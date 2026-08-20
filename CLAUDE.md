@@ -62,8 +62,30 @@ before moving on.
      every remark is fixed or explicitly answered.
    Findings are triaged: real ones are fixed on the branch; rejected ones get
    an explicit reply on the PR thread, never silent dismissal.
-5. **Merge, then docs.** After the gates pass, merge; then update the product
-   docs (through the uberblick MCP tools once live) to the new status quo.
+5. **Merge, then docs.** After the gates pass, merge per the merge policy
+   below; then update the product docs (through the uberblick MCP tools once
+   live) to the new status quo.
+
+### Merge policy — the rules are the authority, not a session
+
+- **Tier 1 — self-merge.** `Touches ⊆ {repo, docs-seed}` and no new
+  dependencies: the implementation loop merges as soon as all gates are green.
+- **Tier 2 — self-merge with evidence.** Feature packages (`hub`,
+  `mcp-server`, `web`): all gates green **plus** a merge-report comment on the
+  PR — acceptance criteria checked off one by one, gate outcomes, any rejected
+  review findings with reasons. The coordination session audits post-merge
+  (while updating the product docs); audit findings become issues, not
+  reverts, unless critical.
+- **Tier 3 — `needs-human`, pre-merge.** Label the PR `needs-human`, park it,
+  continue with other eligible issues. Triggers: any diff touching `schema`;
+  changes to this file's decided-architecture or invariants sections; new
+  *runtime* dependencies; auth/token semantics; overruling a major
+  Copilot/Codex finding.
+
+The tier-3 trigger list is the autonomy dial: Ben shrinks (or grows) it by
+editing this section as the foundation stabilizes. "Gates green" is
+machine-enforced by CI once it exists — until then a session's self-report is
+the fallback, which is exactly why CI is high priority.
 
 ## Guiding principles
 
