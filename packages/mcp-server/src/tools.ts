@@ -48,6 +48,7 @@ import {
 import type { Annotation, BlockInput, HeadingLevel } from "@uberblick/schema";
 import { z } from "zod";
 import { log } from "./log.js";
+import { PersistenceError } from "./replica.js";
 import type { Replica, Replicas } from "./replica.js";
 
 /** A tool failure with a stable machine-readable code. */
@@ -89,6 +90,16 @@ function failure(payload: Record<string, unknown>): CallToolResult {
  * without another round trip.
  */
 function toFailure(error: unknown): CallToolResult {
+  if (error instanceof PersistenceError) {
+    // Fail-stop: every later call lands here too, until the server is restarted.
+    return failure({
+      error: "persistence_failed",
+      message: error.message,
+      room: error.room,
+      applied: false,
+      synced: false,
+    });
+  }
   if (error instanceof StaleBlockError) {
     return failure({
       error: "stale_block",
@@ -140,14 +151,13 @@ function guarded<Args>(
   };
 }
 
-const uuidArg = z.string().min(1).describe("Document UUID.");
+// Identity is UUIDs, so the boundary checks for one. A tool that accepted any
+// string would let an agent persist an identity nothing can ever resolve.
+const uuidArg = z.uuid().describe("Document UUID.");
 
 const linkArg = z
-  .string()
-  .min(1)
-  .refine((value) => !value.includes("/") && !/\s/.test(value), {
-    message: "a link is a target document UUID, never a path or a title",
-  });
+  .uuid("a link is a target document UUID, never a path or a title")
+  .describe("Target document UUID.");
 
 const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
@@ -212,12 +222,19 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
   /**
    * What a mutating tool owes its caller: the write landed locally, and whether
    * it has reached the hub — which, right after a write, it has not.
+   *
+   * `assertHealthy` runs here, after the write: an append that failed during
+   * *this* call must not be reported as applied. It throws, so the tool answers
+   * with `persistence_failed` instead.
    */
-  const durability = (replica: Replica): Record<string, unknown> => ({
-    applied: true,
-    synced: replicas.isRoomQuiet(replica.room),
-    hub: replicas.sync.state(),
-  });
+  const durability = (replica: Replica): Record<string, unknown> => {
+    replicas.assertHealthy();
+    return {
+      applied: true,
+      synced: replicas.isRoomQuiet(replica.room),
+      hub: replicas.sync.state(),
+    };
+  };
 
   const annotationJson = (
     replica: Replica,
@@ -590,27 +607,38 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     {
       title: "Sync status",
       description:
-        "What this replica knows and what the hub has. `hub.status` distinguishes a hub that is down from a token the hub rejected — " +
-        "the first resolves itself, the second needs a human. `unsyncedChanges` counts local changes not yet acknowledged by the hub.",
+        "What this replica holds and what the hub has acknowledged.\n\n" +
+        "`hub.status` distinguishes a hub that is down from a token the hub rejected — the first resolves itself, " +
+        "the second needs a human — and `disabled` means no secret was configured, so this server is local-only.\n\n" +
+        "`unsyncedChanges` counts rooms holding local changes the hub has not acknowledged. It is read from the " +
+        "durable pending set, so it survives a restart and is non-zero in local-only mode: work that never left " +
+        "this machine is unsynced, whether or not a connection was ever attempted. `inFlightUpdates` is the " +
+        "in-memory count of messages awaiting an acknowledgement on the current connection, and resets with it.\n\n" +
+        "`persistence` is null unless an update failed to reach the log, in which case every other tool refuses " +
+        "to serve until the server is restarted.",
       inputSchema: {},
     },
+    // Diagnostics must still answer when persistence has failed — that is
+    // exactly when someone needs to know why every other tool stopped.
     guarded(async () => {
-      await replicas.settle();
-      const replicaList = replicas.attachedReplicas();
+      await replicas.settle({ requireHealthy: false });
+      const pending = replicas.store.pendingRooms();
       return json({
         session: replicas.config.sessionId,
         agent: replicas.name,
         workspace: replicas.config.workspaceId,
         database: replicas.store.databasePath,
         hub: replicas.sync.state(),
-        unsyncedChanges: replicas.sync.unsyncedChanges(),
-        pendingRooms: replicas.store.pendingRooms(),
-        rooms: replicaList.map((replica) => ({
+        unsyncedChanges: pending.length,
+        pendingRooms: pending,
+        inFlightUpdates: replicas.sync.unsyncedChanges(),
+        rooms: replicas.attachedReplicas().map((replica) => ({
           room: replica.room,
           appliedSeq: replica.lastSeq,
           synced: replicas.isRoomQuiet(replica.room),
         })),
         logEntries: replicas.store.logSize(),
+        persistence: replicas.persistenceError(),
       });
     }),
   );

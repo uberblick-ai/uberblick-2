@@ -71,8 +71,11 @@ describe("agent awareness", () => {
 
     const { replica, state } = awarenessOf(rig, doc.uuid);
 
+    // The identity is whatever the connected MCP client called itself at
+    // `initialize` — not a hardcoded vendor, which would misattribute every
+    // other client that speaks MCP.
     expect(state.user).toEqual({
-      name: "Claude · uberblick-tests",
+      name: rig.clientName,
       color: rig.config.color,
     });
 

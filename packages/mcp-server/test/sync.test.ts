@@ -101,7 +101,9 @@ describe("hub sync", () => {
 
     const offline = await rig.ok("sync_status", {});
     expect(offline.hub.status).toBe("hub-down");
-    expect(offline.pendingRooms).toContain(`main/${created.uuid}`);
+    expect(
+      (offline.pendingRooms as { room: string }[]).map((entry) => entry.room),
+    ).toContain(`main/${created.uuid}`);
 
     // The hub comes up on the same address.
     const started = await hub({ port, databasePath: hubDatabase });
@@ -172,6 +174,41 @@ describe("hub sync", () => {
     expect(
       fresh.instance.store.updatesAfter(room, 0).length,
     ).toBeGreaterThan(0);
+  });
+
+  it("makes concurrent first calls wait for the same hydration", async () => {
+    const running = await hub();
+    const author = await serverOn(running.port);
+    const first = await author.ok("create_doc", {
+      title: "Gamma",
+      blocks: [{ type: "paragraph", text: "a wandering wombat" }],
+    });
+    const second = await author.ok("create_doc", { title: "Delta" });
+    await waitForQuiet(author);
+
+    // Every one of these is a *first* call on an empty replica set: they all
+    // trigger the boot settle at once. Each must answer from the hydrated
+    // corpus — a caller that sails past the in-flight settle would return an
+    // empty directory or an empty index.
+    const fresh = await serverOn(running.port, {
+      databasePath: tempDatabasePath(),
+    });
+    const [docsA, docsB, hits, status] = await Promise.all([
+      fresh.ok("list_docs", {}),
+      fresh.ok("list_docs", {}),
+      fresh.ok("search", { query: "wombat" }),
+      fresh.ok("sync_status", {}),
+    ]);
+
+    for (const listed of [docsA, docsB]) {
+      expect(
+        listed.docs.map((doc: { uuid: string }) => doc.uuid).sort(),
+      ).toEqual([first.uuid, second.uuid].sort());
+    }
+    expect(hits.hits.map((hit: { uuid: string }) => hit.uuid)).toEqual([
+      first.uuid,
+    ]);
+    expect(status.hub.status).toBe("connected");
   });
 
   it("logs remote updates too, and serves them", async () => {

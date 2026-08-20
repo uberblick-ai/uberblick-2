@@ -11,6 +11,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   removeTempDirs,
   startServer,
+  tempDatabasePath,
   testConfig,
   TEST_SECRET,
 } from "./helpers.js";
@@ -194,9 +195,42 @@ describe("with the hub stopped", () => {
     expect(status.hub.status).toBe("hub-down");
     expect(status.hub.reason).toContain("127.0.0.1:1");
     expect(status.unsyncedChanges).toBeGreaterThan(0);
-    // The doc's own room and the directory room both hold local-only changes.
-    expect(status.pendingRooms).toContain(`main/${created.uuid}`);
-    expect(status.pendingRooms).toContain("main/_directory");
+    // The doc's own room and the directory room both hold local-only changes,
+    // each with the log sequence it is waiting on.
+    const pending = status.pendingRooms as { room: string; seq: number }[];
+    expect(pending.map((entry) => entry.room)).toEqual(
+      expect.arrayContaining([`main/${created.uuid}`, "main/_directory"]),
+    );
+    for (const entry of pending) {
+      expect(entry.seq).toBeGreaterThan(0);
+    }
+    expect(status.unsyncedChanges).toBe(pending.length);
+  });
+
+  it("keeps reporting unsynced work in local-only mode, across a restart", async () => {
+    // The count comes from the durable pending set, not a provider's in-memory
+    // counter: with sync disabled there is no provider at all, and an offline
+    // restart starts every counter at zero — but the work is still unsynced.
+    const databasePath = tempDatabasePath();
+    const first = await startServer(testConfig({ databasePath }));
+    rigs.push(first);
+    const created = await first.ok("create_doc", { title: "Never left home" });
+
+    const before = await first.ok("sync_status", {});
+    expect(before.hub.status).toBe("disabled");
+    expect(before.inFlightUpdates).toBe(0);
+    expect(before.unsyncedChanges).toBeGreaterThan(0);
+
+    await first.close();
+    rigs.length = 0;
+
+    const restarted = await startServer(testConfig({ databasePath }));
+    rigs.push(restarted);
+    const after = await restarted.ok("sync_status", {});
+    expect(after.unsyncedChanges).toBeGreaterThan(0);
+    expect(
+      (after.pendingRooms as { room: string }[]).map((entry) => entry.room),
+    ).toContain(`main/${created.uuid}`);
   });
 
   it("does not open a room for a document nobody has heard of", async () => {

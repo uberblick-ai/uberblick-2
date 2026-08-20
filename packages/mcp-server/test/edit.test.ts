@@ -9,6 +9,7 @@
  */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { tombstoneDirectoryEntry } from "@uberblick/schema";
 import { removeTempDirs, startServer, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
@@ -216,13 +217,93 @@ describe("the derived index", () => {
     ]);
   });
 
-  it("rejects a link that is a path rather than a UUID", async () => {
+  it("carries a hit's tags without a query per hit", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Tagged",
+      tags: ["alpha", "beta"],
+      blocks: [{ type: "paragraph", text: "quokka" }],
+    });
+
+    const hits = await rig.ok("search", { query: "quokka" });
+    expect(hits.hits).toEqual([
+      {
+        uuid: doc.uuid,
+        title: "Tagged",
+        tags: ["alpha", "beta"],
+        snippet: "quokka",
+      },
+    ]);
+
+    // Retagging is reflected, so the packed column is not a stale cache.
+    await rig.ok("set_tags", { uuid: doc.uuid, tags: ["gamma"] });
+    expect((await rig.ok("search", { query: "quokka" })).hits[0].tags).toEqual([
+      "gamma",
+    ]);
+  });
+
+  it("keeps a tombstoned document out of a rebuilt index", async () => {
+    const rig = await localRig();
+    const kept = await rig.ok("create_doc", {
+      title: "Kept",
+      blocks: [{ type: "paragraph", text: "numbat" }],
+    });
+    const deleted = await rig.ok("create_doc", {
+      title: "Deleted elsewhere",
+      blocks: [{ type: "paragraph", text: "numbat" }],
+    });
+
+    // A tombstone arriving from another client — there is no delete_doc tool.
+    tombstoneDirectoryEntry(rig.instance.replicas.directory().doc, deleted.uuid);
+
+    rig.instance.replicas.rebuildIndex();
+
+    // The rebuild walks every attached replica, tombstoned ones included, so
+    // this is where a deleted document used to come back to life.
+    expect(
+      rig.instance.store.search("numbat", 10).map((hit) => hit.uuid),
+    ).toEqual([kept.uuid]);
+    expect(
+      (await rig.ok("search", { query: "numbat" })).hits.map(
+        (hit: { uuid: string }) => hit.uuid,
+      ),
+    ).toEqual([kept.uuid]);
+    expect(
+      (await rig.ok("list_docs", {})).docs.map(
+        (doc: { uuid: string }) => doc.uuid,
+      ),
+    ).toEqual([kept.uuid]);
+  });
+});
+
+describe("identity at the boundary", () => {
+  it("rejects a link that is not a UUID", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", { title: "Bad links" });
-    const refused = await rig.call("set_links", {
+
+    // A path was already refused; an arbitrary string is the same violation,
+    // and either one persists a target nothing can ever resolve.
+    for (const link of ["docs/some-title", "abc", "Link Target"]) {
+      const refused = await rig.call("set_links", {
+        uuid: doc.uuid,
+        links: [link],
+      });
+      expect(refused.isError).toBe(true);
+    }
+
+    const target = await rig.ok("create_doc", { title: "Real target" });
+    const accepted = await rig.ok("set_links", {
       uuid: doc.uuid,
-      links: ["docs/some-title"],
+      links: [target.uuid],
     });
-    expect(refused.isError).toBe(true);
+    expect(accepted.applied).toBe(true);
+  });
+
+  it("rejects a document id that is not a UUID", async () => {
+    const rig = await localRig();
+    for (const tool of ["get_doc", "export_markdown", "backlinks"]) {
+      const refused = await rig.call(tool, { uuid: "not-a-uuid" });
+      expect(refused.isError).toBe(true);
+    }
   });
 });

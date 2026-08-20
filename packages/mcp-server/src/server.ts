@@ -29,8 +29,15 @@ export interface UberblickMcpServer {
   close(): Promise<void>;
 }
 
-export function createMcpServer(config: McpConfig): UberblickMcpServer {
-  const store = new MirrorStore(config.databasePath);
+/**
+ * @param store The SQLite mirror. Defaults to one opened at
+ * `config.databasePath`; injectable so a test can drive persistence failures
+ * through the real code path.
+ */
+export function createMcpServer(
+  config: McpConfig,
+  store: MirrorStore = new MirrorStore(config.databasePath),
+): UberblickMcpServer {
   const replicas = new Replicas(config, store);
 
   const server = new McpServer(
@@ -44,11 +51,13 @@ export function createMcpServer(config: McpConfig): UberblickMcpServer {
     },
   );
 
-  // Awareness identity: the web UI renders this name over the agent's cursor,
-  // so it should say which client is writing. Known only after `initialize`.
+  // Awareness identity: the web UI renders this name over the agent's cursor
+  // and it becomes the default annotation author, so it must say which client
+  // is actually writing — Claude Code, Codex, or anything else that speaks MCP.
+  // The client tells us at `initialize`; we do not guess a vendor.
   server.server.oninitialized = () => {
     const client = server.server.getClientVersion();
-    replicas.setAgentName(`Claude · ${client?.name ?? "mcp client"}`);
+    replicas.setAgentName(client?.title ?? client?.name ?? "agent");
   };
 
   registerTools(server, replicas);

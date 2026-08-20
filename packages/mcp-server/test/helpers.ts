@@ -24,6 +24,7 @@ import * as Y from "yjs";
 import type { McpConfig } from "../src/config.js";
 import { createMcpServer } from "../src/server.js";
 import type { UberblickMcpServer } from "../src/server.js";
+import type { MirrorStore } from "../src/store.js";
 
 /** The hub's HMAC secret in tests. Never a valid token itself. */
 export const TEST_SECRET = "test-hmac-secret-for-the-mcp-server";
@@ -113,21 +114,35 @@ export interface Rig {
   readonly instance: UberblickMcpServer;
   readonly client: Client;
   readonly config: McpConfig;
+  /** The name this test client announced at `initialize`. */
+  readonly clientName: string;
   call(name: string, args?: Record<string, unknown>): Promise<ToolCall>;
   /** Call a tool and fail the test if it returned an error. */
   ok(name: string, args?: Record<string, unknown>): Promise<any>;
   close(): Promise<void>;
 }
 
-/** Start a server and an MCP client joined by an in-memory transport pair. */
+/** The name the test client identifies itself with over MCP. */
+export const CLIENT_NAME = "uberblick-tests";
+
+/**
+ * Start a server and an MCP client joined by an in-memory transport pair.
+ *
+ * `store` is injectable so a suite can drive persistence failures through the
+ * real code path rather than around it.
+ */
 export async function startServer(
   config: McpConfig = testConfig(),
+  store?: MirrorStore,
 ): Promise<Rig> {
-  const instance = createMcpServer(config);
+  const instance =
+    store === undefined
+      ? createMcpServer(config)
+      : createMcpServer(config, store);
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
 
-  const client = new Client({ name: "uberblick-tests", version: "0.0.0" });
+  const client = new Client({ name: CLIENT_NAME, version: "0.0.0" });
   await Promise.all([
     instance.connect(serverTransport),
     client.connect(clientTransport),
@@ -156,6 +171,7 @@ export async function startServer(
     instance,
     client,
     config,
+    clientName: CLIENT_NAME,
     call,
     async ok(name, args) {
       const result = await call(name, args);

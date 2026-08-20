@@ -60,6 +60,29 @@ export interface Replica {
   lastSeq: number;
 }
 
+/**
+ * Thrown by every tool once an update could not be appended to the log.
+ *
+ * Not recoverable in-process: the live replica holds a change the log does not,
+ * so it can no longer be trusted to answer anything. A restart rebuilds it from
+ * the log — losing the unlogged change, which was never durable in the first
+ * place.
+ */
+export class PersistenceError extends Error {
+  readonly room: string;
+
+  constructor(room: string, cause: unknown) {
+    super(
+      `The update log rejected a write to ${room}, so this replica is ahead of its own log ` +
+        `and no longer safe to read or write. Restart the MCP server to rebuild it from the log. ` +
+        `Cause: ${String(cause)}`,
+      { cause },
+    );
+    this.name = "PersistenceError";
+    this.room = room;
+  }
+}
+
 /** The Y.XmlText holding a block's source, or null when the block is absent. */
 export function blockText(doc: Y.Doc, blockId: string): Y.XmlText | null {
   for (const child of getBlocksFragment(doc).toArray()) {
@@ -96,12 +119,21 @@ export class Replicas {
   /** Set on boot and on every hub connect: the next tool call waits for sync. */
   private settleNeeded = true;
 
+  /** The settle currently in flight, so concurrent tool calls share one. */
+  private settling: Promise<void> | null = null;
+
+  /**
+   * The first failure to persist an update, if any. Sticky and fatal by design
+   * — see {@link assertHealthy}.
+   */
+  private persistenceFailure: { room: string; error: unknown } | null = null;
+
   private destroyed = false;
 
   constructor(config: McpConfig, store: MirrorStore) {
     this.config = config;
     this.store = store;
-    this.agentName = "Claude · agent";
+    this.agentName = "agent";
     this.sync = new HubSync(config, () => {
       // A hub that just came up may hold docs (or updates) this replica set has
       // never seen, so the next tool call settles again rather than answering
@@ -112,9 +144,35 @@ export class Replicas {
     // The directory doc exists from boot: discovery is a synced doc, and every
     // stub repair needs it in hand.
     this.directory();
-    for (const room of this.store.pendingRooms()) {
-      this.adoptRoom(room);
+    for (const pending of this.store.pendingRooms()) {
+      this.adoptRoom(pending.room);
     }
+  }
+
+  /**
+   * Refuse to serve once an update could not be logged.
+   *
+   * The log is the authoritative replica, so a failed append leaves the live
+   * document ahead of the truth: it holds a change that a restart will not
+   * bring back. Serving reads from it would hand out state that is about to
+   * vanish, and serving writes would stack more of them. The failure is
+   * therefore sticky and every tool stops — a restart rebuilds the replica from
+   * the log and drops the unlogged change, which is the only honest outcome.
+   */
+  assertHealthy(): void {
+    const failure = this.persistenceFailure;
+    if (failure === null) {
+      return;
+    }
+    throw new PersistenceError(failure.room, failure.error);
+  }
+
+  /** The sticky persistence failure, for diagnostics that must still answer. */
+  persistenceError(): { room: string; message: string } | null {
+    const failure = this.persistenceFailure;
+    return failure === null
+      ? null
+      : { room: failure.room, message: String(failure.error) };
   }
 
   /** The awareness display name for this agent session. */
@@ -187,11 +245,23 @@ export class Replicas {
       const kind: UpdateOrigin = this.sync.isRemoteOrigin(origin)
         ? "remote"
         : "local";
-      // Not guarded: a log append that fails must fail the tool call. The log
-      // is the replica, so "applied" would be a lie without it.
-      this.store.appendUpdate(room, payload, kind);
-      if (kind === "local") {
-        this.store.markPending(room);
+      // The append (and, for a local change, its pending watermark) is one
+      // transaction, so an update is never logged without being remembered.
+      //
+      // A failure is recorded rather than thrown: this runs inside Yjs'
+      // transaction cleanup, where throwing can leave the document unable to
+      // emit later updates — which would turn a broken replica into a silent
+      // one, reporting `applied: true` for writes nothing ever logged. Recorded
+      // here, it stops every tool through `assertHealthy`.
+      try {
+        this.store.appendUpdate(room, payload, kind);
+      } catch (error) {
+        this.persistenceFailure ??= { room, error };
+        log.error("failed to append to the update log", {
+          room,
+          error: String(error),
+        });
+        return;
       }
       this.afterChange(replica);
     });
@@ -218,19 +288,26 @@ export class Replicas {
   /**
    * Apply everything in the log this replica has not seen.
    *
+   * The snapshot and the tail come from one consistent read
+   * ({@link MirrorStore.readSince}), and that is the whole point: read
+   * separately, a compaction landing between them prunes the rows that bridge
+   * the two, and this replica would advance `lastSeq` past updates Yjs never
+   * received — a gap it can never close, because the snapshot that replaced
+   * them is now *behind* `lastSeq`.
+   *
    * A snapshot whose `through_seq` is ahead of us is applied first: another
-   * instance may have compacted away the rows we were about to read, and the
-   * snapshot is exactly what replaced them.
+   * instance compacted away the rows we were about to read, and the snapshot is
+   * exactly what replaced them.
    */
   private poll(replica: Replica): boolean {
+    const slice = this.store.readSince(replica.room, replica.lastSeq);
     let applied = false;
-    const snapshot = this.store.snapshot(replica.room);
-    if (snapshot !== null && snapshot.throughSeq > replica.lastSeq) {
-      Y.applyUpdate(replica.doc, snapshot.state, LOG_ORIGIN);
-      replica.lastSeq = snapshot.throughSeq;
+    if (slice.snapshot !== null) {
+      Y.applyUpdate(replica.doc, slice.snapshot.state, LOG_ORIGIN);
+      replica.lastSeq = slice.snapshot.throughSeq;
       applied = true;
     }
-    for (const entry of this.store.updatesAfter(replica.room, replica.lastSeq)) {
+    for (const entry of slice.updates) {
       Y.applyUpdate(replica.doc, entry.payload, LOG_ORIGIN);
       replica.lastSeq = entry.seq;
       applied = true;
@@ -258,7 +335,10 @@ export class Replicas {
    *
    * Guarded as a whole: the update it reacts to is already logged, so a failure
    * must not turn an applied write into an error. The index is derived; the stub
-   * is repaired again on the next observed update or connect.
+   * is repaired again on the next observed update or connect. A stub write that
+   * cannot itself be logged is *not* swallowed here — the directory replica's
+   * own observer records that as a sticky persistence failure, which stops every
+   * tool regardless of what this catch does.
    */
   private afterChange(replica: Replica): void {
     if (replica.isDirectory) {
@@ -267,6 +347,12 @@ export class Replicas {
     try {
       const meta = getMeta(replica.doc);
       if (meta.uuid === "") {
+        return;
+      }
+      // A tombstoned document must not come back through the index — not on a
+      // live update, and not on a rebuild.
+      if (getDirectoryEntry(this.directory().doc, meta.uuid)?.deleted === true) {
+        this.store.unindexDoc(meta.uuid);
         return;
       }
       this.repairStub(meta);
@@ -328,9 +414,9 @@ export class Replicas {
         added += 1;
       }
     }
-    for (const room of this.store.pendingRooms()) {
-      if (!this.replicas.has(room)) {
-        this.adoptRoom(room);
+    for (const pending of this.store.pendingRooms()) {
+      if (!this.replicas.has(pending.room)) {
+        this.adoptRoom(pending.room);
         added += 1;
       }
     }
@@ -347,20 +433,57 @@ export class Replicas {
    * enumerate and search the whole corpus. Bounded and skipped entirely when
    * the hub is unreachable: no tool call blocks on the network.
    */
-  async settle(): Promise<void> {
+  async settle(options: { requireHealthy?: boolean } = {}): Promise<void> {
+    if (options.requireHealthy !== false) {
+      this.assertHealthy();
+    }
     if (this.destroyed) {
       return;
     }
+
+    // Concurrent tool calls share one settle. Without this, the first caller
+    // would clear `settleNeeded` and then await hub hydration while a second
+    // caller sails past and answers from a directory, document set or index
+    // that is still filling up.
+    const inFlight = this.settling;
+    if (inFlight !== null) {
+      await inFlight;
+      // Cheap and local: pick up anything logged while we were waiting.
+      this.refresh();
+      return;
+    }
+
+    const run = this.runSettle();
+    this.settling = run;
+    try {
+      await run;
+    } finally {
+      this.settling = null;
+    }
+  }
+
+  /** Replay the log tail and attach newly discovered documents. Synchronous. */
+  private refresh(): void {
     this.pollAll();
     this.adoptKnownDocs();
+  }
+
+  private async runSettle(): Promise<void> {
+    this.refresh();
 
     if (this.sync.enabled && this.settleNeeded) {
-      this.settleNeeded = false;
-      await this.sync.waitForQuiet();
-      this.pollAll();
-      if (this.adoptKnownDocs() > 0) {
+      try {
         await this.sync.waitForQuiet();
         this.pollAll();
+        if (this.adoptKnownDocs() > 0) {
+          await this.sync.waitForQuiet();
+          this.pollAll();
+        }
+      } finally {
+        // Cleared only once the wait is over — a caller joining this settle is
+        // waiting for exactly that, and a caller arriving after it should not
+        // repeat it.
+        this.settleNeeded = false;
       }
     }
 
@@ -368,11 +491,18 @@ export class Replicas {
     this.compactLargeLogs();
   }
 
-  /** A room whose local changes reached the hub is no longer pending. */
+  /**
+   * A room whose local changes reached the hub is no longer pending.
+   *
+   * The watermark is read before the acknowledgement is checked, and only that
+   * watermark is cleared: a local change appended in between — by this process
+   * or another one — raises the row's sequence, and the release skips it rather
+   * than forgetting work nobody has seen acknowledged.
+   */
   private releaseQuietRooms(): void {
-    for (const room of this.store.pendingRooms()) {
-      if (this.sync.isRoomQuiet(room)) {
-        this.store.clearPending(room);
+    for (const pending of this.store.pendingRooms()) {
+      if (this.sync.isRoomQuiet(pending.room)) {
+        this.store.clearPending(pending.room, pending.seq);
       }
     }
   }
