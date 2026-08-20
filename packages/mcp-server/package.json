@@ -1,0 +1,29 @@
+{
+  "name": "@uberblick/mcp-server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MCP stdio server with a local SQLite mirror (FTS5, tags, backlinks).",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "build": "tsc -b",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@hocuspocus/provider": "^4.6.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@uberblick/schema": "workspace:*",
+    "better-sqlite3": "^12.11.1",
+    "ws": "^8.21.3",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.32"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.2.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

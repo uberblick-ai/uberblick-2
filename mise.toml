@@ -1,0 +1,24 @@
+[tools]
+node = "26"
+pnpm = "10"
+fnox = "latest"
+
+[tasks.hub]
+description = "Start the Hocuspocus sync hub"
+run = "fnox exec -- pnpm --filter @uberblick/hub start"
+
+[tasks.mcp]
+description = "Start the MCP server"
+run = "fnox exec -- pnpm --filter @uberblick/mcp-server start"
+
+[tasks.web]
+description = "Start the Vite dev server"
+run = "fnox exec -- pnpm --filter @uberblick/web dev"
+
+[tasks.dev]
+description = "Run hub, mcp and web together"
+depends = ["hub", "mcp", "web"]
+
+[tasks.test]
+description = "Run all test suites"
+run = "pnpm -r test"

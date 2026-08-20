@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# local data / persistence (hub SQLite, mcp mirror)
+data/
+packages/*/data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+*.db
+
+# env / secrets
+# NOTE: fnox.toml IS committed — it is age-encrypted.
+.env
+.env.*
+
+# editor / OS
+.DS_Store
+.vite/

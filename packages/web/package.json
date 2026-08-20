@@ -1,0 +1,30 @@
+{
+  "name": "@uberblick/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "BlockNote web client — viewer/editor for uberblick documents.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@blocknote/core": "^0.54.0",
+    "@blocknote/mantine": "^0.54.0",
+    "@blocknote/react": "^0.54.0",
+    "@hocuspocus/provider": "^4.6.0",
+    "@uberblick/schema": "workspace:*",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.32"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.1.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.2"
+  }
+}

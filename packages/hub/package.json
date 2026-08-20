@@ -1,0 +1,22 @@
+{
+  "name": "@uberblick/hub",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Hocuspocus sync hub with SQLite persistence.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@hocuspocus/extension-sqlite": "^4.6.0",
+    "@hocuspocus/server": "^4.6.0",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.32"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
+  }
+}
