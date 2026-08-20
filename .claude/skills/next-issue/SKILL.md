@@ -62,10 +62,14 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    threads via `gh api graphql` — inline review comments don't show in the
    former) and confirm zero unaddressed remarks, human or bot, including any
    that arrived after the earlier gates passed; anything open is triaged
-   first. Then merge per CLAUDE.md's "Merge policy" tiers — Tier 1 and Tier 2
-   self-merge as specified there (Tier 2 requires the merge-report comment on
-   the PR first); Tier 3 triggers mean: label the PR `needs-human`, park it,
-   and move on. After merging, confirm the issue auto-closed, then update the
+   first. Confirm the PR's base is `main` (`gh pr view <n> --json baseRefName`)
+   — a stacked PR merges into its parent feature branch and silently orphans
+   the reviewed work (this happened: #13 into feat/hub, re-landed as #25);
+   retarget the PR to `main` (or merge the parent first) before merging. Then
+   merge per CLAUDE.md's "Merge policy" tiers — Tier 1 and Tier 2 self-merge
+   as specified there (Tier 2 requires the merge-report comment on the PR
+   first); Tier 3 triggers mean: label the PR `needs-human`, park it, and
+   move on. After merging, confirm the issue auto-closed, then update the
    product docs to the new status quo (uberblick MCP tools once registered;
    until then, comment on the PR that the doc update is pending).
 
