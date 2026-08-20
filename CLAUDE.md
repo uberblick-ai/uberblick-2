@@ -16,10 +16,15 @@ in docs, README, or CI.
 - `mise run dev` — all three
 - `mise run test` — run the test suites
 
-Secrets come from `fnox exec` (age-encrypted `fnox.toml`, safe to commit; the
-private key lives at `~/.config/fnox/age.txt`, never in the repo). The mise
-tasks already wrap their commands in `fnox exec` — do not write secrets to
-`.env` files or commit plaintext tokens.
+Secrets and endpoints come from `fnox exec` (age-encrypted `fnox.toml`, safe
+to commit; the private key lives at `~/.config/fnox/age.txt`, never in the
+repo). The mise tasks already wrap their commands in `fnox exec` — do not
+write secrets to `.env` files or commit plaintext tokens.
+
+Config in fnox: `HUB_AUTH_TOKEN` (shared token the hub's onAuthenticate
+checks) and `HUB_URL` (default `ws://localhost:1234`). Rule: no hardcoded hub
+addresses anywhere except as the in-code fallback default — everything reads
+`HUB_URL`.
 
 ## Orchestration policy
 
@@ -46,6 +51,44 @@ before moving on.
 - Markdown is an export format, never the storage format.
 - Every client publishes awareness (name, color, cursor); agent sessions are
   visible in the UI.
+- Discovery is itself a synced doc: a directory doc in a well-known room
+  (`_directory`) holds a Y.Map of uuid → {title, tags, deleted?} stubs,
+  upserted on create/rename and tombstoned on delete. `list_docs` is fed by
+  the directory doc, never by locally-observed creations.
+- The MCP server is offline-first by construction, not emergently: the
+  append-only update log is the authoritative local replica (replicas hydrate
+  from it on boot, never from the hub); the server starts and serves every
+  tool with the hub unreachable; writes apply locally and return before hub
+  ack — sync is background.
+
+## Invariants
+
+- SQLite indexes (FTS5, tags, links) are derived and rebuildable — never
+  authoritative.
+- All document state lives in the Y.Doc, never in server-side tables.
+- Identity is UUIDs everywhere; titles and paths are display data.
+- Discovery is itself a synced doc (the `_directory` room), traveling over the
+  same sync channel as everything else.
+
+## Spike acceptance criteria
+
+- Web UI and a second client co-edit a doc with visible remote cursors, no
+  lost keystrokes.
+- An `edit_block` from an MCP client lands in the web UI live, attributed to a
+  visible agent cursor.
+- A concurrent human edit to a different block merges cleanly; a conflicting
+  edit to the same range makes `edit_block` fail safely with a re-read.
+- `search` and `backlinks` return correct results from the derived index after
+  edits.
+- `export_markdown` produces clean markdown including fenced code and mermaid.
+- The system's own docs are inside it, and an agent has demonstrably used the
+  MCP tools to update one of them.
+- Hub restart loses nothing; a client offline during edits converges on
+  reconnect.
+- Kill the hub mid-session — every MCP tool still works, including creating a
+  doc; restart the hub — everything converges, including on a second client.
+- A fresh client with empty local state connects to the hub and can enumerate
+  and search all existing docs after hydration.
 
 ## The dogfooding contract
 
