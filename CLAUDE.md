@@ -38,6 +38,41 @@ workflows: delegate implementation to Opus sub-agents (or Workflow pipelines
 for fan-out), then validate their output (run tests, check acceptance criteria)
 before moving on.
 
+## Development workflow (every functionality)
+
+1. **Issue first.** Every piece of functionality starts as a GitHub issue:
+   what, why, acceptance criteria. No issue, no branch.
+2. **Branch + sub-agents.** Implementation happens on a feature branch
+   (`feat/<slug>`, `fix/<slug>`), written by Opus sub-agents coordinated by
+   Fable with decision-complete briefs. Never commit feature work directly to
+   `main`.
+3. **PR.** Open a PR against `main` linked to the issue (`Closes #N`), with a
+   body stating what changed and how it was verified.
+4. **Gates — all of them, before merge:**
+   - tests + typecheck green (`mise run test`, `mise run typecheck`);
+   - coordinator validation against the issue's acceptance criteria;
+   - **GitHub Copilot review** requested on the PR;
+   - **local Codex session review** of the PR.
+   Findings are triaged: real ones are fixed on the branch; rejected ones get
+   an explicit reply on the PR thread, never silent dismissal.
+5. **Merge, then docs.** After the gates pass, merge; then update the product
+   docs (through the uberblick MCP tools once live) to the new status quo.
+
+## Guiding principles
+
+- **KISS / YAGNI.** Build the simplest thing that satisfies the issue. No
+  speculative generality, no config for futures nobody scheduled.
+- **Least code wins.** The goal is the smallest diff that does the job —
+  prefer reusing or deleting over adding. Eagerly producing lots of code is a
+  failure mode, not productivity.
+- **Write code for humans.** Clarity over cleverness; names over comments;
+  small reviewable units.
+- **Don't overtest.** Test contracts and invariants — concurrency semantics,
+  data safety, the things someone relies on — not implementation details or
+  trivia. Every test must defend a behavior worth defending.
+- **Boring dependencies, few of them.** Adding a dependency is an
+  architectural decision, not a convenience.
+
 ## Architecture (decided — do not relitigate)
 
 - TypeScript everywhere; single pnpm monorepo.
