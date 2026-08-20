@@ -6,16 +6,18 @@
  *   - `blocks`      Y.XmlFragment: one Y.XmlElement per block, each holding a
  *                   single Y.XmlText of plain-text source
  *                   (types: paragraph, heading, code, mermaid)
- *   - `annotations` Y.Map of threads anchored via Yjs relative positions
+ *   - `annotations` Y.Map of thread JSON, anchored by `comment` formatting
+ *                   marks on the block's text
  *
- * …plus the directory doc (room `_directory`) that makes discovery a synced doc,
- * and one-way markdown export.
+ * …plus room names (`<workspaceId>/<uuid>`), the directory doc that makes
+ * discovery a synced doc, and one-way markdown export.
  *
  * Runtime dependencies are limited to `yjs` and `fast-diff`.
  *
- * Two rules hold everywhere: identity is UUIDs (titles and paths are display
- * data), and writes are block-scoped. There is no whole-document replace, by
- * construction — see `blocks.ts`.
+ * Three rules hold everywhere: identity is UUIDs (titles and paths are display
+ * data); writes are block-scoped, so there is no whole-document replace, by
+ * construction; and a block's type changes only through `setBlockType`, which
+ * keeps the id and the text delta.
  */
 
 export {
@@ -38,23 +40,32 @@ export {
   deleteBlock,
   editBlock,
   getBlock,
+  getBlockRev,
   getBlockText,
   getBlocks,
   insertBlock,
   setBlockLanguage,
   setBlockLevel,
+  setBlockType,
 } from "./blocks.js";
+export type { BlockTypeAttrs, EditBlockOptions } from "./blocks.js";
+
+export { blockRev } from "./rev.js";
+export type { RevInput } from "./rev.js";
 
 export {
+  COMMENT_MARK,
   addComment,
   createAnnotation,
   deleteAnnotation,
   getAnnotation,
+  listAnnotationRanges,
   listAnnotations,
   listAnnotationsForBlock,
   resolveAnnotationRange,
   setAnnotationResolved,
 } from "./annotations.js";
+export type { CommentRun } from "./annotations.js";
 
 export { exportMarkdown, importMarkdown } from "./markdown.js";
 export type {
@@ -62,6 +73,15 @@ export type {
   ImportedBlock,
   ImportedDoc,
 } from "./markdown.js";
+
+export {
+  DEFAULT_WORKSPACE,
+  DIRECTORY_SUFFIX,
+  directoryRoom,
+  parseRoom,
+  roomForDoc,
+} from "./rooms.js";
+export type { ParsedRoom } from "./rooms.js";
 
 export {
   DIRECTORY_DOCS_KEY,
@@ -74,7 +94,16 @@ export {
 } from "./directory.js";
 export type { DirectoryUpsert, ListDirectoryOptions } from "./directory.js";
 
-export { BlockNotFoundError, StaleBlockError } from "./errors.js";
+export {
+  AnnotationRangeError,
+  BlockNotFoundError,
+  InvalidRoomError,
+  StaleBlockError,
+} from "./errors.js";
+export type {
+  AnnotationRangeErrorReason,
+  StaleBlockDetails,
+} from "./errors.js";
 
 export { BLOCK_TYPES, isBlockType } from "./types.js";
 export type {
@@ -84,6 +113,7 @@ export type {
   Block,
   BlockInput,
   BlockType,
+  CommentMark,
   DirectoryEntry,
   DocMeta,
   HeadingLevel,

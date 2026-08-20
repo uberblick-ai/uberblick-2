@@ -1,21 +1,31 @@
 /**
  * The directory document.
  *
- * Discovery is itself a synced doc: one Y.Doc in the well-known room
- * `_directory` holding a Y.Map of uuid → {title, tags, deleted?} stubs. It
- * travels over the same sync channel as every other document, so a fresh client
- * with empty local state learns the corpus by joining one more room. There is no
- * other discovery mechanism — never enumerate locally-observed creations.
+ * Discovery is itself a synced doc: one Y.Doc per workspace, in the well-known
+ * room `<workspaceId>/_directory` (see `rooms.ts`), holding a Y.Map of
+ * uuid → {title, tags, deleted?} stubs. It travels over the same sync channel
+ * as every other document, so a fresh client with empty local state learns the
+ * corpus by joining one more room. There is no other discovery mechanism —
+ * never enumerate locally-observed creations.
+ *
+ * The stub is a cache, not the truth: `meta.title` inside the document itself
+ * is authoritative, and the stub is repaired on write and on connect.
  *
  * Entries are whole-object writes, so concurrent upserts to the same uuid
  * converge last-write-wins per key while different uuids never conflict.
  */
 
 import * as Y from "yjs";
+import { DIRECTORY_SUFFIX } from "./rooms.js";
 import type { DirectoryEntry } from "./types.js";
 
-/** The well-known room name of the directory doc. */
-export const DIRECTORY_ROOM = "_directory";
+/**
+ * The bare directory room name, without a workspace.
+ *
+ * @deprecated Rooms carry a workspace: use `directoryRoom(workspaceId)` from
+ * `rooms.ts`. Kept as the document-id suffix for pre-tenancy callers.
+ */
+export const DIRECTORY_ROOM = DIRECTORY_SUFFIX;
 
 /** The key of the directory Y.Map inside the directory doc. */
 export const DIRECTORY_DOCS_KEY = "docs";

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
+import type { Block } from "../src/index.js";
 import {
   BLOCKS_KEY,
   BlockNotFoundError,
   appendBlock,
+  blockRev,
   deleteBlock,
   exportMarkdown,
   getBlock,
@@ -20,6 +22,12 @@ import {
 } from "../src/index.js";
 
 const UUID = "11111111-1111-4111-8111-111111111111";
+
+/** Expected block, with the rev the reader should have computed for it. */
+function withRev(block: Omit<Block, "rev">): Block {
+  const { type, text, level, language } = block;
+  return { ...block, rev: blockRev({ type, text, level, language }) };
+}
 
 function seeded(): Y.Doc {
   const doc = new Y.Doc();
@@ -80,15 +88,15 @@ describe("document round-trip", () => {
     });
 
     expect(getBlocks(doc)).toEqual([
-      { id: h1, type: "heading", text: "Overview", level: 1 },
-      { id: p, type: "paragraph", text: "Blocks hold text." },
-      {
+      withRev({ id: h1, type: "heading", text: "Overview", level: 1 }),
+      withRev({ id: p, type: "paragraph", text: "Blocks hold text." }),
+      withRev({
         id: code,
         type: "code",
         text: 'const x: number = 1;\nconsole.log(x);',
         language: "ts",
-      },
-      { id: mermaid, type: "mermaid", text: "graph TD\n  A-->B" },
+      }),
+      withRev({ id: mermaid, type: "mermaid", text: "graph TD\n  A-->B" }),
     ]);
     expect(new Set([h1, p, code, mermaid]).size).toBe(4);
   });
@@ -126,12 +134,9 @@ describe("document round-trip", () => {
 
     expect(getBlock(doc, plain)?.level).toBe(1);
     expect(getBlock(doc, deep)?.level).toBe(6);
-    expect(getBlock(doc, code)).toEqual({
-      id: code,
-      type: "code",
-      text: "echo hi",
-      language: "",
-    });
+    expect(getBlock(doc, code)).toEqual(
+      withRev({ id: code, type: "code", text: "echo hi", language: "" }),
+    );
   });
 
   it("changes heading level and code language in place", () => {

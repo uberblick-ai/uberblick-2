@@ -9,15 +9,17 @@
  *
  *   <heading id="…" level="2">Y.XmlText("Some title")</heading>
  *
- * The single Y.XmlText child holds the block's plain-text source. `code` and
- * `mermaid` are text-source blocks too — a rich block is a text block with a
- * fancy renderer, never a different storage shape.
+ * The single Y.XmlText child holds the block's plain-text source, plus any
+ * formatting marks anchoring annotation threads. `code` and `mermaid` are
+ * text-source blocks too — a rich block is a text block with a fancy renderer,
+ * never a different storage shape.
  */
 
 import * as Y from "yjs";
 import fastDiff from "fast-diff";
 import { getBlocksFragment } from "./doc.js";
 import { BlockNotFoundError, StaleBlockError } from "./errors.js";
+import { blockRev } from "./rev.js";
 import { isBlockType } from "./types.js";
 import type { Block, BlockInput, BlockType, HeadingLevel } from "./types.js";
 
@@ -48,7 +50,7 @@ function textOf(element: Y.XmlElement): Y.XmlText | null {
   return first instanceof Y.XmlText ? first : null;
 }
 
-/** Read a Y.XmlText as plain text, ignoring any formatting attributes. */
+/** Read a Y.XmlText as plain text, ignoring any formatting marks. */
 function readText(text: Y.XmlText | null): string {
   if (text === null) return "";
   let out = "";
@@ -93,24 +95,41 @@ export function blockTextType(element: Y.XmlElement): Y.XmlText | null {
   return textOf(element);
 }
 
+/** @internal — shared with the annotations module. */
+export function requireBlockText(
+  ydoc: Y.Doc,
+  element: Y.XmlElement,
+  blockId: string,
+): Y.XmlText {
+  const existing = textOf(element);
+  if (existing !== null) return existing;
+  ydoc.transact(() => {
+    element.insert(0, [new Y.XmlText()]);
+  });
+  const created = textOf(element);
+  if (created === null) throw new BlockNotFoundError(blockId);
+  return created;
+}
+
+function levelOf(element: Y.XmlElement): HeadingLevel {
+  const raw = element.getAttribute("level");
+  const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
+  return Number.isNaN(parsed) ? 1 : normalizeLevel(parsed);
+}
+
 function toBlock(element: Y.XmlElement): Block {
   const type = elementType(element);
   const id = element.getAttribute("id") ?? "";
   const text = readText(textOf(element));
   if (type === "heading") {
-    const raw = element.getAttribute("level");
-    const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
-    return {
-      id,
-      type,
-      text,
-      level: Number.isNaN(parsed) ? 1 : normalizeLevel(parsed),
-    };
+    const level = levelOf(element);
+    return { id, type, text, rev: blockRev({ type, text, level }), level };
   }
   if (type === "code") {
-    return { id, type, text, language: element.getAttribute("language") ?? "" };
+    const language = element.getAttribute("language") ?? "";
+    return { id, type, text, rev: blockRev({ type, text, language }), language };
   }
-  return { id, type, text };
+  return { id, type, text, rev: blockRev({ type, text }) };
 }
 
 /** All blocks, in document order. */
@@ -129,6 +148,13 @@ export function getBlockText(ydoc: Y.Doc, blockId: string): string {
   const element = findBlockElement(ydoc, blockId);
   if (element === null) throw new BlockNotFoundError(blockId);
   return readText(textOf(element));
+}
+
+/** One block's content hash. Throws {@link BlockNotFoundError} if absent. */
+export function getBlockRev(ydoc: Y.Doc, blockId: string): string {
+  const element = findBlockElement(ydoc, blockId);
+  if (element === null) throw new BlockNotFoundError(blockId);
+  return toBlock(element).rev;
 }
 
 function buildElement(id: string, input: BlockInput): Y.XmlElement {
@@ -189,7 +215,7 @@ export function deleteBlock(ydoc: Y.Doc, blockId: string): void {
   });
 }
 
-/** Set a heading's level. No-op for non-heading blocks' semantics; still stored. */
+/** Set a heading's level. */
 export function setBlockLevel(
   ydoc: Y.Doc,
   blockId: string,
@@ -215,47 +241,129 @@ export function setBlockLanguage(
   });
 }
 
+export interface BlockTypeAttrs {
+  /** Heading level for the new type. Carried over when the old block was a heading. */
+  level?: HeadingLevel;
+  /** Code language for the new type. Carried over when the old block was code. */
+  language?: string;
+}
+
+/**
+ * Re-type a block, preserving its id and its full text delta — marks included.
+ *
+ * This is the only sanctioned way to change a block's type. A delete-and-
+ * reinsert re-type churns the block id (breaking every inbound reference) and
+ * drops the text's formatting marks, orphaning every annotation thread anchored
+ * in the block. Doing it the other way is an invariant violation, not a style
+ * preference.
+ *
+ * Mechanics, all inside one transaction: read the old text's delta, insert a
+ * new element with the same id and the new node name directly after the old
+ * one, replay the delta into its Y.XmlText, then delete the old element — so
+ * the block keeps its position in the document.
+ *
+ * Type-specific attributes are carried over where they still apply and can be
+ * overridden through `attrs`.
+ *
+ * Known limitation: because a re-type inserts a replacement element, two
+ * replicas re-typing the same block concurrently converge on two elements
+ * sharing that block id (reads resolve the first, identically on every
+ * replica). A concurrent *text* edit to the block loses its characters with the
+ * replaced element — a re-type is a structural change, and `rev`/`oldText` is
+ * what protects a caller who cares.
+ */
+export function setBlockType(
+  ydoc: Y.Doc,
+  blockId: string,
+  newType: BlockType,
+  attrs: BlockTypeAttrs = {},
+): void {
+  const fragment = getBlocksFragment(ydoc);
+  ydoc.transact(() => {
+    const index = indexOfBlock(fragment, blockId);
+    if (index === -1) throw new BlockNotFoundError(blockId);
+    const old = fragment.get(index) as Y.XmlElement;
+    const oldType = elementType(old);
+
+    const level =
+      attrs.level ?? (oldType === "heading" ? levelOf(old) : undefined);
+    const language =
+      attrs.language ?? (oldType === "code" ? old.getAttribute("language") : undefined);
+
+    const replacement = new Y.XmlElement(newType);
+    replacement.setAttribute("id", blockId);
+    if (newType === "heading") {
+      replacement.setAttribute("level", String(normalizeLevel(level)));
+    }
+    if (newType === "code" && language !== undefined) {
+      replacement.setAttribute("language", language);
+    }
+    replacement.insert(0, [new Y.XmlText()]);
+    fragment.insert(index + 1, [replacement]);
+
+    const oldText = textOf(old);
+    const newText = textOf(replacement);
+    if (oldText !== null && newText !== null) {
+      const delta = oldText.toDelta() as Array<Record<string, unknown>>;
+      if (delta.length > 0) newText.applyDelta(delta);
+    }
+    fragment.delete(index, 1);
+  });
+}
+
+export interface EditBlockOptions {
+  /**
+   * The `rev` the caller read. When given and it no longer matches, the edit is
+   * refused even if `oldText` happens to match — an attribute change alone
+   * (a heading level, a code language) is enough to invalidate it.
+   */
+  rev?: string;
+}
+
 /**
  * THE core write.
  *
- * In one transaction: locate the block, verify its current text is exactly
- * `oldText`, then apply `fast-diff(oldText, newText)` as minimal
- * retain/delete/insert splices to the block's Y.XmlText.
+ * In one transaction: locate the block, verify it still matches what the caller
+ * read (`oldText`, and `rev` when supplied), then apply
+ * `fast-diff(oldText, newText)` as minimal retain/delete/insert splices to the
+ * block's Y.XmlText.
  *
  * The minimal-splice property is what makes concurrent human+agent editing
  * safe: characters the edit did not touch are never deleted and reinserted, so
  * a concurrent edit elsewhere in the same block — or at the block's very end —
- * survives the merge instead of being clobbered.
+ * survives the merge, and annotation marks over untouched text stay anchored.
  *
- * @throws BlockNotFoundError when the block does not exist (including when a
- * concurrent client deleted it).
- * @throws StaleBlockError when the block's text is not `oldText`. The error
- * carries `currentText` so the caller can re-read, re-diff and retry.
+ * The staleness check is local-replica-only. See {@link StaleBlockError}.
+ *
+ * @throws BlockNotFoundError when the block does not exist, or when a
+ * concurrent delete detached it — never a silent no-op.
+ * @throws StaleBlockError when the text or the asserted rev is stale. The error
+ * carries `currentText` and `currentRev` so the caller can re-read and retry.
  */
 export function editBlock(
   ydoc: Y.Doc,
   blockId: string,
   oldText: string,
   newText: string,
+  options: EditBlockOptions = {},
 ): void {
   ydoc.transact(() => {
     const element = findBlockElement(ydoc, blockId);
     if (element === null) throw new BlockNotFoundError(blockId);
 
-    let text = textOf(element);
-    const current = readText(text);
-    if (current !== oldText) {
-      throw new StaleBlockError(blockId, oldText, current);
+    const current = toBlock(element);
+    if (current.text !== oldText || (options.rev !== undefined && options.rev !== current.rev)) {
+      throw new StaleBlockError({
+        blockId,
+        expectedText: oldText,
+        expectedRev: options.rev,
+        currentText: current.text,
+        currentRev: current.rev,
+      });
     }
     if (oldText === newText) return;
 
-    if (text === null) {
-      // Nothing to splice into yet: materialise the text child.
-      const created = new Y.XmlText();
-      element.insert(0, [created]);
-      text = created;
-    }
-
+    const text = requireBlockText(ydoc, element, blockId);
     let index = 0;
     for (const [op, chunk] of fastDiff(oldText, newText)) {
       if (op === DIFF_EQUAL) {
@@ -266,6 +374,14 @@ export function editBlock(
         text.insert(index, chunk);
         index += chunk.length;
       }
+    }
+
+    // The block must still be attached when the splice lands. A caller can
+    // delete a block inside an enclosing transaction, and a detached element
+    // accepts writes that go nowhere — report that instead of returning as if
+    // the edit had applied.
+    if (findBlockElement(ydoc, blockId) === null) {
+      throw new BlockNotFoundError(blockId);
     }
   });
 }

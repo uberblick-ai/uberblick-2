@@ -13,12 +13,14 @@ import {
   deleteBlock,
   editBlock,
   getBlock,
+  getBlockRev,
   getBlockText,
   getBlocks,
   getBlocksFragment,
   initDoc,
   insertBlock,
   resolveAnnotationRange,
+  setBlockLevel,
 } from "../src/index.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
@@ -163,7 +165,7 @@ describe("two clients, one block", () => {
 });
 
 describe("stale oldText", () => {
-  it("fails safely with the current text attached", () => {
+  it("fails safely with the current text and rev attached", () => {
     let blockId = "";
     const [a, b] = replicaPair((doc) => {
       initDoc(doc, { uuid: UUID, title: "Stale" });
@@ -186,15 +188,69 @@ describe("stale oldText", () => {
     const staleError = caught as StaleBlockError;
     expect(staleError.blockId).toBe(blockId);
     expect(staleError.expectedText).toBe("original text");
+    expect(staleError.expectedRev).toBeUndefined();
     expect(staleError.currentText).toBe("rewritten text");
+    expect(staleError.currentRev).toBe(getBlockRev(b, blockId));
     // Nothing was written: the failed edit left the block untouched.
     expect(getBlockText(b, blockId)).toBe("rewritten text");
 
-    // The documented recovery: re-read, re-diff, retry.
+    // The documented recovery: re-read, re-diff, retry — and the rev the error
+    // handed back is accepted on the retry.
     const current = staleError.currentText;
-    editBlock(b, blockId, current, `${current} plus B's addition`);
+    editBlock(b, blockId, current, `${current} plus B's addition`, {
+      rev: staleError.currentRev,
+    });
     syncDocs(a, b);
     expect(getBlockText(a, blockId)).toBe("rewritten text plus B's addition");
+  });
+
+  it("refuses an edit whose rev is stale even when the text still matches", () => {
+    let blockId = "";
+    const [a, b] = replicaPair((doc) => {
+      initDoc(doc, { uuid: UUID, title: "Stale rev" });
+      blockId = appendBlock(doc, { type: "heading", text: "Section", level: 2 });
+    });
+
+    const staleRev = getBlockRev(b, blockId);
+    // A changes only an attribute — the text is untouched, so `oldText` alone
+    // cannot detect it.
+    setBlockLevel(a, blockId, 4);
+    syncDocs(a, b);
+    expect(getBlockText(b, blockId)).toBe("Section");
+
+    let caught: unknown;
+    try {
+      editBlock(b, blockId, "Section", "Section, edited", { rev: staleRev });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(StaleBlockError);
+    const error = caught as StaleBlockError;
+    expect(error.expectedRev).toBe(staleRev);
+    expect(error.currentRev).toBe(getBlockRev(b, blockId));
+    expect(error.currentText).toBe("Section");
+    expect(getBlockText(b, blockId)).toBe("Section");
+
+    // Without the rev assertion the same edit is accepted: rev is opt-in.
+    editBlock(b, blockId, "Section", "Section, edited");
+    expect(getBlockText(b, blockId)).toBe("Section, edited");
+  });
+
+  it("accepts a matching rev and reports the fresh one afterwards", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Fresh rev" });
+    const blockId = appendBlock(doc, { type: "paragraph", text: "one" });
+
+    const rev = getBlockRev(doc, blockId);
+    editBlock(doc, blockId, "one", "one two", { rev });
+    expect(getBlockText(doc, blockId)).toBe("one two");
+    expect(getBlockRev(doc, blockId)).not.toBe(rev);
+
+    // Replaying the same edit with the now-stale rev is refused.
+    expect(() =>
+      editBlock(doc, blockId, "one two", "one two three", { rev }),
+    ).toThrow(StaleBlockError);
   });
 });
 
@@ -230,6 +286,24 @@ describe("edit versus deletion", () => {
     expect(() => editBlock(a, doomed, "delete me", "again")).toThrow(
       BlockNotFoundError,
     );
+  });
+
+  it("errors instead of no-op'ing when the block is deleted inside the same transaction", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Detached" });
+    const blockId = appendBlock(doc, { type: "paragraph", text: "here" });
+
+    // A caller's enclosing transaction can detach the element mid-flight. An
+    // edit into a detached element would apply to nothing; it must report that
+    // rather than return as though it had written.
+    expect(() =>
+      doc.transact(() => {
+        deleteBlock(doc, blockId);
+        editBlock(doc, blockId, "here", "gone");
+      }),
+    ).toThrow(BlockNotFoundError);
+    expect(getBlock(doc, blockId)).toBeNull();
+    expect(getBlocks(doc)).toEqual([]);
   });
 });
 

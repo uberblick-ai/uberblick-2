@@ -27,6 +27,11 @@ export interface Block {
   type: BlockType;
   /** The block's plain-text source. Rich blocks render this; they do not replace it. */
   text: string;
+  /**
+   * Content hash of type + text + attributes, for optimistic concurrency.
+   * Pass it back to `editBlock` to assert nothing changed since this read.
+   */
+  rev: string;
   level?: HeadingLevel;
   language?: string;
 }
@@ -60,23 +65,31 @@ export interface AnnotationComment {
 /**
  * An annotation thread, stored as plain JSON in the `annotations` Y.Map.
  *
- * `anchor` and `head` are base64-encoded Yjs RelativePositions pointing into
- * the anchored block's Y.XmlText, so they survive concurrent edits.
+ * The thread carries no positions. Its range lives in the document text as a
+ * `comment` formatting mark holding this thread's id, so the range survives
+ * concurrent edits, block splits and re-types — see `annotations.ts`.
  */
 export interface Annotation {
   id: string;
   blockId: string;
-  anchor: string;
-  head: string;
   comments: AnnotationComment[];
   resolved?: boolean;
+}
+
+/** The value of a `comment` mark: ProseMirror-shaped mark attributes. */
+export interface CommentMark {
+  threadId: string;
 }
 
 /** A resolved absolute range inside a block's text. */
 export interface AnnotationRange {
   start: number;
   end: number;
-  /** True when the annotated text is gone and the range collapsed to a point. */
+  /**
+   * True when the marked span resolves to zero length. Not reachable through
+   * this package's own writers — a fully deleted span loses its mark and
+   * resolves to `null` instead — but a foreign writer can leave one behind.
+   */
   collapsed: boolean;
 }
 
