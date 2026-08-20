@@ -57,6 +57,11 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    - probe failure behavior when the change crosses persistence,
      startup/shutdown, networking, concurrency, or another stateful boundary;
      happy-path tests alone do not close those acceptance criteria;
+   - record every gate result against the commit SHA it ran at — container
+     review, CI, your acceptance validation, the Codex verdict, the Copilot
+     state. Any new commit on the branch (fix-ups included) invalidates the
+     test/typecheck and review evidence: re-run those gates at the new
+     `headRefOid` rather than carrying an older verdict forward;
    - your validation against every acceptance checkbox on the linked issue —
      check a box only with evidence (command output, test name);
    - footprint check: the diff stays within the issue's declared `Touches`;
@@ -80,13 +85,22 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    first. Confirm the PR's base is `main` (`gh pr view <n> --json baseRefName`)
    — a stacked PR merges into its parent feature branch and silently orphans
    the reviewed work (this happened: #13 into feat/hub, re-landed as #25);
-   retarget the PR to `main` (or merge the parent first) before merging. Then
-   merge per CLAUDE.md's "Merge policy" tiers — Tier 1 and Tier 2 self-merge
-   as specified there (Tier 2 requires the merge-report comment on the PR
-   first); Tier 3 triggers mean: label the PR `needs-human`, park it, and
-   move on. After merging, confirm the issue auto-closed, then update the
-   product docs to the new status quo (uberblick MCP tools once registered;
-   until then, comment on the PR that the doc update is pending).
+   retarget the PR to `main` (or merge the parent first) before merging.
+   **Tier check, before any merge:** classify the PR against CLAUDE.md's
+   "Merge policy" tiers from its actual diff (`gh pr diff <n> --name-only`),
+   not from the issue's `Touches`. A tier-3 trigger means you do not merge:
+   label the PR `needs-human`, comment which trigger fired, fire a
+   PushNotification naming the PR and the trigger so the owner learns a merge
+   decision awaits them, then park it and continue with the next PR or issue.
+   Tier 1 and Tier 2 self-merge as specified there (Tier 2 requires the
+   merge-report comment on the PR first).
+   **Gate-freshness check, immediately before merging:** confirm the recorded
+   gate SHA equals the current head (`gh pr view <n> --json headRefOid`). If
+   they differ someone pushed after the gates ran — re-run them at the new
+   head; never merge on stale evidence. After merging, confirm the issue
+   auto-closed, then update the product docs to the new status quo (uberblick
+   MCP tools once registered; until then, comment on the PR that the doc
+   update is pending).
 
 3. **Lint `ready` issues** against the spec's checklist. Failures: comment
    exactly what's missing, remove `ready`, skip.
