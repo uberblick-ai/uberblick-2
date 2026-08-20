@@ -19,11 +19,16 @@ import { acquireRoom } from "../collab/rooms.js";
 import { randomIdentity } from "../collab/identity.js";
 import { DocList } from "./DocList.js";
 import { EditorPane } from "./EditorPane.js";
-import { useDirectory, useIdentity, useRoom } from "./hooks.js";
+import { OutlinePane } from "./OutlinePane.js";
+import { useDirectory, useIdentity, useRoom, useStoredFlag } from "./hooks.js";
+
+/** Sidebar preference, persisted per browser. */
+const SIDEBAR_COLLAPSED_KEY = "uberblick.sidebar.collapsed";
 
 export function App(): ReactElement {
   const identity = useIdentity(randomIdentity);
   const [selected, setSelected] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useStoredFlag(SIDEBAR_COLLAPSED_KEY, false);
 
   const directory = useRoom(directoryRoom(WORKSPACE), identity);
   const doc = useRoom(
@@ -89,6 +94,17 @@ export function App(): ReactElement {
   return (
     <main className="ub-app">
       <header className="ub-header">
+        {/* Lives in the header so it stays visible while the sidebar is gone. */}
+        <button
+          type="button"
+          className="ub-sidebar-toggle"
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? "Show document list" : "Hide document list"}
+          title={collapsed ? "Show document list" : "Hide document list"}
+          onClick={() => setCollapsed(!collapsed)}
+        >
+          {collapsed ? "»" : "«"}
+        </button>
         <span className="ub-brand">uberblick</span>
         <span className="ub-muted">workspace {WORKSPACE}</span>
         <span className="ub-me" style={{ borderColor: identity.color }}>
@@ -96,14 +112,17 @@ export function App(): ReactElement {
         </span>
       </header>
       <div className="ub-body">
-        <DocList
-          connection={directory}
-          entries={entries}
-          selected={selected}
-          onSelect={setSelected}
-          onCreate={onCreate}
-        />
+        {!collapsed && (
+          <DocList
+            connection={directory}
+            entries={entries}
+            selected={selected}
+            onSelect={setSelected}
+            onCreate={onCreate}
+          />
+        )}
         <EditorPane connection={doc} />
+        <OutlinePane connection={doc} />
       </div>
     </main>
   );
