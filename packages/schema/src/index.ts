@@ -44,6 +44,7 @@ export {
   getBlockText,
   getBlocks,
   insertBlock,
+  repairDuplicateBlocks,
   setBlockLanguage,
   setBlockLevel,
   setBlockType,

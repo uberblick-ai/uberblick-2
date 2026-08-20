@@ -60,34 +60,74 @@ function readText(text: Y.XmlText | null): string {
   return out;
 }
 
-function elementChildren(fragment: Y.XmlFragment): Y.XmlElement[] {
-  const out: Y.XmlElement[] = [];
-  for (const child of fragment.toArray()) {
-    if (child instanceof Y.XmlElement) out.push(child);
+/**
+ * Split the fragment's element children into the ones a reader may see and the
+ * duplicates it must not: the first element to claim an id wins, and every later
+ * element carrying that id is *shadowed*.
+ *
+ * Duplicate ids exist because a re-type must re-insert (Yjs element names are
+ * immutable), so two replicas re-typing one block concurrently converge on two
+ * elements sharing its id — see {@link setBlockType}. Document order is
+ * identical on every replica, so every replica shadows the same elements.
+ *
+ * This is the one place that rule lives: everything that walks the fragment goes
+ * through here.
+ */
+function partitionById(fragment: Y.XmlFragment): {
+  /** The visible element for each id, in document order. */
+  visible: Y.XmlElement[];
+  /** Fragment indexes of the shadowed duplicates, ascending. */
+  shadowed: number[];
+} {
+  const seen = new Set<string>();
+  const visible: Y.XmlElement[] = [];
+  const shadowed: number[] = [];
+  const children = fragment.toArray();
+  for (let i = 0; i < children.length; i += 1) {
+    const child = children[i];
+    if (!(child instanceof Y.XmlElement)) continue;
+    const id = child.getAttribute("id") ?? "";
+    if (seen.has(id)) {
+      shadowed.push(i);
+      continue;
+    }
+    seen.add(id);
+    visible.push(child);
   }
-  return out;
+  return { visible, shadowed };
 }
 
-function indexOfBlock(fragment: Y.XmlFragment, blockId: string): number {
+/** Every fragment index carrying `blockId`, ascending. */
+function indexesOfBlock(fragment: Y.XmlFragment, blockId: string): number[] {
+  const out: number[] = [];
   const children = fragment.toArray();
   for (let i = 0; i < children.length; i += 1) {
     const child = children[i];
     if (child instanceof Y.XmlElement && child.getAttribute("id") === blockId) {
-      return i;
+      out.push(i);
     }
   }
-  return -1;
+  return out;
 }
 
-/** @internal — shared with the annotations module. */
+/** The index of the visible element for `blockId`, or -1. */
+function indexOfBlock(fragment: Y.XmlFragment, blockId: string): number {
+  return indexesOfBlock(fragment, blockId)[0] ?? -1;
+}
+
+/**
+ * The visible element for a block id — the first one carrying it, so a shadowed
+ * duplicate is never returned.
+ *
+ * @internal — shared with the annotations module.
+ */
 export function findBlockElement(
   ydoc: Y.Doc,
   blockId: string,
 ): Y.XmlElement | null {
-  for (const element of elementChildren(getBlocksFragment(ydoc))) {
-    if (element.getAttribute("id") === blockId) return element;
-  }
-  return null;
+  const fragment = getBlocksFragment(ydoc);
+  const index = indexOfBlock(fragment, blockId);
+  return index === -1 ? null : (fragment.get(index) as Y.XmlElement);
 }
 
 /** @internal — shared with the annotations module. */
@@ -132,9 +172,12 @@ function toBlock(element: Y.XmlElement): Block {
   return { id, type, text, rev: blockRev({ type, text }) };
 }
 
-/** All blocks, in document order. */
+/**
+ * All blocks, in document order — exactly one per id. A shadowed duplicate left
+ * behind by concurrent re-types is skipped; see {@link partitionById}.
+ */
 export function getBlocks(ydoc: Y.Doc): Block[] {
-  return elementChildren(getBlocksFragment(ydoc)).map(toBlock);
+  return partitionById(getBlocksFragment(ydoc)).visible.map(toBlock);
 }
 
 /** One block by id, or null when it does not exist (or was deleted). */
@@ -205,14 +248,47 @@ export function appendBlock(ydoc: Y.Doc, input: BlockInput): string {
   return id;
 }
 
-/** Delete a block. Throws {@link BlockNotFoundError} when it is already gone. */
+/**
+ * Delete a block. Throws {@link BlockNotFoundError} when it is already gone.
+ *
+ * Every element carrying the id goes, not just the visible one: leaving a
+ * shadowed duplicate behind would make the block reappear after the delete.
+ */
 export function deleteBlock(ydoc: Y.Doc, blockId: string): void {
   const fragment = getBlocksFragment(ydoc);
   ydoc.transact(() => {
-    const index = indexOfBlock(fragment, blockId);
-    if (index === -1) throw new BlockNotFoundError(blockId);
-    fragment.delete(index, 1);
+    const indexes = indexesOfBlock(fragment, blockId);
+    if (indexes.length === 0) throw new BlockNotFoundError(blockId);
+    // Descending, so an earlier delete cannot shift a later index.
+    for (const index of [...indexes].reverse()) {
+      fragment.delete(index, 1);
+    }
   });
+}
+
+/**
+ * Delete the shadowed duplicates left by concurrent re-types, keeping the
+ * document-order winner — the element every replica's reads already resolve.
+ * Returns how many elements were removed.
+ *
+ * Nothing to repair means no transaction and no update, so calling this on every
+ * observed change is free, and two replicas repairing the same duplicate
+ * converge: they delete the same element, and a second delete of it is a no-op.
+ *
+ * The losing copy's text goes with it, including anything written to it after
+ * the re-type — the same semantics as a text edit concurrent with a re-type, and
+ * the reason {@link editBlock} takes a `rev`.
+ */
+export function repairDuplicateBlocks(ydoc: Y.Doc): number {
+  const fragment = getBlocksFragment(ydoc);
+  const indexes = partitionById(fragment).shadowed;
+  if (indexes.length === 0) return 0;
+  ydoc.transact(() => {
+    for (const index of [...indexes].reverse()) {
+      fragment.delete(index, 1);
+    }
+  });
+  return indexes.length;
 }
 
 /** Set a heading's level. */
@@ -265,12 +341,18 @@ export interface BlockTypeAttrs {
  * Type-specific attributes are carried over where they still apply and can be
  * overridden through `attrs`.
  *
- * Known limitation: because a re-type inserts a replacement element, two
- * replicas re-typing the same block concurrently converge on two elements
- * sharing that block id (reads resolve the first, identically on every
- * replica). A concurrent *text* edit to the block loses its characters with the
- * replaced element — a re-type is a structural change, and `rev`/`oldText` is
- * what protects a caller who cares.
+ * Concurrency: because a re-type inserts a replacement element, two replicas
+ * re-typing the same block concurrently converge on two elements sharing that
+ * block id. The earlier one in document order wins — identically on every
+ * replica — and the later copy is shadowed: every read skips it
+ * ({@link getBlocks}, {@link getBlock}), and {@link repairDuplicateBlocks}
+ * deletes it once an observer sees it.
+ *
+ * The losing copy's text is therefore discarded, including edits made to it
+ * after that replica's re-type: they were written into an element no reader ever
+ * resolves. This is the same rule as a text edit concurrent with a re-type — a
+ * re-type is a structural change, and `rev`/`oldText` is what protects a caller
+ * who cares. Divergent duplicate texts are never merged.
  */
 export function setBlockType(
   ydoc: Y.Doc,

@@ -33,6 +33,7 @@ import {
   getDirectoryEntry,
   getMeta,
   listDirectory,
+  repairDuplicateBlocks,
   roomForDoc,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -350,6 +351,7 @@ export class Replicas {
     if (replica.isDirectory) {
       return;
     }
+    this.repairDuplicates(replica);
     try {
       const meta = getMeta(replica.doc);
       if (meta.uuid === "") {
@@ -373,6 +375,39 @@ export class Replicas {
       });
     } catch (error) {
       log.warn("failed to mirror a document change", error);
+    }
+  }
+
+  /**
+   * Delete shadowed duplicate blocks as soon as this instance observes them.
+   *
+   * Two replicas re-typing one block concurrently converge on two elements
+   * sharing its id. Reads already skip the shadowed copy, but leaving it in the
+   * document leaves the stable-block-id invariant dented for every other
+   * consumer, so the first instance to see it deletes it. The winner is the
+   * document-order one — the same element every replica's reads resolve — so two
+   * instances repairing at once delete the same element and converge; a repair
+   * with nothing to do writes nothing.
+   *
+   * This is an ordinary local write: its update goes through the observer above
+   * and is logged like any other. Skipped on a poisoned replica for the same
+   * reason nothing else touches one — the document is ahead of its log, and a
+   * repair would add another change the log will not keep.
+   */
+  private repairDuplicates(replica: Replica): void {
+    if (this.persistenceFailure !== null) {
+      return;
+    }
+    try {
+      const removed = repairDuplicateBlocks(replica.doc);
+      if (removed > 0) {
+        log.debug("deleted shadowed duplicate blocks", {
+          room: replica.room,
+          removed,
+        });
+      }
+    } catch (error) {
+      log.warn("failed to repair duplicate blocks", error);
     }
   }
 
