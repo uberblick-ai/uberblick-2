@@ -1,0 +1,44 @@
+name: CI
+
+# The merge policy in CLAUDE.md lets the implementation loop self-merge on
+# "gates green". This workflow is what makes green verified rather than
+# self-reported: it runs the same mise tasks a human would run locally.
+#
+# No secrets: `install`, `typecheck` and `test` are the tasks that do not wrap
+# `fnox exec`, so they run fine on a runner without the age key.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: typecheck + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Installs the toolchain pinned in mise.toml (node, pnpm, fnox) and
+      # caches it; also puts `mise` itself on PATH for the task steps.
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+
+      - run: mise run install
+        env:
+          PNPM_STORE_DIR: ~/.pnpm-store
+
+      - run: mise run typecheck
+      - run: mise run test
