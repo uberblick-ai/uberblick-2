@@ -2,8 +2,11 @@
  * Client configuration, injected by Vite `define` (see vite.config.ts).
  *
  * Rule from CLAUDE.md: no hardcoded hub addresses anywhere except the in-code
- * fallback default. That single default lives in vite.config.ts; this module
- * only reads what was injected.
+ * fallback default. There are exactly two, both fallbacks: the one vite.config.ts
+ * substitutes when HUB_URL is unset in the build environment, and
+ * FALLBACK_HUB_URL below, which applies when this module is loaded outside a
+ * Vite build (tests) and nothing was injected. Under a normal dev server this
+ * module only reads the injected value.
  *
  * ============================ LOUD WARNING ============================
  * HUB_AUTH_TOKEN is compiled into the bundle. That is LOCAL-SPIKE-ONLY — a

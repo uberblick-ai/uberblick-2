@@ -6,10 +6,11 @@
  * reads, so it renders in the web editor with a name label like any human peer.
  * The MCP server will reuse this format for agent attribution.
  *
- * Needs a mise task to be the documented entry point (`mise run agent-cursor`)
- * — mise.toml is outside this package, so adding it is a separate change. Until
- * then: `mise exec -- fnox exec -- pnpm --filter @uberblick/web agent-cursor
- * [<docUuid>]`. With no uuid it picks the first entry from the directory doc.
+ * Entry point: `mise run agent-cursor` — the task does not exist yet (mise.toml
+ * lives outside this package, so adding it is a separate change, tracked in
+ * issue #15). It takes an optional `<docUuid>`; with no uuid the script picks
+ * the first entry from the directory doc. HUB_AUTH_TOKEN has to come from
+ * `fnox exec`, which the task wraps.
  *
  * ============================================================================
  * THE AWARENESS CURSOR FORMAT — read out of y-prosemirror 1.3.7, not guessed
