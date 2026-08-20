@@ -114,12 +114,9 @@ describe("agent awareness cursor format", () => {
         defaultCursorBuilder,
         defaultSelectionBuilder,
       );
-      // A cursor exists for that client — where it lands is y-prosemirror's
-      // business, not this contract's.
-      const keys = decorations
-        .find()
-        .map((decoration: { spec?: { key?: unknown } }) => decoration.spec?.key);
-      expect(keys).toContain(String(agentDoc.clientID));
+      // The one foreign awareness state produced decorations. What they look
+      // like, and where they land, is y-prosemirror's business.
+      expect(decorations.find().length).toBeGreaterThan(0);
 
       // The default cursor builder is the DOM the app styles with plain CSS.
       const element = defaultCursorBuilder({

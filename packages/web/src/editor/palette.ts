@@ -34,9 +34,18 @@
  * mark with `schema.mark(name, attrs)`; either throwing deletes the offending
  * Y type. So a *known* block name is not enough: a `<paragraph>` holding a
  * `<callout>` loses the callout, and a Y.XmlText carrying a mark the schema does not
- * declare (`bold`, say) loses the whole text node. A block is safe to bind only
- * when its children are all Y.XmlText and those texts carry nothing but the
- * marks in {@link MARK_NAMES}.
+ * declare (`bold`, say) loses the whole text node.
+ *
+ * A Y.XmlText's *content* is the third case, and the quietest one.
+ * `createTextNodesFromYText` only ever calls `schema.text(delta.insert, marks)`,
+ * so a delta op whose `insert` is not a string (an embed, written with
+ * `insertEmbed`) has no ProseMirror representation at all. Nothing throws and
+ * nothing is deleted at bind time — but the embed is absent from the editor
+ * state, so the next keystroke round-trips the block's text back onto the
+ * Y.XmlText without it. That is silent data loss on a later mutation rather than
+ * on binding, which makes it worse, not better. A block is safe to bind only
+ * when its children are all Y.XmlText, those texts insert nothing but strings,
+ * and those strings carry nothing but the marks in {@link MARK_NAMES}.
  */
 
 import * as Y from "yjs";
@@ -58,7 +67,8 @@ export interface ForeignBlock {
   index: number;
   /**
    * What the palette cannot represent: an unknown node name, `#text`/`#hook`
-   * for a stray non-element, or `#mark:<name>` for an undeclared mark.
+   * for a stray non-element, `#mark:<name>` for an undeclared mark, or
+   * `#embed` for a non-string delta insertion.
    */
   nodeName: string;
   /** The element's `id` attribute, when it has one. */
@@ -75,7 +85,8 @@ function previewOf(child: Y.XmlElement | Y.XmlText | Y.XmlHook): string {
 /**
  * What inside an otherwise-renderable block the palette cannot represent, or
  * `null` when the child is fine. A block's children must be Y.XmlText, and a
- * Y.XmlText may only carry marks the editor schema declares.
+ * Y.XmlText may only insert strings, carrying only marks the editor schema
+ * declares.
  */
 function foreignInsideBlock(
   child: Y.XmlElement | Y.XmlText | Y.XmlHook,
@@ -83,8 +94,12 @@ function foreignInsideBlock(
   if (child instanceof Y.XmlElement) return child.nodeName;
   if (!(child instanceof Y.XmlText)) return "#hook";
   for (const op of child.toDelta() as Array<{
+    insert?: unknown;
     attributes?: Record<string, unknown>;
   }>) {
+    // Embeds have no ProseMirror equivalent, so binding drops them from the
+    // editor state and the next edit writes the text back without them.
+    if (typeof op.insert !== "string") return "#embed";
     for (const mark of Object.keys(op.attributes ?? {})) {
       if (!MARK_NAMES.includes(mark)) return `#mark:${mark}`;
     }

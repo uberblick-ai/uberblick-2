@@ -17,9 +17,11 @@
  *
  * The same trap sits *inside* a known block: a nested Y.XmlElement, or a mark
  * the editor schema does not declare, throws one level down and takes the
- * nested element or the whole Y.XmlText with it. `findForeignBlocks` therefore
- * scans recursively (see palette.ts), and this guard is only as good as that
- * scan.
+ * nested element or the whole Y.XmlText with it. An embed inside a Y.XmlText is
+ * the quiet variant — it throws nothing, it simply has no ProseMirror
+ * representation, so the next edit rewrites the text without it.
+ * `findForeignBlocks` therefore scans recursively (see palette.ts), and this
+ * guard is only as good as that scan.
  *
  * ## The two halves
  *

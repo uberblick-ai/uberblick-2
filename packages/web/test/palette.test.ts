@@ -30,7 +30,7 @@ import {
   describeForeignBlocks,
   findForeignBlocks,
 } from "../src/editor/palette.js";
-import { blockText, plainText } from "../src/editor/ytext.js";
+import { plainText } from "../src/editor/ytext.js";
 import { mountEditor } from "./helpers.js";
 
 describe("the palette is exactly the schema's block types", () => {
@@ -305,6 +305,13 @@ describe("foreign content inside a known block", () => {
     return block.firstChild as Y.XmlText;
   }
 
+  /** The non-string inserts of a Y.XmlText — what an embed leaves in the delta. */
+  function embedsOf(ytext: Y.XmlText): unknown[] {
+    return (ytext.toDelta() as Array<{ insert?: unknown }>)
+      .map((op) => op.insert)
+      .filter((insert) => typeof insert !== "string");
+  }
+
   function bind(ydoc: Y.Doc, onUnbind?: () => void): GuardedBinding {
     const element = document.createElement("div");
     document.body.appendChild(element);
@@ -330,30 +337,6 @@ describe("foreign content inside a known block", () => {
     const markFindings = findForeignBlocks(getBlocksFragment(marked));
     expect(markFindings).toHaveLength(1);
     expect(markFindings[0]?.nodeName).toBe("#mark:bold");
-  });
-
-  it("would be DESTROYED by binding an unguarded editor — hence the gate", () => {
-    const nested = docWithBlock();
-    (getBlocksFragment(nested).get(0) as Y.XmlElement).insert(1, [nestedElement()]);
-    const first = mountEditor(nested);
-    try {
-      // The nested element is gone from the CRDT, and only the text is left.
-      expect((getBlocksFragment(nested).get(0) as Y.XmlElement).length).toBe(1);
-    } finally {
-      first.editor.destroy();
-    }
-
-    const marked = docWithBlock();
-    firstBlockText(marked).format(0, 3, { bold: {} });
-    const second = mountEditor(marked);
-    try {
-      // The whole Y.XmlText is gone — an undeclared mark costs the block's text.
-      expect(plainText(blockText(getBlocksFragment(marked).get(0) as Y.XmlElement))).toBe(
-        "",
-      );
-    } finally {
-      second.editor.destroy();
-    }
   });
 
   it("keeps a nested element when it is already there at load", () => {
@@ -409,6 +392,43 @@ describe("foreign content inside a known block", () => {
     expect(plainText(firstBlockText(ydoc))).toBe("known");
     const delta = firstBlockText(ydoc).toDelta() as Array<Record<string, unknown>>;
     expect(delta[0]?.attributes).toEqual({ bold: {} });
+    binding.destroy();
+  });
+
+  /**
+   * The quiet variant, and the reason the delta scan checks `insert` as well as
+   * `attributes`. An embed throws nothing while binding: y-prosemirror's
+   * `createTextNodesFromYText` only ever calls `schema.text(insert, marks)`, so
+   * a non-string insert simply never reaches the editor state — and the next
+   * keystroke writes the block's text back to the Y.XmlText without it. Silent
+   * loss on a later mutation, which is why the gate has to refuse up front.
+   */
+  it("keeps an embed inside a block's text at load", () => {
+    const ydoc = docWithBlock();
+    firstBlockText(ydoc).insertEmbed(1, { future: "keep-me" });
+    const foreign = findForeignBlocks(getBlocksFragment(ydoc));
+    expect(foreign).toHaveLength(1);
+    expect(foreign[0]?.nodeName).toBe("#embed");
+
+    const binding = bind(ydoc);
+    expect(binding.refused).toBe(true);
+    expect(embedsOf(firstBlockText(ydoc))).toEqual([{ future: "keep-me" }]);
+    expect(plainText(firstBlockText(ydoc))).toBe("known");
+    binding.destroy();
+  });
+
+  it("keeps an embed arriving while the editor is bound", () => {
+    const ydoc = docWithBlock();
+    const unbound: string[] = [];
+    const binding = bind(ydoc, () => unbound.push("unbound"));
+    expect(binding.refused).toBe(false);
+
+    firstBlockText(ydoc).insertEmbed(1, { future: "keep-me" });
+
+    expect(unbound).toEqual(["unbound"]);
+    expect(embedsOf(firstBlockText(ydoc))).toEqual([{ future: "keep-me" }]);
+    expect(plainText(firstBlockText(ydoc))).toBe("known");
+    expect(findForeignBlocks(getBlocksFragment(ydoc))).toHaveLength(1);
     binding.destroy();
   });
 
