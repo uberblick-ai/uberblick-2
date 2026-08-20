@@ -104,8 +104,9 @@ protocol, scheduling semantics, and lint. This file does not restate it.
 ## Pacing under /loop (dynamic mode)
 
 - Running sub-agents and workflows re-invoke you when they finish — never
-  schedule short wakeups to poll them. Long fallback: 1800s.
+  schedule short wakeups to poll them. Long fallback: 1200s.
 - Waiting only on an external signal (Copilot review, a human answering a
-  `needs-decision`): ~600s.
-- Nothing eligible and nothing in flight: 1800s with `noop: true`. Do not
+  `needs-decision`): ~300s.
+- Nothing eligible and nothing in flight: 300s with `noop: true` — the owner
+  wants idle-time change detection at least every 5 minutes. Do not
   stop the loop yourself; the user stops it.
