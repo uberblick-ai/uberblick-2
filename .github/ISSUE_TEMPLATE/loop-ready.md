@@ -3,8 +3,9 @@ name: Loop-ready issue
 about: Work item the implementation loop can pick up. Contract: .github/ISSUE_SPEC.md
 ---
 
-Depends-on: none
+Depends-on:
 Touches:
+Priority: normal
 
 ## What
 
@@ -24,5 +25,12 @@ Touches:
 ## Out of scope
 
 <!-- Explicit non-goals, or "None." — scope creep is rejected against this. -->
+
+-
+
+## Pointers
+
+<!-- Files, prior PRs/issues, CLAUDE.md sections, doc UUIDs, known gotchas.
+     "None." only when CLAUDE.md genuinely covers it. -->
 
 -

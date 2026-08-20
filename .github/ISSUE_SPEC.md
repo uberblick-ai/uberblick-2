@@ -23,10 +23,15 @@ Touches: mcp-server, schema
   list of issue refs. Grammar: `^Depends-on: (none|#[0-9]+(, #[0-9]+)*)$`.
   A missing line means *untriaged*, which is different from `none`
   (*consciously independent*); untriaged issues are never eligible.
-- **`Touches`** — mandatory. Comma-separated footprint names, lowercase:
-  the package short names (`hub`, `mcp-server`, `schema`, `web`), plus
-  `docs-seed` and `repo` (root config, CI, top-level docs). Grammar:
-  `^Touches: [a-z0-9-]+(, [a-z0-9-]+)*$`, every name from that list.
+- **`Touches`** — mandatory. Comma-separated footprint names, lowercase: the
+  short names of directories under `packages/` (currently `hub`, `mcp-server`,
+  `schema`, `web` — the live directory listing is authoritative, this sentence
+  is not), plus `docs-seed` and `repo` (root config, CI, top-level docs).
+  Grammar: `^Touches: [a-z0-9-]+(, [a-z0-9-]+)*$`, every name from that list.
+- **`Priority`** — optional third line. `high`, `normal`, or `low`; absent
+  means `normal`. Grammar when present: `^Priority: (high|normal|low)$`.
+  A reprioritizing pass edits this line; everything else about order is
+  derived.
 
 ### Scheduling semantics
 
@@ -36,8 +41,8 @@ Touches: mcp-server, schema
   worktrees). **Overlapping** sets queue behind each other.
 - `schema` in `Touches` **serializes globally** — it is the keystone package;
   nothing else is dispatched while a schema-touching issue is in flight.
-- Order among eligible issues: dependency topology, then ascending issue
-  number. There is no priority field; add one only when reality demands it.
+- Order among eligible issues: dependency topology, then `Priority`
+  (high → normal → low), then ascending issue number.
 
 ### Gate check
 
@@ -59,6 +64,12 @@ There is deliberately **no `blocked` label**: blocked is derived from
 `Depends-on` plus issue closed-state, and stored copies of derivable state
 rot.
 
+`needs-decision` exit path: the loop asks the question as an issue comment
+(concrete options, its recommendation). A human answers in a comment; whoever
+resolves it removes `needs-decision` and restores `ready` — restoring `ready`
+is the assertion that the decision is now written into the issue body, not
+just the thread.
+
 ### Claim protocol
 
 On claiming an issue the loop adds `in-progress` and comments
@@ -69,7 +80,7 @@ session's memory, so a crashed session never strands an issue.
 
 ## Body sections
 
-Four required `##` headings after the header. The bar for all of them:
+Five required `##` headings after the header. The bar for all of them:
 **would the implementing agent have to make a product decision the issue
 doesn't answer? Then the issue is not `ready`.**
 
@@ -85,6 +96,12 @@ doesn't answer? Then the issue is not `ready`.**
 - **Out of scope** — explicit non-goals, or `None.` if genuinely none. This
   is the "least code wins" principle made enforceable: it is what scope
   creep gets rejected against.
+- **Pointers** — where a fresh agent should look before writing anything:
+  relevant files/modules, prior PRs and issues, CLAUDE.md sections, doc UUIDs
+  (once the MCP server is live), and known gotchas (e.g. "y-prosemirror
+  deletes unknown elements — see #14"). `None.` only when CLAUDE.md genuinely
+  covers it. Every implementing agent starts with zero session memory; this
+  section is what makes that cheap instead of expensive.
 
 ## Sizing
 
@@ -98,10 +115,11 @@ An issue labeled `ready` must pass all of:
 
 1. `Depends-on` line present, first-section, matching the grammar above.
 2. `Touches` line present, matching the grammar, every name valid.
-3. All four `##` sections present: What, Why, Acceptance criteria,
-   Out of scope.
-4. At least one `- [ ]` checkbox under Acceptance criteria.
-5. Out of scope is non-empty (explicit `None.` is acceptable).
+3. `Priority` line, when present, matches its grammar.
+4. All five `##` sections present: What, Why, Acceptance criteria,
+   Out of scope, Pointers.
+5. At least one `- [ ]` checkbox under Acceptance criteria.
+6. Out of scope and Pointers are non-empty (explicit `None.` is acceptable).
 
 Sizing and decision-completeness are judgment calls, not lintable — the
 coordinator applies them when granting or revoking `ready`.
