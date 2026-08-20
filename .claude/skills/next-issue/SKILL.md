@@ -41,7 +41,19 @@ protocol, scheduling semantics, and lint. This file does not restate it.
 2. **Advance open PRs first** — an open PR is closer to value than a new
    dispatch, and this includes PRs that predate the loop. For each, drive the
    CLAUDE.md gates in order:
-   - `mise run test` and `mise run typecheck`, run in that PR's worktree;
+   - resolve and record the PR's immutable `headRefOid`, fetch it, inspect that
+     commit's `Dockerfile.review`, then run
+     `REVIEW_SHA=<headRefOid> mise run review`; never treat tests from a mutable
+     shared checkout as review evidence. For an older PR that predates
+     `Dockerfile.review`, construct a temporary trusted Dockerfile from the
+     toolchain declared at that SHA and still build from `git archive`;
+   - never pass branch-owned Docker builds secrets, host mounts, privileged
+     mode, or the Docker socket. Run the verification container without
+     network. Keep the SHA-tagged image long enough for focused probes, then
+     remove it when the PR is settled;
+   - probe failure behavior when the change crosses persistence,
+     startup/shutdown, networking, concurrency, or another stateful boundary;
+     happy-path tests alone do not close those acceptance criteria;
    - your validation against every acceptance checkbox on the linked issue —
      check a box only with evidence (command output, test name);
    - footprint check: the diff stays within the issue's declared `Touches`;

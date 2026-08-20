@@ -36,6 +36,7 @@ mise run web          # Vite dev server
 mise run dev          # hub + web in parallel
 mise run typecheck    # tsc --noEmit across all packages
 mise run test         # all test suites
+REVIEW_SHA=<commit> mise run review  # immutable Docker review of one commit
 ```
 
 `mise run dev` deliberately runs **hub + web only**. The MCP server speaks JSON-RPC
@@ -69,6 +70,24 @@ What that config is careful about, since none of it is obvious:
 `mise run import-seed` is the one-time import of `docs-seed/` into the system.
 After it, the product docs live in the documents, and are read and written
 through the MCP tools rather than by editing the seed files.
+
+## Review isolation
+
+`mise run review` resolves `REVIEW_SHA` to a commit, streams that commit through
+`git archive`, builds its `Dockerfile.review`, and runs the full typecheck and
+test gates in a disposable container. The build context therefore contains
+only committed files from the reviewed SHA: it cannot pick up a changing
+checkout, untracked files, local `node_modules`, `.git`, or plaintext secrets.
+The resulting image is tagged `uberblick-review:<full-sha>` and retained so a
+reviewer can run focused failure-path probes against the exact same environment.
+
+`Dockerfile.review` belongs to the branch, so branches may add the OS/runtime
+dependencies their changes require. Inspect changes to that file before
+building it: a Dockerfile is executable branch code. The trusted invocation
+must never pass build secrets, host mounts, privileged mode, or the Docker
+socket. Dependency installation needs network access during the image build;
+the verification container itself runs with no network and all capabilities
+dropped.
 
 ## Toolchain choices
 

@@ -67,3 +67,13 @@ run = "pnpm -r typecheck"
 [tasks.test]
 description = "Run all test suites"
 run = "pnpm -r test"
+
+[tasks.review]
+description = "Build and verify an immutable commit in Docker (REVIEW_SHA defaults to HEAD)"
+run = """
+review_sha="$(git rev-parse "${REVIEW_SHA:-HEAD}^{commit}")"
+review_tag="uberblick-review:${review_sha}"
+git archive "$review_sha" | docker build --file Dockerfile.review --tag "$review_tag" -
+docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges "$review_tag"
+printf 'Review image retained for probes: %s\n' "$review_tag"
+"""

@@ -52,7 +52,10 @@ before moving on.
 3. **PR.** Open a PR against `main` linked to the issue (`Closes #N`), with a
    body stating what changed and how it was verified.
 4. **Gates — all of them, before merge:**
-   - tests + typecheck green (`mise run test`, `mise run typecheck`);
+   - immutable Docker review green (`REVIEW_SHA=<head-sha> mise run review`),
+     using the commit's own `Dockerfile.review`; worktree tests are useful
+     during implementation but are not merge evidence because a shared
+     checkout can change during review;
    - coordinator validation against the issue's acceptance criteria;
    - **GitHub Copilot review** requested on the PR;
    - **local Codex session review** of the PR;
@@ -62,6 +65,13 @@ before moving on.
      every remark is fixed or explicitly answered.
    Findings are triaged: real ones are fixed on the branch; rejected ones get
    an explicit reply on the PR thread, never silent dismissal.
+   Before building branch-owned review code, inspect the reviewed commit's
+   `Dockerfile.review` diff. The trusted runner supplies only
+   `git archive <head-sha>` as context and never passes secrets, host mounts,
+   privileged mode, or the Docker socket. For persistence, startup/shutdown,
+   networking, concurrency, and other stateful boundaries, passing happy-path
+   tests is not enough: run focused failure-path probes in the retained review
+   image and post reproducible findings inline.
 5. **Merge, then docs.** After the gates pass, merge per the merge policy
    below; then update the product docs (through the uberblick MCP tools once
    live) to the new status quo.
