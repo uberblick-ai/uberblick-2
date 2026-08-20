@@ -61,8 +61,14 @@ function sharedSocket(): HocuspocusProviderWebsocket {
   const created = new HocuspocusProviderWebsocket({
     url: HUB_URL,
     // A hub restart should be picked up in seconds, not half a minute: the
-    // default backoff climbs to 30s. `minDelay` is the retry library's floor
-    // and must not exceed the first delay or the cap.
+    // default backoff climbs to 30s. Deterministic, like the MCP server's —
+    // one tab dialling a local hub has nothing to spread out.
+    //
+    // `minDelay` is not decorative and not about jitter: Hocuspocus defaults it
+    // to 1000, and the retry library validates `delay >= minDelay` on every
+    // `connect()` regardless of jitter — leave it out and each attempt rejects
+    // with "delay cannot be less than minDelay" instead of dialling. Lower it
+    // with `delay`, never past it.
     delay: 250,
     minDelay: 250,
     maxDelay: 2_000,
