@@ -14,6 +14,14 @@
  *   list *and* by the create flow. Connections are shared and only torn down
  *   when the last holder releases them.
  *
+ * - **A closed document means a dead connection.** The hub can close a
+ *   document without closing the socket, which leaves a provider attached to a
+ *   live-looking socket that delivers nothing — and Hocuspocus never announces
+ *   the lost sync, because it only emits `synced` for `true`. Both halves are
+ *   handled below: status is derived from the socket and provider rather than
+ *   from event payloads, and an unsolicited close drops the socket so every
+ *   room re-joins on the next `open`.
+ *
  * The token is passed as an async callable, not a string: Hocuspocus accepts
  * `() => Promise<string>` and calls it before each connection attempt, so a
  * reconnect after the token would have expired re-mints instead of failing.
@@ -32,9 +40,55 @@ import type { AwarenessUser } from "./identity.js";
 
 let socket: HocuspocusProviderWebsocket | null = null;
 
+/** Set while a forced drop is in flight, so the `disconnect` handler re-dials. */
+let redialAfterDrop = false;
+
+/** One forced drop per this window: a hub that keeps closing us must not spin. */
+const FORCED_DROP_COOLDOWN_MS = 5_000;
+let lastForcedDrop = 0;
+
 function sharedSocket(): HocuspocusProviderWebsocket {
-  socket ??= new HocuspocusProviderWebsocket({ url: HUB_URL });
-  return socket;
+  if (socket !== null) return socket;
+  const created = new HocuspocusProviderWebsocket({
+    url: HUB_URL,
+    // A hub restart should be picked up in seconds, not half a minute: the
+    // default backoff climbs to 30s. `minDelay` is the retry library's floor
+    // and must not exceed the first delay or the cap.
+    delay: 250,
+    minDelay: 250,
+    maxDelay: 2_000,
+    jitter: false,
+  });
+  created.on("disconnect", () => {
+    if (!redialAfterDrop) return;
+    // `disconnect()` cleared `shouldConnect`, so nothing would dial again on its
+    // own. Doing it here rather than straight after `disconnect()` is the whole
+    // point: `connect()` returns early while the status still reads
+    // "connected", which it does until the close event lands.
+    redialAfterDrop = false;
+    void created.connect();
+  });
+  socket = created;
+  return created;
+}
+
+/**
+ * Drop the shared socket and dial again.
+ *
+ * Called when the hub closes a *document* while the socket is still up — see
+ * {@link openRoom}. Every attached provider re-authenticates and re-syncs on
+ * the next `open`, which is what actually resumes live sync; nothing else does.
+ */
+function dropSocket(): void {
+  const current = sharedSocket();
+  // Only meaningful while the socket believes it is connected: a socket that
+  // already knows it is down is reconnecting on its own, and dropping it here
+  // would fight that retry loop.
+  if (current.status !== WebSocketStatus.Connected) return;
+  if (Date.now() - lastForcedDrop < FORCED_DROP_COOLDOWN_MS) return;
+  lastForcedDrop = Date.now();
+  redialAfterDrop = true;
+  current.disconnect();
 }
 
 /** Mint a fresh hub token. Called by Hocuspocus before every connect. */
@@ -118,17 +172,35 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     for (const listener of listeners) listener({ ...status });
   };
 
-  provider.on("status", (event: { status: string }) => {
-    status.connected = event.status === "connected";
+  // Read from the socket and the provider rather than from the event payloads.
+  // Hocuspocus only emits `synced` when it becomes *true* — losing sync is
+  // silent — so mirroring payloads leaves a stale `synced: true` behind after
+  // every disconnect, which is the indicator claiming "synced" over a
+  // connection that stopped delivering anything.
+  const refresh = (): void => {
+    status.connected = socket.status === WebSocketStatus.Connected;
+    status.synced = provider.isSynced;
+    status.unsyncedChanges = provider.unsyncedChanges;
     emit();
-  });
-  provider.on("synced", (event: { state: boolean }) => {
-    status.synced = event.state;
-    emit();
-  });
-  provider.on("unsyncedChanges", (event: { number: number }) => {
-    status.unsyncedChanges = event.number;
-    emit();
+  };
+  provider.on("status", refresh);
+  provider.on("synced", refresh);
+  provider.on("unsyncedChanges", refresh);
+  provider.on("close", refresh);
+
+  provider.on("close", (event: { event?: { reason?: string } }) => {
+    // A close on a live socket is the hub closing this *document*:
+    // `closeConnections` (hub shutdown, document reset) drops the connection
+    // server-side and sends a CLOSE message without touching the socket. The
+    // provider resets its own sync state and then waits for an `open` that will
+    // never come, so the room silently stops receiving updates while the socket
+    // still looks connected. The socket is the only thing that can re-join.
+    //
+    // `provider_initiated` is the hub echoing back a close *we* asked for by
+    // detaching (switching documents, a StrictMode remount). Re-joining after
+    // that works by itself, so dropping the socket there would be pure churn.
+    if (event?.event?.reason === "provider_initiated") return;
+    dropSocket();
   });
 
   // Local-first: the IndexedDB replica is keyed by the room name, so a tab that
