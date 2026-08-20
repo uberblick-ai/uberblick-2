@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "uberblick": {
+      "command": "fnox",
+      "args": [
+        "exec",
+        "--if-missing",
+        "warn",
+        "--",
+        "pnpm",
+        "--silent",
+        "--filter",
+        "@uberblick/mcp-server",
+        "start"
+      ]
+    }
+  }
+}
