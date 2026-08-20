@@ -15,8 +15,8 @@
  *
  * Because the theme follows `prefers-color-scheme`, each colour has to work on
  * both grounds. All eight sit near luminance 0.18: ≥4.1:1 against the dark
- * background, ≥4.1:1 against the light one, and ≥4.6:1 against the white
- * cursor-label text.
+ * background, ≥4.1:1 against the light one, and ≥4.69:1 against the white
+ * cursor-label text (`--cursor-label-foreground`).
  */
 const COLORS = [
   "#e30c4e",
@@ -29,8 +29,11 @@ const COLORS = [
   "#cb26b4",
 ] as const;
 
-/** Used when a peer publishes awareness without a colour. Same contrast budget. */
-const FALLBACK_COLOR = "#787878";
+/**
+ * Used when a peer publishes awareness without a colour. Same budget: 5.02:1
+ * against the white label text, 3.9:1 / 4.5:1 against the two grounds.
+ */
+const FALLBACK_COLOR = "#6f6f6f";
 
 const ADJECTIVES = [
   "loitering",

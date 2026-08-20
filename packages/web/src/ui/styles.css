@@ -47,6 +47,12 @@
   --status-info: oklch(0.7 0.17 240);
   --status-info-subtle: oklch(0.25 0.03 240);
 
+  /* Remote-cursor label text. Theme-invariant on purpose — it sits on the peer's
+     awareness colour, which y-prosemirror writes inline as a `#rrggbb` literal
+     (see src/collab/identity.ts), and that palette is picked for white text:
+     ≥4.69:1 for every colour. Not overridden in the light block. */
+  --cursor-label-foreground: #ffffff;
+
   --radius: 0.625rem;
   --radius-sm: calc(var(--radius) - 4px);
 
@@ -299,12 +305,14 @@ body {
   cursor: pointer;
 }
 
-/* Brand-on-brand-subtle instead of text on `--brand`: the brand amber is light
-   in both themes, so neither foreground token reads on it. */
+/* The brand amber is light in both themes, so it works as an accent (border,
+   1px, non-text) but not as label text: `--brand` on `--brand-subtle` is
+   1.98:1 in the light theme. The label stays `--foreground` (15.4:1 dark,
+   17.0:1 light). */
 .ub-tool-on {
   background: var(--brand-subtle);
   border-color: var(--brand);
-  color: var(--brand);
+  color: var(--foreground);
 }
 
 .ub-lang {
@@ -377,9 +385,12 @@ body {
 
 /* ---- foreign-content fallback ---- */
 
+/* Loud comes from the ground and the 2px border; the prose stays
+   `--foreground` (15.5:1 dark, 16.8:1 light) because `--destructive` on
+   `--destructive-subtle` is only 4.05:1 in the light theme. */
 .ub-foreign-banner {
   background: var(--destructive-subtle);
-  color: var(--destructive);
+  color: var(--foreground);
   border: 2px solid var(--destructive);
   border-radius: var(--radius);
   padding: 0.6rem 0.75rem;
@@ -419,10 +430,7 @@ body {
   font-weight: 600;
   line-height: normal;
   white-space: nowrap;
-  /* Label text sits on the peer's awareness color, which y-prosemirror sets
-     inline as a `#rrggbb` literal — not a token, so the readable pairing is
-     fixed white (the palette in identity.ts is chosen for it). */
-  color: #ffffff;
+  color: var(--cursor-label-foreground);
   padding: 0.05rem 0.25rem;
   border-radius: var(--radius-sm);
   user-select: none;
