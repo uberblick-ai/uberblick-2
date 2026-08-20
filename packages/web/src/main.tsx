@@ -1,26 +1,20 @@
 /**
- * @uberblick/web — viewer/editor.
+ * @uberblick/web — browser entry point.
  *
- * Scaffold placeholder: renders a title only. The Tiptap/ProseMirror editor
- * (bound to the Y.Doc through y-prosemirror), the Hocuspocus provider
- * connection, y-indexeddb offline caching and awareness rendering are not
- * wired up yet.
+ * StrictMode is deliberately absent. Its double-invoked effects open every
+ * WebSocket, IndexedDB replica and ProseMirror binding twice, which for a
+ * live-sync spike means the presence strip and awareness state lie in dev but
+ * not in production. Room connections are refcounted (see collab/rooms.ts), so
+ * turning StrictMode back on is safe; the noise just is not worth it here.
  */
 
-import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-
-function App() {
-  return <main>uberblick web</main>;
-}
+import { App } from "./ui/App.js";
+import "./ui/styles.css";
 
 const container = document.getElementById("root");
 if (!container) {
   throw new Error("uberblick web: #root container is missing from index.html");
 }
 
-createRoot(container).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+createRoot(container).render(<App />);
