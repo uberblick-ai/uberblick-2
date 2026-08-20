@@ -9,14 +9,17 @@
  * keeps the writer connected across the shutdown.
  *
  * `Hub.flush()` closes that window, and is exactly what `main.ts` runs on
- * SIGTERM. It is tested three ways: that it writes what the debounce is still
+ * SIGTERM. It is tested four ways: that it writes what the debounce is still
  * holding (checked in SQLite, not inferred), that a hub which dies right after
- * a flush loses nothing, and that a graceful `stop()` is durable end to end.
+ * a flush loses nothing, that a graceful `stop()` is durable end to end — and
+ * that a flush which could *not* store says so, because a shutdown that reports
+ * success without writing is the same data loss with a clean exit code.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import * as Y from "yjs";
+import type { HubConfig } from "../src/config.js";
 import type { Hub } from "../src/server.js";
 import {
   TEXT_KEY,
@@ -34,10 +37,17 @@ import {
 const clients: TestClient[] = [];
 const hubs: Hub[] = [];
 
-async function hub(databasePath: string): Promise<Hub> {
+async function hub(
+  databasePath: string,
+  overrides: Partial<HubConfig> = {},
+): Promise<Hub> {
   // A debounce long enough that nothing can be stored spontaneously during a
   // test: anything on disk got there because a flush put it there.
-  const started = await startHub({ databasePath, debounce: 60_000 });
+  const started = await startHub({
+    databasePath,
+    debounce: 60_000,
+    ...overrides,
+  });
   hubs.push(started);
   return started;
 }
@@ -122,6 +132,32 @@ describe("flush", () => {
     const started = await hub(tempDatabasePath());
     await expect(started.flush()).resolves.toBeUndefined();
     await expect(started.flush()).resolves.toBeUndefined();
+  });
+
+  it("refuses to report a successful shutdown after a failed store", async () => {
+    const databasePath = tempDatabasePath();
+    // The store will fail and leave the document in memory, so destroy() waits
+    // for an unload that never comes; don't spend the whole default on it.
+    const started = await hub(databasePath, { shutdownTimeoutMs: 500 });
+    const room = testRoom();
+    const writer = await client(started, room);
+
+    writer.text.insert(0, "never stored");
+    await sleep(200);
+
+    // Fault injection: take the table out from under the hub's open handle, so
+    // the pending store fails when the flush fires it. Hocuspocus catches that
+    // failure, logs it and resolves the hook, which is exactly why the hub has
+    // to observe it itself — otherwise stop() reports success and main.ts exits
+    // 0 with the edit never written.
+    const database = new Database(databasePath);
+    database.exec('DROP TABLE "documents"');
+    database.close();
+
+    await expect(started.stop()).rejects.toThrow(/not durable/);
+
+    hubs.length = 0;
+    destroyClients();
   });
 });
 

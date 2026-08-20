@@ -1,10 +1,16 @@
 /**
  * Hub configuration.
  *
- * The hub binds `PORT` and never parses `HUB_URL`: the URL is a client-side
- * concern (which endpoint to dial), the port is a server-side one (which socket
- * to own), and conflating them is how hardcoded addresses creep in. `PORT`
- * defaults to 1234 — the one address-ish default in the repo.
+ * The hub binds `HUB_HOST`:`PORT` and never parses `HUB_URL`: the URL is a
+ * client-side concern (which endpoint to dial), the bind address is a
+ * server-side one (which socket to own), and conflating them is how hardcoded
+ * addresses creep in. `PORT` defaults to 1234 and `HUB_HOST` to 127.0.0.1 —
+ * the two address-ish defaults in the repo.
+ *
+ * The loopback default is the security model, not a convenience: the hub's only
+ * credential is a single dev secret shared by every client, so a wildcard bind
+ * would offer the whole LAN a hub that trusts anyone holding it. A hosted
+ * deployment opts in with `HUB_HOST=0.0.0.0`.
  *
  * `HUB_AUTH_TOKEN` is the HMAC secret for {@link mintToken}/{@link verifyToken},
  * delivered by `fnox exec` (see the `mise run hub` task). There is no fallback:
@@ -16,8 +22,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { HubLogger } from "./log.js";
 
-/** The only hardcoded address-ish default in the repo. */
+/** The only hardcoded address-ish defaults in the repo. */
 export const DEFAULT_PORT = 1234;
+export const DEFAULT_HOST = "127.0.0.1";
 
 export interface HubConfig {
   /**
@@ -25,7 +32,10 @@ export interface HubConfig {
    * `Hub.port`. Defaults to {@link DEFAULT_PORT}.
    */
   port?: number;
-  /** Bind address. Unset means every interface (Node's default). */
+  /**
+   * Bind address (`HUB_HOST`). Defaults to {@link DEFAULT_HOST} — loopback, so
+   * the hub is not on the network by accident. Wildcard is explicit opt-in.
+   */
   address?: string;
   /**
    * SQLite file for document persistence. The parent directory is created if
@@ -87,10 +97,12 @@ export function resolveHubConfig(
     );
   }
 
+  const host = env.HUB_HOST?.trim();
   const databasePath = env.HUB_DB_PATH?.trim();
 
   return {
     port: parsePort(env.PORT),
+    address: host === undefined || host === "" ? DEFAULT_HOST : host,
     databasePath:
       databasePath === undefined || databasePath === ""
         ? defaultDatabasePath()

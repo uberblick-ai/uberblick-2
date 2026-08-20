@@ -13,6 +13,7 @@
 export { createHub } from "./server.js";
 export type { Hub, HubContext, StopOptions } from "./server.js";
 export {
+  DEFAULT_HOST,
   DEFAULT_PORT,
   defaultDatabasePath,
   resolveHubConfig,

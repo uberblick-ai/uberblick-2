@@ -3,6 +3,22 @@ import { isTokenScope, mintToken, verifyToken } from "../src/token.js";
 
 const SECRET = "a-dev-secret";
 
+/** Correctly sign an arbitrary payload — a token the minter would refuse. */
+async function forge(claims: Record<string, unknown>): Promise<string> {
+  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = Buffer.from(
+    await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload)),
+  ).toString("base64url");
+  return `${payload}.${signature}`;
+}
+
 describe("mintToken / verifyToken", () => {
   it("round-trips claims", async () => {
     const token = await mintToken(SECRET, {
@@ -77,23 +93,30 @@ describe("mintToken / verifyToken", () => {
     }
   });
 
-  it("rejects a correctly signed but incomplete claim set", async () => {
-    // Sign a payload the minter would never produce: no scope.
-    const payload = Buffer.from(
-      JSON.stringify({ sub: "s", workspace: "main", iat: 0 }),
-    ).toString("base64url");
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(SECRET),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"],
-    );
-    const signature = Buffer.from(
-      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload)),
-    ).toString("base64url");
+  it("accepts only claims the minter could have produced", async () => {
+    const minted = { sub: "s", workspace: "main", scope: "read-only", iat: 0 };
 
-    expect(await verifyToken(SECRET, `${payload}.${signature}`)).toBeNull();
+    // The forging rig itself has to produce a valid token, or the rejections
+    // below would prove nothing.
+    expect(await verifyToken(SECRET, await forge(minted))).not.toBeNull();
+
+    for (const claims of [
+      { sub: "s", workspace: "main", iat: 0 }, // incomplete: no scope
+      { ...minted, sub: "" },
+      { ...minted, workspace: "" },
+      // A workspace is one room segment; the hub compares it against the
+      // segment it parses out of a room name, so anything else is not a claim
+      // the minter would sign.
+      { ...minted, workspace: "main/other" },
+      { ...minted, iat: 1.5 },
+      { ...minted, iat: -1 },
+      { ...minted, iat: "0" },
+    ]) {
+      expect(
+        await verifyToken(SECRET, await forge(claims)),
+        `should reject ${JSON.stringify(claims)}`,
+      ).toBeNull();
+    }
   });
 
   it("refuses to mint nonsense", async () => {
@@ -116,6 +139,14 @@ describe("mintToken / verifyToken", () => {
         scope: "admin" as "read-write",
       }),
     ).rejects.toThrow(/scope/);
+    await expect(
+      mintToken(SECRET, {
+        sub: "s",
+        workspace: "main",
+        scope: "read-write",
+        iat: 1.5,
+      }),
+    ).rejects.toThrow(/iat/);
   });
 
   it("knows its scopes", () => {

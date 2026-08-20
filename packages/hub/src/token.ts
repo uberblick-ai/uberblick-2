@@ -89,15 +89,27 @@ function assertClaims(claims: TokenRequest): void {
   if (claims.sub === "") {
     throw new Error("mintToken: sub must not be empty");
   }
-  if (claims.workspace === "") {
-    throw new Error("mintToken: workspace must not be empty");
-  }
-  if (claims.workspace.includes("/")) {
-    throw new Error('mintToken: workspace must not contain "/"');
+  if (!isWorkspace(claims.workspace)) {
+    throw new Error(
+      'mintToken: workspace must be non-empty and must not contain "/"',
+    );
   }
   if (!isTokenScope(claims.scope)) {
     throw new Error(`mintToken: unknown scope ${JSON.stringify(claims.scope)}`);
   }
+  if (claims.iat !== undefined && !isIssuedAt(claims.iat)) {
+    throw new Error("mintToken: iat must be a non-negative integer");
+  }
+}
+
+/** Whole seconds since the epoch. The same rule on both sides of a token. */
+function isIssuedAt(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+/** A workspace is one room segment, so it cannot contain the separator. */
+function isWorkspace(value: unknown): value is string {
+  return typeof value === "string" && value !== "" && !value.includes("/");
 }
 
 /**
@@ -140,13 +152,13 @@ function parseClaims(payloadJson: string): TokenClaims | null {
   if (typeof sub !== "string" || sub === "") {
     return null;
   }
-  if (typeof workspace !== "string" || workspace === "") {
+  if (!isWorkspace(workspace)) {
     return null;
   }
   if (!isTokenScope(scope)) {
     return null;
   }
-  if (typeof iat !== "number" || !Number.isFinite(iat)) {
+  if (!isIssuedAt(iat)) {
     return null;
   }
   return { sub, workspace, scope, iat };
@@ -154,7 +166,9 @@ function parseClaims(payloadJson: string): TokenClaims | null {
 
 /**
  * Verify a token and return its claims, or `null` for anything that is not a
- * well-formed, correctly signed token with a complete claim set. Never throws:
+ * well-formed, correctly signed token whose claims {@link mintToken} could have
+ * produced — the two apply the same rules, so a signed payload with a workspace
+ * spanning two room segments or a fractional `iat` is not a token. Never throws:
  * every rejection reason collapses to `null` so callers cannot accidentally
  * distinguish "bad signature" from "bad shape".
  */
