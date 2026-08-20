@@ -9,7 +9,12 @@
  */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { tombstoneDirectoryEntry } from "@uberblick/schema";
+import * as Y from "yjs";
+import {
+  getBlocksFragment,
+  setBlockType,
+  tombstoneDirectoryEntry,
+} from "@uberblick/schema";
 import { removeTempDirs, startServer, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
@@ -135,6 +140,63 @@ describe("edit_block", () => {
           "block two, edited by the second agent",
         ],
       );
+    }
+  });
+});
+
+describe("duplicate blocks from concurrent re-types", () => {
+  it("repairs them on observation and converges on one element across two instances", async () => {
+    const databasePath = testConfig().databasePath;
+    const first = await localRig(databasePath);
+    const doc = await first.ok("create_doc", {
+      title: "Re-types",
+      blocks: [{ type: "paragraph", text: "shared text" }],
+    });
+    const blockId = doc.blocks[0].id;
+
+    const second = await localRig(databasePath);
+    await second.ok("get_doc", { uuid: doc.uuid });
+
+    // Two clients re-type the same block while offline from each other — the
+    // race that leaves two elements carrying one block id.
+    const state = Y.encodeStateAsUpdate(
+      first.instance.replicas.replica(doc.uuid).doc,
+    );
+    const updates = (["heading", "code"] as const).map((type) => {
+      const scratch = new Y.Doc();
+      Y.applyUpdate(scratch, state);
+      const before = Y.encodeStateVector(scratch);
+      setBlockType(scratch, blockId, type);
+      return Y.encodeStateAsUpdate(scratch, before);
+    });
+
+    // Who should survive: the first element in document order once both
+    // re-types have merged, with no repair involved.
+    const merged = new Y.Doc();
+    Y.applyUpdate(merged, state);
+    for (const update of updates) Y.applyUpdate(merged, update);
+    const winner = (getBlocksFragment(merged).get(0) as Y.XmlElement).nodeName;
+    expect(getBlocksFragment(merged).length).toBe(2);
+
+    // Both instances observe the duplicate before either has seen the other's
+    // repair, so both attempt one.
+    for (const rig of [first, second]) {
+      const replicaDoc = rig.instance.replicas.replica(doc.uuid).doc;
+      for (const update of updates) Y.applyUpdate(replicaDoc, update);
+      expect(getBlocksFragment(replicaDoc).length).toBe(1);
+    }
+
+    for (const rig of [first, second]) {
+      const read = await rig.ok("get_doc", { uuid: doc.uuid });
+      expect(read.blocks).toHaveLength(1);
+      expect(read.blocks[0].id).toBe(blockId);
+      expect(read.blocks[0].type).toBe(winner);
+      expect(read.blocks[0].text).toBe("shared text");
+      // Repaired in the document, not merely hidden from the read — and the two
+      // repairs deleted the same element, so nothing is over-deleted.
+      expect(
+        getBlocksFragment(rig.instance.replicas.replica(doc.uuid).doc).length,
+      ).toBe(1);
     }
   });
 });

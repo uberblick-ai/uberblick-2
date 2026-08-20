@@ -10,12 +10,16 @@ import {
   BlockNotFoundError,
   appendBlock,
   createAnnotation,
+  deleteBlock,
   editBlock,
   exportMarkdown,
   getBlock,
+  getBlockRev,
   getBlockText,
   getBlocks,
+  getBlocksFragment,
   initDoc,
+  repairDuplicateBlocks,
   resolveAnnotationRange,
   setBlockType,
 } from "../src/index.js";
@@ -27,6 +31,29 @@ function seeded(): Y.Doc {
   const doc = new Y.Doc();
   initDoc(doc, { uuid: UUID, title: "Re-types" });
   return doc;
+}
+
+/** The raw element names in the blocks fragment, duplicates included. */
+function fragmentTypes(doc: Y.Doc): string[] {
+  return getBlocksFragment(doc)
+    .toArray()
+    .map((child) => (child as Y.XmlElement).nodeName);
+}
+
+/**
+ * Two replicas that re-typed the same block concurrently and then synced: the
+ * state where one block id is carried by two elements.
+ */
+function duplicated(): { a: Y.Doc; b: Y.Doc; id: string } {
+  let id = "";
+  const [a, b] = replicaPair((doc) => {
+    initDoc(doc, { uuid: UUID, title: "Re-types" });
+    id = appendBlock(doc, { type: "paragraph", text: "shared text" });
+  });
+  setBlockType(a, id, "heading", { level: 2 });
+  setBlockType(b, id, "code", { language: "ts" });
+  syncDocs(a, b);
+  return { a, b, id };
 }
 
 describe("setBlockType", () => {
@@ -151,35 +178,85 @@ describe("setBlockType", () => {
     expect(getBlock(a, id)?.id).toBe(id);
   });
 
-  it("converges when both replicas re-type the same block", () => {
-    let id = "";
-    const [a, b] = replicaPair((doc) => {
-      initDoc(doc, { uuid: UUID, title: "Re-types" });
-      id = appendBlock(doc, { type: "paragraph", text: "shared text" });
-    });
+  it("converges when both replicas re-type the same block, with reads showing one block", () => {
+    const { a, b, id } = duplicated();
 
-    setBlockType(a, id, "heading", { level: 2 });
-    setBlockType(b, id, "code", { language: "ts" });
-    syncDocs(a, b);
+    // A re-type inserts a replacement element (Yjs element names are
+    // immutable), so two concurrent re-types of one block leave TWO elements
+    // carrying that block id — in the same order on both replicas.
+    expect(fragmentTypes(a)).toEqual(fragmentTypes(b));
+    expect(fragmentTypes(a)).toHaveLength(2);
 
-    // Known limitation, pinned here so it cannot regress unnoticed: a re-type
-    // inserts a replacement element, so two concurrent re-types of one block
-    // leave TWO elements carrying that block id, each with the full text. Both
-    // replicas converge on the same pair in the same order, and `getBlock`
-    // resolves the first one deterministically — so consumers keyed by block id
-    // stay consistent — but the document is left with a duplicate id until
-    // someone deletes one. Concurrent re-types of the same block are rare;
-    // making them idempotent needs a tie-break the schema does not have yet.
+    // Reads shadow the later copy: exactly one block per id, and the same
+    // winner — the document-order one — on every replica.
     const blocksA = getBlocks(a);
     expect(blocksA).toEqual(getBlocks(b));
-    expect(blocksA).toHaveLength(2);
-    expect(blocksA.map((block) => block.id)).toEqual([id, id]);
-    expect(blocksA.map((block) => block.text)).toEqual([
-      "shared text",
-      "shared text",
-    ]);
+    expect(blocksA.map((block) => block.id)).toEqual([id]);
+    expect(blocksA[0]?.type).toBe(fragmentTypes(a)[0]);
+    expect(blocksA[0]?.text).toBe("shared text");
     expect(getBlock(a, id)).toEqual(blocksA[0]);
-    expect(getBlockText(a, id)).toBe("shared text");
+    expect(getBlock(b, id)).toEqual(blocksA[0]);
+    expect(getBlockText(b, id)).toBe("shared text");
+    expect(getBlockRev(b, id)).toBe(getBlockRev(a, id));
+  });
+
+  it("repairs the duplicate to one element, idempotently and on either replica", () => {
+    const { a, b, id } = duplicated();
+    const winner = getBlock(a, id);
+
+    // Each replica repairs on its own, before hearing about the other's repair:
+    // both delete the element reads already ignored, so the two deletions are
+    // the same deletion and the merge is a single surviving element.
+    expect(repairDuplicateBlocks(a)).toBe(1);
+    expect(repairDuplicateBlocks(b)).toBe(1);
+    // Idempotent: a second pass finds nothing and writes nothing.
+    const quiet = Y.encodeStateVector(a);
+    expect(repairDuplicateBlocks(a)).toBe(0);
+    expect(Y.encodeStateVector(a)).toEqual(quiet);
+
+    syncDocs(a, b);
+
+    expect(fragmentTypes(a)).toEqual(fragmentTypes(b));
+    expect(fragmentTypes(a)).toHaveLength(1);
+    expect(getBlock(a, id)).toEqual(winner);
+    expect(getBlocks(b)).toEqual(getBlocks(a));
+  });
+
+  it("never shadows or repairs id-less foreign content", () => {
+    const doc = seeded();
+    const mine = appendBlock(doc, { type: "paragraph", text: "mine" });
+    doc.transact(() => {
+      const fragment = getBlocksFragment(doc);
+      for (const [name, text] of [
+        ["future-a", "alpha"],
+        ["future-b", "beta"],
+      ] as const) {
+        const element = new Y.XmlElement(name);
+        element.insert(0, [new Y.XmlText(text)]);
+        fragment.insert(fragment.length, [element]);
+      }
+    });
+
+    // Two elements with no id are not two copies of one block: an absent id has
+    // claimed no identity. Both stay visible and the repair leaves them alone —
+    // unknown content degrades loudly, it is never silently dropped.
+    expect(getBlocks(doc).map((block) => block.text)).toEqual([
+      "mine",
+      "alpha",
+      "beta",
+    ]);
+    expect(repairDuplicateBlocks(doc)).toBe(0);
+    expect(fragmentTypes(doc)).toEqual(["paragraph", "future-a", "future-b"]);
+    expect(getBlock(doc, mine)?.text).toBe("mine");
+  });
+
+  it("deletes every copy of a duplicated block, so it cannot come back", () => {
+    const { a, id } = duplicated();
+
+    deleteBlock(a, id);
+
+    expect(getBlock(a, id)).toBeNull();
+    expect(fragmentTypes(a)).toEqual([]);
   });
 });
 
