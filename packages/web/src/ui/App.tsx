@@ -34,23 +34,33 @@ export function App(): ReactElement {
 
   /**
    * A create needs the new document's Y.Doc *before* React has mounted the
-   * editor pane for it, so the handle is held here and released when the next
-   * document is created. Room connections are refcounted and keyed by room
-   * name, so this handle and the pane's are the same connection.
+   * editor pane for it, so the handle is held here until `useRoom` has acquired
+   * the same room. Room connections are refcounted and keyed by room name, so
+   * this handle and the pane's are the same connection — and handing over as
+   * soon as the pane has it is what keeps navigating away from actually closing
+   * the connection instead of leaving it publishing stale awareness.
    */
-  const pending = useRef<(() => void) | null>(null);
-  useEffect(() => () => pending.current?.(), []);
+  const pending = useRef<{ room: string; release: () => void } | null>(null);
+  useEffect(() => () => pending.current?.release(), []);
+
+  useEffect(() => {
+    const held = pending.current;
+    if (held === null || doc === null || doc.room !== held.room) return;
+    pending.current = null;
+    held.release();
+  }, [doc]);
 
   const onCreate = useCallback(() => {
     if (directory === null) return;
     const uuid = crypto.randomUUID();
-    const handle = acquireRoom(roomForDoc(WORKSPACE, uuid), identity);
+    const room = roomForDoc(WORKSPACE, uuid);
+    const handle = acquireRoom(room, identity);
     initDoc(handle.connection.ydoc, { uuid, title: "" });
     // A document with no blocks has nowhere to put the caret, so seed one.
     appendBlock(handle.connection.ydoc, { type: "paragraph", text: "" });
     upsertDirectoryEntry(directory.ydoc, { uuid, title: "" });
-    pending.current?.();
-    pending.current = handle.release;
+    pending.current?.release();
+    pending.current = { room, release: handle.release };
     setSelected(uuid);
   }, [directory, identity]);
 

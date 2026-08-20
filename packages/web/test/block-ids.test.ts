@@ -4,11 +4,13 @@
  */
 
 import { describe, expect, it } from "vitest";
+import * as Y from "yjs";
 import { EditorState } from "@tiptap/pm/state";
 import type { Node as PMNode } from "@tiptap/pm/model";
+import { appendBlock, getBlocks, initDoc } from "@uberblick/schema";
 import { blockIdPlugin } from "../src/editor/block-ids.js";
 import { uberblickSchema } from "../src/editor/create-editor.js";
-import { sequentialIds } from "./helpers.js";
+import { mountEditor, sequentialIds } from "./helpers.js";
 
 function stateWith(
   blocks: Array<{ type: string; attrs?: Record<string, unknown>; text?: string }>,
@@ -95,16 +97,6 @@ describe("blockIdPlugin", () => {
     expect(split.doc.child(1).textContent).toBe("def");
   });
 
-  it("keeps the repair out of the undo history", () => {
-    const initial = stateWith([{ type: "paragraph", text: "x" }], sequentialIds());
-    let appended: unknown;
-    const plugin = initial.plugins[0];
-    // Re-derive the appended transaction directly so its meta can be inspected.
-    const tr = plugin?.spec.appendTransaction?.([], initial, initial);
-    appended = tr?.getMeta("addToHistory");
-    expect(appended).toBe(false);
-  });
-
   it("does nothing when every id is already unique", () => {
     const initial = stateWith(
       [
@@ -115,5 +107,44 @@ describe("blockIdPlugin", () => {
     );
     const plugin = initial.plugins[0];
     expect(plugin?.spec.appendTransaction?.([], initial, initial)).toBeNull();
+  });
+});
+
+/**
+ * The plugin's repair is bookkeeping, not a user edit, so undo must never leave
+ * a block without an id. Driven through the real editor — the app's undo is the
+ * Yjs UndoManager (`yUndoPlugin`), not ProseMirror history, so only the editor
+ * can tell us the truth about it.
+ */
+describe("block ids across an undo in the real editor", () => {
+  function idsInDoc(ydoc: Y.Doc): string[] {
+    return getBlocks(ydoc).map((block) => block.id);
+  }
+
+  it("leaves every block with a present, unique id", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "undo-doc", title: "Undo" });
+    const original = appendBlock(ydoc, { type: "paragraph", text: "abcdef" });
+    const { editor } = mountEditor(ydoc, { newBlockId: sequentialIds() });
+    try {
+      // A split is where the repair fires: ProseMirror copies the attrs onto
+      // both halves, so the second one gets a fresh id.
+      editor.commands.setTextSelection(4);
+      editor.commands.splitBlock();
+      editor.commands.insertContent("X");
+      expect(getBlocks(ydoc).map((block) => block.text)).toEqual(["abc", "Xdef"]);
+      expect(idsInDoc(ydoc)).toEqual([original, "fresh-1"]);
+
+      expect(editor.commands.keyboardShortcut("Mod-z")).toBe(true);
+
+      // The edit is undone, and both blocks still have their id.
+      expect(getBlocks(ydoc).map((block) => block.text)).toEqual(["abc", "def"]);
+      const ids = idsInDoc(ydoc);
+      expect(ids).toEqual([original, "fresh-1"]);
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(editor.state.doc.childCount).toBe(ids.length);
+    } finally {
+      editor.destroy();
+    }
   });
 });

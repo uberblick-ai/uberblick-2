@@ -23,11 +23,14 @@ import {
 } from "@uberblick/schema";
 import { uberblickSchema } from "../src/editor/create-editor.js";
 import { bindGuardedEditor } from "../src/editor/guarded-binding.js";
+import type { GuardedBinding } from "../src/editor/guarded-binding.js";
 import {
   BLOCK_NODE_NAMES,
+  MARK_NAMES,
   describeForeignBlocks,
   findForeignBlocks,
 } from "../src/editor/palette.js";
+import { blockText, plainText } from "../src/editor/ytext.js";
 import { mountEditor } from "./helpers.js";
 
 describe("the palette is exactly the schema's block types", () => {
@@ -43,8 +46,9 @@ describe("the palette is exactly the schema's block types", () => {
     expect(BLOCK_NODE_NAMES).toEqual(["paragraph", "heading", "code", "mermaid"]);
   });
 
-  it("declares exactly one mark", () => {
+  it("declares exactly one mark, and the gate reads its list off the schema", () => {
     expect(Object.keys(uberblickSchema.marks)).toEqual([COMMENT_MARK]);
+    expect(MARK_NAMES).toEqual(Object.keys(uberblickSchema.marks));
   });
 
   it("has no list, blockquote, bold or italic to fall back to", () => {
@@ -272,6 +276,149 @@ describe("foreign blocks already in the document", () => {
     expect(second.refused).toBe(false);
     expect(second.editor?.state.doc.childCount).toBe(1);
     second.destroy();
+  });
+});
+
+/**
+ * The same hazard, one level down. A block name the palette knows is not enough:
+ * y-prosemirror recurses into the block's children and builds every mark, and
+ * both failure paths end in the same catch-and-delete. So the gate has to look
+ * inside the block, at load *and* mid-session.
+ */
+describe("foreign content inside a known block", () => {
+  /** A paragraph the palette can name, holding an element it cannot. */
+  function nestedElement(): Y.XmlElement {
+    const callout = new Y.XmlElement("callout");
+    callout.insert(0, [new Y.XmlText("keep me")]);
+    return callout;
+  }
+
+  function docWithBlock(): Y.Doc {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "nested-doc", title: "Nested" });
+    appendBlock(ydoc, { type: "paragraph", text: "known" });
+    return ydoc;
+  }
+
+  function firstBlockText(ydoc: Y.Doc): Y.XmlText {
+    const block = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
+    return block.firstChild as Y.XmlText;
+  }
+
+  function bind(ydoc: Y.Doc, onUnbind?: () => void): GuardedBinding {
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    return bindGuardedEditor({
+      element,
+      fragment: getBlocksFragment(ydoc),
+      awareness: null,
+      ...(onUnbind === undefined ? {} : { onUnbind }),
+    });
+  }
+
+  it("is detected, named and attributed to the block that holds it", () => {
+    const nested = docWithBlock();
+    (getBlocksFragment(nested).get(0) as Y.XmlElement).insert(1, [nestedElement()]);
+    const foreign = findForeignBlocks(getBlocksFragment(nested));
+    expect(foreign).toHaveLength(1);
+    expect(foreign[0]?.nodeName).toBe("callout");
+    expect(foreign[0]?.index).toBe(0);
+    expect(describeForeignBlocks(foreign)).toContain("callout");
+
+    const marked = docWithBlock();
+    firstBlockText(marked).format(0, 3, { bold: {} });
+    const markFindings = findForeignBlocks(getBlocksFragment(marked));
+    expect(markFindings).toHaveLength(1);
+    expect(markFindings[0]?.nodeName).toBe("#mark:bold");
+  });
+
+  it("would be DESTROYED by binding an unguarded editor — hence the gate", () => {
+    const nested = docWithBlock();
+    (getBlocksFragment(nested).get(0) as Y.XmlElement).insert(1, [nestedElement()]);
+    const first = mountEditor(nested);
+    try {
+      // The nested element is gone from the CRDT, and only the text is left.
+      expect((getBlocksFragment(nested).get(0) as Y.XmlElement).length).toBe(1);
+    } finally {
+      first.editor.destroy();
+    }
+
+    const marked = docWithBlock();
+    firstBlockText(marked).format(0, 3, { bold: {} });
+    const second = mountEditor(marked);
+    try {
+      // The whole Y.XmlText is gone — an undeclared mark costs the block's text.
+      expect(plainText(blockText(getBlocksFragment(marked).get(0) as Y.XmlElement))).toBe(
+        "",
+      );
+    } finally {
+      second.editor.destroy();
+    }
+  });
+
+  it("keeps a nested element when it is already there at load", () => {
+    const ydoc = docWithBlock();
+    (getBlocksFragment(ydoc).get(0) as Y.XmlElement).insert(1, [nestedElement()]);
+    const binding = bind(ydoc);
+    expect(binding.refused).toBe(true);
+
+    const block = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
+    expect(block.length).toBe(2);
+    expect((block.get(1) as Y.XmlElement).nodeName).toBe("callout");
+    expect((block.get(1) as Y.XmlElement).toString()).toContain("keep me");
+    binding.destroy();
+  });
+
+  it("keeps a nested element arriving while the editor is bound", () => {
+    const ydoc = docWithBlock();
+    const unbound: string[] = [];
+    const binding = bind(ydoc, () => unbound.push("unbound"));
+    expect(binding.refused).toBe(false);
+
+    (getBlocksFragment(ydoc).get(0) as Y.XmlElement).insert(1, [nestedElement()]);
+
+    expect(unbound).toEqual(["unbound"]);
+    const block = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
+    expect(block.length).toBe(2);
+    expect((block.get(1) as Y.XmlElement).nodeName).toBe("callout");
+    expect(findForeignBlocks(getBlocksFragment(ydoc))).toHaveLength(1);
+    binding.destroy();
+  });
+
+  it("keeps a text carrying an undeclared mark at load", () => {
+    const ydoc = docWithBlock();
+    firstBlockText(ydoc).format(0, 3, { bold: {} });
+    const binding = bind(ydoc);
+    expect(binding.refused).toBe(true);
+
+    const delta = firstBlockText(ydoc).toDelta() as Array<Record<string, unknown>>;
+    expect(plainText(firstBlockText(ydoc))).toBe("known");
+    expect(delta[0]?.attributes).toEqual({ bold: {} });
+    binding.destroy();
+  });
+
+  it("keeps a text carrying an undeclared mark applied mid-session", () => {
+    const ydoc = docWithBlock();
+    const unbound: string[] = [];
+    const binding = bind(ydoc, () => unbound.push("unbound"));
+    expect(binding.refused).toBe(false);
+
+    firstBlockText(ydoc).format(0, 3, { bold: {} });
+
+    expect(unbound).toEqual(["unbound"]);
+    expect(plainText(firstBlockText(ydoc))).toBe("known");
+    const delta = firstBlockText(ydoc).toDelta() as Array<Record<string, unknown>>;
+    expect(delta[0]?.attributes).toEqual({ bold: {} });
+    binding.destroy();
+  });
+
+  it("still binds a text carrying the comment mark — that one is declared", () => {
+    const ydoc = docWithBlock();
+    firstBlockText(ydoc).format(0, 3, { [COMMENT_MARK]: { threadId: "t1" } });
+    expect(findForeignBlocks(getBlocksFragment(ydoc))).toEqual([]);
+    const binding = bind(ydoc);
+    expect(binding.refused).toBe(false);
+    binding.destroy();
   });
 });
 

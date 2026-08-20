@@ -26,22 +26,40 @@
  * A ProseMirror schema cannot have a catch-all node type, so there is no
  * in-editor placeholder that would let us bind safely; refusing to bind is the
  * only option that preserves the data.
+ *
+ * ## The scan is recursive, because the hazard is
+ *
+ * The same catch-and-delete sits one level down. `createNodeFromYElement`
+ * recurses into a block's children, and `createTextNodesFromYText` builds every
+ * mark with `schema.mark(name, attrs)`; either throwing deletes the offending
+ * Y type. So a *known* block name is not enough: a `<paragraph>` holding a
+ * `<callout>` loses the callout, and a Y.XmlText carrying a mark the schema does not
+ * declare (`bold`, say) loses the whole text node. A block is safe to bind only
+ * when its children are all Y.XmlText and those texts carry nothing but the
+ * marks in {@link MARK_NAMES}.
  */
 
 import * as Y from "yjs";
-import { BLOCK_TYPES, COMMENT_MARK, isBlockType } from "@uberblick/schema";
+import { BLOCK_TYPES, isBlockType } from "@uberblick/schema";
+import { uberblickSchema } from "./create-editor.js";
 
 /** The node names the editor may render. Identical to the schema's block types. */
 export const BLOCK_NODE_NAMES: readonly string[] = BLOCK_TYPES;
 
-/** The only mark type in the editor schema. Anchors annotation threads. */
-export const MARK_NAMES: readonly string[] = [COMMENT_MARK];
+/**
+ * The mark keys the editor's ProseMirror schema actually registers — read off
+ * the schema rather than restated, so the gate cannot drift from the palette.
+ */
+export const MARK_NAMES: readonly string[] = Object.keys(uberblickSchema.marks);
 
-/** A top-level element in the `blocks` fragment that the palette cannot render. */
+/** Content in the `blocks` fragment that the palette cannot render. */
 export interface ForeignBlock {
-  /** Position of the element in the fragment, in document order. */
+  /** Position of the *top-level* element in the fragment, in document order. */
   index: number;
-  /** The Y.XmlElement nodeName, or a description for non-element children. */
+  /**
+   * What the palette cannot represent: an unknown node name, `#text`/`#hook`
+   * for a stray non-element, or `#mark:<name>` for an undeclared mark.
+   */
   nodeName: string;
   /** The element's `id` attribute, when it has one. */
   id: string | null;
@@ -55,8 +73,29 @@ function previewOf(child: Y.XmlElement | Y.XmlText | Y.XmlHook): string {
 }
 
 /**
- * Every top-level child of the `blocks` fragment the editor palette cannot
- * represent. Empty array means the fragment is safe to bind.
+ * What inside an otherwise-renderable block the palette cannot represent, or
+ * `null` when the child is fine. A block's children must be Y.XmlText, and a
+ * Y.XmlText may only carry marks the editor schema declares.
+ */
+function foreignInsideBlock(
+  child: Y.XmlElement | Y.XmlText | Y.XmlHook,
+): string | null {
+  if (child instanceof Y.XmlElement) return child.nodeName;
+  if (!(child instanceof Y.XmlText)) return "#hook";
+  for (const op of child.toDelta() as Array<{
+    attributes?: Record<string, unknown>;
+  }>) {
+    for (const mark of Object.keys(op.attributes ?? {})) {
+      if (!MARK_NAMES.includes(mark)) return `#mark:${mark}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Everything in the `blocks` fragment the editor palette cannot represent, one
+ * entry per offending top-level block. Empty array means the fragment is safe
+ * to bind.
  *
  * Non-element children (a bare Y.XmlText directly under the fragment, which the
  * schema package never writes) count as foreign too: the editor's `doc` node is
@@ -77,13 +116,17 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
       });
       continue;
     }
+    const id = child.getAttribute("id") ?? null;
     if (!isBlockType(child.nodeName)) {
-      foreign.push({
-        index,
-        nodeName: child.nodeName,
-        id: child.getAttribute("id") ?? null,
-        preview: previewOf(child),
-      });
+      foreign.push({ index, nodeName: child.nodeName, id, preview: previewOf(child) });
+      continue;
+    }
+    for (const inner of child.toArray()) {
+      const nodeName = foreignInsideBlock(inner);
+      if (nodeName === null) continue;
+      // One entry per block: the count in the banner is a block count.
+      foreign.push({ index, nodeName, id, preview: previewOf(child) });
+      break;
     }
   }
   return foreign;

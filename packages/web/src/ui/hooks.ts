@@ -103,6 +103,10 @@ export function useDocMeta(connection: RoomConnection | null): DocMeta | null {
  * ProseMirror to the fragment, because y-prosemirror deletes elements whose
  * node name its schema does not know. Observed (not read once) so a foreign
  * block arriving mid-session unbinds the editor instead of losing the block.
+ *
+ * Deep, not shallow: foreign content can arrive *inside* a known block (a nested
+ * element, an undeclared mark), which a shallow observer never sees — and then
+ * the guard would tear the editor down with nothing rendered in its place.
  */
 export function useForeignBlocks(
   connection: RoomConnection | null,
@@ -116,8 +120,8 @@ export function useForeignBlocks(
     const fragment = getBlocksFragment(connection.ydoc);
     const read = (): void => setForeign(findForeignBlocks(fragment));
     read();
-    fragment.observe(read);
-    return () => fragment.unobserve(read);
+    fragment.observeDeep(read);
+    return () => fragment.unobserveDeep(read);
   }, [connection]);
   return foreign;
 }

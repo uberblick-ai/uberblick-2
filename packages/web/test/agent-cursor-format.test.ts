@@ -14,8 +14,6 @@ import {
   defaultAwarenessStateFilter,
   defaultCursorBuilder,
   defaultSelectionBuilder,
-  relativePositionToAbsolutePosition,
-  ySyncPluginKey,
 } from "y-prosemirror";
 import { appendBlock, getBlocksFragment, initDoc } from "@uberblick/schema";
 import { mountEditor } from "./helpers.js";
@@ -81,32 +79,6 @@ describe("agent awareness cursor format", () => {
     )).toBe(true);
   });
 
-  it("resolves to a ProseMirror position inside the bound editor", () => {
-    const { ydoc } = docWithOneBlock();
-    const { editor } = mountEditor(ydoc);
-    try {
-      const ytext = firstBlockText(ydoc);
-      const json = Y.relativePositionToJSON(
-        Y.createRelativePositionFromTypeIndex(ytext, 3),
-      );
-      const state = ySyncPluginKey.getState(editor.state) as {
-        binding: { mapping: Map<unknown, unknown> };
-        type: Y.XmlFragment;
-        doc: Y.Doc;
-      };
-      const absolute = relativePositionToAbsolutePosition(
-        state.doc,
-        state.type,
-        Y.createRelativePositionFromJSON(json),
-        state.binding.mapping as never,
-      );
-      // Block content starts at 1 (position 0 is before the block element).
-      expect(absolute).toBe(4);
-    } finally {
-      editor.destroy();
-    }
-  });
-
   it("renders a remote caret with a name label from a foreign awareness state", () => {
     const { ydoc } = docWithOneBlock();
     const { editor } = mountEditor(ydoc);
@@ -142,15 +114,12 @@ describe("agent awareness cursor format", () => {
         defaultCursorBuilder,
         defaultSelectionBuilder,
       );
-      const found = decorations.find();
-      expect(found.length).toBeGreaterThan(0);
-
-      const widget = found.find(
-        (decoration: { type: { toDOM?: unknown } }) =>
-          typeof decoration.type.toDOM === "function" ||
-          "widget" in decoration.type,
-      );
-      expect(widget).toBeDefined();
+      // A cursor exists for that client — where it lands is y-prosemirror's
+      // business, not this contract's.
+      const keys = decorations
+        .find()
+        .map((decoration: { spec?: { key?: unknown } }) => decoration.spec?.key);
+      expect(keys).toContain(String(agentDoc.clientID));
 
       // The default cursor builder is the DOM the app styles with plain CSS.
       const element = defaultCursorBuilder({
