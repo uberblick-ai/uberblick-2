@@ -43,6 +43,10 @@ trap 'kill 0' INT TERM
 wait
 """
 
+[tasks.agent-cursor]
+description = "Park a demo agent cursor in a document's first block (optional `-- <docUuid>`)"
+run = "fnox exec --if-missing warn -- pnpm --filter @uberblick/web run agent-cursor"
+
 [tasks.install]
 description = "Install workspace dependencies (frozen lockfile in CI)"
 # PNPM_STORE_DIR is a convention of this task, not something pnpm reads: CI sets
