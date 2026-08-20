@@ -9,18 +9,31 @@
 /**
  * y-prosemirror only accepts 6-digit hex colours — `cursor-plugin.js` tests
  * against `/^#[0-9a-fA-F]{6}$/` and warns on anything else. No shorthand, no
- * `rgb()`, no alpha.
+ * `rgb()`, no alpha. This is the one place in the app where a colour is a
+ * literal rather than a CSS token: the theme cannot reach inside the inline
+ * styles the cursor plugin writes.
+ *
+ * Because the theme follows `prefers-color-scheme`, each colour has to work on
+ * both grounds. All eight sit near luminance 0.18: ≥4.1:1 against the dark
+ * background, ≥4.1:1 against the light one, and ≥4.69:1 against the white
+ * cursor-label text (`--cursor-label-foreground`).
  */
 const COLORS = [
-  "#e0567c",
-  "#f08c33",
-  "#c9a227",
-  "#4caf7d",
-  "#2f9fb0",
-  "#3f7fd0",
-  "#7b5ec7",
-  "#b4529a",
+  "#e30c4e",
+  "#ac6008",
+  "#837401",
+  "#0c853d",
+  "#0e8085",
+  "#0675c9",
+  "#8c4bf7",
+  "#cb26b4",
 ] as const;
+
+/**
+ * Used when a peer publishes awareness without a colour. Same budget: 5.02:1
+ * against the white label text, 3.9:1 / 4.5:1 against the two grounds.
+ */
+const FALLBACK_COLOR = "#6f6f6f";
 
 const ADJECTIVES = [
   "loitering",
@@ -68,4 +81,4 @@ export function randomIdentity(): AwarenessUser {
   };
 }
 
-export { COLORS as AWARENESS_COLORS };
+export { COLORS as AWARENESS_COLORS, FALLBACK_COLOR as AWARENESS_FALLBACK_COLOR };
