@@ -47,6 +47,15 @@ let redialAfterDrop = false;
 const FORCED_DROP_COOLDOWN_MS = 5_000;
 let lastForcedDrop = 0;
 
+/** A drop asked for during the cooldown, waiting for the window to end. */
+let pendingDrop: ReturnType<typeof setTimeout> | null = null;
+
+function cancelPendingDrop(): void {
+  if (pendingDrop === null) return;
+  clearTimeout(pendingDrop);
+  pendingDrop = null;
+}
+
 function sharedSocket(): HocuspocusProviderWebsocket {
   if (socket !== null) return socket;
   const created = new HocuspocusProviderWebsocket({
@@ -78,14 +87,34 @@ function sharedSocket(): HocuspocusProviderWebsocket {
  * Called when the hub closes a *document* while the socket is still up — see
  * {@link openRoom}. Every attached provider re-authenticates and re-syncs on
  * the next `open`, which is what actually resumes live sync; nothing else does.
+ *
+ * The cooldown *defers*, never discards. A close is the only signal that a room
+ * needs repairing — no later socket transition or provider event repeats it — so
+ * dropping one inside the cooldown window would strand the room in exactly the
+ * orphaned state this whole path exists to repair. Suppressed closes coalesce
+ * into one trailing drop at the end of the window, which bounds how often we
+ * reconnect without ever forgetting that we owe a reconnect.
  */
 function dropSocket(): void {
   const current = sharedSocket();
   // Only meaningful while the socket believes it is connected: a socket that
-  // already knows it is down is reconnecting on its own, and dropping it here
-  // would fight that retry loop.
+  // already knows it is down is reconnecting on its own — and every attached
+  // provider re-syncs on that `open` — so dropping it here would fight the
+  // retry loop that is already doing the repair.
   if (current.status !== WebSocketStatus.Connected) return;
-  if (Date.now() - lastForcedDrop < FORCED_DROP_COOLDOWN_MS) return;
+
+  const sinceLastDrop = Date.now() - lastForcedDrop;
+  if (sinceLastDrop < FORCED_DROP_COOLDOWN_MS) {
+    // One trailing drop covers every close suppressed in this window.
+    if (pendingDrop !== null) return;
+    pendingDrop = setTimeout(() => {
+      pendingDrop = null;
+      dropSocket();
+    }, FORCED_DROP_COOLDOWN_MS - sinceLastDrop);
+    return;
+  }
+
+  cancelPendingDrop();
   lastForcedDrop = Date.now();
   redialAfterDrop = true;
   current.disconnect();
@@ -266,6 +295,9 @@ export function acquireRoom(
       held.persistence?.destroy();
       held.connection.provider.destroy();
       held.connection.ydoc.destroy();
+      // Nothing left to repair: a deferred drop would reconnect a socket no
+      // room is listening on.
+      if (entries.size === 0) cancelPendingDrop();
     },
   };
 }
