@@ -42,10 +42,11 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    - footprint check: the diff stays within the issue's declared `Touches`;
    - GitHub Copilot review requested and returned;
    - local Codex review of the PR. Mechanism depends on the environment:
-     when running under herdr (ListAgents shows a Codex session among the
-     local sessions), message that session directly and iterate — answer its
-     findings, push fixes, re-request — until both sides are satisfied;
-     otherwise use the codex plugin. Either way the review brief is the same:
+     when running under herdr (`test "${HERDR_ENV:-}" = 1`; use the herdr
+     skill and `herdr agent` to find the Codex pane), talk to that Codex
+     session directly and iterate — answer its findings, push fixes,
+     re-request — until both sides are satisfied; otherwise use the codex
+     plugin. Either way the review brief is the same:
      be critical, and hunt specifically for overtesting and overengineering
      per this repo's principles (KISS/YAGNI, least code wins, tests defend
      contracts and invariants — not implementation trivia).
