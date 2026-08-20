@@ -48,6 +48,26 @@ transport — use the stderr helpers in `src/log.ts`.
 because `depends` on two long-running tasks serializes under `MISE_JOBS=1` and
 the web server would never start.
 
+## The MCP server, as a client sees it
+
+`.mcp.json` registers the server for any MCP client that reads it (Claude Code
+included). It spawns the same command `mise run mcp` does:
+
+```
+fnox exec --if-missing warn -- pnpm --silent --filter @uberblick/mcp-server start
+```
+
+`fnox exec` supplies `HUB_AUTH_TOKEN`; `--if-missing warn` is deliberate, so a
+contributor without the age key still gets a working server — offline-first, with
+`sync_status` reporting `disabled`. `pnpm --silent` is load-bearing: stdout is
+the JSON-RPC transport, and pnpm's lifecycle banner would corrupt the session.
+`HUB_URL` is not set here — the server falls back to `ws://localhost:1234`, the
+same default mise's `[env]` carries.
+
+`mise run import-seed` is the one-time import of `docs-seed/` into the system.
+After it, the product docs live in the documents, and are read and written
+through the MCP tools rather than by editing the seed files.
+
 ## Toolchain choices
 
 **Node 26** (`engines.node: ">=26"`, `mise` `node = "26"`). One runtime version
