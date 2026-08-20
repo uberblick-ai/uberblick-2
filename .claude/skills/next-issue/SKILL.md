@@ -87,17 +87,26 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    the reviewed work (this happened: #13 into feat/hub, re-landed as #25);
    retarget the PR to `main` (or merge the parent first) before merging.
    **Tier check, before any merge:** classify the PR against CLAUDE.md's
-   "Merge policy" tiers from its actual diff (`gh pr diff <n> --name-only`),
-   not from the issue's `Touches`. A tier-3 trigger means you do not merge:
-   label the PR `needs-human`, comment which trigger fired, fire a
-   PushNotification naming the PR and the trigger so the owner learns a merge
-   decision awaits them, then park it and continue with the next PR or issue.
-   Tier 1 and Tier 2 self-merge as specified there (Tier 2 requires the
-   merge-report comment on the PR first).
-   **Gate-freshness check, immediately before merging:** confirm the recorded
-   gate SHA equals the current head (`gh pr view <n> --json headRefOid`). If
-   they differ someone pushed after the gates ran — re-run them at the new
-   head; never merge on stale evidence. After merging, confirm the issue
+   "Merge policy" tiers by reading its full diff (`gh pr diff <n>`) and how
+   its review findings were dispositioned — never from the issue's `Touches`.
+   `--name-only` is just the pathname inventory, and it only catches the
+   mechanical triggers (`schema`, `.github/`, `.claude/skills/`); the semantic
+   ones live in the hunks — a `package.json` entry landing under
+   `dependencies` rather than `devDependencies`, auth or token semantics
+   changing inside otherwise ordinary code, a CLAUDE.md hunk in the
+   decided-architecture or invariants sections, or this PR overruling a major
+   Copilot/Codex finding. A tier-3 trigger means you do not merge: label the
+   PR `needs-human`, comment which trigger fired, fire a PushNotification
+   naming the PR and the trigger so the owner learns a merge decision awaits
+   them, then park it and continue with the next PR or issue. Tier 1 and
+   Tier 2 self-merge as specified there (Tier 2 requires the merge-report
+   comment on the PR first).
+   **Gate freshness, at merge time:** make the merge itself conditional on the
+   recorded gate SHA — `gh pr merge <n> --match-head-commit <gate-sha> …` — so
+   a commit landing after the last check fails the merge instead of riding
+   stale evidence; comparing `gh pr view <n> --json headRefOid` beforehand is
+   for your report, not the guarantee. Either way a mismatch returns to the
+   gates: re-run them at the new head. After merging, confirm the issue
    auto-closed, then update the product docs to the new status quo (uberblick
    MCP tools once registered; until then, comment on the PR that the doc
    update is pending).
