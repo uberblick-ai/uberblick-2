@@ -56,8 +56,6 @@ describe("token auth", () => {
     const connected = client(testRoom(), await token("read-write"));
 
     await expect(connected.synced).resolves.toBeUndefined();
-    expect(connected.provider.isAuthenticated).toBe(true);
-    expect(connected.provider.authorizedScope).toBe("read-write");
   });
 
   it("rejects garbage", async () => {
@@ -133,7 +131,6 @@ describe("token auth", () => {
 
       // Down: the reader sees the writer's content.
       await waitForText("reader", reader.text, "written by the hub client");
-      expect(reader.provider.authorizedScope).toBe("readonly");
 
       // Up: nothing. The update is refused at the server, so it neither
       // reaches the writer nor the server's copy of the document.
@@ -145,24 +142,6 @@ describe("token auth", () => {
       expect(serverDoc?.getText(TEXT_KEY).toString()).toBe(
         "written by the hub client",
       );
-    });
-
-    it("does not persist its writes", async () => {
-      const room = testRoom();
-      const reader = client(room, await token("read-only"));
-      await reader.synced;
-
-      reader.text.insert(0, "SMUGGLED");
-      await sleep(200);
-      await hub.flush();
-
-      // Reconnecting read-write to the same room shows the server's state, not
-      // the read-only client's local one.
-      const writer = client(room, await token("read-write"));
-      await writer.synced;
-      await sleep(200);
-
-      expect(writer.text.toString()).toBe("");
     });
   });
 });

@@ -28,7 +28,8 @@
  *    *resolves*, so completion is not durability: a hub whose database went
  *    away would flush, stop and exit 0 having written nothing. {@link HubSQLite}
  *    records the failure where it is still an exception, and `flush()`/`stop()`
- *    reject on it. Likewise, storage is opened before the socket: the
+ *    reject on it — `stop()` after the teardown as well as before, because the
+ *    teardown stores too. Likewise, storage is opened before the socket: the
  *    extension's own open happens in an `onConfigure` hook Hocuspocus never
  *    awaits, which turns a bad database path into an unhandled rejection after
  *    the hub already announced itself as listening.
@@ -60,14 +61,6 @@ import { verifyToken } from "./token.js";
  */
 export type HubContext = TokenClaims;
 
-export interface StopOptions {
-  /**
-   * Flush pending stores before shutting down. Defaults to `true`; only a test
-   * proving that the flush is what persists the data passes `false`.
-   */
-  flush?: boolean;
-}
-
 export interface Hub {
   /** The bound port. The real one, even when `config.port` was 0. */
   readonly port: number;
@@ -83,11 +76,13 @@ export interface Hub {
    */
   flush(): Promise<void>;
   /**
-   * Flush, close connections, unload documents, close the database. Rejects if
-   * the flush could not make the state durable; the resources are released
-   * either way, so a caller can exit on the rejection rather than because of it.
+   * Quiesce connections, flush, unload documents, close the database. Rejects
+   * unless the hub's state is known to be on disk when it returns — a failed
+   * store, before or during teardown, or a teardown that did not finish inside
+   * the shutdown timeout. The resources are released either way, so a caller
+   * can exit on the rejection rather than because of it.
    */
-  stop(options?: StopOptions): Promise<void>;
+  stop(): Promise<void>;
 }
 
 /** Query parameters that would carry a token. Their presence is a rejection. */
@@ -425,35 +420,50 @@ export async function createHub(config: HubConfig): Promise<Hub> {
 
   log({ event: "hub.listen", address, port, database: databasePath });
 
+  /** The sticky store failure, as the error a durability claim should not hide. */
+  const storeError = (): Error | undefined =>
+    storeFailure === undefined
+      ? undefined
+      : new Error(
+          "hub: a document store failed, so the hub's state is not durable: " +
+            String(storeFailure.error),
+          { cause: storeFailure.error },
+        );
+
   const flush = async (): Promise<void> => {
     await flushPendingStores(hocuspocus, log);
-    if (storeFailure !== undefined) {
-      throw new Error(
-        "hub: a document store failed, so the hub's state is not durable: " +
-          String(storeFailure.error),
-        { cause: storeFailure.error },
-      );
+    const failed = storeError();
+    if (failed !== undefined) {
+      throw failed;
     }
   };
   let stopping: Promise<void> | undefined;
 
-  const runStop = async (options: StopOptions): Promise<void> => {
+  const runStop = async (): Promise<void> => {
+    // Quiesce first. Closing the socket and the open connections is what makes
+    // the flush below final: while clients can still send updates — or connect —
+    // a document can go dirty again after it was stored, and the write that
+    // would have caught up happens during the teardown, where a failure is
+    // Hocuspocus' to swallow.
+    server.httpServer.close();
+    hocuspocus.closeConnections();
+
     // A failed flush must not skip the teardown — the socket and the handle are
     // released either way — but it is what stop() reports.
-    let flushError: unknown;
-    if (options.flush !== false) {
-      try {
-        await flush();
-      } catch (error) {
-        flushError = error;
-      }
+    let failure: unknown;
+    try {
+      await flush();
+    } catch (error) {
+      failure = error;
     }
 
-    // destroy() closes the HTTP server, closes every connection and waits for
-    // the documents to unload. It can only wait forever if a document refuses
-    // to unload, and the flush above already made the data durable, so bound
-    // it rather than hanging a shutdown.
+    // destroy() closes every connection and waits for the documents to unload.
+    // It can only wait forever if a document refuses to unload — which is
+    // exactly what a failing store makes it do — so bound it rather than
+    // hanging a shutdown, and remember that the wait did not finish.
+    let timedOut = false;
     await withTimeout(server.destroy(), shutdownTimeoutMs, () => {
+      timedOut = true;
       log({
         event: "hub.stop.timeout",
         timeoutMs: shutdownTimeoutMs,
@@ -467,8 +477,18 @@ export async function createHub(config: HubConfig): Promise<Hub> {
 
     sqlite.close(log);
 
-    if (flushError !== undefined) {
-      throw flushError;
+    // Teardown stores too: it fires the pending stores of the documents it
+    // unloads, and Hocuspocus swallows a failure there as it does everywhere
+    // else. Only re-reading the sticky failure after the teardown can tell
+    // whether those writes landed.
+    failure ??= storeError();
+    if (failure === undefined && timedOut) {
+      failure = new Error(
+        `hub: shutdown did not finish within ${shutdownTimeoutMs}ms, so the hub's state is not durable`,
+      );
+    }
+    if (failure !== undefined) {
+      throw failure;
     }
 
     log({ event: "hub.stopped", port });
@@ -480,8 +500,8 @@ export async function createHub(config: HubConfig): Promise<Hub> {
     server,
     hocuspocus,
     flush,
-    stop(options: StopOptions = {}) {
-      stopping ??= runStop(options);
+    stop() {
+      stopping ??= runStop();
       return stopping;
     },
   };

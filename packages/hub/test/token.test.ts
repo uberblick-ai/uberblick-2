@@ -123,9 +123,19 @@ describe("mintToken / verifyToken", () => {
     await expect(
       mintToken("", { sub: "s", workspace: "main", scope: "read-write" }),
     ).rejects.toThrow(/secret/);
-    await expect(
-      mintToken(SECRET, { sub: "", workspace: "main", scope: "read-write" }),
-    ).rejects.toThrow(/sub/);
+    // Mint and verify apply one subject rule, so a token can never be signed
+    // with a subject `verifyToken` would then refuse — `sub: undefined` reaching
+    // the payload as a missing claim is the shape that actually happens.
+    for (const sub of ["", undefined, 1, { id: "s" }]) {
+      await expect(
+        mintToken(SECRET, {
+          sub: sub as string,
+          workspace: "main",
+          scope: "read-write",
+        }),
+        `should refuse to mint sub ${JSON.stringify(sub)}`,
+      ).rejects.toThrow(/sub/);
+    }
     await expect(
       mintToken(SECRET, { sub: "s", workspace: "", scope: "read-write" }),
     ).rejects.toThrow(/workspace/);

@@ -10,10 +10,12 @@
  *
  * `Hub.flush()` closes that window, and is exactly what `main.ts` runs on
  * SIGTERM. It is tested four ways: that it writes what the debounce is still
- * holding (checked in SQLite, not inferred), that a hub which dies right after
- * a flush loses nothing, that a graceful `stop()` is durable end to end — and
- * that a flush which could *not* store says so, because a shutdown that reports
- * success without writing is the same data loss with a clean exit code.
+ * holding (checked in SQLite, not inferred), that what it wrote is what the
+ * next process serves, that a graceful `stop()` is durable end to end — and
+ * that a store which could *not* land makes `stop()` say so, whether it failed
+ * during the flush or during the teardown that follows it, because a shutdown
+ * that reports success without writing is the same data loss with a clean exit
+ * code.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,6 +33,7 @@ import {
   testRoom,
   token,
   waitForText,
+  waitUntil,
   type TestClient,
 } from "./helpers.js";
 
@@ -87,17 +90,6 @@ function storedText(databasePath: string, room: string): string | null {
   } finally {
     database.close();
   }
-}
-
-/**
- * Simulate the process dying immediately after a flush: everything Hocuspocus
- * still holds in memory is dropped without a further store, so only what the
- * flush already wrote can survive. A test cannot usefully SIGKILL itself,
- * which is why the flush is factored out as its own awaitable operation.
- */
-async function dieAbruptly(started: Hub): Promise<void> {
-  started.hocuspocus.documents.clear();
-  await started.stop({ flush: false });
 }
 
 afterEach(async () => {
@@ -159,6 +151,45 @@ describe("flush", () => {
     hubs.length = 0;
     destroyClients();
   });
+
+  it("refuses to report a successful shutdown after a store fails during teardown", async () => {
+    const databasePath = tempDatabasePath();
+    const started = await hub(databasePath, { shutdownTimeoutMs: 2_000 });
+    const room = testRoom();
+    const writer = await client(started, room);
+
+    writer.text.insert(0, "flushed");
+    await sleep(200);
+
+    // A direct connection is a server-side writer: it survives the connection
+    // quiesce, so it can edit the document *after* stop()'s flush, in the
+    // window where Server.destroy() stores what it unloads and Hocuspocus
+    // swallows a failure. Without the post-teardown re-check, stop() resolves
+    // here and main.ts exits 0 with the last edit never written.
+    const direct = await started.hocuspocus.openDirectConnection(room);
+
+    const stopping = started.stop();
+    await waitUntil(
+      "stop()'s flush to land",
+      () => storedText(databasePath, room) === "flushed",
+    );
+
+    const database = new Database(databasePath);
+    database.exec('DROP TABLE "documents"');
+    database.close();
+
+    await direct.transact((doc) => {
+      doc.getText(TEXT_KEY).insert(7, " then lost");
+    });
+    // Disconnecting stores the document and unloads it, so the teardown
+    // completes: the only thing that can make stop() reject is the failed store.
+    await direct.disconnect();
+
+    await expect(stopping).rejects.toThrow(/not durable/);
+
+    hubs.length = 0;
+    destroyClients();
+  });
 });
 
 describe("restart", () => {
@@ -168,22 +199,23 @@ describe("restart", () => {
 
     const first = await hub(databasePath);
     const writer = await client(first, room);
-    writer.text.insert(0, "written before the crash");
+    writer.text.insert(0, "flushed mid-session");
     await sleep(200);
 
-    // Flush with the client still attached, then lose the process without any
-    // graceful store: the flush is the only thing that wrote anything.
+    // Flush with the client still attached and read the row back before the
+    // shutdown: what the next process serves is what this flush wrote, not
+    // something a graceful stop stored afterwards.
     await first.flush();
-    await dieAbruptly(first);
+    expect(storedText(databasePath, room)).toBe("flushed mid-session");
+
+    await first.stop();
     hubs.length = 0;
     destroyClients();
-
-    expect(storedText(databasePath, room)).toBe("written before the crash");
 
     const second = await hub(databasePath);
     const reader = await client(second, room);
 
-    await waitForText("reader", reader.text, "written before the crash");
+    await waitForText("reader", reader.text, "flushed mid-session");
   });
 
   it("loses nothing when a hub is stopped mid-session", async () => {

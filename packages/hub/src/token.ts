@@ -86,8 +86,8 @@ function importSecret(secret: string) {
 }
 
 function assertClaims(claims: TokenRequest): void {
-  if (claims.sub === "") {
-    throw new Error("mintToken: sub must not be empty");
+  if (!isSubject(claims.sub)) {
+    throw new Error("mintToken: sub must be a non-empty string");
   }
   if (!isWorkspace(claims.workspace)) {
     throw new Error(
@@ -100,6 +100,11 @@ function assertClaims(claims: TokenRequest): void {
   if (claims.iat !== undefined && !isIssuedAt(claims.iat)) {
     throw new Error("mintToken: iat must be a non-negative integer");
   }
+}
+
+/** Who the token is for. Any non-empty string, on both sides of a token. */
+function isSubject(value: unknown): value is string {
+  return typeof value === "string" && value !== "";
 }
 
 /** Whole seconds since the epoch. The same rule on both sides of a token. */
@@ -149,7 +154,7 @@ function parseClaims(payloadJson: string): TokenClaims | null {
     return null;
   }
   const { sub, workspace, scope, iat } = parsed as Record<string, unknown>;
-  if (typeof sub !== "string" || sub === "") {
+  if (!isSubject(sub)) {
     return null;
   }
   if (!isWorkspace(workspace)) {
