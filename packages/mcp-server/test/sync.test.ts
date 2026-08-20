@@ -1,0 +1,246 @@
+/**
+ * What the hub adds, and what it is not allowed to take away.
+ *
+ * Every test here runs a real hub on an ephemeral port and a real second client
+ * (a plain `HocuspocusProvider`, standing in for the web UI), because the
+ * interesting claims are about the wire: an offline-created document reaching
+ * the hub once it comes up, a fresh replica learning a whole corpus, and remote
+ * updates landing in the log like any other.
+ */
+
+import Database from "better-sqlite3";
+import { afterEach, describe, expect, it } from "vitest";
+import { appendBlock, getBlocks, getMeta, listDirectory } from "@uberblick/schema";
+import type { Hub } from "@uberblick/hub";
+import {
+  hubUrl,
+  peerClient,
+  removeTempDirs,
+  startHub,
+  startServer,
+  tempDatabasePath,
+  testConfig,
+  TEST_SECRET,
+  waitUntil,
+} from "./helpers.js";
+import type { PeerClient, Rig } from "./helpers.js";
+
+const hubs: Hub[] = [];
+const rigs: Rig[] = [];
+const peers: PeerClient[] = [];
+
+afterEach(async () => {
+  for (const peer of peers.splice(0)) {
+    peer.destroy();
+  }
+  for (const rig of rigs.splice(0)) {
+    await rig.close();
+  }
+  for (const hub of hubs.splice(0)) {
+    await hub.stop().catch(() => {});
+  }
+  removeTempDirs();
+});
+
+async function hub(options: { port?: number; databasePath?: string } = {}) {
+  const started = await startHub(options);
+  hubs.push(started);
+  return started;
+}
+
+async function serverOn(
+  port: number,
+  options: { databasePath?: string; authSecret?: string } = {},
+): Promise<Rig> {
+  const rig = await startServer(
+    testConfig({
+      authSecret: options.authSecret ?? TEST_SECRET,
+      hubUrl: hubUrl(port),
+      ...(options.databasePath === undefined
+        ? {}
+        : { databasePath: options.databasePath }),
+    }),
+  );
+  rigs.push(rig);
+  return rig;
+}
+
+async function peer(port: number, room: string): Promise<PeerClient> {
+  const client = await peerClient(port, room);
+  peers.push(client);
+  return client;
+}
+
+/** Wait until the server reports everything it holds has reached the hub. */
+async function waitForQuiet(rig: Rig): Promise<void> {
+  await waitUntil("the server to report itself in sync", async () => {
+    const status = await rig.ok("sync_status", {});
+    return (
+      status.hub.status === "connected" &&
+      status.unsyncedChanges === 0 &&
+      status.pendingRooms.length === 0
+    );
+  });
+}
+
+describe("hub sync", () => {
+  it("delivers a document created while the hub was down", async () => {
+    // Take a port, then give it back: the server dials an address that will
+    // only start answering later.
+    const hubDatabase = tempDatabasePath();
+    const first = await startHub({ databasePath: hubDatabase });
+    const port = first.port;
+    await first.stop();
+
+    const rig = await serverOn(port);
+    const created = await rig.ok("create_doc", {
+      title: "Created offline",
+      blocks: [{ type: "paragraph", text: "no hub was involved" }],
+    });
+    expect(created.synced).toBe(false);
+
+    const offline = await rig.ok("sync_status", {});
+    expect(offline.hub.status).toBe("hub-down");
+    expect(offline.pendingRooms).toContain(`main/${created.uuid}`);
+
+    // The hub comes up on the same address.
+    const started = await hub({ port, databasePath: hubDatabase });
+    expect(started.port).toBe(port);
+
+    const docPeer = await peer(port, `main/${created.uuid}`);
+    await waitUntil("the offline-created document to reach a second client", () => {
+      return getMeta(docPeer.doc).title === "Created offline";
+    });
+    expect(getBlocks(docPeer.doc).map((block) => block.text)).toEqual([
+      "no hub was involved",
+    ]);
+
+    // Discovery travels the same way, so the doc is findable, not just present.
+    const directoryPeer = await peer(port, "main/_directory");
+    await waitUntil("the directory stub to reach a second client", () =>
+      listDirectory(directoryPeer.doc).some(
+        (entry) => entry.uuid === created.uuid,
+      ),
+    );
+
+    await waitForQuiet(rig);
+    const synced = await rig.ok("sync_status", {});
+    expect(synced.hub.status).toBe("connected");
+    expect(synced.pendingRooms).toEqual([]);
+  });
+
+  it("lets a fresh replica enumerate and search a corpus it has never seen", async () => {
+    const running = await hub();
+    const author = await serverOn(running.port);
+
+    const first = await author.ok("create_doc", {
+      title: "Alpha",
+      tags: ["seed"],
+      blocks: [{ type: "paragraph", text: "the quick brown capybara" }],
+    });
+    const second = await author.ok("create_doc", {
+      title: "Beta",
+      blocks: [{ type: "paragraph", text: "an entirely different marmot" }],
+    });
+    await waitForQuiet(author);
+
+    // Empty local state, same hub. Everything it knows, it learns by syncing —
+    // and everything it learns, it logs.
+    const fresh = await serverOn(running.port, {
+      databasePath: tempDatabasePath(),
+    });
+
+    const listed = await fresh.ok("list_docs", {});
+    expect(
+      listed.docs.map((doc: { uuid: string }) => doc.uuid).sort(),
+    ).toEqual([first.uuid, second.uuid].sort());
+
+    expect(
+      (await fresh.ok("search", { query: "capybara" })).hits.map(
+        (hit: { uuid: string }) => hit.uuid,
+      ),
+    ).toEqual([first.uuid]);
+    expect(
+      (await fresh.ok("search", { query: "marmot" })).hits.map(
+        (hit: { uuid: string }) => hit.uuid,
+      ),
+    ).toEqual([second.uuid]);
+
+    // Hydration went through the log, so a restart with the hub gone still has
+    // the corpus.
+    const room = `main/${first.uuid}`;
+    expect(
+      fresh.instance.store.updatesAfter(room, 0).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("logs remote updates too, and serves them", async () => {
+    const running = await hub();
+    const databasePath = tempDatabasePath();
+    const rig = await serverOn(running.port, { databasePath });
+
+    const created = await rig.ok("create_doc", {
+      title: "Shared",
+      blocks: [{ type: "paragraph", text: "written by the agent" }],
+    });
+    await waitForQuiet(rig);
+
+    // The web UI's side of the story: a second client appends a block.
+    const room = `main/${created.uuid}`;
+    const other = await peer(running.port, room);
+    await other.synced;
+    await waitUntil("the second client to see the agent's block", () =>
+      getBlocks(other.doc).length === 1,
+    );
+    appendBlock(other.doc, { type: "paragraph", text: "written by a human" });
+
+    await waitUntil("the agent's replica to see the human's block", async () => {
+      const read = await rig.ok("get_doc", { uuid: created.uuid });
+      return read.blocks.length === 2;
+    });
+
+    const read = await rig.ok("get_doc", { uuid: created.uuid });
+    expect(read.blocks.map((block: { text: string }) => block.text)).toEqual([
+      "written by the agent",
+      "written by a human",
+    ]);
+
+    // The invariant: the log records every update, remote origin included.
+    const db = new Database(databasePath, { readonly: true });
+    try {
+      const origins = db
+        .prepare("SELECT origin, COUNT(*) AS n FROM updates WHERE room = ? GROUP BY origin")
+        .all(room) as { origin: string; n: number }[];
+      const byOrigin = new Map(origins.map((row) => [row.origin, row.n]));
+      expect(byOrigin.get("local") ?? 0).toBeGreaterThan(0);
+      expect(byOrigin.get("remote") ?? 0).toBeGreaterThan(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports a rejected token as auth-failed, and keeps serving", async () => {
+    const running = await hub();
+    const rig = await serverOn(running.port, {
+      authSecret: "a-different-secret-the-hub-will-not-accept",
+    });
+
+    await waitUntil("the hub to reject the token", async () => {
+      const status = await rig.ok("sync_status", {});
+      return status.hub.status === "auth-failed";
+    });
+
+    const status = await rig.ok("sync_status", {});
+    expect(status.hub.status).toBe("auth-failed");
+    expect(status.hub.reason).toBeTruthy();
+
+    // A rejected token is a sync problem, never a local one.
+    const created = await rig.ok("create_doc", { title: "Still writable" });
+    expect(created.applied).toBe(true);
+    expect(created.synced).toBe(false);
+    expect(created.hub.status).toBe("auth-failed");
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).title).toBe(
+      "Still writable",
+    );
+  });
+});

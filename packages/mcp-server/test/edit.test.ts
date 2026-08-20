@@ -1,0 +1,228 @@
+/**
+ * Block-scoped writes: what happens when they conflict, and what the derived
+ * index does afterwards.
+ *
+ * Two MCP servers sharing one database is the normal case (a user runs their
+ * agent twice), so the concurrency test uses exactly that rather than a mocked
+ * second replica: each instance appends to the shared log, and each picks the
+ * other up by polling the log tail at tool-call start.
+ */
+
+import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { removeTempDirs, startServer, testConfig } from "./helpers.js";
+import type { Rig } from "./helpers.js";
+
+const rigs: Rig[] = [];
+
+async function localRig(databasePath?: string): Promise<Rig> {
+  const rig = await startServer(
+    testConfig(databasePath === undefined ? {} : { databasePath }),
+  );
+  rigs.push(rig);
+  return rig;
+}
+
+afterEach(async () => {
+  for (const rig of rigs.splice(0)) {
+    await rig.close();
+  }
+});
+
+afterAll(() => {
+  removeTempDirs();
+});
+
+describe("edit_block", () => {
+  it("refuses a stale old_text and hands back the re-read payload", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Conflict",
+      blocks: [{ type: "paragraph", text: "the current text" }],
+    });
+    const block = doc.blocks[0];
+
+    const stale = await rig.call("edit_block", {
+      uuid: doc.uuid,
+      block_id: block.id,
+      old_text: "what I thought was there",
+      new_text: "my version",
+    });
+
+    expect(stale.isError).toBe(true);
+    expect(stale.payload.error).toBe("stale_block");
+    expect(stale.payload.currentText).toBe("the current text");
+    expect(stale.payload.currentRev).toBe(block.rev);
+
+    // The refused edit changed nothing.
+    const read = await rig.ok("get_doc", { uuid: doc.uuid });
+    expect(read.blocks[0].text).toBe("the current text");
+  });
+
+  it("refuses a stale rev even when old_text still matches", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Revs",
+      blocks: [{ type: "paragraph", text: "first" }],
+    });
+    const staleRev = doc.blocks[0].rev;
+
+    await rig.ok("edit_block", {
+      uuid: doc.uuid,
+      block_id: doc.blocks[0].id,
+      old_text: "first",
+      new_text: "second",
+    });
+
+    const refused = await rig.call("edit_block", {
+      uuid: doc.uuid,
+      block_id: doc.blocks[0].id,
+      old_text: "second",
+      new_text: "third",
+      rev: staleRev,
+    });
+
+    expect(refused.isError).toBe(true);
+    expect(refused.payload.error).toBe("stale_block");
+    expect(refused.payload.expectedRev).toBe(staleRev);
+    expect(refused.payload.currentText).toBe("second");
+    expect(refused.payload.currentRev).not.toBe(staleRev);
+  });
+
+  it("merges concurrent edits to different blocks across two instances", async () => {
+    const databasePath = testConfig().databasePath;
+    const first = await localRig(databasePath);
+    const doc = await first.ok("create_doc", {
+      title: "Two agents",
+      blocks: [
+        { type: "paragraph", text: "block one" },
+        { type: "paragraph", text: "block two" },
+      ],
+    });
+
+    const second = await localRig(databasePath);
+    const seen = await second.ok("get_doc", { uuid: doc.uuid });
+    expect(seen.blocks.map((block: { text: string }) => block.text)).toEqual([
+      "block one",
+      "block two",
+    ]);
+
+    // Neither instance has seen the other's edit when it makes its own.
+    const [one, two] = await Promise.all([
+      first.ok("edit_block", {
+        uuid: doc.uuid,
+        block_id: seen.blocks[0].id,
+        old_text: "block one",
+        new_text: "block one, edited by the first agent",
+        rev: seen.blocks[0].rev,
+      }),
+      second.ok("edit_block", {
+        uuid: doc.uuid,
+        block_id: seen.blocks[1].id,
+        old_text: "block two",
+        new_text: "block two, edited by the second agent",
+        rev: seen.blocks[1].rev,
+      }),
+    ]);
+    expect(one.applied).toBe(true);
+    expect(two.applied).toBe(true);
+
+    for (const rig of [first, second]) {
+      const merged = await rig.ok("get_doc", { uuid: doc.uuid });
+      expect(merged.blocks.map((block: { text: string }) => block.text)).toEqual(
+        [
+          "block one, edited by the first agent",
+          "block two, edited by the second agent",
+        ],
+      );
+    }
+  });
+});
+
+describe("the derived index", () => {
+  it("follows edits", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Searchable",
+      blocks: [{ type: "paragraph", text: "aardvark" }],
+    });
+
+    const before = await rig.ok("search", { query: "aardvark" });
+    expect(before.hits.map((hit: { uuid: string }) => hit.uuid)).toEqual([
+      doc.uuid,
+    ]);
+
+    await rig.ok("edit_block", {
+      uuid: doc.uuid,
+      block_id: doc.blocks[0].id,
+      old_text: "aardvark",
+      new_text: "zebra",
+      rev: doc.blocks[0].rev,
+    });
+
+    expect((await rig.ok("search", { query: "aardvark" })).hits).toEqual([]);
+    expect(
+      (await rig.ok("search", { query: "zebra" })).hits.map(
+        (hit: { uuid: string }) => hit.uuid,
+      ),
+    ).toEqual([doc.uuid]);
+  });
+
+  it("follows set_links in both directions", async () => {
+    const rig = await localRig();
+    const source = await rig.ok("create_doc", { title: "Source" });
+    const target = await rig.ok("create_doc", { title: "Target" });
+    const other = await rig.ok("create_doc", { title: "Other" });
+
+    await rig.ok("set_links", {
+      uuid: source.uuid,
+      links: [target.uuid],
+    });
+    expect(
+      (await rig.ok("backlinks", { uuid: target.uuid })).backlinks,
+    ).toEqual([{ uuid: source.uuid, title: "Source" }]);
+
+    await rig.ok("set_links", { uuid: source.uuid, links: [other.uuid] });
+    expect((await rig.ok("backlinks", { uuid: target.uuid })).backlinks).toEqual(
+      [],
+    );
+    expect(
+      (await rig.ok("backlinks", { uuid: other.uuid })).backlinks,
+    ).toEqual([{ uuid: source.uuid, title: "Source" }]);
+  });
+
+  it("is derived: it can be thrown away and rebuilt from the replicas", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Rebuildable",
+      blocks: [{ type: "paragraph", text: "pangolin" }],
+    });
+    const target = await rig.ok("create_doc", { title: "Pointed at" });
+    await rig.ok("set_links", { uuid: doc.uuid, links: [target.uuid] });
+
+    // Asserted against the store, not through the tools: a tool call settles
+    // first, and settling reindexes whatever it replays out of the log.
+    const store = rig.instance.store;
+    store.clearDerived();
+    expect(store.search("pangolin", 10)).toEqual([]);
+    expect(store.backlinks(target.uuid)).toEqual([]);
+
+    rig.instance.replicas.rebuildIndex();
+
+    expect(store.search("pangolin", 10).map((hit) => hit.uuid)).toEqual([
+      doc.uuid,
+    ]);
+    expect(store.backlinks(target.uuid).map((row) => row.uuid)).toEqual([
+      doc.uuid,
+    ]);
+  });
+
+  it("rejects a link that is a path rather than a UUID", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", { title: "Bad links" });
+    const refused = await rig.call("set_links", {
+      uuid: doc.uuid,
+      links: ["docs/some-title"],
+    });
+    expect(refused.isError).toBe(true);
+  });
+});

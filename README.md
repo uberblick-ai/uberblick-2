@@ -78,5 +78,12 @@ secrets go there: plaintext local defaults such as `HUB_URL`
 Contributors without the age key are not blocked. The task wrappers pass
 `fnox exec --if-missing warn` explicitly, so a secret fnox cannot decrypt logs a
 warning and the command still runs with that variable unset instead of aborting.
-`mise run test` and `mise run typecheck` don't shell through fnox at all. Only
-the hub's auth path actually needs `HUB_AUTH_TOKEN`.
+`mise run test` and `mise run typecheck` don't shell through fnox at all.
+
+`HUB_AUTH_TOKEN` is the HMAC secret hub tokens are signed with. The hub refuses
+to start without it — a hub that cannot verify a token would accept anything.
+The MCP server treats it as optional and runs local-only without it: its update
+log is the authoritative replica, so no secret means no sync, not no service
+(`sync_status` reports `hub.status: "disabled"`). It also reads `WORKSPACE_ID`
+(default `main`) and `UBERBLICK_DB` (default
+`$XDG_DATA_HOME/uberblick/<workspace>.sqlite`).

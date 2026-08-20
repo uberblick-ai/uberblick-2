@@ -3,7 +3,20 @@
  *
  * Resolved directly from TypeScript source (see package.json exports); the
  * process entry point is ./main.ts, run with tsx.
+ *
+ * The package's interface is small on purpose: build a config from the
+ * environment, build a server from the config, attach a transport. The
+ * replicas, the store and the sync layer are reachable through the returned
+ * server for tests and diagnostics, not as separate entry points.
  */
 
+export {
+  DEFAULT_HUB_URL,
+  defaultDatabasePath,
+  resolveMcpConfig,
+} from "./config.js";
+export type { McpConfig } from "./config.js";
+export { createMcpServer } from "./server.js";
+export type { UberblickMcpServer } from "./server.js";
 export { log, logAt } from "./log.js";
 export type { LogLevel } from "./log.js";
