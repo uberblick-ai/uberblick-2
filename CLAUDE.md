@@ -80,7 +80,9 @@ before moving on.
   continue with other eligible issues. Triggers: any diff touching `schema`;
   changes to this file's decided-architecture or invariants sections; new
   *runtime* dependencies; auth/token semantics; overruling a major
-  Copilot/Codex finding.
+  Copilot/Codex finding; and any change to the process itself — `.github/`
+  spec/workflow files or `.claude/skills/` (a bug in the loop's own rules
+  multiplies into everything it merges).
 
 The tier-3 trigger list is the autonomy dial: Ben shrinks (or grows) it by
 editing this section as the foundation stabilizes. "Gates green" is
