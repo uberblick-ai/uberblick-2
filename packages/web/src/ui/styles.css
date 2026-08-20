@@ -1,0 +1,319 @@
+/* Ugly is fine; live is mandatory. Plain CSS, no framework. */
+
+:root {
+  --ub-bg: #fbfaf8;
+  --ub-fg: #1c1b1a;
+  --ub-muted: #6b6862;
+  --ub-line: #d9d5cd;
+  --ub-accent: #2f6f4f;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ub-bg);
+  color: var(--ub-fg);
+}
+
+.ub-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.ub-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--ub-line);
+}
+
+.ub-brand {
+  font-weight: 700;
+}
+
+.ub-muted {
+  color: var(--ub-muted);
+  font-size: 0.8rem;
+}
+
+.ub-me,
+.ub-peer {
+  border: 2px solid var(--ub-line);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.ub-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---- doc list ---- */
+
+.ub-list {
+  width: 16rem;
+  border-right: 1px solid var(--ub-line);
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+
+.ub-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.ub-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ub-list li button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  padding: 0.3rem 0.4rem;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.ub-list li button:hover {
+  background: #efece6;
+}
+
+.ub-list li button.ub-selected {
+  background: #e3ece6;
+  font-weight: 600;
+}
+
+.ub-empty {
+  padding: 0.4rem;
+}
+
+/* ---- editor pane ---- */
+
+.ub-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 1rem;
+  overflow-y: auto;
+}
+
+.ub-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  padding: 0.2rem 0;
+  color: inherit;
+  font-family: inherit;
+}
+
+.ub-title:focus {
+  outline: none;
+  border-bottom-color: var(--ub-line);
+}
+
+.ub-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--ub-muted);
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--ub-line);
+  margin-bottom: 0.75rem;
+}
+
+.ub-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.ub-dot-live {
+  background: var(--ub-accent);
+}
+
+.ub-dot-syncing {
+  background: #c9a227;
+}
+
+.ub-dot-off {
+  background: #c05050;
+}
+
+.ub-pending {
+  background: #f3e6c0;
+  border-radius: 3px;
+  padding: 0 0.3rem;
+}
+
+.ub-peers {
+  display: flex;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+
+/* ---- block toolbar ---- */
+
+.ub-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.ub-tool {
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--ub-line);
+  border-radius: 3px;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ub-tool-on {
+  background: var(--ub-accent);
+  border-color: var(--ub-accent);
+  color: #fff;
+}
+
+.ub-lang {
+  font: inherit;
+  font-size: 0.75rem;
+  width: 7rem;
+  padding: 0.15rem 0.35rem;
+  border: 1px solid var(--ub-line);
+  border-radius: 3px;
+}
+
+/* ---- blocks ---- */
+
+.ub-editor .tiptap {
+  outline: none;
+  min-height: 12rem;
+  line-height: 1.55;
+  /* ProseMirror warns without this and relies on it for caret placement at
+     line ends and around trailing spaces. Set here instead of loading
+     prosemirror-view's stylesheet, which brings a pile of unrelated rules. */
+  white-space: pre-wrap;
+}
+
+.ub-heading {
+  line-height: 1.2;
+  margin: 1.2em 0 0.4em;
+}
+
+.ub-paragraph {
+  margin: 0.5em 0;
+}
+
+.ub-code,
+.ub-mermaid pre {
+  background: #f1eee8;
+  border: 1px solid var(--ub-line);
+  border-left: 3px solid var(--ub-muted);
+  border-radius: 4px;
+  padding: 0.6rem 0.75rem;
+  margin: 0.7em 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.ub-mermaid {
+  margin: 0.7em 0;
+}
+
+.ub-mermaid pre {
+  border-left-color: var(--ub-accent);
+  margin: 0;
+}
+
+.ub-mermaid::before {
+  content: "mermaid source (not rendered)";
+  display: block;
+  font-size: 0.7rem;
+  color: var(--ub-muted);
+  margin-bottom: 0.2rem;
+}
+
+.ub-comment {
+  background: #fdf0a8;
+  border-bottom: 2px solid #d8bb2c;
+}
+
+/* ---- foreign-content fallback ---- */
+
+.ub-foreign-banner {
+  background: #ffe0e0;
+  border: 2px solid #c05050;
+  border-radius: 4px;
+  padding: 0.6rem 0.75rem;
+}
+
+.ub-foreign-list {
+  font-size: 0.85rem;
+}
+
+.ub-foreign-list pre {
+  white-space: pre-wrap;
+  background: #f1eee8;
+  padding: 0.4rem;
+  border-radius: 3px;
+}
+
+/* ---- remote cursors (y-prosemirror default DOM) ---- */
+
+.ProseMirror-yjs-cursor {
+  position: relative;
+  margin-left: -1px;
+  margin-right: -1px;
+  border-left: 1px solid black;
+  border-right: 1px solid black;
+  border-color: orange;
+  word-break: normal;
+  pointer-events: none;
+}
+
+.ProseMirror-yjs-cursor > div {
+  position: absolute;
+  top: -1.15em;
+  left: -1px;
+  font-size: 0.65rem;
+  font-style: normal;
+  font-weight: 600;
+  line-height: normal;
+  white-space: nowrap;
+  color: #fff;
+  padding: 0.05rem 0.25rem;
+  border-radius: 3px;
+  user-select: none;
+}
+
+.ProseMirror-yjs-selection {
+  border-radius: 2px;
+}
