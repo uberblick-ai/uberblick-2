@@ -41,7 +41,10 @@ before moving on.
 ## Development workflow (every functionality)
 
 1. **Issue first.** Every piece of functionality starts as a GitHub issue:
-   what, why, acceptance criteria. No issue, no branch.
+   what, why, acceptance criteria. No issue, no branch. Issues the
+   implementation loop may pick up must conform to `.github/ISSUE_SPEC.md`
+   (`Depends-on`/`Touches` header, runnable acceptance criteria, explicit
+   out-of-scope); the `ready` label asserts conformance and eligibility.
 2. **Branch + sub-agents.** Implementation happens on a feature branch
    (`feat/<slug>`, `fix/<slug>`), written by Opus sub-agents coordinated by
    Fable with decision-complete briefs. Never commit feature work directly to
