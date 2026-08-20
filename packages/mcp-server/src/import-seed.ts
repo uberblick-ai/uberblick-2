@@ -18,7 +18,7 @@ import type { SeedImport } from "./seed.js";
 
 /** Whether every document is accounted for. Skips mean it is not. */
 function report(results: SeedImport[], hub: string): boolean {
-  const counts = { created: 0, updated: 0, unchanged: 0, skipped: 0 };
+  const counts = { created: 0, unchanged: 0, skipped: 0 };
   for (const result of results) {
     counts[result.action] += 1;
     const sync = result.synced ? "synced" : "local only";
@@ -27,11 +27,14 @@ function report(results: SeedImport[], hub: string): boolean {
         .toString()
         .padStart(3)} blocks  ${sync}  ${result.file}\n`,
     );
+    if (result.reason !== null) {
+      process.stdout.write(`          ↳ ${result.reason}\n`);
+    }
   }
   process.stdout.write(
     `\n${results.length} seed documents: ${counts.created} created, ` +
-      `${counts.updated} updated, ${counts.unchanged} unchanged, ` +
-      `${counts.skipped} skipped. Hub: ${hub}.\n`,
+      `${counts.unchanged} already present, ${counts.skipped} skipped. ` +
+      `Hub: ${hub}.\n`,
   );
   if (results.some((result) => !result.synced)) {
     process.stdout.write(
@@ -41,9 +44,9 @@ function report(results: SeedImport[], hub: string): boolean {
   }
   if (counts.skipped > 0) {
     process.stdout.write(
-      "Skipped documents exist in the directory but their rooms never reached " +
-        "this replica, so writing them would have duplicated their blocks. " +
-        "Check that the hub is the one holding the corpus, then run this again.\n",
+      "Skipped documents were not written, because writing them would have " +
+        "duplicated blocks or created a document nothing can list. Resolve the " +
+        "reason above, then run this again.\n",
     );
   }
   return counts.skipped === 0;

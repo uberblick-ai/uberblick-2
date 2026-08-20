@@ -24,6 +24,7 @@ import type { Hub } from "@uberblick/hub";
 import { MirrorStore } from "../src/store.js";
 import type { UpdateOrigin } from "../src/store.js";
 import {
+  FailingStore,
   peerClient,
   removeTempDirs,
   sleep,
@@ -87,22 +88,6 @@ class LatePendingStore extends MirrorStore {
     this.hook = null;
     hook?.();
     return super.pendingRooms();
-  }
-}
-
-/** A store whose appends can be made to fail, as a full disk would. */
-class FailingStore extends MirrorStore {
-  failing = false;
-
-  override appendUpdate(
-    room: string,
-    payload: Uint8Array,
-    origin: UpdateOrigin,
-  ): number {
-    if (this.failing) {
-      throw new Error("simulated disk failure");
-    }
-    return super.appendUpdate(room, payload, origin);
   }
 }
 

@@ -24,7 +24,29 @@ import * as Y from "yjs";
 import type { McpConfig } from "../src/config.js";
 import { createMcpServer } from "../src/server.js";
 import type { UberblickMcpServer } from "../src/server.js";
-import type { MirrorStore } from "../src/store.js";
+import { MirrorStore } from "../src/store.js";
+import type { UpdateOrigin } from "../src/store.js";
+
+/**
+ * A store whose appends can be made to fail, as a full or read-only disk would.
+ *
+ * The seam every "the log refused a write" test drives: real store, real code
+ * path, one failure injected where the failure actually happens.
+ */
+export class FailingStore extends MirrorStore {
+  failing = false;
+
+  override appendUpdate(
+    room: string,
+    payload: Uint8Array,
+    origin: UpdateOrigin,
+  ): number {
+    if (this.failing) {
+      throw new Error("simulated disk failure");
+    }
+    return super.appendUpdate(room, payload, origin);
+  }
+}
 
 /** The hub's HMAC secret in tests. Never a valid token itself. */
 export const TEST_SECRET = "test-hmac-secret-for-the-mcp-server";

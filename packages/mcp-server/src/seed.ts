@@ -7,26 +7,31 @@
  * *storage* rule: `importMarkdown` is the reader this import was built for, and
  * there is deliberately no import MCP tool.
  *
- * Four properties worth stating, because they are what the implementation is
+ * Five properties worth stating, because they are what the implementation is
  * shaped around:
  *
  * 1. **It writes through the same path the MCP tools do.** A {@link Replicas}
  *    set over the {@link MirrorStore}, so every update lands in the
  *    authoritative update log synchronously and reaches the hub the same way
  *    any tool's write does. Nothing here touches the derived index tables.
- * 2. **Identity comes from the file.** The frontmatter `uuid` is the idempotency
- *    key: it is what makes a re-run recognise a document it already wrote. A
- *    file without one is an error — the importer never invents identity.
- * 3. **A re-run of unchanged files writes nothing at all.** Every write is
- *    guarded by a comparison, so an unchanged re-run appends zero log entries.
- * 4. **Existing documents are reconciled in place, never replaced.** Blocks are
- *    matched positionally and updated with `editBlock`/`setBlockType`, so block
- *    ids — and the annotation anchors hanging off them — survive a re-import.
- * 5. **An unhydrated document is skipped, not created.** A uuid the directory
- *    knows whose room has not reached this replica is refused: writing it would
- *    put a second copy of every block into a room that already has one. The
- *    report says so and the command fails, which is the honest outcome — the
- *    alternative is a silently duplicated corpus.
+ * 2. **Identity comes from the file.** The frontmatter `uuid` is what makes a
+ *    re-run recognise a document it already wrote. A file without one is an
+ *    error — the importer never invents identity.
+ * 3. **One-time by construction.** A uuid that already exists is never written
+ *    again, not even when the file has changed. After the import the document
+ *    belongs to whoever edits it through the MCP tools, and this importer cannot
+ *    tell a legitimately edited seed file from a legitimately edited *document* —
+ *    so it does not guess, and a re-run cannot clobber real work. Ongoing
+ *    docs-seed sync is not a feature; the file is dead history.
+ * 4. **A document it must not write is skipped, not written.** Two cases: a uuid
+ *    the directory knows whose room has not reached this replica (writing it
+ *    would put a second copy of every block into a room that already has one),
+ *    and a uuid whose directory entry is tombstoned (a tombstone is sticky, so
+ *    the document could never be listed again). Both report why and fail the
+ *    command, which is the honest outcome.
+ * 5. **A store that cannot log stops the run.** Health is asserted after every
+ *    document and after the final wait, so a failing store can never let the
+ *    import report success for writes the log refused.
  *
  * Offline-first like everything else: with no hub it imports into the local log
  * and the rooms stay pending until one appears. With a hub it waits for the
@@ -39,24 +44,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   appendBlock,
-  deleteBlock,
-  editBlock,
-  getBlockText,
-  getBlocks,
   getDirectoryEntry,
   getMeta,
   importMarkdown,
   initDoc,
-  setBlockLanguage,
-  setBlockLevel,
-  setBlockType,
   setLinks,
-  setTags,
-  setTitle,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { BlockInput, ImportedBlock, ImportedDoc } from "@uberblick/schema";
-import * as Y from "yjs";
 import { log } from "./log.js";
 import type { Replicas } from "./replica.js";
 
@@ -76,7 +71,16 @@ export interface SeedDoc extends ImportedDoc {
   file: string;
 }
 
-export type SeedAction = "created" | "updated" | "unchanged" | "skipped";
+/**
+ * What happened to one seed file.
+ *
+ * - `created` — the document did not exist and was written.
+ * - `unchanged` — the uuid is already in the system, so nothing was written.
+ *   This is the normal outcome of every run after the first, whatever the file
+ *   says now.
+ * - `skipped` — the importer refused, and `reason` says why. The command fails.
+ */
+export type SeedAction = "created" | "unchanged" | "skipped";
 
 export interface SeedImport {
   file: string;
@@ -85,6 +89,8 @@ export interface SeedImport {
   room: string;
   action: SeedAction;
   blocks: number;
+  /** Why the document was skipped. Null for every other action. */
+  reason: string | null;
   /** Whether the hub has acknowledged this room's changes. */
   synced: boolean;
 }
@@ -113,13 +119,6 @@ export function readSeedDocs(dir: string = SEED_DIR): SeedDoc[] {
   });
 }
 
-/** Set equality: neither a tag list nor a link list has meaningful order. */
-function sameSet(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false;
-  const left = new Set(a);
-  return b.every((value) => left.has(value));
-}
-
 function toBlockInput(block: ImportedBlock): BlockInput {
   return {
     type: block.type,
@@ -129,81 +128,12 @@ function toBlockInput(block: ImportedBlock): BlockInput {
   };
 }
 
-/**
- * Bring the document's blocks in line with the file, matched by position.
- *
- * Positional matching is the honest choice for a seed import: the file has no
- * block ids to match on, and position is what the author's edit history looks
- * like. Every change goes through a sanctioned block-scoped write — `editBlock`
- * for text, `setBlockType` for a type change — so a block keeps its id and its
- * annotation anchors instead of being deleted and reinserted.
- *
- * Returns whether anything was written.
- */
-function reconcileBlocks(doc: Y.Doc, want: ImportedBlock[]): boolean {
-  const have = getBlocks(doc);
-  let changed = false;
-
-  const shared = Math.min(have.length, want.length);
-  for (let i = 0; i < shared; i += 1) {
-    const current = have[i];
-    const target = want[i];
-    if (current === undefined || target === undefined) continue;
-
-    if (current.type !== target.type) {
-      setBlockType(doc, current.id, target.type, {
-        ...(target.level === undefined ? {} : { level: target.level }),
-        ...(target.language === undefined ? {} : { language: target.language }),
-      });
-      changed = true;
-    } else if (
-      target.type === "heading" &&
-      (current.level ?? 1) !== (target.level ?? 1)
-    ) {
-      setBlockLevel(doc, current.id, target.level ?? 1);
-      changed = true;
-    } else if (
-      target.type === "code" &&
-      (current.language ?? "") !== (target.language ?? "")
-    ) {
-      setBlockLanguage(doc, current.id, target.language ?? "");
-      changed = true;
-    }
-
-    // Read the text back: a re-type replaced the element, and the file is the
-    // intended state either way.
-    const text = getBlockText(doc, current.id);
-    if (text !== target.text) {
-      editBlock(doc, current.id, text, target.text);
-      changed = true;
-    }
-  }
-
-  // Trailing blocks the file no longer has, back to front so the ids stay valid.
-  for (let i = have.length - 1; i >= want.length; i -= 1) {
-    const extra = have[i];
-    if (extra === undefined) continue;
-    deleteBlock(doc, extra.id);
-    changed = true;
-  }
-
-  for (let i = have.length; i < want.length; i += 1) {
-    const missing = want[i];
-    if (missing === undefined) continue;
-    appendBlock(doc, toBlockInput(missing));
-    changed = true;
-  }
-
-  return changed;
-}
-
 function applySeed(
   replicas: Replicas,
   seed: SeedDoc,
 ): Omit<SeedImport, "synced"> {
   const replica = replicas.replica(seed.uuid);
   const doc = replica.doc;
-  const links = seed.links ?? [];
   const directory = replicas.directory();
   const stub = getDirectoryEntry(directory.doc, seed.uuid);
   const identity = {
@@ -213,77 +143,68 @@ function applySeed(
     room: replica.room,
     blocks: seed.blocks.length,
   };
+  const skip = (reason: string): Omit<SeedImport, "synced"> => {
+    log.warn("skipping a seed document", {
+      uuid: seed.uuid,
+      file: seed.file,
+      reason,
+      hub: replicas.sync.state().status,
+    });
+    return { ...identity, action: "skipped", reason };
+  };
+
+  // A tombstone is sticky by design: upserting a deleted entry keeps it deleted,
+  // so a document written here could never be listed again. Importing into that
+  // is a conflict a human has to resolve, not something to do quietly.
+  if (stub?.deleted === true) {
+    return skip(
+      "the directory entry is tombstoned, and a tombstone is sticky — this " +
+        "document could never appear in list_docs again",
+    );
+  }
 
   // An empty `meta.uuid` is the one reliable "this document does not exist
   // yet" — the room is joined by uuid, so its name proves nothing.
-  const fresh = getMeta(doc).uuid === "";
+  const hydrated = getMeta(doc).uuid !== "";
 
-  // …unless the directory says otherwise. A live stub for an empty room means
-  // the document exists somewhere and this replica has not received it, which is
-  // the one case where writing does real damage: the blocks would merge into the
-  // existing room as a second copy. Refuse, and let the report say why.
-  if (fresh && stub !== null && stub.deleted !== true && replicas.sync.enabled) {
-    log.warn(
-      "skipping a seed document the directory knows but this replica has not received",
-      { uuid: seed.uuid, file: seed.file, hub: replicas.sync.state().status },
+  // …but a live stub over an empty room means the document exists somewhere and
+  // this replica has not received it, which is the case where writing does real
+  // damage: the blocks would merge into the existing room as a second copy.
+  if (!hydrated && stub !== null && replicas.sync.enabled) {
+    return skip(
+      "the directory names this document but its room has not reached this " +
+        "replica, so writing it would duplicate every block",
     );
-    return { ...identity, action: "skipped" };
   }
 
-  let changed = fresh;
-
-  if (fresh) {
-    initDoc(doc, { uuid: seed.uuid, title: seed.title, tags: seed.tags });
-  } else {
-    const meta = getMeta(doc);
-    if (meta.title !== seed.title) {
-      setTitle(doc, seed.title);
-      changed = true;
-    }
-    if (!sameSet(meta.tags, seed.tags)) {
-      setTags(doc, seed.tags);
-      changed = true;
-    }
+  // Already imported, so this importer is done with it — whatever the file says
+  // now. The document belongs to the MCP tools from here on, and a changed seed
+  // file is indistinguishable from an edited document.
+  if (hydrated) {
+    return { ...identity, action: "unchanged", reason: null };
   }
 
-  if (!sameSet(getMeta(doc).links, links)) {
+  initDoc(doc, { uuid: seed.uuid, title: seed.title, tags: seed.tags });
+  for (const block of seed.blocks) {
+    appendBlock(doc, toBlockInput(block));
+  }
+  // A file that declares no links says nothing about links — it does not say
+  // "no links". `initDoc` has already seeded an empty set, so writing one here
+  // would only ever be a way to clear something.
+  const links = seed.links ?? [];
+  if (links.length > 0) {
     setLinks(doc, links);
-    changed = true;
-  }
-  if (reconcileBlocks(doc, seed.blocks)) {
-    changed = true;
   }
 
   // Discovery is a synced doc, so being discoverable is an explicit write here —
   // the way `create_doc` does it — not a side effect of having been observed.
-  // A re-run therefore also repairs a stub that went missing.
-  //
-  // Re-read: observing this document's own updates already repaired the stub, so
-  // the value from before the writes would provoke a pointless second write.
-  const written = getDirectoryEntry(directory.doc, seed.uuid);
-  if (written?.deleted === true) {
-    // Tombstones are sticky by design: a late write must not resurrect a
-    // deleted document. Say so rather than leaving a doc silently unlisted.
-    log.warn("seed document is tombstoned in the directory, leaving it deleted", {
-      uuid: seed.uuid,
-      file: seed.file,
-    });
-  } else if (
-    written === null ||
-    written.title !== seed.title ||
-    !sameSet(written.tags, seed.tags)
-  ) {
-    upsertDirectoryEntry(directory.doc, {
-      uuid: seed.uuid,
-      title: seed.title,
-      tags: seed.tags,
-    });
-  }
+  upsertDirectoryEntry(directory.doc, {
+    uuid: seed.uuid,
+    title: seed.title,
+    tags: seed.tags,
+  });
 
-  return {
-    ...identity,
-    action: fresh ? "created" : changed ? "updated" : "unchanged",
-  };
+  return { ...identity, action: "created", reason: null };
 }
 
 /**
@@ -307,7 +228,7 @@ function warnOnDanglingLinks(replicas: Replicas, docs: SeedDoc[]): void {
 }
 
 /**
- * Import (or re-import) every parsed seed document.
+ * Import every parsed seed document that is not already in the system.
  *
  * The two-pass shape is the load-bearing part. Every target room is joined and
  * given a chance to sync *before* anything is written, because "does this
@@ -315,6 +236,11 @@ function warnOnDanglingLinks(replicas: Replicas, docs: SeedDoc[]): void {
  * what this machine happens to have downloaded. Skipping that, a second machine
  * would find every seed document empty and append a second copy of its blocks
  * into the very same room — merging into a duplicated document.
+ *
+ * @throws PersistenceError as soon as an update fails to reach the log. The log
+ * is the authoritative replica, so a failed append leaves the document ahead of
+ * the truth: continuing would pile more unlogged writes on top and let the run
+ * report documents as imported that a restart will not bring back.
  */
 export async function importSeedDocs(
   replicas: Replicas,
@@ -329,11 +255,21 @@ export async function importSeedDocs(
 
   warnOnDanglingLinks(replicas, docs);
 
-  const results = docs.map((doc) => applySeed(replicas, doc));
+  const results: Omit<SeedImport, "synced">[] = [];
+  for (const doc of docs) {
+    results.push(applySeed(replicas, doc));
+    // Checked per document, not once at the end: the first failed append is the
+    // last honest moment. Stopping here leaves the documents already imported
+    // intact and durable, and reports the failure instead of a false success.
+    replicas.assertHealthy();
+  }
 
   // The import is already durable — it is in the log. This only lets the report
   // tell the truth about what the hub has taken.
   await replicas.sync.waitForQuiet();
+  // A remote update can fail to log while we wait, which poisons this replica
+  // just as surely as one of our own writes would.
+  replicas.assertHealthy();
 
   return results.map((result) => ({
     ...result,

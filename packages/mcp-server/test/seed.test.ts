@@ -16,12 +16,19 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import type { Hub } from "@uberblick/hub";
-import { getBlocks, roomForDoc, upsertDirectoryEntry } from "@uberblick/schema";
-import { Replicas } from "../src/replica.js";
+import {
+  getBlocks,
+  getMeta,
+  roomForDoc,
+  tombstoneDirectoryEntry,
+  upsertDirectoryEntry,
+} from "@uberblick/schema";
+import { PersistenceError, Replicas } from "../src/replica.js";
 import { MirrorStore } from "../src/store.js";
 import { importSeedDocs, readSeedDocs } from "../src/seed.js";
 import type { SeedImport } from "../src/seed.js";
 import {
+  FailingStore,
   TEST_SECRET,
   WORKSPACE,
   hubUrl,
@@ -96,6 +103,8 @@ afterAll(() => {
 });
 
 describe("seed import", () => {
+  // What the importer needs from a seed file, not what the corpus happens to
+  // look like today: identity it can key on, a title, and something to import.
   it("parses every seed file with identity, a title and a tag", () => {
     expect(seeds.length).toBeGreaterThanOrEqual(9);
     for (const seed of seeds) {
@@ -103,7 +112,7 @@ describe("seed import", () => {
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
       );
       expect(seed.title).not.toBe("");
-      expect(seed.tags).toHaveLength(1);
+      expect(seed.tags.length).toBeGreaterThanOrEqual(1);
       expect(seed.blocks.length).toBeGreaterThan(0);
     }
   });
@@ -225,44 +234,112 @@ describe("seed import", () => {
     }
   });
 
-  it("reconciles a changed file in place, keeping block ids", async () => {
+  // The import is one-time: after it, the document belongs to whoever edits it
+  // through the MCP tools. A re-run — even against a seed file that has since
+  // changed — must not reach into a live document, because the importer cannot
+  // tell an edited file from an edited document.
+  it("leaves live edits alone on a re-run, even when the file changed", async () => {
     const dir = tempDir();
     const uuid = "1f4a2c7e-1b3d-4f9a-8c21-9b6d0e5a7c33";
-    const write = (body: string): void => {
+    const write = (body: string, tags: string): void => {
       writeFileSync(
         join(dir, "doc.md"),
-        `---\nuuid: ${uuid}\ntitle: Reconciled\ntags: [reference]\n---\n\n${body}`,
+        `---\nuuid: ${uuid}\ntitle: Imported once\ntags: [${tags}]\n---\n\n${body}`,
       );
     };
 
-    write("## First\n\nOriginal prose.\n");
+    write("## First\n\nOriginal prose.\n", "reference");
     const databasePath = tempDatabasePath();
     await runImport(databasePath, dir);
 
-    const before = await startServer(testConfig({ databasePath }));
-    const ids = await before
-      .ok("get_doc", { uuid })
-      .then((doc) => (doc.blocks as { id: string }[]).map((block) => block.id));
-    await before.close();
+    // A human or an agent edits the document through the tools.
+    const editing = await startServer(testConfig({ databasePath }));
+    const imported = await editing.ok("get_doc", { uuid });
+    const paragraph = (imported.blocks as { id: string; text: string }[])[1];
+    if (paragraph === undefined) throw new Error("expected a paragraph block");
+    await editing.ok("edit_block", {
+      uuid,
+      block_id: paragraph.id,
+      old_text: "Original prose.",
+      new_text: "Prose an agent rewrote.",
+    });
+    await editing.ok("set_tags", { uuid, tags: ["feature"] });
+    const added = await editing.ok("insert_block", {
+      uuid,
+      after_block_id: paragraph.id,
+      type: "paragraph",
+      text: "A block the seed file never had.",
+    });
+    await editing.close();
 
-    write("## First\n\nEdited prose.\n\nA new paragraph.\n");
+    // The seed file moves on too: different prose, a deleted block, new tags.
+    write("## First\n\nProse only the file has.\n", "verify");
     const second = await runImport(databasePath, dir);
-    expect(second.results[0]?.action).toBe("updated");
+    expect(second.results[0]?.action).toBe("unchanged");
+    expect(second.results[0]?.reason).toBeNull();
 
     const rig = await startServer(testConfig({ databasePath }));
     try {
       const doc = await rig.ok("get_doc", { uuid });
-      const blocks = doc.blocks as { id: string; type: string; text: string }[];
-      expect(blocks.map((block) => block.text)).toEqual([
+      // Every live edit survived, and nothing from the changed file landed.
+      expect((doc.blocks as { text: string }[]).map((block) => block.text)).toEqual([
         "First",
-        "Edited prose.",
-        "A new paragraph.",
+        "Prose an agent rewrote.",
+        "A block the seed file never had.",
       ]);
-      // An edit is an edit, not a replacement: the blocks that existed keep the
-      // ids every annotation anchor and inbound reference depends on.
-      expect(blocks.slice(0, 2).map((block) => block.id)).toEqual(ids);
+      expect(doc.tags).toEqual(["feature"]);
+      expect((doc.blocks as { id: string }[])[1]?.id).toBe(paragraph.id);
+      expect((doc.blocks as { id: string }[])[2]?.id).toBe(added.block.id);
     } finally {
       await rig.close();
+    }
+  });
+
+  // A tombstone is sticky: upserting a deleted entry keeps it deleted, so a
+  // document written here could never be listed. That is a conflict for a human,
+  // not something to do quietly and report as success.
+  it("skips a tombstoned uuid instead of writing a doc nothing can list", async () => {
+    const databasePath = tempDatabasePath();
+    const store = new MirrorStore(databasePath);
+    const replicas = new Replicas(testConfig({ databasePath }), store);
+    try {
+      const seed = seeds[0];
+      if (seed === undefined) throw new Error("no seed docs");
+      tombstoneDirectoryEntry(replicas.directory().doc, seed.uuid);
+
+      const results = await importSeedDocs(replicas, [seed]);
+      expect(results[0]?.action).toBe("skipped");
+      expect(results[0]?.reason).toContain("tombstoned");
+      expect(getBlocks(replicas.replica(seed.uuid).doc)).toHaveLength(0);
+      expect(getMeta(replicas.replica(seed.uuid).doc).uuid).toBe("");
+    } finally {
+      replicas.destroy();
+      store.close();
+    }
+  });
+
+  // The log is the authoritative replica, so an append it refuses means the
+  // documents in memory are ahead of the only durable copy. Reporting them as
+  // imported would be a lie a teardown then throws away.
+  it("fails the run when the log refuses a write", async () => {
+    const databasePath = tempDatabasePath();
+    const faulty = new FailingStore(databasePath);
+    const replicas = new Replicas(testConfig({ databasePath }), faulty);
+    try {
+      faulty.failing = true;
+      await expect(importSeedDocs(replicas, seeds)).rejects.toThrow(
+        PersistenceError,
+      );
+      // Nothing was made durable, so nothing may be reported as imported.
+      expect(faulty.logSize()).toBe(0);
+      // And it stopped at the first failure rather than working through the rest:
+      // the second document was never written.
+      const later = seeds[1];
+      if (later === undefined) throw new Error("expected more than one seed doc");
+      expect(getMeta(replicas.replica(later.uuid).doc).uuid).toBe("");
+    } finally {
+      replicas.destroy();
+      faulty.close();
     }
   });
 
