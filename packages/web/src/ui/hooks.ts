@@ -16,6 +16,7 @@ import {
 import type { DirectoryEntry, DocMeta } from "@uberblick/schema";
 import { acquireRoom } from "../collab/rooms.js";
 import type { RoomConnection, RoomStatus } from "../collab/rooms.js";
+import { AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
 import type { AwarenessUser } from "../collab/identity.js";
 import { findForeignBlocks } from "../editor/palette.js";
 import type { ForeignBlock } from "../editor/palette.js";
@@ -143,7 +144,7 @@ export function usePeers(connection: RoomConnection | null): AwarenessUser[] {
         if (user === undefined) return;
         out.push({
           name: typeof user.name === "string" ? user.name : `client ${clientId}`,
-          color: typeof user.color === "string" ? user.color : "#888888",
+          color: typeof user.color === "string" ? user.color : AWARENESS_FALLBACK_COLOR,
         });
       });
       setPeers(out);
