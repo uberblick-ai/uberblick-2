@@ -24,5 +24,6 @@ packages/*/data/
 .DS_Store
 .vite/
 
-# agent scratch space (git worktrees live under .claude/worktrees/)
-.claude/
+# agent-local state; .claude/skills/ is versioned
+.claude/worktrees/
+.claude/settings.local.json
