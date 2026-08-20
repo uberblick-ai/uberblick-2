@@ -61,7 +61,10 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    implementation.
 
 6. **Dispatch.** For each issue to start: add `in-progress`, comment
-   `Claimed: feat/<slug>` (or `fix/`), then spawn an Opus sub-agent whose
+   `Claimed: feat/<slug>` (or `fix/`). **Announce the work to the user** in
+   your visible output: one or two plain sentences on what the issue is and
+   why it's next, plus the direct GitHub URL (from
+   `gh issue view <n> --json url`). Then spawn an Opus sub-agent whose
    brief is decision-complete: the full issue body; the Pointers resolved
    (read them yourself first, pass the relevant excerpts — the agent starts
    with zero session memory); the applicable CLAUDE.md invariants; and the
@@ -71,6 +74,8 @@ protocol, scheduling semantics, and lint. This file does not restate it.
 
 7. **Report.** End with a short status a human can skim: PRs advanced (which
    gate), issues dispatched / bounced / parked, what the loop is waiting on.
+   Every issue or PR named in the status carries its direct GitHub URL —
+   the reader clicks through, never hunts.
 
 ## Pacing under /loop (dynamic mode)
 
