@@ -236,6 +236,45 @@ body {
   padding: 0.4rem;
 }
 
+/* ---- doc list groups ---- */
+
+.ub-group + .ub-group {
+  margin-top: 0.5rem;
+}
+
+/* The whole header is the toggle, so the hit target matches the row. */
+.ub-group-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.4rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.ub-group-head:hover {
+  color: var(--foreground);
+}
+
+.ub-group-caret {
+  width: 0.7rem;
+  flex: none;
+}
+
+.ub-group-count {
+  margin-left: auto;
+  letter-spacing: normal;
+}
+
 /* ---- editor pane ---- */
 
 .ub-pane {
