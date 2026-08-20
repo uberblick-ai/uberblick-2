@@ -11,6 +11,7 @@
   },
   "scripts": {
     "start": "tsx src/main.ts",
+    "import-seed": "tsx src/import-seed.ts",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"
