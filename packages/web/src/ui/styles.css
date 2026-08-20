@@ -63,12 +63,41 @@
   --sidebar-width: 16rem;
   --outline-width: 15rem;
 
-  /* Inter and Fraunces when the machine has them, system stack otherwise. No
-     webfont download: the app must work offline. */
-  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
-  --font-serif: "Fraunces", Georgia, "Times New Roman", serif;
+  /* Geist for UI and prose, Geist Mono for machine-flavoured text — room keys,
+     uuids, sync detail, group labels. Both are bundled (see the @font-face
+     block below), with a system stack behind them for the swap period. */
+  --font-sans: "Geist", system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   font-family: var(--font-sans);
+}
+
+/* The two faces ship with the app: variable woff2 files vendored under
+ * `src/assets/fonts` (Geist 1.7.2, SIL Open Font License 1.1 — the license
+ * travels with them as LICENSE.txt). No CDN, no `fonts.googleapis.com`: the
+ * app is offline-first, and a render-blocking third-party request would make
+ * it render differently with no network.
+ *
+ * Vite rewrites these relative urls to hashed emitted assets, so the paths
+ * survive any base path. One variable file per family covers every weight
+ * (`font-weight: 100 900`); italics are left to the browser's synthetic
+ * oblique rather than doubling the payload. `swap` keeps first paint on the
+ * system stack instead of blocking on the download.
+ */
+@font-face {
+  font-family: "Geist";
+  src: url("../assets/fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("../assets/fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
 }
 
 @media (prefers-color-scheme: light) {
@@ -130,8 +159,9 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+/* The wordmark is Geist like the rest of the UI — the serif display face is
+   gone with Fraunces. */
 .ub-brand {
-  font-family: var(--font-serif);
   font-weight: 700;
   color: var(--brand);
 }
@@ -154,12 +184,28 @@ body {
   font-size: 0.8rem;
 }
 
+/* Machine-flavoured text is Geist Mono: the workspace and room keys, the sync
+   detail line, the sidebar group labels, and the block ids in the
+   unsupported-content fallback. Prose and chrome stay Geist. Scoped selectors
+   rather than the bare `.ub-muted`, which also carries prose ("No documents
+   yet."). */
+.ub-header .ub-muted,
+.ub-list-head .ub-muted,
+.ub-status,
+.ub-group-head,
+.ub-foreign-list {
+  font-family: var(--font-mono);
+}
+
+/* Presence names are words, not identifiers, so the pills stay Geist wherever
+   they sit — including inside the mono status line. */
 .ub-me,
 .ub-peer {
   border: 2px solid var(--border);
   border-radius: 999px;
   padding: 0.1rem 0.5rem;
   font-size: 0.75rem;
+  font-family: var(--font-sans);
 }
 
 .ub-body {
@@ -484,7 +530,7 @@ body {
   border-radius: var(--radius-sm);
   padding: 0.6rem 0.75rem;
   margin: 0.7em 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85rem;
   white-space: pre-wrap;
   overflow-x: auto;
