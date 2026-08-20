@@ -41,6 +41,13 @@ trap 'kill 0' INT TERM
 wait
 """
 
+[tasks.install]
+description = "Install workspace dependencies (frozen lockfile in CI)"
+# PNPM_STORE_DIR is a convention of this task, not something pnpm reads: CI sets
+# it to the store it caches, and pnpm expands the `~` itself. Unset locally, so
+# pnpm keeps using its own default store.
+run = 'pnpm install --frozen-lockfile ${PNPM_STORE_DIR:+--store-dir "$PNPM_STORE_DIR"}'
+
 [tasks.typecheck]
 description = "Typecheck every package (tsc --noEmit)"
 run = "pnpm -r typecheck"
