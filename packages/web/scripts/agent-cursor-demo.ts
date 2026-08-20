@@ -6,10 +6,9 @@
  * reads, so it renders in the web editor with a name label like any human peer.
  * The MCP server will reuse this format for agent attribution.
  *
- * Entry point: `mise run agent-cursor` — the task does not exist yet (mise.toml
- * lives outside this package, so adding it is a separate change, tracked in
- * issue #15). It takes an optional `<docUuid>`; with no uuid the script picks
- * the first entry from the directory doc. HUB_AUTH_TOKEN has to come from
+ * Entry point: `mise run agent-cursor`. It takes an optional `<docUuid>`
+ * (`mise run agent-cursor -- <docUuid>`); with no uuid the script picks the
+ * first entry from the directory doc. HUB_AUTH_TOKEN has to come from
  * `fnox exec`, which the task wraps.
  *
  * ============================================================================
