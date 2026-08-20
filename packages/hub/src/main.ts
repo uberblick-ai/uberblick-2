@@ -1,15 +1,50 @@
 /**
- * @uberblick/hub — Hocuspocus sync hub.
+ * Hub process entry point (`mise run hub`).
  *
- * One Y.Doc per document; the room name is the document UUID.
- * Persistence is SQLite via @hocuspocus/extension-sqlite.
- * Auth uses HUB_AUTH_TOKEN, supplied by `fnox exec`.
- *
- * Scaffold placeholder — the server is not wired up yet.
+ * Owns the process: reads the environment, starts one hub, and turns
+ * SIGTERM/SIGINT into a flush-then-close shutdown, so that killing the hub
+ * loses nothing. Hocuspocus can install equivalent handlers itself
+ * (`stopOnSignals`), but `createHub` keeps its hands off process state — that
+ * is what makes it embeddable in tests — so the signals are wired here, where
+ * the shutdown can also be logged and bounded.
  */
 
-function main(): void {
-  console.log("uberblick hub: scaffold placeholder, not implemented yet");
+import { resolveHubConfig } from "./config.js";
+import { stderrLogger } from "./log.js";
+import { createHub } from "./server.js";
+
+const SIGNALS = ["SIGTERM", "SIGINT"] as const;
+
+async function main(): Promise<void> {
+  const hub = await createHub(resolveHubConfig());
+
+  let shuttingDown = false;
+  const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
+    // A second signal while the first is still draining must not race it.
+    if (shuttingDown) {
+      stderrLogger({ event: "hub.signal.ignored", signal });
+      return;
+    }
+    shuttingDown = true;
+    stderrLogger({ event: "hub.signal", signal });
+
+    try {
+      await hub.stop();
+      process.exit(0);
+    } catch (error) {
+      stderrLogger({ event: "hub.stop.failed", error: String(error) });
+      process.exit(1);
+    }
+  };
+
+  for (const signal of SIGNALS) {
+    process.on(signal, () => {
+      void shutdown(signal);
+    });
+  }
 }
 
-main();
+main().catch((error: unknown) => {
+  stderrLogger({ event: "hub.start.failed", error: String(error) });
+  process.exitCode = 1;
+});

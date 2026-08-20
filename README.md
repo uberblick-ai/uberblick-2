@@ -10,7 +10,7 @@ mirror (FTS5, tags, backlinks), and a Tiptap/ProseMirror web client.
 | Package                    | What it is                                                            |
 | -------------------------- | --------------------------------------------------------------------- |
 | `packages/schema`          | The keystone. Yjs block model, markdown import/export, block edits.   |
-| `packages/hub`             | Hocuspocus sync hub, SQLite persistence. Binds `PORT` (default 1234). |
+| `packages/hub`             | Hocuspocus sync hub, SQLite persistence. Binds `HUB_HOST`:`PORT` (default `127.0.0.1:1234`). |
 | `packages/mcp-server`      | MCP stdio server, local SQLite mirror, block-scoped tools.            |
 | `packages/web`             | Vite + React + Tiptap viewer/editor.                                  |
 

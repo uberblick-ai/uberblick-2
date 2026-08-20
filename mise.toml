@@ -6,13 +6,15 @@ fnox = "1"
 # Plaintext local defaults. Only real secrets belong in fnox.toml.
 #
 # HUB_URL is the websocket endpoint clients (web, mcp-server) dial. The hub
-# itself binds PORT — default 1234 in code — so the two must agree; override
-# both together when running the hub somewhere else.
+# itself binds HUB_HOST:PORT — default 127.0.0.1:1234 in code — so the two must
+# agree; override them together when running the hub somewhere else. The bind
+# address is loopback until someone opts into more: the hub's only credential is
+# a shared dev secret, so `HUB_HOST=0.0.0.0` is a deliberate choice.
 [env]
 HUB_URL = "ws://localhost:1234"
 
 [tasks.hub]
-description = "Start the Hocuspocus sync hub (binds PORT, default 1234)"
+description = "Start the Hocuspocus sync hub (binds HUB_HOST:PORT, default 127.0.0.1:1234)"
 run = "fnox exec --if-missing warn -- pnpm --filter @uberblick/hub start"
 
 [tasks.mcp]
