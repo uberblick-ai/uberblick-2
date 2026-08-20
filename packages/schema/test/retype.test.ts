@@ -222,6 +222,34 @@ describe("setBlockType", () => {
     expect(getBlocks(b)).toEqual(getBlocks(a));
   });
 
+  it("never shadows or repairs id-less foreign content", () => {
+    const doc = seeded();
+    const mine = appendBlock(doc, { type: "paragraph", text: "mine" });
+    doc.transact(() => {
+      const fragment = getBlocksFragment(doc);
+      for (const [name, text] of [
+        ["future-a", "alpha"],
+        ["future-b", "beta"],
+      ] as const) {
+        const element = new Y.XmlElement(name);
+        element.insert(0, [new Y.XmlText(text)]);
+        fragment.insert(fragment.length, [element]);
+      }
+    });
+
+    // Two elements with no id are not two copies of one block: an absent id has
+    // claimed no identity. Both stay visible and the repair leaves them alone —
+    // unknown content degrades loudly, it is never silently dropped.
+    expect(getBlocks(doc).map((block) => block.text)).toEqual([
+      "mine",
+      "alpha",
+      "beta",
+    ]);
+    expect(repairDuplicateBlocks(doc)).toBe(0);
+    expect(fragmentTypes(doc)).toEqual(["paragraph", "future-a", "future-b"]);
+    expect(getBlock(doc, mine)?.text).toBe("mine");
+  });
+
   it("deletes every copy of a duplicated block, so it cannot come back", () => {
     const { a, id } = duplicated();
 

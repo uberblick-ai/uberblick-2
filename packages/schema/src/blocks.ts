@@ -70,6 +70,11 @@ function readText(text: Y.XmlText | null): string {
  * elements sharing its id — see {@link setBlockType}. Document order is
  * identical on every replica, so every replica shadows the same elements.
  *
+ * Only a real, non-empty id can shadow anything. An element with no id has
+ * claimed no block identity, so two of them are not copies of one block: they
+ * stay visible and unrepairable, because unknown content degrades loudly and is
+ * never silently dropped.
+ *
  * This is the one place that rule lives: everything that walks the fragment goes
  * through here.
  */
@@ -87,11 +92,13 @@ function partitionById(fragment: Y.XmlFragment): {
     const child = children[i];
     if (!(child instanceof Y.XmlElement)) continue;
     const id = child.getAttribute("id") ?? "";
-    if (seen.has(id)) {
-      shadowed.push(i);
-      continue;
+    if (id !== "") {
+      if (seen.has(id)) {
+        shadowed.push(i);
+        continue;
+      }
+      seen.add(id);
     }
-    seen.add(id);
     visible.push(child);
   }
   return { visible, shadowed };
@@ -274,6 +281,9 @@ export function deleteBlock(ydoc: Y.Doc, blockId: string): void {
  * Nothing to repair means no transaction and no update, so calling this on every
  * observed change is free, and two replicas repairing the same duplicate
  * converge: they delete the same element, and a second delete of it is a no-op.
+ *
+ * Only a repeated, non-empty id is a duplicate. Foreign content — an element
+ * some future writer added, with no id of its own — is never deleted here.
  *
  * The losing copy's text goes with it, including anything written to it after
  * the re-type — the same semantics as a text edit concurrent with a re-type, and

@@ -38,12 +38,6 @@ The editor palette offers exactly these: ¶, H1, H2, H3, code, mermaid.
   transaction.
 - Delete-and-reinsert is an invariant violation: it churns the id and orphans
   every annotation anchored in the block.
-- Two replicas re-typing one block concurrently therefore converge on two
-  elements sharing its id. Reads shadow the later one in document order — every
-  read returns exactly one block per id, and every replica picks the same winner
-  — and the MCP server deletes the shadowed element as soon as it observes the
-  duplicate, keeping the winner. `deleteBlock` removes every copy, so a repaired
-  block cannot come back.
 
 ## Unknown content degrades loudly
 
@@ -57,13 +51,10 @@ The editor palette offers exactly these: ¶, H1, H2, H3, code, mermaid.
 
 ## Known limits
 
-- A duplicate id left by concurrent re-types is invisible to reads immediately,
-  but it is removed from the document only when an MCP server observes it: the
-  web client does not repair, so a document only browsers have seen keeps the
-  extra element until an agent session touches it.
+- Two replicas re-typing the same block while unsynced converge on two elements
+  sharing one id. The fix is decided (dedupe-on-read plus repair-on-observe) and
+  not implemented — issue #11.
 - A text edit made concurrently with a re-type loses its characters with the
-  replaced element — including edits written into the losing copy of a
-  duplicated block, which the repair deletes. `rev` and `old_text` protect a
-  caller who checks. Divergent duplicate texts are never merged.
+  replaced element. `rev` and `old_text` protect a caller who checks.
 - There is no move operation. Blocks are inserted, appended and deleted;
   reordering means delete and reinsert, which changes the id.
