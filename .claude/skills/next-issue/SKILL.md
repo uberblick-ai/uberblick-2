@@ -44,7 +44,10 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    - resolve and record the PR's immutable `headRefOid`, fetch it, inspect that
      commit's `Dockerfile.review`, then run
      `REVIEW_SHA=<headRefOid> mise run review`; never treat tests from a mutable
-     shared checkout as review evidence. For an older PR that predates
+     shared checkout as review evidence. Fetch the commit — never check the PR
+     branch out to review it: `mise run review` reads its own task definition
+     from the current working tree, and `git archive` only needs the object.
+     For an older PR that predates
      `Dockerfile.review`, construct a temporary trusted Dockerfile from the
      toolchain declared at that SHA and still build from `git archive`;
    - never pass branch-owned Docker builds secrets, host mounts, privileged

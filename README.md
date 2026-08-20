@@ -81,13 +81,36 @@ checkout, untracked files, local `node_modules`, `.git`, or plaintext secrets.
 The resulting image is tagged `uberblick-review:<full-sha>` and retained so a
 reviewer can run focused failure-path probes against the exact same environment.
 
+### The trust boundary
+
 `Dockerfile.review` belongs to the branch, so branches may add the OS/runtime
-dependencies their changes require. Inspect changes to that file before
-building it: a Dockerfile is executable branch code. The trusted invocation
-must never pass build secrets, host mounts, privileged mode, or the Docker
-socket. Dependency installation needs network access during the image build;
-the verification container itself runs with no network and all capabilities
-dropped.
+dependencies their changes require — which makes it executable branch code.
+Two consequences follow, and neither is papered over.
+
+**The build stage has network; the verification stage does not.** Installing
+the pinned package manager and the lockfile's dependencies needs the npm
+registry, so `docker build` runs the branch's `RUN` instructions on Docker's
+default network. The verification container that runs the gates is the isolated
+half: `--network none --cap-drop ALL --security-opt no-new-privileges`.
+Restricting the build itself is not on the table — `docker build
+--network=none` fails at the package-manager install, and a `RUN
+--network=none` written *inside* the Dockerfile would be a control the branch
+could simply delete. So the build stage is guarded procedurally: read the
+reviewed commit's `Dockerfile.review` diff **before** you run anything, and
+note that a build only ever happens on an explicit
+`REVIEW_SHA=<commit> mise run review` — nothing builds a branch automatically
+and no CI job builds one on push. The standing rule bounds the blast radius:
+never pass build secrets, host mounts, privileged mode, or the Docker socket,
+so a hostile build has no credentials of ours to exfiltrate.
+
+**The task definition comes from your checkout, not from the branch.**
+`mise run review` reads `mise.toml` from the working tree it runs in, so the
+launcher is trustworthy exactly as far as that tree is. Keep it that way:
+reviewing a PR never requires checking the branch out. The task builds
+`git archive <REVIEW_SHA>`, which needs the commit *fetched*, not checked out —
+so stay on your own `main` and pass the SHA. Check out a branch you are
+reviewing and you have already handed it your `mise.toml`, your git hooks and
+your `node_modules`, long before Docker is involved.
 
 ## Toolchain choices
 

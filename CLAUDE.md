@@ -66,12 +66,18 @@ before moving on.
    Findings are triaged: real ones are fixed on the branch; rejected ones get
    an explicit reply on the PR thread, never silent dismissal.
    Before building branch-owned review code, inspect the reviewed commit's
-   `Dockerfile.review` diff. The trusted runner supplies only
+   `Dockerfile.review` diff — the build stage runs those `RUN` instructions
+   with network, so that diff is the gate, and a build only ever happens on an
+   explicit `REVIEW_SHA=<commit> mise run review`, never automatically. Run it
+   from your own trusted checkout and pass the SHA: the task definition itself
+   comes from the current working tree, and `git archive` needs the commit
+   fetched, never checked out. The trusted runner supplies only
    `git archive <head-sha>` as context and never passes secrets, host mounts,
    privileged mode, or the Docker socket. For persistence, startup/shutdown,
    networking, concurrency, and other stateful boundaries, passing happy-path
    tests is not enough: run focused failure-path probes in the retained review
-   image and post reproducible findings inline.
+   image and post reproducible findings inline. README's "Review isolation"
+   states the full boundary.
 5. **Merge, then docs.** After the gates pass, merge per the merge policy
    below; then update the product docs (through the uberblick MCP tools once
    live) to the new status quo.
