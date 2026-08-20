@@ -195,28 +195,34 @@ export function EditorPane({
   if (connection === null) {
     return (
       <section className="ub-pane">
-        <p className="ub-muted">Pick a document, or create one.</p>
+        <div className="ub-column">
+          <p className="ub-muted">Pick a document, or create one.</p>
+        </div>
       </section>
     );
   }
 
+  // `ub-pane` is the scroll container and takes whatever width is left; the
+  // reading measure lives on `ub-column`, centred inside it.
   return (
     <section className="ub-pane">
-      <input
-        className="ub-title"
-        value={meta?.title ?? ""}
-        placeholder="Untitled"
-        onChange={(event) => setTitle(connection.ydoc, event.target.value)}
-      />
-      <StatusLine connection={connection} />
-      {foreign.length > 0 ? (
-        <ForeignFallback
-          connection={connection}
-          summary={describeForeignBlocks(foreign)}
+      <div className="ub-column">
+        <input
+          className="ub-title"
+          value={meta?.title ?? ""}
+          placeholder="Untitled"
+          onChange={(event) => setTitle(connection.ydoc, event.target.value)}
         />
-      ) : (
-        <BoundEditor connection={connection} />
-      )}
+        <StatusLine connection={connection} />
+        {foreign.length > 0 ? (
+          <ForeignFallback
+            connection={connection}
+            summary={describeForeignBlocks(foreign)}
+          />
+        ) : (
+          <BoundEditor connection={connection} />
+        )}
+      </div>
     </section>
   );
 }

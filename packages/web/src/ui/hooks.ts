@@ -4,7 +4,7 @@
  * take the same path to the screen.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import * as Y from "yjs";
 import {
   getBlocksFragment,
@@ -21,6 +21,8 @@ import type { AwarenessUser } from "../collab/identity.js";
 import { findForeignBlocks } from "../editor/palette.js";
 import type { ForeignBlock } from "../editor/palette.js";
 import { blockText, plainText } from "../editor/ytext.js";
+import { observeOutline } from "./outline.js";
+import type { OutlineEntry } from "./outline.js";
 
 /** Acquire a shared room connection for as long as the component needs it. */
 export function useRoom(
@@ -195,7 +197,55 @@ export function useRawBlocks(
   return blocks;
 }
 
+/**
+ * The open document's heading outline, live. Same shape as every other view
+ * here: an observer over the document, not local state — so a heading a remote
+ * client renames redraws the outline.
+ */
+export function useOutline(connection: RoomConnection | null): OutlineEntry[] {
+  const [outline, setOutline] = useState<OutlineEntry[]>([]);
+  useEffect(() => {
+    if (connection === null) {
+      setOutline([]);
+      return;
+    }
+    return observeOutline(connection.ydoc, setOutline);
+  }, [connection]);
+  return outline;
+}
+
 /** A stable per-tab identity. */
 export function useIdentity(factory: () => AwarenessUser): AwarenessUser {
   return useMemo(factory, []);
+}
+
+/**
+ * A boolean that survives a reload. Storage can be unavailable (private
+ * windows, blocked third-party contexts), and a UI preference is never worth an
+ * exception, so both directions fall back to the in-memory value.
+ */
+export function useStoredFlag(
+  key: string,
+  fallback: boolean,
+): [boolean, (next: boolean) => void] {
+  const [value, setValue] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem(key);
+      return stored === null ? fallback : stored === "true";
+    } catch {
+      return fallback;
+    }
+  });
+  const set = useCallback(
+    (next: boolean) => {
+      setValue(next);
+      try {
+        localStorage.setItem(key, String(next));
+      } catch {
+        // Preference stays for this tab only.
+      }
+    },
+    [key],
+  );
+  return [value, set];
 }
