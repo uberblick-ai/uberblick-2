@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2022"],
+    "target": "ES2023",
+    "lib": ["ES2023"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
 
@@ -13,10 +13,10 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
 
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "composite": true,
+    // Nothing in this repo consumes build output: packages resolve to
+    // ./src/index.ts and tsx/vite/vitest compile TypeScript directly.
+    // tsc is a typechecker here, never a build step.
+    "noEmit": true,
 
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,

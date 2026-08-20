@@ -23,3 +23,6 @@ packages/*/data/
 # editor / OS
 .DS_Store
 .vite/
+
+# agent scratch space (git worktrees live under .claude/worktrees/)
+.claude/

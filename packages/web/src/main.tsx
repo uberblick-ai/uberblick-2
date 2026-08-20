@@ -1,8 +1,10 @@
 /**
- * @uberblick/web — BlockNote viewer/editor.
+ * @uberblick/web — viewer/editor.
  *
- * Scaffold placeholder: renders a title only. The BlockNote editor, the
- * Hocuspocus provider connection and awareness rendering are not wired up yet.
+ * Scaffold placeholder: renders a title only. The Tiptap/ProseMirror editor
+ * (bound to the Y.Doc through y-prosemirror), the Hocuspocus provider
+ * connection, y-indexeddb offline caching and awareness rendering are not
+ * wired up yet.
  */
 
 import { StrictMode } from "react";

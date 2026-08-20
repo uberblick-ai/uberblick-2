@@ -1,23 +1,49 @@
 [tools]
 node = "26"
 pnpm = "10"
-fnox = "latest"
+fnox = "1"
+
+# Plaintext local defaults. Only real secrets belong in fnox.toml.
+#
+# HUB_URL is the websocket endpoint clients (web, mcp-server) dial. The hub
+# itself binds PORT — default 1234 in code — so the two must agree; override
+# both together when running the hub somewhere else.
+[env]
+HUB_URL = "ws://localhost:1234"
 
 [tasks.hub]
-description = "Start the Hocuspocus sync hub"
-run = "fnox exec -- pnpm --filter @uberblick/hub start"
+description = "Start the Hocuspocus sync hub (binds PORT, default 1234)"
+run = "fnox exec --if-missing warn -- pnpm --filter @uberblick/hub start"
 
 [tasks.mcp]
-description = "Start the MCP server"
-run = "fnox exec -- pnpm --filter @uberblick/mcp-server start"
+description = "Start the MCP server for a smoke test — an MCP client normally spawns it over stdio itself"
+# --silent keeps pnpm's own lifecycle banner off stdout: stdout is the JSON-RPC
+# transport, so anything but MCP frames there breaks the session.
+run = "fnox exec --if-missing warn -- pnpm --silent --filter @uberblick/mcp-server start"
 
 [tasks.web]
 description = "Start the Vite dev server"
-run = "fnox exec -- pnpm --filter @uberblick/web dev"
+run = "fnox exec --if-missing warn -- pnpm --filter @uberblick/web dev"
 
+# hub + web only. The MCP server is a stdio process spawned by its client
+# (Claude Code et al.), so it is not part of the dev loop; use `mise run mcp`
+# for a standalone smoke test.
+#
+# These are long-running, so `depends` is wrong here: with MISE_JOBS=1 mise
+# would run the hub to completion before ever starting web. Fan out explicitly
+# instead, and take the whole process group down on Ctrl-C.
 [tasks.dev]
-description = "Run hub, mcp and web together"
-depends = ["hub", "mcp", "web"]
+description = "Run the hub and the web dev server together"
+run = """
+mise run hub &
+mise run web &
+trap 'kill 0' INT TERM
+wait
+"""
+
+[tasks.typecheck]
+description = "Typecheck every package (tsc --noEmit)"
+run = "pnpm -r typecheck"
 
 [tasks.test]
 description = "Run all test suites"

@@ -9,8 +9,12 @@
  * Scaffold placeholder — no tools are registered yet.
  */
 
+import { log } from "./log.js";
+
 function main(): void {
-  console.log("uberblick mcp-server: scaffold placeholder, not implemented yet");
+  // stdout is the JSON-RPC transport for this process: it carries MCP frames
+  // and nothing else. All diagnostics go to stderr via ./log.ts.
+  log.info("scaffold placeholder, not implemented yet");
 }
 
 main();

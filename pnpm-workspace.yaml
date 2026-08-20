@@ -5,3 +5,22 @@ packages:
 onlyBuiltDependencies:
   - better-sqlite3
   - esbuild
+
+# CRDT single-instance contract.
+#
+# yjs, y-protocols and y-prosemirror keep module-level state and use instanceof
+# checks across the doc boundary: two copies of yjs in one process silently
+# corrupt documents. Workspace packages reference these through `catalog:` so
+# they all ask for the same exact version...
+catalog:
+  yjs: 13.6.32
+  y-protocols: 1.0.7
+  y-prosemirror: 1.3.7
+
+# ...and overrides pin transitive requests (y-prosemirror's yjs peer,
+# @hocuspocus/*'s y-protocols, y-indexeddb's yjs peer) to that same version, so
+# the store holds exactly one copy. Verify with `mise exec -- pnpm why yjs`.
+overrides:
+  yjs: 13.6.32
+  y-protocols: 1.0.7
+  y-prosemirror: 1.3.7
