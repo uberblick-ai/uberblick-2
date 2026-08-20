@@ -15,7 +15,7 @@ in docs, README, or CI.
 - `mise run hub` — start the Hocuspocus sync hub
 - `mise run mcp` — start the MCP server
 - `mise run web` — start the Vite dev server
-- `mise run dev` — all three
+- `mise run dev` — hub + web (the MCP server is stdio — its client spawns it)
 - `mise run test` — run the test suites
 
 Secrets and endpoints come from `fnox exec` (age-encrypted `fnox.toml`, safe
