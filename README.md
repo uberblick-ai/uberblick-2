@@ -50,19 +50,21 @@ the web server would never start.
 
 ## The MCP server, as a client sees it
 
-`.mcp.json` registers the server for any MCP client that reads it (Claude Code
-included). It spawns the same command `mise run mcp` does:
+`.mcp.json` registers the server for any MCP client that reads it, Claude Code
+included — the client spawns it for you, so there is nothing to start by hand.
+For a standalone smoke test, `mise run mcp` runs the same thing in the
+foreground. The exact spawn is config, and `.mcp.json` is where it lives; read it
+there rather than copying it into a shell.
 
-```
-fnox exec --if-missing warn -- pnpm --silent --filter @uberblick/mcp-server start
-```
+What that config is careful about, since none of it is obvious:
 
-`fnox exec` supplies `HUB_AUTH_TOKEN`; `--if-missing warn` is deliberate, so a
-contributor without the age key still gets a working server — offline-first, with
-`sync_status` reporting `disabled`. `pnpm --silent` is load-bearing: stdout is
-the JSON-RPC transport, and pnpm's lifecycle banner would corrupt the session.
-`HUB_URL` is not set here — the server falls back to `ws://localhost:1234`, the
-same default mise's `[env]` carries.
+- Secrets come from `fnox exec`, which supplies `HUB_AUTH_TOKEN`. A missing key
+  is a warning, not an error, on purpose: a contributor without the age key still
+  gets a working server — offline-first, with `sync_status` reporting `disabled`.
+- Package-manager lifecycle output is suppressed. stdout is the JSON-RPC
+  transport, so a banner on it would corrupt the session.
+- `HUB_URL` is left unset, so the server falls back to `ws://localhost:1234` —
+  the same default mise's `[env]` carries. No hub address is pinned here.
 
 `mise run import-seed` is the one-time import of `docs-seed/` into the system.
 After it, the product docs live in the documents, and are read and written
