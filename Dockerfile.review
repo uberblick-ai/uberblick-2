@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1.7
+
+# Branch-owned review environment. A branch may add system dependencies here,
+# but the trusted runner always supplies an immutable `git archive` context and
+# never passes secrets, host mounts, privileged mode, or the Docker socket.
+FROM node:26-bookworm
+
+ENV CI=true
+WORKDIR /review
+
+COPY --chown=node:node . .
+
+# package.json is the authority for the exact package-manager version.
+RUN npm install --global "$(node -p "require('./package.json').packageManager")" \
+    && chown node:node /review
+
+USER node
+RUN --mount=type=cache,target=/home/node/.local/share/pnpm/store,uid=1000,gid=1000 \
+    pnpm install --frozen-lockfile
+
+CMD ["sh", "-lc", "pnpm run typecheck && pnpm run test"]

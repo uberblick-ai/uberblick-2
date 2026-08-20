@@ -36,6 +36,7 @@ mise run web          # Vite dev server
 mise run dev          # hub + web in parallel
 mise run typecheck    # tsc --noEmit across all packages
 mise run test         # all test suites
+REVIEW_SHA=<commit> mise run review  # immutable Docker review of one commit
 ```
 
 `mise run dev` deliberately runs **hub + web only**. The MCP server speaks JSON-RPC
@@ -69,6 +70,47 @@ What that config is careful about, since none of it is obvious:
 `mise run import-seed` is the one-time import of `docs-seed/` into the system.
 After it, the product docs live in the documents, and are read and written
 through the MCP tools rather than by editing the seed files.
+
+## Review isolation
+
+`mise run review` resolves `REVIEW_SHA` to a commit, streams that commit through
+`git archive`, builds its `Dockerfile.review`, and runs the full typecheck and
+test gates in a disposable container. The build context therefore contains
+only committed files from the reviewed SHA: it cannot pick up a changing
+checkout, untracked files, local `node_modules`, `.git`, or plaintext secrets.
+The resulting image is tagged `uberblick-review:<full-sha>` and retained so a
+reviewer can run focused failure-path probes against the exact same environment.
+
+### The trust boundary
+
+`Dockerfile.review` belongs to the branch, so branches may add the OS/runtime
+dependencies their changes require — which makes it executable branch code.
+Two consequences follow, and neither is papered over.
+
+**The build stage has network; the verification stage does not.** Installing
+the pinned package manager and the lockfile's dependencies needs the npm
+registry, so `docker build` runs the branch's `RUN` instructions on Docker's
+default network. The verification container that runs the gates is the isolated
+half: `--network none --cap-drop ALL --security-opt no-new-privileges`.
+Restricting the build itself is not on the table — `docker build
+--network=none` fails at the package-manager install, and a `RUN
+--network=none` written *inside* the Dockerfile would be a control the branch
+could simply delete. So the build stage is guarded procedurally: read the
+reviewed commit's `Dockerfile.review` diff **before** you run anything, and
+note that a build only ever happens on an explicit
+`REVIEW_SHA=<commit> mise run review` — nothing builds a branch automatically
+and no CI job builds one on push. The standing rule bounds the blast radius:
+never pass build secrets, host mounts, privileged mode, or the Docker socket,
+so a hostile build has no credentials of ours to exfiltrate.
+
+**The task definition comes from your checkout, not from the branch.**
+`mise run review` reads `mise.toml` from the working tree it runs in, so the
+launcher is trustworthy exactly as far as that tree is. Keep it that way:
+reviewing a PR never requires checking the branch out. The task builds
+`git archive <REVIEW_SHA>`, which needs the commit *fetched*, not checked out —
+so stay on your own `main` and pass the SHA. Check out a branch you are
+reviewing and you have already handed it your `mise.toml`, your git hooks and
+your `node_modules`, long before Docker is involved.
 
 ## Toolchain choices
 

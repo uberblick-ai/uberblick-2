@@ -67,3 +67,20 @@ run = "pnpm -r typecheck"
 [tasks.test]
 description = "Run all test suites"
 run = "pnpm -r test"
+
+[tasks.review]
+description = "Build and verify an immutable commit in Docker (REVIEW_SHA defaults to HEAD)"
+# Trust boundary (README, "Review isolation"): only the built context is
+# branch-owned. This task definition is read from the working tree it runs in,
+# so review from your own checkout and pass the SHA — `git archive` needs the
+# commit fetched, not checked out. The build stage keeps network because
+# installing the pinned pnpm and the lockfile needs the registry, so the
+# reviewed commit's `Dockerfile.review` diff is the thing to read first; only
+# the verification container is isolated.
+run = """
+review_sha="$(git rev-parse "${REVIEW_SHA:-HEAD}^{commit}")"
+review_tag="uberblick-review:${review_sha}"
+git archive "$review_sha" | docker build --file Dockerfile.review --tag "$review_tag" -
+docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges "$review_tag"
+printf 'Review image retained for probes: %s\n' "$review_tag"
+"""
