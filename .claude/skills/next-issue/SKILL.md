@@ -44,7 +44,12 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    - local Codex review of the PR (codex plugin).
    Triage findings: real ones become a fix-up brief for an Opus sub-agent on
    the branch; rejected ones get an explicit reply on the PR thread — never
-   silent dismissal. All gates green → merge, confirm the issue auto-closed,
+   silent dismissal. **Final gate, immediately before merging:** re-fetch the
+   PR's reviews and comment threads (`gh pr view <n> --comments` plus review
+   threads via `gh api graphql` — inline review comments don't show in the
+   former) and confirm zero unaddressed remarks, human or bot, including any
+   that arrived after the earlier gates passed; anything open is triaged
+   first. Then merge, confirm the issue auto-closed,
    then update the product docs to the new status quo (uberblick MCP tools
    once registered; until then, comment on the PR that the doc update is
    pending).

@@ -55,7 +55,11 @@ before moving on.
    - tests + typecheck green (`mise run test`, `mise run typecheck`);
    - coordinator validation against the issue's acceptance criteria;
    - **GitHub Copilot review** requested on the PR;
-   - **local Codex session review** of the PR.
+   - **local Codex session review** of the PR;
+   - **zero unaddressed PR remarks** — immediately before merging, re-fetch
+     the PR's reviews and comment threads (human and bot alike, including
+     remarks that arrived after the other gates passed); merge only when
+     every remark is fixed or explicitly answered.
    Findings are triaged: real ones are fixed on the branch; rejected ones get
    an explicit reply on the PR thread, never silent dismissal.
 5. **Merge, then docs.** After the gates pass, merge; then update the product
