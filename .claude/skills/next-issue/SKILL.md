@@ -41,7 +41,14 @@ protocol, scheduling semantics, and lint. This file does not restate it.
      check a box only with evidence (command output, test name);
    - footprint check: the diff stays within the issue's declared `Touches`;
    - GitHub Copilot review requested and returned;
-   - local Codex review of the PR (codex plugin).
+   - local Codex review of the PR. Mechanism depends on the environment:
+     when running under herdr (ListAgents shows a Codex session among the
+     local sessions), message that session directly and iterate — answer its
+     findings, push fixes, re-request — until both sides are satisfied;
+     otherwise use the codex plugin. Either way the review brief is the same:
+     be critical, and hunt specifically for overtesting and overengineering
+     per this repo's principles (KISS/YAGNI, least code wins, tests defend
+     contracts and invariants — not implementation trivia).
    Triage findings: real ones become a fix-up brief for an Opus sub-agent on
    the branch; rejected ones get an explicit reply on the PR thread — never
    silent dismissal. **Final gate, immediately before merging:** re-fetch the
