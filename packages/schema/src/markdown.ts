@@ -168,6 +168,12 @@ export interface ImportedDoc {
   tags: string[];
   /** Present only when the source carried a uuid in its frontmatter. */
   uuid?: string;
+  /**
+   * Outbound links, present only when the source carried a `links` key. Values
+   * are target document UUIDs — a link is never a path or a title, so nothing
+   * here is resolved against titles or filenames.
+   */
+  links?: string[];
   blocks: ImportedBlock[];
 }
 
@@ -203,8 +209,38 @@ interface Frontmatter {
   uuid?: string;
   title?: string;
   tags?: string[];
+  links?: string[];
   /** Index of the first body line after the frontmatter block. */
   bodyStart: number;
+}
+
+/**
+ * A frontmatter list value in any of the three shapes the seed files use:
+ * inline (`[a, b]`), a `- ` block on the following lines, or a bare scalar.
+ * Returns the list and the index of the last line it consumed.
+ */
+function parseListValue(
+  lines: string[],
+  index: number,
+  end: number,
+  value: string,
+): { list: string[]; last: number } {
+  if (value.startsWith("[") && value.endsWith("]")) {
+    return { list: parseInlineList(value), last: index };
+  }
+  if (value === "") {
+    const list: string[] = [];
+    let j = index + 1;
+    for (; j < end; j += 1) {
+      const item = /^\s*-\s*(.*)$/.exec(lines[j] ?? "");
+      if (item === null) break;
+      const entry = parseScalar(item[1] ?? "");
+      if (entry !== "") list.push(entry);
+    }
+    return { list, last: j - 1 };
+  }
+  const scalar = parseScalar(value);
+  return { list: scalar === "" ? [] : [scalar], last: index };
 }
 
 function parseFrontmatter(lines: string[]): Frontmatter {
@@ -229,32 +265,22 @@ function parseFrontmatter(lines: string[]): Frontmatter {
       result.uuid = parseScalar(value);
     } else if (key === "title") {
       result.title = parseScalar(value);
-    } else if (key === "tags") {
-      if (value.startsWith("[") && value.endsWith("]")) {
-        result.tags = parseInlineList(value);
-      } else if (value === "") {
-        const tags: string[] = [];
-        let j = i + 1;
-        for (; j < end; j += 1) {
-          const item = /^\s*-\s*(.*)$/.exec(lines[j] ?? "");
-          if (item === null) break;
-          const tag = parseScalar(item[1] ?? "");
-          if (tag !== "") tags.push(tag);
-        }
-        i = j - 1;
-        result.tags = tags;
+    } else if (key === "tags" || key === "links") {
+      const parsed = parseListValue(lines, i, end, value);
+      if (key === "tags") {
+        result.tags = parsed.list;
       } else {
-        const tag = parseScalar(value);
-        result.tags = tag === "" ? [] : [tag];
+        result.links = parsed.list;
       }
+      i = parsed.last;
     }
   }
   return result;
 }
 
 /**
- * Parse markdown into the pieces needed to build a document: title, tags and a
- * flat block list. Handles frontmatter, ATX headings, fenced code (with
+ * Parse markdown into the pieces needed to build a document: title, tags, links
+ * and a flat block list. Handles frontmatter, ATX headings, fenced code (with
  * language) and mermaid fences; everything else becomes a paragraph.
  *
  * Title precedence: frontmatter `title`, else a leading level-1 heading — which
@@ -345,8 +371,11 @@ export function importMarkdown(markdown: string): ImportedDoc {
     }
   }
 
-  const tags = front.tags ?? [];
-  return front.uuid === undefined
-    ? { title, tags, blocks }
-    : { title, tags, uuid: front.uuid, blocks };
+  // uuid and links are set only when the source carried them: absent is not the
+  // same as empty, and a caller distinguishes "no identity in this file" from
+  // "this file declares no links".
+  const result: ImportedDoc = { title, tags: front.tags ?? [], blocks };
+  if (front.uuid !== undefined) result.uuid = front.uuid;
+  if (front.links !== undefined) result.links = front.links;
+  return result;
 }

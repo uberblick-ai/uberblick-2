@@ -43,6 +43,12 @@ trap 'kill 0' INT TERM
 wait
 """
 
+[tasks.import-seed]
+description = "One-time import of docs-seed/*.md into the system (idempotent by frontmatter uuid)"
+# Writes through the MCP server's own replicas and update log, so it works with
+# no hub: the docs land locally and sync when one is reachable.
+run = "fnox exec --if-missing warn -- pnpm --filter @uberblick/mcp-server run import-seed"
+
 [tasks.agent-cursor]
 description = "Park a demo agent cursor in a document's first block (optional `-- <docUuid>`)"
 run = "fnox exec --if-missing warn -- pnpm --filter @uberblick/web run agent-cursor"
