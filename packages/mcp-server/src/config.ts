@@ -98,15 +98,32 @@ function trimmed(value: string | undefined): string | null {
   return text === undefined || text === "" ? null : text;
 }
 
+/**
+ * The workspace has to be one path segment as well as one room segment: it names
+ * the SQLite file, and `path.join` happily follows `..` or a `\` out of the data
+ * directory — on Windows both separators count.
+ */
+function assertWorkspaceSegment(value: string): void {
+  const rejected =
+    value === "" ||
+    value === "." ||
+    value === ".." ||
+    value.includes("/") ||
+    value.includes("\\") ||
+    value.includes("\0");
+  if (rejected) {
+    throw new Error(
+      "WORKSPACE_ID must be a single path and room segment: no \"/\", no \"\\\", " +
+        `not "." or "..", got ${JSON.stringify(value)}`,
+    );
+  }
+}
+
 export function resolveMcpConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): McpConfig {
   const workspaceId = trimmed(env.WORKSPACE_ID) ?? DEFAULT_WORKSPACE;
-  if (workspaceId.includes("/")) {
-    throw new Error(
-      `WORKSPACE_ID must not contain "/": it is one room segment, got ${JSON.stringify(workspaceId)}`,
-    );
-  }
+  assertWorkspaceSegment(workspaceId);
   const sessionId = `agent-${randomUUID()}`;
 
   return {

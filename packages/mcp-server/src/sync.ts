@@ -35,7 +35,8 @@ export type HubStatus =
   | "connecting"
   | "connected"
   | "hub-down"
-  | "auth-failed";
+  | "auth-failed"
+  | "quarantined";
 
 export interface HubState {
   status: HubStatus;
@@ -82,6 +83,9 @@ export class HubSync {
   private connectingSince = Date.now();
 
   private authFailure: string | null = null;
+
+  /** Set by {@link quarantine}: this process may no longer publish anything. */
+  private quarantined = false;
 
   private destroyed = false;
 
@@ -145,7 +149,12 @@ export class HubSync {
    * syncs in the background.
    */
   attach({ room, doc, awareness }: AttachOptions): void {
-    if (this.socket === null || this.destroyed || this.providers.has(room)) {
+    if (
+      this.socket === null ||
+      this.destroyed ||
+      this.quarantined ||
+      this.providers.has(room)
+    ) {
       return;
     }
 
@@ -186,7 +195,47 @@ export class HubSync {
     return false;
   }
 
+  /**
+   * Cut this process off the wire, permanently.
+   *
+   * Called when an update could not be logged. Yjs runs every listener on a
+   * document: this module's log append is one of them and the Hocuspocus
+   * provider's broadcast is another, so a caught append failure still leaves the
+   * provider ready to publish a mutation the log never accepted — the exact
+   * inverse of "the log is the authoritative local replica".
+   *
+   * `detach()` unsubscribes the provider from the socket and makes its `send()`
+   * inert, which is what stops the broadcast even though the provider's own
+   * listener still runs; the socket is then disconnected so nothing else can
+   * leave either. There is no un-quarantine: the replica is rebuilt by
+   * restarting the process.
+   */
+  quarantine(): void {
+    if (this.quarantined) {
+      return;
+    }
+    this.quarantined = true;
+    for (const provider of this.providers.values()) {
+      provider.detach();
+    }
+    this.socket?.disconnect();
+    log.error("quarantined the hub connection: this replica is not durable");
+  }
+
+  isQuarantined(): boolean {
+    return this.quarantined;
+  }
+
   state(): HubState {
+    if (this.quarantined) {
+      return {
+        status: "quarantined",
+        url: this.config.hubUrl,
+        reason:
+          "an update could not be logged, so this replica was cut off the wire to " +
+          "keep an unlogged change from reaching other clients",
+      };
+    }
     if (!this.enabled) {
       return {
         status: "disabled",

@@ -242,6 +242,39 @@ describe("the derived index", () => {
     ]);
   });
 
+  it("packs tags losslessly, whatever they contain", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Awkward tags",
+      blocks: [{ type: "paragraph", text: "bilby" }],
+    });
+
+    // Tags are arbitrary text. A tag holding the separator an in-band encoding
+    // would use must survive as one tag, not two.
+    const awkward = `one${String.fromCharCode(31)}two`;
+    await rig.ok("set_tags", {
+      uuid: doc.uuid,
+      tags: [awkward, 'quote"and,comma', "[]"],
+    });
+    expect(
+      (await rig.ok("search", { query: "bilby" })).hits[0].tags.sort(),
+    ).toEqual([awkward, "[]", 'quote"and,comma'].sort());
+
+    // And an empty tag — which only a foreign writer can produce, since the
+    // tool rejects one — must not vanish from the row.
+    rig.instance.store.indexDoc({
+      uuid: doc.uuid,
+      title: "Awkward tags",
+      tags: ["", "after"],
+      links: [],
+      body: "bilby",
+    });
+    expect(rig.instance.store.search("bilby", 10)[0]?.tags).toEqual([
+      "",
+      "after",
+    ]);
+  });
+
   it("keeps a tombstoned document out of a rebuilt index", async () => {
     const rig = await localRig();
     const kept = await rig.ok("create_doc", {

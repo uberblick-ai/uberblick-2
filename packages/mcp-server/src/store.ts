@@ -88,10 +88,18 @@ export interface LogSlice {
 }
 
 /**
- * Search rows carry their tags packed into one column, joined by the ASCII unit
- * separator — `char(31)` in SQL. A comma would collide with a tag holding one.
+ * Read a search row's packed tags. `json_group_array` gives back a JSON array,
+ * which survives tags containing anything at all — separators, quotes, nothing.
  */
-const TAG_SEPARATOR = String.fromCharCode(31);
+function parseTags(packed: string | null): string[] {
+  if (packed === null) {
+    return [];
+  }
+  const parsed: unknown = JSON.parse(packed);
+  return Array.isArray(parsed)
+    ? parsed.filter((tag): tag is string => typeof tag === "string")
+    : [];
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS updates (
@@ -231,8 +239,9 @@ export class MirrorStore {
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("busy_timeout = 5000");
     this.db.pragma("foreign_keys = ON");
-    this.dropPreWatermarkPendingRooms();
     this.db.exec(SCHEMA);
+    // After the schema, so the backfill can read `updates` and `snapshots`.
+    this.migratePendingRooms();
 
     const prepare = <T extends unknown[]>(sql: string): Statement<T> =>
       this.db.prepare(sql) as Statement<T>;
@@ -292,11 +301,14 @@ export class MirrorStore {
       ),
       // Tags come back packed into the row rather than one query per hit: a
       // search over a growing corpus should cost one query, not 1 + limit.
+      // The packing is a JSON array, not a joined string — tags are arbitrary
+      // text, so any in-band separator would split a tag that contains it and
+      // swallow an empty one.
       search: prepare(
         "SELECT f.uuid AS uuid, d.title AS title, " +
           "snippet(docs_fts, 2, '', '', '…', 16) AS snippet, " +
-          "(SELECT group_concat(t.tag, char(31)) FROM doc_tags t WHERE t.uuid = f.uuid " +
-          "ORDER BY t.tag) AS tags " +
+          "(SELECT json_group_array(t.tag) FROM " +
+          "(SELECT tag FROM doc_tags WHERE uuid = f.uuid ORDER BY tag) t) AS tags " +
           "FROM docs_fts f JOIN doc_index d ON d.uuid = f.uuid " +
           "WHERE docs_fts MATCH ? ORDER BY bm25(docs_fts) LIMIT ?",
       ),
@@ -506,10 +518,7 @@ export class MirrorStore {
     return rows.map((row) => ({
       uuid: row.uuid,
       title: row.title,
-      tags:
-        row.tags === null || row.tags === ""
-          ? []
-          : row.tags.split(TAG_SEPARATOR),
+      tags: parseTags(row.tags),
       snippet: row.snippet === "" ? row.title : row.snippet,
     }));
   }
@@ -523,20 +532,39 @@ export class MirrorStore {
   }
 
   /**
-   * Drop a `pending_rooms` table from before the watermark existed.
+   * Bring a `pending_rooms` table from before the watermark up to the new shape.
    *
    * The old shape recorded only *that* a room was pending, which is not enough
-   * to release it safely. Nothing is lost: the markers are a hint for
-   * re-attaching rooms after a restart, and every document the directory names
-   * is attached anyway, so unsynced work is still pushed.
+   * to release it safely — but it may be the only record that a room exists at
+   * all. The crash window the old code left open is exactly that: a local update
+   * logged and marked, with the directory stub never written. Deleting the marker
+   * would strand that document forever — nothing would attach its room, so it
+   * could never be discovered or pushed.
+   *
+   * So the marker is kept and given a conservative watermark: the room's highest
+   * logged sequence (or its snapshot's, or 0). Conservative means "assume none of
+   * it was acknowledged" — re-pushing an update the hub already has is free,
+   * losing one is not.
    */
-  private dropPreWatermarkPendingRooms(): void {
+  private migratePendingRooms(): void {
     const columns = this.db
       .prepare("SELECT name FROM pragma_table_info('pending_rooms')")
       .all() as { name: string }[];
-    if (columns.length > 0 && !columns.some((column) => column.name === "seq")) {
-      this.db.exec("DROP TABLE pending_rooms");
+    if (columns.length === 0 || columns.some((column) => column.name === "seq")) {
+      return;
     }
+
+    this.db.transaction(() => {
+      this.db.exec(
+        "CREATE TABLE pending_rooms_migrated (room TEXT PRIMARY KEY, seq INTEGER NOT NULL);" +
+          "INSERT INTO pending_rooms_migrated (room, seq) SELECT p.room, COALESCE(" +
+          "(SELECT MAX(u.seq) FROM updates u WHERE u.room = p.room), " +
+          "(SELECT s.through_seq FROM snapshots s WHERE s.room = p.room), 0) " +
+          "FROM pending_rooms p;" +
+          "DROP TABLE pending_rooms;" +
+          "ALTER TABLE pending_rooms_migrated RENAME TO pending_rooms;",
+      );
+    })();
   }
 
   close(): void {

@@ -261,6 +261,12 @@ export class Replicas {
           room,
           error: String(error),
         });
+        // Quarantine before returning, and before any other listener on this
+        // document runs. Yjs calls every `update` listener in turn, and the
+        // Hocuspocus provider's listener is one of them: without this, the very
+        // mutation the log just refused would be broadcast to every other
+        // client, while this tool call reported `applied: false`.
+        this.sync.quarantine();
         return;
       }
       this.afterChange(replica);
@@ -434,10 +440,20 @@ export class Replicas {
    * the hub is unreachable: no tool call blocks on the network.
    */
   async settle(options: { requireHealthy?: boolean } = {}): Promise<void> {
-    if (options.requireHealthy !== false) {
+    const requireHealthy = options.requireHealthy !== false;
+    if (requireHealthy) {
       this.assertHealthy();
     }
     if (this.destroyed) {
+      return;
+    }
+
+    // A poisoned replica does nothing at all — not even the parts that look
+    // read-only. Polling reindexes from a document that is ahead of the log and
+    // repairs directory stubs from it; compaction would fold the unlogged change
+    // into a snapshot and make it durable, which is how a write reported as
+    // refused came back after a restart. Diagnostics may look, never touch.
+    if (this.persistenceFailure !== null) {
       return;
     }
 
@@ -449,7 +465,12 @@ export class Replicas {
     if (inFlight !== null) {
       await inFlight;
       // Cheap and local: pick up anything logged while we were waiting.
-      this.refresh();
+      if (this.persistenceFailure === null) {
+        this.refresh();
+      }
+      if (requireHealthy) {
+        this.assertHealthy();
+      }
       return;
     }
 
@@ -459,6 +480,13 @@ export class Replicas {
       await run;
     } finally {
       this.settling = null;
+    }
+
+    // Re-checked after the waits: an append can fail at any moment, including
+    // while this call was waiting on the hub. Serving what follows would answer
+    // from a replica that stopped being the log mid-call.
+    if (requireHealthy) {
+      this.assertHealthy();
     }
   }
 
@@ -474,9 +502,14 @@ export class Replicas {
     if (this.sync.enabled && this.settleNeeded) {
       try {
         await this.sync.waitForQuiet();
+        // Re-checked after every wait: an append that failed while we waited
+        // (a remote update, say) means everything below would be working from a
+        // document the log does not back.
+        if (this.persistenceFailure !== null) return;
         this.pollAll();
         if (this.adoptKnownDocs() > 0) {
           await this.sync.waitForQuiet();
+          if (this.persistenceFailure !== null) return;
           this.pollAll();
         }
       } finally {
@@ -487,6 +520,7 @@ export class Replicas {
       }
     }
 
+    if (this.persistenceFailure !== null) return;
     this.releaseQuietRooms();
     this.compactLargeLogs();
   }
@@ -494,16 +528,23 @@ export class Replicas {
   /**
    * A room whose local changes reached the hub is no longer pending.
    *
-   * The watermark is read before the acknowledgement is checked, and only that
-   * watermark is cleared: a local change appended in between — by this process
-   * or another one — raises the row's sequence, and the release skips it rather
-   * than forgetting work nobody has seen acknowledged.
+   * Released only through `min(marker, lastSeq)` — at most what *this* replica
+   * has applied, and therefore at most what its provider can have had
+   * acknowledged. The marker in the database is not a safe watermark on its own:
+   * another process can raise it between this replica's poll and this read, and
+   * clearing through it would forget a change nobody has seen acknowledged. A
+   * room with no replica here is left entirely alone.
    */
   private releaseQuietRooms(): void {
     for (const pending of this.store.pendingRooms()) {
-      if (this.sync.isRoomQuiet(pending.room)) {
-        this.store.clearPending(pending.room, pending.seq);
+      const replica = this.replicas.get(pending.room);
+      if (replica === undefined || !this.sync.isRoomQuiet(pending.room)) {
+        continue;
       }
+      this.store.clearPending(
+        pending.room,
+        Math.min(pending.seq, replica.lastSeq),
+      );
     }
   }
 
@@ -515,6 +556,11 @@ export class Replicas {
    * transaction.
    */
   private compactLargeLogs(): void {
+    // Never from a replica that is ahead of its log: the snapshot would make the
+    // unlogged change durable, which is worse than the failure that caused it.
+    if (this.persistenceFailure !== null) {
+      return;
+    }
     for (const replica of this.replicas.values()) {
       if (replica.lastSeq <= 0) continue;
       if (this.store.updateCount(replica.room) < this.config.compactAfter) {

@@ -15,29 +15,45 @@
  * anything that lets the two drift apart is data loss with extra steps.
  */
 
+import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
+import { appendBlock, getBlocks, initDoc } from "@uberblick/schema";
+import type { Hub } from "@uberblick/hub";
 import { MirrorStore } from "../src/store.js";
 import type { UpdateOrigin } from "../src/store.js";
 import {
+  peerClient,
   removeTempDirs,
+  sleep,
+  startHub,
   startServer,
   tempDatabasePath,
   testConfig,
+  TEST_SECRET,
+  waitUntil,
 } from "./helpers.js";
-import type { Rig } from "./helpers.js";
+import type { PeerClient, Rig } from "./helpers.js";
 
 const ROOM = "main/durability";
 const TEXT = "body";
 
 const stores: MirrorStore[] = [];
 const rigs: Rig[] = [];
+const hubs: Hub[] = [];
+const peers: PeerClient[] = [];
 
 function store(databasePath: string): MirrorStore {
   const opened = new MirrorStore(databasePath);
   stores.push(opened);
   return opened;
+}
+
+async function hub(): Promise<Hub> {
+  const started = await startHub();
+  hubs.push(started);
+  return started;
 }
 
 /** A store that lets a test run something between the two halves of a read. */
@@ -55,6 +71,22 @@ class InterleavingStore extends MirrorStore {
     this.hook = null;
     hook?.();
     return result;
+  }
+}
+
+/** A store that lets a test append from elsewhere just before a pending read. */
+class LatePendingStore extends MirrorStore {
+  private hook: (() => void) | null = null;
+
+  beforeNextPendingRead(hook: () => void): void {
+    this.hook = hook;
+  }
+
+  override pendingRooms() {
+    const hook = this.hook;
+    this.hook = null;
+    hook?.();
+    return super.pendingRooms();
   }
 }
 
@@ -94,11 +126,17 @@ function replay(updates: Uint8Array[], snapshot?: Uint8Array): string {
 }
 
 afterEach(async () => {
+  for (const peer of peers.splice(0)) {
+    peer.destroy();
+  }
   for (const rig of rigs.splice(0)) {
     await rig.close();
   }
   for (const opened of stores.splice(0)) {
     opened.close();
+  }
+  for (const started of hubs.splice(0)) {
+    await started.stop().catch(() => {});
   }
   removeTempDirs();
 });
@@ -297,25 +335,140 @@ describe("a failed append", () => {
       "one",
     ]);
   });
+
+  it("never reaches another client, even though Yjs told the provider", async () => {
+    // The failure is caught in this package's update listener, but Yjs goes on
+    // to call every other listener on the document — including the Hocuspocus
+    // provider's, which would broadcast the very mutation the log refused. A
+    // real hub and a real second client are the only way to see that.
+    const running = await hub();
+    const databasePath = tempDatabasePath();
+    const faulty = new FailingStore(databasePath);
+    stores.push(faulty);
+    const rig = await startServer(
+      testConfig({
+        databasePath,
+        authSecret: TEST_SECRET,
+        hubUrl: `ws://127.0.0.1:${running.port}`,
+      }),
+      faulty,
+    );
+    rigs.push(rig);
+
+    const created = await rig.ok("create_doc", {
+      title: "Quarantine",
+      blocks: [{ type: "paragraph", text: "one" }],
+    });
+    const room = `main/${created.uuid}`;
+    const peer = await peerClient(running.port, room);
+    peers.push(peer);
+
+    // The healthy write gets there, so the channel demonstrably works.
+    await waitUntil("the peer to see the logged block", () =>
+      getBlocks(peer.doc).some((block) => block.text === "one"),
+    );
+
+    faulty.failing = true;
+    const refused = await rig.call("edit_block", {
+      uuid: created.uuid,
+      block_id: created.blocks[0].id,
+      old_text: "one",
+      new_text: "two",
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.payload.error).toBe("persistence_failed");
+
+    // The connection is cut, and the unlogged edit stays where it cannot spread.
+    const status = await rig.ok("sync_status", {});
+    expect(status.hub.status).toBe("quarantined");
+
+    await sleep(300);
+    expect(getBlocks(peer.doc).map((block) => block.text)).toEqual(["one"]);
+  });
+
+  it("is never folded into a snapshot by a later diagnostic call", async () => {
+    // Compaction encodes the live document. On a poisoned replica that document
+    // holds the unlogged change, so compacting would make a write reported as
+    // refused durable — and a restart would bring it back.
+    const databasePath = tempDatabasePath();
+    const faulty = new FailingStore(databasePath);
+    stores.push(faulty);
+    const rig = await startServer(
+      testConfig({ databasePath, compactAfter: 1 }),
+      faulty,
+    );
+    rigs.push(rig);
+
+    const created = await rig.ok("create_doc", {
+      title: "No snapshots while broken",
+      blocks: [{ type: "paragraph", text: "original" }],
+    });
+    const room = `main/${created.uuid}`;
+
+    faulty.failing = true;
+    const refused = await rig.call("edit_block", {
+      uuid: created.uuid,
+      block_id: created.blocks[0].id,
+      old_text: "original",
+      new_text: "corrupted",
+    });
+    expect(refused.isError).toBe(true);
+
+    // Another process logs something, so the room's log is over the compaction
+    // threshold and a settle would want to snapshot it.
+    faulty.failing = false;
+    const outside = store(databasePath);
+    const foreign = new Y.Doc();
+    initDoc(foreign, { uuid: created.uuid, title: "No snapshots while broken" });
+    outside.appendUpdate(room, Y.encodeStateAsUpdate(foreign), "remote");
+
+    // Diagnostics still answer, and touch nothing.
+    const status = await rig.ok("sync_status", {});
+    expect(status.persistence).not.toBeNull();
+
+    await rig.close();
+    rigs.length = 0;
+
+    const restarted = await startServer(testConfig({ databasePath }));
+    rigs.push(restarted);
+    const read = await restarted.ok("get_doc", { uuid: created.uuid });
+    expect(read.blocks.map((block: { text: string }) => block.text)).toEqual([
+      "original",
+    ]);
+  });
 });
 
 describe("the pending watermark", () => {
-  it("is committed with the update it belongs to", async () => {
+  it("rolls the update back when its marker cannot be written", () => {
     const databasePath = tempDatabasePath();
-    const rig = await startServer(testConfig({ databasePath }));
-    rigs.push(rig);
+    const writer = store(databasePath);
+    const { doc, updates } = recordingDoc();
+    doc.getText(TEXT).insert(0, "A");
 
-    const created = await rig.ok("create_doc", { title: "Marked" });
+    // Fail the second half of the append, from inside SQLite. Under an
+    // append-then-mark implementation the update row is already committed by
+    // this point and survives; in one transaction, neither effect lands.
+    const saboteur = new Database(databasePath);
+    saboteur.exec(
+      "CREATE TRIGGER refuse_markers AFTER INSERT ON pending_rooms " +
+        "BEGIN SELECT RAISE(ABORT, 'no markers today'); END",
+    );
+    saboteur.close();
 
-    // Read through a second handle: only committed rows are visible, so seeing
-    // both the update and its marker proves they landed together — there is no
-    // window where a SIGKILL leaves a logged local change nothing will push.
-    const reader = store(databasePath);
-    const room = `main/${created.uuid}`;
-    const pending = reader.pendingRooms().find((entry) => entry.room === room);
-    expect(pending).toBeDefined();
-    expect(reader.updatesAfter(room, 0).length).toBeGreaterThan(0);
-    expect(pending?.seq).toBeGreaterThan(0);
+    expect(() =>
+      writer.appendUpdate(ROOM, updates[0] as Uint8Array, "local"),
+    ).toThrow(/no markers today/);
+    expect(writer.updatesAfter(ROOM, 0)).toEqual([]);
+    expect(writer.pendingRooms()).toEqual([]);
+
+    // With the trigger gone, both effects land together.
+    const repair = new Database(databasePath);
+    repair.exec("DROP TRIGGER refuse_markers");
+    repair.close();
+
+    const seq = writer.appendUpdate(ROOM, updates[0] as Uint8Array, "local");
+    expect(writer.updatesAfter(ROOM, 0).map((entry) => entry.seq)).toEqual([seq]);
+    expect(writer.pendingRooms()).toEqual([{ room: ROOM, seq }]);
   });
 
   it("is not cleared by a process that never saw the newer change", () => {
@@ -342,23 +495,108 @@ describe("the pending watermark", () => {
     expect(writer.pendingRooms()).toEqual([]);
   });
 
-  it("survives a database written before the watermark existed", () => {
-    // A pre-watermark file must open rather than crash on the old table shape.
+  it("backfills a pre-watermark marker instead of orphaning its document", async () => {
+    // The old crash window: a local update logged and marked, with the
+    // directory stub never written. The marker is the only record that this
+    // room exists, so deleting it would strand the document — nothing would
+    // attach its room, and it could never be discovered or pushed.
     const databasePath = tempDatabasePath();
+    const uuid = randomUUID();
+    const room = `main/${uuid}`;
+
+    const seeded = new MirrorStore(databasePath);
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid, title: "Offline only" });
+    appendBlock(doc, { type: "paragraph", text: "never announced" });
+    const seq = seeded.appendUpdate(room, Y.encodeStateAsUpdate(doc), "local");
+    seeded.close();
+
+    // Rewrite the marker in the pre-watermark shape, and leave no stub.
     const legacy = new Database(databasePath);
     legacy.exec(
-      "CREATE TABLE pending_rooms (room TEXT PRIMARY KEY, since INTEGER NOT NULL);" +
-        `INSERT INTO pending_rooms (room, since) VALUES ('${ROOM}', 1);`,
+      "DROP TABLE pending_rooms;" +
+        "CREATE TABLE pending_rooms (room TEXT PRIMARY KEY, since INTEGER NOT NULL);" +
+        `INSERT INTO pending_rooms (room, since) VALUES ('${room}', 1);`,
     );
     legacy.close();
 
-    const opened = store(databasePath);
-    expect(opened.pendingRooms()).toEqual([]);
+    const migrated = store(databasePath);
+    expect(migrated.pendingRooms()).toEqual([{ room, seq }]);
+    migrated.close();
+    stores.pop();
 
-    // …and then behave like any other store.
-    const { doc, updates } = recordingDoc();
-    doc.getText(TEXT).insert(0, "A");
-    opened.appendUpdate(ROOM, updates[0] as Uint8Array, "local");
-    expect(opened.pendingRooms()).toEqual([{ room: ROOM, seq: 1 }]);
+    // And the document comes back: the marker attaches the room, hydration
+    // replays it, and the stub is repaired from the document itself.
+    const rig = await startServer(testConfig({ databasePath }));
+    rigs.push(rig);
+    const status = await rig.ok("sync_status", {});
+    expect(
+      status.rooms.map((entry: { room: string }) => entry.room),
+    ).toContain(room);
+    expect(
+      (status.pendingRooms as { room: string }[]).map((entry) => entry.room),
+    ).toContain(room);
+
+    const listed = await rig.ok("list_docs", {});
+    expect(listed.docs.map((entry: { uuid: string }) => entry.uuid)).toContain(
+      uuid,
+    );
+    const read = await rig.ok("get_doc", { uuid });
+    expect(read.blocks.map((block: { text: string }) => block.text)).toEqual([
+      "never announced",
+    ]);
+  });
+
+  it("is not cleared through a sequence this replica has not applied", async () => {
+    // The reviewer's schedule: another process appends after this instance's
+    // poll but before it reads the pending set. The marker in the database is
+    // then ahead of everything this replica has applied, and clearing through
+    // it would forget a change nobody has seen acknowledged.
+    const running = await hub();
+    const databasePath = tempDatabasePath();
+    const late = new LatePendingStore(databasePath);
+    stores.push(late);
+
+    const rig = await startServer(
+      testConfig({
+        databasePath,
+        authSecret: TEST_SECRET,
+        hubUrl: `ws://127.0.0.1:${running.port}`,
+      }),
+      late,
+    );
+    rigs.push(rig);
+
+    const created = await rig.ok("create_doc", { title: "Watermarks" });
+    const room = `main/${created.uuid}`;
+    await waitUntil("the room to be acknowledged", async () => {
+      const status = await rig.ok("sync_status", {});
+      return (
+        status.hub.status === "connected" &&
+        !(status.pendingRooms as { room: string }[]).some(
+          (entry) => entry.room === room,
+        )
+      );
+    });
+
+    // An outside process appends between the poll and the pending read.
+    const outside = store(databasePath);
+    const foreign = new Y.Doc();
+    initDoc(foreign, { uuid: created.uuid, title: "Renamed elsewhere" });
+    let injected = 0;
+    late.beforeNextPendingRead(() => {
+      injected = outside.appendUpdate(
+        room,
+        Y.encodeStateAsUpdate(foreign),
+        "local",
+      );
+    });
+
+    await rig.ok("sync_status", {});
+
+    // The outside change is still pending, and still in the log tail.
+    const after = outside.pendingRooms().find((entry) => entry.room === room);
+    expect(after).toEqual({ room, seq: injected });
+    expect(outside.updatesAfter(room, injected - 1).length).toBeGreaterThan(0);
   });
 });
