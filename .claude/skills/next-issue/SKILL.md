@@ -16,6 +16,11 @@ protocol, scheduling semantics, and lint. This file does not restate it.
 - Dispatch implementation to Opus sub-agents: `model: opus`,
   `isolation: worktree`. Never edit feature code in the main checkout — it may
   hold the user's uncommitted work; worktrees only.
+- The coordinator's own repo edits (skill or docs changes, commits) happen in
+  the coordinator's own worktree too (EnterWorktree), never in the shared
+  checkout — multiple sessions share it and it may sit on any branch. Even
+  small doc/skill edits are dispatched to Opus sub-agents; the coordinator
+  briefs, validates, and merges.
 - Never commit to `main`. Code reaches `main` only through a PR that passed
   every gate.
 - Bounce nonconforming input per the spec's lint; never fill gaps by guessing.
@@ -57,10 +62,12 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    threads via `gh api graphql` — inline review comments don't show in the
    former) and confirm zero unaddressed remarks, human or bot, including any
    that arrived after the earlier gates passed; anything open is triaged
-   first. Then merge, confirm the issue auto-closed,
-   then update the product docs to the new status quo (uberblick MCP tools
-   once registered; until then, comment on the PR that the doc update is
-   pending).
+   first. Then merge per CLAUDE.md's "Merge policy" tiers — Tier 1 and Tier 2
+   self-merge as specified there (Tier 2 requires the merge-report comment on
+   the PR first); Tier 3 triggers mean: label the PR `needs-human`, park it,
+   and move on. After merging, confirm the issue auto-closed, then update the
+   product docs to the new status quo (uberblick MCP tools once registered;
+   until then, comment on the PR that the doc update is pending).
 
 3. **Lint `ready` issues** against the spec's checklist. Failures: comment
    exactly what's missing, remove `ready`, skip.
