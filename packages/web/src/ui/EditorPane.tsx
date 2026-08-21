@@ -20,7 +20,19 @@ import {
   useRoomStatus,
 } from "./hooks.js";
 
-function StatusLine({ connection }: { connection: RoomConnection }): ReactElement {
+/**
+ * Exported for the label test only.
+ *
+ * The unsent count is named in its own unit — individual updates this provider
+ * has not had acknowledged — because `sync_status` reports a *rooms* count under
+ * a similar name. Two numbers labelled "pending" invite the question of which
+ * one is lying; naming the units answers it.
+ */
+export function StatusLine({
+  connection,
+}: {
+  connection: RoomConnection;
+}): ReactElement {
   const status = useRoomStatus(connection);
   const peers = usePeers(connection);
   const label = !status.connected
@@ -35,7 +47,10 @@ function StatusLine({ connection }: { connection: RoomConnection }): ReactElemen
       />
       <span>{label}</span>
       {status.unsyncedChanges > 0 && (
-        <span className="ub-pending">{status.unsyncedChanges} pending</span>
+        <span className="ub-pending">
+          {status.unsyncedChanges} update{status.unsyncedChanges === 1 ? "" : "s"}{" "}
+          unsent
+        </span>
       )}
       {status.localReplicaLoaded && <span className="ub-muted">local cache</span>}
       <span className="ub-muted">{connection.room}</span>

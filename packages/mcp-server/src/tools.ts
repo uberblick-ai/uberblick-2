@@ -643,10 +643,13 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "What this replica holds and what the hub has acknowledged.\n\n" +
         "`hub.status` distinguishes a hub that is down from a token the hub rejected — the first resolves itself, " +
         "the second needs a human — and `disabled` means no secret was configured, so this server is local-only.\n\n" +
-        "`unsyncedChanges` counts rooms holding local changes the hub has not acknowledged. It is read from the " +
-        "durable pending set, so it survives a restart and is non-zero in local-only mode: work that never left " +
-        "this machine is unsynced, whether or not a connection was ever attempted. `inFlightUpdates` is the " +
-        "in-memory count of messages awaiting an acknowledgement on the current connection, and resets with it.\n\n" +
+        "The two counts here are in different units, so they are not expected to agree. `unsyncedChanges` counts " +
+        "ROOMS, not updates: the rooms holding local changes the hub has not acknowledged, the ones `pendingRooms` " +
+        "names. It is read from the durable pending set, so it survives a restart and is non-zero in local-only " +
+        "mode: work that never left this machine is unsynced, whether or not a connection was ever attempted. " +
+        "`inFlightUpdates` counts individual UPDATES awaiting an acknowledgement on the current connection — an " +
+        "in-memory count that resets with the connection, and the unit the web client's status line shows. One " +
+        "unsynced room can hold many unsent updates.\n\n" +
         `${SYNCED_MEANS} The same holds for \`rooms[].synced\` below and for \`unsyncedChanges: 0\`: both are ` +
         "statements about acknowledgement, so a hub that dies inside the debounce comes back missing updates " +
         "this tool has already reported as synced, until a replica holding them reconnects and re-sends.\n\n" +
