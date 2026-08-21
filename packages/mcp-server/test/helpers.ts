@@ -55,6 +55,22 @@ export const WORKSPACE = "main";
 /** The package root, so a test can spawn `src/main.ts` the way a client would. */
 export const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
+/**
+ * How to run a package's `src/main.ts` as exactly one process, from that
+ * package's directory.
+ *
+ * `node --import tsx`, never the `tsx` binary: tsx's CLI runs the script in a
+ * grandchild process, so a `SIGKILL` to the child kills the launcher and leaves
+ * the server itself running — which would quietly hollow out every test that
+ * kills one.
+ */
+export function mainTsProcess(): { command: string; args: string[] } {
+  return {
+    command: process.execPath,
+    args: ["--import", "tsx", join("src", "main.ts")],
+  };
+}
+
 const tempDirs: string[] = [];
 
 export function tempDir(): string {

@@ -11,7 +11,6 @@
  *   replica built from the compacted log is the same replica.
  */
 
-import { join } from "node:path";
 import {
   StdioClientTransport,
   getDefaultEnvironment,
@@ -20,6 +19,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { afterAll, describe, expect, it } from "vitest";
 import { MirrorStore } from "../src/store.js";
 import {
+  mainTsProcess,
   PACKAGE_ROOT,
   removeTempDirs,
   startServer,
@@ -105,8 +105,7 @@ describe("the update log", () => {
   it("keeps a write that a SIGKILL interrupted", async () => {
     const databasePath = tempDatabasePath();
     const transport = new StdioClientTransport({
-      command: join(PACKAGE_ROOT, "node_modules", ".bin", "tsx"),
-      args: [join("src", "main.ts")],
+      ...mainTsProcess(),
       cwd: PACKAGE_ROOT,
       // No HUB_AUTH_TOKEN: the child runs local-only, which is the point.
       env: { ...getDefaultEnvironment(), UBERBLICK_DB: databasePath },
