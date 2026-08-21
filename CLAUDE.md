@@ -18,6 +18,8 @@ in docs, README, or CI.
 - `mise run dev` — hub + web (the MCP server is stdio — its client spawns it)
 - `mise run lint` — Biome lint (lint only; the formatter is off by decision)
 - `mise run test` — run the test suites
+- `mise run e2e` — the browser proof points (Playwright, Chromium, on demand;
+  starts its own hub and dev server on ephemeral ports, so it needs no secret)
 
 Secrets and endpoints come from `fnox exec` (age-encrypted `fnox.toml`, safe
 to commit; the private key lives at `~/.config/fnox/age.txt`, never in the

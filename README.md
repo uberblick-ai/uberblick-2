@@ -37,8 +37,17 @@ mise run dev          # hub + web in parallel
 mise run lint         # Biome lint across the workspace (no formatter)
 mise run typecheck    # tsc --noEmit across all packages
 mise run test         # all test suites
+mise run e2e          # browser proof points (Playwright, Chromium, on demand)
 REVIEW_SHA=<commit> mise run review  # immutable Docker review of one commit
 ```
+
+`mise run e2e` is the only task that drives a browser. It starts its own hub on
+an ephemeral port with a throwaway signing secret and a temp database, and its
+own Vite dev server on an ephemeral port, so it needs no fnox key and cannot
+collide with a running `mise run dev`. It covers exactly what jsdom cannot —
+two live clients converging on one block, a rendered remote cursor, and a reload
+that comes out of the IndexedDB cache while the hub is down. Everything else
+belongs in `mise run test`.
 
 `mise run dev` deliberately runs **hub + web only**. The MCP server speaks JSON-RPC
 over stdio and is normally spawned by its client (Claude Code and friends, via

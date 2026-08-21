@@ -43,3 +43,40 @@ jobs:
       - run: mise run lint
       - run: mise run typecheck
       - run: mise run test
+
+  # Deliberately its own job, and deliberately NOT a required check yet (#46):
+  # real-browser tests get one week of observed runs before anything is allowed
+  # to block a merge on them. A red e2e job is a signal to read, not a gate — if
+  # it turns out to flake, it gets fixed or deleted, it does not get retried.
+  #
+  # Separate from `gates` for cost too: this job downloads a browser, which the
+  # other one has no reason to pay for.
+  e2e:
+    name: browser e2e (advisory, not a required check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+
+      # Keyed on the lockfile because that is what pins @playwright/test, and
+      # the browser build a Playwright version wants is a function of it.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-
+
+      - run: mise run install
+        env:
+          PNPM_STORE_DIR: ~/.pnpm-store
+
+      # The task downloads the pinned Chromium itself (a no-op on a cache hit)
+      # and starts its own hub and dev server, so there is nothing else to wire.
+      - run: mise run e2e

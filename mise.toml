@@ -75,6 +75,20 @@ run = "pnpm -r typecheck"
 description = "Run all test suites"
 run = "pnpm -r test"
 
+[tasks.e2e]
+description = "Run the browser end-to-end proof points (Playwright, Chromium only)"
+# No `fnox exec`: the harness starts its own hub on an ephemeral port with its
+# own throwaway signing secret and a temp database, so nothing here needs the
+# real one — and nothing collides with a `mise run dev` on 1234/5173.
+#
+# `playwright install` runs first because the browser is a download, not a
+# dependency pnpm can fetch: it is a no-op once the pinned Chromium is in the
+# local cache, and the alternative is a first run that fails with instructions.
+run = """
+pnpm --filter @uberblick/web exec playwright install chromium
+pnpm --filter @uberblick/web run e2e
+"""
+
 [tasks.review]
 description = "Build and verify an immutable commit in Docker (REVIEW_SHA defaults to HEAD)"
 # Trust boundary (README, "Review isolation"): only the built context is

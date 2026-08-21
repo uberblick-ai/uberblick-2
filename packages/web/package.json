@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "e2e": "playwright test",
     "preview": "vite preview",
     "agent-cursor": "tsx scripts/agent-cursor-demo.ts"
   },
@@ -26,6 +27,7 @@
     "yjs": "catalog:"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.1.0",
