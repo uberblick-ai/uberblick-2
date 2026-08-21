@@ -156,18 +156,23 @@ function guarded<Args>(
 /**
  * The exact claim `synced: true` makes, in the words an agent reads.
  *
- * The hub acknowledges an update on receipt and writes it on a debounce, so an
+ * The hub acknowledges an update on receipt and only schedules the write, so an
  * acknowledged update is in the hub's memory, not on its disk. Narrowing the
  * word here is the honest fix: the hub cannot store per update, because its
  * SQLite extension writes the whole document state per store call.
  */
 const SYNCED_MEANS =
-  "`synced: true` means the hub acknowledged this update: it is in the hub's memory and will be written within " +
-  "the hub's store debounce — by default 2s after the last change to the document, 10s at the outside. It does " +
-  "NOT mean the hub has stored it. A hub killed inside that window (SIGKILL, a crash, power loss) loses the " +
-  "update even though it was reported as synced; only a graceful hub shutdown flushes what the debounce is " +
-  "holding. `applied: true` is the durable half: the local update log has this write before the tool returns, " +
-  "and survives a kill of this server.";
+  "`synced: true` means the hub acknowledged this update: it is in the hub's memory, and a healthy hub has " +
+  "scheduled the write on its store debounce — by default 2s after the last change to the document, 10s at the " +
+  "outside. It does NOT mean the hub has stored it: the write is still ahead of the hub's disk, and the store " +
+  "itself can fail. A hub that dies abruptly inside that window (SIGKILL, a crash, power loss) loses its " +
+  "volatile copy of the update. That is recoverable rather than fatal: `applied: true` is the durable half — " +
+  "this server's append-only update log holds the write before the tool returns and re-sends it on reconnect — " +
+  "so losing it for good takes the crash plus no replica holding that update ever coming back.";
+
+/** The same narrowing for the mutators that do not restate it in full. */
+const SYNCED_IS_ACKNOWLEDGED =
+  "`synced` here means hub-acknowledged, not hub-stored — see sync_status for the exact claim and its crash window.";
 
 // Identity is UUIDs, so the boundary checks for one. A tool that accepted any
 // string would let an agent persist an identity nothing can ever resolve.
@@ -450,7 +455,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       title: "Insert a block",
       description:
         "Insert one block after `after_block_id`, or at the top of the document when it is omitted. " +
-        "Block types are paragraph, heading, code and mermaid — the editor's whole palette.",
+        "Block types are paragraph, heading, code and mermaid — the editor's whole palette.\n\n" +
+        SYNCED_IS_ACKNOWLEDGED,
       inputSchema: {
         uuid: uuidArg,
         after_block_id: z
@@ -484,7 +490,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       title: "Delete a block",
       description:
         "Delete one block. Deleting is never how a block changes type — use insert_block plus edit_block only for new content, " +
-        "and never delete-and-reinsert to re-type, which churns the block id and orphans its annotations.",
+        "and never delete-and-reinsert to re-type, which churns the block id and orphans its annotations.\n\n" +
+        SYNCED_IS_ACKNOWLEDGED,
       inputSchema: { uuid: uuidArg, block_id: z.string().min(1) },
     },
     guarded(async ({ uuid, block_id }) => {
@@ -500,7 +507,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     {
       title: "Set a document's tags",
       description:
-        "Replace the document's tag set. The directory stub is updated to match, so list_docs and tag filters follow.",
+        "Replace the document's tag set. The directory stub is updated to match, so list_docs and tag filters follow.\n\n" +
+        SYNCED_IS_ACKNOWLEDGED,
       inputSchema: { uuid: uuidArg, tags: z.array(z.string().min(1)) },
     },
     guarded(async ({ uuid, tags }) => {
@@ -517,7 +525,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       title: "Set a document's outbound links",
       description:
         "Replace the document's outbound link set. Values are target document UUIDs — never paths, never titles. " +
-        "The backlinks index follows immediately.",
+        "The backlinks index follows immediately.\n\n" +
+        SYNCED_IS_ACKNOWLEDGED,
       inputSchema: { uuid: uuidArg, links: z.array(linkArg) },
     },
     guarded(async ({ uuid, links }) => {
@@ -534,7 +543,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       title: "Annotate a range, or comment on a thread",
       description:
         "Open an annotation thread over a range of a block's text, or — with `thread_id` — add a comment to an existing thread. " +
-        "The range is anchored by a formatting mark on the text itself, so it survives edits, splits and re-types.",
+        "The range is anchored by a formatting mark on the text itself, so it survives edits, splits and re-types.\n\n" +
+        SYNCED_IS_ACKNOWLEDGED,
       inputSchema: {
         uuid: uuidArg,
         text: z.string().min(1).describe("The comment body."),
@@ -638,8 +648,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "this machine is unsynced, whether or not a connection was ever attempted. `inFlightUpdates` is the " +
         "in-memory count of messages awaiting an acknowledgement on the current connection, and resets with it.\n\n" +
         `${SYNCED_MEANS} The same holds for \`rooms[].synced\` below and for \`unsyncedChanges: 0\`: both are ` +
-        "statements about acknowledgement, so a hub killed inside the debounce loses updates this tool has " +
-        "already reported as synced.\n\n" +
+        "statements about acknowledgement, so a hub that dies inside the debounce comes back missing updates " +
+        "this tool has already reported as synced, until a replica holding them reconnects and re-sends.\n\n" +
         "`persistence` is null unless an update failed to reach the log, in which case every other tool refuses " +
         "to serve until the server is restarted.",
       inputSchema: {},

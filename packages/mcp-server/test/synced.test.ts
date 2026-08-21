@@ -12,12 +12,17 @@
  * The debounce lives in the hub process' memory, so real processes and a real
  * `SIGKILL` are the only honest reproduction: an in-process "crash" would assert
  * the test's own bookkeeping instead of the hub's.
+ *
+ * The second test is much smaller and no less load-bearing: the behaviour is
+ * Yjs and Hocuspocus being themselves, so what this package can get wrong is the
+ * wording — and the wording is where an agent decides how much to trust
+ * `synced`.
  */
 
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   StdioClientTransport,
@@ -25,7 +30,10 @@ import {
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
+import { getBlocks } from "@uberblick/schema";
+import * as Y from "yjs";
 import {
+  mainTsProcess,
   PACKAGE_ROOT,
   removeTempDirs,
   startServer,
@@ -63,23 +71,18 @@ function parseRecord(line: string): Record<string, unknown> | null {
 
 /** Start `packages/hub/src/main.ts` as its own process and read back its port. */
 async function startHubProcess(databasePath: string): Promise<HubProcess> {
-  // `node --import tsx`, never the `tsx` binary: tsx's CLI runs the script in a
-  // grandchild, which a SIGKILL to the child would leave alive and syncing.
-  const child = spawn(
-    process.execPath,
-    ["--import", "tsx", join("src", "main.ts")],
-    {
-      cwd: HUB_ROOT,
-      env: {
-        ...process.env,
-        HUB_AUTH_TOKEN: TEST_SECRET,
-        HUB_HOST: "127.0.0.1",
-        HUB_DB_PATH: databasePath,
-        PORT: "0",
-      },
-      stdio: ["ignore", "ignore", "pipe"],
+  const { command, args } = mainTsProcess();
+  const child = spawn(command, args, {
+    cwd: HUB_ROOT,
+    env: {
+      ...process.env,
+      HUB_AUTH_TOKEN: TEST_SECRET,
+      HUB_HOST: "127.0.0.1",
+      HUB_DB_PATH: databasePath,
+      PORT: "0",
     },
-  );
+    stdio: ["ignore", "ignore", "pipe"],
+  });
   hubProcesses.push(child);
 
   const port = await new Promise<number>((resolve, reject) => {
@@ -115,8 +118,7 @@ interface Writer {
 /** An MCP server in its own process, syncing to the hub on `port`. */
 async function startWriter(port: number): Promise<Writer> {
   const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: ["--import", "tsx", join("src", "main.ts")],
+    ...mainTsProcess(),
     cwd: PACKAGE_ROOT,
     env: {
       ...getDefaultEnvironment(),
@@ -146,21 +148,32 @@ async function startWriter(port: number): Promise<Writer> {
   return writer;
 }
 
-/** True once the hub's SQLite file holds a row for `room`. */
-function isStored(databasePath: string, room: string): boolean {
+/**
+ * The block text the hub has on disk for `room`, or null when it holds no row
+ * for it yet. Read straight out of the hub's SQLite file, so it is what the hub
+ * would come back with, not what anything in this process believes.
+ */
+function storedBlocks(databasePath: string, room: string): string[] | null {
   try {
     const database = new Database(databasePath, { readonly: true });
     try {
-      return (
-        database.prepare('SELECT 1 FROM "documents" WHERE name = ?').get(room) !==
-        undefined
-      );
+      const row = database
+        .prepare('SELECT data FROM "documents" WHERE name = ?')
+        .get(room) as { data: Buffer } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      const doc = new Y.Doc();
+      Y.applyUpdate(doc, new Uint8Array(row.data));
+      const blocks = getBlocks(doc).map((block) => block.text);
+      doc.destroy();
+      return blocks;
     } finally {
       database.close();
     }
   } catch {
-    // No file, no table, or a writer mid-transaction: not stored yet.
-    return false;
+    // No file, no table, or a writer mid-transaction: nothing stored yet.
+    return null;
   }
 }
 
@@ -202,7 +215,9 @@ describe("synced", () => {
     // the crash takes the whole document and says nothing about the window.
     await waitUntil(
       "the hub to store the created document",
-      () => isStored(hubDatabase, room) && isStored(hubDatabase, "main/_directory"),
+      () =>
+        storedBlocks(hubDatabase, room)?.includes(STORED) === true &&
+        storedBlocks(hubDatabase, "main/_directory") !== null,
     );
 
     await writer.call("edit_block", {
@@ -221,6 +236,14 @@ describe("synced", () => {
         )
       );
     });
+
+    // The hub's store timer runs on its own clock: descheduled long enough
+    // after the acknowledgement, this process would be killing a hub that had
+    // already written the edit, and the probe would be asserting nothing. The
+    // re-read turns that into a named failure here rather than a mystery
+    // failure below. It narrows the race; it cannot close it, because the timer
+    // can still fire between this read and the kill.
+    expect(storedBlocks(hubDatabase, room)).toEqual([STORED]);
 
     // The hub dies first, and both die before either can be waited on: a writer
     // that went first would let the hub store the document on the disconnect,
@@ -255,4 +278,35 @@ describe("synced", () => {
     // between the two — named in create_doc, edit_block and sync_status.
     expect(read?.blocks.map((block) => block.text)).toEqual([STORED]);
   }, 45_000);
+
+  // The behaviour above is Yjs and Hocuspocus being themselves; what this
+  // package owes an agent is saying so where the agent reads. So the words are
+  // part of the contract, pinned like any other.
+  it("is qualified in the description of every tool that returns it", async () => {
+    const rig = await startServer(testConfig());
+    rigs.push(rig);
+    const { tools } = await rig.client.listTools();
+    const description = (name: string): string =>
+      tools.find((tool) => tool.name === name)?.description ?? "";
+
+    // Stated in full where durability decisions are made: what the word means,
+    // the window it leaves open, and that the local log is what closes it.
+    for (const name of ["create_doc", "edit_block", "sync_status"]) {
+      expect(description(name)).toContain("the hub acknowledged");
+      expect(description(name)).toContain("store debounce");
+      expect(description(name)).toContain("SIGKILL");
+      expect(description(name)).toContain("update log");
+    }
+
+    // And named, with a pointer, on every other tool that returns the field.
+    for (const name of [
+      "insert_block",
+      "delete_block",
+      "set_tags",
+      "set_links",
+      "annotate",
+    ]) {
+      expect(description(name)).toContain("hub-acknowledged, not hub-stored");
+    }
+  });
 });
