@@ -74,7 +74,8 @@
 
 /* The two faces ship with the app: variable woff2 files vendored under
  * `src/assets/fonts` (Geist 1.7.2, SIL Open Font License 1.1 — the license
- * travels with them as LICENSE.txt). No CDN, no `fonts.googleapis.com`: the
+ * travels with them as LICENSE.txt, referenced from `index.html` so the build
+ * emits it into `dist/` too). No CDN, no `fonts.googleapis.com`: the
  * app is offline-first, and a render-blocking third-party request would make
  * it render differently with no network.
  *

@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>uberblick</title>
+    <!-- The bundled Geist faces are SIL Open Font License 1.1, which requires
+         the license to travel with the font software wherever it is
+         distributed. Vite only emits assets something references, so this link
+         is what pulls LICENSE.txt into `dist/`. `rel="license"` is metadata —
+         browsers never fetch it, so it costs nothing at load. -->
+    <link rel="license" href="/src/assets/fonts/LICENSE.txt" />
   </head>
   <body>
     <div id="root"></div>
