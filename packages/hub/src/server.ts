@@ -402,6 +402,46 @@ export async function createHub(config: HubConfig): Promise<Hub> {
 
       return claims;
     },
+
+    /**
+     * Connection lifecycle, per room and not per socket: Hocuspocus runs these
+     * hooks once per document a client attaches to, so one client on three
+     * documents produces three of each event. Hence the names and the `room`
+     * field — and `socketId`, which is what ties a room's events back to one
+     * client and makes a reconnect legible (same room, new socket).
+     *
+     * `connected` rather than `onConnect` because only the post-handshake hook
+     * has the token claims in its context. The close is registered on the
+     * connection rather than read from the `onDisconnect` hook because
+     * Hocuspocus discards the websocket close event when it builds that hook's
+     * payload; `Connection.onClose` still carries it.
+     *
+     * A close the hub initiated names itself (`4205 Reset Connection` on
+     * shutdown, the timeout code when a client stops answering). A client
+     * going away does not: it arrives as `1006` with an empty reason, or with
+     * no event at all when the hub noticed the dead socket on its next write
+     * before the close frame got here. Both mean the same thing, so they are
+     * logged under one name instead of as an empty field.
+     */
+    async connected({ documentName, context, socketId, connection }) {
+      log({
+        event: "hub.room.connected",
+        room: documentName,
+        sub: context.sub,
+        socketId,
+      });
+
+      connection.onClose((_document, event) => {
+        log({
+          event: "hub.room.closed",
+          room: documentName,
+          sub: context.sub,
+          socketId,
+          code: event?.code ?? null,
+          reason: event?.reason || "client-gone",
+        });
+      });
+    },
   });
 
   let hocuspocus: Hocuspocus<HubContext>;
