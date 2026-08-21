@@ -22,7 +22,6 @@ import * as Y from "yjs";
 import { appendBlock, getBlocks, initDoc } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
 import { MirrorStore } from "../src/store.js";
-import type { UpdateOrigin } from "../src/store.js";
 import {
   FailingStore,
   peerClient,

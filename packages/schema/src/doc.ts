@@ -14,7 +14,7 @@
  * the outer one and keeps the outer origin.
  */
 
-import * as Y from "yjs";
+import type * as Y from "yjs";
 import type { DocMeta } from "./types.js";
 
 export const META_KEY = "meta";

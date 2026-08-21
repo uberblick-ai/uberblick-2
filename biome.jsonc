@@ -1,0 +1,44 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.9/schema.json",
+
+  // Lint only, by decision (#54): no formatter, no whole-repo reformat diff,
+  // no editor config to keep in sync. Same for the assist actions.
+  "formatter": { "enabled": false },
+  "assist": { "enabled": false },
+
+  // Reuse .gitignore so node_modules/, dist/ and the local SQLite data stay out.
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+
+  "linter": {
+    "enabled": true,
+    "rules": { "preset": "recommended" }
+  },
+
+  "overrides": [
+    {
+      // The invariant this linter exists to guard: the MCP server writes
+      // nothing to stdout except JSON-RPC frames, so a stray console.* there is
+      // a protocol bug, not a style question. src/log.ts is the sanctioned path
+      // and needs no exception — it writes to process.stderr, never console.
+      "includes": ["packages/mcp-server/src/**"],
+      "linter": { "rules": { "suspicious": { "noConsole": "error" } } }
+    },
+    {
+      "includes": ["packages/*/test/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            // Tests assert `expect(x).toBeDefined()` and then use `x!`. Biome's
+            // fix is `x?.`, which turns a failing test into a passing one.
+            "noNonNullAssertion": "off"
+          },
+          "suspicious": {
+            // MCP tool payloads are untyped JSON by contract; `unknown` would
+            // mean a cast at every assertion.
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    }
+  ]
+}

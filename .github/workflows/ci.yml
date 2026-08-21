@@ -4,8 +4,8 @@ name: CI
 # "gates green". This workflow is what makes green verified rather than
 # self-reported: it runs the same mise tasks a human would run locally.
 #
-# No secrets: `install`, `typecheck` and `test` are the tasks that do not wrap
-# `fnox exec`, so they run fine on a runner without the age key.
+# No secrets: `install`, `lint`, `typecheck` and `test` are the tasks that do
+# not wrap `fnox exec`, so they run fine on a runner without the age key.
 
 on:
   pull_request:
@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   gates:
-    name: typecheck + test
+    name: lint + typecheck + test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -40,5 +40,6 @@ jobs:
         env:
           PNPM_STORE_DIR: ~/.pnpm-store
 
+      - run: mise run lint
       - run: mise run typecheck
       - run: mise run test

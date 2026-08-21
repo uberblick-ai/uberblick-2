@@ -60,6 +60,13 @@ description = "Install workspace dependencies (frozen lockfile in CI)"
 # pnpm keeps using its own default store.
 run = 'pnpm install --frozen-lockfile ${PNPM_STORE_DIR:+--store-dir "$PNPM_STORE_DIR"}'
 
+[tasks.lint]
+description = "Lint the workspace with Biome (lint only — the formatter stays off)"
+# Biome is one root-level binary, not a per-package script, so this is `pnpm
+# lint` rather than `pnpm -r lint`. The root script carries the flags so the
+# Docker review runs the identical command.
+run = "pnpm lint"
+
 [tasks.typecheck]
 description = "Typecheck every package (tsc --noEmit)"
 run = "pnpm -r typecheck"

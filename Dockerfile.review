@@ -18,4 +18,4 @@ USER node
 RUN --mount=type=cache,target=/home/node/.local/share/pnpm/store,uid=1000,gid=1000 \
     pnpm install --frozen-lockfile
 
-CMD ["sh", "-lc", "pnpm run typecheck && pnpm run test"]
+CMD ["sh", "-lc", "pnpm run lint && pnpm run typecheck && pnpm run test"]
