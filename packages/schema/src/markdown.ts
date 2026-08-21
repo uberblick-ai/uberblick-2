@@ -483,7 +483,8 @@ function renderInline(source: readonly InlineRun[]): string {
 
   /**
    * Close every mark above `depth`, top down, putting `held` back after the last
-   * emphasis closer — outside the emphasis, still inside anything deeper.
+   * emphasis closer — outside the emphasis, still inside the marks that enclose
+   * it, whose closers have not been written yet.
    *
    * Only emphasis cannot sit against whitespace; a link is perfectly happy to, so
    * `[word ](url)` keeps its space when the link is the deeper of the two. When
@@ -1176,16 +1177,24 @@ function markFor(char: string, take: number): Span["mark"] {
 function matchDelimiters(
   tokens: readonly Token[],
   denied: ReadonlySet<string>,
+  frozen: readonly number[],
 ): {
   spans: Span[];
   unclaimed: number[];
   /** The pairs that only matched because the rule of three was waived. */
-  waived: Array<{ key: string; opener: number; closer: number }>;
+  waived: Array<{ key: string; opener: number; closer: number; take: number }>;
 } {
-  const waived: Array<{ key: string; opener: number; closer: number }> = [];
+  const waived: Array<{
+    key: string;
+    opener: number;
+    closer: number;
+    take: number;
+  }> = [];
   const spans: Span[] = [];
-  const unclaimed = tokens.map((token) =>
-    token.kind === "delim" ? token.length : 0,
+  // Frozen characters are text before matching begins: nothing may claim them,
+  // and they are added back to the leftovers at the end so they still get written.
+  const unclaimed = tokens.map((token, index) =>
+    token.kind === "delim" ? token.length - (frozen[index] ?? 0) : 0,
   );
   /** Indexes of runs still able to open something, innermost last. */
   const openers: number[] = [];
@@ -1232,7 +1241,7 @@ function matchDelimiters(
       if (at === -1) break;
       const j = openers[at] as number;
       const key = `${j}:${i}`;
-      if (paired.has(key)) waived.push({ key, opener: j, closer: i });
+      if (paired.has(key)) waived.push({ key, opener: j, closer: i, take });
       paired.add(key);
       unclaimed[j] = lengthAt(j) - take;
       unclaimed[i] = lengthAt(i) - take;
@@ -1244,7 +1253,11 @@ function matchDelimiters(
 
     if (token.canOpen && lengthAt(i) > 0) openers.push(i);
   }
-  return { spans, unclaimed, waived };
+  return {
+    spans,
+    unclaimed: unclaimed.map((left, index) => left + (frozen[index] ?? 0)),
+    waived,
+  };
 }
 
 /**
@@ -1259,22 +1272,41 @@ function matchDelimiters(
  * the construct is *finished*.
  *
  * So: match with the waiver, and if either run it was granted for ends up with
- * characters nobody claimed, withdraw it — for *that pair only*, and match again.
- * A line can hold one construct that finishes and another that does not, and the
- * second one's failure says nothing about the first: withdrawing the waiver
- * line-wide would take apart a construct that was perfectly well formed.
+ * characters nobody claimed, withdraw it — and *quarantine* what the waived match
+ * had taken. Those characters become literal text for the re-match rather than
+ * going back on the market.
  *
- * Each round withdraws at least one pair and no round grants a pair back, so this
- * settles in at most as many passes as there are waived pairs — one, for anything
- * that did not need the waiver at all.
+ * The quarantine is what keeps a withdrawal local. Handing the freed characters
+ * back would let some *other* pair consume them, so denying one waiver could
+ * silently change the marks on a construct that was perfectly well formed.
+ * Freezing them leaves every other pair looking at the same characters it saw
+ * before.
+ *
+ * Not at the same *time*, though, and that is worth being exact about: a denied
+ * pair stops matching altogether, which changes how the opener stack unwinds after
+ * it, so a later pair can pair up differently and need a withdrawal of its own.
+ * Settling is therefore monotone rather than immediate — every round denies at
+ * least one pair and no round ever grants one back, so it ends in at most as many
+ * rounds as there are waived pairs. Two is typical; three happens
+ * (`****a******a*******`).
+ *
+ * A note on fidelity, since this is a reader of other people's markdown: the
+ * quarantine is a rule of this implementation, chosen because it is provable, not
+ * one lifted from a reference implementation. cmark could not be run in the
+ * environment this was written in, so its output for these shapes is *unverified*
+ * here; what the tests pin is that every character of the input survives, which is
+ * the contract this reader owes its callers either way.
  */
 function matchNesting(tokens: readonly Token[]): {
   spans: Span[];
   unclaimed: number[];
 } {
   const denied = new Set<string>();
-  for (;;) {
-    const attempt = matchDelimiters(tokens, denied);
+  const frozen = tokens.map(() => 0);
+  // Two passes is the expectation, not the limit; the bound is here so a mistake
+  // in the reasoning above cannot become an infinite loop.
+  for (let pass = 0; pass < tokens.length + 2; pass += 1) {
+    const attempt = matchDelimiters(tokens, denied, frozen);
     const stranded = attempt.waived.filter(
       (pair) =>
         !denied.has(pair.key) &&
@@ -1282,8 +1314,13 @@ function matchNesting(tokens: readonly Token[]): {
           (attempt.unclaimed[pair.closer] ?? 0) > 0),
     );
     if (stranded.length === 0) return attempt;
-    for (const pair of stranded) denied.add(pair.key);
+    for (const pair of stranded) {
+      denied.add(pair.key);
+      frozen[pair.opener] = (frozen[pair.opener] ?? 0) + pair.take;
+      frozen[pair.closer] = (frozen[pair.closer] ?? 0) + pair.take;
+    }
   }
+  return matchDelimiters(tokens, denied, frozen);
 }
 
 /** A token's marks: the tokenizer's scope, plus every span covering it. */

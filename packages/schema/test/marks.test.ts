@@ -305,6 +305,43 @@ describe("inline marks in the document", () => {
   });
 
   /**
+   * Delimiter soup: several runs on one line, pairing across whatever looks like a
+   * construct, with waivers granted and some of them withdrawn again.
+   *
+   * These are the shapes where a reader can quietly lose characters, so what is
+   * pinned is the thing that must never bend — every character of the input is
+   * still there afterwards — plus the settling: read it, write it, read it again,
+   * and nothing moves. The *marks* these produce are this implementation's reading
+   * of genuinely ambiguous input, not a reference implementation's; cmark could not
+   * be run here to compare, so they are recorded rather than claimed as canonical.
+   */
+  it("keeps every character of tangled delimiter runs, and settles", () => {
+    const tangles = [
+      "a***b****c ***d****e*",
+      "***a****a*****a*****",
+      "****a******a*******",
+      "***c****d* a***b****c",
+    ];
+    for (const source of tangles) {
+      const letters = (text: string): string => text.replace(/[^a-z ]/g, "");
+      const first = importMarkdown(source).blocks[0];
+      expect(first, source).toBeDefined();
+      // Nothing but delimiters may be consumed: every letter and space survives.
+      expect(letters(first?.text ?? ""), source).toBe(letters(source));
+
+      // …and the reading is stable, which is what stops an edit from churning.
+      const doc = seeded();
+      const id = appendBlock(doc, first ?? { type: "paragraph" });
+      const exported = exportMarkdown(doc, { frontmatter: false });
+      const again = importMarkdown(exported).blocks[0];
+      const reread = seeded();
+      const rereadId = appendBlock(reread, again ?? { type: "paragraph" });
+      expect(getBlockText(reread, rereadId), source).toBe(getBlockText(doc, id));
+      expect(exportMarkdown(reread, { frontmatter: false }), source).toBe(exported);
+    }
+  });
+
+  /**
    * Only *emphasis* cannot sit against whitespace. A link is perfectly happy to
    * hold a space, so hoisting the space out of everything would throw away a mark
    * the format can express.
@@ -1036,8 +1073,8 @@ describe("export and import are closed over the marks the model allows", () => {
       expect(three.markdown, label).toBe(two.markdown);
 
       // …and when the format can express the document at all, the first export is
-      // already exact. The exception is emphasis touching whitespace, and this is
-      // what stops it growing into anything else.
+      // already exact. The exceptions are emphasis touching whitespace and two code
+      // spans that would meet; this is what stops them growing into anything else.
       if (expressibleInGfm(getBlockInline(doc, id))) {
         expressible += 1;
         expect(one.runs, label).toEqual(getBlockInline(doc, id));
