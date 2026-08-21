@@ -468,9 +468,10 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
  * `test/marks.test.ts` asserts: the text never changes; the per-character mark
  * sets never change from the first export's own re-read onward; and the bytes
  * settle immediately, an export of a re-import being identical to its source. For
- * a document GFM can express at all, the first export is already exact — the sole
- * exception being the marked whitespace above, which is the format's limit rather
- * than this code's.
+ * a document GFM can express at all, the first export is already exact — the two
+ * exceptions being the marked whitespace above and two code spans that would meet
+ * with nothing writable between them. Both are the format's limits rather than this
+ * code's, and `expressibleInGfm` in the test names them structurally.
  */
 function renderInline(source: readonly InlineRun[]): string {
   let out = "";
@@ -1213,6 +1214,7 @@ function matchDelimiters(
       // a dead end: `~~a~b~~` matches the outer pair *past* the lone `~`.
       let at = -1;
       let take = 0;
+      let exercisedWaiver = false;
       for (let k = openers.length - 1; k >= 0; k -= 1) {
         const j = openers[k] as number;
         const candidate = tokens[j];
@@ -1220,28 +1222,37 @@ function matchDelimiters(
           candidate === undefined ||
           candidate.kind !== "delim" ||
           candidate.char !== token.char ||
-          lengthAt(j) === 0 ||
-          !ruleOfThreeAllows(
-            token.char,
-            candidate,
-            token,
-            lengthAt(j),
-            lengthAt(i),
-            paired.has(`${j}:${i}`) && !denied.has(`${j}:${i}`),
-          )
+          lengthAt(j) === 0
         ) {
           continue;
         }
+        // Two separate questions: would the rule of three allow this match on its
+        // own, and if not, is the waiver available? Most repeat matches between one
+        // pair need no waiver at all — `****a*****` matches strong twice because
+        // neither run can go both ways — and recording those as waived would
+        // quarantine delimiters that nothing was ever wrong with.
+        const strict = ruleOfThreeAllows(
+          token.char,
+          candidate,
+          token,
+          lengthAt(j),
+          lengthAt(i),
+          false,
+        );
+        const key = `${j}:${i}`;
+        const waiverOffered = paired.has(key) && !denied.has(key);
+        if (!strict && !waiverOffered) continue;
         const possible = delimiterTake(token.char, lengthAt(j), lengthAt(i));
         if (possible === 0) continue;
         at = k;
         take = possible;
+        exercisedWaiver = !strict;
         break;
       }
       if (at === -1) break;
       const j = openers[at] as number;
       const key = `${j}:${i}`;
-      if (paired.has(key)) waived.push({ key, opener: j, closer: i, take });
+      if (exercisedWaiver) waived.push({ key, opener: j, closer: i, take });
       paired.add(key);
       unclaimed[j] = lengthAt(j) - take;
       unclaimed[i] = lengthAt(i) - take;
@@ -1286,9 +1297,11 @@ function matchDelimiters(
  * pair stops matching altogether, which changes how the opener stack unwinds after
  * it, so a later pair can pair up differently and need a withdrawal of its own.
  * Settling is therefore monotone rather than immediate — every round denies at
- * least one pair and no round ever grants one back, so it ends in at most as many
- * rounds as there are waived pairs. Two is typical; three happens
- * (`****a******a*******`).
+ * least one pair and no round ever grants one back, so the number of rounds is at
+ * most the number of distinct pairs that exercise the waiver, *plus one* for the
+ * clean round that returns. In practice that is one round for input that never
+ * exercises it and two for input that does: `****a******a*******` and
+ * `a***b****c` each withdraw a single pair and return on the second round.
  *
  * A note on fidelity, since this is a reader of other people's markdown: the
  * quarantine is a rule of this implementation, chosen because it is provable, not
@@ -1303,8 +1316,9 @@ function matchNesting(tokens: readonly Token[]): {
 } {
   const denied = new Set<string>();
   const frozen = tokens.map(() => 0);
-  // Two passes is the expectation, not the limit; the bound is here so a mistake
-  // in the reasoning above cannot become an infinite loop.
+  // One round per withdrawal plus a clean one to finish; the cap is here so a
+  // mistake in the reasoning above cannot become an infinite loop, not because the
+  // count is expected to come near it.
   for (let pass = 0; pass < tokens.length + 2; pass += 1) {
     const attempt = matchDelimiters(tokens, denied, frozen);
     const stranded = attempt.waived.filter(

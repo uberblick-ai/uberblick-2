@@ -289,6 +289,19 @@ describe("inline marks in the document", () => {
       ],
     });
 
+    // A pair can match twice with no waiver involved at all: neither run here can
+    // go both ways, so the rule of three never applies and both strong matches are
+    // its own doing. Recording that as a waiver would quarantine delimiters that
+    // nothing was ever wrong with, and cost the second span.
+    expect(importMarkdown("****a*****").blocks[0]).toEqual({
+      type: "paragraph",
+      text: "a*",
+      inline: [
+        { text: "a", marks: { bold: true } },
+        { text: "*", marks: {} },
+      ],
+    });
+
     // Both on one line: the second one's failure says nothing about the first,
     // and withdrawing the waiver line-wide would take the good one apart.
     expect(importMarkdown("***c****d* a***b****c").blocks[0]).toEqual({
@@ -317,6 +330,7 @@ describe("inline marks in the document", () => {
    */
   it("keeps every character of tangled delimiter runs, and settles", () => {
     const tangles = [
+      "****a*****",
       "a***b****c ***d****e*",
       "***a****a*****a*****",
       "****a******a*******",
