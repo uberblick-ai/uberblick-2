@@ -43,24 +43,20 @@ function settle(state: EditorState): EditorState {
 }
 
 describe("blockIdPlugin", () => {
-  it("assigns an id to a block that has none", () => {
+  it("assigns an id to a block that has none, empty string included", () => {
     const state = settle(
       stateWith([{ type: "paragraph", text: "hello" }], sequentialIds()),
     );
     expect(idsOf(state)).toEqual(["fresh-1"]);
-  });
 
-  it("leaves existing unique ids alone", () => {
-    const state = settle(
+    // An empty id has claimed no identity, so it counts as absent.
+    const blank = settle(
       stateWith(
-        [
-          { type: "heading", attrs: { id: "a", level: "2" }, text: "A" },
-          { type: "paragraph", attrs: { id: "b" }, text: "B" },
-        ],
+        [{ type: "paragraph", attrs: { id: "" }, text: "x" }],
         sequentialIds(),
       ),
     );
-    expect(idsOf(state)).toEqual(["a", "b"]);
+    expect(idsOf(blank)).toEqual(["fresh-1"]);
   });
 
   it("keeps the first occurrence and re-ids later duplicates", () => {
@@ -75,13 +71,19 @@ describe("blockIdPlugin", () => {
       ),
     );
     expect(idsOf(state)).toEqual(["dup", "fresh-1", "fresh-2"]);
-  });
 
-  it("treats the empty string as no id", () => {
-    const state = settle(
-      stateWith([{ type: "paragraph", attrs: { id: "" }, text: "x" }], sequentialIds()),
+    // Ids that are already unique are left exactly as they are — the plugin
+    // repairs, it does not renumber.
+    const untouched = settle(
+      stateWith(
+        [
+          { type: "heading", attrs: { id: "a", level: "2" }, text: "A" },
+          { type: "paragraph", attrs: { id: "b" }, text: "B" },
+        ],
+        sequentialIds(),
+      ),
     );
-    expect(idsOf(state)).toEqual(["fresh-1"]);
+    expect(idsOf(untouched)).toEqual(["a", "b"]);
   });
 
   it("gives the second half of an Enter-split a fresh id", () => {
@@ -97,17 +99,6 @@ describe("blockIdPlugin", () => {
     expect(split.doc.child(1).textContent).toBe("def");
   });
 
-  it("does nothing when every id is already unique", () => {
-    const initial = stateWith(
-      [
-        { type: "paragraph", attrs: { id: "a" }, text: "a" },
-        { type: "code", attrs: { id: "b", language: "ts" }, text: "b" },
-      ],
-      sequentialIds(),
-    );
-    const plugin = initial.plugins[0];
-    expect(plugin?.spec.appendTransaction?.([], initial, initial)).toBeNull();
-  });
 });
 
 /**

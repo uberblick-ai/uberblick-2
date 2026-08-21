@@ -20,7 +20,6 @@ import {
   listAnnotationsForBlock,
   resolveAnnotationRange,
   setAnnotationResolved,
-  setBlockType,
 } from "../src/index.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
@@ -88,36 +87,57 @@ describe("annotations", () => {
     expect(annotatedText(doc, blockId, threadId)).toBe("brave");
   });
 
-  it("shifts with the text when characters before it change", () => {
+  it("tracks the range through edits before, after, inside and across it", () => {
+    // The mark IS the anchor, so an edit anywhere in the block moves the range
+    // rather than invalidating it. One table, one behaviour: what "brave"
+    // covers after each kind of edit, and where the range lands.
+    const cases: Array<{
+      what: string;
+      newText: string;
+      covers: string;
+      range?: { start: number; end: number };
+    }> = [
+      {
+        what: "shifts when characters before it are inserted",
+        newText: `Say: ${SENTENCE}`,
+        covers: "brave",
+        range: { start: 11, end: 16 },
+      },
+      {
+        what: "stays put when text after it changes",
+        newText: "Hello brave new world",
+        covers: "brave",
+        range: { start: 6, end: 11 },
+      },
+      {
+        what: "grows with text inserted strictly inside",
+        newText: "Hello braXve world",
+        covers: "braXve",
+      },
+      {
+        what: "shrinks when part of the annotated text is deleted",
+        newText: "Hello be world",
+        covers: "be",
+      },
+    ];
+
+    for (const { what, newText, covers, range } of cases) {
+      const { doc, blockId, threadId } = annotated();
+      editBlock(doc, blockId, SENTENCE, newText);
+      expect(annotatedText(doc, blockId, threadId), what).toBe(covers);
+      if (range !== undefined) {
+        expect(resolveAnnotationRange(doc, threadId), what).toEqual({
+          ...range,
+          collapsed: false,
+        });
+      }
+    }
+
+    // …and an edit that puts the text back leaves the range where it started.
     const { doc, blockId, threadId } = annotated();
-
     editBlock(doc, blockId, SENTENCE, `Say: ${SENTENCE}`);
-    expect(resolveAnnotationRange(doc, threadId)).toEqual({
-      start: 11,
-      end: 16,
-      collapsed: false,
-    });
-    expect(annotatedText(doc, blockId, threadId)).toBe("brave");
-
     editBlock(doc, blockId, `Say: ${SENTENCE}`, SENTENCE);
     expect(annotatedText(doc, blockId, threadId)).toBe("brave");
-  });
-
-  it("stays put when text after it changes", () => {
-    const { doc, blockId, threadId } = annotated();
-    editBlock(doc, blockId, SENTENCE, "Hello brave new world");
-    expect(resolveAnnotationRange(doc, threadId)).toEqual({
-      start: 6,
-      end: 11,
-      collapsed: false,
-    });
-    expect(annotatedText(doc, blockId, threadId)).toBe("brave");
-  });
-
-  it("grows with text inserted strictly inside", () => {
-    const { doc, blockId, threadId } = annotated();
-    editBlock(doc, blockId, SENTENCE, "Hello braXve world");
-    expect(annotatedText(doc, blockId, threadId)).toBe("braXve");
   });
 
   it("takes in text typed at its end boundary but not at its start boundary", () => {
@@ -137,12 +157,6 @@ describe("annotations", () => {
     );
   });
 
-  it("shrinks when part of the annotated text is deleted", () => {
-    const { doc, blockId, threadId } = annotated();
-    editBlock(doc, blockId, SENTENCE, "Hello be world");
-    expect(annotatedText(doc, blockId, threadId)).toBe("be");
-  });
-
   it("resolves to null once every annotated character is deleted, keeping the thread", () => {
     const { doc, blockId, threadId } = annotated();
 
@@ -159,35 +173,16 @@ describe("annotations", () => {
     expect(listAnnotationRanges(doc, blockId)).toEqual([]);
   });
 
-  it("resolves to null when the anchoring block is deleted, keeping the thread", () => {
+  it("resolves to null when the anchoring block is deleted, or the thread is unknown", () => {
     const { doc, blockId, threadId } = annotated();
+    expect(resolveAnnotationRange(doc, "not-a-thread")).toBeNull();
+
     deleteBlock(doc, blockId);
     expect(getAnnotation(doc, threadId)).not.toBeNull();
     expect(resolveAnnotationRange(doc, threadId)).toBeNull();
   });
 
-  it("resolves to null for an unknown thread id", () => {
-    const { doc } = annotated();
-    expect(resolveAnnotationRange(doc, "not-a-thread")).toBeNull();
-  });
-
-  it("survives a block re-type, marks and all", () => {
-    const { doc, blockId, threadId } = annotated();
-
-    setBlockType(doc, blockId, "heading", { level: 2 });
-
-    expect(deltaOf(doc, blockId)).toEqual([
-      ["Hello ", null],
-      ["brave", { [COMMENT_MARK]: { threadId } }],
-      [" world", null],
-    ]);
-    expect(annotatedText(doc, blockId, threadId)).toBe("brave");
-    // …and still tracks edits after the re-type.
-    editBlock(doc, blockId, SENTENCE, `Say: ${SENTENCE}`);
-    expect(annotatedText(doc, blockId, threadId)).toBe("brave");
-  });
-
-  it("clamps out-of-range and reversed indices", () => {
+  it("clamps out-of-range and reversed indices, and refuses unknown blocks", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Annotations" });
     const blockId = appendBlock(doc, { type: "paragraph", text: "short" });
@@ -205,6 +200,10 @@ describe("annotations", () => {
       end: 4,
       collapsed: false,
     });
+
+    expect(() => createAnnotation(doc, "nope", 0, 1, "a", "b")).toThrow(
+      BlockNotFoundError,
+    );
   });
 
   it("rejects an empty range", () => {
@@ -251,13 +250,6 @@ describe("annotations", () => {
       { threadId, start: 6, end: 11 },
       { threadId: after.id, start: 11, end: 17 },
     ]);
-  });
-
-  it("rejects annotations on unknown blocks", () => {
-    const { doc } = annotated();
-    expect(() => createAnnotation(doc, "nope", 0, 1, "a", "b")).toThrow(
-      BlockNotFoundError,
-    );
   });
 
   it("appends comments and resolves threads without touching the mark", () => {
@@ -366,7 +358,7 @@ describe("annotations", () => {
   });
 
   it("exports annotations as adjacent HTML comments, or drops them", () => {
-    const { doc, threadId } = annotated();
+    const { doc, blockId, threadId } = annotated();
     setAnnotationResolved(doc, threadId, true);
 
     expect(exportMarkdown(doc, { frontmatter: false })).toBe(
@@ -382,10 +374,9 @@ describe("annotations", () => {
         "",
       ].join("\n"),
     );
-  });
 
-  it("omits unanchored threads from the markdown export", () => {
-    const { doc, blockId } = annotated();
+    // An unanchored thread has no range to point at, so it is omitted even when
+    // annotations are requested.
     appendBlock(doc, { type: "paragraph", text: "still here" });
     deleteBlock(doc, blockId);
     expect(

@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   BlockNotFoundError,
+  COMMENT_MARK,
   appendBlock,
   createAnnotation,
   deleteBlock,
@@ -79,6 +80,8 @@ describe("setBlockType", () => {
       text: "def f():\n    return 1",
       language: "python",
     });
+
+    expect(() => setBlockType(doc, "nope", "code")).toThrow(BlockNotFoundError);
   });
 
   it("carries type attributes over where they still apply", () => {
@@ -132,6 +135,10 @@ describe("setBlockType", () => {
     expect(getBlockText(doc, id)).toBe("Now a heading");
   });
 
+  // The canonical annotation-survives-a-re-type test. It asserts the anchor at
+  // every level a caller can see it — the raw comment mark Yjs holds, the
+  // resolved range, the covered text, the export — and that the mark keeps
+  // tracking edits afterwards, so no other package needs its own copy.
   it("keeps annotation anchors, which a delete-and-reinsert re-type would orphan", () => {
     const doc = seeded();
     const id = appendBlock(doc, {
@@ -145,14 +152,20 @@ describe("setBlockType", () => {
     const range = resolveAnnotationRange(doc, thread.id);
     expect(range).toEqual({ start: 6, end: 11, collapsed: false });
     expect(getAnnotatedText(doc, id, thread.id)).toBe("brave");
+    // The mark itself came through the re-type, not just a range that happens
+    // to line up.
+    expect(commentDelta(doc, id)).toEqual([
+      ["Hello ", null],
+      ["brave", { [COMMENT_MARK]: { threadId: thread.id } }],
+      [" world", null],
+    ]);
     expect(exportMarkdown(doc, { frontmatter: false })).toBe(
       "## Hello brave world\n",
     );
-  });
 
-  it("reports an unknown block", () => {
-    const doc = seeded();
-    expect(() => setBlockType(doc, "nope", "code")).toThrow(BlockNotFoundError);
+    // …and the re-typed block's mark still moves with the text.
+    editBlock(doc, id, "Hello brave world", "Say: Hello brave world");
+    expect(getAnnotatedText(doc, id, thread.id)).toBe("brave");
   });
 
   it("converges with a concurrent edit to the same block", () => {
@@ -268,4 +281,19 @@ function getAnnotatedText(
   const range = resolveAnnotationRange(doc, threadId);
   if (range === null) return null;
   return getBlockText(doc, blockId).slice(range.start, range.end);
+}
+
+/** The raw formatting attributes Yjs holds, to prove the anchor is a mark. */
+function commentDelta(doc: Y.Doc, blockId: string): Array<[string, unknown]> {
+  const element = getBlocksFragment(doc)
+    .toArray()
+    .find((child) => {
+      return (
+        child instanceof Y.XmlElement && child.getAttribute("id") === blockId
+      );
+    }) as Y.XmlElement;
+  const text = element.firstChild as Y.XmlText;
+  return (
+    text.toDelta() as Array<{ insert: string; attributes?: unknown }>
+  ).map((op) => [op.insert, op.attributes ?? null]);
 }

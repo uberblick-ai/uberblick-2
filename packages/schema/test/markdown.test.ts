@@ -74,6 +74,8 @@ describe("importMarkdown", () => {
         text: "A paragraph that\nspans two source lines.",
       },
     ]);
+
+    expect(importMarkdown("")).toEqual({ title: "", tags: [], blocks: [] });
   });
 
   it("takes the title from a leading H1 when there is no frontmatter, and consumes it", () => {
@@ -84,12 +86,12 @@ describe("importMarkdown", () => {
     expect(imported.blocks).toEqual([
       { type: "paragraph", text: "What it is." },
     ]);
-  });
 
-  it("keeps a non-leading or non-H1 heading as a block", () => {
-    const imported = importMarkdown("## Section\n\nBody.\n");
-    expect(imported.title).toBe("");
-    expect(imported.blocks[0]).toEqual({
+    // Only a LEADING H1 is a title: any other heading stays a block, and the
+    // document is left untitled.
+    const notATitle = importMarkdown("## Section\n\nBody.\n");
+    expect(notATitle.title).toBe("");
+    expect(notATitle.blocks[0]).toEqual({
       type: "heading",
       text: "Section",
       level: 2,
@@ -145,9 +147,6 @@ describe("importMarkdown", () => {
     ]);
   });
 
-  it("returns an empty document for empty input", () => {
-    expect(importMarkdown("")).toEqual({ title: "", tags: [], blocks: [] });
-  });
 });
 
 describe("markdown round-trip", () => {
@@ -161,6 +160,15 @@ describe("markdown round-trip", () => {
     expect(reimported).toEqual(first);
     expect(getBlocks(docFrom(exported)).map(({ id, ...rest }) => rest)).toEqual(
       getBlocks(doc).map(({ id, ...rest }) => rest),
+    );
+
+    // Export reads nothing but the Y.Doc, so a replica hydrated from an update
+    // exports byte-identically — and `frontmatter: false` drops only the header.
+    const replica = new Y.Doc();
+    Y.applyUpdate(replica, Y.encodeStateAsUpdate(doc));
+    expect(exportMarkdown(replica)).toBe(exported);
+    expect(exportMarkdown(replica, { frontmatter: false })).toBe(
+      exported.slice(exported.indexOf("\n---\n\n") + "\n---\n\n".length),
     );
   });
 
@@ -189,22 +197,24 @@ describe("markdown round-trip", () => {
     const imported = importMarkdown(exported);
     expect(imported.title).toBe("Schema: the keystone");
     expect(imported.tags).toEqual(["a tag", "with: colon"]);
-  });
 
-  it("emits an empty tag list and an empty title safely", () => {
-    const doc = new Y.Doc();
-    initDoc(doc, { uuid: UUID, title: "" });
-    setTags(doc, []);
-    const exported = exportMarkdown(doc);
-    expect(exported).toBe(
+    // The degenerate end of the same emitter: an empty title and no tags still
+    // produce valid, re-importable frontmatter — and a blockless document has
+    // no body at all, which with `frontmatter: false` is the empty string.
+    const empty = new Y.Doc();
+    initDoc(empty, { uuid: UUID, title: "" });
+    setTags(empty, []);
+    const emptyExport = exportMarkdown(empty);
+    expect(emptyExport).toBe(
       ["---", `uuid: ${UUID}`, 'title: ""', "tags: []", "---", ""].join("\n"),
     );
-    expect(importMarkdown(exported)).toEqual({
+    expect(importMarkdown(emptyExport)).toEqual({
       title: "",
       tags: [],
       uuid: UUID,
       blocks: [],
     });
+    expect(exportMarkdown(empty, { frontmatter: false })).toBe("");
   });
 
   it("lengthens the fence when the code itself contains backticks", () => {
@@ -230,11 +240,5 @@ describe("markdown round-trip", () => {
     initDoc(doc, { uuid: UUID, title: "Headings" });
     appendBlock(doc, { type: "heading", text: "One\nline", level: 2 });
     expect(exportMarkdown(doc, { frontmatter: false })).toBe("## One line\n");
-  });
-
-  it("exports an empty document as an empty string without frontmatter", () => {
-    const doc = new Y.Doc();
-    initDoc(doc, { uuid: UUID, title: "Empty" });
-    expect(exportMarkdown(doc, { frontmatter: false })).toBe("");
   });
 });

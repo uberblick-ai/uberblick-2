@@ -118,7 +118,9 @@ export function testConfig(options: TestConfigOptions = {}): McpConfig {
     databasePath: options.databasePath ?? tempDatabasePath(),
     sessionId: `agent-test-${randomUUID()}`,
     color: "#7b5ec7",
-    connectTimeoutMs: 400,
+    // Short on purpose: the offline tests dial a port nothing listens on, where
+    // the connect fails immediately and the timeout is pure waiting.
+    connectTimeoutMs: 150,
     syncTimeoutMs: 2_000,
     reconnectMaxDelayMs: 250,
     cursorTtlMs: options.cursorTtlMs ?? 30_000,

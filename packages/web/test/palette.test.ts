@@ -34,7 +34,7 @@ import { plainText } from "../src/editor/ytext.js";
 import { mountEditor } from "./helpers.js";
 
 describe("the palette is exactly the schema's block types", () => {
-  it("declares four block nodes plus doc and text, and nothing else", () => {
+  it("declares four block nodes, one mark, and nothing else", () => {
     expect(Object.keys(uberblickSchema.nodes).sort()).toEqual([
       "code",
       "doc",
@@ -44,14 +44,12 @@ describe("the palette is exactly the schema's block types", () => {
       "text",
     ]);
     expect(BLOCK_NODE_NAMES).toEqual(["paragraph", "heading", "code", "mermaid"]);
-  });
-
-  it("declares exactly one mark, and the gate reads its list off the schema", () => {
     expect(Object.keys(uberblickSchema.marks)).toEqual([COMMENT_MARK]);
+    // The gate reads its list off the schema rather than keeping its own.
     expect(MARK_NAMES).toEqual(Object.keys(uberblickSchema.marks));
-  });
 
-  it("has no list, blockquote, bold or italic to fall back to", () => {
+    // Stated the other way round, because a node or mark that quietly exists is
+    // one the editor could normalise foreign content into.
     for (const absent of [
       "bulletList",
       "orderedList",
@@ -80,7 +78,7 @@ describe("the palette is exactly the schema's block types", () => {
     }
   });
 
-  it("rejects an unknown node type instead of normalising it", () => {
+  it("rejects an unknown node or mark type instead of normalising it", () => {
     expect(() => uberblickSchema.node("blockquote")).toThrow(/Unknown node type/);
     expect(() =>
       uberblickSchema.nodeFromJSON({
@@ -88,10 +86,7 @@ describe("the palette is exactly the schema's block types", () => {
         content: [{ type: "bulletList", content: [] }],
       }),
     ).toThrow();
-  });
 
-  it("rejects an unknown mark type", () => {
-    expect(uberblickSchema.marks.bold).toBeUndefined();
     expect(() => uberblickSchema.mark("bold")).toThrow();
     expect(() =>
       uberblickSchema.nodeFromJSON({
@@ -139,25 +134,25 @@ describe("foreign blocks already in the document", () => {
     expect(foreign[0]?.index).toBe(1);
     expect(describeForeignBlocks(foreign)).toContain("callout");
     expect(describeForeignBlocks(foreign)).toMatch(/unsupported type/i);
-  });
 
-  it("reports a clean fragment as safe to bind", () => {
-    const ydoc = new Y.Doc();
-    initDoc(ydoc, { uuid: "doc-2", title: "Fine" });
-    appendBlock(ydoc, { type: "heading", text: "h", level: 2 });
-    appendBlock(ydoc, { type: "code", text: "x", language: "ts" });
-    appendBlock(ydoc, { type: "mermaid", text: "graph TD;" });
-    expect(findForeignBlocks(getBlocksFragment(ydoc))).toEqual([]);
+    // A bare Y.XmlText at the top level is foreign too — the document is a list
+    // of block elements, and y-prosemirror would drop loose inline content.
+    const loose = new Y.Doc();
+    initDoc(loose, { uuid: "doc-3", title: "Inline at top level" });
+    getBlocksFragment(loose).insert(0, [new Y.XmlText("loose text")]);
+    const looseFindings = findForeignBlocks(getBlocksFragment(loose));
+    expect(looseFindings).toHaveLength(1);
+    expect(looseFindings[0]?.nodeName).toBe("#text");
+
+    // And a fragment made only of palette blocks is reported as safe to bind:
+    // the detector has to be quiet, or the gate would never open.
+    const clean = new Y.Doc();
+    initDoc(clean, { uuid: "doc-2", title: "Fine" });
+    appendBlock(clean, { type: "heading", text: "h", level: 2 });
+    appendBlock(clean, { type: "code", text: "x", language: "ts" });
+    appendBlock(clean, { type: "mermaid", text: "graph TD;" });
+    expect(findForeignBlocks(getBlocksFragment(clean))).toEqual([]);
     expect(describeForeignBlocks([])).toBe("");
-  });
-
-  it("counts a bare top-level Y.XmlText as foreign", () => {
-    const ydoc = new Y.Doc();
-    initDoc(ydoc, { uuid: "doc-3", title: "Inline at top level" });
-    getBlocksFragment(ydoc).insert(0, [new Y.XmlText("loose text")]);
-    const foreign = findForeignBlocks(getBlocksFragment(ydoc));
-    expect(foreign).toHaveLength(1);
-    expect(foreign[0]?.nodeName).toBe("#text");
   });
 
   /**
@@ -339,60 +334,83 @@ describe("foreign content inside a known block", () => {
     expect(markFindings[0]?.nodeName).toBe("#mark:bold");
   });
 
-  it("keeps a nested element when it is already there at load", () => {
-    const ydoc = docWithBlock();
-    (getBlocksFragment(ydoc).get(0) as Y.XmlElement).insert(1, [nestedElement()]);
-    const binding = bind(ydoc);
-    expect(binding.refused).toBe(true);
+  /**
+   * The three kinds of foreign content a known block can hold, and the two
+   * guards that have to catch each of them. One test per guard, because the
+   * guard is the subject; the kind of content only varies the fixture.
+   */
+  const kinds: Array<{
+    what: string;
+    plant: (ydoc: Y.Doc) => void;
+    /** Everything the block must still hold afterwards. */
+    intact: (ydoc: Y.Doc) => void;
+  }> = [
+    {
+      what: "a nested element",
+      plant: (ydoc) => {
+        (getBlocksFragment(ydoc).get(0) as Y.XmlElement).insert(1, [
+          nestedElement(),
+        ]);
+      },
+      intact: (ydoc) => {
+        const block = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
+        expect(block.length).toBe(2);
+        expect((block.get(1) as Y.XmlElement).nodeName).toBe("callout");
+        expect((block.get(1) as Y.XmlElement).toString()).toContain("keep me");
+      },
+    },
+    {
+      what: "a text carrying an undeclared mark",
+      plant: (ydoc) => {
+        firstBlockText(ydoc).format(0, 3, { bold: {} });
+      },
+      intact: (ydoc) => {
+        expect(plainText(firstBlockText(ydoc))).toBe("known");
+        const delta = firstBlockText(ydoc).toDelta() as Array<
+          Record<string, unknown>
+        >;
+        expect(delta[0]?.attributes).toEqual({ bold: {} });
+      },
+    },
+    {
+      what: "an embed inside the block's text",
+      plant: (ydoc) => {
+        firstBlockText(ydoc).insertEmbed(1, { future: "keep-me" });
+      },
+      intact: (ydoc) => {
+        expect(embedsOf(firstBlockText(ydoc))).toEqual([{ future: "keep-me" }]);
+        expect(plainText(firstBlockText(ydoc))).toBe("known");
+      },
+    },
+  ];
 
-    const block = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
-    expect(block.length).toBe(2);
-    expect((block.get(1) as Y.XmlElement).nodeName).toBe("callout");
-    expect((block.get(1) as Y.XmlElement).toString()).toContain("keep me");
-    binding.destroy();
+  it("keeps foreign content that is already there at load, of every kind", () => {
+    for (const { what, plant, intact } of kinds) {
+      const ydoc = docWithBlock();
+      plant(ydoc);
+      expect(findForeignBlocks(getBlocksFragment(ydoc)), what).toHaveLength(1);
+
+      const binding = bind(ydoc);
+      expect(binding.refused, what).toBe(true);
+      intact(ydoc);
+      binding.destroy();
+    }
   });
 
-  it("keeps a nested element arriving while the editor is bound", () => {
-    const ydoc = docWithBlock();
-    const unbound: string[] = [];
-    const binding = bind(ydoc, () => unbound.push("unbound"));
-    expect(binding.refused).toBe(false);
+  it("keeps foreign content arriving while the editor is bound, of every kind", () => {
+    for (const { what, plant, intact } of kinds) {
+      const ydoc = docWithBlock();
+      const unbound: string[] = [];
+      const binding = bind(ydoc, () => unbound.push("unbound"));
+      expect(binding.refused, what).toBe(false);
 
-    (getBlocksFragment(ydoc).get(0) as Y.XmlElement).insert(1, [nestedElement()]);
+      plant(ydoc);
 
-    expect(unbound).toEqual(["unbound"]);
-    const block = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
-    expect(block.length).toBe(2);
-    expect((block.get(1) as Y.XmlElement).nodeName).toBe("callout");
-    expect(findForeignBlocks(getBlocksFragment(ydoc))).toHaveLength(1);
-    binding.destroy();
-  });
-
-  it("keeps a text carrying an undeclared mark at load", () => {
-    const ydoc = docWithBlock();
-    firstBlockText(ydoc).format(0, 3, { bold: {} });
-    const binding = bind(ydoc);
-    expect(binding.refused).toBe(true);
-
-    const delta = firstBlockText(ydoc).toDelta() as Array<Record<string, unknown>>;
-    expect(plainText(firstBlockText(ydoc))).toBe("known");
-    expect(delta[0]?.attributes).toEqual({ bold: {} });
-    binding.destroy();
-  });
-
-  it("keeps a text carrying an undeclared mark applied mid-session", () => {
-    const ydoc = docWithBlock();
-    const unbound: string[] = [];
-    const binding = bind(ydoc, () => unbound.push("unbound"));
-    expect(binding.refused).toBe(false);
-
-    firstBlockText(ydoc).format(0, 3, { bold: {} });
-
-    expect(unbound).toEqual(["unbound"]);
-    expect(plainText(firstBlockText(ydoc))).toBe("known");
-    const delta = firstBlockText(ydoc).toDelta() as Array<Record<string, unknown>>;
-    expect(delta[0]?.attributes).toEqual({ bold: {} });
-    binding.destroy();
+      expect(unbound, what).toEqual(["unbound"]);
+      intact(ydoc);
+      expect(findForeignBlocks(getBlocksFragment(ydoc)), what).toHaveLength(1);
+      binding.destroy();
+    }
   });
 
   /**
@@ -403,43 +421,29 @@ describe("foreign content inside a known block", () => {
    * keystroke writes the block's text back to the Y.XmlText without it. Silent
    * loss on a later mutation, which is why the gate has to refuse up front.
    */
-  it("keeps an embed inside a block's text at load", () => {
+  it("names an embed as the silent kind, and binds through the mark it declares", () => {
+    // The embed is the one kind that throws NOTHING while binding, so it is
+    // named separately: without the delta scan reporting it the gate would open
+    // and the loss would happen on the next keystroke instead.
     const ydoc = docWithBlock();
     firstBlockText(ydoc).insertEmbed(1, { future: "keep-me" });
     const foreign = findForeignBlocks(getBlocksFragment(ydoc));
     expect(foreign).toHaveLength(1);
     expect(foreign[0]?.nodeName).toBe("#embed");
-
-    const binding = bind(ydoc);
-    expect(binding.refused).toBe(true);
     expect(embedsOf(firstBlockText(ydoc))).toEqual([{ future: "keep-me" }]);
-    expect(plainText(firstBlockText(ydoc))).toBe("known");
-    binding.destroy();
-  });
 
-  it("keeps an embed arriving while the editor is bound", () => {
-    const ydoc = docWithBlock();
-    const unbound: string[] = [];
-    const binding = bind(ydoc, () => unbound.push("unbound"));
-    expect(binding.refused).toBe(false);
-
-    firstBlockText(ydoc).insertEmbed(1, { future: "keep-me" });
-
-    expect(unbound).toEqual(["unbound"]);
-    expect(embedsOf(firstBlockText(ydoc))).toEqual([{ future: "keep-me" }]);
-    expect(plainText(firstBlockText(ydoc))).toBe("known");
-    expect(findForeignBlocks(getBlocksFragment(ydoc))).toHaveLength(1);
-    binding.destroy();
-  });
-
-  it("still binds a text carrying the comment mark — that one is declared", () => {
-    const ydoc = docWithBlock();
-    firstBlockText(ydoc).format(0, 3, { [COMMENT_MARK]: { threadId: "t1" } });
-    expect(findForeignBlocks(getBlocksFragment(ydoc))).toEqual([]);
-    const binding = bind(ydoc);
+    // The other side of the same scan: the comment mark IS declared, so a text
+    // carrying it is not foreign and the editor binds.
+    const annotated = docWithBlock();
+    firstBlockText(annotated).format(0, 3, {
+      [COMMENT_MARK]: { threadId: "t1" },
+    });
+    expect(findForeignBlocks(getBlocksFragment(annotated))).toEqual([]);
+    const binding = bind(annotated);
     expect(binding.refused).toBe(false);
     binding.destroy();
   });
+
 });
 
 describe("the editor refuses foreign content inserted through commands", () => {

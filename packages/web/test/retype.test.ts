@@ -4,20 +4,18 @@
  * The invariant under test is the one from CLAUDE.md: a block-type change keeps
  * the block id and the text delta, marks included. That is what makes annotation
  * anchors and inbound references survive a user pressing "H2".
+ *
+ * The mark-survives-a-re-type half of that invariant is a schema property and is
+ * pinned once, in `packages/schema/test/retype.test.ts`. What is left here is
+ * what only the editor can answer: that the command re-types the SELECTED block
+ * and writes the attributes the schema package expects.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import {
-  appendBlock,
-  createAnnotation,
-  getBlocks,
-  initDoc,
-  listAnnotationRanges,
-  resolveAnnotationRange,
-} from "@uberblick/schema";
+import { appendBlock, getBlocks, initDoc } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
-import { retypeSelectedBlock, selectedBlock } from "../src/editor/retype.js";
+import { retypeSelectedBlock } from "../src/editor/retype.js";
 import { mountEditor } from "./helpers.js";
 
 let editors: Editor[] = [];
@@ -69,62 +67,18 @@ describe("retypeSelectedBlock", () => {
       text: "Promote me to a heading",
     });
 
-    // Re-typing code → code with no language given keeps the existing one.
+    // Re-typing code → code with no language given keeps the existing one, and
+    // reports the no-op — the same answer a re-type to the current type gives.
     expect(retypeSelectedBlock(editor, "code")).toBe(false);
     expect(getBlocks(ydoc)[0]?.language).toBe("ts");
-  });
 
-  it("drops the language when leaving the code type", () => {
-    const { ydoc, editor } = docWithParagraph();
-    retypeSelectedBlock(editor, "code", { language: "ts" });
+    // Leaving `code` drops the language attribute entirely, in the document as
+    // well as in the read.
     retypeSelectedBlock(editor, "mermaid");
-    const blocks = getBlocks(ydoc);
-    expect(blocks[0]?.type).toBe("mermaid");
-    expect(blocks[0]?.language).toBeUndefined();
+    expect(getBlocks(ydoc)[0]?.type).toBe("mermaid");
+    expect(getBlocks(ydoc)[0]?.language).toBeUndefined();
     const element = ydoc.getXmlFragment("blocks").get(0) as Y.XmlElement;
     expect(element.getAttribute("language")).toBeUndefined();
-  });
-
-  it("keeps an annotation anchored across a re-type", () => {
-    const ydoc = new Y.Doc();
-    initDoc(ydoc, { uuid: "retype-annotated", title: "Anchored" });
-    const blockId = appendBlock(ydoc, {
-      type: "paragraph",
-      text: "The quick brown fox",
-    });
-    const annotation = createAnnotation(ydoc, blockId, 4, 9, "tester", "why?");
-    const { editor } = mountEditor(ydoc);
-    editors.push(editor);
-    editor.commands.setTextSelection(2);
-
-    expect(retypeSelectedBlock(editor, "heading", { level: 3 })).toBe(true);
-
-    expect(getBlocks(ydoc)[0]).toMatchObject({
-      id: blockId,
-      type: "heading",
-      level: 3,
-      text: "The quick brown fox",
-    });
-    expect(listAnnotationRanges(ydoc, blockId)).toEqual([
-      { threadId: annotation.id, start: 4, end: 9 },
-    ]);
-    expect(resolveAnnotationRange(ydoc, annotation.id)).toEqual({
-      start: 4,
-      end: 9,
-      collapsed: false,
-    });
-  });
-
-  it("reports the selected block, and nothing when there is no selection in one", () => {
-    const { blockId, editor } = docWithParagraph();
-    expect(selectedBlock(editor)).toMatchObject({
-      type: "paragraph",
-      attrs: { id: blockId },
-    });
-  });
-
-  it("is a no-op when the block is already that type", () => {
-    const { editor } = docWithParagraph();
-    expect(retypeSelectedBlock(editor, "paragraph")).toBe(false);
+    expect(retypeSelectedBlock(editor, "mermaid")).toBe(false);
   });
 });

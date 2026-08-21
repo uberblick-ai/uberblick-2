@@ -12,8 +12,10 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   getBlocksFragment,
+  getDirectoryEntry,
   setBlockType,
   tombstoneDirectoryEntry,
+  upsertDirectoryEntry,
 } from "@uberblick/schema";
 import { removeTempDirs, startServer, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
@@ -145,23 +147,22 @@ describe("edit_block", () => {
 });
 
 describe("duplicate blocks from concurrent re-types", () => {
-  it("repairs them on observation and converges on one element across two instances", async () => {
-    const databasePath = testConfig().databasePath;
-    const first = await localRig(databasePath);
-    const doc = await first.ok("create_doc", {
+  // This package's own claim: observing a duplicate-producing update triggers
+  // the repair, so the document is fixed and not merely read around. That two
+  // replicas repairing independently still converge on one element is a schema
+  // property, pinned in schema/test/retype.test.ts.
+  it("repairs them the moment the replica observes them", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
       title: "Re-types",
       blocks: [{ type: "paragraph", text: "shared text" }],
     });
     const blockId = doc.blocks[0].id;
 
-    const second = await localRig(databasePath);
-    await second.ok("get_doc", { uuid: doc.uuid });
-
     // Two clients re-type the same block while offline from each other — the
     // race that leaves two elements carrying one block id.
-    const state = Y.encodeStateAsUpdate(
-      first.instance.replicas.replica(doc.uuid).doc,
-    );
+    const replicaDoc = rig.instance.replicas.replica(doc.uuid).doc;
+    const state = Y.encodeStateAsUpdate(replicaDoc);
     const updates = (["heading", "code"] as const).map((type) => {
       const scratch = new Y.Doc();
       Y.applyUpdate(scratch, state);
@@ -178,26 +179,79 @@ describe("duplicate blocks from concurrent re-types", () => {
     const winner = (getBlocksFragment(merged).get(0) as Y.XmlElement).nodeName;
     expect(getBlocksFragment(merged).length).toBe(2);
 
-    // Both instances observe the duplicate before either has seen the other's
-    // repair, so both attempt one.
-    for (const rig of [first, second]) {
-      const replicaDoc = rig.instance.replicas.replica(doc.uuid).doc;
-      for (const update of updates) Y.applyUpdate(replicaDoc, update);
-      expect(getBlocksFragment(replicaDoc).length).toBe(1);
-    }
+    for (const update of updates) Y.applyUpdate(replicaDoc, update);
 
-    for (const rig of [first, second]) {
-      const read = await rig.ok("get_doc", { uuid: doc.uuid });
-      expect(read.blocks).toHaveLength(1);
-      expect(read.blocks[0].id).toBe(blockId);
-      expect(read.blocks[0].type).toBe(winner);
-      expect(read.blocks[0].text).toBe("shared text");
-      // Repaired in the document, not merely hidden from the read — and the two
-      // repairs deleted the same element, so nothing is over-deleted.
-      expect(
-        getBlocksFragment(rig.instance.replicas.replica(doc.uuid).doc).length,
-      ).toBe(1);
-    }
+    // Repaired in the document by the observation itself, before any read.
+    expect(getBlocksFragment(replicaDoc).length).toBe(1);
+
+    const read = await rig.ok("get_doc", { uuid: doc.uuid });
+    expect(read.blocks).toHaveLength(1);
+    expect(read.blocks[0].id).toBe(blockId);
+    expect(read.blocks[0].type).toBe(winner);
+    expect(read.blocks[0].text).toBe("shared text");
+  });
+});
+
+describe("the directory stub as a cache", () => {
+  // CLAUDE.md: on conflict `meta.title` in the doc is authoritative and the
+  // stub is a cache repaired on write/connect. Nothing tested that a stub which
+  // is merely WRONG — not missing — is corrected, which is the case a foreign
+  // or half-finished writer actually produces.
+  it("is repaired from the document when it disagrees", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "The real title",
+      tags: ["reference"],
+      blocks: [{ type: "paragraph", text: "body" }],
+    });
+
+    // Corrupt the stub directly on the directory doc: wrong title, wrong tags.
+    // A foreign or half-finished writer leaves exactly this.
+    const directory = rig.instance.replicas.directory().doc;
+    upsertDirectoryEntry(directory, {
+      uuid: doc.uuid,
+      title: "A stale, wrong title",
+      tags: ["wrong"],
+    });
+    // The corruption is real — without this the rest would prove nothing.
+    expect(getDirectoryEntry(directory, doc.uuid)).toMatchObject({
+      title: "A stale, wrong title",
+      tags: ["wrong"],
+    });
+
+    // The next tool call settles, and the settle repairs the cache from the
+    // document that owns the truth.
+    const listed = await rig.ok("list_docs");
+    const stub = (
+      listed.docs as { uuid: string; title: string; tags: string[] }[]
+    ).find((entry) => entry.uuid === doc.uuid);
+    expect(stub?.title).toBe("The real title");
+    expect(stub?.tags).toEqual(["reference"]);
+
+    // Repaired in the directory doc itself, not masked by the read path — the
+    // next replica to sync the directory gets the corrected stub.
+    expect(getDirectoryEntry(directory, doc.uuid)).toMatchObject({
+      title: "The real title",
+      tags: ["reference"],
+    });
+
+    // And a write repairs it the same way, through the observer rather than the
+    // poll.
+    upsertDirectoryEntry(directory, {
+      uuid: doc.uuid,
+      title: "Wrong again",
+      tags: [],
+    });
+    await rig.ok("edit_block", {
+      uuid: doc.uuid,
+      block_id: doc.blocks[0].id,
+      old_text: "body",
+      new_text: "body, edited",
+    });
+    expect(getDirectoryEntry(directory, doc.uuid)).toMatchObject({
+      title: "The real title",
+      tags: ["reference"],
+    });
   });
 });
 
@@ -392,10 +446,9 @@ describe("identity at the boundary", () => {
       links: [target.uuid],
     });
     expect(accepted.applied).toBe(true);
-  });
 
-  it("rejects a document id that is not a UUID", async () => {
-    const rig = await localRig();
+    // The same rule on the way in: a document id that is not a UUID is not a
+    // document id, on every tool that takes one.
     for (const tool of ["get_doc", "export_markdown", "backlinks"]) {
       const refused = await rig.call(tool, { uuid: "not-a-uuid" });
       expect(refused.isError).toBe(true);

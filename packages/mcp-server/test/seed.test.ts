@@ -117,7 +117,7 @@ describe("seed import", () => {
     }
   });
 
-  it("imports every seed doc, and list_docs finds all of them", async () => {
+  it("imports every seed doc, and list_docs and search find all of them", async () => {
     const databasePath = tempDatabasePath();
     const run = await runImport(databasePath);
 
@@ -126,12 +126,25 @@ describe("seed import", () => {
       seeds.map(() => "created"),
     );
 
+    // A tenth document whose wording this test owns, so the FTS assertion below
+    // does not depend on what the real corpus happens to say today — editing a
+    // seed file must never break a test.
+    const dir = tempDir();
+    const extra = "5b1c0f8a-7d21-4e93-8a04-6c2f9d1b3e77";
+    const phrase = "quarrelsome zeppelin";
+    writeFileSync(
+      join(dir, "extra.md"),
+      `---\nuuid: ${extra}\ntitle: Extra\ntags: [reference]\n---\n\n` +
+        `A ${phrase} landed here.\n`,
+    );
+    await runImport(databasePath, dir);
+
     const rig = await startServer(testConfig({ databasePath }));
     try {
       const listed = await rig.ok("list_docs");
       expect(
         (listed.docs as { uuid: string }[]).map((doc) => doc.uuid).sort(),
-      ).toEqual(seeds.map((seed) => seed.uuid).sort());
+      ).toEqual([...seeds.map((seed) => seed.uuid), extra].sort());
       // The title in the directory is the title from the file's frontmatter.
       const stubs = new Map(
         (listed.docs as { uuid: string; title: string }[]).map((doc) => [
@@ -142,6 +155,17 @@ describe("seed import", () => {
       for (const seed of seeds) {
         expect(stubs.get(seed.uuid)).toBe(seed.title);
       }
+
+      // Imported text reaches the FTS index: one word and a whole phrase both
+      // find the document that carries them, and nothing else.
+      const word = await rig.ok("search", { query: "zeppelin" });
+      expect((word.hits as { uuid: string }[]).map((hit) => hit.uuid)).toEqual([
+        extra,
+      ]);
+      const found = await rig.ok("search", { query: phrase });
+      expect((found.hits as { uuid: string }[]).map((hit) => hit.uuid)).toEqual([
+        extra,
+      ]);
     } finally {
       await rig.close();
     }
@@ -343,28 +367,6 @@ describe("seed import", () => {
     }
   });
 
-  it("makes seed docs findable by a distinctive phrase", async () => {
-    const databasePath = tempDatabasePath();
-    await runImport(databasePath);
-
-    const rig = await startServer(testConfig({ databasePath }));
-    try {
-      const found = await rig.ok("search", { query: "clobbering" });
-      expect((found.hits as { uuid: string }[]).map((hit) => hit.uuid)).toEqual([
-        seedUuid("overview.md"),
-      ]);
-
-      const phrase = await rig.ok("search", {
-        query: "Hocuspocus hub with SQLite persistence",
-      });
-      expect((phrase.hits as { uuid: string }[]).map((hit) => hit.uuid)).toContain(
-        seedUuid("overview.md"),
-      );
-    } finally {
-      await rig.close();
-    }
-  });
-
   it("resolves inter-doc links to UUIDs, so backlinks names the citing doc", async () => {
     const databasePath = tempDatabasePath();
     await runImport(databasePath);
@@ -386,36 +388,17 @@ describe("seed import", () => {
     }
   });
 
-  it("exports an imported doc with its headings and fenced code intact", async () => {
-    const databasePath = tempDatabasePath();
-    await runImport(databasePath);
-
-    const rig = await startServer(testConfig({ databasePath }));
-    try {
-      const exported = await rig.ok("export_markdown", {
-        uuid: seedUuid("install.md"),
-      });
-      const markdown = exported.markdown as string;
-      expect(markdown).toContain("title: Install and run");
-      expect(markdown).toContain("## Prerequisites");
-      expect(markdown).toContain(
-        "```\ngit clone https://github.com/uberblick-ai/uberblick-2.git",
-      );
-    } finally {
-      await rig.close();
-    }
-  });
-
-  // The seed corpus happens to contain no mermaid block, so the mermaid half of
-  // the round trip is proven on a seed file of the same shape, imported through
-  // the same path.
-  it("exports a mermaid fence as a mermaid fence", async () => {
+  // The whole export round trip on one fixture this test owns: frontmatter, a
+  // heading, an unlabelled fence and a mermaid fence — the corpus happens to
+  // contain no mermaid block, and its wording is not this test's business.
+  it("exports an imported doc with headings and both kinds of fence intact", async () => {
     const dir = tempDir();
     const uuid = "2c9e5b71-8d34-4a6f-9e12-7f0b3a4d8c56";
     writeFileSync(
       join(dir, "diagram.md"),
       `---\nuuid: ${uuid}\ntitle: Diagram\ntags: [reference]\n---\n\n` +
-        "## Flow\n\n```mermaid\ngraph TD\n  a[Agent] --> h[Hub]\n```\n",
+        "## Flow\n\n```\ngit clone git@example.com:uberblick.git\n```\n\n" +
+        "```mermaid\ngraph TD\n  a[Agent] --> h[Hub]\n```\n",
     );
 
     const databasePath = tempDatabasePath();
@@ -424,7 +407,13 @@ describe("seed import", () => {
     const rig = await startServer(testConfig({ databasePath }));
     try {
       const exported = await rig.ok("export_markdown", { uuid });
-      expect(exported.markdown as string).toContain(
+      const markdown = exported.markdown as string;
+      expect(markdown).toContain("title: Diagram");
+      expect(markdown).toContain("## Flow");
+      expect(markdown).toContain(
+        "```\ngit clone git@example.com:uberblick.git\n```",
+      );
+      expect(markdown).toContain(
         "```mermaid\ngraph TD\n  a[Agent] --> h[Hub]\n```",
       );
     } finally {

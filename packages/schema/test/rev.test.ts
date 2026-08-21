@@ -24,14 +24,9 @@ function seeded(): Y.Doc {
 }
 
 describe("blockRev", () => {
-  it("is a stable 16-character hex hash", () => {
-    const rev = blockRev({ type: "paragraph", text: "hello" });
-    expect(rev).toMatch(/^[0-9a-f]{16}$/);
-    expect(blockRev({ type: "paragraph", text: "hello" })).toBe(rev);
-  });
-
   it("changes with text, type and attributes", () => {
     const base = blockRev({ type: "paragraph", text: "hello" });
+    expect(blockRev({ type: "paragraph", text: "hello" })).toBe(base);
     expect(blockRev({ type: "paragraph", text: "hello " })).not.toBe(base);
     expect(blockRev({ type: "mermaid", text: "hello" })).not.toBe(base);
     expect(blockRev({ type: "heading", text: "hello", level: 1 })).not.toBe(

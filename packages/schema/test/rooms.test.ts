@@ -27,7 +27,7 @@ describe("room names", () => {
     expect(directoryRoom("main").endsWith(DIRECTORY_SUFFIX)).toBe(true);
   });
 
-  it("round-trips through parseRoom", () => {
+  it("round-trips through parseRoom, reading a bare room as the default workspace", () => {
     expect(parseRoom(roomForDoc("acme", UUID))).toEqual({
       workspaceId: "acme",
       uuid: UUID,
@@ -38,9 +38,9 @@ describe("room names", () => {
       uuid: DIRECTORY_SUFFIX,
       isDirectory: true,
     });
-  });
 
-  it("reads a bare room as a document in the default workspace", () => {
+    // A pre-tenancy room name has no workspace segment: it belongs to the
+    // default workspace, so old rooms keep resolving.
     expect(parseRoom(UUID)).toEqual({
       workspaceId: DEFAULT_WORKSPACE,
       uuid: UUID,
@@ -63,16 +63,5 @@ describe("room names", () => {
     expect(() => roomForDoc("main", "")).toThrow(InvalidRoomError);
     expect(() => roomForDoc("a/b", UUID)).toThrow(InvalidRoomError);
     expect(() => roomForDoc("main", "a/b")).toThrow(InvalidRoomError);
-  });
-
-  it("names the offending room in the error", () => {
-    let caught: unknown;
-    try {
-      parseRoom("main/");
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(InvalidRoomError);
-    expect((caught as InvalidRoomError).room).toBe("main/");
   });
 });

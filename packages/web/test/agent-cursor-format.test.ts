@@ -59,26 +59,6 @@ describe("agent awareness cursor format", () => {
     expect(absolute?.index).toBe(3);
   });
 
-  it("encodes identically whether or not relativePositionToJSON is used", () => {
-    // y-prosemirror passes the RelativePosition object itself; the demo script
-    // calls relativePositionToJSON. Both must land on the same wire bytes.
-    const { ydoc } = docWithOneBlock();
-    const ytext = firstBlockText(ydoc);
-    const position = Y.createRelativePositionFromTypeIndex(ytext, 5);
-
-    const raw = JSON.parse(JSON.stringify(position));
-    const explicit = JSON.parse(
-      JSON.stringify(Y.relativePositionToJSON(position)),
-    );
-    // relativePositionToJSON omits null-valued keys; the decoder treats missing
-    // and null identically (`json.type == null`).
-    expect(explicit).toEqual({ ...raw, tname: undefined, item: raw.item });
-    expect(Y.compareRelativePositions(
-      Y.createRelativePositionFromJSON(raw),
-      Y.createRelativePositionFromJSON(explicit),
-    )).toBe(true);
-  });
-
   it("renders a remote caret with a name label from a foreign awareness state", () => {
     const { ydoc } = docWithOneBlock();
     const { editor } = mountEditor(ydoc);

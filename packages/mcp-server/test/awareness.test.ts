@@ -105,24 +105,23 @@ describe("agent awareness", () => {
     );
     expect(absolute?.type).toBe(text);
     expect(absolute?.index).toBe("an agent was here".length);
-  });
 
-  it("anchors the cursor in a freshly inserted block", async () => {
-    const rig = await rigWith();
-    const doc = await rig.ok("create_doc", { title: "Insertions" });
+    // An insert anchors the same way, in the block it just created — a block
+    // that did not exist when the previous cursor was published.
     const inserted = await rig.ok("insert_block", {
       uuid: doc.uuid,
       type: "paragraph",
       text: "brand new",
     });
-
-    const { replica, state } = awarenessOf(rig, doc.uuid);
-    const absolute = Y.createAbsolutePositionFromRelativePosition(
-      Y.createRelativePositionFromJSON(state.cursor.head),
-      replica.doc,
+    const afterInsert = awarenessOf(rig, doc.uuid);
+    const head = Y.createAbsolutePositionFromRelativePosition(
+      Y.createRelativePositionFromJSON(afterInsert.state.cursor.head),
+      afterInsert.replica.doc,
     );
-    expect(absolute?.type).toBe(blockText(replica.doc, inserted.block.id));
-    expect(absolute?.index).toBe("brand new".length);
+    expect(head?.type).toBe(
+      blockText(afterInsert.replica.doc, inserted.block.id),
+    );
+    expect(head?.index).toBe("brand new".length);
   });
 
   it("withdraws the cursor when its TTL expires", async () => {
