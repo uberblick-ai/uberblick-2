@@ -17,10 +17,12 @@
  * what that reader would take as syntax. The vocabulary is narrower than
  * CommonMark's, deliberately:
  *
- *   - Emphasis is asterisk-only. `_` is never a delimiter, so `snake_case`
- *     survives without escaping — and `__bold__` typed in the editor still
- *     arrives as a `bold` mark, because that is the editor's input rule, not
- *     this reader's job.
+ *   - Both emphasis characters are read, `*` and `_`, because both are standard
+ *     GFM and an agent writing markdown by hand will use either. Flanking decides
+ *     what can open and close, so `_` between two word characters is not a
+ *     delimiter at all and `snake_case` survives untouched.
+ *   - The writer only ever *writes* `*` and `~~`, so its output is boring and
+ *     its diffs are stable — see {@link DELIMITER}.
  *   - Delimiter *runs* are matched the CommonMark way: flanking decides what can
  *     open and close (`** x **` is literal), a closer takes the nearest opener,
  *     and a long run splits between matches — which is what makes `***both***`,
@@ -29,8 +31,8 @@
  *     Doc-to-doc references are `meta.links` by UUID and never a link mark, so
  *     anything else stays literal text. Balanced parentheses inside a target
  *     belong to it, again per CommonMark.
- *   - `\` escapes `` \ ` * ~ [ ``, plus `]` inside a link label, and nothing
- *     else, in both directions.
+ *   - `\` escapes `` \ ` * [ ``, `~` and `_` where they could delimit, and `]`
+ *     inside a link label. Nothing else, in both directions.
  */
 
 import type * as Y from "yjs";
@@ -114,9 +116,14 @@ const NESTING = ["link", "bold", "italic", "strike"] as const;
 type NestedMark = (typeof NESTING)[number];
 
 /**
- * The delimiter each mark is written with. Asterisks for emphasis, and never the
- * `_` forms: this reader does not treat `_` as a delimiter, so writing one would
- * not survive the trip back. See the module comment.
+ * The delimiter each mark is written with.
+ *
+ * One spelling each, always. The `_` forms are deliberately *not* used: the
+ * writer would have to predict, at the moment it opens a mark, whether `_` can
+ * still close it at the other end of the span — and that prediction depends on
+ * run structure that the first export can normalise, which makes the *output*
+ * unstable. Measured, it made both mark preservation and byte stability worse
+ * than leaving it alone. See the note on `renderInline`.
  */
 const DELIMITER: Record<Exclude<NestedMark, "link">, string> = {
   bold: "**",
@@ -157,10 +164,12 @@ interface EscapeContext {
  * run's literal text. No run-local test can see it, and a global one would have
  * to render first and then decide, so the bracket always gets its backslash.
  *
- * `~` is escaped only where it could actually delimit something, which is what
- * keeps ordinary prose readable: a lone `~` is not a delimiter, so home
- * directories survive. `_` is never escaped, because this reader never treats it
- * as one — see the module comment.
+ * `~` and `_` are escaped only where they could actually delimit something, which
+ * is what keeps ordinary prose readable: a lone `~` is not a delimiter, so home
+ * directories survive, and a `_` between two word characters can neither open nor
+ * close, so `snake_case` does too. Both rules are the reader's, read backwards —
+ * and both err towards escaping, since a delimiter from a neighbouring run can
+ * change what this text sits against.
  */
 function escapeInline(text: string, context: EscapeContext): string {
   let out = "";
@@ -175,11 +184,31 @@ function escapeInline(text: string, context: EscapeContext): string {
       (context.hugged || text[i + 1] === "~" || text[i - 1] === "~")
     ) {
       out += "\\~";
+    } else if (char === "_" && !intraword(text, i)) {
+      out += "\\_";
     } else {
       out += char;
     }
   }
   return out;
+}
+
+/**
+ * Whether the character at `index` sits between two word characters, where a `_`
+ * can neither open nor close emphasis. Only what is inside this run counts: a
+ * neighbour that is a word character stays one wherever the run lands, while a
+ * missing neighbour could turn out to be anything, so it errs towards escaping.
+ */
+function intraword(text: string, index: number): boolean {
+  const word = /[\p{L}\p{N}]/u;
+  const before = text[index - 1];
+  const after = text[index + 1];
+  return (
+    before !== undefined &&
+    after !== undefined &&
+    word.test(before) &&
+    word.test(after)
+  );
 }
 
 /** Whether every `(` in `href` has its `)`, the CommonMark bare-target rule. */
@@ -234,6 +263,50 @@ function without(marks: InlineMarkSet, drop: readonly EmphasisMark[]): InlineMar
   const kept: InlineMarkSet = { ...marks };
   for (const mark of drop) delete kept[mark];
   return kept;
+}
+
+/**
+ * Merge neighbouring runs that carry the same marks.
+ *
+ * A caller can hand over two runs that say the same thing — `appendBlock` writes
+ * whatever delta it is given — and how the text happens to be divided must not
+ * change what comes out, or an export and the export of its own re-import would
+ * disagree over nothing. Every read of a document already merges them, so this is
+ * the writer catching up.
+ */
+function merged(runs: readonly InlineRun[]): InlineRun[] {
+  const out: InlineRun[] = [];
+  for (const run of runs) pushInlineRun(out, run.text, run.marks);
+  return out;
+}
+
+/**
+ * Drop the emphasis a run of nothing but whitespace cannot carry.
+ *
+ * A delimiter needs something other than whitespace to hug, so a mark that has to
+ * *open or close* at a whitespace-only run cannot be written at all. A mark that
+ * merely passes through — carried by the runs on both sides — is fine: it opened
+ * somewhere real and will close somewhere real, and the whitespace is interior to
+ * it. Stripping those too is what made a mark survive one round trip and vanish on
+ * the next, because the second export was normalising what the first had kept.
+ *
+ * A code span is exempt entirely: its emphasis hugs the backtick fence, not the
+ * whitespace inside it.
+ */
+function whitespaceSafe(runs: readonly InlineRun[]): InlineRun[] {
+  return runs.map((run, index) => {
+    if (run.text.trim() !== "" || run.marks.inlineCode === true) return run;
+    const carries = (other: InlineRun | undefined, mark: EmphasisMark): boolean =>
+      other?.marks[mark] === true;
+    const unwritable = EMPHASIS_MARKS.filter(
+      (mark) =>
+        run.marks[mark] === true &&
+        !(carries(runs[index - 1], mark) && carries(runs[index + 1], mark)),
+    );
+    return unwritable.length === 0
+      ? run
+      : { text: run.text, marks: without(run.marks, unwritable) };
+  });
 }
 
 /** Trailing whitespace of `text`, which is `""` when it ends in anything else. */
@@ -352,41 +425,30 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
  *   - **Emphasis touching whitespace,** which GFM cannot spell at all: `**word **`
  *     is not bold in any reader including this one. Leading whitespace is written
  *     before the delimiters that open, trailing whitespace is taken back off the
- *     output and re-appended after the delimiters that close, and a run of nothing
- *     but whitespace carries no emphasis. Those spaces lose that mark.
+ *     output and re-appended after the delimiters that close, and a mark that
+ *     would have to *open or close* on a whitespace-only run is dropped from it.
+ *     Only that mark, and only there: one that merely passes through, carried by
+ *     the runs on both sides, is interior to its span and survives.
  *   - **Delimiter runs of the same character that meet.** Splitting a crossing
- *     means an inner mark's reopener can land against the closer of the mark that
- *     died: `*` after `**` is one run of three, and which part of it closes is
- *     then the reader's guess. The reader guesses the CommonMark way (nearest
- *     opener, split runs, rule of three) and agrees with the writer almost always
- *     — measured at 99.2% of generated documents, with the remainder *normalising*
- *     a mark rather than corrupting anything.
+ *     means an inner mark's reopener lands against the closer of the mark that
+ *     died, and `*` after `**` is one run of three. The reader takes those apart
+ *     the CommonMark way — nearest opener, runs split a piece at a time, and the
+ *     rule of three judging only the *first* match between two runs, since a pair
+ *     already mid-construct must not be vetoed halfway.
  *
- * So the guarantee this pair makes is about text, not spelling: **the characters
- * always survive**, and the marks survive except where the format cannot hold
- * them, in which case the first export drops one and every export after that is
- * identical. The property test at the bottom of `test/marks.test.ts` is what
- * holds this honest.
- *
- * The residue has one known cure, deliberately not taken here: writing the
- * `_`/`__` spellings for a delimiter that would otherwise merge makes the two
- * runs different characters, so nothing has to be guessed. That needs the reader
- * to understand `_` emphasis, which is a bigger change than this one — tracked as
- * a follow-up rather than smuggled in.
+ * What the pair therefore guarantees, and what the property test at the bottom of
+ * `test/marks.test.ts` asserts: the text never changes; the per-character mark
+ * sets never change from the first export's own re-read onward; and the bytes
+ * settle immediately, an export of a re-import being identical to its source. For
+ * a document GFM can express at all, the first export is already exact — the sole
+ * exception being the marked whitespace above, which is the format's limit rather
+ * than this code's.
  */
 function renderInline(source: readonly InlineRun[]): string {
   let out = "";
   const open: OpenMark[] = [];
 
-  // Whitespace alone gives a delimiter nothing to hug, so it carries no emphasis
-  // at all — there is no way to write that, and pretending otherwise is what
-  // turns `~~ ~~` back into literal text on the next read. A code span is exempt:
-  // its emphasis hugs the backticks, not the whitespace inside them.
-  const runs: InlineRun[] = coalesceCodeRuns(source).map((run) =>
-    run.text.trim() === "" && run.marks.inlineCode !== true
-      ? { text: run.text, marks: without(run.marks, EMPHASIS_MARKS) }
-      : run,
-  );
+  const runs: InlineRun[] = whitespaceSafe(coalesceCodeRuns(merged(source)));
   // A single unmarked run has no delimiter anywhere near it; anything else might.
   const hugged = runs.length > 1 || hasInlineMarks(runs[0]?.marks ?? {});
   const orders = markOrders(runs);
@@ -868,6 +930,50 @@ function matchCodeSpan(
   return null;
 }
 
+/** Absent means the edge of the line, which CommonMark counts as whitespace. */
+function isBlank(char: string | undefined): boolean {
+  return char === undefined || /\s/.test(char);
+}
+
+/** CommonMark's "punctuation" for the flanking rules: Unicode P and S. */
+function isPunctuation(char: string | undefined): boolean {
+  return char !== undefined && /[\p{P}\p{S}]/u.test(char);
+}
+
+/**
+ * Whether a delimiter run can open, can close, or both.
+ *
+ * `*` and `~` use the rule this reader has always used: a run may open when a
+ * non-space follows it and close when a non-space precedes it. That is the part
+ * of CommonMark's flanking rule that matters for them, and the strict form —
+ * which also asks about punctuation on either side — would refuse perfectly good
+ * closers like the `~~` after an escaped tilde.
+ *
+ * `_` gets the strict form, because its whole reason for existing here is the
+ * *intraword* restriction: a run that could go either way may only open when
+ * punctuation precedes it and only close when punctuation follows, so a `_`
+ * between two word characters can do neither and `snake_case` is just a word.
+ */
+function flanking(
+  char: string,
+  before: string | undefined,
+  after: string | undefined,
+): { canOpen: boolean; canClose: boolean } {
+  if (char !== "_") {
+    return { canOpen: !isBlank(after), canClose: !isBlank(before) };
+  }
+  const leftFlanking =
+    !isBlank(after) &&
+    (!isPunctuation(after) || isBlank(before) || isPunctuation(before));
+  const rightFlanking =
+    !isBlank(before) &&
+    (!isPunctuation(before) || isBlank(after) || isPunctuation(after));
+  return {
+    canOpen: leftFlanking && (!rightFlanking || isPunctuation(before)),
+    canClose: rightFlanking && (!leftFlanking || isPunctuation(after)),
+  };
+}
+
 /** Pass 1: `source` as text, code and delimiter tokens, with `marks` in scope. */
 function tokenizeInline(source: string, marks: InlineMarkSet): Token[] {
   const tokens: Token[] = [];
@@ -883,7 +989,7 @@ function tokenizeInline(source: string, marks: InlineMarkSet): Token[] {
 
     if (char === "\\") {
       const next = source[i + 1];
-      if (next !== undefined && "\\`*~[]".includes(next)) {
+      if (next !== undefined && "\\`*_~[]".includes(next)) {
         plain += next;
         i += 2;
         continue;
@@ -916,17 +1022,14 @@ function tokenizeInline(source: string, marks: InlineMarkSet): Token[] {
       }
     }
 
-    if (char === "*" || char === "~") {
+    if (char === "*" || char === "~" || char === "_") {
       flush();
       const length = runLength(source, i, char);
-      const before = source[i - 1];
-      const after = source[i + length];
       tokens.push({
         kind: "delim",
         char,
         length,
-        canOpen: after !== undefined && !/\s/.test(after),
-        canClose: before !== undefined && !/\s/.test(before),
+        ...flanking(char, source[i - 1], source[i + length]),
         marks,
       });
       i += length;
@@ -947,9 +1050,16 @@ interface Span {
   mark: "bold" | "italic" | "strike";
 }
 
+/** Whether `char` writes emphasis (`*`, `_`) rather than strikethrough (`~`). */
+function isEmphasisChar(char: string): boolean {
+  return char === "*" || char === "_";
+}
+
 /** How many characters a closer and its opener would each give up, or 0. */
 function delimiterTake(char: string, opener: number, closer: number): number {
-  if (char === "~") return opener >= STRONG && closer >= STRONG ? STRONG : 0;
+  if (!isEmphasisChar(char)) {
+    return opener >= STRONG && closer >= STRONG ? STRONG : 0;
+  }
   return opener >= STRONG && closer >= STRONG ? STRONG : EMPHASIS;
 }
 
@@ -962,12 +1072,19 @@ function delimiterTake(char: string, opener: number, closer: number): number {
  * Without it, `**~~a*x*~~**` reads the italic's *opener* as the bold's closer —
  * the bold `**` can close (a non-space precedes it) and one asterisk is enough —
  * and the whole span unravels. Strikethrough is a GFM extension with no such
- * rule, so this applies to `*` only.
+ * rule, so this applies to the emphasis characters only.
  *
  * The lengths are what is *left* of each run, not what it started as. A run gets
  * spent a piece at a time, and the rule is about the match being made now:
  * `**a***b**` spends two of the middle three closing the bold, and the remaining
  * one against the final two is the 1+2 the rule exists to reject.
+ *
+ * It only judges the *first* match between two runs, though. Once a pair has
+ * exchanged characters it is one nested construct being taken apart — `***x***`,
+ * or the four asterisks that close an italic-inside-bold and reopen the italic —
+ * and vetoing the rest of it would leave delimiters stranded as text. The rule is
+ * there to keep two *unrelated* runs from pairing up, which is a question that is
+ * settled the first time they meet.
  */
 function ruleOfThreeAllows(
   char: string,
@@ -975,15 +1092,17 @@ function ruleOfThreeAllows(
   closer: DelimToken,
   openerLeft: number,
   closerLeft: number,
+  paired: boolean,
 ): boolean {
-  if (char !== "*") return true;
+  if (!isEmphasisChar(char)) return true;
+  if (paired) return true;
   if (!closer.canOpen && !opener.canClose) return true;
   if ((openerLeft + closerLeft) % 3 !== 0) return true;
   return openerLeft % 3 === 0 && closerLeft % 3 === 0;
 }
 
 function markFor(char: string, take: number): Span["mark"] {
-  if (char === "~") return "strike";
+  if (!isEmphasisChar(char)) return "strike";
   return take === STRONG ? "bold" : "italic";
 }
 
@@ -1005,6 +1124,8 @@ function matchDelimiters(tokens: readonly Token[]): {
   );
   /** Indexes of runs still able to open something, innermost last. */
   const openers: number[] = [];
+  /** Which opener/closer pairs have already matched — see the rule of three. */
+  const paired = new Set<string>();
 
   const lengthAt = (index: number): number => unclaimed[index] ?? 0;
 
@@ -1026,7 +1147,14 @@ function matchDelimiters(tokens: readonly Token[]): {
           candidate.kind !== "delim" ||
           candidate.char !== token.char ||
           lengthAt(j) === 0 ||
-          !ruleOfThreeAllows(token.char, candidate, token, lengthAt(j), lengthAt(i))
+          !ruleOfThreeAllows(
+            token.char,
+            candidate,
+            token,
+            lengthAt(j),
+            lengthAt(i),
+            paired.has(`${j}:${i}`),
+          )
         ) {
           continue;
         }
@@ -1038,6 +1166,7 @@ function matchDelimiters(tokens: readonly Token[]): {
       }
       if (at === -1) break;
       const j = openers[at] as number;
+      paired.add(`${j}:${i}`);
       unclaimed[j] = lengthAt(j) - take;
       unclaimed[i] = lengthAt(i) - take;
       spans.push({ from: j + 1, to: i - 1, mark: markFor(token.char, take) });

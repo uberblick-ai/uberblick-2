@@ -302,7 +302,7 @@ describe("inline marks in the document", () => {
     const literals = [
       "Not bold: \\*\\*this\\*\\* is literal.",
       "A backslash \\\\ and a backtick \\` stay put.",
-      "Tilde \\~\\~pair\\~\\~, path ~/.config, snake_case and __underscores__.",
+      "Tilde \\~\\~pair\\~\\~, path ~/.config, snake_case and \\_\\_underscores\\_\\_.",
       "\\[not a link](https://example.com) and \\[not one either](./relative.md).",
     ];
     for (const source of literals) {
@@ -316,9 +316,23 @@ describe("inline marks in the document", () => {
       );
     }
 
-    // `_` is never a delimiter, so it is never escaped either.
-    expect(importMarkdown("__underscores__").blocks[0]?.text).toBe(
-      "__underscores__",
+    // `_` *is* a delimiter now, so a literal one is escaped — except between two
+    // word characters, where CommonMark's intraword rule means it can never
+    // delimit anything and `snake_case` needs no help.
+    expect(importMarkdown("__underscores__").blocks[0]?.inline).toEqual([
+      { text: "underscores", marks: { bold: true } },
+    ]);
+    expect(importMarkdown("_em_ and snake_case").blocks[0]?.inline).toEqual([
+      { text: "em", marks: { italic: true } },
+      { text: " and snake_case", marks: {} },
+    ]);
+    const underscores = seeded();
+    appendBlock(underscores, {
+      type: "paragraph",
+      text: "snake_case but __not bold__",
+    });
+    expect(exportMarkdown(underscores, { frontmatter: false })).toBe(
+      "snake_case but \\_\\_not bold\\_\\_\n",
     );
 
     // `[` always is, even the one above whose target is not a link. What makes a
@@ -709,23 +723,21 @@ describe("inline marks in the document", () => {
  * found by generating documents like these, and each was invisible to a
  * hand-written case until it was written down.
  *
- * Two properties, both about the pair rather than either half, and stated at the
- * strength the pair actually holds them:
+ * Three properties, all about the pair rather than either half:
  *
- *  1. **Text is never changed, on any trip.** This is the invariant that cannot
- *     bend: a mis-emitted or mis-read delimiter shows up here as changed text.
- *     Zero failures over 20k generated documents per seed.
- *  2. **The spelling settles.** Marks can be lost where GFM cannot spell them —
- *     whitespace at a span edge, or a delimiter run the reader splits differently
- *     from the way the writer meant it — and losing one changes which spans are
- *     contiguous, so a later export can differ from the first. What must not
- *     happen is churning forever. Every document reaches a fixed point.
+ *  1. **The text never changes**, on any trip. This is the invariant that cannot
+ *     bend, and a mis-emitted or mis-read delimiter shows up here first.
+ *  2. **Per-character mark sets never change**, from the first export's own
+ *     re-read onward: read what was written, write it again, read it again, and
+ *     the runs are identical.
+ *  3. **The bytes settle immediately**: the export of a re-import is byte-identical
+ *     to the export it came from.
  *
- * What is deliberately *not* asserted: that the marks themselves survive the first
- * trip. They do for 99.2% of generated documents, and the shortfall is
- * normalisation rather than corruption, but 99.2% is not a property — see the
- * comment on `renderInline` for why, and the named cases above for the shapes that
- * do round-trip exactly.
+ * And one exception, which is the format's rather than ours: GFM cannot write
+ * emphasis that touches whitespace, so a document with a marked space at the edge
+ * of a span loses that one mark on the way out — after which everything above
+ * holds exactly. For every document GFM *can* express, the first export is already
+ * exact, which the test asserts separately so the exception cannot quietly grow.
  *
  * Fixed seed and a small count, so it is a deterministic sub-second test rather
  * than a fuzzer.
@@ -794,33 +806,28 @@ describe("export and import are closed over the marks the model allows", () => {
     return runs;
   }
 
-  /** How many round trips it takes `markdown` to stop changing, or null. */
-  function tripsToSettle(
-    markdown: string,
-    plain: string,
-    label: string,
-    limit = 3,
-  ): number | null {
-    let current = markdown;
-    for (let trip = 1; trip <= limit; trip += 1) {
-      const imported = importMarkdown(current).blocks[0];
-      expect(imported, label).toBeDefined();
-      const reread = seeded();
-      const id = appendBlock(reread, imported ?? { type: "paragraph" });
-      // Every trip, not just the last: the text is what cannot drift.
-      expect(getBlockText(reread, id), label).toBe(plain);
-      const again = exportMarkdown(reread, { frontmatter: false });
-      if (again === current) return trip;
-      current = again;
-    }
-    return null;
+  /** One trip through markdown and back: what the document became. */
+  function roundTrip(markdown: string): {
+    runs: InlineRun[];
+    text: string;
+    markdown: string;
+  } {
+    const imported = importMarkdown(markdown).blocks[0];
+    const doc = seeded();
+    const id = appendBlock(doc, imported ?? { type: "paragraph" });
+    return {
+      runs: getBlockInline(doc, id),
+      text: getBlockText(doc, id),
+      markdown: exportMarkdown(doc, { frontmatter: false }),
+    };
   }
 
-  it("keeps the text and settles, for 200 documents", () => {
+  it("preserves text and marks and settles, for 200 documents", () => {
     const next = generator(20260821);
     let checked = 0;
     let multiRun = 0;
     let marked = 0;
+    let expressible = 0;
 
     for (let round = 0; round < 200; round += 1) {
       const runs = randomDocument(next);
@@ -831,9 +838,30 @@ describe("export and import are closed over the marks the model allows", () => {
       // reader, which has nothing to do with marks.
       if (plain.trim() === "") continue;
 
-      const once = exportMarkdown(doc, { frontmatter: false });
-      const label = `${JSON.stringify(runs)} -> ${JSON.stringify(once)}`;
-      expect(tripsToSettle(once, plain, label), label).not.toBeNull();
+      const first = exportMarkdown(doc, { frontmatter: false });
+      const one = roundTrip(first);
+      const two = roundTrip(one.markdown);
+      const three = roundTrip(two.markdown);
+      const label = `${JSON.stringify(getBlockInline(doc, id))} -> ${JSON.stringify(first)}`;
+
+      // 1. The text, every trip.
+      for (const trip of [one, two, three]) {
+        expect(trip.text, label).toBe(plain);
+      }
+      // 2. The marks, from the first re-read onward.
+      expect(two.runs, label).toEqual(one.runs);
+      expect(three.runs, label).toEqual(two.runs);
+      // 3. The bytes, from the first re-read onward.
+      expect(two.markdown, label).toBe(one.markdown);
+      expect(three.markdown, label).toBe(two.markdown);
+
+      // …and when the format can express the document at all, the first export is
+      // already exact. The exception is emphasis touching whitespace, and this is
+      // what stops it growing into anything else.
+      if (JSON.stringify(one.runs) === JSON.stringify(getBlockInline(doc, id))) {
+        expressible += 1;
+        expect(one.markdown, label).toBe(first);
+      }
 
       checked += 1;
       if (runs.length > 1) multiRun += 1;
@@ -848,5 +876,8 @@ describe("export and import are closed over the marks the model allows", () => {
     expect(checked).toBeGreaterThan(150);
     expect(multiRun).toBeGreaterThan(100);
     expect(marked).toBeGreaterThan(100);
+    // Most documents are expressible, so the exact-first-export assertion above is
+    // carrying real weight rather than being skipped.
+    expect(expressible).toBeGreaterThan(100);
   });
 });
