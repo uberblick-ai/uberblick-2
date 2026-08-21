@@ -368,6 +368,19 @@ describe("foreign content inside a known block", () => {
     expect(findForeignBlocks(getBlocksFragment(inCode))).toEqual([
       expect.objectContaining({ nodeName: "#mark:bold", index: 0 }),
     ]);
+
+    // And so is a mark whose *value* cannot be rendered faithfully. The schema
+    // package refuses to write a link that is not an external URL, so one can
+    // only arrive from a writer that does not — and binding it would hand the
+    // scheme straight to an `<a href>`.
+    for (const href of ["javascript:alert(1)", "mailto:a@b.com", "./other.md"]) {
+      const linked = docWithBlock();
+      firstBlockText(linked).format(0, 3, { link: { href } });
+      expect(findForeignBlocks(getBlocksFragment(linked)), href).toEqual([
+        expect.objectContaining({ nodeName: "#mark:link" }),
+      ]);
+      expect(bind(linked).refused, href).toBe(true);
+    }
   });
 
   /**

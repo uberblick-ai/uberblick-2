@@ -54,7 +54,7 @@ export {
 } from "./blocks.js";
 export type { BlockTypeAttrs, EditBlockOptions } from "./blocks.js";
 
-export { hasInlineMarks, inlinePlainText, readInlineRuns } from "./marks.js";
+export { isExternalHref } from "./marks.js";
 
 export { blockRev } from "./rev.js";
 export type { RevInput } from "./rev.js";
@@ -103,7 +103,9 @@ export type { DirectoryUpsert, ListDirectoryOptions } from "./directory.js";
 export {
   AnnotationRangeError,
   BlockNotFoundError,
+  InvalidLinkHrefError,
   InvalidRoomError,
+  MarksNotAllowedError,
   StaleBlockError,
 } from "./errors.js";
 export type {

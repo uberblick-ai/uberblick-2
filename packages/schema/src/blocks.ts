@@ -24,8 +24,17 @@
 import * as Y from "yjs";
 import fastDiff from "fast-diff";
 import { getBlocksFragment } from "./doc.js";
-import { BlockNotFoundError, StaleBlockError } from "./errors.js";
-import { applyInlineRuns, readInlineRuns } from "./marks.js";
+import {
+  BlockNotFoundError,
+  MarksNotAllowedError,
+  StaleBlockError,
+} from "./errors.js";
+import {
+  applyInlineRuns,
+  assertInlineWritable,
+  inlineMarkNamesIn,
+  readInlineRuns,
+} from "./marks.js";
 import { blockRev } from "./rev.js";
 import { isBlockType } from "./types.js";
 import type {
@@ -234,6 +243,22 @@ export function getBlockInline(ydoc: Y.Doc, blockId: string): InlineRun[] {
 }
 
 /**
+ * Every visible block with its inline runs, from a single traversal — what a
+ * whole-document reader wants. Looking each block's marks up by id instead would
+ * rescan the fragment per block, which is quadratic in the block count.
+ *
+ * @internal — shared with the markdown module.
+ */
+export function getBlocksWithInline(
+  ydoc: Y.Doc,
+): Array<{ block: Block; inline: InlineRun[] }> {
+  return partitionById(getBlocksFragment(ydoc)).visible.map((element) => ({
+    block: toBlock(element),
+    inline: readInlineRuns(textOf(element)),
+  }));
+}
+
+/**
  * The formatted content to write for an input, or null to write `input.text`.
  * Only prose blocks carry inline marks — `code` and `mermaid` hold source.
  */
@@ -245,6 +270,11 @@ function inlineOf(input: BlockInput): readonly InlineRun[] | null {
 }
 
 function buildElement(id: string, input: BlockInput): Y.XmlElement {
+  // Before anything is inserted: a Yjs transaction does not roll back, so a
+  // refusal from inside one would leave a stray empty block behind.
+  const runs = inlineOf(input);
+  if (runs !== null) assertInlineWritable(runs);
+
   const element = new Y.XmlElement(input.type);
   element.setAttribute("id", id);
   if (input.type === "heading") {
@@ -406,6 +436,16 @@ export interface BlockTypeAttrs {
  * Type-specific attributes are carried over where they still apply and can be
  * overridden through `attrs`.
  *
+ * **Prose → source is refused when the text carries inline marks.** `code` and
+ * `mermaid` hold source text and may carry only `comment`, so there is no honest
+ * way to re-type formatted prose into one: dropping the marks would break this
+ * function's whole promise, and keeping them would leave a document the web
+ * editor refuses to bind (its palette gate rejects a block holding a mark its
+ * node type disallows, precisely so nothing gets destroyed). So the re-type is
+ * refused *before* it mutates anything — see {@link MarksNotAllowedError}, which
+ * names the marks in the way. Annotation anchors are unaffected: `comment` is
+ * legal on every block type and always survives.
+ *
  * Concurrency: because a re-type inserts a replacement element, two replicas
  * re-typing the same block concurrently converge on two elements sharing that
  * block id. The earlier one in document order wins — identically on every
@@ -431,6 +471,15 @@ export function setBlockType(
     if (index === -1) throw new BlockNotFoundError(blockId);
     const old = fragment.get(index) as Y.XmlElement;
     const oldType = elementType(old);
+
+    // Refused before anything is written: nothing to roll back, and the caller
+    // still has the block it started with.
+    if (newType === "code" || newType === "mermaid") {
+      const marks = inlineMarkNamesIn(textOf(old));
+      if (marks.length > 0) {
+        throw new MarksNotAllowedError(blockId, newType, marks);
+      }
+    }
 
     const level =
       attrs.level ?? (oldType === "heading" ? levelOf(old) : undefined);

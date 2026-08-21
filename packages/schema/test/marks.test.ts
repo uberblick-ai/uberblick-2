@@ -11,15 +11,20 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
+  InvalidLinkHrefError,
+  MarksNotAllowedError,
   appendBlock,
+  createAnnotation,
   editBlock,
   exportMarkdown,
+  getBlock,
   getBlockInline,
   getBlockText,
   getBlocks,
   getBlocksFragment,
   importMarkdown,
   initDoc,
+  listAnnotationRanges,
   setBlockType,
 } from "../src/index.js";
 import type { InlineRun } from "../src/index.js";
@@ -44,13 +49,17 @@ function docFromBody(body: string): { doc: Y.Doc; ids: string[] } {
   return { doc, ids };
 }
 
+/** One block's Y.XmlText, for writing the wire shapes a foreign client would. */
+function text(doc: Y.Doc, index = 0): Y.XmlText {
+  const element = getBlocksFragment(doc).get(index) as Y.XmlElement;
+  return element.firstChild as Y.XmlText;
+}
+
 /** The raw formatting attributes on a block's text, per delta op. */
 function delta(doc: Y.Doc, index = 0): Array<[unknown, unknown]> {
-  const element = getBlocksFragment(doc).get(index) as Y.XmlElement;
-  const text = element.firstChild as Y.XmlText;
-  return (text.toDelta() as Array<{ insert: unknown; attributes?: unknown }>).map(
-    (op) => [op.insert, op.attributes ?? null],
-  );
+  return (
+    text(doc, index).toDelta() as Array<{ insert: unknown; attributes?: unknown }>
+  ).map((op) => [op.insert, op.attributes ?? null]);
 }
 
 describe("inline marks in the document", () => {
@@ -102,8 +111,7 @@ describe("inline marks in the document", () => {
   });
 
   it("nests marks, and keeps one span whole across a run boundary", () => {
-    // `***x***` is both, a link label can hold emphasis, and a bold span broken
-    // into two delta ops by an overlapping mark still exports as one `**…**`.
+    // `***x***` is both, and a link label can hold emphasis.
     const { doc } = docFromBody(
       "***both*** and [**bold** link](https://example.com/a).",
     );
@@ -118,19 +126,116 @@ describe("inline marks in the document", () => {
       "***both*** and [**bold** link](https://example.com/a).\n",
     );
 
-    // One bold run written as two ops (an annotation splits it) is one span.
+    // A comment mark cutting across a bold span splits the delta into three ops.
+    // The bold span is still one span, so it is still one `**…**`.
     const doc2 = seeded();
     const id = appendBlock(doc2, {
       type: "paragraph",
-      inline: [
-        { text: "a", marks: { bold: true } },
-        { text: "b", marks: { bold: true } },
-      ],
+      inline: [{ text: "one bold span", marks: { bold: true } }],
     });
+    createAnnotation(doc2, id, 4, 8, "reviewer", "which one?");
     expect(getBlockInline(doc2, id)).toEqual([
-      { text: "ab", marks: { bold: true } },
+      { text: "one bold span", marks: { bold: true } },
     ]);
-    expect(exportMarkdown(doc2, { frontmatter: false })).toBe("**ab**\n");
+    expect(exportMarkdown(doc2, { frontmatter: false })).toBe(
+      "**one bold span**\n",
+    );
+  });
+
+  /**
+   * Reader and writer have to be closed over the mark combinations the document
+   * model allows: whatever the editor can produce, export has to spell in a way
+   * import reads back. These are the cases where a naive scan gets it wrong —
+   * adjacent delimiter runs, emphasis nested inside emphasis, and a delimiter
+   * that is really inside a code span.
+   */
+  it("round-trips adjacent, nested and code-shadowed delimiters", () => {
+    const cases: Array<{ runs: InlineRun[]; markdown: string }> = [
+      {
+        // Adjacent runs sharing nothing: one delimiter run has to be split on
+        // the way back in.
+        runs: [
+          { text: "a", marks: { bold: true } },
+          { text: "b", marks: { italic: true } },
+        ],
+        markdown: "**a***b*",
+      },
+      {
+        // Emphasis inside emphasis: the shared mark stays open across the runs,
+        // and the inner opener must not be read as the outer closer.
+        runs: [
+          { text: "italic ", marks: { italic: true } },
+          { text: "bold", marks: { italic: true, bold: true } },
+          { text: " italic", marks: { italic: true } },
+        ],
+        markdown: "*italic **bold** italic*",
+      },
+      {
+        // The delimiter that is not one: `**` inside a code span is content.
+        runs: [{ text: "a**b", marks: { bold: true, inlineCode: true } }],
+        markdown: "**`a**b`**",
+      },
+      {
+        // …and the rule-of-three case, where a `*` that could close the outer
+        // `**` has to be read as opening the inner emphasis instead.
+        runs: [
+          { text: "a", marks: { bold: true, strike: true } },
+          { text: "b", marks: { bold: true, italic: true, strike: true } },
+        ],
+        markdown: "**~~a*b*~~**",
+      },
+    ];
+
+    for (const { runs, markdown } of cases) {
+      const doc = seeded();
+      const id = appendBlock(doc, { type: "paragraph", inline: runs });
+      expect(exportMarkdown(doc, { frontmatter: false }), markdown).toBe(
+        `${markdown}\n`,
+      );
+      expect(importMarkdown(markdown).blocks[0]?.inline, markdown).toEqual(
+        getBlockInline(doc, id),
+      );
+    }
+
+    // Emphasis cannot touch whitespace in GFM, so the space moves out of the
+    // span rather than the span silently becoming literal text on the way back.
+    const spaced = seeded();
+    appendBlock(spaced, {
+      type: "paragraph",
+      inline: [{ text: "word ", marks: { bold: true } }],
+    });
+    expect(exportMarkdown(spaced, { frontmatter: false })).toBe("**word** \n");
+  });
+
+  it("round-trips link labels and targets that markdown would truncate", () => {
+    const cases: Array<{ run: InlineRun; markdown: string }> = [
+      {
+        // A `]` in the label would end it early.
+        run: { text: "a]b", marks: { link: "https://example.com" } },
+        markdown: "[a\\]b](https://example.com)",
+      },
+      {
+        // Balanced parentheses belong to the target.
+        run: { text: "x", marks: { link: "https://example.com/a_(b)" } },
+        markdown: "[x](https://example.com/a_(b))",
+      },
+      {
+        // An unbalanced one does not, so the target goes in angle brackets —
+        // written differently, never rewritten.
+        run: { text: "x", marks: { link: "https://example.com/a)b" } },
+        markdown: "[x](<https://example.com/a)b>)",
+      },
+    ];
+    for (const { run, markdown } of cases) {
+      const doc = seeded();
+      const id = appendBlock(doc, { type: "paragraph", inline: [run] });
+      expect(exportMarkdown(doc, { frontmatter: false }), markdown).toBe(
+        `${markdown}\n`,
+      );
+      expect(importMarkdown(markdown).blocks[0]?.inline, markdown).toEqual(
+        getBlockInline(doc, id),
+      );
+    }
   });
 
   it("keeps literal markdown literal, in both directions", () => {
@@ -205,6 +310,109 @@ describe("inline marks in the document", () => {
         { text: "plain source", marks: {} },
       ]);
     }
+  });
+
+  /**
+   * The refusal that keeps the two halves of the model consistent. Marks a source
+   * block cannot hold must not get there by the back door, and `setBlockType`
+   * cannot silently drop them either — its whole contract is that it preserves
+   * the delta. So the re-type is refused, before it writes anything.
+   */
+  it("refuses to re-type formatted prose into a source block", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, {
+      type: "paragraph",
+      inline: [
+        { text: "plain ", marks: {} },
+        { text: "bold", marks: { bold: true } },
+      ],
+    });
+    const thread = createAnnotation(doc, id, 0, 5, "reviewer", "hm");
+
+    for (const type of ["code", "mermaid"] as const) {
+      expect(() => setBlockType(doc, id, type), type).toThrow(
+        MarksNotAllowedError,
+      );
+    }
+    // Refused *before* mutating: the block is exactly as it was.
+    expect(getBlock(doc, id)?.type).toBe("paragraph");
+    expect(getBlockInline(doc, id)).toEqual([
+      { text: "plain ", marks: {} },
+      { text: "bold", marks: { bold: true } },
+    ]);
+
+    // The error names what is in the way, so a caller can clear it and retry.
+    try {
+      setBlockType(doc, id, "code");
+      expect.unreachable();
+    } catch (error) {
+      expect((error as MarksNotAllowedError).marks).toEqual(["bold"]);
+      expect((error as MarksNotAllowedError).blockType).toBe("code");
+    }
+
+    // An annotation anchor is legal on every block type, so a block carrying
+    // only that re-types as it always did.
+    const annotated = seeded();
+    const other = appendBlock(annotated, {
+      type: "paragraph",
+      text: "Hello brave world",
+    });
+    createAnnotation(annotated, other, 6, 11, "reviewer", "hm");
+    setBlockType(annotated, other, "code", { language: "ts" });
+    expect(getBlock(annotated, other)?.type).toBe("code");
+    expect(listAnnotationRanges(annotated, other)).toHaveLength(1);
+    expect(thread.id).not.toBe("");
+  });
+
+  /**
+   * The link invariant belongs to the model, not to the editor's input rules: a
+   * write refuses, and a read of something written elsewhere degrades. Together
+   * they are what keeps a `javascript:` target out of the document and out of
+   * every renderer downstream of it.
+   */
+  it("refuses to write a link target that is not an external URL", () => {
+    for (const href of [
+      "javascript:alert(1)",
+      "mailto:a@b.com",
+      "./relative.md",
+      "ftp://example.com/x",
+      "",
+    ]) {
+      const doc = seeded();
+      expect(
+        () =>
+          appendBlock(doc, {
+            type: "paragraph",
+            inline: [{ text: "x", marks: { link: href } }],
+          }),
+        href,
+      ).toThrow(InvalidLinkHrefError);
+      // Nothing was written: the refusal comes before the delta.
+      expect(getBlocks(doc), href).toEqual([]);
+    }
+
+    // Read the other way: a foreign writer's link is not a link here.
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "paragraph", text: "click me" });
+    text(doc).format(0, 5, { link: { href: "javascript:alert(1)" } });
+    expect(getBlockInline(doc, id)).toEqual([{ text: "click me", marks: {} }]);
+    expect(exportMarkdown(doc, { frontmatter: false })).toBe("click me\n");
+  });
+
+  it("reads a flag only from the values it writes", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "paragraph", text: "abcdef" });
+    // `{}` is what y-prosemirror writes for an attribute-less mark, and `true` is
+    // what a person writes by hand. Anything else is not this mark.
+    text(doc).format(0, 1, { bold: {} });
+    text(doc).format(1, 1, { bold: true });
+    text(doc).format(2, 1, { bold: false });
+    text(doc).format(3, 1, { bold: 0 });
+    text(doc).format(4, 1, { bold: "yes" });
+    expect(getBlockInline(doc, id)).toEqual([
+      { text: "ab", marks: { bold: true } },
+      { text: "cdef", marks: {} },
+    ]);
   });
 
   it("survives a re-type, a block-scoped edit and a concurrent merge", () => {

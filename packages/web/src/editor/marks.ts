@@ -22,9 +22,12 @@
  *    `class` attributes, which would put three keys of rendering policy into the
  *    document. `target`/`rel` are render-time only here.
  * 3. **Links are external URLs only.** Doc-to-doc references are `meta.links` by
- *    UUID — never a link mark. Enforcement is cheap and lives at the three doors
- *    a link can come through: the input rule, the paste rule and HTML parsing.
- *    No validation registry, no link resolver.
+ *    UUID — never a link mark. The invariant is enforced at the model boundary
+ *    (the schema package refuses to write another scheme, and its palette gate
+ *    refuses to bind one that arrived over the wire); the three doors here — the
+ *    input rule, the paste rule and HTML parsing — keep it from being reached in
+ *    the first place, and share the schema's `isExternalHref` so there is one
+ *    definition. No validation registry, no link resolver.
  * 4. **The `inlineCode` mark declares `code: true`.** Tiptap's input-rule runner
  *    skips every rule adjacent to a mark whose spec says `code`, which is what
  *    keeps `**x**` from turning into bold inside an inline code span. (Code
@@ -51,7 +54,7 @@ import {
   markPasteRule,
   mergeAttributes,
 } from "@tiptap/core";
-import { COMMENT_MARK, INLINE_MARKS } from "@uberblick/schema";
+import { COMMENT_MARK, INLINE_MARKS, isExternalHref } from "@uberblick/schema";
 
 /**
  * The marks a prose block may carry: the closed inline set plus the annotation
@@ -59,9 +62,6 @@ import { COMMENT_MARK, INLINE_MARKS } from "@uberblick/schema";
  * `COMMENT_MARK` alone.
  */
 export const PROSE_MARKS: string = [...INLINE_MARKS, COMMENT_MARK].join(" ");
-
-/** An external URL, and nothing else. The one rule links are held to. */
-const EXTERNAL_URL = /^https?:\/\/\S+$/i;
 
 const BOLD_INPUT = /(?:^|\s)(\*\*(?!\s+\*\*)([^*]+)\*\*)$/;
 const BOLD_UNDERSCORE_INPUT = /(?:^|\s)(__(?!\s+__)([^_]+)__)$/;
@@ -202,7 +202,7 @@ export const Link = Mark.create({
         // external URL is not a link — the text comes through unmarked.
         getAttrs: (element: HTMLElement): { href: string } | false => {
           const href = element.getAttribute("href") ?? "";
-          return EXTERNAL_URL.test(href) ? { href } : false;
+          return isExternalHref(href) ? { href } : false;
         },
       },
     ];

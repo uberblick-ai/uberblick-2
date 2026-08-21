@@ -121,13 +121,25 @@ function typeText(editor: Editor, text: string): void {
   }
 }
 
-/** The marks on each text node of one block, as `{ name: attrs }` per node. */
-function marksOf(editor: Editor, index: number): Array<Record<string, unknown>> {
-  const nodes: Array<Record<string, unknown>> = [];
+/**
+ * Each text node of one block with its marks — text included, so a mark that
+ * moved to different characters fails rather than matching the same shape.
+ */
+function marksOf(
+  editor: Editor,
+  index: number,
+): Array<{ text: string | undefined; marks: Record<string, unknown> }> {
+  const nodes: Array<{
+    text: string | undefined;
+    marks: Record<string, unknown>;
+  }> = [];
   editor.state.doc.child(index).content.forEach((node) => {
-    nodes.push(
-      Object.fromEntries(node.marks.map((mark) => [mark.type.name, mark.attrs])),
-    );
+    nodes.push({
+      text: node.text,
+      marks: Object.fromEntries(
+        node.marks.map((mark) => [mark.type.name, mark.attrs]),
+      ),
+    });
   });
   return nodes;
 }
@@ -164,15 +176,18 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     // thread id and the link its href — one text node per run, in order.
     expect(doc.child(1).textContent).toBe("The quick brown fox jumps.");
     expect(marksOf(editor, 1)).toEqual([
-      {},
-      { [COMMENT_MARK]: { threadId } },
-      {},
-      { bold: {} },
-      {},
-      { italic: {}, link: { href: "https://example.com/fox" } },
-      {},
-      { strike: {}, inlineCode: {} },
-      {},
+      { text: "The ", marks: {} },
+      { text: "quick", marks: { [COMMENT_MARK]: { threadId } } },
+      { text: " ", marks: {} },
+      { text: "brown", marks: { bold: {} } },
+      { text: " ", marks: {} },
+      {
+        text: "fox",
+        marks: { italic: {}, link: { href: "https://example.com/fox" } },
+      },
+      { text: " ", marks: {} },
+      { text: "jumps", marks: { strike: {}, inlineCode: {} } },
+      { text: ".", marks: {} },
     ]);
 
     // The code block renders monospace with its language visible: the label is a
@@ -272,7 +287,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
   });
 
   it("splits a paragraph on Enter into two valid blocks with a fresh id", () => {
-    const { ydoc, ids } = buildDocument();
+    const { ydoc, ids, threadId } = buildDocument();
     const editor = mount(ydoc, sequentialIds("split"));
 
     // Position the caret after "The quick " in the paragraph (block index 1).
@@ -295,6 +310,24 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     expect(blocks[2]?.id).toBe("split-1");
     expect(blocks[1]?.text).toBe("The quick ");
     expect(blocks[2]?.text).toBe("brown fox jumps.");
+
+    // A split is the operation stored positions would not survive. Every mark in
+    // the half that moved is still on the same characters, in the new block.
+    expect(getBlockInline(ydoc, "split-1")).toEqual([
+      { text: "brown", marks: { bold: true } },
+      { text: " ", marks: {} },
+      { text: "fox", marks: { italic: true, link: "https://example.com/fox" } },
+      { text: " ", marks: {} },
+      { text: "jumps", marks: { strike: true, inlineCode: true } },
+      { text: ".", marks: {} },
+    ]);
+    // …and the annotation stayed with the first half, where its text went.
+    expect(getBlockInline(ydoc, ids.paragraph)).toEqual([
+      { text: "The quick ", marks: {} },
+    ]);
+    expect(listAnnotationRanges(ydoc, ids.paragraph)).toEqual([
+      { threadId, start: 4, end: 9 },
+    ]);
 
     // Every id in the document is still unique and non-empty.
     const allIds = blocks.map((block) => block.id);

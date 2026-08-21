@@ -24,28 +24,59 @@
  *    destroy it. `code` and `mermaid` blocks are source text and carry no inline
  *    marks at all — only `comment`.
  *
- * Reading is lossy on purpose: a `link` whose value has no string `href`, or a
- * flag written as something other than an object, is read as "not marked" rather
- * than throwing. A reader must never break on a writer that knows more.
+ * Writing and reading are deliberately asymmetric, the way the rest of the
+ * package is:
+ *
+ *   - **Writing refuses.** A `link` target that is not an external `http(s)` URL
+ *     throws {@link InvalidLinkHrefError} rather than reaching the CRDT. This is
+ *     the model-level door for that invariant; the import parser and the editor's
+ *     input/paste rules are conveniences in front of it, not the enforcement.
+ *   - **Reading degrades.** A flag written as something other than `true` or an
+ *     attribute object, or a `link` with no usable `href`, reads as "not marked".
+ *     A reader must never break on a writer that knows more — and the loudness
+ *     lives where it can act: the web client's palette gate refuses to bind a
+ *     text carrying a mark it cannot faithfully render, including a `link` whose
+ *     href is not external, so nothing reaches a renderer unchecked.
  */
 
 import type * as Y from "yjs";
+import { InvalidLinkHrefError } from "./errors.js";
 import type { InlineMarkSet, InlineRun } from "./types.js";
 
 const FLAGS = ["bold", "italic", "strike", "inlineCode"] as const;
 
-/** The inline marks in one delta op's attributes. Unknown keys are ignored. */
+/**
+ * The one definition of a legal inline-link target, shared by every door: this
+ * module, the markdown reader, the editor's input and paste rules and the
+ * palette gate. Doc-to-doc references are `meta.links` by UUID, never a link
+ * mark, so nothing but an external `http(s)` URL is a link.
+ */
+export function isExternalHref(href: unknown): href is string {
+  return typeof href === "string" && /^https?:\/\/\S+$/i.test(href);
+}
+
+/**
+ * The inline marks in one delta op's attributes.
+ *
+ * Unknown keys are ignored, and so is a known key whose value is not the shape
+ * this module writes: a flag is on only for `true` or an attribute object (`{}`
+ * is what y-prosemirror writes for an attribute-less mark), and a `link` counts
+ * only with an external href.
+ */
 function marksOf(attributes: unknown): InlineMarkSet {
   if (typeof attributes !== "object" || attributes === null) return {};
   const source = attributes as Record<string, unknown>;
   const marks: InlineMarkSet = {};
   for (const flag of FLAGS) {
-    if (source[flag] !== undefined && source[flag] !== null) marks[flag] = true;
+    const value = source[flag];
+    if (value === true || (typeof value === "object" && value !== null)) {
+      marks[flag] = true;
+    }
   }
   const link = source.link;
   if (typeof link === "object" && link !== null) {
     const href = (link as { href?: unknown }).href;
-    if (typeof href === "string" && href !== "") marks.link = href;
+    if (isExternalHref(href)) marks.link = href;
   }
   return marks;
 }
@@ -114,16 +145,63 @@ export function inlinePlainText(runs: readonly InlineRun[]): string {
   return runs.map((run) => run.text).join("");
 }
 
-/** One run's marks as Yjs formatting attributes, or null when it has none. */
+/**
+ * One run's marks as Yjs formatting attributes, or null when it has none.
+ *
+ * @throws InvalidLinkHrefError when a `link` target is not an external URL. This
+ * is the boundary the invariant is enforced at, so no caller — `appendBlock`, an
+ * MCP tool, the seed importer — can put another scheme into the document.
+ */
 function attributesOf(marks: InlineMarkSet): Record<string, unknown> | null {
   const attributes: Record<string, unknown> = {};
   for (const flag of FLAGS) {
     if (marks[flag] === true) attributes[flag] = {};
   }
-  if (marks.link !== undefined && marks.link !== "") {
+  if (marks.link !== undefined) {
+    if (!isExternalHref(marks.link)) throw new InvalidLinkHrefError(marks.link);
     attributes.link = { href: marks.link };
   }
   return Object.keys(attributes).length === 0 ? null : attributes;
+}
+
+/**
+ * Throw if any run carries a mark this package refuses to write, without
+ * touching the document.
+ *
+ * A caller checks *before* it starts writing: a Yjs transaction does not roll
+ * back when a callback throws, so validating halfway through would leave the
+ * half that already applied behind.
+ *
+ * @throws InvalidLinkHrefError
+ */
+export function assertInlineWritable(runs: readonly InlineRun[]): void {
+  for (const run of runs) attributesOf(run.marks);
+}
+
+/**
+ * The inline mark names present anywhere in a Y.XmlText, in document order.
+ *
+ * Any value counts here, unlike {@link marksOf}, and on purpose: this answers
+ * "would a block holding this text be unbindable if it became a source block?",
+ * and the editor's palette gate judges a text by the attribute *keys* it carries,
+ * whatever the values say. A key {@link marksOf} would not read as formatting
+ * still stops the editor dead, so it still has to stop a re-type.
+ */
+export function inlineMarkNamesIn(text: Y.XmlText | null): string[] {
+  if (text === null) return [];
+  const names: string[] = [];
+  for (const op of text.toDelta() as Array<{ attributes?: unknown }>) {
+    for (const [name, value] of Object.entries(
+      (op.attributes ?? {}) as Record<string, unknown>,
+    )) {
+      const known =
+        (FLAGS as readonly string[]).includes(name) || name === "link";
+      if (known && value !== undefined && value !== null && !names.includes(name)) {
+        names.push(name);
+      }
+    }
+  }
+  return names;
 }
 
 /**
@@ -132,6 +210,9 @@ function attributesOf(marks: InlineMarkSet): Record<string, unknown> | null {
  * The text must be attached to a document (a detached Y.XmlText cannot take a
  * delta), and it is appended to rather than replaced: callers create the element
  * with an empty text and apply once.
+ *
+ * @throws InvalidLinkHrefError before writing anything, when a run carries a
+ * link target that is not an external URL.
  */
 export function applyInlineRuns(
   text: Y.XmlText,

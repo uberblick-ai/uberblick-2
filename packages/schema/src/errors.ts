@@ -98,6 +98,58 @@ export class AnnotationRangeError extends Error {
   }
 }
 
+/**
+ * Thrown when a write would put a mark where the block type cannot hold it.
+ *
+ * The case that exists today is a re-type: `code` and `mermaid` blocks are
+ * source text and carry only `comment`, so re-typing formatted prose into one
+ * has no honest outcome. Stripping the marks would contradict `setBlockType`'s
+ * whole promise (it preserves the delta), and keeping them would write a
+ * document the web editor refuses to bind. So the re-type is refused *before* it
+ * mutates anything, and `marks` names what is in the way — a caller that means
+ * it can clear the formatting first and re-type after.
+ */
+export class MarksNotAllowedError extends Error {
+  readonly blockId: string;
+  /** The block type that cannot hold the marks. */
+  readonly blockType: string;
+  /** The offending mark names, in the document's order, deduplicated. */
+  readonly marks: string[];
+
+  constructor(blockId: string, blockType: string, marks: string[]) {
+    super(
+      `Block ${blockId} cannot become ${blockType}: its text carries inline ` +
+        `formatting (${marks.join(", ")}), and a ${blockType} block holds source ` +
+        `text — only the comment mark. Clear the formatting first.`,
+    );
+    this.name = "MarksNotAllowedError";
+    this.blockId = blockId;
+    this.blockType = blockType;
+    this.marks = marks;
+  }
+}
+
+/**
+ * Thrown when a `link` mark's target is not an external `http(s)` URL.
+ *
+ * Inline links are external URLs only — a doc-to-doc reference is `meta.links`
+ * by UUID — and this is the model-level door, not a UI nicety: refusing here is
+ * what keeps a `javascript:` target out of the CRDT, and therefore out of every
+ * renderer downstream of it.
+ */
+export class InvalidLinkHrefError extends Error {
+  readonly href: string;
+
+  constructor(href: string) {
+    super(
+      `Not an external link target: ${JSON.stringify(href)}. Inline links are ` +
+        `http(s) URLs only; a reference to another document is meta.links by UUID.`,
+    );
+    this.name = "InvalidLinkHrefError";
+    this.href = href;
+  }
+}
+
 /** Thrown when a room name is not `<workspaceId>/<uuid>`-shaped. */
 export class InvalidRoomError extends Error {
   readonly room: string;

@@ -43,6 +43,11 @@
  * it. An inline mark inside a `code` or `mermaid` block is exactly that: those
  * nodes hold source text, so `comment` is the only mark they allow.
  *
+ * A mark whose *value* the editor cannot render faithfully is the same kind of
+ * hazard, one step further in: a `link` is external URLs only, so binding one
+ * with another scheme would put it into an `<a href>`. The schema package refuses
+ * to write such a link; this gate is what stops one written elsewhere.
+ *
  * A Y.XmlText's *content* is the third case, and the quietest one.
  * `createTextNodesFromYText` only ever calls `schema.text(delta.insert, marks)`,
  * so a delta op whose `insert` is not a string (an embed, written with
@@ -56,7 +61,7 @@
  */
 
 import * as Y from "yjs";
-import { BLOCK_TYPES, isBlockType } from "@uberblick/schema";
+import { BLOCK_TYPES, isBlockType, isExternalHref } from "@uberblick/schema";
 import { uberblickSchema } from "./create-editor.js";
 
 /** The node names the editor may render. Identical to the schema's block types. */
@@ -91,9 +96,26 @@ function blockAllowsMark(blockName: string, mark: string): boolean {
 }
 
 /**
+ * Whether a declared, allowed mark's *value* is one the editor can render
+ * faithfully. One case today: a `link` is external URLs only, and binding one
+ * with any other scheme would hand it straight to an `<a href>`. The schema
+ * package refuses to write such a link, so this is the door for one that arrived
+ * over the wire from a writer that does not.
+ */
+function renderableMarkValue(mark: string, value: unknown): boolean {
+  if (mark !== "link") return true;
+  const href =
+    typeof value === "object" && value !== null
+      ? (value as { href?: unknown }).href
+      : undefined;
+  return isExternalHref(href);
+}
+
+/**
  * What inside an otherwise-renderable block the palette cannot represent, or
  * `null` when the child is fine. A block's children must be Y.XmlText, and a
- * Y.XmlText may only insert strings, carrying only marks that block allows.
+ * Y.XmlText may only insert strings, carrying only marks that block allows, with
+ * values the editor can render.
  */
 function foreignInsideBlock(
   blockName: string,
@@ -108,8 +130,9 @@ function foreignInsideBlock(
     // Embeds have no ProseMirror equivalent, so binding drops them from the
     // editor state and the next edit writes the text back without them.
     if (typeof op.insert !== "string") return "#embed";
-    for (const mark of Object.keys(op.attributes ?? {})) {
+    for (const [mark, value] of Object.entries(op.attributes ?? {})) {
       if (!blockAllowsMark(blockName, mark)) return `#mark:${mark}`;
+      if (!renderableMarkValue(mark, value)) return `#mark:${mark}`;
     }
   }
   return null;

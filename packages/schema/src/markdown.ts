@@ -11,26 +11,38 @@
  * Block structure is still line-based: no lists, tables or block quotes exist in
  * the model, so none are read or written here.
  *
- * The inline reader is deliberately narrower than CommonMark, and the writer
- * escapes exactly what the reader would take back:
+ * Reader and writer are one unit: every legal combination of marks has to
+ * survive the trip out and back, so the reader implements CommonMark's delimiter
+ * matching rather than a looser approximation, and the writer escapes exactly
+ * what that reader would take as syntax. The vocabulary is narrower than
+ * CommonMark's, deliberately:
  *
  *   - Emphasis is asterisk-only. `_` is never a delimiter, so `snake_case`
  *     survives without escaping — and `__bold__` typed in the editor still
  *     arrives as a `bold` mark, because that is the editor's input rule, not
  *     this reader's job.
- *   - Delimiters must hug their content (`** x **` is literal), which is the
- *     rule that keeps ordinary prose from turning into emphasis.
+ *   - Delimiter *runs* are matched the CommonMark way: flanking decides what can
+ *     open and close (`** x **` is literal), a closer takes the nearest opener,
+ *     and a long run splits between matches — which is what makes `***both***`,
+ *     `**a***b*` and `*a **b** c*` each mean what they should.
  *   - A link is a link only when its target is an external `http(s)` URL.
  *     Doc-to-doc references are `meta.links` by UUID and never a link mark, so
- *     anything else stays literal text.
- *   - `\` escapes `` \ ` * ~ [ ``, and nothing else, in both directions.
+ *     anything else stays literal text. Balanced parentheses inside a target
+ *     belong to it, again per CommonMark.
+ *   - `\` escapes `` \ ` * ~ [ ``, plus `]` inside a link label, and nothing
+ *     else, in both directions.
  */
 
 import type * as Y from "yjs";
-import { getBlockInline, getBlocks } from "./blocks.js";
+import { getBlocksWithInline } from "./blocks.js";
 import { getMeta } from "./doc.js";
 import { listAnnotations, resolveAnnotationRange } from "./annotations.js";
-import { hasInlineMarks, inlinePlainText, pushInlineRun } from "./marks.js";
+import {
+  hasInlineMarks,
+  inlinePlainText,
+  isExternalHref,
+  pushInlineRun,
+} from "./marks.js";
 import type {
   Block,
   BlockType,
@@ -95,7 +107,7 @@ function fenceFor(text: string): string {
 
 /* --------------------------------------------------------------- inline: out */
 
-/** The marks that nest, outermost first. `inlineCode` is always innermost. */
+/** The marks that nest. `inlineCode` is not one: it is always innermost. */
 const NESTING = ["link", "bold", "italic", "strike"] as const;
 
 type NestedMark = (typeof NESTING)[number];
@@ -115,20 +127,38 @@ function nestedMarksOf(marks: InlineMarkSet): NestedMark[] {
   return out;
 }
 
+interface EscapeContext {
+  /**
+   * Within a link label the first unescaped `]` ends the label, so a label
+   * holding one must escape it or the link does not survive the round trip.
+   */
+  insideLabel: boolean;
+  /**
+   * Whether a delimiter the writer emits can sit against this text. A lone `~` is
+   * not a delimiter, so ordinary prose keeps its home directories unescaped — but
+   * `~` next to an emitted `~~` merges into one run and changes meaning, and the
+   * merge happens across the boundary where this text cannot see it.
+   */
+  hugged: boolean;
+}
+
 /**
  * Escape the characters the reader would take as syntax. `_` is absent on
  * purpose — it is not a delimiter here — and `~` and `[` are escaped only where
- * they would actually open something, so ordinary prose stays readable.
+ * they could actually open something, so ordinary prose stays readable.
  */
-function escapeInline(text: string): string {
+function escapeInline(text: string, context: EscapeContext): string {
   let out = "";
   for (let i = 0; i < text.length; i += 1) {
     const char = text[i] as string;
     if (char === "\\" || char === "`" || char === "*") {
       out += `\\${char}`;
-    } else if (char === "~" && (text[i + 1] === "~" || text[i - 1] === "~")) {
-      // Only a `~~` pair is a delimiter, so a lone tilde — a home directory, a
-      // version range — is left alone.
+    } else if (char === "]" && context.insideLabel) {
+      out += "\\]";
+    } else if (
+      char === "~" &&
+      (context.hugged || text[i + 1] === "~" || text[i - 1] === "~")
+    ) {
       out += "\\~";
     } else if (char === "[" && matchLink(text, i) !== null) {
       out += "\\[";
@@ -137,6 +167,31 @@ function escapeInline(text: string): string {
     }
   }
   return out;
+}
+
+/** Whether every `(` in `href` has its `)`, the CommonMark bare-target rule. */
+function parensBalanced(href: string): boolean {
+  let depth = 0;
+  for (const char of href) {
+    if (char === "(") depth += 1;
+    else if (char === ")") depth -= 1;
+    if (depth < 0) return false;
+  }
+  return depth === 0;
+}
+
+/**
+ * A link target, written so the reader gets it back *unchanged* — an href is
+ * data, so escaping it is fine but rewriting it is not.
+ *
+ * Balanced parentheses belong to a bare target (the rule the reader implements),
+ * so `https://example.com/a_(b)` goes out as it is. Anything a bare target cannot
+ * hold — an unbalanced paren, an angle bracket — goes in CommonMark's `<…>` form,
+ * where a backslash covers the rest.
+ */
+function renderHref(href: string): string {
+  if (parensBalanced(href) && !/[<>]/.test(href)) return href;
+  return `<${href.replace(/[\\<>]/g, (char) => `\\${char}`)}>`;
 }
 
 /**
@@ -156,58 +211,93 @@ function renderCodeSpan(text: string): string {
   return `${fence}${pad}${text}${pad}${fence}`;
 }
 
+/** The marks whose delimiters have to hug their content. */
+const EMPHASIS_MARKS = ["bold", "italic", "strike"] as const;
+
+type EmphasisMark = (typeof EMPHASIS_MARKS)[number];
+
+/** `marks` minus `drop` — the marks whitespace pushed outside a span keeps. */
+function without(marks: InlineMarkSet, drop: readonly EmphasisMark[]): InlineMarkSet {
+  const kept: InlineMarkSet = { ...marks };
+  for (const mark of drop) delete kept[mark];
+  return kept;
+}
+
+/** Trailing whitespace of `text`, which is `""` when it ends in anything else. */
+function trailingWhitespace(text: string): string {
+  return /\s*$/.exec(text)?.[0] ?? "";
+}
+
+/** One mark on the open stack: its name, plus the href a `link` was opened with. */
+interface OpenMark {
+  name: NestedMark;
+  href: string;
+}
+
 /**
- * Emphasis delimiters have to hug their content, so whitespace at the edge of an
- * emphasised run is pushed outside the emphasis. Without this, bolding "word "
- * would export as `**word **`, which is not bold in GFM and is not read back as
- * bold here either.
+ * Reorder a run's marks so the ones already open stay open.
+ *
+ * The fixed {@link NESTING} order alone is not enough, because nesting depth is
+ * a property of *spans*, not of mark types: with `italic` over the whole phrase
+ * and `bold` over one word inside it, the shared mark is outermost in the first
+ * run and innermost in the second, so a fixed order would close and reopen the
+ * italic around every boundary and emit `*a ***b*** c*`. Moving each already-open
+ * mark to the position it holds on the stack keeps the wider span outside, which
+ * is what makes `*italic **bold** italic*` come out.
  */
-function normalizeInlineRuns(runs: readonly InlineRun[]): InlineRun[] {
-  const out: InlineRun[] = [];
-  for (const run of runs) {
-    const emphasised =
-      run.marks.bold === true ||
-      run.marks.italic === true ||
-      run.marks.strike === true;
-    if (!emphasised || run.marks.inlineCode === true) {
-      pushInlineRun(out, run.text, run.marks);
-      continue;
-    }
-    const lead = /^\s*/.exec(run.text)?.[0] ?? "";
-    const rest = run.text.slice(lead.length);
-    const trail = /\s*$/.exec(rest)?.[0] ?? "";
-    const core = rest.slice(0, rest.length - trail.length);
-    const bare: InlineMarkSet =
-      run.marks.link === undefined ? {} : { link: run.marks.link };
-    pushInlineRun(out, lead, bare);
-    pushInlineRun(out, core, run.marks);
-    pushInlineRun(out, trail, bare);
+function orderedMarks(marks: NestedMark[], open: readonly OpenMark[]): NestedMark[] {
+  const ordered = [...marks];
+  for (const [depth, entry] of open.entries()) {
+    const at = ordered.indexOf(entry.name);
+    if (at === -1 || at === depth || depth >= ordered.length) continue;
+    ordered.splice(at, 1);
+    ordered.splice(depth, 0, entry.name);
   }
-  return out;
+  return ordered;
 }
 
 /**
  * Render runs as GFM, keeping the marks properly nested: a mark shared by
  * neighbouring runs stays open across them, so one bold span split by an
  * annotation boundary is still `**ab**` and never `**a****b**`.
+ *
+ * Where two neighbouring runs genuinely share nothing — bold `a` then italic `b`
+ * — the delimiters do end up adjacent (`**a***b*`). That is not ambiguous, it is
+ * the case CommonMark's delimiter-run splitting exists for, and the reader below
+ * implements the same splitting, so the pair round-trips.
+ *
+ * The one thing GFM cannot spell is emphasis touching whitespace: `**word **` is
+ * not bold, in any reader including this one. So whitespace is kept out of the
+ * emphasis instead, *here* rather than in a pre-pass over the runs — only the
+ * writer knows where its delimiters actually land, because an outer mark ending
+ * forces the marks nested inside it to close and reopen too. Leading whitespace is
+ * written before the delimiters that open; trailing whitespace is taken back off
+ * the output and re-appended after the delimiters that close. Those spaces lose
+ * that mark, which is the honest cost of the format.
  */
 function renderInline(runs: readonly InlineRun[]): string {
   let out = "";
-  /** The open marks, outermost first, with the href a `link` was opened with. */
-  const open: Array<{ name: NestedMark; href: string }> = [];
+  const open: OpenMark[] = [];
+  // A single unmarked run has no delimiter anywhere near it; anything else might.
+  const hugged = runs.length > 1 || hasInlineMarks(runs[0]?.marks ?? {});
 
   const closeDownTo = (depth: number): void => {
     for (let i = open.length - 1; i >= depth; i -= 1) {
       const entry = open[i];
       if (entry === undefined) continue;
-      out += entry.name === "link" ? `](${entry.href})` : DELIMITER[entry.name];
+      out += entry.name === "link" ? `](${renderHref(entry.href)})` : DELIMITER[entry.name];
     }
     open.length = depth;
   };
 
-  for (const run of normalizeInlineRuns(runs)) {
-    const desired = nestedMarksOf(run.marks);
-    const href = run.marks.link ?? "";
+  for (const run of runs) {
+    // Whitespace alone gives a delimiter nothing to hug, so it carries no
+    // emphasis at all — there is no way to write that, and pretending otherwise
+    // is what turns `~~ ~~` back into literal text on the next read.
+    const marks =
+      run.text.trim() === "" ? without(run.marks, EMPHASIS_MARKS) : run.marks;
+    const desired = orderedMarks(nestedMarksOf(marks), open);
+    const href = marks.link ?? "";
     let common = 0;
     while (
       common < open.length &&
@@ -217,19 +307,47 @@ function renderInline(runs: readonly InlineRun[]): string {
     ) {
       common += 1;
     }
+
+    // Closing: hold back whitespace already written, so no closer sits on it.
+    let held = "";
+    if (open.slice(common).some((entry) => entry.name !== "link")) {
+      held = trailingWhitespace(out);
+      out = out.slice(0, out.length - held.length);
+    }
     closeDownTo(common);
+    out += held;
+
+    // Opening: write leading whitespace outside the delimiters, same reason.
+    let text = run.text;
+    if (desired.slice(common).some((name) => name !== "link")) {
+      const lead = /^\s*/.exec(text)?.[0] ?? "";
+      out += lead;
+      text = text.slice(lead.length);
+    }
     for (let i = common; i < desired.length; i += 1) {
       const name = desired[i];
       if (name === undefined) continue;
       out += name === "link" ? "[" : DELIMITER[name];
       open.push({ name, href });
     }
+
     out +=
-      run.marks.inlineCode === true
-        ? renderCodeSpan(run.text)
-        : escapeInline(run.text);
+      marks.inlineCode === true
+        ? renderCodeSpan(text)
+        : escapeInline(text, {
+            insideLabel: open.some((entry) => entry.name === "link"),
+            hugged,
+          });
   }
-  closeDownTo(0);
+
+  const held = trailingWhitespace(out);
+  if (open.some((entry) => entry.name !== "link")) {
+    out = out.slice(0, out.length - held.length);
+    closeDownTo(0);
+    out += held;
+  } else {
+    closeDownTo(0);
+  }
   return out;
 }
 
@@ -317,11 +435,9 @@ export function exportMarkdown(
     }
   }
 
-  for (const block of getBlocks(ydoc)) {
-    // Marks are read by id, which resolves the same element `getBlocks` read —
-    // shadowed duplicates included. An element with no id claims no identity, so
-    // it has no marks to look up and falls back to its plain text.
-    const inline = getBlockInline(ydoc, block.id);
+  // Blocks and their marks come from one traversal. Looking each block's marks
+  // up by id would rescan the whole fragment per block.
+  for (const { block, inline } of getBlocksWithInline(ydoc)) {
     sections.push(
       renderBlock(
         block,
@@ -466,10 +582,51 @@ function parseFrontmatter(lines: string[]): Frontmatter {
 
 /* ---------------------------------------------------------------- inline: in */
 
-/** A link target the model accepts as an inline link: an external URL, only. */
-const EXTERNAL_URL = /^https?:\/\/\S+$/i;
+/**
+ * The reader is two passes, not one, and that is the whole design.
+ *
+ * A single left-to-right scan that looks for "the closing delimiter" cannot get
+ * nesting right: in `*italic **bold** italic*` the first `*`-run it meets is the
+ * inner bold's *opener*, and in ``**bold `a**b`**`` the `**` it meets is inside a
+ * code span. So:
+ *
+ *  1. **Tokenize.** Escapes, code spans and links are resolved first — code spans
+ *     bind tighter than everything (their content is literal) and a link's label
+ *     is tokenized recursively. What is left of `*` and `~` becomes *delimiter
+ *     runs*, each tagged with whether it can open and whether it can close,
+ *     from the flanking rule: a run can open when the character after it is not
+ *     whitespace, and can close when the character before it is not.
+ *  2. **Match delimiters,** CommonMark-style: every closer takes the nearest
+ *     compatible opener, and a run of three or more is *split* — two characters
+ *     for strong, one for emphasis — which is what makes both `***both***` and
+ *     `**a***b*` come out right. Delimiter characters nobody claimed are text.
+ *
+ * The result is a set of properly nested spans over the token list, so a token's
+ * marks are simply the union of the spans containing it.
+ */
 
-const LINK = /^\[((?:\\.|[^\\\]])*)\]\(([^\s)]*)\)/;
+/** How many characters a mark's delimiter takes from a run. */
+const STRONG = 2;
+const EMPHASIS = 1;
+
+interface TextToken {
+  kind: "text";
+  text: string;
+  /** The marks the tokenizer had in scope: a code span, a link label, or none. */
+  marks: InlineMarkSet;
+}
+
+interface DelimToken {
+  kind: "delim";
+  char: string;
+  length: number;
+  canOpen: boolean;
+  canClose: boolean;
+  /** Same as {@link TextToken.marks}: whatever is left over is text in scope. */
+  marks: InlineMarkSet;
+}
+
+type Token = TextToken | DelimToken;
 
 /** Length of the run of `char` starting at `from`. */
 function runLength(source: string, from: number, char: string): number {
@@ -478,54 +635,89 @@ function runLength(source: string, from: number, char: string): number {
   return length;
 }
 
-/** Whether the character at `index` is backslash-escaped. */
-function isEscaped(source: string, index: number): boolean {
-  let backslashes = 0;
-  for (let i = index - 1; i >= 0 && source[i] === "\\"; i -= 1) backslashes += 1;
-  return backslashes % 2 === 1;
-}
-
 /**
  * The link opening at `start`, or null — including for a target that is not an
  * external URL, which stays literal text rather than becoming a mark.
+ *
+ * The label ends at the first unescaped `]`. The target is either bare — running
+ * to the `)` that matches, counting nested pairs, so `https://example.com/a_(b)`
+ * survives — or CommonMark's `<…>` form, which holds the targets a bare one
+ * cannot. Both are the writer's two forms, read back.
  */
 function matchLink(
   source: string,
   start: number,
 ): { label: string; href: string; next: number } | null {
-  const match = LINK.exec(source.slice(start));
-  if (match === null) return null;
-  const label = match[1] ?? "";
-  const href = match[2] ?? "";
-  if (label === "" || !EXTERNAL_URL.test(href)) return null;
-  return { label, href, next: start + match[0].length };
-}
-
-/**
- * The emphasis span opening at `start` with a `need`-long run of `char`, or null.
- *
- * The closer is taken from the *end* of its delimiter run, which is what makes
- * `***both***` bold-and-italic rather than bold over a stray asterisk. Content
- * that is empty or edged with whitespace is not emphasis at all.
- */
-function matchEmphasis(
-  source: string,
-  start: number,
-  char: string,
-  need: number,
-): { content: string; next: number } | null {
-  const from = start + need;
-  for (let i = from; i < source.length; i += 1) {
-    if (source[i] !== char || isEscaped(source, i)) continue;
-    const length = runLength(source, i, char);
-    if (length < need) {
-      i += length - 1;
+  if (source[start] !== "[") return null;
+  let i = start + 1;
+  for (; i < source.length; i += 1) {
+    const char = source[i];
+    if (char === "\\") {
+      i += 1;
       continue;
     }
-    const end = i + length;
-    const content = source.slice(from, end - need);
-    if (content !== "" && !/^\s|\s$/.test(content)) return { content, next: end };
-    i = end - 1;
+    // Code spans are resolved before brackets, so a `]` inside one belongs to the
+    // code and not to the label — the same order CommonMark parses in, and what
+    // lets a label hold `` `]` `` at all.
+    if (char === "`") {
+      const span = matchCodeSpan(source, i);
+      if (span !== null) {
+        i = span.next - 1;
+        continue;
+      }
+    }
+    if (char === "]") break;
+  }
+  if (source[i] !== "]" || source[i + 1] !== "(") return null;
+  const label = source.slice(start + 1, i);
+
+  const target =
+    source[i + 2] === "<"
+      ? matchAngleTarget(source, i + 3)
+      : matchBareTarget(source, i + 2);
+  if (target === null || label === "" || !isExternalHref(target.href)) return null;
+  return { label, href: target.href, next: target.next };
+}
+
+/** A bare `(target)`, ending at the `)` that balances. */
+function matchBareTarget(
+  source: string,
+  from: number,
+): { href: string; next: number } | null {
+  let depth = 1;
+  for (let i = from; i < source.length; i += 1) {
+    const char = source[i] as string;
+    if (/\s/.test(char)) return null;
+    if (char === "(") depth += 1;
+    else if (char === ")") {
+      depth -= 1;
+      if (depth === 0) return { href: source.slice(from, i), next: i + 1 };
+    }
+  }
+  return null;
+}
+
+/** A `(<target>)`, ending at the first unescaped `>`. Backslashes come off. */
+function matchAngleTarget(
+  source: string,
+  from: number,
+): { href: string; next: number } | null {
+  let href = "";
+  for (let i = from; i < source.length; i += 1) {
+    const char = source[i] as string;
+    if (char === "\\") {
+      const next = source[i + 1];
+      if (next !== undefined) {
+        href += next;
+        i += 1;
+        continue;
+      }
+    }
+    if (char === "<") return null;
+    if (char === ">") {
+      return source[i + 1] === ")" ? { href, next: i + 2 } : null;
+    }
+    href += char;
   }
   return null;
 }
@@ -557,19 +749,12 @@ function matchCodeSpan(
   return null;
 }
 
-/**
- * Read `source` into runs, adding to whatever marks are already in scope. Marked
- * spans recurse (a link label can hold emphasis and vice versa); a code span's
- * content does not, because it is literal.
- */
-function scanInline(
-  source: string,
-  marks: InlineMarkSet,
-  out: InlineRun[],
-): void {
+/** Pass 1: `source` as text, code and delimiter tokens, with `marks` in scope. */
+function tokenizeInline(source: string, marks: InlineMarkSet): Token[] {
+  const tokens: Token[] = [];
   let plain = "";
   const flush = (): void => {
-    pushInlineRun(out, plain, marks);
+    if (plain !== "") tokens.push({ kind: "text", text: plain, marks });
     plain = "";
   };
 
@@ -579,7 +764,7 @@ function scanInline(
 
     if (char === "\\") {
       const next = source[i + 1];
-      if (next !== undefined && "\\`*~[".includes(next)) {
+      if (next !== undefined && "\\`*~[]".includes(next)) {
         plain += next;
         i += 2;
         continue;
@@ -590,7 +775,11 @@ function scanInline(
       const span = matchCodeSpan(source, i);
       if (span !== null) {
         flush();
-        pushInlineRun(out, span.content, { ...marks, inlineCode: true });
+        tokens.push({
+          kind: "text",
+          text: span.content,
+          marks: { ...marks, inlineCode: true },
+        });
         i = span.next;
         continue;
       }
@@ -600,42 +789,166 @@ function scanInline(
       const link = matchLink(source, i);
       if (link !== null) {
         flush();
-        scanInline(link.label, { ...marks, link: link.href }, out);
+        tokens.push(
+          ...tokenizeInline(link.label, { ...marks, link: link.href }),
+        );
         i = link.next;
         continue;
       }
     }
 
-    if (char === "~" && marks.strike !== true && runLength(source, i, "~") >= 2) {
-      const span = matchEmphasis(source, i, "~", 2);
-      if (span !== null) {
-        flush();
-        scanInline(span.content, { ...marks, strike: true }, out);
-        i = span.next;
-        continue;
-      }
-    }
-
-    if (char === "*") {
-      const bold = runLength(source, i, "*") >= 2;
-      if (bold ? marks.bold !== true : marks.italic !== true) {
-        const span = matchEmphasis(source, i, "*", bold ? 2 : 1);
-        if (span !== null) {
-          flush();
-          const nested: InlineMarkSet = bold
-            ? { ...marks, bold: true }
-            : { ...marks, italic: true };
-          scanInline(span.content, nested, out);
-          i = span.next;
-          continue;
-        }
-      }
+    if (char === "*" || char === "~") {
+      flush();
+      const length = runLength(source, i, char);
+      const before = source[i - 1];
+      const after = source[i + length];
+      tokens.push({
+        kind: "delim",
+        char,
+        length,
+        canOpen: after !== undefined && !/\s/.test(after),
+        canClose: before !== undefined && !/\s/.test(before),
+        marks,
+      });
+      i += length;
+      continue;
     }
 
     plain += char;
     i += 1;
   }
   flush();
+  return tokens;
+}
+
+/** A matched pair of delimiters, and the mark it puts on the tokens between. */
+interface Span {
+  from: number;
+  to: number;
+  mark: "bold" | "italic" | "strike";
+}
+
+/** How many characters a closer and its opener would each give up, or 0. */
+function delimiterTake(char: string, opener: number, closer: number): number {
+  if (char === "~") return opener >= STRONG && closer >= STRONG ? STRONG : 0;
+  return opener >= STRONG && closer >= STRONG ? STRONG : EMPHASIS;
+}
+
+/**
+ * CommonMark's "rule of three", which is what keeps a `*` that could go either
+ * way from closing the wrong thing: when either delimiter can both open and
+ * close, the two runs' lengths may not sum to a multiple of three unless both are
+ * multiples of three.
+ *
+ * Without it, `**~~a*x*~~**` reads the italic's *opener* as the bold's closer —
+ * the bold `**` can close (a non-space precedes it) and one asterisk is enough —
+ * and the whole span unravels. Strikethrough is a GFM extension with no such
+ * rule, so this applies to `*` only.
+ */
+function ruleOfThreeAllows(
+  char: string,
+  opener: DelimToken,
+  closer: DelimToken,
+): boolean {
+  if (char !== "*") return true;
+  if (!closer.canOpen && !opener.canClose) return true;
+  const sum = opener.length + closer.length;
+  if (sum % 3 !== 0) return true;
+  return opener.length % 3 === 0 && closer.length % 3 === 0;
+}
+
+function markFor(char: string, take: number): Span["mark"] {
+  if (char === "~") return "strike";
+  return take === STRONG ? "bold" : "italic";
+}
+
+/**
+ * Pass 2: match delimiter runs — every closer takes the nearest compatible
+ * opener, and a long run is split between several matches.
+ *
+ * Returns the spans plus, per token, how much of its run nobody claimed. That
+ * leftover is literal text: `**a*` is not emphasis, it is two asterisks and an
+ * asterisk.
+ */
+function matchDelimiters(tokens: readonly Token[]): {
+  spans: Span[];
+  unclaimed: number[];
+} {
+  const spans: Span[] = [];
+  const unclaimed = tokens.map((token) =>
+    token.kind === "delim" ? token.length : 0,
+  );
+  /** Indexes of runs still able to open something, innermost last. */
+  const openers: number[] = [];
+
+  const lengthAt = (index: number): number => unclaimed[index] ?? 0;
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token === undefined || token.kind !== "delim") continue;
+
+    while (token.canClose && lengthAt(i) > 0) {
+      let at = -1;
+      for (let k = openers.length - 1; k >= 0; k -= 1) {
+        const candidate = tokens[openers[k] as number];
+        if (
+          candidate !== undefined &&
+          candidate.kind === "delim" &&
+          candidate.char === token.char &&
+          lengthAt(openers[k] as number) > 0 &&
+          ruleOfThreeAllows(token.char, candidate, token)
+        ) {
+          at = k;
+          break;
+        }
+      }
+      if (at === -1) break;
+      const j = openers[at] as number;
+      const take = delimiterTake(token.char, lengthAt(j), lengthAt(i));
+      if (take === 0) break;
+      unclaimed[j] = lengthAt(j) - take;
+      unclaimed[i] = lengthAt(i) - take;
+      spans.push({ from: j + 1, to: i - 1, mark: markFor(token.char, take) });
+      // Openers inside the pair just closed are unreachable now: any closer they
+      // could still meet lies outside the span they would have to cover.
+      openers.length = lengthAt(j) === 0 ? at : at + 1;
+    }
+
+    if (token.canOpen && lengthAt(i) > 0) openers.push(i);
+  }
+  return { spans, unclaimed };
+}
+
+/** A token's marks: the tokenizer's scope, plus every span covering it. */
+function marksFor(
+  token: Token,
+  spans: readonly Span[],
+  index: number,
+): InlineMarkSet {
+  const marks: InlineMarkSet = { ...token.marks };
+  for (const span of spans) {
+    if (index >= span.from && index <= span.to) marks[span.mark] = true;
+  }
+  return marks;
+}
+
+/**
+ * Read `source` into runs: tokenize, match delimiters, then hand every token the
+ * union of the marks covering it. Unclaimed delimiter characters come through as
+ * the text they are.
+ */
+function scanInline(source: string, out: InlineRun[]): void {
+  const tokens = tokenizeInline(source, {});
+  const { spans, unclaimed } = matchDelimiters(tokens);
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token === undefined) continue;
+    const text =
+      token.kind === "text"
+        ? token.text
+        : token.char.repeat(unclaimed[i] ?? 0);
+    pushInlineRun(out, text, marksFor(token, spans, i));
+  }
 }
 
 /**
@@ -648,7 +961,7 @@ function proseBlock(
   source: string,
 ): ImportedBlock {
   const runs: InlineRun[] = [];
-  scanInline(source, {}, runs);
+  scanInline(source, runs);
   const text = inlinePlainText(runs);
   return runs.some((run) => hasInlineMarks(run.marks))
     ? { type, text, inline: runs }
