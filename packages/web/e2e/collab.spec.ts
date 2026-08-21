@@ -20,11 +20,24 @@ import type { Harness } from "./harness.js";
 
 test.describe.configure({ mode: "serial" });
 
-let harness: Harness;
+let started: Harness | null = null;
 const contexts: BrowserContext[] = [];
 
+/**
+ * The running harness.
+ *
+ * A function, not a bare variable: if `beforeAll` failed there is nothing to
+ * dereference, and a `TypeError` here would bury the real bootstrap error.
+ */
+function harness(): Harness {
+  if (started === null) {
+    throw new Error("e2e: the harness is not running — its bootstrap failed");
+  }
+  return started;
+}
+
 test.beforeAll(async () => {
-  harness = await startHarness();
+  started = await startHarness();
 });
 
 test.afterEach(async () => {
@@ -32,7 +45,11 @@ test.afterEach(async () => {
 });
 
 test.afterAll(async () => {
-  await harness.stop();
+  // Tolerates a failed bootstrap: `startHarness` cleans up after itself, so
+  // there is nothing left to stop.
+  const running = started;
+  started = null;
+  await running?.stop();
 });
 
 /** A fresh context: its own IndexedDB, its own awareness identity, its own tab. */
@@ -40,7 +57,7 @@ async function openApp(browser: Browser): Promise<Page> {
   const context = await browser.newContext();
   contexts.push(context);
   const page = await context.newPage();
-  await page.goto(harness.appUrl);
+  await page.goto(harness().appUrl);
   await expect(page.locator(".ub-list-head")).toBeVisible();
   return page;
 }
@@ -189,7 +206,7 @@ test("a reload with the hub stopped renders from the local cache, and the offlin
   await expect(a.locator(".ub-status")).toContainText("synced");
   await expect(a.locator(".ub-status")).toContainText("local cache");
 
-  await harness.stopHub();
+  await harness().stopHub();
   await expect(a.locator(".ub-status")).toContainText("offline");
 
   // Reload with nowhere to sync from. Both the document list and the document
@@ -203,7 +220,7 @@ test("a reload with the hub stopped renders from the local cache, and the offlin
   await caretTo(a, "end");
   await type(a, "-offline");
 
-  await harness.startHub();
+  await harness().startHub();
   await expect
     .poll(() => blockText(b), { timeout: 40_000 })
     .toBe("before-offline");

@@ -66,16 +66,22 @@ export async function startHarness(): Promise<Harness> {
     shutdownTimeoutMs: 5_000,
   };
 
-  let hub: Hub | null = await createHub(config);
-  // Every later start reuses the port the first one was given, so the bundle's
-  // baked-in HUB_URL keeps pointing at the hub across a restart.
-  const port = hub.port;
+  let hub: Hub | null = null;
+  let vite: ViteDevServer | null = null;
 
-  process.env.HUB_URL = `ws://127.0.0.1:${port}`;
-  process.env.HUB_AUTH_TOKEN = SECRET;
-
-  let vite: ViteDevServer;
+  // One failure boundary for the whole bootstrap, the temp directory included:
+  // a harness that did not finish starting must leave nothing behind — no
+  // listening socket, no stray database — and must surface its own error rather
+  // than a cleanup error on top of it.
   try {
+    hub = await createHub(config);
+    // Every later start reuses the port the first one was given, so the
+    // bundle's baked-in HUB_URL keeps pointing at the hub across a restart.
+    const port = hub.port;
+
+    process.env.HUB_URL = `ws://127.0.0.1:${port}`;
+    process.env.HUB_AUTH_TOKEN = SECRET;
+
     vite = await createServer({
       configFile: join(packageRoot, "vite.config.ts"),
       root: packageRoot,
@@ -83,38 +89,43 @@ export async function startHarness(): Promise<Harness> {
       logLevel: "warn",
     });
     await vite.listen();
+
+    const appUrl = vite.resolvedUrls?.local[0];
+    if (appUrl === undefined) {
+      throw new Error("e2e: the vite dev server reported no local URL");
+    }
+    const server = vite;
+
+    const stopHub = async (): Promise<void> => {
+      if (hub === null) return;
+      const running = hub;
+      hub = null;
+      await running.stop();
+    };
+
+    return {
+      appUrl,
+      async startHub() {
+        if (hub !== null) return;
+        hub = await createHub({ ...config, port });
+      },
+      stopHub,
+      async stop() {
+        // Every step is best-effort and the temp directory goes last, in a
+        // `finally`: a hub or dev server that fails to shut down cleanly must
+        // not leave a database behind as well.
+        try {
+          await stopHub().catch(() => {});
+          await server.close().catch(() => {});
+        } finally {
+          rmSync(databaseDir, { recursive: true, force: true });
+        }
+      },
+    };
   } catch (error) {
-    await hub.stop().catch(() => {});
+    await vite?.close().catch(() => {});
+    await hub?.stop().catch(() => {});
     rmSync(databaseDir, { recursive: true, force: true });
     throw error;
   }
-
-  const appUrl = vite.resolvedUrls?.local[0];
-  if (appUrl === undefined) {
-    await vite.close();
-    await hub.stop().catch(() => {});
-    rmSync(databaseDir, { recursive: true, force: true });
-    throw new Error("e2e: the vite dev server reported no local URL");
-  }
-
-  const stopHub = async (): Promise<void> => {
-    if (hub === null) return;
-    const running = hub;
-    hub = null;
-    await running.stop();
-  };
-
-  return {
-    appUrl,
-    async startHub() {
-      if (hub !== null) return;
-      hub = await createHub({ ...config, port });
-    },
-    stopHub,
-    async stop() {
-      await stopHub().catch(() => {});
-      await vite.close();
-      rmSync(databaseDir, { recursive: true, force: true });
-    },
-  };
 }
