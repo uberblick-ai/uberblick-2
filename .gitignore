@@ -20,6 +20,10 @@ packages/*/data/
 .env
 .env.*
 
+# playwright run artifacts (traces, screenshots, HTML report)
+test-results/
+playwright-report/
+
 # editor / OS
 .DS_Store
 .vite/
