@@ -4,7 +4,7 @@
  * per room, with the token's identity, and with a reason for the close.
  */
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import type { HubLogRecord } from "../src/log.js";
 import type { Hub } from "../src/server.js";
 import {
@@ -13,10 +13,20 @@ import {
   startHub,
   testRoom,
   token,
+  type TestClient,
   waitUntil,
 } from "./helpers.js";
 
 const hubs: Hub[] = [];
+const clients: TestClient[] = [];
+
+// A client a failed assertion left behind would keep reconnecting through the
+// rest of the suite, so tearing them down is not the test's business.
+afterEach(() => {
+  for (const client of clients.splice(0)) {
+    client.destroy();
+  }
+});
 
 afterAll(async () => {
   for (const hub of hubs) {
@@ -41,6 +51,7 @@ describe("connection lifecycle", () => {
       room,
       token: await token("read-write", { sub: "lifecycle-client" }),
     });
+    clients.push(client);
     await client.synced;
 
     expect(records).toContainEqual(
