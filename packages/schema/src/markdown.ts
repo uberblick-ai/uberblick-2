@@ -8,7 +8,7 @@
  * inline formatting.
  */
 
-import * as Y from "yjs";
+import type * as Y from "yjs";
 import { getBlocks } from "./blocks.js";
 import { getMeta } from "./doc.js";
 import { listAnnotations, resolveAnnotationRange } from "./annotations.js";

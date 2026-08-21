@@ -4,7 +4,7 @@
  * take the same path to the screen.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import * as Y from "yjs";
 import {
   getBlocksFragment,
@@ -129,9 +129,14 @@ export function useForeignBlocks(
   return foreign;
 }
 
+/** A peer in the presence strip. `clientId` is its stable key: names collide. */
+export interface Peer extends AwarenessUser {
+  clientId: number;
+}
+
 /** Awareness states other than our own, for the presence strip. */
-export function usePeers(connection: RoomConnection | null): AwarenessUser[] {
-  const [peers, setPeers] = useState<AwarenessUser[]>([]);
+export function usePeers(connection: RoomConnection | null): Peer[] {
+  const [peers, setPeers] = useState<Peer[]>([]);
   useEffect(() => {
     const awareness = connection?.provider.awareness ?? null;
     if (awareness === null) {
@@ -139,12 +144,13 @@ export function usePeers(connection: RoomConnection | null): AwarenessUser[] {
       return;
     }
     const read = (): void => {
-      const out: AwarenessUser[] = [];
+      const out: Peer[] = [];
       awareness.getStates().forEach((state, clientId) => {
         if (clientId === awareness.clientID) return;
         const user = (state as { user?: Partial<AwarenessUser> }).user;
         if (user === undefined) return;
         out.push({
+          clientId,
           name: typeof user.name === "string" ? user.name : `client ${clientId}`,
           color: typeof user.color === "string" ? user.color : AWARENESS_FALLBACK_COLOR,
         });
@@ -214,9 +220,14 @@ export function useOutline(connection: RoomConnection | null): OutlineEntry[] {
   return outline;
 }
 
-/** A stable per-tab identity. */
+/**
+ * A stable per-tab identity. `useState`'s lazy initializer, not `useMemo` with
+ * an empty dependency list: React guarantees the initializer runs exactly once,
+ * where a memo is free to recompute and would hand out a second identity.
+ */
 export function useIdentity(factory: () => AwarenessUser): AwarenessUser {
-  return useMemo(factory, []);
+  const [identity] = useState(factory);
+  return identity;
 }
 
 /**

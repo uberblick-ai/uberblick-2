@@ -34,6 +34,7 @@ mise run hub          # Hocuspocus sync hub
 mise run mcp          # MCP server, standalone smoke test only (see below)
 mise run web          # Vite dev server
 mise run dev          # hub + web in parallel
+mise run lint         # Biome lint across the workspace (no formatter)
 mise run typecheck    # tsc --noEmit across all packages
 mise run test         # all test suites
 REVIEW_SHA=<commit> mise run review  # immutable Docker review of one commit
@@ -43,7 +44,10 @@ REVIEW_SHA=<commit> mise run review  # immutable Docker review of one commit
 over stdio and is normally spawned by its client (Claude Code and friends, via
 `.mcp.json`), so it has no place in the dev loop; `mise run mcp` exists for
 smoke tests. Nothing in `packages/mcp-server` may write to stdout except the MCP
-transport — use the stderr helpers in `src/log.ts`.
+transport — use the stderr helpers in `src/log.ts`. `biome.jsonc` makes that a
+build failure rather than a convention: `noConsole` is an error under
+`packages/mcp-server/src`, so `mise run lint` rejects a stray `console.log`
+there.
 
 `dev` starts both processes explicitly rather than through mise's `depends`,
 because `depends` on two long-running tasks serializes under `MISE_JOBS=1` and
@@ -142,7 +146,8 @@ secrets go there: plaintext local defaults such as `HUB_URL`
 Contributors without the age key are not blocked. The task wrappers pass
 `fnox exec --if-missing warn` explicitly, so a secret fnox cannot decrypt logs a
 warning and the command still runs with that variable unset instead of aborting.
-`mise run test` and `mise run typecheck` don't shell through fnox at all.
+`mise run lint`, `mise run test` and `mise run typecheck` don't shell through
+fnox at all.
 
 `HUB_AUTH_TOKEN` is the HMAC secret hub tokens are signed with. The hub refuses
 to start without it — a hub that cannot verify a token would accept anything.

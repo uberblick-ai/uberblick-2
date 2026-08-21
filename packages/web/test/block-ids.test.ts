@@ -33,7 +33,9 @@ function stateWith(
 
 function idsOf(state: EditorState): Array<unknown> {
   const ids: unknown[] = [];
-  state.doc.forEach((node) => ids.push(node.attrs.id));
+  state.doc.forEach((node) => {
+    ids.push(node.attrs.id);
+  });
   return ids;
 }
 

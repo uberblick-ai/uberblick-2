@@ -15,7 +15,7 @@
  * converge last-write-wins per key while different uuids never conflict.
  */
 
-import * as Y from "yjs";
+import type * as Y from "yjs";
 import { DIRECTORY_SUFFIX } from "./rooms.js";
 import type { DirectoryEntry } from "./types.js";
 

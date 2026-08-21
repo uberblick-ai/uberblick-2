@@ -40,9 +40,9 @@ function StatusLine({ connection }: { connection: RoomConnection }): ReactElemen
       {status.localReplicaLoaded && <span className="ub-muted">local cache</span>}
       <span className="ub-muted">{connection.room}</span>
       <span className="ub-peers">
-        {peers.map((peer, index) => (
+        {peers.map((peer) => (
           <span
-            key={`${peer.name}-${index}`}
+            key={peer.clientId}
             className="ub-peer"
             style={{ borderColor: peer.color }}
           >
