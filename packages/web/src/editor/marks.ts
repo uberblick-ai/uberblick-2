@@ -43,8 +43,9 @@
  * `[^delimiter]`: `markInputRule` deletes from the start of the match up to the
  * captured text, skipping leading *whitespace* only, so a non-space prefix in the
  * pattern is eaten along with the delimiter. Underscore forms (`__b__`, `_i_`)
- * are editor conveniences; markdown export always writes asterisks, and the
- * markdown reader treats `_` as an ordinary character.
+ * are here because people type them: markdown export always writes asterisks,
+ * while the markdown *reader* understands both — a `_` delimits under
+ * CommonMark's flanking rules, which is what keeps `snake_case` a word.
  */
 
 import {

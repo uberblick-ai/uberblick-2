@@ -482,25 +482,28 @@ function renderInline(source: readonly InlineRun[]): string {
   const orders = markOrders(runs);
 
   /**
-   * Close every mark above `depth`, top down, putting `held` back where it
-   * belongs: outside the emphasis, still inside anything else.
+   * Close every mark above `depth`, top down, putting `held` back after the last
+   * emphasis closer — outside the emphasis, still inside anything deeper.
    *
-   * Only emphasis cannot sit against whitespace. A link is perfectly happy to
-   * hold a trailing space — `[word ](url)` is a link over "word " — so the space
-   * goes back after the last *emphasis* closer rather than after all of them,
-   * and the link keeps it.
+   * Only emphasis cannot sit against whitespace; a link is perfectly happy to, so
+   * `[word ](url)` keeps its space when the link is the deeper of the two. When
+   * the link is the *inner* one, though, the space cannot stay in it: the bold
+   * closing after it would then cover a trailing space, which the next read strips
+   * — the export would keep a mark that its own re-export drops. One mark has to
+   * go, and it is the one whose span ends here. `expressibleInGfm` in the test
+   * names that case, and the honest cost is recorded there.
    */
   const closeDownTo = (depth: number, held = ""): void => {
-    const deepestEmphasis = open.findIndex(
+    const lastEmphasis = open.findIndex(
       (entry, index) => index >= depth && entry.name !== "link",
     );
     for (let i = open.length - 1; i >= depth; i -= 1) {
       const entry = open[i];
       if (entry === undefined) continue;
       out += entry.name === "link" ? `](${renderHref(entry.href)})` : entry.spelling;
-      if (i === deepestEmphasis) out += held;
+      if (i === lastEmphasis) out += held;
     }
-    if (deepestEmphasis === -1) out += held;
+    if (lastEmphasis === -1) out += held;
     open.length = depth;
   };
 
@@ -1172,14 +1175,14 @@ function markFor(char: string, take: number): Span["mark"] {
  */
 function matchDelimiters(
   tokens: readonly Token[],
-  allowBypass: boolean,
+  denied: ReadonlySet<string>,
 ): {
   spans: Span[];
   unclaimed: number[];
-  /** Runs that only matched because the rule of three was waived for them. */
-  bypassed: number[];
+  /** The pairs that only matched because the rule of three was waived. */
+  waived: Array<{ key: string; opener: number; closer: number }>;
 } {
-  const bypassed: number[] = [];
+  const waived: Array<{ key: string; opener: number; closer: number }> = [];
   const spans: Span[] = [];
   const unclaimed = tokens.map((token) =>
     token.kind === "delim" ? token.length : 0,
@@ -1215,7 +1218,7 @@ function matchDelimiters(
             token,
             lengthAt(j),
             lengthAt(i),
-            allowBypass && paired.has(`${j}:${i}`),
+            paired.has(`${j}:${i}`) && !denied.has(`${j}:${i}`),
           )
         ) {
           continue;
@@ -1228,8 +1231,9 @@ function matchDelimiters(
       }
       if (at === -1) break;
       const j = openers[at] as number;
-      if (paired.has(`${j}:${i}`)) bypassed.push(j, i);
-      paired.add(`${j}:${i}`);
+      const key = `${j}:${i}`;
+      if (paired.has(key)) waived.push({ key, opener: j, closer: i });
+      paired.add(key);
       unclaimed[j] = lengthAt(j) - take;
       unclaimed[i] = lengthAt(i) - take;
       spans.push({ from: j + 1, to: i - 1, mark: markFor(token.char, take) });
@@ -1240,7 +1244,7 @@ function matchDelimiters(
 
     if (token.canOpen && lengthAt(i) > 0) openers.push(i);
   }
-  return { spans, unclaimed, bypassed };
+  return { spans, unclaimed, waived };
 }
 
 /**
@@ -1255,21 +1259,31 @@ function matchDelimiters(
  * the construct is *finished*.
  *
  * So: match with the waiver, and if either run it was granted for ends up with
- * characters nobody claimed, read the whole thing again without it. A waiver that
- * completed a construct stands; one that only half-built it is withdrawn. Two
- * passes at worst, and only for input that used the waiver at all — and the test
- * is on those runs alone, since a stray delimiter elsewhere in the line has
- * nothing to do with whether this construct closed.
+ * characters nobody claimed, withdraw it — for *that pair only*, and match again.
+ * A line can hold one construct that finishes and another that does not, and the
+ * second one's failure says nothing about the first: withdrawing the waiver
+ * line-wide would take apart a construct that was perfectly well formed.
+ *
+ * Each round withdraws at least one pair and no round grants a pair back, so this
+ * settles in at most as many passes as there are waived pairs — one, for anything
+ * that did not need the waiver at all.
  */
 function matchNesting(tokens: readonly Token[]): {
   spans: Span[];
   unclaimed: number[];
 } {
-  const lenient = matchDelimiters(tokens, true);
-  const stranded = lenient.bypassed.some(
-    (index) => (lenient.unclaimed[index] ?? 0) > 0,
-  );
-  return stranded ? matchDelimiters(tokens, false) : lenient;
+  const denied = new Set<string>();
+  for (;;) {
+    const attempt = matchDelimiters(tokens, denied);
+    const stranded = attempt.waived.filter(
+      (pair) =>
+        !denied.has(pair.key) &&
+        ((attempt.unclaimed[pair.opener] ?? 0) > 0 ||
+          (attempt.unclaimed[pair.closer] ?? 0) > 0),
+    );
+    if (stranded.length === 0) return attempt;
+    for (const pair of stranded) denied.add(pair.key);
+  }
 }
 
 /** A token's marks: the tokenizer's scope, plus every span covering it. */

@@ -289,11 +289,19 @@ describe("inline marks in the document", () => {
       ],
     });
 
-    // …and the neighbouring shapes stay put.
-    expect(importMarkdown("***both***").blocks[0]?.inline).toEqual([
-      { text: "both", marks: { bold: true, italic: true } },
-    ]);
-    expect(importMarkdown("**a***b**").blocks[0]?.text).toBe("a*b**");
+    // Both on one line: the second one's failure says nothing about the first,
+    // and withdrawing the waiver line-wide would take the good one apart.
+    expect(importMarkdown("***c****d* a***b****c").blocks[0]).toEqual({
+      type: "paragraph",
+      text: "cd a*b**c",
+      inline: [
+        { text: "c", marks: { bold: true, italic: true } },
+        { text: "d", marks: { italic: true } },
+        { text: " a*", marks: {} },
+        { text: "b", marks: { bold: true } },
+        { text: "**c", marks: {} },
+      ],
+    });
   });
 
   /**
@@ -322,6 +330,39 @@ describe("inline marks in the document", () => {
         text,
       ).toBe(true);
     }
+  });
+
+  /**
+   * …but only when the link is the deeper of the two. When emphasis spans further
+   * than the link does, the space cannot stay inside it: the emphasis closes after
+   * the link's `)` and would then be covering a trailing space, which the next read
+   * strips — an export whose own re-export disagrees with it. So both marks come
+   * off the space, the text is untouched, and `expressibleInGfm` counts the
+   * document out rather than the exactness assertion pretending otherwise.
+   *
+   * Keeping the link here means splitting the emphasis so the link ends up
+   * outermost (`**a**[**b** ](url)`), which is expressible — but the next trip
+   * reads the space as its own run and orders the two marks the other way, so the
+   * bytes never settle. Measured; the stable spelling is the one below.
+   */
+  it("drops an inner link from edge whitespace rather than churning", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, {
+      type: "paragraph",
+      inline: [
+        { text: "a", marks: { bold: true } },
+        { text: "b ", marks: { bold: true, link: "https://example.com" } },
+      ],
+    });
+    const exported = exportMarkdown(doc, { frontmatter: false });
+    expect(exported).toBe("**a[b](https://example.com)** \n");
+
+    // The text is intact, and re-exporting agrees with itself.
+    const back = importMarkdown(exported).blocks[0];
+    const reread = seeded();
+    const rereadId = appendBlock(reread, back ?? { type: "paragraph" });
+    expect(getBlockText(reread, rereadId)).toBe(getBlockText(doc, id));
+    expect(exportMarkdown(reread, { frontmatter: false })).toBe(exported);
   });
 
   it("does not read a currency symbol as punctuation for the `_` rule", () => {
@@ -494,10 +535,12 @@ describe("inline marks in the document", () => {
 
   /**
    * Two code spans whose fences met would be one span nothing could split, so the
-   * writer must not put them next to each other. It does not have to merge them to
-   * manage that: the delimiters of whatever mark they disagree about go between
-   * them and keep the backtick runs apart. Merging is therefore reserved for runs
-   * that carry *identical* marks, where it loses nothing at all.
+   * writer must not put them next to each other. Usually it does not have to merge
+   * them to manage that: the delimiters of whatever mark they disagree about go
+   * between them and keep the backtick runs apart, and runs with *identical* marks
+   * merge losing nothing at all. The exception is a code run of nothing but
+   * whitespace, where the separating delimiter cannot be written either — see the
+   * forced-merge case below.
    */
   it("keeps neighbouring code runs apart without losing their marks", () => {
     const doc = seeded();
@@ -815,11 +858,13 @@ describe("inline marks in the document", () => {
  *  3. **The bytes settle immediately**: the export of a re-import is byte-identical
  *     to the export it came from.
  *
- * And one exception, which is the format's rather than ours: GFM cannot write
- * emphasis that touches whitespace, so a document with a marked space at the edge
- * of a span loses that one mark on the way out — after which everything above
- * holds exactly. For every document GFM *can* express, the first export is already
- * exact, which the test asserts separately so the exception cannot quietly grow.
+ * And two exceptions, both the format's rather than ours: GFM cannot write
+ * emphasis that touches whitespace, and it cannot keep two code spans apart when
+ * the mark that would separate them falls on a space. A document that needs either
+ * loses that one mark on the way out — after which everything above holds exactly.
+ * For every document GFM *can* express, the first export is already exact, and
+ * `expressibleInGfm` names both exceptions structurally so neither can quietly
+ * grow.
  *
  * Fixed seed and a small count, so it is a deterministic sub-second test rather
  * than a fuzzer.
