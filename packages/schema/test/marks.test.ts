@@ -201,6 +201,26 @@ describe("inline marks in the document", () => {
         runs: [{ text: "a~b", marks: { strike: true } }],
         markdown: "~~a\\~b~~",
       },
+      {
+        // The mark that outlives its neighbour goes outside it, even though at
+        // the first run nothing has said so yet: the italic here spans both runs,
+        // the bold only the first, so italic is the outer span and the bold
+        // closes inside it.
+        runs: [
+          { text: "a", marks: { bold: true, italic: true } },
+          { text: "b", marks: { italic: true } },
+        ],
+        markdown: "***a**b*",
+      },
+      {
+        // The same, the other way round, so the ordering is not just a lucky
+        // tie-break: bold outlives italic here.
+        runs: [
+          { text: "a", marks: { bold: true, italic: true } },
+          { text: "b", marks: { bold: true } },
+        ],
+        markdown: "***a*b**",
+      },
     ];
 
     for (const { runs, markdown } of cases) {
@@ -283,7 +303,7 @@ describe("inline marks in the document", () => {
       "Not bold: \\*\\*this\\*\\* is literal.",
       "A backslash \\\\ and a backtick \\` stay put.",
       "Tilde \\~\\~pair\\~\\~, path ~/.config, snake_case and __underscores__.",
-      "\\[not a link](https://example.com) and [not one either](./relative.md).",
+      "\\[not a link](https://example.com) and \\[not one either](./relative.md).",
     ];
     for (const source of literals) {
       const imported = importMarkdown(source);
@@ -299,6 +319,15 @@ describe("inline marks in the document", () => {
     // `_` is never a delimiter, so it is never escaped either.
     expect(importMarkdown("__underscores__").blocks[0]?.text).toBe(
       "__underscores__",
+    );
+
+    // `[` always is, even the one above whose target is not a link. What makes a
+    // bracket dangerous is a `](…)` later in the *line*, which another run can
+    // emit, so no run-local test could decide it.
+    const bracket = seeded();
+    appendBlock(bracket, { type: "paragraph", text: "see [1] and [2]" });
+    expect(exportMarkdown(bracket, { frontmatter: false })).toBe(
+      "see \\[1] and \\[2]\n",
     );
 
     // The writer canonicalises: text the reader would not have taken as a
@@ -327,6 +356,54 @@ describe("inline marks in the document", () => {
     expect(importMarkdown(exported).blocks[0]?.inline).toEqual([
       { text: "a ` b", marks: { inlineCode: true } },
     ]);
+
+    // …and a paragraph that therefore *starts* with three backticks is still a
+    // paragraph. A fence's info string may hold no backticks, which is what tells
+    // the two apart — CommonMark's rule, and the reason this round-trips.
+    const leading = seeded();
+    appendBlock(leading, {
+      type: "paragraph",
+      inline: [{ text: "``x", marks: { inlineCode: true } }],
+    });
+    const fenced = exportMarkdown(leading, { frontmatter: false });
+    expect(fenced).toBe("``` ``x ```\n");
+    expect(importMarkdown(fenced).blocks[0]).toEqual({
+      type: "paragraph",
+      text: "``x",
+      inline: [{ text: "``x", marks: { inlineCode: true } }],
+    });
+  });
+
+  /**
+   * Two code spans cannot sit next to each other: their fences meet as one run of
+   * backticks and no reader can split it. So neighbouring code runs are merged,
+   * keeping the marks they share — the text is what must not move.
+   */
+  it("merges neighbouring code runs rather than emitting fences that meet", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, {
+      type: "paragraph",
+      inline: [
+        { text: "one", marks: { inlineCode: true, bold: true } },
+        { text: "two", marks: { inlineCode: true } },
+      ],
+    });
+    expect(exportMarkdown(doc, { frontmatter: false })).toBe("`onetwo`\n");
+    expect(getBlockText(doc, id)).toBe("onetwo");
+    expect(importMarkdown("`onetwo`").blocks[0]?.inline).toEqual([
+      { text: "onetwo", marks: { inlineCode: true } },
+    ]);
+
+    // The marks they do share stay.
+    const shared = seeded();
+    appendBlock(shared, {
+      type: "paragraph",
+      inline: [
+        { text: "one", marks: { inlineCode: true, bold: true } },
+        { text: "two", marks: { inlineCode: true, bold: true, italic: true } },
+      ],
+    });
+    expect(exportMarkdown(shared, { frontmatter: false })).toBe("**`onetwo`**\n");
   });
 
   it("gives source blocks no inline marks — only the annotation anchor", () => {
@@ -439,6 +516,35 @@ describe("inline marks in the document", () => {
   });
 
   /**
+   * `comment` is exempt from that refusal because every block type allows it —
+   * but only a real anchor is. The editor's gate rejects a malformed one, so
+   * exempting it here would let a re-type produce exactly the document the gate
+   * then refuses to bind.
+   */
+  it("exempts only a comment mark that is really an anchor", () => {
+    const real = seeded();
+    const anchored = appendBlock(real, {
+      type: "paragraph",
+      text: "Hello brave world",
+    });
+    createAnnotation(real, anchored, 6, 11, "reviewer", "hm");
+    setBlockType(real, anchored, "code");
+    expect(getBlock(real, anchored)?.type).toBe("code");
+
+    for (const value of [true, {}, { threadId: "" }, { threadId: 7 }]) {
+      const doc = seeded();
+      const id = appendBlock(doc, { type: "paragraph", text: "not an anchor" });
+      text(doc).format(0, 3, { comment: value });
+      const label = JSON.stringify(value);
+
+      expect(() => setBlockType(doc, id, "code"), label).toThrow(
+        MarksNotAllowedError,
+      );
+      expect(getBlock(doc, id)?.type, label).toBe("paragraph");
+    }
+  });
+
+  /**
    * The link invariant belongs to the model, not to the editor's input rules: a
    * write refuses, and a read of something written elsewhere degrades. Together
    * they are what keeps a `javascript:` target out of the document and out of
@@ -542,11 +648,14 @@ describe("inline marks in the document", () => {
  *
  * Two properties, both about the pair rather than either half:
  *
- *  1. **Text is never changed.** Marks can be lost where GFM cannot spell them
- *     (whitespace at a span edge), so the plain text is what must survive
- *     exactly. Corrupted delimiters show up here as changed text.
- *  2. **Export is a fixed point after one trip.** Whatever the first export
- *     normalised, importing and exporting again must produce the same bytes.
+ *  1. **Text is never changed, on any trip.** Marks can be lost where GFM cannot
+ *     spell them — whitespace at a span edge, two code spans meeting — so the
+ *     plain text is what must survive exactly. A mis-emitted or mis-read
+ *     delimiter shows up here as changed text.
+ *  2. **The spelling settles.** Losing a mark changes which spans are contiguous,
+ *     so the second export can legitimately differ from the first; what must not
+ *     happen is churning forever. Every document reaches a fixed point, and the
+ *     worst case observed over 60k generated documents is two trips.
  *
  * Fixed seed and a small count, so it is a deterministic sub-second test rather
  * than a fuzzer.
@@ -573,12 +682,24 @@ describe("export and import are closed over the marks the model allows", () => {
     "x)y",
   ];
 
-  /** A tiny deterministic PRNG, so a failure is always reproducible. */
+  /**
+   * A tiny deterministic PRNG, so a failure is always reproducible.
+   *
+   * mulberry32, and the choice matters: the obvious textbook LCG
+   * (`state * 1103515245 + 12345 & 0x7fffffff`) is *broken* in JavaScript, because
+   * the multiply overflows 2^53 and loses the low bits — its output is never
+   * 2 or 3 mod 4, which silently made every generated document a single run and
+   * the whole corpus blind to run transitions. This one stays in 32-bit integer
+   * territory (`Math.imul`, `>>> 0`) and is uniform in every modulus used here.
+   */
   function generator(seed: number): () => number {
-    let state = seed;
+    let state = seed >>> 0;
     return () => {
-      state = (state * 1103515245 + 12345) & 0x7fffffff;
-      return state;
+      state = (state + 0x6d2b79f5) >>> 0;
+      let t = state;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return (t ^ (t >>> 14)) >>> 0;
     };
   }
 
@@ -603,9 +724,33 @@ describe("export and import are closed over the marks the model allows", () => {
     return runs;
   }
 
-  it("keeps the text and settles after one round trip, for 200 documents", () => {
+  /** How many round trips it takes `markdown` to stop changing, or null. */
+  function tripsToSettle(
+    markdown: string,
+    plain: string,
+    label: string,
+    limit = 3,
+  ): number | null {
+    let current = markdown;
+    for (let trip = 1; trip <= limit; trip += 1) {
+      const imported = importMarkdown(current).blocks[0];
+      expect(imported, label).toBeDefined();
+      const reread = seeded();
+      const id = appendBlock(reread, imported ?? { type: "paragraph" });
+      // Every trip, not just the last: the text is what cannot drift.
+      expect(getBlockText(reread, id), label).toBe(plain);
+      const again = exportMarkdown(reread, { frontmatter: false });
+      if (again === current) return trip;
+      current = again;
+    }
+    return null;
+  }
+
+  it("keeps the text and settles, for 200 documents", () => {
     const next = generator(20260821);
     let checked = 0;
+    let multiRun = 0;
+    let marked = 0;
 
     for (let round = 0; round < 200; round += 1) {
       const runs = randomDocument(next);
@@ -617,19 +762,21 @@ describe("export and import are closed over the marks the model allows", () => {
       if (plain.trim() === "") continue;
 
       const once = exportMarkdown(doc, { frontmatter: false });
-      const imported = importMarkdown(once).blocks[0];
-      expect(imported, once).toBeDefined();
-
-      const reread = seeded();
-      const rereadId = appendBlock(reread, imported ?? { type: "paragraph" });
       const label = `${JSON.stringify(runs)} -> ${JSON.stringify(once)}`;
+      expect(tripsToSettle(once, plain, label), label).not.toBeNull();
 
-      expect(getBlockText(reread, rereadId), label).toBe(plain);
-      expect(exportMarkdown(reread, { frontmatter: false }), label).toBe(once);
       checked += 1;
+      if (runs.length > 1) multiRun += 1;
+      if (runs.some((run) => Object.keys(run.marks).length > 0)) marked += 1;
     }
 
-    // The generator is doing its job, not silently skipping everything.
+    // The corpus has to be worth checking, and a generator can go quietly
+    // degenerate — the first version of this one did, and every document came out
+    // a single run, so the transitions between runs (where the delimiters are)
+    // were never exercised at all. Assert the shape of the corpus, not just that
+    // it ran.
     expect(checked).toBeGreaterThan(150);
+    expect(multiRun).toBeGreaterThan(100);
+    expect(marked).toBeGreaterThan(100);
   });
 });

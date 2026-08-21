@@ -200,8 +200,8 @@ export function assertInlineWritable(runs: readonly InlineRun[]): void {
 }
 
 /**
- * Every formatting key on a text other than the annotation anchor, in document
- * order — what a source block cannot hold.
+ * Every formatting key on a text that a source block cannot hold, in document
+ * order.
  *
  * Deliberately *not* limited to the marks this package knows, and not filtered by
  * {@link readsAsMark}: the question is "would a block holding this text be
@@ -209,6 +209,11 @@ export function assertInlineWritable(runs: readonly InlineRun[]): void {
  * attribute keys it carries against what the node type allows. A key nothing here
  * recognises stops the editor just as dead as a known one, so it has to stop a
  * re-type too.
+ *
+ * `comment` is the one exemption, because it is the one mark every block type
+ * allows — but only when its value is an anchor {@link readsAsMark} accepts. The
+ * gate refuses a malformed one, so exempting it here would be this module saying
+ * a re-type is fine and the editor then refusing to bind the result.
  */
 export function marksOtherThanComment(text: Y.XmlText | null): string[] {
   if (text === null) return [];
@@ -217,7 +222,8 @@ export function marksOtherThanComment(text: Y.XmlText | null): string[] {
     for (const [name, value] of Object.entries(
       (op.attributes ?? {}) as Record<string, unknown>,
     )) {
-      if (name === COMMENT_MARK || value === undefined || value === null) continue;
+      if (value === undefined || value === null) continue;
+      if (name === COMMENT_MARK && readsAsMark(name, value)) continue;
       if (!names.includes(name)) names.push(name);
     }
   }

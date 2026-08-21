@@ -144,14 +144,20 @@ interface EscapeContext {
 
 /**
  * Escape the characters the reader would take as syntax. `_` is absent on
- * purpose — it is not a delimiter here — and `~` and `[` are escaped only where
- * they could actually open something, so ordinary prose stays readable.
+ * purpose — it is not a delimiter here — and `~` is escaped only where it could
+ * actually open something, so ordinary prose keeps its home directories.
+ *
+ * `[` is escaped unconditionally, even though most brackets are harmless. What
+ * makes one dangerous is a `](…)` *somewhere later in the line*, and that can be
+ * emitted by a different run entirely — a link mark two runs along, or another
+ * run's literal text. No run-local test can see it, and a global one would have
+ * to render first and then decide, so the bracket always gets its backslash.
  */
 function escapeInline(text: string, context: EscapeContext): string {
   let out = "";
   for (let i = 0; i < text.length; i += 1) {
     const char = text[i] as string;
-    if (char === "\\" || char === "`" || char === "*") {
+    if (char === "\\" || char === "`" || char === "*" || char === "[") {
       out += `\\${char}`;
     } else if (char === "]" && context.insideLabel) {
       out += "\\]";
@@ -160,8 +166,6 @@ function escapeInline(text: string, context: EscapeContext): string {
       (context.hugged || text[i + 1] === "~" || text[i - 1] === "~")
     ) {
       out += "\\~";
-    } else if (char === "[" && matchLink(text, i) !== null) {
-      out += "\\[";
     } else {
       out += char;
     }
@@ -228,6 +232,46 @@ function trailingWhitespace(text: string): string {
   return /\s*$/.exec(text)?.[0] ?? "";
 }
 
+/** The marks two runs agree on, code included — see {@link coalesceCodeRuns}. */
+function sharedMarks(a: InlineMarkSet, b: InlineMarkSet): InlineMarkSet {
+  const marks: InlineMarkSet = { inlineCode: true };
+  for (const mark of EMPHASIS_MARKS) {
+    if (a[mark] === true && b[mark] === true) marks[mark] = true;
+  }
+  if (a.link !== undefined && a.link === b.link) marks.link = a.link;
+  return marks;
+}
+
+/**
+ * Merge neighbouring code runs into one span.
+ *
+ * Two code spans cannot sit next to each other in markdown: their fences meet as
+ * one run of backticks, and a reader looking for a closing run of the opening
+ * length cannot split it — CommonMark reads `` `a``b` `` as one span holding
+ * ``a``b``, and so does the reader below. So neighbours are merged, keeping only
+ * the marks they agree on. Losing a mark the two did not share is the cost; the
+ * text is not negotiable.
+ */
+function coalesceCodeRuns(runs: readonly InlineRun[]): InlineRun[] {
+  const out: InlineRun[] = [];
+  for (const run of runs) {
+    const last = out[out.length - 1];
+    if (
+      last !== undefined &&
+      last.marks.inlineCode === true &&
+      run.marks.inlineCode === true
+    ) {
+      out[out.length - 1] = {
+        text: last.text + run.text,
+        marks: sharedMarks(last.marks, run.marks),
+      };
+      continue;
+    }
+    out.push(run);
+  }
+  return out;
+}
+
 /** One mark on the open stack: its name, plus the href a `link` was opened with. */
 interface OpenMark {
   name: NestedMark;
@@ -241,19 +285,53 @@ interface OpenMark {
  * a property of *spans*, not of mark types: with `italic` over the whole phrase
  * and `bold` over one word inside it, the shared mark is outermost in the first
  * run and innermost in the second, so a fixed order would close and reopen the
- * italic around every boundary and emit `*a ***b*** c*`. Moving each already-open
- * mark to the position it holds on the stack keeps the wider span outside, which
- * is what makes `*italic **bold** italic*` come out.
+ * italic around every boundary and emit `*a ***b*** c*`.
+ *
+ * So order by extent, computed over the whole run list rather than against the
+ * marks that happen to be open: the span that starts earliest goes outermost,
+ * and among spans starting together the one that ends latest. A mark shared with
+ * a neighbour therefore lands at the same depth in both runs — it stays open
+ * across the boundary — and a mark that is about to end sits *inside* the ones
+ * that continue, so it closes first. Looking only at what is already open cannot
+ * see that: it gets `*italic **bold** italic*` right, and still emits
+ * `***a****b*` for bold+italic followed by italic, because at the first run
+ * nothing yet says the italic outlives the bold.
  */
-function orderedMarks(marks: NestedMark[], open: readonly OpenMark[]): NestedMark[] {
-  const ordered = [...marks];
-  for (const [depth, entry] of open.entries()) {
-    const at = ordered.indexOf(entry.name);
-    if (at === -1 || at === depth || depth >= ordered.length) continue;
-    ordered.splice(at, 1);
-    ordered.splice(depth, 0, entry.name);
-  }
-  return ordered;
+function spanExtent(
+  runs: readonly InlineRun[],
+  index: number,
+  mark: NestedMark,
+): { start: number; end: number } {
+  const shared = (other: InlineRun | undefined): boolean => {
+    if (other === undefined) return false;
+    const here = runs[index]?.marks;
+    if (here === undefined) return false;
+    return mark === "link"
+      ? other.marks.link === here.link
+      : other.marks[mark] === true;
+  };
+  let start = index;
+  let end = index;
+  while (shared(runs[start - 1])) start -= 1;
+  while (shared(runs[end + 1])) end += 1;
+  return { start, end };
+}
+
+function orderedMarks(
+  runs: readonly InlineRun[],
+  index: number,
+): NestedMark[] {
+  const present = nestedMarksOf(runs[index]?.marks ?? {});
+  const extents = new Map<NestedMark, { start: number; end: number }>();
+  for (const mark of present) extents.set(mark, spanExtent(runs, index, mark));
+  return present.sort((a, b) => {
+    const left = extents.get(a) ?? { start: index, end: index };
+    const right = extents.get(b) ?? { start: index, end: index };
+    if (left.start !== right.start) return left.start - right.start;
+    if (left.end !== right.end) return right.end - left.end;
+    // Same extent: any order round-trips, so pick the stable one.
+    return NESTING.indexOf(a) - NESTING.indexOf(b);
+  });
 }
 
 /**
@@ -268,16 +346,25 @@ function orderedMarks(marks: NestedMark[], open: readonly OpenMark[]): NestedMar
  *
  * The one thing GFM cannot spell is emphasis touching whitespace: `**word **` is
  * not bold, in any reader including this one. So whitespace is kept out of the
- * emphasis instead, *here* rather than in a pre-pass over the runs — only the
- * writer knows where its delimiters actually land, because an outer mark ending
- * forces the marks nested inside it to close and reopen too. Leading whitespace is
- * written before the delimiters that open; trailing whitespace is taken back off
- * the output and re-appended after the delimiters that close. Those spaces lose
- * that mark, which is the honest cost of the format.
+ * emphasis instead. Leading whitespace is written before the delimiters that
+ * open; trailing whitespace is taken back off the output and re-appended after
+ * the delimiters that close. Those spaces lose that mark, which is the honest
+ * cost of the format — and because dropping it changes which spans are
+ * contiguous, it happens *before* the extents are measured, not during the walk.
  */
-function renderInline(runs: readonly InlineRun[]): string {
+function renderInline(source: readonly InlineRun[]): string {
   let out = "";
   const open: OpenMark[] = [];
+
+  // Whitespace alone gives a delimiter nothing to hug, so it carries no emphasis
+  // at all — there is no way to write that, and pretending otherwise is what
+  // turns `~~ ~~` back into literal text on the next read. A code span is exempt:
+  // its emphasis hugs the backticks, not the whitespace inside them.
+  const runs: InlineRun[] = coalesceCodeRuns(source).map((run) =>
+    run.text.trim() === "" && run.marks.inlineCode !== true
+      ? { text: run.text, marks: without(run.marks, EMPHASIS_MARKS) }
+      : run,
+  );
   // A single unmarked run has no delimiter anywhere near it; anything else might.
   const hugged = runs.length > 1 || hasInlineMarks(runs[0]?.marks ?? {});
 
@@ -290,13 +377,9 @@ function renderInline(runs: readonly InlineRun[]): string {
     open.length = depth;
   };
 
-  for (const run of runs) {
-    // Whitespace alone gives a delimiter nothing to hug, so it carries no
-    // emphasis at all — there is no way to write that, and pretending otherwise
-    // is what turns `~~ ~~` back into literal text on the next read.
-    const marks =
-      run.text.trim() === "" ? without(run.marks, EMPHASIS_MARKS) : run.marks;
-    const desired = orderedMarks(nestedMarksOf(marks), open);
+  for (const [index, run] of runs.entries()) {
+    const marks = run.marks;
+    const desired = orderedMarks(runs, index);
     const href = marks.link ?? "";
     let common = 0;
     while (
@@ -317,9 +400,15 @@ function renderInline(runs: readonly InlineRun[]): string {
     closeDownTo(common);
     out += held;
 
-    // Opening: write leading whitespace outside the delimiters, same reason.
+    // Opening: write leading whitespace outside the delimiters, same reason —
+    // except for a code span, whose delimiters hug its backtick fence rather than
+    // its content. Moving whitespace out of *that* would change the content, and
+    // empty it entirely when the content is nothing but whitespace.
     let text = run.text;
-    if (desired.slice(common).some((name) => name !== "link")) {
+    if (
+      marks.inlineCode !== true &&
+      desired.slice(common).some((name) => name !== "link")
+    ) {
       const lead = /^\s*/.exec(text)?.[0] ?? "";
       out += lead;
       text = text.slice(lead.length);
@@ -1028,7 +1117,12 @@ export function importMarkdown(markdown: string): ImportedDoc {
       continue;
     }
 
-    const fence = /^(`{3,}|~{3,})\s*(\S*)\s*$/.exec(trimmed);
+    // An info string may hold no backticks — CommonMark's rule, and the one that
+    // keeps a paragraph apart from a fence here. A code span whose content has two
+    // adjacent backticks needs a three-backtick fence of its own, so an exported
+    // paragraph can legitimately *start* with ```; what tells the two apart is
+    // that the fence's rest-of-line is then full of backticks.
+    const fence = /^(`{3,}|~{3,})\s*([^`\s]*)\s*$/.exec(trimmed);
     if (fence !== null) {
       flush();
       const marker = fence[1] ?? "```";
