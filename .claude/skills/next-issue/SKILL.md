@@ -111,15 +111,18 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    MCP tools once registered; until then, comment on the PR that the doc
    update is pending).
    **Dev stack, after every merge to `main`:** restart it so
-   http://localhost:5173/ always serves the just-merged `main` — kill the hub
-   and vite processes the loop previously started, fast-forward your own
-   worktree to the new `origin/main`, and start `mise run hub` and
-   `mise run web` from there as background tasks. Never run or git-manipulate
-   the shared checkout for this; it belongs to other sessions, and your
-   worktree is the serving copy. Killing an already-running dev server is
-   sanctioned (owner directive) — but only a process the loop itself started,
-   or a vite/hub whose provenance you checked first, never another session's
-   MCP server. A fresh hub store is fine: replicas rehydrate it over sync.
+   http://localhost:5173/ always serves the just-merged `main`. Killing a
+   running dev server is sanctioned (owner directive) but bounded: terminate
+   only the background hub/vite processes the loop itself recorded starting —
+   never any other process — and confirm they exited, so their ports are free,
+   before relaunching. Serve from your own worktree, never the shared checkout,
+   which belongs to other sessions; the worktree must be clean (no uncommitted
+   changes, no unpushed commits) — if it isn't, skip the restart and say so
+   rather than serve something that isn't `main`. Then `git fetch origin main`,
+   fast-forward to it, verify `HEAD` equals the fetched `origin/main`, start
+   `mise run hub` and `mise run web` as background tasks, and confirm
+   http://localhost:5173/ answers before you report the stack serving the new
+   `main`. A fresh hub store is fine: replicas rehydrate it over sync.
 
 3. **Lint `ready` issues** against the spec's checklist. Failures: comment
    exactly what's missing, remove `ready`, skip.
