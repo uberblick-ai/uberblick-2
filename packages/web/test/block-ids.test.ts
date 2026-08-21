@@ -5,6 +5,8 @@
 
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
+import { yUndoPluginKey } from "y-prosemirror";
+import type { Editor } from "@tiptap/core";
 import { EditorState } from "@tiptap/pm/state";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { appendBlock, getBlocks, initDoc } from "@uberblick/schema";
@@ -104,38 +106,73 @@ describe("blockIdPlugin", () => {
 });
 
 /**
- * The plugin's repair is bookkeeping, not a user edit, so undo must never leave
- * a block without an id. Driven through the real editor — the app's undo is the
- * Yjs UndoManager (`yUndoPlugin`), not ProseMirror history, so only the editor
- * can tell us the truth about it.
+ * Undoing an Enter-split, driven through the real editor — the app's undo is
+ * the Yjs UndoManager (`yUndoPlugin`), not ProseMirror history, so only the
+ * editor can tell us the truth about it. The plugin's repair rides in the same
+ * transaction as the split, so the two must be undone together and must never
+ * leave a block without a unique id.
  */
-describe("block ids across an undo in the real editor", () => {
-  function idsInDoc(ydoc: Y.Doc): string[] {
-    return getBlocks(ydoc).map((block) => block.id);
+describe("undoing a split in the real editor", () => {
+  function texts(ydoc: Y.Doc): string[] {
+    return getBlocks(ydoc).map((block) => block.text);
   }
 
-  it("leaves every block with a present, unique id", () => {
+  /** Every block has an id, no two the same, one per block in the editor. */
+  function expectSoundIds(ydoc: Y.Doc, editor: Editor): void {
+    const ids = getBlocks(ydoc).map((block) => block.id);
+    expect(ids.every((id) => id !== "")).toBe(true);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(editor.state.doc.childCount).toBe(ids.length);
+  }
+
+  /**
+   * The UndoManager merges edits that land within its 500ms capture window into
+   * one stack item, so a synchronous test has to stand in for the pause a human
+   * takes between pressing Enter and typing.
+   */
+  function endUndoStep(editor: Editor): void {
+    yUndoPluginKey.getState(editor.state)?.undoManager.stopCapturing();
+  }
+
+  function splitDoc(): { ydoc: Y.Doc; editor: Editor; original: string } {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: "undo-doc", title: "Undo" });
     const original = appendBlock(ydoc, { type: "paragraph", text: "abcdef" });
-    const { editor } = mountEditor(ydoc, { newBlockId: sequentialIds() });
-    try {
-      // A split is where the repair fires: ProseMirror copies the attrs onto
-      // both halves, so the second one gets a fresh id.
-      editor.commands.setTextSelection(4);
-      editor.commands.splitBlock();
-      editor.commands.insertContent("X");
-      expect(getBlocks(ydoc).map((block) => block.text)).toEqual(["abc", "Xdef"]);
-      expect(idsInDoc(ydoc)).toEqual([original, "fresh-1"]);
+    const { editor } = mountEditor(ydoc);
+    editor.commands.setTextSelection(4);
+    expect(editor.commands.keyboardShortcut("Enter")).toBe(true);
+    expect(texts(ydoc)).toEqual(["abc", "def"]);
+    return { ydoc, editor, original };
+  }
 
+  it("reverts the split", () => {
+    const { ydoc, editor, original } = splitDoc();
+    try {
       expect(editor.commands.keyboardShortcut("Mod-z")).toBe(true);
 
-      // The edit is undone, and both blocks still have their id.
-      expect(getBlocks(ydoc).map((block) => block.text)).toEqual(["abc", "def"]);
-      const ids = idsInDoc(ydoc);
-      expect(ids).toEqual([original, "fresh-1"]);
-      expect(new Set(ids).size).toBe(ids.length);
-      expect(editor.state.doc.childCount).toBe(ids.length);
+      expect(texts(ydoc)).toEqual(["abcdef"]);
+      expect(getBlocks(ydoc).map((block) => block.id)).toEqual([original]);
+      expectSoundIds(ydoc, editor);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("reverts typing, then the split", () => {
+    const { ydoc, editor, original } = splitDoc();
+    try {
+      endUndoStep(editor);
+      editor.commands.insertContent("X");
+      expect(texts(ydoc)).toEqual(["abc", "Xdef"]);
+
+      expect(editor.commands.keyboardShortcut("Mod-z")).toBe(true);
+      expect(texts(ydoc)).toEqual(["abc", "def"]);
+      expectSoundIds(ydoc, editor);
+
+      expect(editor.commands.keyboardShortcut("Mod-z")).toBe(true);
+      expect(texts(ydoc)).toEqual(["abcdef"]);
+      expect(getBlocks(ydoc).map((block) => block.id)).toEqual([original]);
+      expectSoundIds(ydoc, editor);
     } finally {
       editor.destroy();
     }

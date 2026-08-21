@@ -14,8 +14,10 @@
  * Enter-split deterministic — the first half stays the block it was, the second
  * half is a new block.
  *
- * The repair transaction is marked `addToHistory: false`: an id assignment is
- * bookkeeping, not a user edit, and undoing it would leave an id-less block.
+ * The repair stays in the undo stack. Marking it `addToHistory: false` made
+ * y-prosemirror stamp the whole Yjs transaction — the user's split included —
+ * as uncaptured, so the split could not be undone (#23). The plugin is
+ * idempotent, so a repair that gets undone is simply made again.
  */
 
 import { Extension } from "@tiptap/core";
@@ -51,8 +53,7 @@ export function blockIdPlugin(options: Partial<BlockIdOptions> = {}): Plugin {
         tr.setNodeAttribute(offset, "id", fresh);
       });
       if (tr === null) return null;
-      // Not a user edit: keep it out of the undo stack.
-      return (tr as Transaction).setMeta("addToHistory", false);
+      return tr;
     },
   });
 }
