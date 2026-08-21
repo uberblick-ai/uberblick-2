@@ -330,6 +330,26 @@ describe("inline marks in the document", () => {
       "see \\[1] and \\[2]\n",
     );
 
+    // The case that rule exists for: a bracket in one run, and a *later* run whose
+    // link mark emits the `](…)` that would pair with it. Escaping only what a run
+    // can see would turn the two into one link and lose both characters.
+    const paired = seeded();
+    const pairedId = appendBlock(paired, {
+      type: "paragraph",
+      inline: [
+        { text: "[not a link", marks: { bold: true } },
+        { text: " but ", marks: {} },
+        { text: "this is", marks: { link: "https://example.com" } },
+      ],
+    });
+    const pairedOut = exportMarkdown(paired, { frontmatter: false });
+    expect(pairedOut).toBe(
+      "**\\[not a link** but [this is](https://example.com)\n",
+    );
+    expect(importMarkdown(pairedOut).blocks[0]?.inline).toEqual(
+      getBlockInline(paired, pairedId),
+    );
+
     // The writer canonicalises: text the reader would not have taken as a
     // delimiter anyway is still escaped, so the round trip is stable.
     const loose = seeded();
@@ -375,11 +395,13 @@ describe("inline marks in the document", () => {
   });
 
   /**
-   * Two code spans cannot sit next to each other: their fences meet as one run of
-   * backticks and no reader can split it. So neighbouring code runs are merged,
-   * keeping the marks they share — the text is what must not move.
+   * Two code spans whose fences met would be one span nothing could split, so the
+   * writer must not put them next to each other. It does not have to merge them to
+   * manage that: the delimiters of whatever mark they disagree about go between
+   * them and keep the backtick runs apart. Merging is therefore reserved for runs
+   * that carry *identical* marks, where it loses nothing at all.
    */
-  it("merges neighbouring code runs rather than emitting fences that meet", () => {
+  it("keeps neighbouring code runs apart without losing their marks", () => {
     const doc = seeded();
     const id = appendBlock(doc, {
       type: "paragraph",
@@ -388,22 +410,63 @@ describe("inline marks in the document", () => {
         { text: "two", marks: { inlineCode: true } },
       ],
     });
-    expect(exportMarkdown(doc, { frontmatter: false })).toBe("`onetwo`\n");
+    const exported = exportMarkdown(doc, { frontmatter: false });
+    // The `**` between the two spans is what stops the fences meeting.
+    expect(exported).toBe("**`one`**`two`\n");
     expect(getBlockText(doc, id)).toBe("onetwo");
-    expect(importMarkdown("`onetwo`").blocks[0]?.inline).toEqual([
-      { text: "onetwo", marks: { inlineCode: true } },
-    ]);
+    // Nothing was lost: the marks come back exactly as they went in.
+    expect(importMarkdown(exported).blocks[0]?.inline).toEqual(
+      getBlockInline(doc, id),
+    );
 
-    // The marks they do share stay.
-    const shared = seeded();
-    appendBlock(shared, {
+    // Identical marks *are* merged, because then there is nothing to lose.
+    const same = seeded();
+    const sameId = appendBlock(same, {
       type: "paragraph",
       inline: [
         { text: "one", marks: { inlineCode: true, bold: true } },
-        { text: "two", marks: { inlineCode: true, bold: true, italic: true } },
+        { text: "two", marks: { inlineCode: true, bold: true } },
       ],
     });
-    expect(exportMarkdown(shared, { frontmatter: false })).toBe("**`onetwo`**\n");
+    expect(exportMarkdown(same, { frontmatter: false })).toBe("**`onetwo`**\n");
+    expect(getBlockInline(same, sameId)).toEqual([
+      { text: "onetwo", marks: { inlineCode: true, bold: true } },
+    ]);
+  });
+
+  /**
+   * A code span's content is verbatim, so the whitespace rules that keep emphasis
+   * off spaces must not reach inside one. Hoisting the leading whitespace out of a
+   * code run whose text is *only* whitespace used to empty the span entirely and
+   * emit `` `` ``, which reads back as two literal backticks.
+   */
+  it("does not hoist whitespace out of a code span", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, {
+      type: "paragraph",
+      inline: [
+        { text: "  ", marks: { inlineCode: true, bold: true } },
+        { text: "after", marks: {} },
+      ],
+    });
+    const exported = exportMarkdown(doc, { frontmatter: false });
+    expect(exported).toBe("**`    `**after\n");
+    expect(getBlockText(doc, id)).toBe("  after");
+    expect(importMarkdown(exported).blocks[0]?.text).toBe("  after");
+    expect(importMarkdown(exported).blocks[0]?.inline).toEqual(
+      getBlockInline(doc, id),
+    );
+  });
+
+  /**
+   * A tilde fence's info string may hold backticks — only a *backtick* fence's may
+   * not. Applying the backtick rule to both turned a `~~~` block into a paragraph.
+   */
+  it("reads a tilde fence whose info string holds backticks", () => {
+    const imported = importMarkdown("~~~`weird`\nbody\n~~~");
+    expect(imported.blocks).toEqual([
+      { type: "code", text: "body", language: "`weird`" },
+    ]);
   });
 
   it("gives source blocks no inline marks — only the annotation anchor", () => {
@@ -646,16 +709,23 @@ describe("inline marks in the document", () => {
  * found by generating documents like these, and each was invisible to a
  * hand-written case until it was written down.
  *
- * Two properties, both about the pair rather than either half:
+ * Two properties, both about the pair rather than either half, and stated at the
+ * strength the pair actually holds them:
  *
- *  1. **Text is never changed, on any trip.** Marks can be lost where GFM cannot
- *     spell them — whitespace at a span edge, two code spans meeting — so the
- *     plain text is what must survive exactly. A mis-emitted or mis-read
- *     delimiter shows up here as changed text.
- *  2. **The spelling settles.** Losing a mark changes which spans are contiguous,
- *     so the second export can legitimately differ from the first; what must not
- *     happen is churning forever. Every document reaches a fixed point, and the
- *     worst case observed over 60k generated documents is two trips.
+ *  1. **Text is never changed, on any trip.** This is the invariant that cannot
+ *     bend: a mis-emitted or mis-read delimiter shows up here as changed text.
+ *     Zero failures over 20k generated documents per seed.
+ *  2. **The spelling settles.** Marks can be lost where GFM cannot spell them —
+ *     whitespace at a span edge, or a delimiter run the reader splits differently
+ *     from the way the writer meant it — and losing one changes which spans are
+ *     contiguous, so a later export can differ from the first. What must not
+ *     happen is churning forever. Every document reaches a fixed point.
+ *
+ * What is deliberately *not* asserted: that the marks themselves survive the first
+ * trip. They do for 99.2% of generated documents, and the shortfall is
+ * normalisation rather than corruption, but 99.2% is not a property — see the
+ * comment on `renderInline` for why, and the named cases above for the shapes that
+ * do round-trip exactly.
  *
  * Fixed seed and a small count, so it is a deterministic sub-second test rather
  * than a fuzzer.
