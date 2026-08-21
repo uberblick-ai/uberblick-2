@@ -1299,9 +1299,10 @@ function matchDelimiters(
  * Settling is therefore monotone rather than immediate — every round denies at
  * least one pair and no round ever grants one back, so the number of rounds is at
  * most the number of distinct pairs that exercise the waiver, *plus one* for the
- * clean round that returns. In practice that is one round for input that never
- * exercises it and two for input that does: `****a******a*******` and
- * `a***b****c` each withdraw a single pair and return on the second round.
+ * clean round that returns. In practice that is one round whenever nothing has to
+ * be withdrawn — including input whose waiver is exercised and stands, like
+ * `***c****d*` — and two when one is: `****a******a*******` and `a***b****c` each
+ * withdraw a single pair and return on the second round.
  *
  * A note on fidelity, since this is a reader of other people's markdown: the
  * quarantine is a rule of this implementation, chosen because it is provable, not
