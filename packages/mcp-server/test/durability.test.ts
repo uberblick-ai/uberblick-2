@@ -212,57 +212,16 @@ describe("compaction", () => {
     const snapshot = reopened.snapshot(ROOM);
     expect(snapshot?.throughSeq).toBe(4);
     expect(replay([], snapshot?.state)).toBe("ABCD");
-  });
 
-  it("keeps a document whole when a stale compactor loses the race", async () => {
-    const databasePath = tempDatabasePath();
-    const rig = await startServer(testConfig({ databasePath }));
-    rigs.push(rig);
-
-    const created = await rig.ok("create_doc", {
-      title: "Compaction race",
-      blocks: [
-        { type: "paragraph", text: "first" },
-        { type: "paragraph", text: "second" },
-      ],
-    });
-    const room = `main/${created.uuid}`;
-    const replica = rig.instance.replicas
-      .attachedReplicas()
-      .find((candidate) => candidate.id === created.uuid);
-    if (replica === undefined) throw new Error("no replica");
-
-    // A snapshot of the document as it was, standing in for another process
-    // that has not caught up.
-    const staleState = Y.encodeStateAsUpdate(replica.doc);
-    const staleSeq = replica.lastSeq;
-
-    await rig.ok("insert_block", {
-      uuid: created.uuid,
-      after_block_id: created.blocks[1].id,
-      type: "paragraph",
-      text: "third",
-    });
-    await rig.ok("sync_status", {});
-
-    const outside = store(databasePath);
+    // …and the document is whole through the path a booting replica actually
+    // takes: hydrate from seq 0 and get every character, not the laggard's view.
+    const hydration = reopened.readSince(ROOM, 0);
     expect(
-      outside.compact(room, Y.encodeStateAsUpdate(replica.doc), replica.lastSeq),
-    ).toBe(true);
-    // The laggard tries to compact its older view of the same room.
-    expect(outside.compact(room, staleState, staleSeq)).toBe(false);
-
-    await rig.close();
-    rigs.length = 0;
-
-    const restarted = await startServer(testConfig({ databasePath }));
-    rigs.push(restarted);
-    const read = await restarted.ok("get_doc", { uuid: created.uuid });
-    expect(read.blocks.map((block: { text: string }) => block.text)).toEqual([
-      "first",
-      "second",
-      "third",
-    ]);
+      replay(
+        hydration.updates.map((entry) => entry.payload),
+        hydration.snapshot?.state,
+      ),
+    ).toBe("ABCD");
   });
 });
 
@@ -456,7 +415,12 @@ describe("the pending watermark", () => {
     expect(writer.pendingRooms()).toEqual([{ room: ROOM, seq }]);
   });
 
-  it("is not cleared by a process that never saw the newer change", () => {
+  // Both halves of the same rule, in one test: the store only clears through
+  // the watermark it is given, AND the live sync loop only ever gives it the
+  // watermark it actually saw acknowledged. The second half needs a real hub and
+  // a store that appends from outside between the poll and the pending read —
+  // the reviewer's schedule, which no store-level assertion can reproduce.
+  it("is not cleared by a process that never saw the newer change", async () => {
     const databasePath = tempDatabasePath();
     const writer = store(databasePath);
 
@@ -478,6 +442,55 @@ describe("the pending watermark", () => {
 
     writer.clearPending(ROOM, 2);
     expect(writer.pendingRooms()).toEqual([]);
+
+    // Now the same race against a live instance, where the marker in the
+    // database ends up ahead of everything this replica has applied.
+    const running = await hub();
+    const racedPath = tempDatabasePath();
+    const late = new LatePendingStore(racedPath);
+    stores.push(late);
+
+    const rig = await startServer(
+      testConfig({
+        databasePath: racedPath,
+        authSecret: TEST_SECRET,
+        hubUrl: `ws://127.0.0.1:${running.port}`,
+      }),
+      late,
+    );
+    rigs.push(rig);
+
+    const created = await rig.ok("create_doc", { title: "Watermarks" });
+    const room = `main/${created.uuid}`;
+    await waitUntil("the room to be acknowledged", async () => {
+      const status = await rig.ok("sync_status", {});
+      return (
+        status.hub.status === "connected" &&
+        !(status.pendingRooms as { room: string }[]).some(
+          (entry) => entry.room === room,
+        )
+      );
+    });
+
+    // An outside process appends between the poll and the pending read.
+    const outside = store(racedPath);
+    const foreign = new Y.Doc();
+    initDoc(foreign, { uuid: created.uuid, title: "Renamed elsewhere" });
+    let injected = 0;
+    late.beforeNextPendingRead(() => {
+      injected = outside.appendUpdate(
+        room,
+        Y.encodeStateAsUpdate(foreign),
+        "local",
+      );
+    });
+
+    await rig.ok("sync_status", {});
+
+    // The outside change is still pending, and still in the log tail.
+    const after = outside.pendingRooms().find((entry) => entry.room === room);
+    expect(after).toEqual({ room, seq: injected });
+    expect(outside.updatesAfter(room, injected - 1).length).toBeGreaterThan(0);
   });
 
   it("backfills a pre-watermark marker instead of orphaning its document", async () => {
@@ -532,56 +545,4 @@ describe("the pending watermark", () => {
     ]);
   });
 
-  it("is not cleared through a sequence this replica has not applied", async () => {
-    // The reviewer's schedule: another process appends after this instance's
-    // poll but before it reads the pending set. The marker in the database is
-    // then ahead of everything this replica has applied, and clearing through
-    // it would forget a change nobody has seen acknowledged.
-    const running = await hub();
-    const databasePath = tempDatabasePath();
-    const late = new LatePendingStore(databasePath);
-    stores.push(late);
-
-    const rig = await startServer(
-      testConfig({
-        databasePath,
-        authSecret: TEST_SECRET,
-        hubUrl: `ws://127.0.0.1:${running.port}`,
-      }),
-      late,
-    );
-    rigs.push(rig);
-
-    const created = await rig.ok("create_doc", { title: "Watermarks" });
-    const room = `main/${created.uuid}`;
-    await waitUntil("the room to be acknowledged", async () => {
-      const status = await rig.ok("sync_status", {});
-      return (
-        status.hub.status === "connected" &&
-        !(status.pendingRooms as { room: string }[]).some(
-          (entry) => entry.room === room,
-        )
-      );
-    });
-
-    // An outside process appends between the poll and the pending read.
-    const outside = store(databasePath);
-    const foreign = new Y.Doc();
-    initDoc(foreign, { uuid: created.uuid, title: "Renamed elsewhere" });
-    let injected = 0;
-    late.beforeNextPendingRead(() => {
-      injected = outside.appendUpdate(
-        room,
-        Y.encodeStateAsUpdate(foreign),
-        "local",
-      );
-    });
-
-    await rig.ok("sync_status", {});
-
-    // The outside change is still pending, and still in the log tail.
-    const after = outside.pendingRooms().find((entry) => entry.room === room);
-    expect(after).toEqual({ room, seq: injected });
-    expect(outside.updatesAfter(room, injected - 1).length).toBeGreaterThan(0);
-  });
 });

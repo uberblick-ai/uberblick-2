@@ -48,20 +48,26 @@ function replicas(): { local: Y.Doc; remote: Y.Doc } {
 }
 
 describe("the outline derives from the document's heading blocks", () => {
-  it("lists headings in document order, with their level and text", () => {
-    expect(outlineFromDoc(docWithHeadings())).toEqual([
+  it("lists headings in document order, with their level, text and block id", () => {
+    const ydoc = docWithHeadings();
+    expect(outlineFromDoc(ydoc)).toEqual([
       { id: expect.any(String), level: 1, text: "Install" },
       { id: expect.any(String), level: 2, text: "Homebrew" },
       { id: expect.any(String), level: 3, text: "Flags" },
     ]);
-  });
 
-  it("carries the block ids, in the fragment's order", () => {
-    const ydoc = docWithHeadings();
+    // The ids are the block ids from the fragment, in the fragment's order —
+    // which is what makes an entry a click target.
     const headingIds = getBlocks(ydoc)
       .filter((block) => block.type === "heading")
       .map((block) => block.id);
     expect(outlineFromDoc(ydoc).map((entry) => entry.id)).toEqual(headingIds);
+
+    // A document with no headings derives an empty outline, not a stale one.
+    const flat = new Y.Doc();
+    initDoc(flat, { uuid: "flat", title: "Flat" });
+    appendBlock(flat, { type: "paragraph", text: "just prose" });
+    expect(outlineFromDoc(flat)).toEqual([]);
   });
 
   it("stops at level 3 — deeper headings are structure, not navigation", () => {
@@ -75,13 +81,6 @@ describe("the outline derives from the document's heading blocks", () => {
       "h2",
       "h3",
     ]);
-  });
-
-  it("is empty for a document with no headings", () => {
-    const ydoc = new Y.Doc();
-    initDoc(ydoc, { uuid: "flat", title: "Flat" });
-    appendBlock(ydoc, { type: "paragraph", text: "just prose" });
-    expect(outlineFromDoc(ydoc)).toEqual([]);
   });
 });
 
@@ -109,9 +108,17 @@ describe("the outline updates live", () => {
     watcher.stop();
   });
 
-  it("sees a heading a remote replica adds", () => {
+  /**
+   * Every kind of remote change the outline has to notice, on one watcher, in
+   * sequence. The retitle is the reason the subscription is deep: a heading's
+   * text lives in the Y.XmlText one level below the blocks fragment, so a
+   * shallow observer would see headings appear and disappear but never see one
+   * retitled.
+   */
+  it("sees a remote replica add, retitle and re-level a heading", () => {
     const { local, remote } = replicas();
     const watcher = watch(local);
+
     appendBlock(remote, { type: "heading", text: "Upgrade", level: 2 });
     expect(watcher.latest().map((entry) => entry.text)).toEqual([
       "Install",
@@ -119,43 +126,32 @@ describe("the outline updates live", () => {
       "Flags",
       "Upgrade",
     ]);
-    watcher.stop();
-  });
-
-  /**
-   * The reason the subscription is deep. A heading's text lives in the
-   * Y.XmlText one level below the blocks fragment, so a shallow observer would
-   * see headings appear and disappear but never see one retitled.
-   */
-  it("sees a heading a remote replica retitles", () => {
-    const { local, remote } = replicas();
-    const watcher = watch(local);
-    const heading = outlineFromDoc(remote).find((entry) => entry.text === "Homebrew");
-    expect(heading).toBeDefined();
 
     // Edited through the schema's block write, the way an agent's `edit_block`
     // does it: a splice inside the heading's Y.XmlText, one level below the
     // fragment.
+    const heading = outlineFromDoc(remote).find(
+      (entry) => entry.text === "Homebrew",
+    );
+    expect(heading).toBeDefined();
     editBlock(remote, heading!.id, "Homebrew", "Homebrew (macOS)");
-
     expect(watcher.latest().map((entry) => entry.text)).toEqual([
       "Install",
       "Homebrew (macOS)",
       "Flags",
+      "Upgrade",
     ]);
-    watcher.stop();
-  });
 
-  it("sees a heading a remote replica re-levels out of range", () => {
-    const { local, remote } = replicas();
-    const watcher = watch(local);
+    // Re-levelled past 3, a heading leaves the outline.
     const flags = outlineFromDoc(remote).find((entry) => entry.text === "Flags");
     expect(flags).toBeDefined();
     setBlockLevel(remote, flags!.id, 4);
     expect(watcher.latest().map((entry) => entry.text)).toEqual([
       "Install",
-      "Homebrew",
+      "Homebrew (macOS)",
+      "Upgrade",
     ]);
+
     watcher.stop();
   });
 

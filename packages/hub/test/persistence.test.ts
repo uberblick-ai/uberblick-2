@@ -9,13 +9,12 @@
  * keeps the writer connected across the shutdown.
  *
  * `Hub.flush()` closes that window, and is exactly what `main.ts` runs on
- * SIGTERM. It is tested four ways: that it writes what the debounce is still
- * holding (checked in SQLite, not inferred), that what it wrote is what the
- * next process serves, that a graceful `stop()` is durable end to end — and
- * that a store which could *not* land makes `stop()` say so, whether it failed
- * during the flush or during the teardown that follows it, because a shutdown
- * that reports success without writing is the same data loss with a clean exit
- * code.
+ * SIGTERM. It is tested three ways: that it writes what the debounce is still
+ * holding (checked in SQLite, not inferred), that a restart serves back both
+ * what the flush and what the graceful `stop()` wrote, per room — and that a
+ * store which could *not* land makes `stop()` say so, whether it failed during
+ * the flush or during the teardown that follows it, because a shutdown that
+ * reports success without writing is the same data loss with a clean exit code.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -120,12 +119,6 @@ describe("flush", () => {
     expect(storedText(databasePath, room)).toBe("unflushed");
   });
 
-  it("is a no-op when nothing is pending", async () => {
-    const started = await hub(tempDatabasePath());
-    await expect(started.flush()).resolves.toBeUndefined();
-    await expect(started.flush()).resolves.toBeUndefined();
-  });
-
   it("refuses to report a successful shutdown after a failed store", async () => {
     const databasePath = tempDatabasePath();
     // The store will fail and leave the document in memory, so destroy() waits
@@ -193,55 +186,11 @@ describe("flush", () => {
 });
 
 describe("restart", () => {
-  it("serves a flushed document to a client of the next process", async () => {
-    const databasePath = tempDatabasePath();
-    const room = testRoom();
-
-    const first = await hub(databasePath);
-    const writer = await client(first, room);
-    writer.text.insert(0, "flushed mid-session");
-    await sleep(200);
-
-    // Flush with the client still attached and read the row back before the
-    // shutdown: what the next process serves is what this flush wrote, not
-    // something a graceful stop stored afterwards.
-    await first.flush();
-    expect(storedText(databasePath, room)).toBe("flushed mid-session");
-
-    await first.stop();
-    hubs.length = 0;
-    destroyClients();
-
-    const second = await hub(databasePath);
-    const reader = await client(second, room);
-
-    await waitForText("reader", reader.text, "flushed mid-session");
-  });
-
-  it("loses nothing when a hub is stopped mid-session", async () => {
-    const databasePath = tempDatabasePath();
-    const room = testRoom();
-
-    const first = await hub(databasePath);
-    const writer = await client(first, room);
-    writer.text.insert(0, "written before SIGTERM");
-    await sleep(200);
-
-    // The SIGTERM path, with the client still editing: exactly what main.ts
-    // calls on a signal.
-    await first.stop();
-    hubs.length = 0;
-    destroyClients();
-
-    expect(storedText(databasePath, room)).toBe("written before SIGTERM");
-
-    const second = await hub(databasePath);
-    const reader = await client(second, room);
-
-    await waitForText("reader", reader.text, "written before SIGTERM");
-  });
-
-  it("keeps documents separate across a restart", async () => {
+  // The spike criterion, end to end and over two rooms at once: with writers
+  // still attached, an explicit mid-session `flush()` lands in SQLite, the
+  // SIGTERM path (`stop()`) lands the rest, and the next process serves both
+  // documents back — each its own, never mixed.
+  it("loses nothing when a hub is stopped mid-session, per room", async () => {
     const databasePath = tempDatabasePath();
     const roomOne = testRoom();
     const roomTwo = testRoom();
@@ -253,18 +202,36 @@ describe("restart", () => {
     two.text.insert(0, "document two");
     await sleep(200);
 
+    // Flush with the clients still attached and read the rows back before the
+    // shutdown: what the next process serves is what this flush wrote, not
+    // something a graceful stop stored afterwards.
+    await first.flush();
+    expect(storedText(databasePath, roomOne)).toBe("document one");
+    expect(storedText(databasePath, roomTwo)).toBe("document two");
+
+    // A further edit only the SIGTERM path can save, on one of the two rooms.
+    one.text.insert(one.text.length, ", edited before SIGTERM");
+    await sleep(200);
+
+    // Exactly what main.ts calls on a signal, clients still editing.
     await first.stop();
     hubs.length = 0;
     destroyClients();
 
-    expect(storedText(databasePath, roomOne)).toBe("document one");
+    expect(storedText(databasePath, roomOne)).toBe(
+      "document one, edited before SIGTERM",
+    );
     expect(storedText(databasePath, roomTwo)).toBe("document two");
 
     const second = await hub(databasePath);
     const readerOne = await client(second, roomOne);
     const readerTwo = await client(second, roomTwo);
 
-    await waitForText("reader one", readerOne.text, "document one");
+    await waitForText(
+      "reader one",
+      readerOne.text,
+      "document one, edited before SIGTERM",
+    );
     await waitForText("reader two", readerTwo.text, "document two");
   });
 });

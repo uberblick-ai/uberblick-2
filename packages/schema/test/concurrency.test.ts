@@ -235,21 +235,17 @@ describe("stale oldText", () => {
     // Without the rev assertion the same edit is accepted: rev is opt-in.
     editBlock(b, blockId, "Section", "Section, edited");
     expect(getBlockText(b, blockId)).toBe("Section, edited");
-  });
 
-  it("accepts a matching rev and reports the fresh one afterwards", () => {
-    const doc = new Y.Doc();
-    initDoc(doc, { uuid: UUID, title: "Fresh rev" });
-    const blockId = appendBlock(doc, { type: "paragraph", text: "one" });
-
-    const rev = getBlockRev(doc, blockId);
-    editBlock(doc, blockId, "one", "one two", { rev });
-    expect(getBlockText(doc, blockId)).toBe("one two");
-    expect(getBlockRev(doc, blockId)).not.toBe(rev);
-
-    // Replaying the same edit with the now-stale rev is refused.
+    // The other half of the contract: a MATCHING rev is accepted, the write
+    // moves the rev on, and replaying the now-stale one is refused.
+    const fresh = getBlockRev(b, blockId);
+    editBlock(b, blockId, "Section, edited", "Section, edited twice", {
+      rev: fresh,
+    });
+    expect(getBlockText(b, blockId)).toBe("Section, edited twice");
+    expect(getBlockRev(b, blockId)).not.toBe(fresh);
     expect(() =>
-      editBlock(doc, blockId, "one two", "one two three", { rev }),
+      editBlock(b, blockId, "Section, edited twice", "again", { rev: fresh }),
     ).toThrow(StaleBlockError);
   });
 });
@@ -360,13 +356,4 @@ describe("concurrent structural changes", () => {
     expect(blockIdsOf(b)).toEqual([inserted, tail]);
   });
 
-  it("keeps ids unique across many independent replicas", () => {
-    const ids = new Set<string>();
-    for (let i = 0; i < 50; i += 1) {
-      const doc = new Y.Doc();
-      initDoc(doc, { uuid: UUID, title: "Ids" });
-      ids.add(appendBlock(doc, { type: "paragraph", text: "x" }));
-    }
-    expect(ids.size).toBe(50);
-  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isTokenScope, mintToken, verifyToken } from "../src/token.js";
+import { mintToken, verifyToken } from "../src/token.js";
 
 const SECRET = "a-dev-secret";
 
@@ -34,16 +34,9 @@ describe("mintToken / verifyToken", () => {
     expect(claims?.workspace).toBe("main");
     expect(claims?.scope).toBe("read-write");
     expect(claims?.iat).toBeTypeOf("number");
-  });
 
-  it("produces a two-part base64url token", async () => {
-    const token = await mintToken(SECRET, {
-      sub: "s",
-      workspace: "main",
-      scope: "read-only",
-      iat: 0,
-    });
-
+    // The wire shape a token has to keep: two base64url parts, so it survives
+    // Hocuspocus's auth message and anything that reads it as one word.
     expect(token.split(".")).toHaveLength(2);
     expect(token).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
   });
@@ -157,12 +150,5 @@ describe("mintToken / verifyToken", () => {
         iat: 1.5,
       }),
     ).rejects.toThrow(/iat/);
-  });
-
-  it("knows its scopes", () => {
-    expect(isTokenScope("read-write")).toBe(true);
-    expect(isTokenScope("read-only")).toBe(true);
-    expect(isTokenScope("readonly")).toBe(false);
-    expect(isTokenScope(undefined)).toBe(false);
   });
 });

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
-  DIRECTORY_ROOM,
   getDirectoryEntry,
   getDirectoryMap,
   listDirectory,
@@ -14,11 +13,8 @@ const ALPHA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const BETA = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const GAMMA = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
+// The well-known room name itself is pinned once, in rooms.test.ts.
 describe("directory doc", () => {
-  it("uses the well-known room name", () => {
-    expect(DIRECTORY_ROOM).toBe("_directory");
-  });
-
   it("upserts on create, rename and retag", () => {
     const dir = new Y.Doc();
     upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha", tags: ["draft"] });

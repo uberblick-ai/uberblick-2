@@ -187,6 +187,11 @@ describe("with the hub stopped", () => {
     }
   });
 
+  // `hub.status` is what an agent reads to know whether its work has left the
+  // machine, so the values have to be distinguishable. Two of the three are
+  // reachable with no hub: "hub-down" (configured, unreachable) and "disabled"
+  // (never configured). The third, "auth-failed", needs a hub that rejects a
+  // token and is pinned in sync.test.ts.
   it("reports the hub as down, with the unsynced work it is holding", async () => {
     const rig = await offlineRig();
     const created = await rig.ok("create_doc", { title: "Held locally" });
@@ -205,6 +210,17 @@ describe("with the hub stopped", () => {
       expect(entry.seq).toBeGreaterThan(0);
     }
     expect(status.unsyncedChanges).toBe(pending.length);
+
+    // Sync switched off entirely is a distinct answer, not the same as a hub
+    // that is merely unreachable — and every tool still works either way.
+    const disabled = await startServer(testConfig({ authSecret: null }));
+    rigs.push(disabled);
+    const off = await disabled.ok("sync_status", {});
+    expect(off.hub.status).toBe("disabled");
+    expect(off.hub.url).toBeNull();
+    const local = await disabled.ok("create_doc", { title: "Local only" });
+    expect(local.applied).toBe(true);
+    expect(local.synced).toBe(false);
   });
 
   it("keeps reporting unsynced work in local-only mode, across a restart", async () => {
@@ -248,18 +264,4 @@ describe("with the hub stopped", () => {
     ).toEqual(["main/_directory"]);
   });
 
-  it("tells a rejected token apart from an absent hub", async () => {
-    // Sync switched off entirely is a third, distinct answer: no secret, no
-    // hub, and every tool still works.
-    const rig = await startServer(testConfig({ authSecret: null }));
-    rigs.push(rig);
-
-    const status = await rig.ok("sync_status", {});
-    expect(status.hub.status).toBe("disabled");
-    expect(status.hub.url).toBeNull();
-
-    const created = await rig.ok("create_doc", { title: "Local only" });
-    expect(created.applied).toBe(true);
-    expect(created.synced).toBe(false);
-  });
 });

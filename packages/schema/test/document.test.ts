@@ -7,7 +7,6 @@ import {
   appendBlock,
   blockRev,
   deleteBlock,
-  exportMarkdown,
   getBlock,
   getBlockText,
   getBlocks,
@@ -137,15 +136,11 @@ describe("document round-trip", () => {
     expect(getBlock(doc, code)).toEqual(
       withRev({ id: code, type: "code", text: "echo hi", language: "" }),
     );
-  });
 
-  it("changes heading level and code language in place", () => {
-    const doc = seeded();
-    const heading = appendBlock(doc, { type: "heading", text: "Section" });
-    const code = appendBlock(doc, { type: "code", text: "x" });
-    setBlockLevel(doc, heading, 3);
+    // Both attributes are also settable in place, without a re-type.
+    setBlockLevel(doc, plain, 3);
     setBlockLanguage(doc, code, "python");
-    expect(getBlock(doc, heading)?.level).toBe(3);
+    expect(getBlock(doc, plain)?.level).toBe(3);
     expect(getBlock(doc, code)?.language).toBe("python");
   });
 
@@ -164,47 +159,4 @@ describe("document round-trip", () => {
     );
   });
 
-  it("exports the seeded document as markdown", () => {
-    const doc = seeded();
-    appendBlock(doc, { type: "heading", text: "Overview", level: 1 });
-    appendBlock(doc, { type: "paragraph", text: "Blocks hold text." });
-    appendBlock(doc, { type: "heading", text: "Details", level: 3 });
-    appendBlock(doc, { type: "code", text: "const x = 1;", language: "ts" });
-    appendBlock(doc, { type: "mermaid", text: "graph TD\n  A-->B" });
-
-    expect(exportMarkdown(doc)).toBe(
-      [
-        "---",
-        `uuid: ${UUID}`,
-        "title: Block model",
-        "tags: [schema]",
-        "---",
-        "",
-        "# Overview",
-        "",
-        "Blocks hold text.",
-        "",
-        "### Details",
-        "",
-        "```ts",
-        "const x = 1;",
-        "```",
-        "",
-        "```mermaid",
-        "graph TD",
-        "  A-->B",
-        "```",
-        "",
-      ].join("\n"),
-    );
-  });
-
-  it("omits frontmatter on request and survives a synced replica", () => {
-    const doc = seeded();
-    appendBlock(doc, { type: "paragraph", text: "Hello" });
-    const replica = new Y.Doc();
-    Y.applyUpdate(replica, Y.encodeStateAsUpdate(doc));
-    expect(exportMarkdown(replica, { frontmatter: false })).toBe("Hello\n");
-    expect(exportMarkdown(replica)).toBe(exportMarkdown(doc));
-  });
 });

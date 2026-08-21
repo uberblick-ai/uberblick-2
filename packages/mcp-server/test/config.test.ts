@@ -23,13 +23,12 @@ describe("resolveMcpConfig", () => {
     expect(config.databasePath).toBe(
       join("/tmp/uberblick-config-test", "uberblick", "main.sqlite"),
     );
-  });
 
-  it("keeps the database inside the data directory", () => {
-    const config = resolveMcpConfig(env({ WORKSPACE_ID: "team-b" }));
-    expect(config.databasePath).toBe(
-      join("/tmp/uberblick-config-test", "uberblick", "team-b.sqlite"),
-    );
+    // A configured workspace names the file, and it stays inside the data
+    // directory.
+    expect(
+      resolveMcpConfig(env({ WORKSPACE_ID: "team-b" })).databasePath,
+    ).toBe(join("/tmp/uberblick-config-test", "uberblick", "team-b.sqlite"));
   });
 
   it("rejects a workspace that is not a single path segment", () => {
@@ -47,9 +46,8 @@ describe("resolveMcpConfig", () => {
         /WORKSPACE_ID/,
       );
     }
-  });
 
-  it("treats a blank workspace as unset rather than as a segment", () => {
+    // Blank is the one non-segment that is not an error: it means unset.
     expect(resolveMcpConfig(env({ WORKSPACE_ID: "   " })).workspaceId).toBe(
       "main",
     );
