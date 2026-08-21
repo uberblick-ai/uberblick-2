@@ -3,16 +3,41 @@
  *
  * `exportMarkdown` is the one-way road out of the document model.
  * `importMarkdown` is the opposite direction and deliberately weaker: it is a
- * dependency-free, line-based reader used to bring seed documents in once. It
- * does not round-trip inline formatting, because the block model does not store
- * inline formatting.
+ * dependency-free, line-based reader used to bring seed documents in once.
+ *
+ * Both directions carry the closed inline-mark set — `**bold**`, `*italic*`,
+ * `~~strike~~`, `` `code` `` and `[text](https://…)` — because a block's text
+ * does store inline formatting (as Yjs formatting attributes; see `marks.ts`).
+ * Block structure is still line-based: no lists, tables or block quotes exist in
+ * the model, so none are read or written here.
+ *
+ * The inline reader is deliberately narrower than CommonMark, and the writer
+ * escapes exactly what the reader would take back:
+ *
+ *   - Emphasis is asterisk-only. `_` is never a delimiter, so `snake_case`
+ *     survives without escaping — and `__bold__` typed in the editor still
+ *     arrives as a `bold` mark, because that is the editor's input rule, not
+ *     this reader's job.
+ *   - Delimiters must hug their content (`** x **` is literal), which is the
+ *     rule that keeps ordinary prose from turning into emphasis.
+ *   - A link is a link only when its target is an external `http(s)` URL.
+ *     Doc-to-doc references are `meta.links` by UUID and never a link mark, so
+ *     anything else stays literal text.
+ *   - `\` escapes `` \ ` * ~ [ ``, and nothing else, in both directions.
  */
 
 import type * as Y from "yjs";
-import { getBlocks } from "./blocks.js";
+import { getBlockInline, getBlocks } from "./blocks.js";
 import { getMeta } from "./doc.js";
 import { listAnnotations, resolveAnnotationRange } from "./annotations.js";
-import type { Block, BlockType, HeadingLevel } from "./types.js";
+import { hasInlineMarks, inlinePlainText, pushInlineRun } from "./marks.js";
+import type {
+  Block,
+  BlockType,
+  HeadingLevel,
+  InlineMarkSet,
+  InlineRun,
+} from "./types.js";
 
 export interface ExportMarkdownOptions {
   /** Emit a `---` YAML frontmatter block with uuid, title and tags. Default true. */
@@ -54,21 +79,166 @@ function parseScalar(raw: string): string {
   return value;
 }
 
-/** Longest run of backticks in `text`, so a fence can always be made longer. */
-function fenceFor(text: string): string {
+/** Longest run of backticks anywhere in `text`. */
+function longestBacktickRun(text: string): number {
   let longest = 0;
   for (const match of text.matchAll(/`+/g)) {
     longest = Math.max(longest, match[0].length);
   }
-  return "`".repeat(Math.max(3, longest + 1));
+  return longest;
 }
 
-function renderBlock(block: Block): string {
+/** A fence longer than any backtick run in `text`, so it always closes. */
+function fenceFor(text: string): string {
+  return "`".repeat(Math.max(3, longestBacktickRun(text) + 1));
+}
+
+/* --------------------------------------------------------------- inline: out */
+
+/** The marks that nest, outermost first. `inlineCode` is always innermost. */
+const NESTING = ["link", "bold", "italic", "strike"] as const;
+
+type NestedMark = (typeof NESTING)[number];
+
+const DELIMITER: Record<Exclude<NestedMark, "link">, string> = {
+  bold: "**",
+  italic: "*",
+  strike: "~~",
+};
+
+function nestedMarksOf(marks: InlineMarkSet): NestedMark[] {
+  const out: NestedMark[] = [];
+  if (marks.link !== undefined) out.push("link");
+  if (marks.bold === true) out.push("bold");
+  if (marks.italic === true) out.push("italic");
+  if (marks.strike === true) out.push("strike");
+  return out;
+}
+
+/**
+ * Escape the characters the reader would take as syntax. `_` is absent on
+ * purpose — it is not a delimiter here — and `~` and `[` are escaped only where
+ * they would actually open something, so ordinary prose stays readable.
+ */
+function escapeInline(text: string): string {
+  let out = "";
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i] as string;
+    if (char === "\\" || char === "`" || char === "*") {
+      out += `\\${char}`;
+    } else if (char === "~" && (text[i + 1] === "~" || text[i - 1] === "~")) {
+      // Only a `~~` pair is a delimiter, so a lone tilde — a home directory, a
+      // version range — is left alone.
+      out += "\\~";
+    } else if (char === "[" && matchLink(text, i) !== null) {
+      out += "\\[";
+    } else {
+      out += char;
+    }
+  }
+  return out;
+}
+
+/**
+ * A code span. Its content is literal — backslash escapes do not exist inside
+ * one — so the fence is lengthened past any backticks in the text, and edges the
+ * reader's unpadding rule would eat are padded out.
+ */
+function renderCodeSpan(text: string): string {
+  const fence = "`".repeat(longestBacktickRun(text) + 1);
+  const pad =
+    text.startsWith("`") ||
+    text.endsWith("`") ||
+    text.startsWith(" ") ||
+    text.endsWith(" ")
+      ? " "
+      : "";
+  return `${fence}${pad}${text}${pad}${fence}`;
+}
+
+/**
+ * Emphasis delimiters have to hug their content, so whitespace at the edge of an
+ * emphasised run is pushed outside the emphasis. Without this, bolding "word "
+ * would export as `**word **`, which is not bold in GFM and is not read back as
+ * bold here either.
+ */
+function normalizeInlineRuns(runs: readonly InlineRun[]): InlineRun[] {
+  const out: InlineRun[] = [];
+  for (const run of runs) {
+    const emphasised =
+      run.marks.bold === true ||
+      run.marks.italic === true ||
+      run.marks.strike === true;
+    if (!emphasised || run.marks.inlineCode === true) {
+      pushInlineRun(out, run.text, run.marks);
+      continue;
+    }
+    const lead = /^\s*/.exec(run.text)?.[0] ?? "";
+    const rest = run.text.slice(lead.length);
+    const trail = /\s*$/.exec(rest)?.[0] ?? "";
+    const core = rest.slice(0, rest.length - trail.length);
+    const bare: InlineMarkSet =
+      run.marks.link === undefined ? {} : { link: run.marks.link };
+    pushInlineRun(out, lead, bare);
+    pushInlineRun(out, core, run.marks);
+    pushInlineRun(out, trail, bare);
+  }
+  return out;
+}
+
+/**
+ * Render runs as GFM, keeping the marks properly nested: a mark shared by
+ * neighbouring runs stays open across them, so one bold span split by an
+ * annotation boundary is still `**ab**` and never `**a****b**`.
+ */
+function renderInline(runs: readonly InlineRun[]): string {
+  let out = "";
+  /** The open marks, outermost first, with the href a `link` was opened with. */
+  const open: Array<{ name: NestedMark; href: string }> = [];
+
+  const closeDownTo = (depth: number): void => {
+    for (let i = open.length - 1; i >= depth; i -= 1) {
+      const entry = open[i];
+      if (entry === undefined) continue;
+      out += entry.name === "link" ? `](${entry.href})` : DELIMITER[entry.name];
+    }
+    open.length = depth;
+  };
+
+  for (const run of normalizeInlineRuns(runs)) {
+    const desired = nestedMarksOf(run.marks);
+    const href = run.marks.link ?? "";
+    let common = 0;
+    while (
+      common < open.length &&
+      common < desired.length &&
+      open[common]?.name === desired[common] &&
+      (desired[common] !== "link" || open[common]?.href === href)
+    ) {
+      common += 1;
+    }
+    closeDownTo(common);
+    for (let i = common; i < desired.length; i += 1) {
+      const name = desired[i];
+      if (name === undefined) continue;
+      out += name === "link" ? "[" : DELIMITER[name];
+      open.push({ name, href });
+    }
+    out +=
+      run.marks.inlineCode === true
+        ? renderCodeSpan(run.text)
+        : escapeInline(run.text);
+  }
+  closeDownTo(0);
+  return out;
+}
+
+function renderBlock(block: Block, inline: readonly InlineRun[]): string {
   switch (block.type) {
     case "heading": {
       const level = block.level ?? 1;
       // Headings are single-line by definition; fold any stray newlines.
-      const text = block.text.replace(/\s*\n\s*/g, " ").trim();
+      const text = renderInline(inline).replace(/\s*\n\s*/g, " ").trim();
       return `${"#".repeat(level)} ${text}`.trimEnd();
     }
     case "code": {
@@ -80,7 +250,7 @@ function renderBlock(block: Block): string {
       return `${fence}mermaid\n${block.text}\n${fence}`;
     }
     case "paragraph":
-      return block.text;
+      return renderInline(inline);
   }
 }
 
@@ -148,7 +318,16 @@ export function exportMarkdown(
   }
 
   for (const block of getBlocks(ydoc)) {
-    sections.push(renderBlock(block));
+    // Marks are read by id, which resolves the same element `getBlocks` read —
+    // shadowed duplicates included. An element with no id claims no identity, so
+    // it has no marks to look up and falls back to its plain text.
+    const inline = getBlockInline(ydoc, block.id);
+    sections.push(
+      renderBlock(
+        block,
+        inline.length === 0 ? [{ text: block.text, marks: {} }] : inline,
+      ),
+    );
     const comments = annotationsByBlock.get(block.id);
     if (comments !== undefined) sections.push(comments.join("\n"));
   }
@@ -158,9 +337,16 @@ export function exportMarkdown(
 
 export interface ImportedBlock {
   type: BlockType;
+  /** The block's plain text, inline syntax resolved away. */
   text: string;
   level?: HeadingLevel;
   language?: string;
+  /**
+   * The formatted content, present only when the source carried inline syntax.
+   * Feeding it to `appendBlock`/`insertBlock` is what preserves the formatting;
+   * a caller that reads only `text` gets the same prose without marks.
+   */
+  inline?: InlineRun[];
 }
 
 export interface ImportedDoc {
@@ -278,10 +464,202 @@ function parseFrontmatter(lines: string[]): Frontmatter {
   return result;
 }
 
+/* ---------------------------------------------------------------- inline: in */
+
+/** A link target the model accepts as an inline link: an external URL, only. */
+const EXTERNAL_URL = /^https?:\/\/\S+$/i;
+
+const LINK = /^\[((?:\\.|[^\\\]])*)\]\(([^\s)]*)\)/;
+
+/** Length of the run of `char` starting at `from`. */
+function runLength(source: string, from: number, char: string): number {
+  let length = 0;
+  while (source[from + length] === char) length += 1;
+  return length;
+}
+
+/** Whether the character at `index` is backslash-escaped. */
+function isEscaped(source: string, index: number): boolean {
+  let backslashes = 0;
+  for (let i = index - 1; i >= 0 && source[i] === "\\"; i -= 1) backslashes += 1;
+  return backslashes % 2 === 1;
+}
+
+/**
+ * The link opening at `start`, or null — including for a target that is not an
+ * external URL, which stays literal text rather than becoming a mark.
+ */
+function matchLink(
+  source: string,
+  start: number,
+): { label: string; href: string; next: number } | null {
+  const match = LINK.exec(source.slice(start));
+  if (match === null) return null;
+  const label = match[1] ?? "";
+  const href = match[2] ?? "";
+  if (label === "" || !EXTERNAL_URL.test(href)) return null;
+  return { label, href, next: start + match[0].length };
+}
+
+/**
+ * The emphasis span opening at `start` with a `need`-long run of `char`, or null.
+ *
+ * The closer is taken from the *end* of its delimiter run, which is what makes
+ * `***both***` bold-and-italic rather than bold over a stray asterisk. Content
+ * that is empty or edged with whitespace is not emphasis at all.
+ */
+function matchEmphasis(
+  source: string,
+  start: number,
+  char: string,
+  need: number,
+): { content: string; next: number } | null {
+  const from = start + need;
+  for (let i = from; i < source.length; i += 1) {
+    if (source[i] !== char || isEscaped(source, i)) continue;
+    const length = runLength(source, i, char);
+    if (length < need) {
+      i += length - 1;
+      continue;
+    }
+    const end = i + length;
+    const content = source.slice(from, end - need);
+    if (content !== "" && !/^\s|\s$/.test(content)) return { content, next: end };
+    i = end - 1;
+  }
+  return null;
+}
+
+/**
+ * The code span opening at `start`, or null. Content is literal: the closing
+ * fence is a backtick run of exactly the opening length, escapes do not apply,
+ * and one space is unpadded from each end when both are spaces.
+ */
+function matchCodeSpan(
+  source: string,
+  start: number,
+): { content: string; next: number } | null {
+  const fence = runLength(source, start, "`");
+  const from = start + fence;
+  for (let i = from; i < source.length; i += 1) {
+    if (source[i] !== "`") continue;
+    const length = runLength(source, i, "`");
+    if (length !== fence) {
+      i += length - 1;
+      continue;
+    }
+    let content = source.slice(from, i);
+    if (content.length >= 2 && content.startsWith(" ") && content.endsWith(" ")) {
+      content = content.slice(1, -1);
+    }
+    return content === "" ? null : { content, next: i + length };
+  }
+  return null;
+}
+
+/**
+ * Read `source` into runs, adding to whatever marks are already in scope. Marked
+ * spans recurse (a link label can hold emphasis and vice versa); a code span's
+ * content does not, because it is literal.
+ */
+function scanInline(
+  source: string,
+  marks: InlineMarkSet,
+  out: InlineRun[],
+): void {
+  let plain = "";
+  const flush = (): void => {
+    pushInlineRun(out, plain, marks);
+    plain = "";
+  };
+
+  let i = 0;
+  while (i < source.length) {
+    const char = source[i] as string;
+
+    if (char === "\\") {
+      const next = source[i + 1];
+      if (next !== undefined && "\\`*~[".includes(next)) {
+        plain += next;
+        i += 2;
+        continue;
+      }
+    }
+
+    if (char === "`") {
+      const span = matchCodeSpan(source, i);
+      if (span !== null) {
+        flush();
+        pushInlineRun(out, span.content, { ...marks, inlineCode: true });
+        i = span.next;
+        continue;
+      }
+    }
+
+    if (char === "[" && marks.link === undefined) {
+      const link = matchLink(source, i);
+      if (link !== null) {
+        flush();
+        scanInline(link.label, { ...marks, link: link.href }, out);
+        i = link.next;
+        continue;
+      }
+    }
+
+    if (char === "~" && marks.strike !== true && runLength(source, i, "~") >= 2) {
+      const span = matchEmphasis(source, i, "~", 2);
+      if (span !== null) {
+        flush();
+        scanInline(span.content, { ...marks, strike: true }, out);
+        i = span.next;
+        continue;
+      }
+    }
+
+    if (char === "*") {
+      const bold = runLength(source, i, "*") >= 2;
+      if (bold ? marks.bold !== true : marks.italic !== true) {
+        const span = matchEmphasis(source, i, "*", bold ? 2 : 1);
+        if (span !== null) {
+          flush();
+          const nested: InlineMarkSet = bold
+            ? { ...marks, bold: true }
+            : { ...marks, italic: true };
+          scanInline(span.content, nested, out);
+          i = span.next;
+          continue;
+        }
+      }
+    }
+
+    plain += char;
+    i += 1;
+  }
+  flush();
+}
+
+/**
+ * A prose block from its markdown source. `inline` is present only when the
+ * source actually carried formatting, so an unformatted document imports to
+ * exactly what it did before inline marks existed.
+ */
+function proseBlock(
+  type: "paragraph" | "heading",
+  source: string,
+): ImportedBlock {
+  const runs: InlineRun[] = [];
+  scanInline(source, {}, runs);
+  const text = inlinePlainText(runs);
+  return runs.some((run) => hasInlineMarks(run.marks))
+    ? { type, text, inline: runs }
+    : { type, text };
+}
+
 /**
  * Parse markdown into the pieces needed to build a document: title, tags, links
  * and a flat block list. Handles frontmatter, ATX headings, fenced code (with
- * language) and mermaid fences; everything else becomes a paragraph.
+ * language) and mermaid fences; everything else becomes a paragraph, with its
+ * inline formatting read into `inline`.
  *
  * Title precedence: frontmatter `title`, else a leading level-1 heading — which
  * is then *consumed*, so the title is not duplicated as a block. Any other
@@ -297,7 +675,7 @@ export function importMarkdown(markdown: string): ImportedDoc {
   let paragraph: string[] = [];
   const flush = (): void => {
     if (paragraph.length === 0) return;
-    blocks.push({ type: "paragraph", text: paragraph.join("\n") });
+    blocks.push(proseBlock("paragraph", paragraph.join("\n")));
     paragraph = [];
   };
 
@@ -354,7 +732,7 @@ export function importMarkdown(markdown: string): ImportedDoc {
     if (heading !== null) {
       flush();
       const level = (heading[1] ?? "#").length as HeadingLevel;
-      blocks.push({ type: "heading", text: (heading[2] ?? "").trim(), level });
+      blocks.push({ ...proseBlock("heading", (heading[2] ?? "").trim()), level });
       continue;
     }
 

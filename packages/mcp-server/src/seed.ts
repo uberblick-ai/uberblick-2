@@ -125,6 +125,10 @@ function toBlockInput(block: ImportedBlock): BlockInput {
     text: block.text,
     ...(block.level === undefined ? {} : { level: block.level }),
     ...(block.language === undefined ? {} : { language: block.language }),
+    // The seed files are GFM, so their prose carries inline marks. Dropping
+    // `inline` here would not just lose the formatting: `text` is the *resolved*
+    // plain text, so the markup would be gone from the document entirely.
+    ...(block.inline === undefined ? {} : { inline: block.inline }),
   };
 }
 

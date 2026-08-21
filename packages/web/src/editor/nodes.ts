@@ -1,8 +1,10 @@
 /**
- * The editor palette: four custom block nodes, one mark, nothing else.
+ * The editor palette: four custom block nodes, six marks, nothing else.
  *
- * StarterKit is deliberately absent. Every node here mirrors a schema-owned
- * Y.XmlElement one-for-one:
+ * The marks live in marks.ts — the five inline ones (`bold`, `italic`, `strike`,
+ * `inlineCode`, `link`) plus the `comment` anchor defined below. StarterKit is
+ * deliberately absent. Every node here mirrors a schema-owned Y.XmlElement
+ * one-for-one:
  *
  *   <paragraph id="…">        Y.XmlText
  *   <heading   id="…" level="2">  Y.XmlText
@@ -31,11 +33,17 @@
  *    would make `schema.text(…, [commentMark])` throw, and y-prosemirror's catch
  *    block **deletes the Y.XmlText from the document** — data loss, not a render
  *    failure.
+ *
+ *    Prose blocks take `PROSE_MARKS` on top of that — the inline set. `code` and
+ *    `mermaid` never do: their text is source, so `comment` is the only mark
+ *    they may hold, and an inline mark found inside one is foreign content the
+ *    palette gate refuses to bind (see palette.ts).
  */
 
 import { Node, Mark, mergeAttributes } from "@tiptap/core";
 import { COMMENT_MARK } from "@uberblick/schema";
 import type { HeadingLevel } from "@uberblick/schema";
+import { PROSE_MARKS, inlineMarkExtensions } from "./marks.js";
 
 /**
  * The stable block id, assigned by `BlockIds` (see block-ids.ts) and owned by
@@ -81,7 +89,7 @@ export const Paragraph = Node.create({
   name: "paragraph",
   group: "block",
   content: "inline*",
-  marks: COMMENT_MARK,
+  marks: PROSE_MARKS,
   addAttributes() {
     return { id: idAttribute };
   },
@@ -97,7 +105,7 @@ export const Heading = Node.create({
   name: "heading",
   group: "block",
   content: "inline*",
-  marks: COMMENT_MARK,
+  marks: PROSE_MARKS,
   defining: true,
   addAttributes() {
     return {
@@ -251,4 +259,5 @@ export const paletteExtensions = [
   CodeBlock,
   Mermaid,
   CommentMark,
+  ...inlineMarkExtensions,
 ];

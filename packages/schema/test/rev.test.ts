@@ -8,6 +8,7 @@ import {
   getBlock,
   getBlockRev,
   getBlocks,
+  getBlocksFragment,
   initDoc,
   setBlockLanguage,
   setBlockLevel,
@@ -72,12 +73,16 @@ describe("blockRev", () => {
     expect(getBlockRev(doc, id)).not.toBe(afterType);
   });
 
-  it("ignores annotation marks, so annotating does not invalidate a pending edit", () => {
+  it("ignores every mark, so formatting does not invalidate a pending edit", () => {
     const doc = seeded();
     const id = appendBlock(doc, { type: "paragraph", text: "Hello brave world" });
     const before = getBlockRev(doc, id);
 
     createAnnotation(doc, id, 6, 11, "reviewer", "hm");
+    // The same for inline formatting: bolding a word changes no text.
+    const text = (getBlocksFragment(doc).get(0) as Y.XmlElement)
+      .firstChild as Y.XmlText;
+    text.format(6, 5, { bold: {} });
 
     expect(getBlockRev(doc, id)).toBe(before);
     // …and an edit asserting the pre-annotation rev still applies.

@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   COMMENT_MARK,
+  INLINE_MARKS,
   appendBlock,
   getBlocks,
   getBlocksFragment,
@@ -26,7 +27,6 @@ import { bindGuardedEditor } from "../src/editor/guarded-binding.js";
 import type { GuardedBinding } from "../src/editor/guarded-binding.js";
 import {
   BLOCK_NODE_NAMES,
-  MARK_NAMES,
   describeForeignBlocks,
   findForeignBlocks,
 } from "../src/editor/palette.js";
@@ -34,7 +34,7 @@ import { plainText } from "../src/editor/ytext.js";
 import { mountEditor } from "./helpers.js";
 
 describe("the palette is exactly the schema's block types", () => {
-  it("declares four block nodes, one mark, and nothing else", () => {
+  it("declares four block nodes, six marks, and nothing else", () => {
     expect(Object.keys(uberblickSchema.nodes).sort()).toEqual([
       "code",
       "doc",
@@ -44,9 +44,11 @@ describe("the palette is exactly the schema's block types", () => {
       "text",
     ]);
     expect(BLOCK_NODE_NAMES).toEqual(["paragraph", "heading", "code", "mermaid"]);
-    expect(Object.keys(uberblickSchema.marks)).toEqual([COMMENT_MARK]);
-    // The gate reads its list off the schema rather than keeping its own.
-    expect(MARK_NAMES).toEqual(Object.keys(uberblickSchema.marks));
+    // The closed mark set: the schema package's five inline marks, plus the
+    // annotation anchor.
+    expect(Object.keys(uberblickSchema.marks).sort()).toEqual(
+      [...INLINE_MARKS, COMMENT_MARK].sort(),
+    );
 
     // Stated the other way round, because a node or mark that quietly exists is
     // one the editor could normalise foreign content into.
@@ -63,18 +65,40 @@ describe("the palette is exactly the schema's block types", () => {
     ]) {
       expect(uberblickSchema.nodes[absent]).toBeUndefined();
     }
-    for (const absent of ["bold", "italic", "strike", "link", "code"]) {
+    for (const absent of ["underline", "highlight", "superscript", "textStyle"]) {
       expect(uberblickSchema.marks[absent]).toBeUndefined();
     }
   });
 
-  it("allows the comment mark inside code and mermaid blocks", () => {
+  it("allows the comment mark inside code and mermaid blocks, and nothing else there", () => {
     // A `marks: ""` node spec would make y-prosemirror throw while building the
     // node — and its catch block deletes the Y.XmlText from the document.
     for (const name of ["code", "mermaid", "paragraph", "heading"]) {
       const type = uberblickSchema.nodes[name];
       expect(type).toBeDefined();
       expect(type?.allowsMarkType(uberblickSchema.marks[COMMENT_MARK]!)).toBe(true);
+    }
+
+    // Inline marks are prose only: a source block's text is source.
+    for (const mark of INLINE_MARKS) {
+      const type = uberblickSchema.marks[mark]!;
+      expect(uberblickSchema.nodes.paragraph?.allowsMarkType(type), mark).toBe(true);
+      expect(uberblickSchema.nodes.heading?.allowsMarkType(type), mark).toBe(true);
+      expect(uberblickSchema.nodes.code?.allowsMarkType(type), mark).toBe(false);
+      expect(uberblickSchema.nodes.mermaid?.allowsMarkType(type), mark).toBe(false);
+    }
+  });
+
+  /**
+   * The wire contract, asserted on the schema rather than through a document:
+   * y-prosemirror writes a mark's Yjs attribute under a hashed key
+   * (`bold--A1b2C3d4`) unless the mark type excludes itself. The schema package
+   * reads and writes the bare names, so every mark here must be self-excluding.
+   */
+  it("keeps every mark self-excluding, so its Yjs key is its bare name", () => {
+    for (const name of Object.keys(uberblickSchema.marks)) {
+      const type = uberblickSchema.marks[name]!;
+      expect(type.excludes(type), name).toBe(true);
     }
   });
 
@@ -87,7 +111,7 @@ describe("the palette is exactly the schema's block types", () => {
       }),
     ).toThrow();
 
-    expect(() => uberblickSchema.mark("bold")).toThrow();
+    expect(() => uberblickSchema.mark("underline")).toThrow();
     expect(() =>
       uberblickSchema.nodeFromJSON({
         type: "doc",
@@ -95,7 +119,7 @@ describe("the palette is exactly the schema's block types", () => {
           {
             type: "paragraph",
             attrs: { id: "a" },
-            content: [{ type: "text", text: "x", marks: [{ type: "bold" }] }],
+            content: [{ type: "text", text: "x", marks: [{ type: "underline" }] }],
           },
         ],
       }),
@@ -328,10 +352,22 @@ describe("foreign content inside a known block", () => {
     expect(describeForeignBlocks(foreign)).toContain("callout");
 
     const marked = docWithBlock();
-    firstBlockText(marked).format(0, 3, { bold: {} });
+    firstBlockText(marked).format(0, 3, { underline: {} });
     const markFindings = findForeignBlocks(getBlocksFragment(marked));
     expect(markFindings).toHaveLength(1);
-    expect(markFindings[0]?.nodeName).toBe("#mark:bold");
+    expect(markFindings[0]?.nodeName).toBe("#mark:underline");
+
+    // A mark the schema declares but this block may not hold is foreign too:
+    // inline marks belong to prose, never to a source block.
+    const inCode = new Y.Doc();
+    initDoc(inCode, { uuid: "code-doc", title: "Marked source" });
+    appendBlock(inCode, { type: "code", text: "const x = 1;", language: "ts" });
+    const codeText = (getBlocksFragment(inCode).get(0) as Y.XmlElement)
+      .firstChild as Y.XmlText;
+    codeText.format(0, 5, { bold: {} });
+    expect(findForeignBlocks(getBlocksFragment(inCode))).toEqual([
+      expect.objectContaining({ nodeName: "#mark:bold", index: 0 }),
+    ]);
   });
 
   /**
@@ -362,14 +398,14 @@ describe("foreign content inside a known block", () => {
     {
       what: "a text carrying an undeclared mark",
       plant: (ydoc) => {
-        firstBlockText(ydoc).format(0, 3, { bold: {} });
+        firstBlockText(ydoc).format(0, 3, { underline: {} });
       },
       intact: (ydoc) => {
         expect(plainText(firstBlockText(ydoc))).toBe("known");
         const delta = firstBlockText(ydoc).toDelta() as Array<
           Record<string, unknown>
         >;
-        expect(delta[0]?.attributes).toEqual({ bold: {} });
+        expect(delta[0]?.attributes).toEqual({ underline: {} });
       },
     },
     {
@@ -432,11 +468,14 @@ describe("foreign content inside a known block", () => {
     expect(foreign[0]?.nodeName).toBe("#embed");
     expect(embedsOf(firstBlockText(ydoc))).toEqual([{ future: "keep-me" }]);
 
-    // The other side of the same scan: the comment mark IS declared, so a text
-    // carrying it is not foreign and the editor binds.
+    // The other side of the same scan: the comment mark and the inline marks ARE
+    // declared on a paragraph, so a text carrying them is not foreign and the
+    // editor binds.
     const annotated = docWithBlock();
     firstBlockText(annotated).format(0, 3, {
       [COMMENT_MARK]: { threadId: "t1" },
+      bold: {},
+      link: { href: "https://example.com" },
     });
     expect(findForeignBlocks(getBlocksFragment(annotated))).toEqual([]);
     const binding = bind(annotated);

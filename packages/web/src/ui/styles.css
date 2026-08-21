@@ -541,6 +541,30 @@ body {
   overflow-x: auto;
 }
 
+/* The language label. A pseudo-element, not a NodeView: it is chrome, so it must
+   not be part of the editable content — and `attr()` keeps it in step with the
+   `data-language` attribute the schema owns. A block with no language declared
+   gets no label rather than a made-up one. */
+.ub-code {
+  position: relative;
+}
+
+.ub-code[data-language]:not([data-language=""]) {
+  padding-top: 1.5rem;
+}
+
+.ub-code[data-language]:not([data-language=""])::before {
+  content: attr(data-language);
+  position: absolute;
+  top: 0.25rem;
+  right: 0.6rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+  user-select: none;
+  pointer-events: none;
+}
+
 .ub-mermaid {
   margin: 0.7em 0;
 }
@@ -561,6 +585,27 @@ body {
 .ub-comment {
   background: var(--brand-subtle);
   border-bottom: 2px solid var(--brand);
+}
+
+/* ---- inline marks ---- */
+
+/* Bold, italic and strikethrough render as <strong>, <em> and <s>, and the
+   browser's own styling of those is exactly right — Geist covers the weights,
+   and italics are the synthetic oblique the @font-face block above settles on.
+   Only the two machine-flavoured marks need rules of their own. */
+.ub-inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.05em 0.3em;
+}
+
+.ub-link {
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
 }
 
 /* ---- foreign-content fallback ---- */

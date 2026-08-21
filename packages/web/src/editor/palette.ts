@@ -34,7 +34,14 @@
  * mark with `schema.mark(name, attrs)`; either throwing deletes the offending
  * Y type. So a *known* block name is not enough: a `<paragraph>` holding a
  * `<callout>` loses the callout, and a Y.XmlText carrying a mark the schema does not
- * declare (`bold`, say) loses the whole text node.
+ * declare (`underline`, say) loses the whole text node.
+ *
+ * A mark the schema *does* declare but the enclosing block may not hold is
+ * foreign too, and fails more quietly. `schema.text` never validates marks
+ * against the parent node, so nothing throws and nothing is deleted — the editor
+ * just holds an invalid document until the next write normalises the mark out of
+ * it. An inline mark inside a `code` or `mermaid` block is exactly that: those
+ * nodes hold source text, so `comment` is the only mark they allow.
  *
  * A Y.XmlText's *content* is the third case, and the quietest one.
  * `createTextNodesFromYText` only ever calls `schema.text(delta.insert, marks)`,
@@ -45,7 +52,7 @@
  * Y.XmlText without it. That is silent data loss on a later mutation rather than
  * on binding, which makes it worse, not better. A block is safe to bind only
  * when its children are all Y.XmlText, those texts insert nothing but strings,
- * and those strings carry nothing but the marks in {@link MARK_NAMES}.
+ * and those strings carry nothing but marks the block itself allows.
  */
 
 import * as Y from "yjs";
@@ -54,12 +61,6 @@ import { uberblickSchema } from "./create-editor.js";
 
 /** The node names the editor may render. Identical to the schema's block types. */
 export const BLOCK_NODE_NAMES: readonly string[] = BLOCK_TYPES;
-
-/**
- * The mark keys the editor's ProseMirror schema actually registers — read off
- * the schema rather than restated, so the gate cannot drift from the palette.
- */
-export const MARK_NAMES: readonly string[] = Object.keys(uberblickSchema.marks);
 
 /** Content in the `blocks` fragment that the palette cannot render. */
 export interface ForeignBlock {
@@ -82,13 +83,20 @@ function previewOf(child: Y.XmlElement | Y.XmlText | Y.XmlHook): string {
   return text.length > 80 ? `${text.slice(0, 80)}…` : text;
 }
 
+/** Whether `blockName`'s node type allows `mark`, read off the editor's schema. */
+function blockAllowsMark(blockName: string, mark: string): boolean {
+  const node = uberblickSchema.nodes[blockName];
+  const type = uberblickSchema.marks[mark];
+  return node !== undefined && type !== undefined && node.allowsMarkType(type);
+}
+
 /**
  * What inside an otherwise-renderable block the palette cannot represent, or
  * `null` when the child is fine. A block's children must be Y.XmlText, and a
- * Y.XmlText may only insert strings, carrying only marks the editor schema
- * declares.
+ * Y.XmlText may only insert strings, carrying only marks that block allows.
  */
 function foreignInsideBlock(
+  blockName: string,
   child: Y.XmlElement | Y.XmlText | Y.XmlHook,
 ): string | null {
   if (child instanceof Y.XmlElement) return child.nodeName;
@@ -101,7 +109,7 @@ function foreignInsideBlock(
     // editor state and the next edit writes the text back without them.
     if (typeof op.insert !== "string") return "#embed";
     for (const mark of Object.keys(op.attributes ?? {})) {
-      if (!MARK_NAMES.includes(mark)) return `#mark:${mark}`;
+      if (!blockAllowsMark(blockName, mark)) return `#mark:${mark}`;
     }
   }
   return null;
@@ -137,7 +145,7 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
       continue;
     }
     for (const inner of child.toArray()) {
-      const nodeName = foreignInsideBlock(inner);
+      const nodeName = foreignInsideBlock(child.nodeName, inner);
       if (nodeName === null) continue;
       // One entry per block: the count in the banner is a block count.
       foreign.push({ index, nodeName, id, preview: previewOf(child) });

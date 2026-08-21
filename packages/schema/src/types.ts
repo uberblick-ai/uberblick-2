@@ -17,6 +17,55 @@ export function isBlockType(value: string): value is BlockType {
 }
 
 /**
+ * Inline formatting marks. The set is closed; a mark name is a Yjs text
+ * formatting key on a block's Y.XmlText — see `marks.ts`.
+ *
+ * `comment` is not in here: it is the annotation anchor, not formatting, and it
+ * is the one mark a `code` or `mermaid` block may carry.
+ *
+ * Inline code is `inlineCode`, not `code`, and the reason is structural rather
+ * than stylistic: ProseMirror refuses a schema where one name is both a node and
+ * a mark ("code can not be both a node and a mark"), and `code` is a block type.
+ * A mark's name *is* its Yjs formatting key — y-prosemirror derives one from the
+ * other in both directions — so the mark is what has to give way.
+ */
+export const INLINE_MARKS = [
+  "bold",
+  "italic",
+  "strike",
+  "inlineCode",
+  "link",
+] as const;
+
+export type InlineMarkName = (typeof INLINE_MARKS)[number];
+
+export function isInlineMark(value: string): value is InlineMarkName {
+  return (INLINE_MARKS as readonly string[]).includes(value);
+}
+
+/**
+ * The inline marks covering one run of text.
+ *
+ * Four of them are flags; `link` carries its href, which is always an external
+ * `http(s)` URL. Doc-to-doc references are `meta.links` by UUID and never a
+ * link mark.
+ */
+export interface InlineMarkSet {
+  bold?: boolean;
+  italic?: boolean;
+  strike?: boolean;
+  inlineCode?: boolean;
+  /** External http(s) URL. */
+  link?: string;
+}
+
+/** A maximal run of a block's text carrying one set of inline marks. */
+export interface InlineRun {
+  text: string;
+  marks: InlineMarkSet;
+}
+
+/**
  * A block as read out of the document.
  *
  * `level` is present exactly for `heading`, `language` exactly for `code`
@@ -25,7 +74,10 @@ export function isBlockType(value: string): value is BlockType {
 export interface Block {
   id: string;
   type: BlockType;
-  /** The block's plain-text source. Rich blocks render this; they do not replace it. */
+  /**
+   * The block's plain-text source, marks excluded. Rich blocks render this; they
+   * do not replace it. Inline marks are read separately with `getBlockInline`.
+   */
   text: string;
   /**
    * Content hash of type + text + attributes, for optimistic concurrency.
@@ -44,6 +96,14 @@ export interface BlockInput {
   level?: HeadingLevel;
   /** Code blocks only, e.g. "ts". Ignored for other types. */
   language?: string;
+  /**
+   * Formatted content, for `paragraph` and `heading` only — the two block types
+   * that carry inline marks. When present it *replaces* `text`, so a caller
+   * setting both must keep them consistent; `importMarkdown` does.
+   *
+   * `code` and `mermaid` hold source, so this is ignored for them.
+   */
+  inline?: InlineRun[];
 }
 
 /** Document metadata. Identity is the uuid; title and tags are display data. */
