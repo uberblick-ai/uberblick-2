@@ -73,9 +73,13 @@
 }
 
 /* The two faces ship with the app: variable woff2 files vendored under
- * `src/assets/fonts` (Geist 1.7.2, SIL Open Font License 1.1 — the license
- * travels with them as LICENSE.txt, referenced from `index.html` so the build
- * emits it into `dist/` too). No CDN, no `fonts.googleapis.com`: the
+ * `src/assets/fonts` (Geist 1.7.2, SIL Open Font License 1.1). The OFL wants
+ * its text to travel with the font software, so `public/LICENSE-Geist.txt` is
+ * copied verbatim into every build and served at `/LICENSE-Geist.txt` — it
+ * covers these two files only, not the app. (It lives in `public/` rather than
+ * beside the woff2 files because Vite emits from `src/` only what something
+ * references, and no honest document-level reference to a font license
+ * exists.) No CDN, no `fonts.googleapis.com`: the
  * app is offline-first, and a render-blocking third-party request would make
  * it render differently with no network.
  *
