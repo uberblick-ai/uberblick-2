@@ -279,7 +279,11 @@ export class HubSync {
     return provider.isSynced && !provider.hasUnsyncedChanges;
   }
 
-  /** Outstanding local changes across every attached room. */
+  /**
+   * Provider sync messages awaiting acknowledgement, summed over every attached
+   * room. Messages, not updates: a batch merges into one message, and a
+   * reconnect resets a room's backlog to the single sync-handshake message.
+   */
   unsyncedChanges(): number {
     let total = 0;
     for (const provider of this.providers.values()) {

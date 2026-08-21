@@ -643,10 +643,16 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "What this replica holds and what the hub has acknowledged.\n\n" +
         "`hub.status` distinguishes a hub that is down from a token the hub rejected — the first resolves itself, " +
         "the second needs a human — and `disabled` means no secret was configured, so this server is local-only.\n\n" +
-        "`unsyncedChanges` counts rooms holding local changes the hub has not acknowledged. It is read from the " +
-        "durable pending set, so it survives a restart and is non-zero in local-only mode: work that never left " +
-        "this machine is unsynced, whether or not a connection was ever attempted. `inFlightUpdates` is the " +
-        "in-memory count of messages awaiting an acknowledgement on the current connection, and resets with it.\n\n" +
+        "The two counts here are in different units, so they are not expected to agree. `unsyncedChanges` counts " +
+        "ROOMS, not updates: the rooms holding local changes the hub has not acknowledged, the ones `pendingRooms` " +
+        "names. It is read from the durable pending set, so it survives a restart and is non-zero in local-only " +
+        "mode: work that never left this machine is unsynced, whether or not a connection was ever attempted. " +
+        "`inFlightUpdates` counts provider SYNC MESSAGES awaiting acknowledgement on the current connection, " +
+        "which is not a count of Yjs updates: the provider merges a batch of updates into one message, counts a " +
+        "message before it goes out, and resets the backlog to the single sync-handshake message on every " +
+        "reconnect — so it can read 1 for a whole document's worth of unsent work. It is in memory and resets " +
+        "with the connection. The web client's status line shows the same counter for the room it has open, " +
+        "labelled `N sync messages unacked`.\n\n" +
         `${SYNCED_MEANS} The same holds for \`rooms[].synced\` below and for \`unsyncedChanges: 0\`: both are ` +
         "statements about acknowledgement, so a hub that dies inside the debounce comes back missing updates " +
         "this tool has already reported as synced, until a replica holding them reconnects and re-sends.\n\n" +

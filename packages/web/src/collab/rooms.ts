@@ -145,7 +145,12 @@ async function hubToken(identity: AwarenessUser): Promise<string> {
 export interface RoomStatus {
   connected: boolean;
   synced: boolean;
-  /** Updates applied locally but not yet acknowledged by the hub. */
+  /**
+   * Provider sync messages awaiting the hub's acknowledgement. Messages, not
+   * updates: a batch merges into one message, and a reconnect resets the
+   * backlog to the single sync-handshake message — see `StatusLine`, which is
+   * where the number is labelled.
+   */
   unsyncedChanges: number;
   /** True once the IndexedDB replica has been loaded into the Y.Doc. */
   localReplicaLoaded: boolean;

@@ -20,7 +20,25 @@ import {
   useRoomStatus,
 } from "./hooks.js";
 
-function StatusLine({ connection }: { connection: RoomConnection }): ReactElement {
+/**
+ * Exported for the label test only.
+ *
+ * The backlog count names its unit, because `sync_status` reports a *rooms*
+ * count under a similar name and two numbers labelled "pending" invite the
+ * question of which one is lying.
+ *
+ * The unit is provider sync messages awaiting the hub's acknowledgement — not
+ * Yjs updates, which the counter cannot report: the provider merges a batch of
+ * updates into one message, counts a message before it goes out, and resets the
+ * backlog to the single sync-handshake message on every reconnect. So "1 sync
+ * message unacked" can stand for a whole document's worth of unsent work —
+ * which is why the label does not say "1 update".
+ */
+export function StatusLine({
+  connection,
+}: {
+  connection: RoomConnection;
+}): ReactElement {
   const status = useRoomStatus(connection);
   const peers = usePeers(connection);
   const label = !status.connected
@@ -35,7 +53,10 @@ function StatusLine({ connection }: { connection: RoomConnection }): ReactElemen
       />
       <span>{label}</span>
       {status.unsyncedChanges > 0 && (
-        <span className="ub-pending">{status.unsyncedChanges} pending</span>
+        <span className="ub-pending">
+          {status.unsyncedChanges} sync message
+          {status.unsyncedChanges === 1 ? "" : "s"} unacked
+        </span>
       )}
       {status.localReplicaLoaded && <span className="ub-muted">local cache</span>}
       <span className="ub-muted">{connection.room}</span>
