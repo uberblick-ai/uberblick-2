@@ -314,29 +314,57 @@ function trailingWhitespace(text: string): string {
   return /\s*$/.exec(text)?.[0] ?? "";
 }
 
+/** The marks two runs agree on — what a forced merge is allowed to keep. */
+function sharedMarks(a: InlineMarkSet, b: InlineMarkSet): InlineMarkSet {
+  const marks: InlineMarkSet = { inlineCode: true };
+  for (const mark of EMPHASIS_MARKS) {
+    if (a[mark] === true && b[mark] === true) marks[mark] = true;
+  }
+  if (a.link !== undefined && a.link === b.link) marks.link = a.link;
+  return marks;
+}
+
 /**
- * Merge neighbouring code runs that carry *exactly* the same marks.
+ * Merge neighbouring code runs, which is almost always lossless and never
+ * optional.
  *
- * Only then, because the merge has to be lossless. Two code spans that differ in
- * some mark do not need merging anyway: the delimiters of the mark they disagree
- * about are emitted between them, which is what keeps their backtick runs from
- * meeting — ``**`a`**`b` `` has the `**` in the way. Runs with identical marks
- * cannot be told apart by anything, so joining them changes nothing at all.
+ * Two code spans cannot sit side by side: their fences would meet as one run of
+ * backticks that no reader can split. Usually there is nothing to do about it —
+ * runs carrying *identical* marks are indistinguishable anyway, so joining them
+ * changes nothing; and runs that differ are kept apart for free by the delimiters
+ * of the mark they disagree about, ``**`a`**`b` `` having the `**` in the way.
+ *
+ * The exception is a code run of nothing but whitespace. The mark that would have
+ * separated it cannot be written there — an emphasis delimiter has no non-space to
+ * hug — so the fences really would meet, and the only choice left is which to
+ * give up: the marks the two runs disagree about, or the text. It keeps the text.
  */
 function coalesceCodeRuns(runs: readonly InlineRun[]): InlineRun[] {
+  /** The two runs joined, or null when they may stay apart. */
+  const join = (a: InlineRun, b: InlineRun): InlineRun | null => {
+    if (a.marks.inlineCode !== true || b.marks.inlineCode !== true) return null;
+    if (sameInlineMarks(a.marks, b.marks)) {
+      return { text: a.text + b.text, marks: a.marks };
+    }
+    if (a.text.trim() === "" || b.text.trim() === "") {
+      return { text: a.text + b.text, marks: sharedMarks(a.marks, b.marks) };
+    }
+    return null;
+  };
+
   const out: InlineRun[] = [];
   for (const run of runs) {
-    const last = out[out.length - 1];
-    if (
-      last !== undefined &&
-      last.marks.inlineCode === true &&
-      run.marks.inlineCode === true &&
-      sameInlineMarks(last.marks, run.marks)
-    ) {
-      out[out.length - 1] = { text: last.text + run.text, marks: last.marks };
-      continue;
-    }
     out.push(run);
+    // Collapse backwards, not just once: a forced merge drops the marks that were
+    // keeping this span apart from the one before it, which can leave *those* two
+    // needing to join as well.
+    while (out.length >= 2) {
+      const a = out[out.length - 2] as InlineRun;
+      const b = out[out.length - 1] as InlineRun;
+      const joined = join(a, b);
+      if (joined === null) break;
+      out.splice(out.length - 2, 2, joined);
+    }
   }
   return out;
 }
@@ -453,12 +481,26 @@ function renderInline(source: readonly InlineRun[]): string {
   const hugged = runs.length > 1 || hasInlineMarks(runs[0]?.marks ?? {});
   const orders = markOrders(runs);
 
-  const closeDownTo = (depth: number): void => {
+  /**
+   * Close every mark above `depth`, top down, putting `held` back where it
+   * belongs: outside the emphasis, still inside anything else.
+   *
+   * Only emphasis cannot sit against whitespace. A link is perfectly happy to
+   * hold a trailing space — `[word ](url)` is a link over "word " — so the space
+   * goes back after the last *emphasis* closer rather than after all of them,
+   * and the link keeps it.
+   */
+  const closeDownTo = (depth: number, held = ""): void => {
+    const deepestEmphasis = open.findIndex(
+      (entry, index) => index >= depth && entry.name !== "link",
+    );
     for (let i = open.length - 1; i >= depth; i -= 1) {
       const entry = open[i];
       if (entry === undefined) continue;
       out += entry.name === "link" ? `](${renderHref(entry.href)})` : entry.spelling;
+      if (i === deepestEmphasis) out += held;
     }
+    if (deepestEmphasis === -1) out += held;
     open.length = depth;
   };
 
@@ -476,35 +518,47 @@ function renderInline(source: readonly InlineRun[]): string {
       common += 1;
     }
 
-    // Closing: hold back whitespace already written, so no closer sits on it.
+    // Closing: hold back the whitespace already written, so no emphasis closer
+    // sits on it. `closeDownTo` puts it back inside whatever may keep it.
     let held = "";
     if (open.slice(common).some((entry) => entry.name !== "link")) {
       held = trailingWhitespace(out);
       out = out.slice(0, out.length - held.length);
     }
-    closeDownTo(common);
-    out += held;
+    closeDownTo(common, held);
 
-    // Opening: write leading whitespace outside the delimiters, same reason —
-    // except for a code span, whose delimiters hug its backtick fence rather than
-    // its content. Moving whitespace out of *that* would change the content, and
-    // empty it entirely when the content is nothing but whitespace.
+    // Opening: the mirror image. Leading whitespace goes before the first
+    // *emphasis* delimiter — so a link opened outside it still covers the space —
+    // and never comes out of a code span at all, whose delimiters hug its backtick
+    // fence rather than its content.
+    //
+    // A run of nothing but whitespace opens no emphasis at all. `whitespaceSafe`
+    // has already dropped the marks that begin or end there, but a crossing can
+    // still force one that merely passes through to close and *reopen* right here,
+    // and an opener needs something other than a space to hug. Hoisting instead
+    // would empty the run — and an empty link label is not a link.
     let text = run.text;
-    if (
-      marks.inlineCode !== true &&
-      desired.slice(common).some((name) => name !== "link")
-    ) {
-      const lead = /^\s*/.exec(text)?.[0] ?? "";
-      out += lead;
-      text = text.slice(lead.length);
-    }
-    for (let i = common; i < desired.length; i += 1) {
-      const name = desired[i];
-      if (name === undefined) continue;
+    // A code run is not "blank" for this purpose however empty it looks: its
+    // emphasis hugs the backtick fence, which is not whitespace.
+    const blank = text.trim() === "" && marks.inlineCode !== true;
+    const opening = blank
+      ? desired.slice(common).filter((name) => name === "link")
+      : desired.slice(common);
+    const firstEmphasis =
+      marks.inlineCode === true || blank
+        ? -1
+        : opening.findIndex((name) => name !== "link");
+    for (const [offset, name] of opening.entries()) {
+      if (offset === firstEmphasis) {
+        const lead = /^\s*/.exec(text)?.[0] ?? "";
+        out += lead;
+        text = text.slice(lead.length);
+      }
       const spelling = name === "link" ? "[" : DELIMITER[name];
       out += spelling;
       open.push({ name, href, spelling });
     }
+
 
     out +=
       marks.inlineCode === true
@@ -515,11 +569,10 @@ function renderInline(source: readonly InlineRun[]): string {
           });
   }
 
-  const held = trailingWhitespace(out);
   if (open.some((entry) => entry.name !== "link")) {
+    const held = trailingWhitespace(out);
     out = out.slice(0, out.length - held.length);
-    closeDownTo(0);
-    out += held;
+    closeDownTo(0, held);
   } else {
     closeDownTo(0);
   }
@@ -935,9 +988,13 @@ function isBlank(char: string | undefined): boolean {
   return char === undefined || /\s/.test(char);
 }
 
-/** CommonMark's "punctuation" for the flanking rules: Unicode P and S. */
+/**
+ * CommonMark's "punctuation" for the flanking rules: an ASCII punctuation
+ * character, or anything in Unicode's P categories. Not the S (symbol)
+ * categories — with those in, `€_x_€` reads as emphasis, which it is not.
+ */
 function isPunctuation(char: string | undefined): boolean {
-  return char !== undefined && /[\p{P}\p{S}]/u.test(char);
+  return char !== undefined && /[!-/:-@[-`{-~]|\p{P}/u.test(char);
 }
 
 /**
@@ -1079,12 +1136,11 @@ function delimiterTake(char: string, opener: number, closer: number): number {
  * `**a***b**` spends two of the middle three closing the bold, and the remaining
  * one against the final two is the 1+2 the rule exists to reject.
  *
- * It only judges the *first* match between two runs, though. Once a pair has
- * exchanged characters it is one nested construct being taken apart — `***x***`,
- * or the four asterisks that close an italic-inside-bold and reopen the italic —
- * and vetoing the rest of it would leave delimiters stranded as text. The rule is
- * there to keep two *unrelated* runs from pairing up, which is a question that is
- * settled the first time they meet.
+ * It only judges the *first* match between two runs — a pair that has already
+ * exchanged characters is one nested construct being taken apart, and vetoing the
+ * rest of it would strand delimiters as text. That waiver is conditional, though,
+ * and {@link matchNesting} is what makes it conditional: it only stands if the
+ * construct actually finishes.
  */
 function ruleOfThreeAllows(
   char: string,
@@ -1114,10 +1170,16 @@ function markFor(char: string, take: number): Span["mark"] {
  * leftover is literal text: `**a*` is not emphasis, it is two asterisks and an
  * asterisk.
  */
-function matchDelimiters(tokens: readonly Token[]): {
+function matchDelimiters(
+  tokens: readonly Token[],
+  allowBypass: boolean,
+): {
   spans: Span[];
   unclaimed: number[];
+  /** Runs that only matched because the rule of three was waived for them. */
+  bypassed: number[];
 } {
+  const bypassed: number[] = [];
   const spans: Span[] = [];
   const unclaimed = tokens.map((token) =>
     token.kind === "delim" ? token.length : 0,
@@ -1153,7 +1215,7 @@ function matchDelimiters(tokens: readonly Token[]): {
             token,
             lengthAt(j),
             lengthAt(i),
-            paired.has(`${j}:${i}`),
+            allowBypass && paired.has(`${j}:${i}`),
           )
         ) {
           continue;
@@ -1166,6 +1228,7 @@ function matchDelimiters(tokens: readonly Token[]): {
       }
       if (at === -1) break;
       const j = openers[at] as number;
+      if (paired.has(`${j}:${i}`)) bypassed.push(j, i);
       paired.add(`${j}:${i}`);
       unclaimed[j] = lengthAt(j) - take;
       unclaimed[i] = lengthAt(i) - take;
@@ -1177,7 +1240,36 @@ function matchDelimiters(tokens: readonly Token[]): {
 
     if (token.canOpen && lengthAt(i) > 0) openers.push(i);
   }
-  return { spans, unclaimed };
+  return { spans, unclaimed, bypassed };
+}
+
+/**
+ * Match the delimiters, and check that the licence taken to do it was earned.
+ *
+ * The rule of three is waived for a second match between the same two runs, so
+ * that one nested construct can be taken apart — the four asterisks that close an
+ * italic inside a bold and reopen the italic need it. But `a***b****c` has the
+ * same shape and no later closer to finish the job, and CommonMark reads it as a
+ * single strong span with three asterisks left over as text. The two are
+ * indistinguishable at the moment of the match; what tells them apart is whether
+ * the construct is *finished*.
+ *
+ * So: match with the waiver, and if either run it was granted for ends up with
+ * characters nobody claimed, read the whole thing again without it. A waiver that
+ * completed a construct stands; one that only half-built it is withdrawn. Two
+ * passes at worst, and only for input that used the waiver at all — and the test
+ * is on those runs alone, since a stray delimiter elsewhere in the line has
+ * nothing to do with whether this construct closed.
+ */
+function matchNesting(tokens: readonly Token[]): {
+  spans: Span[];
+  unclaimed: number[];
+} {
+  const lenient = matchDelimiters(tokens, true);
+  const stranded = lenient.bypassed.some(
+    (index) => (lenient.unclaimed[index] ?? 0) > 0,
+  );
+  return stranded ? matchDelimiters(tokens, false) : lenient;
 }
 
 /** A token's marks: the tokenizer's scope, plus every span covering it. */
@@ -1200,7 +1292,7 @@ function marksFor(
  */
 function scanInline(source: string, out: InlineRun[]): void {
   const tokens = tokenizeInline(source, {});
-  const { spans, unclaimed } = matchDelimiters(tokens);
+  const { spans, unclaimed } = matchNesting(tokens);
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (token === undefined) continue;

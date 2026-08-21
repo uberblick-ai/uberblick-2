@@ -255,6 +255,90 @@ describe("inline marks in the document", () => {
     ]);
   });
 
+  /**
+   * The rule of three, and the one waiver it allows.
+   *
+   * `***c****d*` and `a***b****c` are the same shape at the moment of the match —
+   * a three-run opener and a four-run closer — and they must read differently. The
+   * first is a construct the writer emitted: an italic inside a bold, whose closer
+   * shuts both and reopens the italic for a later `*` to close. The second has no
+   * later closer, so CommonMark leaves three asterisks as text. What separates
+   * them is only whether the construct finishes, so the waiver is granted and then
+   * withdrawn if it did not.
+   */
+  it("waives the rule of three only for a construct that finishes", () => {
+    // Finished: every delimiter is spent, and the marks come back.
+    expect(importMarkdown("***c****d*").blocks[0]).toEqual({
+      type: "paragraph",
+      text: "cd",
+      inline: [
+        { text: "c", marks: { bold: true, italic: true } },
+        { text: "d", marks: { italic: true } },
+      ],
+    });
+
+    // Unfinished: the waiver is withdrawn, and the leftovers are text — the same
+    // reading CommonMark gives, with every character of the input preserved.
+    expect(importMarkdown("a***b****c").blocks[0]).toEqual({
+      type: "paragraph",
+      text: "a*b**c",
+      inline: [
+        { text: "a*", marks: {} },
+        { text: "b", marks: { bold: true } },
+        { text: "**c", marks: {} },
+      ],
+    });
+
+    // …and the neighbouring shapes stay put.
+    expect(importMarkdown("***both***").blocks[0]?.inline).toEqual([
+      { text: "both", marks: { bold: true, italic: true } },
+    ]);
+    expect(importMarkdown("**a***b**").blocks[0]?.text).toBe("a*b**");
+  });
+
+  /**
+   * Only *emphasis* cannot sit against whitespace. A link is perfectly happy to
+   * hold a space, so hoisting the space out of everything would throw away a mark
+   * the format can express.
+   */
+  it("keeps a link over edge whitespace, and only drops the emphasis", () => {
+    for (const [text, markdown] of [
+      [" word", "[ **word**](https://example.com)"],
+      ["word ", "[**word** ](https://example.com)"],
+    ] as Array<[string, string]>) {
+      const doc = seeded();
+      const id = appendBlock(doc, {
+        type: "paragraph",
+        inline: [{ text, marks: { link: "https://example.com", bold: true } }],
+      });
+      expect(exportMarkdown(doc, { frontmatter: false }), text).toBe(
+        `${markdown}\n`,
+      );
+      // The space kept the link and lost only the bold, and the text is intact.
+      const back = importMarkdown(markdown).blocks[0];
+      expect(back?.text, text).toBe(getBlockText(doc, id));
+      expect(
+        back?.inline?.every((run) => run.marks.link === "https://example.com"),
+        text,
+      ).toBe(true);
+    }
+  });
+
+  it("does not read a currency symbol as punctuation for the `_` rule", () => {
+    // `€` is a Unicode *symbol*, not punctuation, so it does not license the
+    // intraword `_` that CommonMark's flanking rules would otherwise allow.
+    expect(importMarkdown("€_x_€").blocks[0]).toEqual({
+      type: "paragraph",
+      text: "€_x_€",
+    });
+    // A real punctuation neighbour does license it.
+    expect(importMarkdown("(_x_)").blocks[0]?.inline).toEqual([
+      { text: "(", marks: {} },
+      { text: "x", marks: { italic: true } },
+      { text: ")", marks: {} },
+    ]);
+  });
+
   it("round-trips link labels and targets that markdown would truncate", () => {
     const cases: Array<{ run: InlineRun; markdown: string }> = [
       {
@@ -427,8 +511,7 @@ describe("inline marks in the document", () => {
     const exported = exportMarkdown(doc, { frontmatter: false });
     // The `**` between the two spans is what stops the fences meeting.
     expect(exported).toBe("**`one`**`two`\n");
-    expect(getBlockText(doc, id)).toBe("onetwo");
-    // Nothing was lost: the marks come back exactly as they went in.
+    // Nothing was lost: the marks, and so the text, come back as they went in.
     expect(importMarkdown(exported).blocks[0]?.inline).toEqual(
       getBlockInline(doc, id),
     );
@@ -466,7 +549,6 @@ describe("inline marks in the document", () => {
     const exported = exportMarkdown(doc, { frontmatter: false });
     expect(exported).toBe("**`    `**after\n");
     expect(getBlockText(doc, id)).toBe("  after");
-    expect(importMarkdown(exported).blocks[0]?.text).toBe("  after");
     expect(importMarkdown(exported).blocks[0]?.inline).toEqual(
       getBlockInline(doc, id),
     );
@@ -806,6 +888,45 @@ describe("export and import are closed over the marks the model allows", () => {
     return runs;
   }
 
+  /**
+   * Whether GFM can express this document at all, decided from the runs
+   * themselves rather than from what came back.
+   *
+   * Two things it cannot spell, and both are visible in the runs:
+   *
+   *  - Emphasis against whitespace — `**word **` is not bold in any reader. The
+   *    condition is per *run*, not per span, because a crossing span can be split
+   *    at any run boundary and the delimiter lands there.
+   *  - Two code spans that would meet with nothing between them: fences merge into
+   *    one unsplittable run. Marks they disagree about normally keep them apart,
+   *    but not when one of them is only whitespace, since that mark cannot be
+   *    written there either.
+   *
+   * Conservative — some excluded documents would come out exact anyway — but never
+   * derived from the answer. Deriving it from the answer would make the exactness
+   * assertion unfalsifiable: a document that should have been exact and was not
+   * would simply drop out of the sample.
+   */
+  function expressibleInGfm(runs: readonly InlineRun[]): boolean {
+    const emphasised = (run: InlineRun): boolean =>
+      run.marks.bold === true ||
+      run.marks.italic === true ||
+      run.marks.strike === true;
+    const emphasisOnSpace = runs.some(
+      (run) => emphasised(run) && /^\s|\s$/.test(run.text),
+    );
+    const fencesWouldMeet = runs.some((run, index) => {
+      const next = runs[index + 1];
+      if (next === undefined) return false;
+      if (run.marks.inlineCode !== true || next.marks.inlineCode !== true) {
+        return false;
+      }
+      if (JSON.stringify(run.marks) === JSON.stringify(next.marks)) return false;
+      return run.text.trim() === "" || next.text.trim() === "";
+    });
+    return !emphasisOnSpace && !fencesWouldMeet;
+  }
+
   /** One trip through markdown and back: what the document became. */
   function roundTrip(markdown: string): {
     runs: InlineRun[];
@@ -828,15 +949,29 @@ describe("export and import are closed over the marks the model allows", () => {
     let multiRun = 0;
     let marked = 0;
     let expressible = 0;
+    let blank = 0;
 
     for (let round = 0; round < 200; round += 1) {
       const runs = randomDocument(next);
       const doc = seeded();
       const id = appendBlock(doc, { type: "paragraph", inline: runs });
       const plain = getBlockText(doc, id);
-      // A whitespace-only paragraph is not a block at all to the line-based
-      // reader, which has nothing to do with marks.
-      if (plain.trim() === "") continue;
+      if (plain.trim() === "") {
+        // A paragraph of nothing but whitespace, asserted rather than skipped so
+        // that a change here has to be deliberate. Which of the two things happens
+        // depends on whether any mark survived to hold the line up: with nothing
+        // left, the line is blank and a blank line is not a block; with a code span
+        // or a link on it, there is something to read and the text comes back.
+        blank += 1;
+        const exported = exportMarkdown(doc, { frontmatter: false });
+        const back = importMarkdown(exported).blocks[0];
+        if (exported.trim() === "") {
+          expect(back, JSON.stringify(exported)).toBeUndefined();
+        } else {
+          expect(back?.text, JSON.stringify(exported)).toBe(plain);
+        }
+        continue;
+      }
 
       const first = exportMarkdown(doc, { frontmatter: false });
       const one = roundTrip(first);
@@ -858,8 +993,9 @@ describe("export and import are closed over the marks the model allows", () => {
       // …and when the format can express the document at all, the first export is
       // already exact. The exception is emphasis touching whitespace, and this is
       // what stops it growing into anything else.
-      if (JSON.stringify(one.runs) === JSON.stringify(getBlockInline(doc, id))) {
+      if (expressibleInGfm(getBlockInline(doc, id))) {
         expressible += 1;
+        expect(one.runs, label).toEqual(getBlockInline(doc, id));
         expect(one.markdown, label).toBe(first);
       }
 
@@ -879,5 +1015,7 @@ describe("export and import are closed over the marks the model allows", () => {
     // Most documents are expressible, so the exact-first-export assertion above is
     // carrying real weight rather than being skipped.
     expect(expressible).toBeGreaterThan(100);
+    // The blank-paragraph branch above is exercised too, not dead weight.
+    expect(blank).toBeGreaterThan(0);
   });
 });
