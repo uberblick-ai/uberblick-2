@@ -41,6 +41,7 @@
 
 import type * as Y from "yjs";
 import { InvalidLinkHrefError } from "./errors.js";
+import { COMMENT_MARK, isCommentMark } from "./types.js";
 import type { InlineMarkSet, InlineRun } from "./types.js";
 
 const FLAGS = ["bold", "italic", "strike", "inlineCode"] as const;
@@ -56,27 +57,47 @@ export function isExternalHref(href: unknown): href is string {
 }
 
 /**
- * The inline marks in one delta op's attributes.
+ * Whether a delta attribute's value means its mark is *on*, for every mark this
+ * package knows — the five inline ones and the annotation anchor.
  *
- * Unknown keys are ignored, and so is a known key whose value is not the shape
- * this module writes: a flag is on only for `true` or an attribute object (`{}`
- * is what y-prosemirror writes for an attribute-less mark), and a `link` counts
- * only with an external href.
+ * This is the definition of "readable", and it is deliberately the only one:
+ * every consumer has to agree with it or the document means two things at once.
+ * The editor's palette gate asks this question too, and refuses to bind a text
+ * whose answer is no, because y-prosemirror does *not* ask — `schema.mark` builds
+ * a mark from any attrs object it is handed, so a `{bold: false}` that reads as
+ * unmarked here would bind as bold there and be rewritten as real bold on the
+ * next keystroke. Silent, and a divergence rather than a loss, which is worse.
+ */
+export function readsAsMark(name: string, value: unknown): boolean {
+  if (name === COMMENT_MARK) return isCommentMark(value);
+  if (name === "link") {
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      isExternalHref((value as { href?: unknown }).href)
+    );
+  }
+  // `{}` is what y-prosemirror writes for an attribute-less mark; `true` is what
+  // a person writes by hand. Nothing else is this mark.
+  if ((FLAGS as readonly string[]).includes(name)) {
+    return value === true || (typeof value === "object" && value !== null);
+  }
+  return false;
+}
+
+/**
+ * The inline marks in one delta op's attributes. Unknown keys are ignored, and so
+ * is a known key whose value {@link readsAsMark} rejects.
  */
 function marksOf(attributes: unknown): InlineMarkSet {
   if (typeof attributes !== "object" || attributes === null) return {};
   const source = attributes as Record<string, unknown>;
   const marks: InlineMarkSet = {};
   for (const flag of FLAGS) {
-    const value = source[flag];
-    if (value === true || (typeof value === "object" && value !== null)) {
-      marks[flag] = true;
-    }
+    if (readsAsMark(flag, source[flag])) marks[flag] = true;
   }
-  const link = source.link;
-  if (typeof link === "object" && link !== null) {
-    const href = (link as { href?: unknown }).href;
-    if (isExternalHref(href)) marks.link = href;
+  if (readsAsMark("link", source.link)) {
+    marks.link = (source.link as { href: string }).href;
   }
   return marks;
 }
@@ -179,26 +200,25 @@ export function assertInlineWritable(runs: readonly InlineRun[]): void {
 }
 
 /**
- * The inline mark names present anywhere in a Y.XmlText, in document order.
+ * Every formatting key on a text other than the annotation anchor, in document
+ * order — what a source block cannot hold.
  *
- * Any value counts here, unlike {@link marksOf}, and on purpose: this answers
- * "would a block holding this text be unbindable if it became a source block?",
- * and the editor's palette gate judges a text by the attribute *keys* it carries,
- * whatever the values say. A key {@link marksOf} would not read as formatting
- * still stops the editor dead, so it still has to stop a re-type.
+ * Deliberately *not* limited to the marks this package knows, and not filtered by
+ * {@link readsAsMark}: the question is "would a block holding this text be
+ * unbindable as a source block?", and the editor's gate judges a text by the
+ * attribute keys it carries against what the node type allows. A key nothing here
+ * recognises stops the editor just as dead as a known one, so it has to stop a
+ * re-type too.
  */
-export function inlineMarkNamesIn(text: Y.XmlText | null): string[] {
+export function marksOtherThanComment(text: Y.XmlText | null): string[] {
   if (text === null) return [];
   const names: string[] = [];
   for (const op of text.toDelta() as Array<{ attributes?: unknown }>) {
     for (const [name, value] of Object.entries(
       (op.attributes ?? {}) as Record<string, unknown>,
     )) {
-      const known =
-        (FLAGS as readonly string[]).includes(name) || name === "link";
-      if (known && value !== undefined && value !== null && !names.includes(name)) {
-        names.push(name);
-      }
+      if (name === COMMENT_MARK || value === undefined || value === null) continue;
+      if (!names.includes(name)) names.push(name);
     }
   }
   return names;

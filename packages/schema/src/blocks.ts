@@ -32,7 +32,7 @@ import {
 import {
   applyInlineRuns,
   assertInlineWritable,
-  inlineMarkNamesIn,
+  marksOtherThanComment,
   readInlineRuns,
 } from "./marks.js";
 import { blockRev } from "./rev.js";
@@ -436,15 +436,17 @@ export interface BlockTypeAttrs {
  * Type-specific attributes are carried over where they still apply and can be
  * overridden through `attrs`.
  *
- * **Prose → source is refused when the text carries inline marks.** `code` and
- * `mermaid` hold source text and may carry only `comment`, so there is no honest
- * way to re-type formatted prose into one: dropping the marks would break this
- * function's whole promise, and keeping them would leave a document the web
- * editor refuses to bind (its palette gate rejects a block holding a mark its
- * node type disallows, precisely so nothing gets destroyed). So the re-type is
- * refused *before* it mutates anything — see {@link MarksNotAllowedError}, which
- * names the marks in the way. Annotation anchors are unaffected: `comment` is
- * legal on every block type and always survives.
+ * **Prose → source is refused when the text carries any mark but `comment`.**
+ * `code` and `mermaid` hold source text and may carry only the annotation anchor,
+ * so there is no honest way to re-type formatted prose into one: dropping the
+ * marks would break this function's whole promise, and keeping them would leave a
+ * document the web editor refuses to bind (its palette gate rejects a block
+ * holding a mark its node type disallows, precisely so nothing gets destroyed).
+ * So the re-type is refused *before* it mutates anything — see
+ * {@link MarksNotAllowedError}, which names the marks in the way. A mark from a
+ * writer this package has never heard of counts: the editor cannot render that
+ * either. Annotation anchors are unaffected — `comment` is legal on every block
+ * type and always survives.
  *
  * Concurrency: because a re-type inserts a replacement element, two replicas
  * re-typing the same block concurrently converge on two elements sharing that
@@ -473,9 +475,10 @@ export function setBlockType(
     const oldType = elementType(old);
 
     // Refused before anything is written: nothing to roll back, and the caller
-    // still has the block it started with.
+    // still has the block it started with. Every formatting key counts, not only
+    // the ones this package knows — see `marksOtherThanComment`.
     if (newType === "code" || newType === "mermaid") {
-      const marks = inlineMarkNamesIn(textOf(old));
+      const marks = marksOtherThanComment(textOf(old));
       if (marks.length > 0) {
         throw new MarksNotAllowedError(blockId, newType, marks);
       }

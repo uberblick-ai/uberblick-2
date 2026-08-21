@@ -40,10 +40,10 @@ import * as Y from "yjs";
 import { getAnnotationsMap } from "./doc.js";
 import { AnnotationRangeError, BlockNotFoundError } from "./errors.js";
 import { findBlockElement, requireBlockText } from "./blocks.js";
+import { COMMENT_MARK, isCommentMark } from "./types.js";
 import type { Annotation, AnnotationRange, CommentMark } from "./types.js";
 
-/** The formatting-mark key that anchors annotation ranges. */
-export const COMMENT_MARK = "comment";
+export { COMMENT_MARK };
 
 /** A contiguous run of one thread's `comment` mark. */
 export interface CommentRun {
@@ -55,9 +55,7 @@ export interface CommentRun {
 function threadIdOf(attributes: unknown): string | null {
   if (typeof attributes !== "object" || attributes === null) return null;
   const mark = (attributes as Record<string, unknown>)[COMMENT_MARK];
-  if (typeof mark !== "object" || mark === null) return null;
-  const threadId = (mark as Partial<CommentMark>).threadId;
-  return typeof threadId === "string" && threadId !== "" ? threadId : null;
+  return isCommentMark(mark) ? mark.threadId : null;
 }
 
 /**

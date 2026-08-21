@@ -136,9 +136,26 @@ export interface Annotation {
   resolved?: boolean;
 }
 
+/**
+ * The formatting-mark key that anchors annotation ranges.
+ *
+ * Not one of {@link INLINE_MARKS}: it is the one mark every block type may
+ * carry, formatting or not. It lives here rather than in `annotations.ts` because
+ * the marks module has to know the name to tell an anchor apart from formatting,
+ * and vocabulary belongs in the vocabulary module.
+ */
+export const COMMENT_MARK = "comment";
+
 /** The value of a `comment` mark: ProseMirror-shaped mark attributes. */
 export interface CommentMark {
   threadId: string;
+}
+
+/** Whether a delta attribute's value is a `comment` mark a reader can use. */
+export function isCommentMark(value: unknown): value is CommentMark {
+  if (typeof value !== "object" || value === null) return false;
+  const threadId = (value as Partial<CommentMark>).threadId;
+  return typeof threadId === "string" && threadId !== "";
 }
 
 /** A resolved absolute range inside a block's text. */

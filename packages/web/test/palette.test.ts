@@ -369,17 +369,46 @@ describe("foreign content inside a known block", () => {
       expect.objectContaining({ nodeName: "#mark:bold", index: 0 }),
     ]);
 
-    // And so is a mark whose *value* cannot be rendered faithfully. The schema
-    // package refuses to write a link that is not an external URL, so one can
-    // only arrive from a writer that does not — and binding it would hand the
-    // scheme straight to an `<a href>`.
-    for (const href of ["javascript:alert(1)", "mailto:a@b.com", "./other.md"]) {
-      const linked = docWithBlock();
-      firstBlockText(linked).format(0, 3, { link: { href } });
-      expect(findForeignBlocks(getBlocksFragment(linked)), href).toEqual([
-        expect.objectContaining({ nodeName: "#mark:link" }),
+    // And so is a mark whose *value* the schema package's reader does not read as
+    // that mark. y-prosemirror asks no such question — it builds a mark from any
+    // attrs it is handed — so binding one of these would make the document mean
+    // two things at once: unmarked to every reader, marked in the editor, and
+    // rewritten as the real thing on the next keystroke.
+    const unreadable: Array<[string, unknown]> = [
+      // A link is external URLs only, and this one would reach an `<a href>`.
+      ["link", { href: "javascript:alert(1)" }],
+      ["link", { href: "mailto:a@b.com" }],
+      ["link", { href: "./other.md" }],
+      ["link", {}],
+      // A flag is `true` or an attrs object. These read as unmarked.
+      ["bold", false],
+      ["italic", 0],
+      ["strike", "yes"],
+      // …and an anchor with no thread is not an anchor.
+      [COMMENT_MARK, { threadId: "" }],
+      [COMMENT_MARK, true],
+    ];
+    for (const [mark, value] of unreadable) {
+      const written = docWithBlock();
+      firstBlockText(written).format(0, 3, { [mark]: value });
+      const label = `${mark}=${JSON.stringify(value)}`;
+      expect(findForeignBlocks(getBlocksFragment(written)), label).toEqual([
+        expect.objectContaining({ nodeName: `#mark:${mark}` }),
       ]);
-      expect(bind(linked).refused, href).toBe(true);
+      expect(bind(written).refused, label).toBe(true);
+    }
+
+    // The values the reader *does* read bind, or the gate would never open.
+    for (const [mark, value] of [
+      ["bold", {}],
+      ["italic", true],
+      ["link", { href: "https://example.com" }],
+      [COMMENT_MARK, { threadId: "t1" }],
+    ] as Array<[string, unknown]>) {
+      const written = docWithBlock();
+      firstBlockText(written).format(0, 3, { [mark]: value });
+      const label = `${mark}=${JSON.stringify(value)}`;
+      expect(findForeignBlocks(getBlocksFragment(written)), label).toEqual([]);
     }
   });
 

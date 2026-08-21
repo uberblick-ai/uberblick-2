@@ -44,9 +44,13 @@
  * nodes hold source text, so `comment` is the only mark they allow.
  *
  * A mark whose *value* the editor cannot render faithfully is the same kind of
- * hazard, one step further in: a `link` is external URLs only, so binding one
- * with another scheme would put it into an `<a href>`. The schema package refuses
- * to write such a link; this gate is what stops one written elsewhere.
+ * hazard, one step further in, and the quietest of the three. y-prosemirror hands
+ * whatever it finds to `schema.mark(name, attrs)`, which happily builds a mark
+ * from a value the schema package's reader calls "not marked" — a `{bold: false}`
+ * binds as bold and the next keystroke writes it back as real bold, and a `link`
+ * with a `javascript:` target goes straight into an `<a href>`. Neither is a loss;
+ * both are the document meaning two things at once. So the gate asks the reader's
+ * own question, {@link readsAsMark}, and refuses to bind when the answer is no.
  *
  * A Y.XmlText's *content* is the third case, and the quietest one.
  * `createTextNodesFromYText` only ever calls `schema.text(delta.insert, marks)`,
@@ -61,7 +65,7 @@
  */
 
 import * as Y from "yjs";
-import { BLOCK_TYPES, isBlockType, isExternalHref } from "@uberblick/schema";
+import { BLOCK_TYPES, isBlockType, readsAsMark } from "@uberblick/schema";
 import { uberblickSchema } from "./create-editor.js";
 
 /** The node names the editor may render. Identical to the schema's block types. */
@@ -96,22 +100,6 @@ function blockAllowsMark(blockName: string, mark: string): boolean {
 }
 
 /**
- * Whether a declared, allowed mark's *value* is one the editor can render
- * faithfully. One case today: a `link` is external URLs only, and binding one
- * with any other scheme would hand it straight to an `<a href>`. The schema
- * package refuses to write such a link, so this is the door for one that arrived
- * over the wire from a writer that does not.
- */
-function renderableMarkValue(mark: string, value: unknown): boolean {
-  if (mark !== "link") return true;
-  const href =
-    typeof value === "object" && value !== null
-      ? (value as { href?: unknown }).href
-      : undefined;
-  return isExternalHref(href);
-}
-
-/**
  * What inside an otherwise-renderable block the palette cannot represent, or
  * `null` when the child is fine. A block's children must be Y.XmlText, and a
  * Y.XmlText may only insert strings, carrying only marks that block allows, with
@@ -132,7 +120,11 @@ function foreignInsideBlock(
     if (typeof op.insert !== "string") return "#embed";
     for (const [mark, value] of Object.entries(op.attributes ?? {})) {
       if (!blockAllowsMark(blockName, mark)) return `#mark:${mark}`;
-      if (!renderableMarkValue(mark, value)) return `#mark:${mark}`;
+      // Same question the schema package's reader asks, and it has to be the same
+      // answer: y-prosemirror builds a mark from any attrs object it is handed, so
+      // a value the reader calls "not marked" would bind as marked and be written
+      // back as the real thing.
+      if (!readsAsMark(mark, value)) return `#mark:${mark}`;
     }
   }
   return null;

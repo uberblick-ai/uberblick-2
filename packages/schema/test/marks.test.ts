@@ -25,6 +25,7 @@ import {
   importMarkdown,
   initDoc,
   listAnnotationRanges,
+  resolveAnnotationRange,
   setBlockType,
 } from "../src/index.js";
 import type { InlineRun } from "../src/index.js";
@@ -184,6 +185,22 @@ describe("inline marks in the document", () => {
         ],
         markdown: "**~~a*b*~~**",
       },
+      {
+        // Three runs sharing marks pairwise but not all round: the emitted
+        // delimiters merge into runs that only split correctly if the reader
+        // spends them a piece at a time.
+        runs: [
+          { text: "a", marks: { italic: true } },
+          { text: "b", marks: { bold: true } },
+          { text: "c", marks: { bold: true, italic: true } },
+        ],
+        markdown: "*a***b*c***",
+      },
+      {
+        // A `~` that closes nothing is text inside the span, not the end of it.
+        runs: [{ text: "a~b", marks: { strike: true } }],
+        markdown: "~~a\\~b~~",
+      },
     ];
 
     for (const { runs, markdown } of cases) {
@@ -205,6 +222,17 @@ describe("inline marks in the document", () => {
       inline: [{ text: "word ", marks: { bold: true } }],
     });
     expect(exportMarkdown(spaced, { frontmatter: false })).toBe("**word** \n");
+
+    // Reading hand-written markdown the writer would never emit: a delimiter run
+    // is spent a piece at a time, and what nobody can spend is text. These are
+    // the answers a CommonMark reader gives.
+    expect(importMarkdown("**a***b**").blocks[0]?.inline).toEqual([
+      { text: "a", marks: { bold: true } },
+      { text: "*b**", marks: {} },
+    ]);
+    expect(importMarkdown("~~a~b~~").blocks[0]?.inline).toEqual([
+      { text: "a~b", marks: { strike: true } },
+    ]);
   });
 
   it("round-trips link labels and targets that markdown would truncate", () => {
@@ -225,6 +253,12 @@ describe("inline marks in the document", () => {
         run: { text: "x", marks: { link: "https://example.com/a)b" } },
         markdown: "[x](<https://example.com/a)b>)",
       },
+      {
+        // A backslash in a target is data. Inside the angle form the writer
+        // escapes it and the reader takes exactly that escape back off.
+        run: { text: "x", marks: { link: "https://example.com/a)b\\q" } },
+        markdown: "[x](<https://example.com/a)b\\\\q>)",
+      },
     ];
     for (const { run, markdown } of cases) {
       const doc = seeded();
@@ -236,6 +270,12 @@ describe("inline marks in the document", () => {
         getBlockInline(doc, id),
       );
     }
+
+    // The other side of that escape rule: a backslash the writer did not put
+    // there stays in the target, because an href is never rewritten.
+    expect(
+      importMarkdown("[x](<https://example.com/a)b\\q>)").blocks[0]?.inline,
+    ).toEqual([{ text: "x", marks: { link: "https://example.com/a)b\\q" } }]);
   });
 
   it("keeps literal markdown literal, in both directions", () => {
@@ -350,6 +390,13 @@ describe("inline marks in the document", () => {
       expect((error as MarksNotAllowedError).blockType).toBe("code");
     }
 
+    // The refusal left the annotation where it was, anchored on its own text.
+    expect(resolveAnnotationRange(doc, thread.id)).toEqual({
+      start: 0,
+      end: 5,
+      collapsed: false,
+    });
+
     // An annotation anchor is legal on every block type, so a block carrying
     // only that re-types as it always did.
     const annotated = seeded();
@@ -361,7 +408,34 @@ describe("inline marks in the document", () => {
     setBlockType(annotated, other, "code", { language: "ts" });
     expect(getBlock(annotated, other)?.type).toBe("code");
     expect(listAnnotationRanges(annotated, other)).toHaveLength(1);
-    expect(thread.id).not.toBe("");
+  });
+
+  /**
+   * The refusal cannot be a list of marks this package knows. A source block's
+   * node type allows `comment` and nothing else, so a key from a writer nobody
+   * here has heard of makes the block just as unbindable — and a reader that
+   * skipped it would copy it into the new element and hand the editor a document
+   * it must refuse.
+   */
+  it("refuses a re-type over a mark it has never heard of", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "paragraph", text: "from the future" });
+    text(doc).format(0, 4, { underline: {} });
+
+    expect(() => setBlockType(doc, id, "code")).toThrow(MarksNotAllowedError);
+    try {
+      setBlockType(doc, id, "mermaid");
+      expect.unreachable();
+    } catch (error) {
+      expect((error as MarksNotAllowedError).marks).toEqual(["underline"]);
+    }
+
+    // Untouched, foreign mark included: refusing is what keeps it that way.
+    expect(getBlock(doc, id)?.type).toBe("paragraph");
+    expect(delta(doc)).toEqual([
+      ["from", { underline: {} }],
+      [" the future", null],
+    ]);
   });
 
   /**
@@ -454,5 +528,108 @@ describe("inline marks in the document", () => {
     expect(
       getBlockInline(a, id).filter((run) => run.marks.bold === true),
     ).toEqual([{ text: "bravest", marks: { bold: true } }]);
+  });
+});
+
+/**
+ * The closure contract, as a property rather than a list of examples.
+ *
+ * Named cases pin the failures we know about; this catches the ones we do not.
+ * Every bug the reader and writer had — nested emphasis, adjacent delimiter runs,
+ * the rule of three, whitespace at a span edge, a tilde next to a `~~` — was
+ * found by generating documents like these, and each was invisible to a
+ * hand-written case until it was written down.
+ *
+ * Two properties, both about the pair rather than either half:
+ *
+ *  1. **Text is never changed.** Marks can be lost where GFM cannot spell them
+ *     (whitespace at a span edge), so the plain text is what must survive
+ *     exactly. Corrupted delimiters show up here as changed text.
+ *  2. **Export is a fixed point after one trip.** Whatever the first export
+ *     normalised, importing and exporting again must produce the same bytes.
+ *
+ * Fixed seed and a small count, so it is a deterministic sub-second test rather
+ * than a fuzzer.
+ */
+describe("export and import are closed over the marks the model allows", () => {
+  const CHUNKS = [
+    "a",
+    "bb",
+    " ",
+    "  ",
+    "*",
+    "**",
+    "***",
+    "~~",
+    "~",
+    "`",
+    "[",
+    "]",
+    "(",
+    ")",
+    "\\",
+    "_",
+    "snake_case",
+    "x)y",
+  ];
+
+  /** A tiny deterministic PRNG, so a failure is always reproducible. */
+  function generator(seed: number): () => number {
+    let state = seed;
+    return () => {
+      state = (state * 1103515245 + 12345) & 0x7fffffff;
+      return state;
+    };
+  }
+
+  function randomDocument(next: () => number): InlineRun[] {
+    const pick = (n: number): number => next() % n;
+    const runs: InlineRun[] = [];
+    for (let i = pick(4) + 1; i > 0; i -= 1) {
+      let content = "";
+      for (let j = pick(4) + 1; j > 0; j -= 1) {
+        content += CHUNKS[pick(CHUNKS.length)];
+      }
+      const marks: InlineRun["marks"] = {};
+      if (pick(3) === 0) marks.bold = true;
+      if (pick(3) === 0) marks.italic = true;
+      if (pick(4) === 0) marks.strike = true;
+      if (pick(5) === 0) marks.inlineCode = true;
+      if (pick(5) === 0) {
+        marks.link = pick(2) === 0 ? "https://e.com/a" : "https://e.com/a_(b)";
+      }
+      runs.push({ text: content, marks });
+    }
+    return runs;
+  }
+
+  it("keeps the text and settles after one round trip, for 200 documents", () => {
+    const next = generator(20260821);
+    let checked = 0;
+
+    for (let round = 0; round < 200; round += 1) {
+      const runs = randomDocument(next);
+      const doc = seeded();
+      const id = appendBlock(doc, { type: "paragraph", inline: runs });
+      const plain = getBlockText(doc, id);
+      // A whitespace-only paragraph is not a block at all to the line-based
+      // reader, which has nothing to do with marks.
+      if (plain.trim() === "") continue;
+
+      const once = exportMarkdown(doc, { frontmatter: false });
+      const imported = importMarkdown(once).blocks[0];
+      expect(imported, once).toBeDefined();
+
+      const reread = seeded();
+      const rereadId = appendBlock(reread, imported ?? { type: "paragraph" });
+      const label = `${JSON.stringify(runs)} -> ${JSON.stringify(once)}`;
+
+      expect(getBlockText(reread, rereadId), label).toBe(plain);
+      expect(exportMarkdown(reread, { frontmatter: false }), label).toBe(once);
+      checked += 1;
+    }
+
+    // The generator is doing its job, not silently skipping everything.
+    expect(checked).toBeGreaterThan(150);
   });
 });

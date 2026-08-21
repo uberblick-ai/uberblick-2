@@ -54,7 +54,7 @@ export {
 } from "./blocks.js";
 export type { BlockTypeAttrs, EditBlockOptions } from "./blocks.js";
 
-export { isExternalHref } from "./marks.js";
+export { isExternalHref, readsAsMark } from "./marks.js";
 
 export { blockRev } from "./rev.js";
 export type { RevInput } from "./rev.js";

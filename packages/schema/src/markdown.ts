@@ -697,7 +697,13 @@ function matchBareTarget(
   return null;
 }
 
-/** A `(<target>)`, ending at the first unescaped `>`. Backslashes come off. */
+/**
+ * A `(<target>)`, ending at the first unescaped `>`.
+ *
+ * Only the three characters the writer escapes there come off their backslash. A
+ * backslash before anything else is part of the target — an href goes out
+ * unchanged, so it has to come back unchanged.
+ */
 function matchAngleTarget(
   source: string,
   from: number,
@@ -707,7 +713,7 @@ function matchAngleTarget(
     const char = source[i] as string;
     if (char === "\\") {
       const next = source[i + 1];
-      if (next !== undefined) {
+      if (next !== undefined && "\\<>".includes(next)) {
         href += next;
         i += 1;
         continue;
@@ -844,17 +850,23 @@ function delimiterTake(char: string, opener: number, closer: number): number {
  * the bold `**` can close (a non-space precedes it) and one asterisk is enough —
  * and the whole span unravels. Strikethrough is a GFM extension with no such
  * rule, so this applies to `*` only.
+ *
+ * The lengths are what is *left* of each run, not what it started as. A run gets
+ * spent a piece at a time, and the rule is about the match being made now:
+ * `**a***b**` spends two of the middle three closing the bold, and the remaining
+ * one against the final two is the 1+2 the rule exists to reject.
  */
 function ruleOfThreeAllows(
   char: string,
   opener: DelimToken,
   closer: DelimToken,
+  openerLeft: number,
+  closerLeft: number,
 ): boolean {
   if (char !== "*") return true;
   if (!closer.canOpen && !opener.canClose) return true;
-  const sum = opener.length + closer.length;
-  if (sum % 3 !== 0) return true;
-  return opener.length % 3 === 0 && closer.length % 3 === 0;
+  if ((openerLeft + closerLeft) % 3 !== 0) return true;
+  return openerLeft % 3 === 0 && closerLeft % 3 === 0;
 }
 
 function markFor(char: string, take: number): Span["mark"] {
@@ -888,24 +900,31 @@ function matchDelimiters(tokens: readonly Token[]): {
     if (token === undefined || token.kind !== "delim") continue;
 
     while (token.canClose && lengthAt(i) > 0) {
+      // The nearest opener this closer can actually use. An opener it cannot —
+      // too short for the mark, or refused by the rule of three — is skipped, not
+      // a dead end: `~~a~b~~` matches the outer pair *past* the lone `~`.
       let at = -1;
+      let take = 0;
       for (let k = openers.length - 1; k >= 0; k -= 1) {
-        const candidate = tokens[openers[k] as number];
+        const j = openers[k] as number;
+        const candidate = tokens[j];
         if (
-          candidate !== undefined &&
-          candidate.kind === "delim" &&
-          candidate.char === token.char &&
-          lengthAt(openers[k] as number) > 0 &&
-          ruleOfThreeAllows(token.char, candidate, token)
+          candidate === undefined ||
+          candidate.kind !== "delim" ||
+          candidate.char !== token.char ||
+          lengthAt(j) === 0 ||
+          !ruleOfThreeAllows(token.char, candidate, token, lengthAt(j), lengthAt(i))
         ) {
-          at = k;
-          break;
+          continue;
         }
+        const possible = delimiterTake(token.char, lengthAt(j), lengthAt(i));
+        if (possible === 0) continue;
+        at = k;
+        take = possible;
+        break;
       }
       if (at === -1) break;
       const j = openers[at] as number;
-      const take = delimiterTake(token.char, lengthAt(j), lengthAt(i));
-      if (take === 0) break;
       unclaimed[j] = lengthAt(j) - take;
       unclaimed[i] = lengthAt(i) - take;
       spans.push({ from: j + 1, to: i - 1, mark: markFor(token.char, take) });
