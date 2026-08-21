@@ -110,6 +110,16 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    auto-closed, then update the product docs to the new status quo (uberblick
    MCP tools once registered; until then, comment on the PR that the doc
    update is pending).
+   **Dev stack, after every merge to `main`:** restart it so
+   http://localhost:5173/ always serves the just-merged `main` — kill the hub
+   and vite processes the loop previously started, fast-forward your own
+   worktree to the new `origin/main`, and start `mise run hub` and
+   `mise run web` from there as background tasks. Never run or git-manipulate
+   the shared checkout for this; it belongs to other sessions, and your
+   worktree is the serving copy. Killing an already-running dev server is
+   sanctioned (owner directive) — but only a process the loop itself started,
+   or a vite/hub whose provenance you checked first, never another session's
+   MCP server. A fresh hub store is fine: replicas rehydrate it over sync.
 
 3. **Lint `ready` issues** against the spec's checklist. Failures: comment
    exactly what's missing, remove `ready`, skip.
