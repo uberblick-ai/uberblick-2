@@ -298,6 +298,14 @@ describe("synced", () => {
       expect(description(name)).toContain("update log");
     }
 
+    // The two counts sync_status returns are in different units, and this
+    // paragraph is the only place an agent learns which is which — so losing it
+    // loses the distinction, exactly like losing the qualification above.
+    expect(description("sync_status")).toContain("counts ROOMS, not updates");
+    expect(description("sync_status")).toContain(
+      "counts provider SYNC MESSAGES awaiting acknowledgement",
+    );
+
     // And named, with a pointer, on every other tool that returns the field.
     for (const name of [
       "insert_block",

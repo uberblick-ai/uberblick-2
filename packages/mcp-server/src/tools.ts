@@ -647,9 +647,12 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "ROOMS, not updates: the rooms holding local changes the hub has not acknowledged, the ones `pendingRooms` " +
         "names. It is read from the durable pending set, so it survives a restart and is non-zero in local-only " +
         "mode: work that never left this machine is unsynced, whether or not a connection was ever attempted. " +
-        "`inFlightUpdates` counts individual UPDATES awaiting an acknowledgement on the current connection — an " +
-        "in-memory count that resets with the connection, and the unit the web client's status line shows. One " +
-        "unsynced room can hold many unsent updates.\n\n" +
+        "`inFlightUpdates` counts provider SYNC MESSAGES awaiting acknowledgement on the current connection, " +
+        "which is not a count of Yjs updates: the provider merges a batch of updates into one message, counts a " +
+        "message before it goes out, and resets the backlog to the single sync-handshake message on every " +
+        "reconnect — so it can read 1 for a whole document's worth of unsent work. It is in memory and resets " +
+        "with the connection. The web client's status line shows the same counter for the room it has open, " +
+        "labelled `N sync messages unacked`.\n\n" +
         `${SYNCED_MEANS} The same holds for \`rooms[].synced\` below and for \`unsyncedChanges: 0\`: both are ` +
         "statements about acknowledgement, so a hub that dies inside the debounce comes back missing updates " +
         "this tool has already reported as synced, until a replica holding them reconnects and re-sends.\n\n" +

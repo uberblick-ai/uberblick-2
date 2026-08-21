@@ -23,10 +23,16 @@ import {
 /**
  * Exported for the label test only.
  *
- * The unsent count is named in its own unit — individual updates this provider
- * has not had acknowledged — because `sync_status` reports a *rooms* count under
- * a similar name. Two numbers labelled "pending" invite the question of which
- * one is lying; naming the units answers it.
+ * The backlog count names its unit, because `sync_status` reports a *rooms*
+ * count under a similar name and two numbers labelled "pending" invite the
+ * question of which one is lying.
+ *
+ * The unit is provider sync messages awaiting the hub's acknowledgement — not
+ * Yjs updates, which the counter cannot report: the provider merges a batch of
+ * updates into one message, counts a message before it goes out, and resets the
+ * backlog to the single sync-handshake message on every reconnect. So "1 sync
+ * message unacked" can stand for a whole document's worth of unsent work —
+ * which is why the label does not say "1 update".
  */
 export function StatusLine({
   connection,
@@ -48,8 +54,8 @@ export function StatusLine({
       <span>{label}</span>
       {status.unsyncedChanges > 0 && (
         <span className="ub-pending">
-          {status.unsyncedChanges} update{status.unsyncedChanges === 1 ? "" : "s"}{" "}
-          unsent
+          {status.unsyncedChanges} sync message
+          {status.unsyncedChanges === 1 ? "" : "s"} unacked
         </span>
       )}
       {status.localReplicaLoaded && <span className="ub-muted">local cache</span>}

@@ -1,10 +1,11 @@
 /**
- * The status line's unsent-update label.
+ * The status line's sync-backlog label.
  *
  * `sync_status` reports a count of unsynced *rooms*; this reports a count of
- * unsent *updates*. Both used to read "pending", which made two correct numbers
- * look like a contradiction during an outage. The rendered wording is the fix,
- * so it is what the test pins.
+ * provider sync *messages* awaiting acknowledgement. Both used to read
+ * "pending", which made two correct numbers look like a contradiction during an
+ * outage. The rendered wording is the fix, so it is what the test pins — down to
+ * the unit, because the honest unit here is messages and not updates.
  */
 
 import { describe, expect, it } from "vitest";
@@ -45,10 +46,10 @@ function label(unsyncedChanges: number): string | null {
   return text?.replace(/\s+/g, " ").trim() ?? null;
 }
 
-describe("the status line names the unit of its unsent count", () => {
-  it("reads in updates, not the bare word pending", () => {
-    expect(label(38)).toBe("38 updates unsent");
-    expect(label(1)).toBe("1 update unsent");
+describe("the status line names the unit of its backlog count", () => {
+  it("reads in sync messages, not the bare word pending", () => {
+    expect(label(38)).toBe("38 sync messages unacked");
+    expect(label(1)).toBe("1 sync message unacked");
   });
 
   it("says nothing when everything is acknowledged", () => {
