@@ -11,7 +11,9 @@
  * MCP instance may have written since the last call) and, on boot or after a
  * reconnect, wait briefly for the hub. Every mutating handler ends with
  * `{applied, synced}` plus the hub's state, because "applied locally" is not
- * "synced" and an agent deserves to know which one it got.
+ * "synced" and an agent deserves to know which one it got — and `synced` is not
+ * "stored by the hub" either, which is why {@link SYNCED_MEANS} says so in the
+ * tool descriptions rather than leaving the word to be read generously.
  *
  * All document reads and writes go through `@uberblick/schema`. That is not
  * politeness: the web editor destroys content outside its palette, and the
@@ -151,6 +153,22 @@ function guarded<Args>(
   };
 }
 
+/**
+ * The exact claim `synced: true` makes, in the words an agent reads.
+ *
+ * The hub acknowledges an update on receipt and writes it on a debounce, so an
+ * acknowledged update is in the hub's memory, not on its disk. Narrowing the
+ * word here is the honest fix: the hub cannot store per update, because its
+ * SQLite extension writes the whole document state per store call.
+ */
+const SYNCED_MEANS =
+  "`synced: true` means the hub acknowledged this update: it is in the hub's memory and will be written within " +
+  "the hub's store debounce — by default 2s after the last change to the document, 10s at the outside. It does " +
+  "NOT mean the hub has stored it. A hub killed inside that window (SIGKILL, a crash, power loss) loses the " +
+  "update even though it was reported as synced; only a graceful hub shutdown flushes what the debounce is " +
+  "holding. `applied: true` is the durable half: the local update log has this write before the tool returns, " +
+  "and survives a kill of this server.";
+
 // Identity is UUIDs, so the boundary checks for one. A tool that accepted any
 // string would let an agent persist an identity nothing can ever resolve.
 const uuidArg = z.uuid().describe("Document UUID.");
@@ -223,6 +241,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
    * What a mutating tool owes its caller: the write landed locally, and whether
    * it has reached the hub — which, right after a write, it has not.
    *
+   * `synced` is "the hub acknowledged it", never "the hub stored it"; see
+   * {@link SYNCED_MEANS} for the window that distinction leaves open.
+   *
    * `assertHealthy` runs here, after the write: an append that failed during
    * *this* call must not be reported as applied. It throws, so the tool answers
    * with `persistence_failed` instead.
@@ -251,7 +272,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       description:
         "Create a document and publish its directory stub, so every client can discover it. " +
         "Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
-        "The write applies to the local replica and syncs in the background.",
+        "The write applies to the local replica and syncs in the background.\n\n" +
+        SYNCED_MEANS,
       inputSchema: {
         title: z.string().describe("Display title. Identity is the returned UUID."),
         tags: z.array(z.string().min(1)).optional(),
@@ -393,7 +415,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "refused and the error carries `currentText` and `currentRev` to re-diff against.\n\n" +
         "Scope of that guarantee, stated plainly: it is a check against THIS replica at the moment of the call. " +
         "There is no cross-replica compare-and-swap — an edit made elsewhere that has not reached this replica yet " +
-        "cannot be detected, and the window widens the longer this server stays offline.",
+        "cannot be detected, and the window widens the longer this server stays offline.\n\n" +
+        SYNCED_MEANS,
       inputSchema: {
         uuid: uuidArg,
         block_id: z.string().min(1),
@@ -614,6 +637,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "durable pending set, so it survives a restart and is non-zero in local-only mode: work that never left " +
         "this machine is unsynced, whether or not a connection was ever attempted. `inFlightUpdates` is the " +
         "in-memory count of messages awaiting an acknowledgement on the current connection, and resets with it.\n\n" +
+        `${SYNCED_MEANS} The same holds for \`rooms[].synced\` below and for \`unsyncedChanges: 0\`: both are ` +
+        "statements about acknowledgement, so a hub killed inside the debounce loses updates this tool has " +
+        "already reported as synced.\n\n" +
         "`persistence` is null unless an update failed to reach the log, in which case every other tool refuses " +
         "to serve until the server is restarted.",
       inputSchema: {},

@@ -266,7 +266,11 @@ export class HubSync {
     return { status: "connecting", url: this.config.hubUrl };
   }
 
-  /** True when the room's local changes are known to have reached the hub. */
+  /**
+   * True when the hub has acknowledged the room's local changes. Acknowledged,
+   * not stored: the hub writes on a debounce, so this is what `synced` can
+   * honestly claim and no more.
+   */
   isRoomQuiet(room: string): boolean {
     const provider = this.providers.get(room);
     if (provider === undefined) {
