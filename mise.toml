@@ -27,6 +27,10 @@ run = "fnox exec --if-missing warn -- pnpm --silent --filter @uberblick/mcp-serv
 description = "Start the Vite dev server"
 run = "fnox exec --if-missing warn -- pnpm --filter @uberblick/web dev"
 
+[tasks.build-web]
+description = "Build the web client with HUB_URL and HUB_AUTH_TOKEN baked into packages/web/dist"
+run = "fnox exec --if-missing error -- pnpm --filter @uberblick/web build"
+
 # hub + web only. The MCP server is a stdio process spawned by its client
 # (Claude Code et al.), so it is not part of the dev loop; use `mise run mcp`
 # for a standalone smoke test.

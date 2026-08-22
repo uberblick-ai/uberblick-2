@@ -1,0 +1,43 @@
+name: uberblick-remote
+
+services:
+  hub:
+    build:
+      context: .
+      target: hub
+    environment:
+      HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    volumes:
+      - hub-data:/data
+
+  caddy:
+    build:
+      context: .
+      target: web
+      args:
+        HUB_URL: "wss://${TAILSCALE_HOST:?set TAILSCALE_HOST in .env}/ws"
+      secrets:
+        - hub-auth-token
+    depends_on:
+      - hub
+    environment:
+      TAILSCALE_HOST: "${TAILSCALE_HOST:?set TAILSCALE_HOST in .env}"
+    ports:
+      - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:443:443"
+    restart: unless-stopped
+    user: "0:0"
+    volumes:
+      - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  hub-data:
+  caddy-data:
+  caddy-config:
+
+secrets:
+  hub-auth-token:
+    environment: HUB_AUTH_TOKEN

@@ -33,6 +33,7 @@ mise exec -- pnpm install
 mise run hub          # Hocuspocus sync hub
 mise run mcp          # MCP server, standalone smoke test only (see below)
 mise run web          # Vite dev server
+mise run build-web    # production web bundle in packages/web/dist
 mise run dev          # hub + web in parallel
 mise run lint         # Biome lint across the workspace (no formatter)
 mise run typecheck    # tsc --noEmit across all packages
@@ -40,6 +41,10 @@ mise run test         # all test suites
 mise run e2e          # browser proof points (Playwright, Chromium, on demand)
 REVIEW_SHA=<commit> mise run review  # immutable Docker review of one commit
 ```
+
+To run the hub and built web client on a remote Tailscale host, follow
+[REMOTE.md](REMOTE.md). The remote deployment uses Docker Compose and Caddy for
+TLS, WebSocket proxying, and SPA fallback.
 
 `mise run e2e` is the only task that drives a browser. It starts its own hub on
 an ephemeral port with a throwaway signing secret and a temp database, and its
