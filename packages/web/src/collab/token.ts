@@ -20,9 +20,10 @@
  *
  * ============================ LOUD WARNING ============================
  * The client mints its own token from a secret compiled into the bundle. That
- * is LOCAL-SPIKE-ONLY: a browser bundle is public, so `HUB_AUTH_TOKEN` is not a
- * secret anywhere but localhost. Hosted, the hub mints per OAuth session and
- * the secret never leaves the server. See vite.config.ts.
+ * is PRIVATE-SPIKE-ONLY: a browser bundle is public, so `HUB_AUTH_TOKEN` is not
+ * a secret once served. REMOTE.md limits the remote deployment to a private
+ * Tailscale network. Hosted, the hub mints per OAuth session and the secret
+ * never leaves the server. See vite.config.ts.
  * =====================================================================
  */
 

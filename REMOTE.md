@@ -13,7 +13,10 @@ Server-minted sessions are the planned replacement; see
 ## Host prerequisites
 
 - A Linux host with a plain checkout of this repository, Docker Engine, and
-  Docker Compose v2.
+  Docker Compose 2.6.0 or newer (Compose 5 also satisfies this requirement).
+  Check with `docker compose version --short`. Compose 2.5 added build secrets;
+  2.6 is the minimum that also supports the environment-backed secret source
+  and top-level project name used here.
 - Tailscale installed on the host and connected to the private tailnet. MagicDNS
   and HTTPS must be enabled for the tailnet. Enabling HTTPS publishes the
   machine names used in certificates to a public certificate transparency log;
@@ -47,14 +50,20 @@ Edit `.env` and set all three values:
   age key, `fnox get HUB_AUTH_TOKEN` prints that value so it can be transferred
   to the host's ignored `.env`. Never copy the age key to the host.
 
-Validate the resolved configuration, build the web bundle with
-`wss://<TAILSCALE_HOST>/ws` baked in, and start both services:
+The wrapper reads `.env`, derives a SHA-256 cache key from `HUB_AUTH_TOKEN`
+without printing or passing the token as a Docker build argument, then invokes
+Compose. Always use it for this deployment: BuildKit deliberately excludes
+secret contents from cache keys, so the derived non-secret build argument is
+what forces a web rebuild after token rotation.
+
+Validate the configuration without rendering its secret values, build the web
+bundle with `wss://<TAILSCALE_HOST>/ws` baked in, and start both services:
 
 ```sh
-docker compose config
-docker compose up --build --detach
-docker compose ps
-docker compose logs --tail=100 hub caddy
+sh remote-compose.sh config --quiet
+sh remote-compose.sh up --build --detach
+sh remote-compose.sh ps
+sh remote-compose.sh logs --tail=100 hub caddy
 ```
 
 Open `https://<TAILSCALE_HOST>` from a second computer on the same tailnet. In
@@ -65,8 +74,9 @@ connects.
 
 The web configuration is compiled into the image. After changing
 `TAILSCALE_HOST` or `HUB_AUTH_TOKEN`, rebuild it with
-`docker compose up --build --detach`; restarting the existing container cannot
-change the bundle.
+`sh remote-compose.sh up --build --detach`; restarting the existing container
+cannot change the bundle. Do not run `docker compose config` without `--quiet`:
+the rendered configuration contains `HUB_AUTH_TOKEN` in the hub environment.
 
 ## Two-computer verification protocol
 
@@ -87,28 +97,29 @@ name/color if prompted.
    A's network. Confirm both browsers converge to the same text and neither
    edit disappears.
 4. **Hub restart durability:** make one more edit and wait until it appears on
-   both computers. On the host run `docker compose restart hub`, then reload B.
-   Confirm the document and the last edit remain.
+   both computers. On the host run `sh remote-compose.sh restart hub`, then
+   reload B. Confirm the document and the last edit remain.
 5. **Named-volume durability:** record a distinctive document title, then run
-   `docker compose down` followed by `docker compose up --detach`. Reload B and
-   confirm the title remains and the directory hydrates. Do not pass `--volumes`
-   to `down`; that flag intentionally deletes the named SQLite volume.
+   `sh remote-compose.sh down` followed by
+   `sh remote-compose.sh up --detach`. Reload B and confirm the title remains
+   and the directory hydrates. Do not pass `--volumes` to `down`; that flag
+   intentionally deletes the named SQLite volume.
 
 Record the host name, date, browser/OS pairs, and pass/fail result for every
-step in issue #75. The physical two-computer checks are deployment evidence;
+step in issue #98. The physical two-computer checks are deployment evidence;
 they are not replaced by the repository's local test suite.
 
 ## Operations
 
 ```sh
-docker compose logs --follow hub caddy
-docker compose restart hub
-docker compose down
-docker compose up --detach
+sh remote-compose.sh logs --follow hub caddy
+sh remote-compose.sh restart hub
+sh remote-compose.sh down
+sh remote-compose.sh up --detach
 ```
 
 The hub handles Compose's `SIGTERM` by flushing pending document updates before
 it exits. SQLite is `/data/hub.sqlite` in the `hub-data` named volume, so normal
-container replacement and `docker compose down` preserve it. Backups and moving
-an existing local workspace into this deployment are separate follow-ups.
-
+container replacement and `sh remote-compose.sh down` preserve it. Backups and
+moving an existing local workspace into this deployment are separate
+follow-ups.

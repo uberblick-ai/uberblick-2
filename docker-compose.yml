@@ -18,6 +18,7 @@ services:
       target: web
       args:
         HUB_URL: "wss://${TAILSCALE_HOST:?set TAILSCALE_HOST in .env}/ws"
+        HUB_AUTH_TOKEN_DIGEST: "${HUB_AUTH_TOKEN_DIGEST:?run commands through sh remote-compose.sh}"
       secrets:
         - hub-auth-token
     depends_on:

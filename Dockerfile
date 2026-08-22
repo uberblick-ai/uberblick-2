@@ -22,8 +22,10 @@ COPY . .
 FROM workspace AS web-build
 
 ARG HUB_URL
+ARG HUB_AUTH_TOKEN_DIGEST
 RUN --mount=type=secret,id=hub-auth-token \
     test -n "$HUB_URL" \
+    && test -n "$HUB_AUTH_TOKEN_DIGEST" \
     && test -s /run/secrets/hub-auth-token \
     && HUB_URL="$HUB_URL" HUB_AUTH_TOKEN="$(cat /run/secrets/hub-auth-token)" \
        pnpm --filter @uberblick/web build
