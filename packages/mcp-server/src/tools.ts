@@ -415,7 +415,12 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       title: "Edit one block",
       description:
         "Replace one block's text by diff-and-splice: only the characters that actually changed are touched, " +
-        "so a concurrent human edit elsewhere in the block survives and annotation anchors stay put.\n\n" +
+        "so a concurrent human edit elsewhere in the block survives and every formatting mark — inline " +
+        "formatting and annotation anchors alike — stays put.\n\n" +
+        "Plain text, both ways: `old_text` and `new_text` are the block's text with no markdown in it, the text " +
+        "get_doc returns. Inline formatting is not spelled out there and cannot be changed here; spliced-in text " +
+        "inherits the formatting of the character to its left, and `rev` ignores marks, so formatting a range " +
+        "never makes a prepared edit stale.\n\n" +
         "Pass `old_text` (and the `rev` from get_doc) to assert what you are editing. If either is stale the edit is " +
         "refused and the error carries `currentText` and `currentRev` to re-diff against.\n\n" +
         "Scope of that guarantee, stated plainly: it is a check against THIS replica at the moment of the call. " +

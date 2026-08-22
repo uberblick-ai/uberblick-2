@@ -5,8 +5,8 @@
  * editor bound through ySyncPlugin, a real keystroke is dispatched through the
  * editor view, and afterwards the `blocks` fragment must be recognisably the
  * same document: same elements in the same order, every block id and every
- * attribute untouched, the annotation mark still anchored, and `getBlocks()`
- * still able to parse all of it.
+ * attribute untouched, every formatting mark still anchored under its bare Yjs
+ * key, and `getBlocks()` still able to parse all of it.
  *
  * This is the test that would have failed with BlockNote (foreign fragments get
  * migrated, undeclared attributes get stripped) and it is the reason the editor
@@ -19,6 +19,7 @@ import {
   COMMENT_MARK,
   appendBlock,
   createAnnotation,
+  getBlockInline,
   getBlocks,
   getBlocksFragment,
   initDoc,
@@ -39,7 +40,11 @@ interface Built {
   threadId: string;
 }
 
-/** All four block types, known ids, and one annotation created by the schema. */
+/**
+ * All four block types, known ids, one annotation and all five inline marks —
+ * created by the schema package, never by the editor. The paragraph's plain text
+ * is exactly "The quick brown fox jumps." whatever the marks do to it.
+ */
 function buildDocument(): Built {
   const ydoc = new Y.Doc();
   initDoc(ydoc, { uuid: "11111111-2222-3333-4444-555555555555", title: "Golden" });
@@ -51,7 +56,15 @@ function buildDocument(): Built {
   });
   const paragraph = appendBlock(ydoc, {
     type: "paragraph",
-    text: "The quick brown fox jumps.",
+    inline: [
+      { text: "The quick ", marks: {} },
+      { text: "brown", marks: { bold: true } },
+      { text: " ", marks: {} },
+      { text: "fox", marks: { italic: true, link: "https://example.com/fox" } },
+      { text: " ", marks: {} },
+      { text: "jumps", marks: { strike: true, inlineCode: true } },
+      { text: ".", marks: {} },
+    ],
   });
   const code = appendBlock(ydoc, {
     type: "code",
@@ -89,6 +102,48 @@ function mount(ydoc: Y.Doc, newBlockId?: () => string): Editor {
   return editor;
 }
 
+/**
+ * Type text one character at a time, the way ProseMirror's view does: through
+ * `handleTextInput`, which is the hook input rules listen on. A plain
+ * `insertText` would never fire a rule.
+ */
+function typeText(editor: Editor, text: string): void {
+  for (const char of text) {
+    const { from, to } = editor.state.selection;
+    const handled = editor.view.someProp("handleTextInput", (handler) =>
+      handler(editor.view, from, to, char, () =>
+        editor.state.tr.insertText(char, from, to),
+      ),
+    );
+    if (handled !== true) {
+      editor.view.dispatch(editor.state.tr.insertText(char, from, to));
+    }
+  }
+}
+
+/**
+ * Each text node of one block with its marks — text included, so a mark that
+ * moved to different characters fails rather than matching the same shape.
+ */
+function marksOf(
+  editor: Editor,
+  index: number,
+): Array<{ text: string | undefined; marks: Record<string, unknown> }> {
+  const nodes: Array<{
+    text: string | undefined;
+    marks: Record<string, unknown>;
+  }> = [];
+  editor.state.doc.child(index).content.forEach((node) => {
+    nodes.push({
+      text: node.text,
+      marks: Object.fromEntries(
+        node.marks.map((mark) => [mark.type.name, mark.attrs]),
+      ),
+    });
+  });
+  return nodes;
+}
+
 describe("golden round trip: schema → editor → keystroke → schema", () => {
   it("loads the schema-owned fragment into ProseMirror unchanged", () => {
     const { ydoc, ids, threadId } = buildDocument();
@@ -117,14 +172,29 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     expect(doc.child(2).textContent).toBe("const answer = 42;\nreturn answer;");
     expect(doc.child(3).textContent).toBe("graph TD;\n  A-->B;");
 
-    // The comment mark becomes a ProseMirror mark carrying the thread id.
-    const marked = doc
-      .child(1)
-      .content.content.filter((node) => node.marks.length > 0);
-    expect(marked).toHaveLength(1);
-    expect(marked[0]?.text).toBe("quick");
-    expect(marked[0]?.marks[0]?.type.name).toBe(COMMENT_MARK);
-    expect(marked[0]?.marks[0]?.attrs.threadId).toBe(threadId);
+    // Every formatting mark becomes a ProseMirror mark, the comment carrying its
+    // thread id and the link its href — one text node per run, in order.
+    expect(doc.child(1).textContent).toBe("The quick brown fox jumps.");
+    expect(marksOf(editor, 1)).toEqual([
+      { text: "The ", marks: {} },
+      { text: "quick", marks: { [COMMENT_MARK]: { threadId } } },
+      { text: " ", marks: {} },
+      { text: "brown", marks: { bold: {} } },
+      { text: " ", marks: {} },
+      {
+        text: "fox",
+        marks: { italic: {}, link: { href: "https://example.com/fox" } },
+      },
+      { text: " ", marks: {} },
+      { text: "jumps", marks: { strike: {}, inlineCode: {} } },
+      { text: ".", marks: {} },
+    ]);
+
+    // The code block renders monospace with its language visible: the label is a
+    // CSS pseudo-element on the attribute, so the attribute reaching the DOM is
+    // what makes it appear.
+    const pre = editor.view.dom.querySelector("pre.ub-code");
+    expect(pre?.getAttribute("data-language")).toBe("ts");
   });
 
   it("preserves ids, attributes and the annotation across a real keystroke", () => {
@@ -178,7 +248,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       { threadId, start: 4, end: 9 },
     ]);
 
-    // The mark is stored under the bare `comment` key, not a hashed variant.
+    // Every mark is stored under its bare key, not a hashed variant.
     // (y-prosemirror hashes the key for marks that do not exclude themselves.)
     const paragraphDelta = after[1]?.delta ?? [];
     const attributeKeys = new Set(
@@ -186,7 +256,21 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
         Object.keys((op.attributes ?? {}) as Record<string, unknown>),
       ),
     );
-    expect([...attributeKeys]).toEqual([COMMENT_MARK]);
+    expect([...attributeKeys].sort()).toEqual(
+      [COMMENT_MARK, "bold", "italic", "link", "strike", "inlineCode"].sort(),
+    );
+
+    // …and every run still covers the same text after the keystroke, with the
+    // text typed at the very end staying outside the last mark.
+    expect(getBlockInline(ydoc, ids.paragraph)).toEqual([
+      { text: "The quick ", marks: {} },
+      { text: "brown", marks: { bold: true } },
+      { text: " ", marks: {} },
+      { text: "fox", marks: { italic: true, link: "https://example.com/fox" } },
+      { text: " ", marks: {} },
+      { text: "jumps", marks: { strike: true, inlineCode: true } },
+      { text: ". Then it stopped.", marks: {} },
+    ]);
 
     // And the schema package can still read the whole document.
     const blocks = getBlocks(ydoc);
@@ -203,7 +287,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
   });
 
   it("splits a paragraph on Enter into two valid blocks with a fresh id", () => {
-    const { ydoc, ids } = buildDocument();
+    const { ydoc, ids, threadId } = buildDocument();
     const editor = mount(ydoc, sequentialIds("split"));
 
     // Position the caret after "The quick " in the paragraph (block index 1).
@@ -227,6 +311,24 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     expect(blocks[1]?.text).toBe("The quick ");
     expect(blocks[2]?.text).toBe("brown fox jumps.");
 
+    // A split is the operation stored positions would not survive. Every mark in
+    // the half that moved is still on the same characters, in the new block.
+    expect(getBlockInline(ydoc, "split-1")).toEqual([
+      { text: "brown", marks: { bold: true } },
+      { text: " ", marks: {} },
+      { text: "fox", marks: { italic: true, link: "https://example.com/fox" } },
+      { text: " ", marks: {} },
+      { text: "jumps", marks: { strike: true, inlineCode: true } },
+      { text: ".", marks: {} },
+    ]);
+    // …and the annotation stayed with the first half, where its text went.
+    expect(getBlockInline(ydoc, ids.paragraph)).toEqual([
+      { text: "The quick ", marks: {} },
+    ]);
+    expect(listAnnotationRanges(ydoc, ids.paragraph)).toEqual([
+      { threadId, start: 4, end: 9 },
+    ]);
+
     // Every id in the document is still unique and non-empty.
     const allIds = blocks.map((block) => block.id);
     expect(new Set(allIds).size).toBe(allIds.length);
@@ -242,5 +344,96 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
         .toArray()
         .map((child) => (child instanceof Y.XmlElement ? child.nodeName : "#other")),
     ).toEqual(["heading", "paragraph", "paragraph", "code", "mermaid"]);
+  });
+});
+
+/**
+ * The authoring half: marks the user makes, rather than marks the schema wrote.
+ * Typed markdown and the keyboard shortcuts have to land in the CRDT under the
+ * same bare keys the schema package reads — one document, one vocabulary.
+ */
+describe("golden round trip: keystrokes → marks → schema", () => {
+  /** An empty document with one paragraph and the caret in it. */
+  function typingDoc(): { ydoc: Y.Doc; editor: Editor; blockId: string } {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "22222222-3333-4444-5555-666666666666", title: "Typed" });
+    const blockId = appendBlock(ydoc, { type: "paragraph" });
+    const editor = mount(ydoc);
+    editor.commands.setTextSelection(1);
+    return { ydoc, editor, blockId };
+  }
+
+  it("turns typed markdown into marks, under their bare Yjs keys", () => {
+    const { ydoc, editor, blockId } = typingDoc();
+
+    typeText(editor, "a **b** c *d* e `f` g ~~h~~ i [j](https://example.com/j) k");
+
+    expect(getBlockInline(ydoc, blockId)).toEqual([
+      { text: "a ", marks: {} },
+      { text: "b", marks: { bold: true } },
+      { text: " c ", marks: {} },
+      { text: "d", marks: { italic: true } },
+      { text: " e ", marks: {} },
+      { text: "f", marks: { inlineCode: true } },
+      { text: " g ", marks: {} },
+      { text: "h", marks: { strike: true } },
+      { text: " i ", marks: {} },
+      { text: "j", marks: { link: "https://example.com/j" } },
+      { text: " k", marks: {} },
+    ]);
+    // The delimiters are gone from the text, not just from the rendering.
+    expect(getBlocks(ydoc)[0]?.text).toBe("a b c d e f g h i j k");
+  });
+
+  it("applies and removes marks through the keyboard shortcuts", () => {
+    const { ydoc, editor, blockId } = typingDoc();
+    typeText(editor, "shout");
+    editor.commands.setTextSelection({ from: 1, to: 6 });
+
+    for (const [shortcut, mark] of [
+      ["Mod-b", "bold"],
+      ["Mod-i", "italic"],
+      ["Mod-Shift-s", "strike"],
+      ["Mod-e", "inlineCode"],
+    ] as const) {
+      expect(editor.commands.keyboardShortcut(shortcut), shortcut).toBe(true);
+      expect(getBlockInline(ydoc, blockId), shortcut).toEqual([
+        { text: "shout", marks: { [mark]: true } },
+      ]);
+      // The same shortcut toggles it back off, leaving no attribute behind.
+      expect(editor.commands.keyboardShortcut(shortcut), shortcut).toBe(true);
+      expect(getBlockInline(ydoc, blockId), shortcut).toEqual([
+        { text: "shout", marks: {} },
+      ]);
+    }
+  });
+
+  it("makes no inline marks inside a code block, typed or commanded", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "33333333-4444-5555-6666-777777777777", title: "Source" });
+    const blockId = appendBlock(ydoc, { type: "code", language: "ts" });
+    const editor = mount(ydoc);
+    editor.commands.setTextSelection(1);
+
+    typeText(editor, "x = **2** && `y`");
+    // Every delimiter is still there, and nothing carries a mark: source text is
+    // source text.
+    expect(getBlocks(ydoc)[0]?.text).toBe("x = **2** && `y`");
+    expect(getBlockInline(ydoc, blockId)).toEqual([
+      { text: "x = **2** && `y`", marks: {} },
+    ]);
+
+    // Nor can a command put one there — the node does not allow the mark.
+    editor.commands.setTextSelection({ from: 1, to: 4 });
+    expect(editor.commands.toggleMark("bold")).toBe(false);
+    expect(getBlockInline(ydoc, blockId)).toEqual([
+      { text: "x = **2** && `y`", marks: {} },
+    ]);
+
+    // The annotation anchor still works there, which is the one mark it may hold.
+    const thread = createAnnotation(ydoc, blockId, 0, 3, "tester", "why?");
+    expect(listAnnotationRanges(ydoc, blockId)).toEqual([
+      { threadId: thread.id, start: 0, end: 3 },
+    ]);
   });
 });

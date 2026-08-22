@@ -5,7 +5,9 @@
  *   - `meta`        Y.Map: uuid, title, tags, links-by-UUID
  *   - `blocks`      Y.XmlFragment: one Y.XmlElement per block, each holding a
  *                   single Y.XmlText of plain-text source
- *                   (types: paragraph, heading, code, mermaid)
+ *                   (types: paragraph, heading, code, mermaid), formatted by
+ *                   the closed inline-mark set (bold, italic, strike,
+ *                   inlineCode, link) on prose blocks
  *   - `annotations` Y.Map of thread JSON, anchored by `comment` formatting
  *                   marks on the block's text
  *
@@ -40,6 +42,7 @@ export {
   deleteBlock,
   editBlock,
   getBlock,
+  getBlockInline,
   getBlockRev,
   getBlockText,
   getBlocks,
@@ -50,6 +53,8 @@ export {
   setBlockType,
 } from "./blocks.js";
 export type { BlockTypeAttrs, EditBlockOptions } from "./blocks.js";
+
+export { isExternalHref, readsAsMark } from "./marks.js";
 
 export { blockRev } from "./rev.js";
 export type { RevInput } from "./rev.js";
@@ -98,7 +103,9 @@ export type { DirectoryUpsert, ListDirectoryOptions } from "./directory.js";
 export {
   AnnotationRangeError,
   BlockNotFoundError,
+  InvalidLinkHrefError,
   InvalidRoomError,
+  MarksNotAllowedError,
   StaleBlockError,
 } from "./errors.js";
 export type {
@@ -106,7 +113,7 @@ export type {
   StaleBlockDetails,
 } from "./errors.js";
 
-export { BLOCK_TYPES, isBlockType } from "./types.js";
+export { BLOCK_TYPES, INLINE_MARKS, isBlockType, isInlineMark } from "./types.js";
 export type {
   Annotation,
   AnnotationComment,
@@ -118,4 +125,7 @@ export type {
   DirectoryEntry,
   DocMeta,
   HeadingLevel,
+  InlineMarkName,
+  InlineMarkSet,
+  InlineRun,
 } from "./types.js";

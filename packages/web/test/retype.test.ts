@@ -20,6 +20,7 @@ import {
   COMMENT_MARK,
   appendBlock,
   createAnnotation,
+  getBlockInline,
   getBlocks,
   initDoc,
   listAnnotationRanges,
@@ -128,5 +129,36 @@ describe("retypeSelectedBlock", () => {
     const element = ydoc.getXmlFragment("blocks").get(0) as Y.XmlElement;
     expect(element.getAttribute("language")).toBeUndefined();
     expect(retypeSelectedBlock(editor, "mermaid")).toBe(false);
+  });
+
+  /**
+   * The one transition that has no honest outcome: a source block holds only the
+   * `comment` mark, so formatted prose cannot become one. Refusing beats both
+   * alternatives — stripping the marks loses content, and forcing it through
+   * writes a block the palette gate then refuses to bind.
+   */
+  it("refuses to make formatted prose into a source block, without throwing", () => {
+    const { ydoc, blockId, editor } = docWithParagraph();
+    editor.commands.setTextSelection({ from: 1, to: 8 });
+    expect(editor.commands.toggleMark("bold")).toBe(true);
+
+    for (const type of ["code", "mermaid"] as const) {
+      expect(retypeSelectedBlock(editor, type), type).toBe(false);
+    }
+    expect(getBlocks(ydoc)[0]).toMatchObject({
+      id: blockId,
+      type: "paragraph",
+      text: "Promote me to a heading",
+    });
+    expect(getBlockInline(ydoc, blockId)).toEqual([
+      { text: "Promote", marks: { bold: true } },
+      { text: " me to a heading", marks: {} },
+    ]);
+
+    // Clearing the formatting makes the same re-type work, which is the whole
+    // point of refusing rather than mangling.
+    expect(editor.commands.toggleMark("bold")).toBe(true);
+    expect(retypeSelectedBlock(editor, "code", { language: "ts" })).toBe(true);
+    expect(getBlocks(ydoc)[0]?.type).toBe("code");
   });
 });

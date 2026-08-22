@@ -9,19 +9,41 @@
  *
  *   <heading id="…" level="2">Y.XmlText("Some title")</heading>
  *
- * The single Y.XmlText child holds the block's plain-text source, plus any
- * formatting marks anchoring annotation threads. `code` and `mermaid` are
- * text-source blocks too — a rich block is a text block with a fancy renderer,
- * never a different storage shape.
+ * The single Y.XmlText child holds the block's plain-text source, plus its
+ * formatting marks: the closed inline set (`bold`, `italic`, `strike`,
+ * `inlineCode`, `link` — see `marks.ts`) and the `comment` mark anchoring
+ * annotation threads. `code` and `mermaid` are text-source blocks too — a rich
+ * block is a text block with a fancy renderer, never a different storage shape —
+ * and they carry no inline marks, only `comment`.
+ *
+ * Every read in this module is mark-blind: `text` and `rev` are plain text, so
+ * formatting a range never invalidates a prepared edit. `getBlockInline` is the
+ * one read that sees marks.
  */
 
 import * as Y from "yjs";
 import fastDiff from "fast-diff";
 import { getBlocksFragment } from "./doc.js";
-import { BlockNotFoundError, StaleBlockError } from "./errors.js";
+import {
+  BlockNotFoundError,
+  MarksNotAllowedError,
+  StaleBlockError,
+} from "./errors.js";
+import {
+  applyInlineRuns,
+  assertInlineWritable,
+  marksOtherThanComment,
+  readInlineRuns,
+} from "./marks.js";
 import { blockRev } from "./rev.js";
 import { isBlockType } from "./types.js";
-import type { Block, BlockInput, BlockType, HeadingLevel } from "./types.js";
+import type {
+  Block,
+  BlockInput,
+  BlockType,
+  HeadingLevel,
+  InlineRun,
+} from "./types.js";
 
 const DIFF_DELETE = -1;
 const DIFF_EQUAL = 0;
@@ -207,7 +229,52 @@ export function getBlockRev(ydoc: Y.Doc, blockId: string): string {
   return toBlock(element).rev;
 }
 
+/**
+ * One block's text as maximal runs of equally-marked text — the mark-aware
+ * counterpart of {@link getBlockText}. A block with no formatting is a single
+ * unmarked run; an absent block is no runs at all.
+ *
+ * The `comment` mark is not reported here: annotation ranges are read through
+ * `listAnnotationRanges`, which is the one consumer that needs thread ids.
+ */
+export function getBlockInline(ydoc: Y.Doc, blockId: string): InlineRun[] {
+  const element = findBlockElement(ydoc, blockId);
+  return element === null ? [] : readInlineRuns(textOf(element));
+}
+
+/**
+ * Every visible block with its inline runs, from a single traversal — what a
+ * whole-document reader wants. Looking each block's marks up by id instead would
+ * rescan the fragment per block, which is quadratic in the block count.
+ *
+ * @internal — shared with the markdown module.
+ */
+export function getBlocksWithInline(
+  ydoc: Y.Doc,
+): Array<{ block: Block; inline: InlineRun[] }> {
+  return partitionById(getBlocksFragment(ydoc)).visible.map((element) => ({
+    block: toBlock(element),
+    inline: readInlineRuns(textOf(element)),
+  }));
+}
+
+/**
+ * The formatted content to write for an input, or null to write `input.text`.
+ * Only prose blocks carry inline marks — `code` and `mermaid` hold source.
+ */
+function inlineOf(input: BlockInput): readonly InlineRun[] | null {
+  if (input.inline === undefined) return null;
+  return input.type === "paragraph" || input.type === "heading"
+    ? input.inline
+    : null;
+}
+
 function buildElement(id: string, input: BlockInput): Y.XmlElement {
+  // Before anything is inserted: a Yjs transaction does not roll back, so a
+  // refusal from inside one would leave a stray empty block behind.
+  const runs = inlineOf(input);
+  if (runs !== null) assertInlineWritable(runs);
+
   const element = new Y.XmlElement(input.type);
   element.setAttribute("id", id);
   if (input.type === "heading") {
@@ -216,8 +283,22 @@ function buildElement(id: string, input: BlockInput): Y.XmlElement {
   if (input.type === "code" && input.language !== undefined) {
     element.setAttribute("language", input.language);
   }
-  element.insert(0, [new Y.XmlText(input.text ?? "")]);
+  element.insert(0, [
+    new Y.XmlText(inlineOf(input) === null ? (input.text ?? "") : ""),
+  ]);
   return element;
+}
+
+/**
+ * Replay an input's inline marks, once its element is in the document — a
+ * detached Y.XmlText cannot take a delta. Same transaction as the insert, so no
+ * reader ever sees the unformatted intermediate state.
+ */
+function writeInline(element: Y.XmlElement, input: BlockInput): void {
+  const runs = inlineOf(input);
+  if (runs === null) return;
+  const text = textOf(element);
+  if (text !== null) applyInlineRuns(text, runs);
 }
 
 /**
@@ -240,7 +321,9 @@ export function insertBlock(
       if (found === -1) throw new BlockNotFoundError(afterBlockId);
       index = found + 1;
     }
-    fragment.insert(index, [buildElement(id, input)]);
+    const element = buildElement(id, input);
+    fragment.insert(index, [element]);
+    writeInline(element, input);
   });
   return id;
 }
@@ -250,7 +333,9 @@ export function appendBlock(ydoc: Y.Doc, input: BlockInput): string {
   const fragment = getBlocksFragment(ydoc);
   const id = crypto.randomUUID();
   ydoc.transact(() => {
-    fragment.insert(fragment.length, [buildElement(id, input)]);
+    const element = buildElement(id, input);
+    fragment.insert(fragment.length, [element]);
+    writeInline(element, input);
   });
   return id;
 }
@@ -351,6 +436,18 @@ export interface BlockTypeAttrs {
  * Type-specific attributes are carried over where they still apply and can be
  * overridden through `attrs`.
  *
+ * **Prose → source is refused when the text carries any mark but `comment`.**
+ * `code` and `mermaid` hold source text and may carry only the annotation anchor,
+ * so there is no honest way to re-type formatted prose into one: dropping the
+ * marks would break this function's whole promise, and keeping them would leave a
+ * document the web editor refuses to bind (its palette gate rejects a block
+ * holding a mark its node type disallows, precisely so nothing gets destroyed).
+ * So the re-type is refused *before* it mutates anything — see
+ * {@link MarksNotAllowedError}, which names the marks in the way. A mark from a
+ * writer this package has never heard of counts: the editor cannot render that
+ * either. Annotation anchors are unaffected — `comment` is legal on every block
+ * type and always survives.
+ *
  * Concurrency: because a re-type inserts a replacement element, two replicas
  * re-typing the same block concurrently converge on two elements sharing that
  * block id. The earlier one in document order wins — identically on every
@@ -376,6 +473,16 @@ export function setBlockType(
     if (index === -1) throw new BlockNotFoundError(blockId);
     const old = fragment.get(index) as Y.XmlElement;
     const oldType = elementType(old);
+
+    // Refused before anything is written: nothing to roll back, and the caller
+    // still has the block it started with. Every formatting key counts, not only
+    // the ones this package knows — see `marksOtherThanComment`.
+    if (newType === "code" || newType === "mermaid") {
+      const marks = marksOtherThanComment(textOf(old));
+      if (marks.length > 0) {
+        throw new MarksNotAllowedError(blockId, newType, marks);
+      }
+    }
 
     const level =
       attrs.level ?? (oldType === "heading" ? levelOf(old) : undefined);
@@ -423,7 +530,16 @@ export interface EditBlockOptions {
  * The minimal-splice property is what makes concurrent human+agent editing
  * safe: characters the edit did not touch are never deleted and reinserted, so
  * a concurrent edit elsewhere in the same block — or at the block's very end —
- * survives the merge, and annotation marks over untouched text stay anchored.
+ * survives the merge, and marks over untouched text stay anchored.
+ *
+ * **Marks are invisible to this call, by design.** `oldText`, `newText` and
+ * `rev` are all plain text: an edit never mentions inline marks and never
+ * changes one, and formatting a range does not make a prepared edit stale.
+ * Spliced text inherits formatting the way Yjs inserts always do — from the
+ * character to its left — so text inserted strictly inside a bold run is bold,
+ * and text inserted at a run's start boundary is not. Deleting a whole run
+ * removes its mark with it. A caller that wants to *change* formatting writes
+ * the marks, not the text.
  *
  * The staleness check is local-replica-only. See {@link StaleBlockError}.
  *

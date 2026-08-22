@@ -135,7 +135,14 @@ the fallback, which is exactly why CI is high priority.
   paragraph, heading, code, mermaid), `annotations` (Y.Map of thread JSON;
   ranges are anchored by a `comment` formatting mark carrying the threadId on
   the block's Y.XmlText — marks survive splits, re-types, and concurrent
-  edits, unlike relative positions). Links reference UUIDs, never paths or
+  edits, unlike relative positions). Inline formatting rides the same
+  mechanism: a closed set of Yjs text-formatting marks on the block's
+  Y.XmlText — `bold`, `italic`, `strike`, `inlineCode`, `link` (external
+  http(s) URLs only) — plus `comment`, and nothing else. Prose blocks
+  (paragraph, heading) carry inline marks; `code` and `mermaid` are source
+  text and carry only `comment`. The mark is named `inlineCode` rather than
+  `code` because ProseMirror forbids one name being both a node and a mark,
+  and a mark's name is its Yjs key. Links reference UUIDs, never paths or
   titles.
 - `packages/schema` is the keystone; everything imports it. Its only runtime
   deps are `yjs` and a diff library.

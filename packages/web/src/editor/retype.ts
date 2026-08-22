@@ -49,7 +49,15 @@ export function selectedBlock(
 
 /**
  * Re-type the block containing the selection. Returns false when there is
- * nothing to re-type, or when the block is already that type with those attrs.
+ * nothing to re-type, when the block is already that type with those attrs, or
+ * when the target type cannot hold the block's content.
+ *
+ * That last case is prose with inline marks going to `code` or `mermaid`, which
+ * hold source text and allow only the `comment` mark. `setNodeMarkup` would
+ * *throw* there — `validContent` checks marks as well as node types — and this is
+ * a click handler, so the refusal is a `false`, not an exception. The schema
+ * package refuses the same transition with a typed error; neither side strips
+ * marks to force it through.
  */
 export function retypeSelectedBlock(
   editor: Editor,
@@ -85,6 +93,9 @@ export function retypeSelectedBlock(
     (next.level ?? null) === attrString(current.attrs.level) &&
     (next.language ?? null) === attrString(current.attrs.language);
   if (unchanged) return false;
+
+  const node = editor.state.doc.nodeAt(current.pos);
+  if (node === null || !nodeType.validContent(node.content)) return false;
 
   editor.view.dispatch(
     editor.state.tr.setNodeMarkup(current.pos, nodeType, next),
