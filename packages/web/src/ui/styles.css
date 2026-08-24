@@ -779,6 +779,16 @@ body {
   cursor: pointer;
 }
 
+/* The emphasised tool button — the comment form's submit. The brand amber is
+   light in both themes, so it works as an accent (border, 1px, non-text) but
+   not as label text: `--brand` on `--brand-subtle` is 1.98:1 in the light
+   theme. The label stays `--foreground` (15.4:1 dark, 17.0:1 light). */
+.ub-tool-on {
+  background: var(--brand-subtle);
+  border-color: var(--brand);
+  color: var(--foreground);
+}
+
 .ub-lang {
   font: inherit;
   font-size: 0.75rem;

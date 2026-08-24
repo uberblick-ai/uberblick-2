@@ -22,16 +22,19 @@
  *   them first and stops them there, so ProseMirror never splits a block under
  *   an Enter that meant "insert this one". Everything else falls through and
  *   filters the list by editing the document, which is what keeps the typed
- *   `/query` visible in the prose and undoable as text.
+ *   `/query` visible in the prose and undoable as text. A composing keystroke is
+ *   never the menu's, whatever it says — see {@link composing}.
  *
  * - **The gutter is reserved, never inserted.** `.ub-column` carries a permanent
  *   left padding and the button is absolutely positioned inside it, so
  *   revealing it changes opacity and nothing else. A `+` that pushed the prose
  *   sideways on hover would make every block twitch as the pointer crossed it.
  *
- * Nothing here is collaborative: the menu is local UI, and the document does not
- * change until an entry is picked. A peer sees the resulting block and never the
- * menu.
+ * The menu is local UI, and the document does not change until an entry is
+ * picked — but the document underneath it is not. A peer can delete or move the
+ * block a session or a gutter button is aimed at, so both hold a block **id**
+ * rather than a position, both re-resolve it on every transaction, and both
+ * close rather than act on a block that has gone.
  */
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
@@ -41,7 +44,9 @@ import type { Transaction } from "@tiptap/pm/state";
 import {
   convertBlockAtTrigger,
   filterBlockMenu,
+  findBlockById,
   insertBlockBelow,
+  opensSlashSession,
   slashTriggerAt,
 } from "../editor/block-menu.js";
 import type { BlockMenuEntry, SlashTrigger } from "../editor/block-menu.js";
@@ -57,9 +62,13 @@ interface SlashSession {
   point: Point;
 }
 
-/** The block the pointer is over, and where its gutter button belongs. */
+/**
+ * The block the pointer is over, and where its gutter button belongs. Named by
+ * id: the block it points at has to be findable again after the document has
+ * moved under it.
+ */
 interface Hover {
-  blockPos: number;
+  blockId: string;
   top: number;
 }
 
@@ -68,6 +77,22 @@ const OFFSET = 6;
 
 /** The gutter button's height, in pixels — kept in step with `.ub-gutter-add`. */
 const BUTTON_SIZE = 22;
+
+/**
+ * Whether this keystroke belongs to an input method editor rather than to the
+ * menu.
+ *
+ * Typing Japanese, Chinese or Korean runs Enter and the arrow keys through a
+ * composition first — Enter commits the candidate, the arrows walk the candidate
+ * list — and the browser reports that with `isComposing` (a `keyCode` of 229 on
+ * the browsers that predate it). Taking those keys for the menu would make the
+ * IME unusable inside a slash session. ProseMirror's own `composing` flag is
+ * checked too: it stays true for a moment after `compositionend`, which is
+ * exactly the window in which a stray Enter would arrive.
+ */
+function composing(event: KeyboardEvent, editor: Editor): boolean {
+  return event.isComposing || event.keyCode === 229 || editor.view.composing;
+}
 
 /**
  * Where the menu goes for a slash session: just below the caret.
@@ -91,12 +116,15 @@ function pointAtCaret(editor: Editor, frame: HTMLElement | null): Point {
 }
 
 /**
- * The top-level block position for a DOM node inside the editor, or `null` when
- * the node is not in one. Walks up to the child of the ProseMirror root, then
- * asks the view which position renders it — an index lookup would be wrong the
- * moment a widget decoration sat between two blocks.
+ * The top-level block a DOM node inside the editor belongs to — its id and its
+ * position — or `null` when the node is not in one. Walks up to the child of the
+ * ProseMirror root, then asks the view which position renders it: an index
+ * lookup would be wrong the moment a widget decoration sat between two blocks.
  */
-function blockPosAt(editor: Editor, target: EventTarget | null): number | null {
+function blockAt(
+  editor: Editor,
+  target: EventTarget | null,
+): { blockId: string; pos: number } | null {
   const { view } = editor;
   let element =
     target instanceof HTMLElement
@@ -112,8 +140,13 @@ function blockPosAt(editor: Editor, target: EventTarget | null): number | null {
   let pos = 0;
   const { doc } = view.state;
   for (let index = 0; index < doc.childCount; index += 1) {
-    if (view.nodeDOM(pos) === element) return pos;
-    pos += doc.child(index).nodeSize;
+    const node = doc.child(index);
+    if (view.nodeDOM(pos) === element) {
+      return typeof node.attrs.id === "string" && node.attrs.id !== ""
+        ? { blockId: node.attrs.id, pos }
+        : null;
+    }
+    pos += node.nodeSize;
   }
   return null;
 }
@@ -161,10 +194,12 @@ export function BlockMenu({
   const dismissed = useRef(false);
   const card = useRef<HTMLDivElement | null>(null);
 
-  // The trigger is derived from editor state on every transaction: a remote
+  // The session is derived from editor state on every transaction: a remote
   // edit, an undo or a click that moves the caret closes the menu by itself.
+  // *Opening* one is a stricter question, and belongs to the transaction —
+  // `opensSlashSession` refuses everything that is not this reader typing.
   useEffect(() => {
-    const read = (typed: boolean): void => {
+    const read = (transaction: Transaction | null): void => {
       const trigger = slashTriggerAt(editor);
       if (trigger === null) {
         dismissed.current = false;
@@ -176,17 +211,15 @@ export function BlockMenu({
         return;
       }
       setSlash((current) =>
-        // Typing opens the menu; moving the caret only keeps an open one open.
-        // Otherwise clicking at the end of a paragraph that happens to read
-        // "/todo" would pop a menu nobody asked for.
-        current === null && !typed
+        current === null &&
+        (transaction === null || !opensSlashSession(transaction, trigger))
           ? null
           : { trigger, point: pointAtCaret(editor, host.current) },
       );
     };
-    read(false);
+    read(null);
     const onTransaction = ({ transaction }: { transaction: Transaction }): void =>
-      read(transaction.docChanged);
+      read(transaction);
     editor.on("transaction", onTransaction);
     return () => {
       editor.off("transaction", onTransaction);
@@ -199,13 +232,13 @@ export function BlockMenu({
     const dom = editor.view.dom;
     const frame = host.current;
     const track = (event: MouseEvent): void => {
-      const blockPos = blockPosAt(editor, event.target);
-      if (blockPos === null) return;
-      const top = gutterTop(editor, blockPos, frame);
+      const block = blockAt(editor, event.target);
+      if (block === null) return;
+      const top = gutterTop(editor, block.pos, frame);
       setHover((previous) =>
-        previous !== null && previous.blockPos === blockPos && previous.top === top
+        previous !== null && previous.blockId === block.blockId && previous.top === top
           ? previous
-          : { blockPos, top },
+          : { blockId: block.blockId, top },
       );
     };
     const leave = (): void => setHover(null);
@@ -240,11 +273,39 @@ export function BlockMenu({
     setGutterQuery("");
   }, []);
 
+  // The block the gutter points at can move or vanish under a peer's edit, and
+  // a button parked over the wrong block is a menu aimed at the wrong block. So
+  // the anchor is re-resolved by id on every transaction: gone means closed,
+  // moved means re-measured.
+  const anchorId = gutter?.blockId ?? hover?.blockId ?? null;
+  useEffect(() => {
+    if (anchorId === null) return;
+    const follow = (): void => {
+      const found = findBlockById(editor.state.doc, anchorId);
+      if (found === null) {
+        setHover(null);
+        closeGutter();
+        return;
+      }
+      const top = gutterTop(editor, found.pos, host.current);
+      const move = (previous: Hover | null): Hover | null =>
+        previous === null || previous.top === top ? previous : { ...previous, top };
+      setHover(move);
+      setGutter(move);
+    };
+    editor.on("transaction", follow);
+    return () => {
+      editor.off("transaction", follow);
+    };
+  }, [editor, host, anchorId, closeGutter]);
+
   const choose = useCallback(
     (entry: BlockMenuEntry | undefined): void => {
       if (entry === undefined) return;
       if (gutter !== null) {
-        insertBlockBelow(editor, gutter.blockPos, entry);
+        // A refusal means the block is gone; either way the menu has had its
+        // answer and closes.
+        insertBlockBelow(editor, gutter.blockId, entry);
         closeGutter();
         setHover(null);
         return;
@@ -301,6 +362,7 @@ export function BlockMenu({
     if (path !== "slash" || !open) return;
     const target = editor.view.dom.parentElement ?? editor.view.dom;
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (composing(event, editor)) return;
       if (!handleKey(event.key)) return;
       event.preventDefault();
       event.stopPropagation();
@@ -374,6 +436,9 @@ export function BlockMenu({
               autoFocus
               onChange={(event) => setGutterQuery(event.target.value)}
               onKeyDown={(event) => {
+                // The field takes typed text, so it has an IME to stay out of
+                // the way of just as much as the prose does.
+                if (composing(event.nativeEvent, editor)) return;
                 if (!handleKey(event.key)) return;
                 event.preventDefault();
                 event.stopPropagation();

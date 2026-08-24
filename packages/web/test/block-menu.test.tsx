@@ -1,20 +1,26 @@
 /**
  * The block-insertion menu: the slash path and the gutter path.
  *
- * What is worth defending here is the document, not the pixels. Three
- * contracts:
+ * What is worth defending here is the document, not the pixels. Four contracts:
  *
- * 1. **The slash trigger is exact.** It opens on an empty paragraph and nowhere
- *    else — a slash typed mid-sentence is a slash, and a menu that opened there
- *    would eat the next Enter.
+ * 1. **The slash trigger is exact.** It opens on this reader typing into an
+ *    empty paragraph and nowhere else — a slash typed mid-sentence is a slash, a
+ *    menu that opened there would eat the next Enter, and a menu that opened on
+ *    a *peer's* keystroke would appear in the middle of someone else's sentence.
  * 2. **Converting keeps the block.** The block id survives the re-type (it is
  *    the same block, so every reference to it stays valid), the typed `/query`
  *    never reaches the saved text, and the whole gesture is one undo step.
  * 3. **Inserting makes exactly one new block**, below the one that was hovered,
  *    with an id of its own and the caret inside it.
+ * 4. **Neither operation acts on a block that has moved or gone.** Both name
+ *    their block by id and re-resolve it against live state; a concurrent delete
+ *    makes the menu refuse, never edit whichever block took its place.
  *
  * Everything is read back out of a real Y.Doc through the schema package: the
- * document is the deliverable, the menu is just how a reader asks for it.
+ * document is the deliverable, the menu is just how a reader asks for it. The
+ * concurrency tests use a second replica wired the way the hub wires two
+ * clients, so a peer's edit arrives as the real thing — a remote transaction —
+ * rather than as a local edit in disguise.
  *
  * Layout is not asserted — jsdom has none. The gutter's "reveal without moving
  * the prose" claim is checked in the browser (`e2e/block-menu.spec.ts`).
@@ -24,14 +30,22 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import * as Y from "yjs";
-import { appendBlock, getBlocks, initDoc } from "@uberblick/schema";
+import {
+  appendBlock,
+  deleteBlock,
+  editBlock,
+  getBlocks,
+  initDoc,
+} from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
-import { yUndoPluginKey } from "y-prosemirror";
 import {
   BLOCK_MENU_ENTRIES,
+  convertBlockAtTrigger,
   filterBlockMenu,
+  insertBlockBelow,
   slashTriggerAt,
 } from "../src/editor/block-menu.js";
+import type { SlashTrigger } from "../src/editor/block-menu.js";
 import { BlockMenu } from "../src/ui/BlockMenu.js";
 import { mountEditor } from "./helpers.js";
 
@@ -47,8 +61,12 @@ interface Mounted {
   frame: HTMLElement;
   query: <T extends Element>(selector: string) => T | null;
   entryLabels: () => string[];
-  /** A key, taken the way the browser delivers it: from inside the prose. */
-  press: (key: string) => void;
+  /**
+   * A key, taken the way the browser delivers it: from inside the prose.
+   * Returns the event, whose `defaultPrevented` says whether the menu claimed
+   * it or let it through to ProseMirror.
+   */
+  press: (key: string, init?: KeyboardEventInit) => KeyboardEvent;
   unmount: () => void;
 }
 
@@ -76,12 +94,17 @@ function mountMenu(ydoc: Y.Doc): Mounted {
       [...frame.querySelectorAll(".ub-blockmenu-label")].map(
         (node) => node.textContent ?? "",
       ),
-    press: (key: string) => {
-      act(() => {
-        editor.view.dom.dispatchEvent(
-          new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
-        );
+    press: (key: string, init: KeyboardEventInit = {}) => {
+      const event = new KeyboardEvent("keydown", {
+        key,
+        bubbles: true,
+        cancelable: true,
+        ...init,
       });
+      act(() => {
+        editor.view.dom.dispatchEvent(event);
+      });
+      return event;
     },
     unmount: () => {
       act(() => root.unmount());
@@ -130,12 +153,21 @@ function soundIds(ydoc: Y.Doc): string[] {
 }
 
 /**
- * End the UndoManager's capture window. It merges edits made within 500ms into
- * one stack item, so a synchronous test has to stand in for the pause a reader
- * takes between typing and picking an entry.
+ * A second replica, wired the way the hub wires two clients. An edit made on it
+ * reaches the editor as a *remote* transaction — which is the only way to test
+ * what the menu does about one.
  */
-function endUndoStep(editor: Editor): void {
-  yUndoPluginKey.getState(editor.state)?.undoManager.stopCapturing();
+function peerOf(local: Y.Doc): Y.Doc {
+  const remote = new Y.Doc();
+  Y.applyUpdate(remote, Y.encodeStateAsUpdate(local));
+  remote.on("update", (update: Uint8Array) => Y.applyUpdate(local, update));
+  local.on("update", (update: Uint8Array) => Y.applyUpdate(remote, update));
+  return remote;
+}
+
+/** A peer's edit, inside `act` because the editor re-renders the menu on it. */
+function fromPeer(edit: () => void): void {
+  act(edit);
 }
 
 describe("the registry", () => {
@@ -218,7 +250,11 @@ describe("the slash menu", () => {
       type(editor, "he");
       expect(entryLabels()).toEqual(["Heading 1", "Heading 2", "Heading 3"]);
 
-      endUndoStep(editor);
+      // No pause is arranged: this is the real keyboard path, typed and picked
+      // inside the UndoManager's half-second capture window. The boundary that
+      // keeps the conversion its own undo step is the command's job, not the
+      // test's — a test that called `stopCapturing` itself would be testing
+      // nothing but its own arrangement (#105 review).
       press("ArrowDown");
       press("Enter");
 
@@ -275,7 +311,7 @@ describe("the slash menu", () => {
     }
   });
 
-  it("opens on typing, not on the caret landing in a block that reads like one", () => {
+  it("opens on this reader typing, not on the caret merely landing there", () => {
     const { ydoc } = docWith([{ type: "paragraph", text: "/co" }]);
     const { editor, query, unmount } = mountMenu(ydoc);
     try {
@@ -289,6 +325,131 @@ describe("the slash menu", () => {
       expect(query(".ub-blockmenu")).not.toBeNull();
     } finally {
       unmount();
+    }
+  });
+
+  /**
+   * The menu is this reader's, and only this reader's. A peer typing into the
+   * block the caret happens to sit in must not open one — that is a menu popping
+   * up on someone else's keystroke, over a document the reader was reading.
+   * Undo and paste are the same kind of "the document changed but nobody asked
+   * for a menu" event, so they are pinned beside it.
+   */
+  it("never opens on a peer's edit, an undo, or a paste", () => {
+    const { ydoc, ids } = docWith([{ type: "paragraph", text: "/co" }]);
+    const peer = peerOf(ydoc);
+    const { editor, query, unmount } = mountMenu(ydoc);
+    try {
+      caret(editor, 0, 3);
+
+      // A peer extends the very block the caret is in.
+      fromPeer(() => {
+        editBlock(peer, ids[0] ?? "", "/co", "/cod");
+      });
+      expect(getBlocks(ydoc)[0]?.text).toBe("/cod");
+      expect(slashTriggerAt(editor)).toMatchObject({ query: "cod" });
+      expect(query(".ub-blockmenu")).toBeNull();
+
+      // A paste that happens to be a slash command is content, not a command.
+      act(() => {
+        const { state } = editor;
+        editor.view.dispatch(
+          state.tr.insertText("e", state.selection.from).setMeta("uiEvent", "paste"),
+        );
+      });
+      expect(getBlocks(ydoc)[0]?.text).toBe("/code");
+      expect(query(".ub-blockmenu")).toBeNull();
+
+      // And an undo that restores a slash-looking block is not a request either.
+      act(() => {
+        editor.commands.keyboardShortcut("Mod-z");
+      });
+      expect(query(".ub-blockmenu")).toBeNull();
+    } finally {
+      unmount();
+      peer.destroy();
+    }
+  });
+
+  /**
+   * Typing Japanese, Chinese or Korean runs Enter and the arrows through the
+   * IME's candidate list first. A menu that took those keys would make the
+   * composition unfinishable inside a slash session — so a composing keystroke
+   * is not the menu's to take, even while it is open.
+   */
+  it("leaves composing keystrokes to the input method", () => {
+    const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
+    const { editor, press, query, unmount } = mountMenu(ydoc);
+    try {
+      caret(editor, 0, 0);
+      type(editor, "/he");
+      expect(query(".ub-blockmenu")).not.toBeNull();
+
+      // The menu does not take it: nothing is converted, and the key travels
+      // on past the menu to the editor — which is what a real IME needs, and
+      // what jsdom shows here as ProseMirror's ordinary Enter (a browser's
+      // ProseMirror would ignore it too, being mid-composition).
+      press("Enter", { isComposing: true });
+      expect(getBlocks(ydoc).some((block) => block.type === "heading")).toBe(false);
+      expect(getBlocks(ydoc).map((block) => block.text)).toEqual(["/he", ""]);
+      expect(getBlocks(ydoc)[0]).toMatchObject({ id: ids[0], type: "paragraph" });
+
+      // The same key, with nothing composing, is the menu's.
+      type(editor, "/he");
+      press("Enter");
+      expect(getBlocks(ydoc)[1]).toMatchObject({ type: "heading", text: "" });
+    } finally {
+      unmount();
+    }
+  });
+
+  /**
+   * The hazard a stale position hides: the block the menu was opened over is
+   * deleted by a peer, and the saved number now points at its *successor*.
+   * Acting on it would delete that block's content while looking, to the reader,
+   * like the conversion worked.
+   */
+  it("refuses to convert when the trigger's block is gone", () => {
+    const { ydoc, ids } = docWith([
+      { type: "paragraph", text: "" },
+      { type: "paragraph", text: "a neighbour with content" },
+    ]);
+    const peer = peerOf(ydoc);
+    const { editor, query, press, unmount } = mountMenu(ydoc);
+    try {
+      caret(editor, 0, 0);
+      type(editor, "/he");
+      const trigger = slashTriggerAt(editor);
+      expect(trigger).not.toBeNull();
+      expect(query(".ub-blockmenu")).not.toBeNull();
+
+      fromPeer(() => {
+        deleteBlock(peer, ids[0] ?? "");
+      });
+
+      // The session went with the block, so the menu is closed…
+      expect(query(".ub-blockmenu")).toBeNull();
+      // …and the command refuses the trigger it was holding, rather than
+      // deleting the content of whatever now sits at that position.
+      expect(
+        convertBlockAtTrigger(
+          editor,
+          trigger as SlashTrigger,
+          BLOCK_MENU_ENTRIES[1] as (typeof BLOCK_MENU_ENTRIES)[number],
+        ),
+      ).toBe(false);
+      // Enter is the editor's again, and it does not convert anything either.
+      press("Enter");
+      const blocks = getBlocks(ydoc);
+      expect(blocks.map((block) => block.type)).toEqual(["paragraph", "paragraph"]);
+      expect(blocks[0]).toMatchObject({
+        id: ids[1],
+        text: "a neighbour with content",
+      });
+      soundIds(ydoc);
+    } finally {
+      unmount();
+      peer.destroy();
     }
   });
 
@@ -342,6 +503,78 @@ describe("the gutter menu", () => {
       expect(mounted.query(".ub-blockmenu")).toBeNull();
     } finally {
       mounted.unmount();
+    }
+  });
+
+  /**
+   * The gutter names its block by id too. A peer deleting the block the menu was
+   * opened over must close it — an open menu aimed at a block that no longer
+   * exists would insert relative to whatever moved into its place.
+   */
+  it("closes when a peer deletes the block it was opened over", () => {
+    const { ydoc, ids } = docWith([
+      { type: "paragraph", text: "First" },
+      { type: "paragraph", text: "Second" },
+    ]);
+    const peer = peerOf(ydoc);
+    const mounted = mountMenu(ydoc);
+    try {
+      openGutterMenu(mounted, 0);
+      expect(mounted.query(".ub-blockmenu")).not.toBeNull();
+
+      fromPeer(() => {
+        deleteBlock(peer, ids[0] ?? "");
+      });
+
+      expect(mounted.query(".ub-blockmenu")).toBeNull();
+      expect(mounted.query(".ub-gutter-add-on")).toBeNull();
+      // The surviving block is untouched: nothing was inserted anywhere.
+      expect(getBlocks(ydoc).map((block) => [block.id, block.text])).toEqual([
+        [ids[1], "Second"],
+      ]);
+      // And the command itself refuses the vanished block rather than
+      // inserting relative to whatever took its place.
+      expect(
+        insertBlockBelow(
+          mounted.editor,
+          ids[0] ?? "",
+          BLOCK_MENU_ENTRIES[0] as (typeof BLOCK_MENU_ENTRIES)[number],
+        ),
+      ).toBe(false);
+      expect(getBlocks(ydoc)).toHaveLength(1);
+    } finally {
+      mounted.unmount();
+      peer.destroy();
+    }
+  });
+
+  it("inserts below the block it was opened over, even after one moves above it", () => {
+    const { ydoc, ids } = docWith([
+      { type: "paragraph", text: "First" },
+      { type: "paragraph", text: "Second" },
+    ]);
+    const peer = peerOf(ydoc);
+    const mounted = mountMenu(ydoc);
+    try {
+      // The menu is opened over "Second"…
+      openGutterMenu(mounted, 1);
+      // …and then a peer deletes the block above it, moving every position
+      // after it. A remembered position would now name the wrong block.
+      fromPeer(() => {
+        deleteBlock(peer, ids[0] ?? "");
+      });
+      expect(mounted.query(".ub-blockmenu")).not.toBeNull();
+
+      pick(mounted, "Mermaid");
+
+      expect(getBlocks(ydoc).map((block) => [block.type, block.text])).toEqual([
+        ["paragraph", "Second"],
+        ["mermaid", ""],
+      ]);
+      soundIds(ydoc);
+    } finally {
+      mounted.unmount();
+      peer.destroy();
     }
   });
 
