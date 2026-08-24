@@ -63,14 +63,17 @@ protocol, scheduling semantics, and lint. This file does not restate it.
      included) invalidates the test/typecheck and review evidence: re-run
      those gates at the new `headRefOid` rather than carrying an older verdict
      forward;
-   - your validation against every acceptance checkbox on the linked issue —
+   - your validation against every acceptance checkbox on each linked issue —
      check a box only with evidence (command output, test name);
-   - footprint check: the diff stays within the issue's declared `Touches`;
+   - footprint check: the diff stays within the declared `Touches` — the
+     shared set when the PR closes a batch;
    - GitHub Copilot review requested and returned;
    - local Codex review of the PR where CLAUDE.md's gate list calls for one —
-     it is the authority on scope; in short: data-critical packages,
-     `pnpm-lock.yaml`, large or architectural diffs, or your own judgment that
-     an outside read helps, while trivial and UI-only diffs skip the round.
+     it is the authority on scope; in short: a diff touching
+     `packages/schema`, `packages/mcp-server`, `packages/hub`, or
+     `pnpm-lock.yaml`, a large or architectural diff, or your own judgment
+     that an outside read helps; only when none of those fire may a trivial or
+     UI-only diff skip the round.
      Mechanism depends on the environment: when running under herdr
      (`test "${HERDR_ENV:-}" = 1`; use the herdr skill and `herdr agent` to
      find the Codex pane), talk to that Codex session directly and iterate —
@@ -110,10 +113,10 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    a commit landing after the last check fails the merge instead of riding
    stale evidence; comparing `gh pr view <n> --json headRefOid` beforehand is
    for your report, not the guarantee. Either way a mismatch returns to the
-   gates: re-run them at the new head. After merging, confirm the issue
-   auto-closed, then update the product docs to the new status quo (uberblick
-   MCP tools once registered; until then, comment on the PR that the doc
-   update is pending).
+   gates: re-run them at the new head. After merging, confirm every issue the
+   PR closes auto-closed, then update the product docs to the new status quo
+   (uberblick MCP tools once registered; until then, comment on the PR that
+   the doc update is pending).
    **Dev stack, after every merge to `main`:** restart it so
    http://localhost:5173/ always serves the just-merged `main`. Killing a
    running dev server is sanctioned (owner directive) but bounded: terminate
@@ -152,10 +155,12 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    contract: branch from fresh `main`, implement, `mise run test` +
    `mise run typecheck` green, push, open a PR with `Closes #N` and a body
    stating what changed and how it was verified. Sub-agents never merge.
-   Per the spec's sizing exception, several individually-trivial issues with
-   the same `Touches` set may go to one agent as one batch: claim each issue
-   separately, brief all their bodies, and have the single PR close them all
-   (`Closes #a, #b`).
+   Several individually-trivial issues with the same `Touches` set may go to
+   one agent as one batch: claim each issue separately, brief all their
+   bodies, and have the single PR close them all (`Closes #a, #b`) with a
+   combined diff reviewable in one sitting and a merge report checking each
+   issue's acceptance criteria — every condition of the spec's sizing
+   exception.
 
 7. **Report.** End with a short status a human can skim: PRs advanced (which
    gate), issues dispatched / bounced / parked, what the loop is waiting on.

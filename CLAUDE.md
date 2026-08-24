@@ -66,9 +66,10 @@ before moving on.
      `packages/schema`, `packages/mcp-server`, `packages/hub`, or
      `pnpm-lock.yaml`, when the PR runs to several hundred lines or more, when
      it changes something genuinely architectural, and whenever the
-     coordinator judges an external review worthwhile; a trivial or
-     UI/design-only diff — where the round would spend time and tokens on
-     nothing — merges on the remaining gates, without a Codex round;
+     coordinator judges an external review worthwhile. Only when none of those
+     fire does the relaxation apply: a trivial or UI/design-only diff — where
+     the round would spend time and tokens on nothing — merges on the
+     remaining gates, without a Codex round;
    - **zero unaddressed PR remarks** — immediately before merging, re-fetch
      the PR's reviews and comment threads (human and bot alike, including
      remarks that arrived after the other gates passed); merge only when

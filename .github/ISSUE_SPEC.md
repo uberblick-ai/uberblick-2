@@ -41,9 +41,11 @@ Touches: mcp-server, schema
   `Touches` sets do not by themselves queue. From the issues' scope and
   Pointers the loop forms an expectation of which files each will edit, and
   dispatches in parallel (separate worktrees) whenever those are expected to be
-  disjoint. An expectation that proves wrong costs a rebase, not a lost gate:
-  the later PR rebases and its gates re-run at the new head, which the
-  commit-keyed gate rule already requires.
+  disjoint. Parallel dispatch needs that positive expectation: where the files
+  cannot be foreseen with confidence, the issues queue. An expectation that
+  proves wrong costs a rebase, not a lost gate: the later PR rebases and its
+  gates re-run at the new head, which the commit-keyed gate rule already
+  requires.
 - `schema` in `Touches` **serializes globally** — it is the keystone package;
   nothing else is dispatched while a schema-touching issue is in flight.
 - Order among eligible issues: dependency topology, then `Priority`
@@ -117,9 +119,10 @@ parents are never labeled `ready`, only their children are.
 The exception runs the other way: individually-trivial issues declaring the
 same `Touches` set may be implemented by one agent as one PR closing several
 (`Closes #a, #b`), provided the combined diff is still reviewable in one
-sitting, the footprint check validates that combined diff against the shared
-set, and the PR carries a merge report checking each issue's acceptance
-criteria separately — a batch PR carries that report whatever its merge tier.
+sitting, the gate check above is applied to that combined diff against the
+shared set, and the PR carries the tier-2 merge report of CLAUDE.md's merge
+policy, checking each issue's acceptance criteria separately — a batch PR
+carries that report even where it would otherwise be tier 1.
 
 ## Lint — the exact checks
 
