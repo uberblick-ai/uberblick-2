@@ -37,8 +37,13 @@ Touches: mcp-server, schema
 
 - **Eligible** = labeled `ready` AND every `Depends-on` issue is closed AND
   not claimed.
-- Issues with **disjoint** `Touches` sets may run in parallel (separate
-  worktrees). **Overlapping** sets queue behind each other.
+- Parallelism is judged at **file** level, not footprint level: overlapping
+  `Touches` sets do not by themselves queue. From the issues' scope and
+  Pointers the loop forms an expectation of which files each will edit, and
+  dispatches in parallel (separate worktrees) whenever those are expected to be
+  disjoint. An expectation that proves wrong costs a rebase, not a lost gate:
+  the later PR rebases and its gates re-run at the new head, which the
+  commit-keyed gate rule already requires.
 - `schema` in `Touches` **serializes globally** — it is the keystone package;
   nothing else is dispatched while a schema-touching issue is in flight.
 - Order among eligible issues: dependency topology, then `Priority`
@@ -108,6 +113,12 @@ doesn't answer? Then the issue is not `ready`.**
 One issue = one PR, reviewable in one sitting. Work that honestly needs
 multiple PRs becomes a parent issue split into loop-ready children; parents
 are never labeled `ready`, only their children are.
+
+The rule also runs the other way: individually-trivial issues sharing a
+footprint may be implemented by one agent as one PR closing several
+(`Closes #a, #b`), provided the combined diff is still reviewable in one
+sitting and the merge report checks each issue's acceptance criteria
+separately.
 
 ## Lint — the exact checks
 

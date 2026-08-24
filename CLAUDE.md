@@ -61,7 +61,11 @@ before moving on.
      checkout can change during review;
    - coordinator validation against the issue's acceptance criteria;
    - **GitHub Copilot review** requested on the PR;
-   - **local Codex session review** of the PR;
+   - **local Codex session review** of the PR when the diff touches
+     `packages/schema`, `packages/mcp-server`, `packages/hub`, or
+     `pnpm-lock.yaml`, or when the coordinator flags the PR (owner decision,
+     2026-08-24) — a pure-web diff merges on the other gates alone: Docker
+     review, CI, Copilot, coordinator validation;
    - **zero unaddressed PR remarks** — immediately before merging, re-fetch
      the PR's reviews and comment threads (human and bot alike, including
      remarks that arrived after the other gates passed); merge only when

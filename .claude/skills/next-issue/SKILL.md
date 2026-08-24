@@ -132,10 +132,10 @@ protocol, scheduling semantics, and lint. This file does not restate it.
 4. **Compute the eligible set and order it** per the spec's scheduling
    semantics (deps closed, unclaimed; topology → Priority → number).
 
-5. **Conflict analysis.** Apply the spec's `Touches` rules (schema serializes
-   globally; disjoint parallelize; overlaps queue). Cap work in flight —
-   claimed issues plus unmerged PRs — at 3: the bottleneck is the gates, not
-   implementation.
+5. **Conflict analysis.** Apply the spec's scheduling rules (schema serializes
+   globally; expected file-level overlap decides, not the `Touches` sets). Cap
+   work in flight — claimed issues plus unmerged PRs — at 6: the bottleneck is
+   the gates, not implementation.
 
 6. **Dispatch.** For each issue to start: add `in-progress`, comment
    `Claimed: feat/<slug>` (or `fix/`). **Announce the work to the user** in
