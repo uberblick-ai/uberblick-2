@@ -1,8 +1,11 @@
 {
   "mcpServers": {
     "uberblick": {
-      "command": "fnox",
+      "command": "mise",
       "args": [
+        "exec",
+        "--",
+        "fnox",
         "exec",
         "--if-missing",
         "warn",
