@@ -21,6 +21,8 @@ import { DocList } from "./DocList.js";
 import { EditorPane } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { ThreadsPane } from "./ThreadsPane.js";
+import { focusThread } from "./threads.js";
+import type { ThreadFocus } from "./threads.js";
 import { useDirectory, useIdentity, useRoom, useStoredFlag } from "./hooks.js";
 
 /** Sidebar preference, persisted per browser. */
@@ -33,9 +35,12 @@ export function App(): ReactElement {
   /**
    * The thread the reader is looking at. It lives here because the two ends of
    * the link are in different panes: a highlight in the editor and a card in the
-   * rail focus each other through this one id.
+   * rail focus each other through this one value.
    */
-  const [focusedThread, setFocusedThread] = useState<string | null>(null);
+  const [focusedThread, setFocusedThread] = useState<ThreadFocus | null>(null);
+  const onFocusThread = useCallback((threadId: string) => {
+    setFocusedThread((previous) => focusThread(previous, threadId));
+  }, []);
 
   const directory = useRoom(directoryRoom(WORKSPACE), identity);
   const doc = useRoom(
@@ -128,7 +133,7 @@ export function App(): ReactElement {
             onCreate={onCreate}
           />
         )}
-        <EditorPane connection={doc} onSelectThread={setFocusedThread} />
+        <EditorPane connection={doc} onSelectThread={onFocusThread} />
         {/* The outline and the threads rail stack in one right column. Both
             sections render nothing when they have nothing to show, so the rail
             hides itself when it is empty (`.ub-rail:empty`) rather than leaving
@@ -138,7 +143,7 @@ export function App(): ReactElement {
           <ThreadsPane
             connection={doc}
             focused={focusedThread}
-            onFocus={setFocusedThread}
+            onFocus={onFocusThread}
           />
         </aside>
       </div>

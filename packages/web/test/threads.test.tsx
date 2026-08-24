@@ -34,12 +34,14 @@ import {
 } from "@uberblick/schema";
 import { ThreadsPane } from "../src/ui/ThreadsPane.js";
 import {
+  commentTimestamp,
+  focusThread,
   observeThreads,
-  relativeTime,
+  threadCardId,
   threadIdFromTarget,
   threadsFromDoc,
 } from "../src/ui/threads.js";
-import type { ThreadView } from "../src/ui/threads.js";
+import type { ThreadFocus, ThreadView } from "../src/ui/threads.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { mountEditor } from "./helpers.js";
 
@@ -173,13 +175,26 @@ describe("a thread whose range is deleted is orphaned, not dropped", () => {
 });
 
 describe("the rail follows the document", () => {
-  /** The latest rail an observer has seen. */
-  function watch(ydoc: Y.Doc): { latest: () => ThreadView[]; stop: () => void } {
+  /**
+   * The observer coalesces its two subscriptions onto a microtask, so a
+   * transaction that touches both the annotations map and the text recomputes
+   * the rail once. Reading it back therefore means letting that microtask run.
+   */
+  const flush = (): Promise<void> => Promise.resolve();
+
+  /** The latest rail an observer has seen, and how many times it was told. */
+  function watch(ydoc: Y.Doc): {
+    latest: () => ThreadView[];
+    reads: () => number;
+    stop: () => void;
+  } {
     let seen: ThreadView[] = [];
+    let reads = 0;
     const stop = observeThreads(ydoc, (threads) => {
       seen = threads;
+      reads += 1;
     });
-    return { latest: () => seen, stop };
+    return { latest: () => seen, reads: () => reads, stop };
   }
 
   /**
@@ -189,19 +204,24 @@ describe("the rail follows the document", () => {
    * orphaning touches a *format* one level below the blocks fragment — which is
    * why one subscription could never cover all three.
    */
-  it("sees a remote thread, a remote reply and a remote orphaning", () => {
+  it("sees a remote thread, a remote reply and a remote orphaning", async () => {
     const { local, remote, blocks } = replicas();
     const watcher = watch(local);
     expect(watcher.latest()).toEqual([]);
 
     const paragraph = blocks[1]!;
     const thread = createAnnotation(remote, paragraph, 4, 15, "agent-a", "why?");
+    await flush();
     expect(watcher.latest().map((view) => view.excerpt)).toEqual(["quick brown"]);
+    // One recompute, not two: creating a thread writes the map and the mark.
+    expect(watcher.reads()).toBe(2);
 
     addComment(remote, thread.id, "ben", "historical accident");
+    await flush();
     expect(watcher.latest()[0]?.replyCount).toBe(1);
 
     editBlock(remote, paragraph, getBlockText(remote, paragraph), "The fox jumps.");
+    await flush();
     expect(watcher.latest()[0]).toMatchObject({
       orphaned: true,
       excerpt: "",
@@ -211,12 +231,15 @@ describe("the rail follows the document", () => {
     watcher.stop();
   });
 
-  it("stops reporting once unsubscribed", () => {
+  it("stops reporting once unsubscribed, including a recompute already queued", async () => {
     const { local, remote, blocks } = replicas();
     const watcher = watch(local);
-    watcher.stop();
     createAnnotation(remote, blocks[1]!, 4, 15, "agent-a", "why?");
+    // Unsubscribing between the change and the microtask that would read it.
+    watcher.stop();
+    await flush();
     expect(watcher.latest()).toEqual([]);
+    expect(watcher.reads()).toBe(1);
   });
 });
 
@@ -236,24 +259,33 @@ describe("the rail renders its cards", () => {
 
   function renderRail(
     ydoc: Y.Doc,
-    focused: string | null = null,
-  ): { host: HTMLElement; focus: string[]; unmount: () => void } {
+    focused: ThreadFocus | null = null,
+  ): {
+    host: HTMLElement;
+    focus: string[];
+    refocus: (next: ThreadFocus | null) => void;
+    unmount: () => void;
+  } {
     const focus: string[] = [];
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
-    act(() => {
-      root.render(
-        <ThreadsPane
-          connection={stubConnection(ydoc)}
-          focused={focused}
-          onFocus={(threadId) => focus.push(threadId)}
-        />,
-      );
-    });
+    const draw = (next: ThreadFocus | null): void => {
+      act(() => {
+        root.render(
+          <ThreadsPane
+            connection={stubConnection(ydoc)}
+            focused={next}
+            onFocus={(threadId) => focus.push(threadId)}
+          />,
+        );
+      });
+    };
+    draw(focused);
     return {
       host,
       focus,
+      refocus: draw,
       unmount: () => {
         act(() => root.unmount());
         host.remove();
@@ -300,8 +332,37 @@ describe("the rail renders its cards", () => {
   it("marks the focused thread", () => {
     const { ydoc, blocks } = annotatedDoc();
     const thread = createAnnotation(ydoc, blocks[1]!, 4, 15, "ben", "why?");
-    const view = renderRail(ydoc, thread.id);
+    const view = renderRail(ydoc, focusThread(null, thread.id));
     expect(cards(view.host)[0]?.getAttribute("aria-current")).toBe("true");
+    view.unmount();
+  });
+
+  /**
+   * Clicking a highlight whose card is already focused still has to bring the
+   * card back — the rail has scrolled since, which is exactly why the reader
+   * clicked again. The card's id alone cannot express that, so the focus carries
+   * a click counter.
+   */
+  it("scrolls the card back into view when the same thread is selected twice", () => {
+    const scrolled: Element[] = [];
+    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
+      scrolled.push(this);
+    };
+
+    const { ydoc, blocks } = annotatedDoc();
+    const thread = createAnnotation(ydoc, blocks[1]!, 4, 15, "ben", "why?");
+    // Mounted with nothing focused, the way the rail is when the reader arrives.
+    const view = renderRail(ydoc);
+    const card = view.host.querySelector(`#${CSS.escape(threadCardId(thread.id))}`);
+    expect(card).not.toBeNull();
+    expect(scrolled).toEqual([]);
+
+    const first = focusThread(null, thread.id);
+    view.refocus(first);
+    expect(scrolled).toEqual([card]);
+
+    view.refocus(focusThread(first, thread.id));
+    expect(scrolled).toEqual([card, card]);
     view.unmount();
   });
 
@@ -440,29 +501,24 @@ describe("a highlight and its card focus each other", () => {
   });
 });
 
-describe("a comment's age", () => {
+describe("a comment's timestamp", () => {
   /**
-   * The unit ladder is what is worth pinning — which unit a given age picks, and
-   * that it reads as past. The wording itself is `Intl`'s and the reader's
-   * locale's, so the expectation is built the same way rather than hard-coding
-   * English.
+   * The contract, and not the formatting: the wording is `Intl`'s and the
+   * reader's locale's, so the expectation is built the same way rather than
+   * hard-coding a locale's punctuation.
    */
-  it("picks the right unit, and falls back to the stored string", () => {
-    const now = Date.parse("2026-08-21T12:00:00.000Z");
-    const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-    expect(relativeTime("2026-08-21T11:59:30.000Z", now)).toBe(
-      rtf.format(-30, "second"),
-    );
-    expect(relativeTime("2026-08-21T09:00:00.000Z", now)).toBe(
-      rtf.format(-3, "hour"),
-    );
-    expect(relativeTime("2026-08-16T12:00:00.000Z", now)).toBe(rtf.format(-5, "day"));
-    // Seven days rolls over to the next unit rather than reading "7 days".
-    expect(relativeTime("2026-08-14T12:00:00.000Z", now)).toBe(
-      rtf.format(-1, "week"),
-    );
+  it("formats a date, and shows anything else verbatim with no machine value", () => {
+    const iso = "2026-08-21T12:00:00.000Z";
+    expect(commentTimestamp(iso)).toEqual({
+      label: new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(Date.parse(iso)),
+      dateTime: iso,
+    });
     // Not a timestamp this reader understands: show what the document holds
-    // rather than inventing a date or hiding the comment's byline.
-    expect(relativeTime("whenever", now)).toBe("whenever");
+    // rather than inventing a date or hiding the comment's byline — and emit no
+    // `dateTime`, which an absent key is exactly how React drops the attribute.
+    expect(commentTimestamp("whenever")).toEqual({ label: "whenever" });
   });
 });

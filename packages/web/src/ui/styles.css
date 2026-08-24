@@ -470,7 +470,12 @@ body {
   gap: 0.35rem;
 }
 
+/* The auto margin sits here, on the one element there is exactly one of: a card
+   can carry both an `orphaned` and a `resolved` chip, and two chips each with
+   `margin-left: auto` would split the free space between them instead of
+   grouping them at the right edge. */
 .ub-thread-ref {
+  margin-right: auto;
   font-family: var(--font-mono);
   font-size: 0.7rem;
   letter-spacing: 0.02em;
@@ -478,7 +483,6 @@ body {
 }
 
 .ub-chip {
-  margin-left: auto;
   font-size: 0.65rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;

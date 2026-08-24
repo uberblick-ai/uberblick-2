@@ -19,15 +19,21 @@
  * first anchor in document order is the one the card quotes.
  */
 
-import type * as Y from "yjs";
+import * as Y from "yjs";
 import {
+  COMMENT_MARK,
   getAnnotationsMap,
   getBlocks,
   getBlocksFragment,
-  listAnnotationRanges,
   listAnnotations,
+  readsAsMark,
 } from "@uberblick/schema";
-import type { AnnotationComment, Block, BlockType } from "@uberblick/schema";
+import type {
+  AnnotationComment,
+  Block,
+  BlockType,
+  CommentMark,
+} from "@uberblick/schema";
 
 /** Longest quoted excerpt a card shows before it is cut short. */
 const EXCERPT_MAX = 160;
@@ -73,6 +79,27 @@ export interface ThreadView {
   replyCount: number;
 }
 
+/**
+ * The thread the reader is looking at, as the app shell holds it.
+ *
+ * `click` is a counter, not decoration. Selecting a thread scrolls its card into
+ * view, and a reader who clicks the same highlight twice — because the rail has
+ * scrolled away since — means it the second time. An id alone is a state value
+ * React recognises as unchanged, so nothing would move.
+ */
+export interface ThreadFocus {
+  id: string;
+  click: number;
+}
+
+/** The focus after selecting `threadId`, given the focus before it. */
+export function focusThread(
+  previous: ThreadFocus | null,
+  threadId: string,
+): ThreadFocus {
+  return { id: threadId, click: (previous?.click ?? 0) + 1 };
+}
+
 interface Anchor {
   blockId: string;
   start: number;
@@ -80,21 +107,75 @@ interface Anchor {
 }
 
 /**
- * Where each thread's mark actually sits, from one delta scan per block. The
- * first run in document order wins, so a thread split across two blocks is
- * quoted from its head.
+ * The thread a delta op's attributes anchor to, or null. `readsAsMark` is the
+ * schema package's own definition of a usable `comment` mark, so what counts as
+ * an anchor is decided in one place.
  */
-function anchorsByThread(ydoc: Y.Doc, blocks: Block[]): Map<string, Anchor> {
+function threadIdOf(attributes: unknown): string | null {
+  if (typeof attributes !== "object" || attributes === null) return null;
+  const value = (attributes as Record<string, unknown>)[COMMENT_MARK];
+  return readsAsMark(COMMENT_MARK, value) ? (value as CommentMark).threadId : null;
+}
+
+/**
+ * Where each thread's mark actually sits, from ONE walk of the blocks fragment.
+ * The first run in document order wins, so a thread split across two blocks is
+ * quoted from its head.
+ *
+ * One walk and not `listAnnotationRanges` per block: that API re-locates the
+ * block by scanning the fragment on every call, so calling it once per block is
+ * quadratic in the block count — and this runs on every keystroke.
+ *
+ * The fragment is read directly, which means honouring the one rule that walk
+ * carries: the first element to claim an id is the visible block and any later
+ * element repeating that id is shadowed (see `partitionById` in schema's
+ * blocks.ts). An element with no id has claimed no block identity, so no thread
+ * can name it and nothing here can quote it.
+ */
+function anchorsByThread(ydoc: Y.Doc): Map<string, Anchor> {
   const found = new Map<string, Anchor>();
-  for (const block of blocks) {
-    for (const run of listAnnotationRanges(ydoc, block.id)) {
-      if (found.has(run.threadId)) continue;
-      found.set(run.threadId, {
-        blockId: block.id,
-        start: run.start,
-        end: run.end,
-      });
+  const claimed = new Set<string>();
+  for (const child of getBlocksFragment(ydoc).toArray()) {
+    if (!(child instanceof Y.XmlElement)) continue;
+    const blockId = child.getAttribute("id") ?? "";
+    if (blockId === "" || claimed.has(blockId)) continue;
+    claimed.add(blockId);
+    const text = child.firstChild;
+    if (!(text instanceof Y.XmlText)) continue;
+
+    // Adjacent ops carrying the same thread are one run: a mark the reader
+    // added inside the annotated range splits the delta but not the anchor.
+    let openId: string | null = null;
+    let start = 0;
+    let end = 0;
+    const close = (): void => {
+      if (openId !== null && !found.has(openId)) {
+        found.set(openId, { blockId, start, end });
+      }
+      openId = null;
+    };
+    let index = 0;
+    for (const op of text.toDelta() as Array<{
+      insert?: unknown;
+      attributes?: unknown;
+    }>) {
+      const length =
+        typeof op.insert === "string" ? op.insert.length : op.insert === undefined ? 0 : 1;
+      if (length === 0) continue;
+      const threadId = threadIdOf(op.attributes);
+      if (threadId !== null && threadId === openId) {
+        end = index + length;
+      } else {
+        close();
+        if (threadId !== null) {
+          openId = threadId;
+          start = index;
+          end = index + length;
+        }
+      }
+      index += length;
     }
+    close();
   }
   return found;
 }
@@ -132,12 +213,18 @@ function blockRefFor(
  * its range used to have is recorded nowhere, and the alternative — dropping
  * orphans to the bottom of the rail — would move a card away from the passage
  * the conversation is about.
+ *
+ * A document with no threads costs nothing: this runs on every keystroke through
+ * the fragment observer, and most documents have no annotations at all, so the
+ * empty map is checked before a single block is read.
  */
 export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
+  if (getAnnotationsMap(ydoc).size === 0) return [];
+
   const blocks = getBlocks(ydoc);
   const byId = new Map(blocks.map((block) => [block.id, block] as const));
   const order = new Map(blocks.map((block, index) => [block.id, index] as const));
-  const anchors = anchorsByThread(ydoc, blocks);
+  const anchors = anchorsByThread(ydoc);
 
   const views: ThreadView[] = listAnnotations(ydoc).map((annotation) => {
     const anchor = anchors.get(annotation.id) ?? null;
@@ -183,6 +270,11 @@ export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
  * (threads arriving, comments appended) and the blocks fragment, observed deeply
  * so a *format* change one level down — a mark being deleted with its text — is
  * seen too. A shallow fragment observer would never notice a thread orphaning.
+ *
+ * The two are coalesced onto a microtask, so a single transaction that touches
+ * both — creating a thread writes the map *and* the mark — recomputes the rail
+ * once instead of twice. The first read is synchronous: a mounting rail should
+ * not paint empty for a tick.
  */
 export function observeThreads(
   ydoc: Y.Doc,
@@ -190,13 +282,24 @@ export function observeThreads(
 ): () => void {
   const fragment = getBlocksFragment(ydoc);
   const annotations = getAnnotationsMap(ydoc);
-  const read = (): void => onChange(threadsFromDoc(ydoc));
-  read();
-  fragment.observeDeep(read);
-  annotations.observe(read);
+  let queued = false;
+  let live = true;
+  const schedule = (): void => {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(() => {
+      queued = false;
+      // The unsubscribe can land between the queue and the flush.
+      if (live) onChange(threadsFromDoc(ydoc));
+    });
+  };
+  onChange(threadsFromDoc(ydoc));
+  fragment.observeDeep(schedule);
+  annotations.observe(schedule);
   return () => {
-    fragment.unobserveDeep(read);
-    annotations.unobserve(read);
+    live = false;
+    fragment.unobserveDeep(schedule);
+    annotations.unobserve(schedule);
   };
 }
 
@@ -220,20 +323,42 @@ export function threadIdFromTarget(target: EventTarget | null): string | null {
 }
 
 /**
+ * The timer that will clear each flashing span's class. Keyed by the element so a
+ * second click cancels the first click's timer instead of letting it strip the
+ * class out from under the new flash — and weakly, because ProseMirror is free to
+ * replace the span at any redraw.
+ */
+const flashTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>();
+
+/**
  * Scroll a thread's highlight into view and flash it. A no-op when the thread is
  * orphaned — there is no anchor to scroll to, which is exactly why the card says
  * which block the range lived in instead.
+ *
+ * Each click restarts the flash rather than joining one already running: the
+ * class comes off, the layout is forced, the class goes back on. Without the
+ * restart a click near the end of a flash gets almost no animation at all.
  */
 export function flashThreadHighlight(threadId: string): void {
-  const spans = document.querySelectorAll(
+  const spans = document.querySelectorAll<HTMLElement>(
     `[data-comment-thread="${CSS.escape(threadId)}"]`,
   );
   const first = spans[0];
   if (first === undefined) return;
   first.scrollIntoView({ behavior: "smooth", block: "center" });
   for (const span of spans) {
+    const pending = flashTimers.get(span);
+    if (pending !== undefined) clearTimeout(pending);
+    span.classList.remove(FLASH_CLASS);
+    void span.offsetWidth;
     span.classList.add(FLASH_CLASS);
-    setTimeout(() => span.classList.remove(FLASH_CLASS), FLASH_MS);
+    flashTimers.set(
+      span,
+      setTimeout(() => {
+        span.classList.remove(FLASH_CLASS);
+        flashTimers.delete(span);
+      }, FLASH_MS),
+    );
   }
 }
 
@@ -245,34 +370,33 @@ export function scrollThreadCardIntoView(threadId: string): void {
 }
 
 /** The reader's own locale: a byline is display data, not document data. */
-const RELATIVE_FORMAT = new Intl.RelativeTimeFormat(undefined, {
-  numeric: "auto",
+const TIMESTAMP_FORMAT = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
 });
 
-const RELATIVE_STEPS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
-  ["second", 60],
-  ["minute", 60],
-  ["hour", 24],
-  ["day", 7],
-  ["week", 4.348],
-  ["month", 12],
-  ["year", Number.POSITIVE_INFINITY],
-];
+/** What the byline renders: the visible label, and the `<time>` machine value. */
+export interface CommentTimestamp {
+  label: string;
+  /** Absent when `createdAt` is not a date — an invalid `dateTime` is worse than none. */
+  dateTime?: string;
+}
 
 /**
- * A comment's age, for the card's byline. Falls back to the stored string when
- * it is not a timestamp this reader understands: an unparseable value is a
- * writer's business, and hiding it would be the wrong kind of quiet.
+ * A comment's timestamp for the card's byline: absolute, in the reader's locale.
+ * Absolute and not "30 seconds ago", which is a label that goes stale on screen
+ * in a document nobody is touching.
+ *
+ * A value this reader cannot parse is shown verbatim — an unparseable timestamp
+ * is the writer's business, and hiding it would be the wrong kind of quiet — and
+ * carries no `dateTime`, because a machine-readable attribute that is not a date
+ * is a lie a parser will believe.
  */
-export function relativeTime(iso: string, now: number = Date.now()): string {
-  const at = Date.parse(iso);
-  if (Number.isNaN(at)) return iso;
-  let value = (at - now) / 1000;
-  for (const [unit, span] of RELATIVE_STEPS) {
-    if (Math.abs(value) < span) {
-      return RELATIVE_FORMAT.format(Math.round(value), unit);
-    }
-    value /= span;
-  }
-  return iso;
+export function commentTimestamp(createdAt: string): CommentTimestamp {
+  const at = Date.parse(createdAt);
+  if (Number.isNaN(at)) return { label: createdAt };
+  return {
+    label: TIMESTAMP_FORMAT.format(at),
+    dateTime: new Date(at).toISOString(),
+  };
 }
