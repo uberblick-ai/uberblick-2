@@ -62,6 +62,20 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * A path as a shell would have to be given it.
+ *
+ * The timeout message ends in a command somebody will paste, and the path in it
+ * comes from `XDG_CONFIG_HOME` — which may hold spaces, quotes, `$(…)` or a
+ * newline. Single quotes make a POSIX shell treat every one of those literally;
+ * the only character they cannot contain is a single quote itself, which is why
+ * one is spliced in as `'\''`. `rm --` then keeps a path beginning with `-` from
+ * being read as options.
+ */
+function shellQuote(path: string): string {
+  return `'${path.split("'").join(`'\\''`)}'`;
+}
+
+/**
  * How long that lock has been there, for the message. Never a decision — see the
  * module comment on why nothing here acts on a lock's age.
  */
@@ -91,11 +105,29 @@ export async function acquireInitLock(
   for (;;) {
     try {
       const fd = openSync(path, "wx", 0o600);
+      // From here the lock exists, so every failure has to take it away again:
+      // a lock left behind by a process that never went on to hold it is one
+      // nobody will ever release, and there is no takeover to rescue it. The
+      // close is inside the guarded region for the reason it is in
+      // `writeTempBeside` — that is where a deferred error surfaces — and marked
+      // as attempted first, because POSIX releases the descriptor even when
+      // `close` reports an error.
+      let closeAttempted = false;
       try {
         // Whoever finds this file wants to know which process to look for.
         writeSync(fd, `${process.pid}\n`);
-      } finally {
+        closeAttempted = true;
         closeSync(fd);
+      } catch (error) {
+        if (!closeAttempted) {
+          try {
+            closeSync(fd);
+          } catch {
+            // Already unwinding; the unlink below is what matters.
+          }
+        }
+        removeQuietly(path);
+        throw error;
       }
       let released = false;
       return {
@@ -119,7 +151,7 @@ export async function acquireInitLock(
       throw new Error(
         `another \`ub init\` is holding ${path} (${describeAge(path)}). Wait ` +
           "for it to finish and run `ub init` again — or, if nothing is " +
-          `running, remove it: rm ${path}`,
+          `running, remove it: rm -- ${shellQuote(path)}`,
       );
     }
     await sleep(RETRY_MS);

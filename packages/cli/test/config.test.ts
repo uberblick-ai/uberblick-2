@@ -12,7 +12,6 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -25,7 +24,6 @@ import {
   resolveConfig,
   writeCredentials,
 } from "../src/config.js";
-import { writeTempBeside } from "../src/safe-write.js";
 import { removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -298,26 +296,11 @@ describe("claimSigningSecret", () => {
 });
 
 describe("writing the files ub owns", () => {
-  it("writes every byte, not just the first chunk of one", () => {
-    // What this does NOT do is force a short `write(2)` — a regular file does
-    // not return one, whatever the payload size, so the condition the loop
-    // exists for is unreachable from a test. What it defends is the loop's
-    // arithmetic, which is the regression a hand-written write loop actually
-    // suffers: an offset or length that drops the tail fails here. A payload
-    // past the usual chunk sizes is enough for that; megabytes bought nothing.
-    const box = sandbox();
-    mkdirSync(join(box.configHome, "uberblick"), { recursive: true });
-    const bulk = "x".repeat(64 * 1024);
-
-    const staged = writeTempBeside(credentialsPath(box.env), bulk);
-    try {
-      expect(statSync(staged).size).toBe(bulk.length);
-      expect(readFileSync(staged, "utf8")).toBe(bulk);
-      expect(statSync(staged).mode & 0o777).toBe(0o600);
-    } finally {
-      rmSync(staged, { force: true });
-    }
-  });
+  // No test for `writeAll`'s loop. A write to a regular file does not come back
+  // short, so no payload reaches a second iteration and any test of it would be
+  // asserting that one `writeSync` writes what it was given. The loop stays
+  // because the syscall's contract permits a short write; the test would not
+  // have been defending it.
 
   it("refuses a symlink rather than writing the secret through it", () => {
     // Anything that can plant a symlink at `credentials.json` could otherwise

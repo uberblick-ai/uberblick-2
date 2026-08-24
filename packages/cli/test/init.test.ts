@@ -333,24 +333,42 @@ describe("ub init", () => {
     // a lock is stale unlink it twice, and the second unlink deletes a lock
     // somebody had just legitimately taken. A crashed holder is instead a
     // visible situation with a one-line fix, so the message has to carry it.
-    for (const ageMs of [0, 120_000]) {
+    // A fresh lock and a long-dead one get the same answer, and the second case
+    // puts the lock somewhere whose name a shell would mangle: that recovery
+    // line is going to be pasted into one.
+    for (const [ageMs, home] of [
+      [0, null],
+      [120_000, "it's here/config dir"],
+    ] as const) {
       const box = sandbox({ checkout: true });
-      const lock = join(box.configHome, "uberblick", ".init.lock");
+      const configHome =
+        home === null ? box.configHome : join(box.configHome, home);
+      const lock = join(configHome, "uberblick", ".init.lock");
       mkdirSync(dirname(lock), { recursive: true });
       writeFileSync(lock, "999999\n");
       const when = new Date(Date.now() - ageMs);
       utimesSync(lock, when, when);
 
-      const run = runUb(["init", "--yes"], box, WITHOUT_MISE);
+      const run = runUb(["init", "--yes"], box, {
+        ...WITHOUT_MISE,
+        XDG_CONFIG_HOME: configHome,
+      });
       expect(run.status).toBe(1);
       // The path, how old it is, and the command that fixes it.
       expect(run.stderr).toMatch(/another `ub init` is holding .*\.init\.lock/);
       expect(run.stderr).toMatch(/\d+s old/);
-      expect(run.stderr).toMatch(/rm .*\.init\.lock/);
+      // Quoted for a shell: single quotes around the path, with any single
+      // quote in it spliced as '\'' — so the line survives spaces, quotes and
+      // anything else XDG_CONFIG_HOME can carry.
+      expect(run.stderr).toContain(
+        `rm -- '${lock.split("'").join(`'\\''`)}'`,
+      );
       // Somebody else's lock is left exactly where it was, and nothing was
       // half-written around it.
       expect(existsSync(lock)).toBe(true);
-      expect(existsSync(credentialsPath(box))).toBe(false);
+      expect(existsSync(join(configHome, "uberblick", "credentials.json"))).toBe(
+        false,
+      );
       expect(existsSync(localConfigPath(box))).toBe(false);
     }
   });
