@@ -23,7 +23,9 @@
  * `HUB_AUTH_TOKEN` holds the hub's HMAC **signing secret**, not a token (see
  * `packages/hub/src/token.ts`). It is read from `credentials.json`, passed to the
  * server in its environment, and never printed. A `credentials.json` other users
- * can read is refused rather than used — see {@link credentialsAreExposed}.
+ * can read is refused rather than used — see {@link credentialsAreExposed} — and
+ * the secret is attached only to a hub the *user* chose, never to one a cloned
+ * `./uberblick.json` chose — see {@link secretAppliesTo}.
  */
 
 import {
@@ -110,15 +112,24 @@ function trimmed(value: string | undefined): string | null {
  * Read a JSON object, or nothing. A missing file is silent; anything else wrong
  * with it is a warning and the layer is skipped — one broken file must not stop
  * `ub` from running with the layers below it.
+ *
+ * `secret: true` for a file whose *contents* must never be quoted back: Node's
+ * `JSON.parse` errors include the source around the syntax error, so a
+ * `credentials.json` someone pasted a bare secret into would print the secret in
+ * the warning. The parser's message is the only thing lost, and for that file
+ * there is nothing to say beyond its name — an `ub` warning may reach an MCP
+ * client's log, a terminal someone screen-shares, or a CI transcript.
  */
 function readJsonObject(
   path: string,
   warnings: string[],
+  { secret = false }: { secret?: boolean } = {},
 ): Record<string, unknown> | null {
   let text: string;
   try {
     text = readFileSync(path, "utf8");
   } catch (error) {
+    // An fs error names the path and the errno, never the file's contents.
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       warnings.push(`ignoring ${path}: ${message(error)}`);
     }
@@ -129,7 +140,11 @@ function readJsonObject(
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    warnings.push(`ignoring ${path}: invalid JSON (${message(error)})`);
+    warnings.push(
+      secret
+        ? `ignoring ${path}: invalid JSON`
+        : `ignoring ${path}: invalid JSON (${message(error)})`,
+    );
     return null;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -219,6 +234,24 @@ function credentialsAreExposed(path: string, warnings: string[]): boolean {
   return true;
 }
 
+/**
+ * Whether the stored secret belongs on this hub.
+ *
+ * `./uberblick.json` is committable, so a clone can carry one that points the
+ * checkout at any endpoint its author likes. If the secret in the user's
+ * `credentials.json` followed that URL, `ub status` in a freshly cloned
+ * repository would hand a signed read-write token to a stranger's hub — no
+ * prompt, no build step, just entering the directory.
+ *
+ * So the stored secret is scoped to hubs the *user* chose: the environment,
+ * their own `config.json`, or the built-in default. `HUB_AUTH_TOKEN` in the
+ * environment is itself a deliberate act and always applies, whatever chose the
+ * URL, and that is the documented way to sync with a repository-chosen hub.
+ */
+function secretAppliesTo(hubUrlOrigin: Origin): boolean {
+  return hubUrlOrigin !== "directory file";
+}
+
 export interface ResolveOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
@@ -282,7 +315,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   // exposed file is not read at all: its one actionable message is the mode.
   const credentials = credentialsAreExposed(paths.credentials, warnings)
     ? null
-    : readJsonObject(paths.credentials, warnings);
+    : readJsonObject(paths.credentials, warnings, { secret: true });
   const secretFromFile = stringField(
     credentials,
     SIGNING_SECRET_KEY,
@@ -290,12 +323,22 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
     warnings,
   );
   const secretFromEnv = trimmed(env.HUB_AUTH_TOKEN);
-  const secret = secretFromEnv ?? secretFromFile;
-  let credentialOrigin: CredentialOrigin | null = null;
-  if (secretFromEnv !== null) {
-    credentialOrigin = "environment";
-  } else if (secretFromFile !== null) {
-    credentialOrigin = "credentials file";
+
+  let secret: string | null = secretFromEnv;
+  let credentialOrigin: CredentialOrigin | null =
+    secretFromEnv === null ? null : "environment";
+  if (secret === null && secretFromFile !== null) {
+    if (secretAppliesTo(hubUrl.origin)) {
+      secret = secretFromFile;
+      credentialOrigin = "credentials file";
+    } else {
+      warnings.push(
+        `${paths.directoryFile} points this checkout at ${hubUrl.value}; the ` +
+          `signing secret in ${paths.credentials} was not attached to a ` +
+          "repository-chosen hub — export HUB_AUTH_TOKEN (or set HUB_URL " +
+          "yourself) to sync with it",
+      );
+    }
   }
 
   const resolvedEnv: NodeJS.ProcessEnv = { ...env };

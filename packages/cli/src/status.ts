@@ -46,6 +46,12 @@ export interface StatusReport {
   rooms: SyncStatus["rooms"];
   /** Rooms holding local changes the hub has not acknowledged. Counts ROOMS. */
   unsyncedChanges: number;
+  /**
+   * Which rooms those are, with the log sequence still unacknowledged. The
+   * count alone answers "is anything at risk"; this answers "what", which is
+   * what someone about to close their laptop actually needs.
+   */
+  pendingRooms: SyncStatus["pendingRooms"];
   /** Provider sync MESSAGES awaiting acknowledgement. Not a count of updates. */
   inFlightUpdates: number;
   logEntries: number;
@@ -85,6 +91,7 @@ export async function statusReport(
         hub: sync.hub,
         rooms: sync.rooms,
         unsyncedChanges: sync.unsyncedChanges,
+        pendingRooms: sync.pendingRooms,
         inFlightUpdates: sync.inFlightUpdates,
         logEntries: sync.logEntries,
         persistence: sync.persistence,
@@ -132,6 +139,11 @@ export function renderStatus(report: StatusReport): string {
       `${plural(report.inFlightUpdates, "sync message")} unacked, ` +
       `${report.logEntries} log entries`,
   );
+  // Naming the rooms under the count: "3 rooms unsynced" is an alarm, and the
+  // next question is always which ones.
+  for (const pending of report.pendingRooms) {
+    text += `  ${pending.room}  waiting on seq ${pending.seq}\n`;
+  }
 
   if (report.persistence !== null) {
     text += field("persistence", `FAILED: ${report.persistence.message}`);

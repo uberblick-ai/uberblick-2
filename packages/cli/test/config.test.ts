@@ -158,6 +158,81 @@ describe("resolveConfig", () => {
     expect(fromEnv.warnings.join("\n")).toMatch(/refusing/);
   });
 
+  it("withholds the stored secret from a hub ./uberblick.json chose", () => {
+    // The hostile checkout: a clone carries a committed `uberblick.json` naming
+    // the attacker's endpoint. Entering the directory must not be enough to send
+    // this user's signed read-write token there.
+    const secret = "scoping-signing-secret-4b17c9";
+    const box = sandbox({
+      directoryFile: { hubUrl: "ws://attacker.example:9999" },
+      credentials: { signingSecret: secret },
+    });
+
+    const withheld = resolveConfig({ env: box.env, cwd: box.cwd });
+    expect(resolveMcpConfig(withheld.env).hubUrl).toBe(
+      "ws://attacker.example:9999",
+    );
+    expect(withheld.env.HUB_AUTH_TOKEN).toBeUndefined();
+    expect(resolveMcpConfig(withheld.env).authSecret).toBeNull();
+    // `origins.credential` reports reality, so `ub status` says local-only.
+    expect(withheld.origins.credential).toBeNull();
+    // The warning names the situation and both explicit opt-ins, not the secret.
+    const warning = withheld.warnings.join("\n");
+    expect(warning).toMatch(/uberblick\.json points this checkout at ws:\/\/attacker/);
+    expect(warning).toMatch(/HUB_AUTH_TOKEN/);
+    expect(warning).toMatch(/HUB_URL/);
+    expect(warning).not.toContain(secret);
+
+    // Opt-in one: the environment secret is a deliberate act, so it applies to
+    // whatever hub is in force — including the repository's.
+    const withEnvSecret = resolveConfig({
+      env: { ...box.env, HUB_AUTH_TOKEN: "from-env" },
+      cwd: box.cwd,
+    });
+    expect(withEnvSecret.origins.credential).toBe("environment");
+    expect(resolveMcpConfig(withEnvSecret.env).authSecret).toBe("from-env");
+    expect(withEnvSecret.warnings).toEqual([]);
+
+    // Opt-in two: choose the hub yourself and the stored secret comes along.
+    const withEnvUrl = resolveConfig({
+      env: { ...box.env, HUB_URL: "ws://mine:1234" },
+      cwd: box.cwd,
+    });
+    expect(withEnvUrl.origins.credential).toBe("credentials file");
+    expect(resolveMcpConfig(withEnvUrl.env).authSecret).toBe(secret);
+    expect(withEnvUrl.warnings).toEqual([]);
+
+    // And a hub the *user* configured is not repository-chosen either.
+    const userChosen = sandbox({
+      userConfig: { hubUrl: "ws://mine:1234" },
+      credentials: { signingSecret: secret },
+    });
+    const fromUser = resolveConfig({ env: userChosen.env, cwd: userChosen.cwd });
+    expect(fromUser.origins.credential).toBe("credentials file");
+    expect(fromUser.warnings).toEqual([]);
+  });
+
+  it("keeps a malformed credentials file's contents out of the warning", () => {
+    // Node's JSON.parse errors quote the source around the syntax error, so the
+    // parser message for a file someone pasted a bare secret into *is* the
+    // secret. For that one file the warning names the path and nothing else.
+    const secret = "bare-unquoted-signing-secret-8ac3";
+    const box = sandbox({ raw: { credentials: `${secret}\n` } });
+
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
+    expect(resolved.warnings.join("\n")).toMatch(
+      /ignoring .*credentials\.json: invalid JSON$/,
+    );
+    expect(resolved.warnings.join("\n")).not.toContain(secret);
+    expect(resolved.origins.credential).toBeNull();
+
+    // Other files keep the detailed message: nothing in them is a secret.
+    const other = sandbox({ raw: { directoryFile: "{ not json" } });
+    expect(
+      resolveConfig({ env: other.env, cwd: other.cwd }).warnings.join("\n"),
+    ).toMatch(/uberblick\.json: invalid JSON \(/);
+  });
+
   it("refuses a signing secret in a committable file", () => {
     const box = sandbox({ directoryFile: { signingSecret: "nope" } });
     const resolved = resolveConfig({ env: box.env, cwd: box.cwd });

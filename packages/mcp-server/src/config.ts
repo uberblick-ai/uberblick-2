@@ -107,6 +107,10 @@ function trimmed(value: string | undefined): string | null {
  * environment and must apply this exact rule to all of them; `label` names the
  * source in the message, so a bad value in `./uberblick.json` does not report
  * itself as a bad `WORKSPACE_ID`.
+ *
+ * The rejected value is deliberately not in the message. `label` already says
+ * where to look, and a secret mistakenly exported as `WORKSPACE_ID` would
+ * otherwise be printed by the very error that refuses it.
  */
 export function assertWorkspaceSegment(
   value: string,
@@ -122,7 +126,7 @@ export function assertWorkspaceSegment(
   if (rejected) {
     throw new Error(
       `${label} must be a single path and room segment: no "/", no "\\", ` +
-        `not "." or "..", got ${JSON.stringify(value)}`,
+        'not "." or ".."',
     );
   }
 }

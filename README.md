@@ -110,10 +110,16 @@ Precedence, highest first:
 | Layer | Holds |
 | --- | --- |
 | environment (`WORKSPACE_ID`, `HUB_URL`, `HUB_AUTH_TOKEN`) | wins, so `HUB_URL=… ub mcp serve` keeps working |
-| `./uberblick.json` | binds one checkout to one workspace. Committable, so never secrets |
+| `./uberblick.json` | binds one checkout to one workspace. Committable, so never secrets — and never the hub the stored secret is sent to |
 | `$XDG_CONFIG_HOME/uberblick/config.json` | per-user default workspace and hub endpoint |
 | `$XDG_CONFIG_HOME/uberblick/credentials.json`, mode 0600 | the hub signing secret. Never printed by any command, and refused outright — not merely warned about — if anyone but its owner can read it |
 | built-in defaults | workspace `main`, hub `ws://localhost:1234` |
+
+The stored signing secret is scoped to hubs *you* chose: if the hub URL in force
+came from a committable `./uberblick.json`, the secret in `credentials.json` is
+not attached to it and `ub` says so — a clone must not be able to point your
+credential at its author's endpoint. Exporting `HUB_AUTH_TOKEN`, or setting
+`HUB_URL` yourself, is the explicit opt-in and always applies.
 
 `ub mcp serve` resolves that configuration and runs the MCP server with it, so
 the server keeps its environment-only contract — no flags, no config file — and

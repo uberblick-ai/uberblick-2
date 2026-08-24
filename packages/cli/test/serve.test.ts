@@ -9,6 +9,7 @@
  * because a stray byte on stdout is a parse error and a dropped session.
  */
 
+import { type ChildProcess, spawn } from "node:child_process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
@@ -66,6 +67,22 @@ async function connect(
   };
 }
 
+/**
+ * Wait for the server to say it is serving, on its own stderr. Readiness is
+ * observed rather than timed: a sleep here would be the flaky way to write it.
+ */
+function whenServing(child: ChildProcess): Promise<void> {
+  return new Promise((resolve) => {
+    let seen = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      seen += chunk.toString("utf8");
+      if (seen.includes("serving")) {
+        resolve();
+      }
+    });
+  });
+}
+
 describe("ub mcp serve", () => {
   it("serves the shipped tool set to a client that spawns it", async () => {
     const session = await connect(sandbox());
@@ -99,7 +116,9 @@ describe("ub mcp serve", () => {
     // A directory file that binds the workspace, a credential so the hub is
     // enabled rather than disabled, and a secret in the committable file — which
     // is refused with a warning, so resolution has something to write to stderr
-    // while stdout is carrying the protocol.
+    // while stdout is carrying the protocol. The `HUB_URL` override below is
+    // also what lets the stored secret apply at all: it makes the hub the user's
+    // choice rather than the directory file's.
     const box = sandbox({
       directoryFile: {
         workspace: "cli-serve-test",
@@ -130,5 +149,28 @@ describe("ub mcp serve", () => {
     } finally {
       await session.close();
     }
+  });
+
+  it("forwards SIGHUP and then dies of it, like the server it wraps", async () => {
+    // The wrapper must be invisible to whoever supervises it. SIGHUP is the
+    // signal a vanished terminal sends and the server installs no handler for,
+    // so it is the one that proves both halves at once: the child receives it
+    // (it dies of it rather than surviving) and we re-raise it on ourselves
+    // (waitpid reports a signal death, not a plain exit with 128+n, which is
+    // what a process that merely chose that code looks like).
+    const box = sandbox();
+    const child = spawn(process.execPath, [UB_BIN, "mcp", "serve"], {
+      cwd: box.cwd,
+      env: box.env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const exited = new Promise<NodeJS.Signals | null>((resolve) => {
+      child.on("exit", (_code, signal) => resolve(signal));
+    });
+    await whenServing(child);
+    child.kill("SIGHUP");
+
+    expect(await exited).toBe("SIGHUP");
   });
 });

@@ -38,10 +38,37 @@ function mcpServerMain(): string {
   );
 }
 
+/**
+ * The signals a client or a shell sends a long-running stdio process, forwarded
+ * to the child so the server shuts down its replicas and its hub connection.
+ * SIGHUP is here because a terminal that goes away sends it and nothing else.
+ */
+const FORWARDED: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+
 /** What a shell reports for a process killed by a signal. */
 function signalExitCode(signal: NodeJS.Signals): number {
   const numbers = constants.signals as unknown as Record<string, number>;
   return 128 + (numbers[signal] ?? 0);
+}
+
+/**
+ * Die of the signal the child died of, so that whoever is waiting on `ub mcp
+ * serve` cannot tell it apart from a direct spawn of the server: a supervisor
+ * reading `WIFSIGNALED` sees the signal, not a plain exit with 128+n, which is
+ * what a process that merely *chose* that code looks like.
+ *
+ * The caller drops our forwarding handler first — with it still installed we
+ * would only forward the signal to a child that has already exited. Returns
+ * false when the signal cannot be raised at all (an unknown name on this
+ * platform), and the caller falls back to the number.
+ */
+function reraise(signal: NodeJS.Signals): boolean {
+  try {
+    process.kill(process.pid, signal);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function serveCommand(
@@ -65,17 +92,17 @@ export async function serveCommand(
   );
 
   return await new Promise<number>((resolve, reject) => {
-    // Forward the signals a client or a shell sends us: the server shuts down
-    // its replicas and its hub connection on both.
     const forward = (signal: NodeJS.Signals): void => {
       child.kill(signal);
     };
     const stop = (): void => {
-      process.off("SIGINT", forward);
-      process.off("SIGTERM", forward);
+      for (const signal of FORWARDED) {
+        process.off(signal, forward);
+      }
     };
-    process.on("SIGINT", forward);
-    process.on("SIGTERM", forward);
+    for (const signal of FORWARDED) {
+      process.on(signal, forward);
+    }
 
     child.on("error", (error) => {
       stop();
@@ -83,7 +110,17 @@ export async function serveCommand(
     });
     child.on("exit", (code, signal) => {
       stop();
-      resolve(signal === null ? (code ?? 1) : signalExitCode(signal));
+      if (signal === null) {
+        resolve(code ?? 1);
+        return;
+      }
+      if (reraise(signal)) {
+        // The raise is delivered by the event loop, so stay alive long enough
+        // to receive it; the resolve is only reached if it never arrives.
+        setTimeout(() => resolve(signalExitCode(signal)), 200);
+        return;
+      }
+      resolve(signalExitCode(signal));
     });
   });
 }

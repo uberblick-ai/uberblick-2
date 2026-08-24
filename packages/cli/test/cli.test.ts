@@ -71,6 +71,10 @@ describe("ub status", () => {
     expect(Array.isArray(report.rooms)).toBe(true);
     expect(report.rooms[0].room).toBe("main/_directory");
     expect(report.rooms[0]).toHaveProperty("synced");
+    // The rooms behind `unsyncedChanges`, not just the count: durable local work
+    // the hub has not acknowledged is the one thing this report must not hide.
+    expect(Array.isArray(report.pendingRooms)).toBe(true);
+    expect(report.pendingRooms.length).toBe(report.unsyncedChanges);
   });
 
   it("reports a configured credential without printing it", () => {
@@ -121,6 +125,50 @@ describe("ub status", () => {
     // The refusal and its fix are on stderr, and the secret is on neither stream.
     expect(run.stderr).toMatch(/refusing/);
     expect(run.stderr).toMatch(/chmod 600/);
+    expect(run.output).not.toContain(secret);
+  });
+
+  it("does not hand the stored secret to a hub ./uberblick.json chose", () => {
+    // The hostile checkout, through the real binary: a cloned `uberblick.json`
+    // names an endpoint, the user has a signing secret on disk, and `ub status`
+    // must report local-only rather than dial that hub with a signed token.
+    const secret = "cli-test-signing-secret-c40b8a";
+    const box = sandbox({
+      directoryFile: { hubUrl: DEAD_HUB_URL },
+      credentials: { signingSecret: secret },
+    });
+
+    const run = runUb(["status", "--json"], box);
+    expect(run.status).toBe(0);
+    const report = JSON.parse(run.stdout);
+    expect(report.hubUrl).toBe(DEAD_HUB_URL);
+    expect(report.credentialPresent).toBe(false);
+    expect(report.credentialSource).toBeNull();
+    expect(report.hub.status).toBe("disabled");
+    expect(run.stderr).toMatch(/was not attached to a repository-chosen hub/);
+    expect(run.output).not.toContain(secret);
+
+    // Setting HUB_URL is the opt-in, and then the secret does apply.
+    const optIn = runUb(["status", "--json"], box, { HUB_URL: DEAD_HUB_URL });
+    const opted = JSON.parse(optIn.stdout);
+    expect(opted.credentialPresent).toBe(true);
+    expect(opted.credentialSource).toBe("credentials file");
+    expect(optIn.output).not.toContain(secret);
+  });
+
+  it("never quotes a malformed credentials file back", () => {
+    // A bare secret pasted into credentials.json: the parser's message would be
+    // the secret itself, so it is not printed.
+    const secret = "cli-test-signing-secret-2e6f41";
+    const box = sandbox({
+      raw: { credentials: `${secret}\n` },
+      userConfig: { hubUrl: DEAD_HUB_URL },
+    });
+
+    const run = runUb(["status", "--json"], box);
+    expect(run.status).toBe(0);
+    expect(JSON.parse(run.stdout).credentialPresent).toBe(false);
+    expect(run.stderr).toMatch(/credentials\.json: invalid JSON/);
     expect(run.output).not.toContain(secret);
   });
 
