@@ -12,6 +12,7 @@ import { bindGuardedEditor } from "../editor/guarded-binding.js";
 import { describeForeignBlocks } from "../editor/palette.js";
 import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
 import type { RoomConnection } from "../collab/rooms.js";
+import { rawSyncState, useCalmSyncState } from "./calm.js";
 import {
   useDocMeta,
   useForeignBlocks,
@@ -35,6 +36,17 @@ import { threadIdFromTarget } from "./threads.js";
  * backlog to the single sync-handshake message on every reconnect. So "1 sync
  * message unacked" can stand for a whole document's worth of unsent work —
  * which is why the label does not say "1 update".
+ *
+ * Three things keep the line still while someone types (#76):
+ *
+ * 1. The state is debounced (`useCalmSyncState`) — the truth is unchanged, the
+ *    redraw cadence is.
+ * 2. The mark and the word each sit in a fixed-width slot, so swapping the dot
+ *    for the spinner and "synced" for "syncing…" moves nothing to their right.
+ * 3. The backlog badge is last before the presence strip, and only shows when
+ *    the settled state is not `synced`. In the two settled states the room key
+ *    and "local cache" are therefore at identical positions; a badge in its old
+ *    place, between them and the word, could not have been.
  */
 export function StatusLine({
   connection,
@@ -43,25 +55,29 @@ export function StatusLine({
 }): ReactElement {
   const status = useRoomStatus(connection);
   const peers = usePeers(connection);
-  const label = !status.connected
-    ? "offline"
-    : status.synced
-      ? "synced"
-      : "connected, syncing…";
+  const state = useCalmSyncState(rawSyncState(status));
+  const label = state === "syncing" ? "syncing…" : state;
   return (
     <div className="ub-status">
-      <span
-        className={`ub-dot ${status.connected && status.synced ? "ub-dot-live" : status.connected ? "ub-dot-syncing" : "ub-dot-off"}`}
-      />
-      <span>{label}</span>
-      {status.unsyncedChanges > 0 && (
+      {/* The word carries the meaning; the mark is decoration beside it. */}
+      <span className="ub-status-mark" aria-hidden="true">
+        {state === "syncing" ? (
+          <span className="ub-spinner" />
+        ) : (
+          <span
+            className={`ub-dot ${state === "synced" ? "ub-dot-live" : "ub-dot-off"}`}
+          />
+        )}
+      </span>
+      <span className="ub-status-word">{label}</span>
+      {status.localReplicaLoaded && <span className="ub-muted">local cache</span>}
+      <span className="ub-muted">{connection.room}</span>
+      {state !== "synced" && status.unsyncedChanges > 0 && (
         <span className="ub-pending">
           {status.unsyncedChanges} sync message
           {status.unsyncedChanges === 1 ? "" : "s"} unacked
         </span>
       )}
-      {status.localReplicaLoaded && <span className="ub-muted">local cache</span>}
-      <span className="ub-muted">{connection.room}</span>
       <span className="ub-peers">
         {peers.map((peer) => (
           <span

@@ -297,7 +297,8 @@ body {
 .ub-group-head {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  /* Tight: the mark belongs to the label it discloses, not beside it. */
+  gap: 0.25rem;
   width: 100%;
   text-align: left;
   background: none;
@@ -316,9 +317,23 @@ body {
   color: var(--foreground);
 }
 
+/* One shape, one transform. The path is drawn pointing right and turns a
+   quarter turn down when the group is open — there is no second glyph to be
+   centred differently, which is what used to make the mark jump. `display:
+   block` drops the inline baseline so the flex row can centre the box, and the
+   path is centred inside its own square viewBox, so the ink lands on the
+   label's middle. */
 .ub-group-caret {
-  width: 0.7rem;
+  display: block;
+  width: 0.75rem;
+  height: 0.75rem;
   flex: none;
+  transform: rotate(0deg);
+  transition: transform 160ms ease;
+}
+
+.ub-group-head[aria-expanded="true"] .ub-group-caret {
+  transform: rotate(90deg);
 }
 
 .ub-group-count {
@@ -809,23 +824,22 @@ body {
   overflow-x: auto;
 }
 
-/* The language label. A pseudo-element, not a NodeView: it is chrome, so it must
-   not be part of the editable content — and `attr()` keeps it in step with the
-   `data-language` attribute the schema owns. A block with no language declared
-   gets no label rather than a made-up one. */
+/* The chrome row: the language label at the left, the copy button at the right
+   (the 1a mockup's "ts … copy"). The label is a pseudo-element rather than
+   markup — it must not be part of the editable content, and `attr()` keeps it
+   in step with the `data-language` attribute the schema owns. A block with no
+   language declared gets no label rather than a made-up one; the row itself is
+   unconditional, because the copy button is always there. */
 .ub-code {
   position: relative;
-}
-
-.ub-code[data-language]:not([data-language=""]) {
-  padding-top: 1.5rem;
+  padding-top: 1.6rem;
 }
 
 .ub-code[data-language]:not([data-language=""])::before {
   content: attr(data-language);
   position: absolute;
-  top: 0.25rem;
-  right: 0.6rem;
+  top: 0.3rem;
+  left: 0.75rem;
   font-size: 0.7rem;
   letter-spacing: 0.04em;
   color: var(--muted-foreground);
@@ -834,6 +848,7 @@ body {
 }
 
 .ub-mermaid {
+  position: relative;
   margin: 0.7em 0;
 }
 
@@ -972,4 +987,124 @@ body {
 
 .ProseMirror-yjs-selection {
   border-radius: var(--radius-sm);
+}
+
+/* ==== calm UI: the sync indicator, the group disclosure, the copy button ====
+
+   One rule runs through this block: state changes are drawn with opacity and
+   transform, never by resizing or reflowing anything. A reader's eye is caught
+   by movement, and none of these three things is worth catching it. */
+
+/* ---- sync indicator (#76) ---- */
+
+/* Two fixed-width slots. Whatever the state, the mark is one square and the
+   word is one column of eight monospace characters ("syncing…" is the longest
+   of the three), so "local cache" and the room key after them never move. */
+.ub-status-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.7rem;
+  height: 0.7rem;
+  flex: none;
+}
+
+.ub-status-word {
+  width: 8ch;
+  flex: none;
+}
+
+/* The dot's replacement, in the same slot: a ring with one lit quarter. Same
+   amber the dot used to carry, so the state still reads at a glance. */
+.ub-spinner {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  border: 2px solid var(--status-warning-subtle);
+  border-top-color: var(--status-warning);
+  animation: ub-spin 900ms linear infinite;
+}
+
+@keyframes ub-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- doc list group bodies (#110) ---- */
+
+/* The 0fr → 1fr grid row is the height animation that needs no measurement: the
+   row is sized by its content when open and to nothing when closed, and the
+   browser interpolates between the two. The child needs `min-height: 0` or it
+   refuses to shrink below its content, and `overflow: hidden` or it spills out
+   of the shrinking row. Following groups slide with it — the outer height is
+   animating continuously, so nothing snaps. */
+.ub-group-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 180ms ease;
+}
+
+.ub-group-body[data-collapsed="true"] {
+  grid-template-rows: 0fr;
+}
+
+.ub-group-body > ul {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---- code and mermaid copy button (#103) ---- */
+
+/* Sits in the block's chrome, opposite the language label — the mockup's
+   "ts … copy" row. Wide enough for "copied" and "failed" as well as "copy", so
+   the confirmation replaces the label without the button changing size.
+   Present but quiet, and it brightens on hover: an affordance nobody can see
+   is not one, and hover-only would hide it from touch entirely. */
+.ub-copy {
+  position: absolute;
+  top: 0.15rem;
+  right: 0.4rem;
+  /* Wide enough for the longest label plus its padding and letter-spacing —
+     `box-sizing: border-box` means this floor covers the whole box. */
+  min-width: 8ch;
+  padding: 0.05rem 0.3rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.6;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease;
+}
+
+.ub-code:hover .ub-copy,
+.ub-mermaid:hover .ub-copy,
+.ub-copy:hover,
+.ub-copy:focus-visible {
+  opacity: 1;
+  color: var(--foreground);
+}
+
+/* ---- reduced motion ---- */
+
+/* Every transition above is decoration on a state change that has already
+   happened, so removing it changes nothing but the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .ub-group-caret,
+  .ub-group-body,
+  .ub-copy {
+    transition: none;
+  }
+
+  .ub-spinner {
+    animation: none;
+  }
 }

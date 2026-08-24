@@ -44,6 +44,11 @@ import { Node, Mark, mergeAttributes } from "@tiptap/core";
 import { COMMENT_MARK } from "@uberblick/schema";
 import type { HeadingLevel } from "@uberblick/schema";
 import { PROSE_MARKS, inlineMarkExtensions } from "./marks.js";
+import {
+  codeBlockChrome,
+  mermaidChrome,
+  sourceBlockView,
+} from "./source-chrome.js";
 
 /**
  * The stable block id, assigned by `BlockIds` (see block-ids.ts) and owned by
@@ -171,6 +176,12 @@ export const CodeBlock = Node.create({
       ["code", {}, 0],
     ];
   },
+  // Same DOM as `renderHTML` above, plus a copy button in the chrome (#103).
+  // `renderHTML` still governs serialization — getHTML, copy, paste — so the
+  // button exists only while the block is on screen.
+  addNodeView() {
+    return sourceBlockView(codeBlockChrome);
+  },
   // No Enter override. Tiptap's core `keymap` extension already chains
   // newlineInCode → createParagraphNear → liftEmptyBlock → splitBlock, and
   // `code: true` above is what makes its first link fire inside this node. A
@@ -208,6 +219,10 @@ export const Mermaid = Node.create({
       ),
       ["pre", {}, 0],
     ];
+  },
+  // Mermaid source is text people take away too — see CodeBlock's node view.
+  addNodeView() {
+    return sourceBlockView(mermaidChrome);
   },
   // See CodeBlock: Enter is handled by the core keymap, driven by `code: true`.
 });
