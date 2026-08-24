@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1.7
 
-# Branch-owned review environment. A branch may add system dependencies here,
-# but the trusted runner always supplies an immutable `git archive` context and
-# never passes secrets, host mounts, privileged mode, or the Docker socket.
+# The review environment, owned by main and never by the commit under review:
+# `mise run review` builds an immutable `git archive` context with *this* file,
+# and never passes secrets, host mounts, privileged mode, or the Docker socket.
+# Changing it is standalone Tier-3 work — it only takes effect once on main.
 FROM node:26-bookworm
 
 ENV CI=true

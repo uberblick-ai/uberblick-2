@@ -56,7 +56,7 @@ before moving on.
    body stating what changed and how it was verified.
 4. **Gates — all of them, before merge:**
    - immutable Docker review green (`REVIEW_SHA=<head-sha> mise run review`),
-     using the commit's own `Dockerfile.review`; worktree tests are useful
+     run from a trusted checkout of `origin/main`; worktree tests are useful
      during implementation but are not merge evidence because a shared
      checkout can change during review;
    - coordinator validation against the issue's acceptance criteria;
@@ -76,19 +76,18 @@ before moving on.
      every remark is fixed or explicitly answered.
    Findings are triaged: real ones are fixed on the branch; rejected ones get
    an explicit reply on the PR thread, never silent dismissal.
-   Before building branch-owned review code, inspect the reviewed commit's
-   `Dockerfile.review` diff — the build stage runs those `RUN` instructions
-   with network, so that diff is the gate, and a build only ever happens on an
-   explicit `REVIEW_SHA=<commit> mise run review`, never automatically. Run it
-   from your own trusted checkout and pass the SHA: the task definition itself
-   comes from the current working tree, and `git archive` needs the commit
-   fetched, never checked out. The trusted runner supplies only
-   `git archive <head-sha>` as context and never passes secrets, host mounts,
-   privileged mode, or the Docker socket. For persistence, startup/shutdown,
-   networking, concurrency, and other stateful boundaries, passing happy-path
-   tests is not enough: run focused failure-path probes in the retained review
-   image and post reproducible findings inline. README's "Review isolation"
-   states the full boundary.
+   Reviewing a commit is one command, `REVIEW_SHA=<head-sha> mise run review`,
+   run from a checkout at freshly fetched `origin/main` with `mise.toml`,
+   `Dockerfile.review` and `.dockerignore` unmodified — the task refuses
+   otherwise, because main is what supplies the build recipe. The reviewed
+   commit contributes file contents, via `git archive`; its manifests still
+   install in the networked build stage, so pass the SHA rather than checking
+   the branch out, and never pass secrets, host mounts, privileged mode, or
+   the Docker socket. For persistence,
+   startup/shutdown, networking, concurrency, and other stateful boundaries,
+   passing happy-path tests is not enough: run focused failure-path probes in
+   the retained review image and post reproducible findings inline. README's
+   "Review isolation" states the full boundary.
 5. **Merge, then docs.** After the gates pass, merge per the merge policy
    below; then update the product docs (through the uberblick MCP tools once
    live) to the new status quo.
