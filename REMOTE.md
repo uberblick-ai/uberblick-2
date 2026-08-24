@@ -48,7 +48,10 @@ Edit `.env` and set all three values:
 - `HUB_AUTH_TOKEN` is the existing shared signing secret used by the local MCP
   clients that will sync to this hub. On a trusted machine with the repository's
   age key, `fnox get HUB_AUTH_TOKEN` prints that value so it can be transferred
-  to the host's ignored `.env`. Never copy the age key to the host.
+  to the host's ignored `.env`. Never copy the age key to the host. The secret
+  must consist only of letters, digits, `.`, `_`, and `-`; `remote-compose.sh`
+  refuses other characters because the shell and Compose parse `.env`
+  differently.
 
 The wrapper reads `.env`, derives a SHA-256 cache key from `HUB_AUTH_TOKEN`
 without printing or passing the token as a Docker build argument, then invokes

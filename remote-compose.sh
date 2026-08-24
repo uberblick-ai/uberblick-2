@@ -29,6 +29,13 @@ fi
 
 : "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
 
+case "$HUB_AUTH_TOKEN" in
+  *[!A-Za-z0-9._-]*)
+    printf 'HUB_AUTH_TOKEN may only contain A-Z a-z 0-9 . _ - : shell and Docker Compose parse other characters differently, so the deployed secret could silently diverge from the one MCP clients use. Regenerate the secret with safe characters.\n' >&2
+    exit 1
+    ;;
+esac
+
 token_digest=$(printf '%s' "$HUB_AUTH_TOKEN" | sha256sum)
 HUB_AUTH_TOKEN_DIGEST=${token_digest%% *}
 export HUB_AUTH_TOKEN_DIGEST
