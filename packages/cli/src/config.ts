@@ -22,7 +22,8 @@
  *
  * `HUB_AUTH_TOKEN` holds the hub's HMAC **signing secret**, not a token (see
  * `packages/hub/src/token.ts`). It is read from `credentials.json`, passed to the
- * server in its environment, and never printed.
+ * server in its environment, and never printed. A `credentials.json` other users
+ * can read is refused rather than used — see {@link credentialsAreExposed}.
  */
 
 import {
@@ -66,7 +67,10 @@ export interface ResolvedConfig {
   origins: {
     workspace: Origin;
     hubUrl: Origin;
-    /** Null when no signing secret is configured: local-only, by design. */
+    /**
+     * Null when no signing secret is in force — none configured, or the file
+     * holding it refused for its mode. Either way: local-only, by design.
+     */
     credential: CredentialOrigin | null;
   };
   /** The files consulted, whether or not they exist. */
@@ -189,22 +193,30 @@ function warnAboutMisplacedSecret(
 
 /**
  * The signing secret is the one value in this layout another user on the machine
- * must not be able to read, so a file anyone else can read is a finding.
+ * must not be able to read, so a file anyone else can read is refused, not
+ * merely complained about — ssh's contract for a private key. Warning and then
+ * using the secret anyway would leave the exposure in place and call it handled.
+ *
+ * Refusing is only the file layer: `HUB_AUTH_TOKEN` still wins and still works,
+ * and with neither this machine is local-only, which is a supported state.
  */
-function warnAboutCredentialsMode(path: string, warnings: string[]): void {
+function credentialsAreExposed(path: string, warnings: string[]): boolean {
   let mode: number;
   try {
     mode = statSync(path).mode;
   } catch {
-    return;
+    return false;
   }
   const permissions = mode & 0o777;
-  if ((permissions & 0o077) !== 0) {
-    warnings.push(
-      `${path} is mode ${permissions.toString(8).padStart(4, "0")}: it holds ` +
-        "the hub signing secret and should be 0600",
-    );
+  if ((permissions & 0o077) === 0) {
+    return false;
   }
+  warnings.push(
+    `refusing ${path}: mode ${permissions.toString(8).padStart(4, "0")} lets ` +
+      "other users read the hub signing secret, so the secret in it was not " +
+      `used — fix it with: chmod 600 ${path}`,
+  );
+  return true;
 }
 
 export interface ResolveOptions {
@@ -266,9 +278,11 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   ]);
 
   // Credentials are read last and from one file only. Nothing committable may
-  // carry a secret, so there is no directory-file layer here by design.
-  warnAboutCredentialsMode(paths.credentials, warnings);
-  const credentials = readJsonObject(paths.credentials, warnings);
+  // carry a secret, so there is no directory-file layer here by design. An
+  // exposed file is not read at all: its one actionable message is the mode.
+  const credentials = credentialsAreExposed(paths.credentials, warnings)
+    ? null
+    : readJsonObject(paths.credentials, warnings);
   const secretFromFile = stringField(
     credentials,
     SIGNING_SECRET_KEY,
@@ -326,11 +340,22 @@ export function writeCredentials(
 ): string {
   const path = credentialsPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  // Tighten an existing file BEFORE writing into it. `mode` below applies only
+  // to a file being created, so a pre-existing 0644 file would otherwise hold
+  // the new secret while still world-readable until the chmod after the write.
+  // ENOENT is the ordinary case — there is no file yet — and `mode` covers it.
+  try {
+    chmodSync(path, 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
   writeFileSync(path, `${JSON.stringify(credentials, null, 2)}\n`, {
     mode: 0o600,
   });
-  // `mode` on writeFileSync only applies when the file is created, so a file
-  // that already existed keeps whatever mode it had. Say it outright instead.
+  // And state the mode outright afterwards, rather than inferring it from the
+  // two paths above: `mode` on creation is still subject to the umask.
   chmodSync(path, 0o600);
   return path;
 }

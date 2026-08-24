@@ -112,7 +112,7 @@ Precedence, highest first:
 | environment (`WORKSPACE_ID`, `HUB_URL`, `HUB_AUTH_TOKEN`) | wins, so `HUB_URL=… ub mcp serve` keeps working |
 | `./uberblick.json` | binds one checkout to one workspace. Committable, so never secrets |
 | `$XDG_CONFIG_HOME/uberblick/config.json` | per-user default workspace and hub endpoint |
-| `$XDG_CONFIG_HOME/uberblick/credentials.json`, mode 0600 | the hub signing secret. Never printed by any command |
+| `$XDG_CONFIG_HOME/uberblick/credentials.json`, mode 0600 | the hub signing secret. Never printed by any command, and refused outright — not merely warned about — if anyone but its owner can read it |
 | built-in defaults | workspace `main`, hub `ws://localhost:1234` |
 
 `ub mcp serve` resolves that configuration and runs the MCP server with it, so

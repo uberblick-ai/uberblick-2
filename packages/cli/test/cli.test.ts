@@ -79,8 +79,6 @@ describe("ub status", () => {
       credentials: { signingSecret: secret },
       // A dead hub, so this test never touches a hub the developer is running.
       userConfig: { hubUrl: DEAD_HUB_URL },
-      // Permissive mode, so resolution has a warning to emit as well.
-      credentialsMode: 0o644,
     });
 
     const human = runUb(["status"], box);
@@ -102,8 +100,28 @@ describe("ub status", () => {
     for (const run of [human, json, failing]) {
       expect(run.output).not.toContain(secret);
     }
-    // ...and the warning about the file's mode did reach stderr.
-    expect(human.stderr).toMatch(/should be 0600/);
+  });
+
+  it("refuses an exposed credentials file, and says so on stderr", () => {
+    const secret = "cli-test-signing-secret-9d2e07";
+    const box = sandbox({
+      credentials: { signingSecret: secret },
+      userConfig: { hubUrl: DEAD_HUB_URL },
+      // A file every user on the machine can read: the secret must go unused.
+      credentialsMode: 0o644,
+    });
+
+    const run = runUb(["status", "--json"], box);
+    expect(run.status).toBe(0);
+    const report = JSON.parse(run.stdout);
+    // Local-only, exactly as if no credential had been configured at all.
+    expect(report.credentialPresent).toBe(false);
+    expect(report.credentialSource).toBeNull();
+    expect(report.hub.status).toBe("disabled");
+    // The refusal and its fix are on stderr, and the secret is on neither stream.
+    expect(run.stderr).toMatch(/refusing/);
+    expect(run.stderr).toMatch(/chmod 600/);
+    expect(run.output).not.toContain(secret);
   });
 
   it("fails with the offending file named when a workspace is not a segment", () => {

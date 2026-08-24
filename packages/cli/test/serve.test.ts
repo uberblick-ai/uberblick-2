@@ -97,13 +97,16 @@ describe("ub mcp serve", () => {
 
   it("passes the resolved configuration through, warnings and all", async () => {
     // A directory file that binds the workspace, a credential so the hub is
-    // enabled rather than disabled, and a mode on that credential worth warning
-    // about — so resolution has something to write to stderr while stdout is
-    // carrying the protocol.
+    // enabled rather than disabled, and a secret in the committable file — which
+    // is refused with a warning, so resolution has something to write to stderr
+    // while stdout is carrying the protocol.
     const box = sandbox({
-      directoryFile: { workspace: "cli-serve-test", hubUrl: "ws://ignored:1" },
+      directoryFile: {
+        workspace: "cli-serve-test",
+        hubUrl: "ws://ignored:1",
+        signingSecret: "cli-serve-misplaced-secret",
+      },
       credentials: { signingSecret: "cli-serve-signing-secret" },
-      credentialsMode: 0o644,
     });
 
     // The environment override has to survive the exec: this is the value the
@@ -121,8 +124,9 @@ describe("ub mcp serve", () => {
       expect(status.hub.url).toBe(DEAD_HUB_URL);
       expect(status.database).toMatch(/cli-serve-test\.sqlite$/);
 
-      expect(session.stderr()).toMatch(/should be 0600/);
+      expect(session.stderr()).toMatch(/belongs in credentials\.json/);
       expect(session.stderr()).not.toContain("cli-serve-signing-secret");
+      expect(session.stderr()).not.toContain("cli-serve-misplaced-secret");
     } finally {
       await session.close();
     }

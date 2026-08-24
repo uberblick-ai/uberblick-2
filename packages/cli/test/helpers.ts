@@ -50,7 +50,10 @@ export interface SandboxFiles {
   directoryFile?: unknown;
   /** Raw text instead of JSON, for the malformed-file cases. */
   raw?: { userConfig?: string; credentials?: string; directoryFile?: string };
-  /** Mode to force on credentials.json after writing it. */
+  /**
+   * Mode to force on credentials.json instead of the 0600 a correct install
+   * has — how a test asks for a file `ub` is supposed to refuse.
+   */
   credentialsMode?: number;
 }
 
@@ -92,7 +95,15 @@ export function sandbox(files: SandboxFiles = {}): Sandbox {
   if (files.raw?.userConfig !== undefined) writeText(userConfigPath, files.raw.userConfig);
   if (files.raw?.credentials !== undefined) writeText(credentialsPath, files.raw.credentials);
   if (files.raw?.directoryFile !== undefined) writeText(directoryPath, files.raw.directoryFile);
-  if (files.credentialsMode !== undefined) chmodSync(credentialsPath, files.credentialsMode);
+
+  // A credentials file others can read is refused, so the sandbox writes the
+  // mode a correct install has — `writeFileSync` would leave it at the umask's
+  // 0644 and quietly make every credential test a test of the refusal path.
+  const wroteCredentials =
+    files.credentials !== undefined || files.raw?.credentials !== undefined;
+  if (wroteCredentials || files.credentialsMode !== undefined) {
+    chmodSync(credentialsPath, files.credentialsMode ?? 0o600);
+  }
 
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const key of RESOLVED_VARIABLES) {

@@ -126,13 +126,36 @@ describe("resolveConfig", () => {
     expect(resolveMcpConfig(fromTyped.env).workspaceId).toBe("main");
   });
 
-  it("warns when the credentials file is readable by anyone else", () => {
+  it("refuses a credentials file anyone else can read, rather than using it", () => {
+    // ssh's contract for a private key: a secret another user on the machine can
+    // read is not adopted. Warning and using it anyway would leave the exposure
+    // in place and call it handled.
+    const secret = "exposed-signing-secret";
     const box = sandbox({
-      credentials: { signingSecret: "secret" },
+      credentials: { signingSecret: secret },
       credentialsMode: 0o644,
     });
-    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
-    expect(resolved.warnings.join("\n")).toMatch(/mode 0644.*should be 0600/);
+
+    const refused = resolveConfig({ env: box.env, cwd: box.cwd });
+    const warning = refused.warnings.join("\n");
+    // Both facts and the fix: the mode, that the secret went unused, the chmod.
+    expect(warning).toMatch(/refusing .*credentials\.json: mode 0644/);
+    expect(warning).toMatch(/not used/);
+    expect(warning).toMatch(/chmod 600 .*credentials\.json/);
+    // The secret itself is in no warning, and in nothing handed to the server.
+    expect(warning).not.toContain(secret);
+    expect(refused.env.HUB_AUTH_TOKEN).toBeUndefined();
+    expect(refused.origins.credential).toBeNull();
+    expect(resolveMcpConfig(refused.env).authSecret).toBeNull();
+
+    // Refusal is the file layer only: the environment still wins and still works.
+    const fromEnv = resolveConfig({
+      env: { ...box.env, HUB_AUTH_TOKEN: "from-env" },
+      cwd: box.cwd,
+    });
+    expect(fromEnv.origins.credential).toBe("environment");
+    expect(resolveMcpConfig(fromEnv.env).authSecret).toBe("from-env");
+    expect(fromEnv.warnings.join("\n")).toMatch(/refusing/);
   });
 
   it("refuses a signing secret in a committable file", () => {
@@ -153,6 +176,12 @@ describe("writeCredentials", () => {
 
     const path = writeCredentials({ signingSecret: "new" }, box.env);
     expect(statSync(path).mode & 0o777).toBe(0o600);
+    // The repair is what makes the file usable at all: at 0644 the reader would
+    // refuse it. (That the tighten happens *before* the truncate is the other
+    // half of the guarantee — see writeCredentials — and is racy to assert.)
+    const repaired = resolveConfig({ env: box.env, cwd: box.cwd });
+    expect(repaired.warnings).toEqual([]);
+    expect(resolveMcpConfig(repaired.env).authSecret).toBe("new");
 
     const fresh = sandbox();
     const created = writeCredentials({ signingSecret: "new" }, fresh.env);
