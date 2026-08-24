@@ -113,17 +113,18 @@ function trimmed(value: string | undefined): string | null {
  * with it is a warning and the layer is skipped — one broken file must not stop
  * `ub` from running with the layers below it.
  *
- * `secret: true` for a file whose *contents* must never be quoted back: Node's
- * `JSON.parse` errors include the source around the syntax error, so a
- * `credentials.json` someone pasted a bare secret into would print the secret in
- * the warning. The parser's message is the only thing lost, and for that file
- * there is nothing to say beyond its name — an `ub` warning may reach an MCP
- * client's log, a terminal someone screen-shares, or a CI transcript.
+ * No parser output reaches a warning, for any of these files. Node's
+ * `JSON.parse` errors quote the source around the syntax error, so the message
+ * for a file someone pasted a bare secret into *is* the secret — and that is not
+ * only `credentials.json`: a secret misplaced in `./uberblick.json` or
+ * `config.json` is exactly the mistake {@link warnAboutMisplacedSecret} exists
+ * to catch, and a file that does not parse never reaches it. An `ub` warning may
+ * land in an MCP client's log, a screen-shared terminal or a CI transcript, so
+ * the file's name is the whole of what is said about it.
  */
 function readJsonObject(
   path: string,
   warnings: string[],
-  { secret = false }: { secret?: boolean } = {},
 ): Record<string, unknown> | null {
   let text: string;
   try {
@@ -139,12 +140,8 @@ function readJsonObject(
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
-  } catch (error) {
-    warnings.push(
-      secret
-        ? `ignoring ${path}: invalid JSON`
-        : `ignoring ${path}: invalid JSON (${message(error)})`,
-    );
+  } catch {
+    warnings.push(`ignoring ${path}: invalid JSON`);
     return null;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -315,7 +312,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   // exposed file is not read at all: its one actionable message is the mode.
   const credentials = credentialsAreExposed(paths.credentials, warnings)
     ? null
-    : readJsonObject(paths.credentials, warnings, { secret: true });
+    : readJsonObject(paths.credentials, warnings);
   const secretFromFile = stringField(
     credentials,
     SIGNING_SECRET_KEY,

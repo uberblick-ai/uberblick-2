@@ -42,9 +42,25 @@ export interface HubState {
   status: HubStatus;
   /** The endpoint being dialled, or null when sync is disabled. */
   url: string | null;
-  /** Why, for `auth-failed` and `hub-down`. */
+  /**
+   * Why, for `auth-failed` and `hub-down`. Always composed here, never taken
+   * from the wire — see {@link AUTH_REJECTED}.
+   */
   reason?: string;
 }
+
+/**
+ * What a rejected token reports, in place of whatever the endpoint said.
+ *
+ * The hub's rejection message is remote-supplied text, and the thing it is
+ * rejecting is a token we just sent it: an endpoint that is hostile or merely
+ * careless can echo that token straight back, and this reason is rendered by
+ * `sync_status`, by every mutating tool's `{applied, synced}`, by `ub status`,
+ * and by the stderr log. So the reason is fixed locally and the remote string is
+ * dropped where it arrives. Which endpoint refused is already in `url`, and the
+ * fix — the secret — is local either way.
+ */
+const AUTH_REJECTED = "authentication rejected by hub";
 
 export interface AttachOptions {
   room: string;
@@ -82,7 +98,11 @@ export class HubSync {
    */
   private connectingSince = Date.now();
 
-  private authFailure: string | null = null;
+  /**
+   * Whether the hub refused our token — a flag, not the hub's message, so there
+   * is nothing remote to leak downstream.
+   */
+  private authRejected = false;
 
   /** Set by {@link quarantine}: this process may no longer publish anything. */
   private quarantined = false;
@@ -165,12 +185,15 @@ export class HubSync {
       websocketProvider: this.socket,
       token: () => this.token(),
       onAuthenticated: () => {
-        this.authFailure = null;
+        this.authRejected = false;
       },
-      onAuthenticationFailed: ({ reason }) => {
-        // Distinct from an unreachable hub: a human has to fix the secret.
-        this.authFailure = reason;
-        log.error("hub rejected the token", { room, reason });
+      onAuthenticationFailed: () => {
+        // Distinct from an unreachable hub: a human has to fix the secret. The
+        // hub's own wording is discarded rather than stored or logged — it is
+        // remote text about a token we just sent, and every consumer of this
+        // state renders it. See AUTH_REJECTED.
+        this.authRejected = true;
+        log.error("hub rejected the token", { room });
       },
     });
     // A provider given a shared socket does not attach itself — it only
@@ -243,11 +266,11 @@ export class HubSync {
         reason: "HUB_AUTH_TOKEN is not set",
       };
     }
-    if (this.authFailure !== null) {
+    if (this.authRejected) {
       return {
         status: "auth-failed",
         url: this.config.hubUrl,
-        reason: this.authFailure,
+        reason: AUTH_REJECTED,
       };
     }
     if (this.socketStatus === "connected") {
@@ -316,12 +339,12 @@ export class HubSync {
 
     const connectDeadline = Date.now() + this.config.connectTimeoutMs;
     while (this.socketStatus !== "connected") {
-      if (this.authFailure !== null || Date.now() >= connectDeadline) {
+      if (this.authRejected || Date.now() >= connectDeadline) {
         return;
       }
       await sleep(25);
     }
-    if (this.authFailure !== null) {
+    if (this.authRejected) {
       return;
     }
 
@@ -329,7 +352,7 @@ export class HubSync {
     while (!this.allQuiet()) {
       if (
         this.socketStatus !== "connected" ||
-        this.authFailure !== null ||
+        this.authRejected ||
         Date.now() >= syncDeadline
       ) {
         return;

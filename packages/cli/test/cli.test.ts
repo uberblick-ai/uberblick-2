@@ -156,7 +156,7 @@ describe("ub status", () => {
     expect(optIn.output).not.toContain(secret);
   });
 
-  it("never quotes a malformed credentials file back", () => {
+  it("never quotes a malformed configuration file back", () => {
     // A bare secret pasted into credentials.json: the parser's message would be
     // the secret itself, so it is not printed.
     const secret = "cli-test-signing-secret-2e6f41";
@@ -170,6 +170,18 @@ describe("ub status", () => {
     expect(JSON.parse(run.stdout).credentialPresent).toBe(false);
     expect(run.stderr).toMatch(/credentials\.json: invalid JSON/);
     expect(run.output).not.toContain(secret);
+
+    // And the same for a committable file, where a pasted secret is the very
+    // mistake `ub` warns about — a file that does not parse never gets that far,
+    // so the parser message must not carry it out either.
+    const misplaced = "cli-test-misplaced-secret-a70c93";
+    const committable = sandbox({ raw: { directoryFile: `${misplaced}\n` } });
+    const second = runUb(["status", "--json"], committable, {
+      HUB_URL: DEAD_HUB_URL,
+    });
+    expect(second.status).toBe(0);
+    expect(second.stderr).toMatch(/uberblick\.json: invalid JSON/);
+    expect(second.output).not.toContain(misplaced);
   });
 
   it("fails with the offending file named when a workspace is not a segment", () => {

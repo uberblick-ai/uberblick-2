@@ -116,7 +116,7 @@ describe("resolveConfig", () => {
     });
     const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
 
-    expect(resolved.warnings.join("\n")).toMatch(/uberblick\.json.*invalid JSON/);
+    expect(resolved.warnings.join("\n")).toMatch(/uberblick\.json: invalid JSON/);
     expect(resolveMcpConfig(resolved.env).workspaceId).toBe("from-user");
 
     // A known key of the wrong type is the same story: warn, do not adopt.
@@ -212,25 +212,21 @@ describe("resolveConfig", () => {
     expect(fromUser.warnings).toEqual([]);
   });
 
-  it("keeps a malformed credentials file's contents out of the warning", () => {
+  it("keeps a malformed file's contents out of the warning, whichever file it is", () => {
     // Node's JSON.parse errors quote the source around the syntax error, so the
     // parser message for a file someone pasted a bare secret into *is* the
-    // secret. For that one file the warning names the path and nothing else.
+    // secret — and not only for credentials.json: a secret in a committable file
+    // is the mistake `warnAboutMisplacedSecret` exists to catch, and a file that
+    // does not parse never reaches it. Every one of these says only its name.
     const secret = "bare-unquoted-signing-secret-8ac3";
-    const box = sandbox({ raw: { credentials: `${secret}\n` } });
+    for (const file of ["credentials", "directoryFile", "userConfig"] as const) {
+      const box = sandbox({ raw: { [file]: `${secret}\n` } });
+      const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
 
-    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
-    expect(resolved.warnings.join("\n")).toMatch(
-      /ignoring .*credentials\.json: invalid JSON$/,
-    );
-    expect(resolved.warnings.join("\n")).not.toContain(secret);
-    expect(resolved.origins.credential).toBeNull();
-
-    // Other files keep the detailed message: nothing in them is a secret.
-    const other = sandbox({ raw: { directoryFile: "{ not json" } });
-    expect(
-      resolveConfig({ env: other.env, cwd: other.cwd }).warnings.join("\n"),
-    ).toMatch(/uberblick\.json: invalid JSON \(/);
+      expect(resolved.warnings.join("\n")).toMatch(/: invalid JSON$/);
+      expect(resolved.warnings.join("\n")).not.toContain(secret);
+      expect(resolved.origins.credential).toBeNull();
+    }
   });
 
   it("refuses a signing secret in a committable file", () => {

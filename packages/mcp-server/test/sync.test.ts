@@ -258,9 +258,8 @@ describe("hub sync", () => {
 
   it("reports a rejected token as auth-failed, and keeps serving", async () => {
     const running = await hub();
-    const rig = await serverOn(running.port, {
-      authSecret: "a-different-secret-the-hub-will-not-accept",
-    });
+    const wrongSecret = "a-different-secret-the-hub-will-not-accept";
+    const rig = await serverOn(running.port, { authSecret: wrongSecret });
 
     await waitUntil("the hub to reject the token", async () => {
       const status = await rig.ok("sync_status", {});
@@ -269,7 +268,12 @@ describe("hub sync", () => {
 
     const status = await rig.ok("sync_status", {});
     expect(status.hub.status).toBe("auth-failed");
-    expect(status.hub.reason).toBeTruthy();
+    // Composed locally, never the endpoint's own words: the thing it is
+    // rejecting is a token we just sent it, and this reason is rendered by every
+    // consumer — tool result, `ub status`, stderr log. A hostile or careless hub
+    // must not get to put text there, let alone echo the credential back.
+    expect(status.hub.reason).toBe("authentication rejected by hub");
+    expect(status.hub.reason).not.toContain(wrongSecret);
 
     // A rejected token is a sync problem, never a local one.
     const created = await rig.ok("create_doc", { title: "Still writable" });
