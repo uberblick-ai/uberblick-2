@@ -200,6 +200,34 @@ describe("the registry", () => {
     ]);
   });
 
+  /**
+   * A `listbox` owns options and nothing else. The group headings are for the
+   * eye scanning the column, so they are presentational — announced as children
+   * of the list they would be a broken list rather than extra context.
+   */
+  it("renders a listbox whose every announced child is an option", () => {
+    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
+    const { editor, frame, unmount } = mountMenu(ydoc);
+    try {
+      caret(editor, 0, 0);
+      type(editor, "/");
+      const list = frame.querySelector(".ub-blockmenu-list");
+      if (list === null) throw new Error("no list");
+      expect(list.getAttribute("role")).toBe("listbox");
+
+      const announced = [...list.children].filter(
+        (child) => child.getAttribute("role") !== "presentation",
+      );
+      expect(announced).not.toHaveLength(0);
+      expect(
+        announced.every((child) => child.getAttribute("role") === "option"),
+      ).toBe(true);
+      expect(announced).toHaveLength(BLOCK_MENU_ENTRIES.length);
+    } finally {
+      unmount();
+    }
+  });
+
   it("filters on label, hint and keyword alike", () => {
     const labels = (query: string): string[] =>
       filterBlockMenu(query).map((entry) => entry.label);
@@ -777,6 +805,41 @@ describe("the gutter menu", () => {
         expect(mounted.editor.commands.keyboardShortcut("Mod-z")).toBe(true);
       });
       expect(getBlocks(ydoc).map((block) => block.id)).toEqual(ids);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  /**
+   * A `code` block is rendered by a NodeView whose root holds chrome (the copy
+   * button, #103) outside the content — so the pointer resolves to a block whose
+   * DOM is not simply its text. The gutter has to find it like any other.
+   */
+  it("resolves a block rendered by a node view", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "menu-doc", title: "Menu" });
+    appendBlock(ydoc, { type: "paragraph", text: "Above" });
+    const codeId = appendBlock(ydoc, {
+      type: "code",
+      text: "const x = 1;",
+      language: "ts",
+    });
+    appendBlock(ydoc, { type: "paragraph", text: "Below" });
+    const mounted = mountMenu(ydoc);
+    try {
+      openGutterMenu(mounted, 1);
+      pick(mounted, "Mermaid");
+
+      // Inserted below the code block, not below one of its neighbours.
+      const blocks = getBlocks(ydoc);
+      expect(blocks.map((block) => block.type)).toEqual([
+        "paragraph",
+        "code",
+        "mermaid",
+        "paragraph",
+      ]);
+      expect(blocks[1]?.id).toBe(codeId);
+      soundIds(ydoc);
     } finally {
       mounted.unmount();
     }

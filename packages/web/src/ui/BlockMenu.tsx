@@ -181,9 +181,14 @@ function pointAtCaret(editor: Editor, frame: HTMLElement | null): Point {
 
 /**
  * The top-level block a DOM node inside the editor belongs to — its id and its
- * position — or `null` when the node is not in one. Walks up to the child of the
- * ProseMirror root, then asks the view which position renders it: an index
- * lookup would be wrong the moment a widget decoration sat between two blocks.
+ * position — or `null` when the node is not in one.
+ *
+ * Two steps, both cheap, because this runs on every `mousemove` over the prose:
+ * walk up the ancestors to the ProseMirror root's own child (bounded by nesting
+ * depth, which this schema caps at a block plus its inline spans), then let the
+ * view map that element to a document position in one call. Scanning the
+ * document instead — `nodeDOM` per top-level node until one matches — was a walk
+ * of the whole document per pointer move, and it grew with the document.
  */
 function blockAt(
   editor: Editor,
@@ -201,18 +206,20 @@ function blockAt(
   }
   if (element === null) return null;
 
-  let pos = 0;
-  const { doc } = view.state;
-  for (let index = 0; index < doc.childCount; index += 1) {
-    const node = doc.child(index);
-    if (view.nodeDOM(pos) === element) {
-      return typeof node.attrs.id === "string" && node.attrs.id !== ""
-        ? { blockId: node.attrs.id, pos }
-        : null;
-    }
-    pos += node.nodeSize;
+  try {
+    // Offset 0 is inside the block, so resolving it gives the block itself at
+    // depth 1 — `before(1)` is where it starts.
+    const $inside = view.state.doc.resolve(view.posAtDOM(element, 0));
+    if ($inside.depth < 1) return null;
+    const node = $inside.node(1);
+    return typeof node.attrs.id === "string" && node.attrs.id !== ""
+      ? { blockId: node.attrs.id, pos: $inside.before(1) }
+      : null;
+  } catch {
+    // `posAtDOM` throws for a node the view no longer describes — a block the
+    // pointer was over while a peer's edit was being applied.
+    return null;
   }
-  return null;
 }
 
 /**
@@ -611,9 +618,18 @@ export function BlockMenu({
                 <Fragment key={entry.id}>
                   {/* A heading before the first entry of each group. The
                       registry is in display order, so this is a look at the
-                      entry before rather than a grouping pass. */}
+                      entry before rather than a grouping pass.
+
+                      Presentational, because a `listbox` owns options and
+                      nothing else: a heading announced as a child of one is a
+                      broken list, not extra context. Nothing is lost by hiding
+                      it — "Heading 2" and "Mermaid" say what they are without
+                      "Text" and "Source" over them, and the grouping is there
+                      for the eye scanning the column. */}
                   {entries[position - 1]?.group !== entry.group && (
-                    <p className="ub-blockmenu-group">{entry.group}</p>
+                    <p className="ub-blockmenu-group" role="presentation">
+                      {entry.group}
+                    </p>
                   )}
                   <button
                     type="button"
