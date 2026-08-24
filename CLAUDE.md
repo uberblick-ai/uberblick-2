@@ -249,7 +249,10 @@ explicitly says so. It contains:
 Changes do not live in the docs. Anything describing a delta — bugs, planned
 work, proposals — is extracted to GitHub issues/projects/PRs. When work merges
 and the status quo shifts, the doc is updated to the new status quo. Docs
-answer "what is true now"; GitHub answers "what is changing."
+answer "what is true now"; GitHub answers "what is changing." Issues carry
+implementation detail only — what, runnable acceptance criteria, scope; shared
+context and knowledge live in the docs, cited from issue Pointers by title and
+UUID, never restated into issue bodies.
 
 **Agent workflow:** read the relevant docs → compare against the code → the gap
 is the work → do the work via a GitHub-style change → update the doc to the new
