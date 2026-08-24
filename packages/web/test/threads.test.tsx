@@ -276,6 +276,7 @@ describe("the rail renders its cards", () => {
           <ThreadsPane
             connection={stubConnection(ydoc)}
             focused={next}
+            author="ben"
             onFocus={(threadId) => focus.push(threadId)}
           />,
         );
@@ -443,6 +444,7 @@ describe("a highlight and its card focus each other", () => {
           <ThreadsPane
             connection={{ room: "main/doc-1", ydoc } as unknown as RoomConnection}
             focused={null}
+            author="ben"
             onFocus={(threadId) => focus.push(threadId)}
           />,
         );
@@ -483,6 +485,7 @@ describe("a highlight and its card focus each other", () => {
           <ThreadsPane
             connection={{ room: "main/doc-1", ydoc } as unknown as RoomConnection}
             focused={null}
+            author="ben"
             onFocus={() => {}}
           />,
         );

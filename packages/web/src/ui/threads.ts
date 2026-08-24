@@ -51,6 +51,16 @@ const BLOCK_LABELS: Record<BlockType, string> = {
 };
 
 /**
+ * How a block is named to a reader: by its kind and its place in the document,
+ * counted from one. The composer names the block it is about to annotate the
+ * same way a card names the block it is anchored in, because they are the same
+ * sentence at two moments.
+ */
+export function blockRefLabel(type: BlockType, index: number): string {
+  return `${BLOCK_LABELS[type]} ${index + 1}`;
+}
+
+/**
  * A comment plus the key the rail renders it under. A stored comment carries no
  * id — the thread is append-only JSON, and its storage shape is not this
  * change's business — so a comment's identity is its position, and the key is
@@ -201,7 +211,7 @@ function blockRefFor(
   const block = byId.get(blockId);
   const index = order.get(blockId);
   if (block === undefined || index === undefined) return "deleted block";
-  return `${BLOCK_LABELS[block.type]} ${index + 1}`;
+  return blockRefLabel(block.type, index);
 }
 
 /**
@@ -360,6 +370,31 @@ export function flashThreadHighlight(threadId: string): void {
       }, FLASH_MS),
     );
   }
+}
+
+/**
+ * The rule that fades a resolved thread's highlight back into the prose.
+ *
+ * A stylesheet and not a class on the span, because the span is ProseMirror's:
+ * it is rebuilt whenever the text inside it changes, and a class this app wrote
+ * would vanish on the next keystroke and come back only at the next annotation
+ * change. A selector matching `data-comment-thread` — which the mark itself
+ * renders (editor/nodes.ts) — survives every redraw, and resolving a thread is
+ * rare enough that regenerating one rule costs nothing.
+ *
+ * The declarations are the resolved *state* of `.ub-comment` in styles.css: the
+ * amber ground goes and the underline thins to a dotted neutral rule. Faded,
+ * not gone — the range is still annotated, and a reader must still be able to
+ * find the conversation from the prose.
+ */
+export function resolvedHighlightCss(threadIds: readonly string[]): string {
+  if (threadIds.length === 0) return "";
+  const selector = threadIds
+    // Escaped for a CSS *string*, which `CSS.escape` (an identifier escaper)
+    // does not do: a thread id is data, and only the document decides it.
+    .map((id) => `[data-comment-thread="${id.replace(/[\\"]/g, "\\$&")}"]`)
+    .join(",");
+  return `${selector}{background:transparent;border-bottom:1px dotted var(--muted-foreground);}`;
 }
 
 /** Scroll a thread's card into view inside the rail. */

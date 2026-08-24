@@ -133,7 +133,11 @@ export function App(): ReactElement {
             onCreate={onCreate}
           />
         )}
-        <EditorPane connection={doc} onSelectThread={onFocusThread} />
+        <EditorPane
+          connection={doc}
+          author={identity.name}
+          onSelectThread={onFocusThread}
+        />
         {/* The outline and the threads rail stack in one right column. Both
             sections render nothing when they have nothing to show, so the rail
             hides itself when it is empty (`.ub-rail:empty`) rather than leaving
@@ -143,6 +147,7 @@ export function App(): ReactElement {
           <ThreadsPane
             connection={doc}
             focused={focusedThread}
+            author={identity.name}
             onFocus={onFocusThread}
           />
         </aside>

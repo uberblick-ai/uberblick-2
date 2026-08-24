@@ -1,24 +1,38 @@
 /**
- * The Threads rail: every comment thread in the open document, read-only.
+ * The Threads rail: every comment thread in the open document, and the two
+ * things a reader can do about one — reply to it, or resolve it.
  *
- * A card is one `<button>` and nothing but phrasing content inside it — a
- * blockquote or a paragraph there would be invalid inside a button, and one
+ * A card's body is one `<button>` and nothing but phrasing content inside it —
+ * a blockquote or a paragraph there would be invalid inside a button, and one
  * button per card keeps the rail a single tab stop per thread with Enter
- * activating it. The quote marks around the excerpt are CSS, not text.
+ * activating it. The actions sit *beside* that button rather than inside it,
+ * because a button may not contain a button. The quote marks around the excerpt
+ * are CSS, not text.
  *
  * Clicking a card flashes the highlight in the prose; clicking a highlight
  * focuses the card. Both directions are the same `ThreadFocus`, held by the app
  * shell, because the two ends live in different panes.
+ *
+ * Resolved threads leave the count and move below it, collapsed and dimmed.
+ * They are never dropped: a conversation someone has already had is the reason
+ * the text reads the way it does now.
+ *
+ * Both writes go through the schema package's annotation API — `addComment` and
+ * `setAnnotationResolved` — in one transaction each, so a reply and a resolve
+ * reach a second client exactly the way an agent's do.
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
+import { addComment, setAnnotationResolved } from "@uberblick/schema";
 import type { AnnotationComment } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useThreads } from "./hooks.js";
+import { CommentForm } from "./CommentForm.js";
 import {
   commentTimestamp,
   flashThreadHighlight,
+  resolvedHighlightCss,
   scrollThreadCardIntoView,
   threadCardId,
 } from "./threads.js";
@@ -42,18 +56,32 @@ function Comment({ comment }: { comment: AnnotationComment }): ReactElement {
 function ThreadCard({
   thread,
   focused,
+  collapsed,
+  replying,
   onSelect,
+  onReply,
+  onReplyOpen,
+  onReplyClose,
+  onResolve,
 }: {
   thread: ThreadView;
   focused: boolean;
+  /** Resolved and not expanded: head and excerpt only. */
+  collapsed: boolean;
+  replying: boolean;
   onSelect: () => void;
+  onReply: (text: string) => void;
+  onReplyOpen: () => void;
+  onReplyClose: () => void;
+  onResolve: (resolved: boolean) => void;
 }): ReactElement {
   return (
-    <li id={threadCardId(thread.id)}>
+    <li id={threadCardId(thread.id)} className="ub-thread-card">
       <button
         type="button"
-        className={`ub-thread${focused ? " ub-thread-focused" : ""}${thread.orphaned ? " ub-thread-orphaned" : ""}`}
+        className={`ub-thread${focused ? " ub-thread-focused" : ""}${thread.orphaned ? " ub-thread-orphaned" : ""}${thread.resolved ? " ub-thread-resolved" : ""}`}
         aria-current={focused ? "true" : undefined}
+        aria-expanded={thread.resolved ? !collapsed : undefined}
         onClick={onSelect}
       >
         <span className="ub-thread-head">
@@ -70,15 +98,46 @@ function ThreadCard({
         ) : (
           <span className="ub-thread-excerpt">{thread.excerpt}</span>
         )}
-        {thread.comments.map((comment) => (
-          <Comment key={comment.key} comment={comment} />
-        ))}
-        {thread.replyCount > 0 && (
+        {collapsed ? (
+          <span className="ub-thread-replies">
+            {thread.comments.length}{" "}
+            {thread.comments.length === 1 ? "comment" : "comments"} — show
+          </span>
+        ) : (
+          thread.comments.map((comment) => (
+            <Comment key={comment.key} comment={comment} />
+          ))
+        )}
+        {!collapsed && thread.replyCount > 0 && (
           <span className="ub-thread-replies">
             {thread.replyCount} {thread.replyCount === 1 ? "reply" : "replies"}
           </span>
         )}
       </button>
+      {!collapsed &&
+        (replying ? (
+          <CommentForm
+            placeholder="Reply…"
+            submitLabel="Reply"
+            onSubmit={onReply}
+            onCancel={onReplyClose}
+          />
+        ) : (
+          <div className="ub-thread-actions">
+            {!thread.resolved && (
+              <button type="button" className="ub-tool" onClick={onReplyOpen}>
+                Reply
+              </button>
+            )}
+            <button
+              type="button"
+              className="ub-tool"
+              onClick={() => onResolve(!thread.resolved)}
+            >
+              {thread.resolved ? "Reopen" : "Resolve"}
+            </button>
+          </div>
+        ))}
     </li>
   );
 }
@@ -86,13 +145,23 @@ function ThreadCard({
 export function ThreadsPane({
   connection,
   focused,
+  author,
   onFocus,
 }: {
   connection: RoomConnection | null;
   focused: ThreadFocus | null;
+  /** The awareness name this client publishes — the author of its replies. */
+  author: string;
   onFocus: (threadId: string) => void;
 }): ReactElement | null {
   const threads = useThreads(connection);
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  /**
+   * The one resolved thread the reader has opened back up. One at a time: the
+   * resolved list is an archive, and expanding a card there is a glance, not a
+   * mode the rail should stay in.
+   */
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   // A highlight click focuses a card that may be scrolled out of the rail. Keyed
   // on the whole focus and not its id, so clicking the same highlight again
@@ -101,25 +170,62 @@ export function ThreadsPane({
     if (focused !== null) scrollThreadCardIntoView(focused.id);
   }, [focused]);
 
-  if (threads.length === 0) return null;
+  if (connection === null || threads.length === 0) return null;
+  const { ydoc } = connection;
+  const open = threads.filter((thread) => !thread.resolved);
+  const resolved = threads.filter((thread) => thread.resolved);
+
+  const card = (thread: ThreadView): ReactElement => (
+    <ThreadCard
+      key={thread.id}
+      thread={thread}
+      focused={thread.id === focused?.id}
+      collapsed={thread.resolved && expanded !== thread.id}
+      replying={replyTo === thread.id}
+      onSelect={() => {
+        onFocus(thread.id);
+        flashThreadHighlight(thread.id);
+        // A resolved card is collapsed, so the click that selects it is also
+        // the click that opens it — and closes it again.
+        if (thread.resolved) {
+          setExpanded((current) => (current === thread.id ? null : thread.id));
+        }
+      }}
+      onReplyOpen={() => setReplyTo(thread.id)}
+      onReplyClose={() => setReplyTo(null)}
+      onReply={(text) => {
+        addComment(ydoc, thread.id, author, text);
+        setReplyTo(null);
+      }}
+      onResolve={(next) => {
+        setAnnotationResolved(ydoc, thread.id, next);
+        setReplyTo((current) => (current === thread.id ? null : current));
+        setExpanded(null);
+      }}
+    />
+  );
+
   return (
     <section className="ub-threads" aria-label="Threads">
+      {/* The count is the open threads: a rail that keeps counting settled
+          conversations stops telling you anything about the document. */}
       <p className="ub-rail-head">
-        Threads <span className="ub-muted">{threads.length}</span>
+        Threads <span className="ub-muted">{open.length}</span>
       </p>
-      <ul>
-        {threads.map((thread) => (
-          <ThreadCard
-            key={thread.id}
-            thread={thread}
-            focused={thread.id === focused?.id}
-            onSelect={() => {
-              onFocus(thread.id);
-              flashThreadHighlight(thread.id);
-            }}
-          />
-        ))}
-      </ul>
+      <ul>{open.map(card)}</ul>
+      {resolved.length > 0 && (
+        <>
+          <p className="ub-rail-head ub-rail-subhead">
+            Resolved <span className="ub-muted">{resolved.length}</span>
+          </p>
+          <ul>{resolved.map(card)}</ul>
+          {/* Fades the resolved ranges in the prose. See `resolvedHighlightCss`
+              for why this is a stylesheet rather than a class on the span. */}
+          <style data-resolved-highlights="">
+            {resolvedHighlightCss(resolved.map((thread) => thread.id))}
+          </style>
+        </>
+      )}
     </section>
   );
 }

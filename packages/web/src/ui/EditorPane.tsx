@@ -19,6 +19,7 @@ import {
   useRawBlocks,
   useRoomStatus,
 } from "./hooks.js";
+import { CommentComposer } from "./CommentComposer.js";
 import { threadIdFromTarget } from "./threads.js";
 
 /**
@@ -177,13 +178,19 @@ function BlockToolbar({ editor }: { editor: Editor }): ReactElement {
 
 function BoundEditor({
   connection,
+  author,
   onSelectThread,
 }: {
   connection: RoomConnection;
+  author: string;
   onSelectThread: (threadId: string) => void;
 }): ReactElement {
   const host = useRef<HTMLDivElement | null>(null);
+  const frame = useRef<HTMLDivElement | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
+  // The only names anyone can mention are the peers publishing awareness right
+  // now — there is no registry, and a mention is plain text.
+  const peers = usePeers(connection);
 
   useEffect(() => {
     const element = host.current;
@@ -216,19 +223,37 @@ function BoundEditor({
   return (
     <>
       {editor !== null && <BlockToolbar editor={editor} />}
-      <div className="ub-editor" ref={host} />
+      {/* The composer is positioned against this frame, not against the editor
+          itself: ProseMirror owns every child of `.ub-editor`. */}
+      <div className="ub-editor-frame" ref={frame}>
+        <div className="ub-editor" ref={host} />
+        {editor !== null && (
+          <CommentComposer
+            editor={editor}
+            ydoc={connection.ydoc}
+            author={author}
+            mentions={peers.map((peer) => peer.name)}
+            host={frame}
+            onCreated={onSelectThread}
+          />
+        )}
+      </div>
     </>
   );
 }
 
 export function EditorPane({
   connection,
+  author,
   onSelectThread,
 }: {
   connection: RoomConnection | null;
+  /** The awareness name this client publishes — the author of its comments. */
+  author: string;
   /**
    * Called when a click lands inside a comment highlight, so the rail can focus
    * that thread. Must be referentially stable — it is an effect dependency.
+   * Also called with a thread this client has just started.
    */
   onSelectThread: (threadId: string) => void;
 }): ReactElement {
@@ -263,7 +288,11 @@ export function EditorPane({
             summary={describeForeignBlocks(foreign)}
           />
         ) : (
-          <BoundEditor connection={connection} onSelectThread={onSelectThread} />
+          <BoundEditor
+            connection={connection}
+            author={author}
+            onSelectThread={onSelectThread}
+          />
         )}
       </div>
     </section>
