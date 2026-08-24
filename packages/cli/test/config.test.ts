@@ -298,19 +298,16 @@ describe("claimSigningSecret", () => {
 });
 
 describe("writing the files ub owns", () => {
-  it("writes every byte of a payload no single write(2) would carry", () => {
-    // `writeSync` may be short — that is the syscall's contract, not an exotic
-    // failure — and a short write to a file holding the signing secret is a file
-    // that parses as something else or not at all.
-    //
-    // Being honest about its reach: a single 8 MB write to a regular file does
-    // NOT actually come back short on the platforms this runs on, so this cannot
-    // reproduce the condition the loop exists for. What it does defend is the
-    // loop's arithmetic — an offset or length that drops the tail fails here,
-    // which is the regression a hand-written write loop actually suffers.
+  it("writes every byte, not just the first chunk of one", () => {
+    // What this does NOT do is force a short `write(2)` — a regular file does
+    // not return one, whatever the payload size, so the condition the loop
+    // exists for is unreachable from a test. What it defends is the loop's
+    // arithmetic, which is the regression a hand-written write loop actually
+    // suffers: an offset or length that drops the tail fails here. A payload
+    // past the usual chunk sizes is enough for that; megabytes bought nothing.
     const box = sandbox();
     mkdirSync(join(box.configHome, "uberblick"), { recursive: true });
-    const bulk = "x".repeat(8 * 1024 * 1024);
+    const bulk = "x".repeat(64 * 1024);
 
     const staged = writeTempBeside(credentialsPath(box.env), bulk);
     try {

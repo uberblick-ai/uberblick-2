@@ -117,10 +117,14 @@ function writeAll(fd: number, contents: string): void {
  * filesystem.
  *
  * The name is unpredictable because the file briefly holds the signing secret,
- * and it is created with `wx` so it can never land on somebody else's file. If
- * anything at all goes wrong after that, the descriptor is closed and the file
- * removed before the error propagates: a failed write must not leave a readable
- * copy of a secret lying under a name nobody will think to look for.
+ * and it is created with `wx` so it can never land on somebody else's file.
+ *
+ * **Nothing survives this call except a file whose name it returned.** The close
+ * is inside the guarded region, not in a `finally` after it: `close(2)` is where
+ * a deferred write error such as EIO finally surfaces, and a close that throws
+ * after the write "succeeded" would otherwise leave a complete, readable copy of
+ * a signing secret on disk under a name the caller never receives and nobody
+ * would think to look for. A failed close is treated as a failed write.
  */
 export function writeTempBeside(path: string, contents: string): string {
   const temp = join(
@@ -128,16 +132,25 @@ export function writeTempBeside(path: string, contents: string): string {
     `.${basename(path)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
   );
   const fd = openSync(temp, "wx", OWNER_ONLY);
-  let published = false;
+  // Set immediately BEFORE the close, not after: POSIX releases the descriptor
+  // even when `close` reports an error, so closing again could land on an
+  // unrelated file that has since been given the same number.
+  let closeAttempted = false;
   try {
     fchmodSync(fd, OWNER_ONLY);
     writeAll(fd, contents);
-    published = true;
-  } finally {
+    closeAttempted = true;
     closeSync(fd);
-    if (!published) {
-      removeQuietly(temp);
+  } catch (error) {
+    if (!closeAttempted) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Already unwinding; the unlink below is what actually matters.
+      }
     }
+    removeQuietly(temp);
+    throw error;
   }
   return temp;
 }

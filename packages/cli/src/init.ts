@@ -315,9 +315,16 @@ export async function initCommand(
     }
 
     // Merged over what is already there: a `hubUrl` somebody set, or a field a
-    // later version of `ub` writes, is not `ub init`'s to drop.
+    // later version of `ub` writes, is not `ub init`'s to drop. Read again here
+    // rather than reusing the copy taken before the prompts — that one is a
+    // snapshot of a machine somebody may have changed since, and it exists only
+    // to offer defaults. What gets written is merged over what is on disk now.
+    const current = readUserConfig();
+    for (const warning of current.warnings) {
+      warnings.add(warning);
+    }
     configPath = writeUserConfig({
-      ...existing.raw,
+      ...current.raw,
       workspace,
       displayName: name,
       color,

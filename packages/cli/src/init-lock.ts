@@ -11,21 +11,26 @@
  * `credentials.json` that already carries other keys.
  *
  * It is a lock file, not a lock service: `open(O_CREAT|O_EXCL)` on
- * `$XDG_CONFIG_HOME/uberblick/.init.lock`. Two things keep that honest.
+ * `$XDG_CONFIG_HOME/uberblick/.init.lock`, and two rules keep that honest.
  *
  * **It is bounded.** Waiting stops after {@link WAIT_TIMEOUT_MS} and `ub init`
- * says another one is running rather than hanging on a terminal nobody is
- * watching. The write phase itself is a handful of file operations, so anything
- * approaching that bound is a wedged process, not contention.
+ * says what is in the way rather than hanging on a terminal nobody is watching.
+ * The write phase is a handful of file operations, so anything approaching that
+ * bound is a wedged or dead process, not contention.
  *
- * **It expires.** A process killed between creating the lock and removing it
- * would otherwise leave a machine that can never be initialised again, and "rm
- * this file" is a terrible thing to make somebody find out. A lock whose mtime is
- * older than {@link STALE_AFTER_MS} is taken over.
+ * **Only its creator removes it.** There is no automatic takeover of an old
+ * lock, and that is a deliberate reversal: an expiry rule needs a second
+ * mechanism to decide when a holder is dead, and every version of that is a
+ * race — two processes agreeing a lock is stale unlink it twice, so one of them
+ * deletes a lock the other had just legitimately taken, and a lock that cannot
+ * be removed at all turns the wait into a spin. A crashed holder on a
+ * single-user machine is instead a visible situation with a one-line fix, and
+ * the timeout message says exactly which file to delete and how old it is.
+ * Nothing here ever unlinks a lock this process did not create.
  *
  * The atomic publications underneath stay exactly as they were. This lock makes
- * the common case orderly; they are what keeps a lock that was taken over — or a
- * writer that is not `ub init` at all — from tearing a file in half.
+ * the common case orderly; they are what keeps a writer that is not `ub init` at
+ * all from tearing a file in half.
  */
 
 import { mkdirSync, openSync, closeSync, statSync, writeSync } from "node:fs";
@@ -38,9 +43,6 @@ const LOCK_FILE = ".init.lock";
 
 /** How long to wait for another `ub init` before giving up. */
 const WAIT_TIMEOUT_MS = 2_000;
-
-/** After this, the holder is assumed dead rather than slow. */
-const STALE_AFTER_MS = 30_000;
 
 /** Long enough not to spin, short enough to be invisible. */
 const RETRY_MS = 20;
@@ -59,20 +61,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** True when the lock was taken over, so the caller should try again at once. */
-function takeOverIfStale(path: string): boolean {
-  let age: number;
+/**
+ * How long that lock has been there, for the message. Never a decision — see the
+ * module comment on why nothing here acts on a lock's age.
+ */
+function describeAge(path: string): string {
   try {
-    age = Date.now() - statSync(path).mtimeMs;
+    const seconds = Math.round((Date.now() - statSync(path).mtimeMs) / 1000);
+    return `${seconds}s old`;
   } catch {
-    // Gone between the failed create and now: the holder released it.
-    return true;
+    return "age unknown";
   }
-  if (age < STALE_AFTER_MS) {
-    return false;
-  }
-  removeQuietly(path);
-  return true;
 }
 
 /**
@@ -101,6 +100,8 @@ export async function acquireInitLock(
       let released = false;
       return {
         path,
+        // The only `unlink` of a lock anywhere in this CLI, and it can only
+        // reach a file this process created with `wx` a moment ago.
         release() {
           if (!released) {
             released = true;
@@ -114,13 +115,11 @@ export async function acquireInitLock(
       }
     }
 
-    if (takeOverIfStale(path)) {
-      continue;
-    }
     if (Date.now() >= deadline) {
       throw new Error(
-        `another \`ub init\` is holding ${path}. Wait for it to finish and run ` +
-          "`ub init` again; if nothing is running, delete that file",
+        `another \`ub init\` is holding ${path} (${describeAge(path)}). Wait ` +
+          "for it to finish and run `ub init` again — or, if nothing is " +
+          `running, remove it: rm ${path}`,
       );
     }
     await sleep(RETRY_MS);

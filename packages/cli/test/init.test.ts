@@ -327,35 +327,32 @@ describe("ub init", () => {
     expect(existsSync(lock)).toBe(false);
   });
 
-  it("takes over a lock old enough that its holder must be gone", () => {
-    // A process killed between taking the lock and releasing it would otherwise
-    // leave a machine that can never be initialised again, and "delete this
-    // file" is a terrible thing to make somebody work out.
-    const box = sandbox({ checkout: true });
-    const lock = join(box.configHome, "uberblick", ".init.lock");
-    mkdirSync(dirname(lock), { recursive: true });
-    writeFileSync(lock, "999999\n");
-    const longAgo = new Date(Date.now() - 120_000);
-    utimesSync(lock, longAgo, longAgo);
+  it("never removes a lock it did not create, however old that lock is", () => {
+    // No automatic takeover, deliberately: deciding a holder is dead needs a
+    // second mechanism, and every version of that races — two processes agreeing
+    // a lock is stale unlink it twice, and the second unlink deletes a lock
+    // somebody had just legitimately taken. A crashed holder is instead a
+    // visible situation with a one-line fix, so the message has to carry it.
+    for (const ageMs of [0, 120_000]) {
+      const box = sandbox({ checkout: true });
+      const lock = join(box.configHome, "uberblick", ".init.lock");
+      mkdirSync(dirname(lock), { recursive: true });
+      writeFileSync(lock, "999999\n");
+      const when = new Date(Date.now() - ageMs);
+      utimesSync(lock, when, when);
 
-    const run = runUb(["init", "--yes"], box, WITHOUT_MISE);
-    expect(run.status, run.output).toBe(0);
-    expect(derivedSecret(box)).toBe(storedSecret(box));
-    expect(existsSync(lock)).toBe(false);
-  });
-
-  it("gives up on a lock that is held and fresh, saying which file to look at", () => {
-    const box = sandbox({ checkout: true });
-    const lock = join(box.configHome, "uberblick", ".init.lock");
-    mkdirSync(dirname(lock), { recursive: true });
-    writeFileSync(lock, "999999\n");
-
-    const run = runUb(["init", "--yes"], box, WITHOUT_MISE);
-    expect(run.status).toBe(1);
-    expect(run.stderr).toMatch(/another `ub init` is holding .*\.init\.lock/);
-    // Nothing half-written, and somebody else's lock left where it was.
-    expect(existsSync(credentialsPath(box))).toBe(false);
-    expect(existsSync(lock)).toBe(true);
+      const run = runUb(["init", "--yes"], box, WITHOUT_MISE);
+      expect(run.status).toBe(1);
+      // The path, how old it is, and the command that fixes it.
+      expect(run.stderr).toMatch(/another `ub init` is holding .*\.init\.lock/);
+      expect(run.stderr).toMatch(/\d+s old/);
+      expect(run.stderr).toMatch(/rm .*\.init\.lock/);
+      // Somebody else's lock is left exactly where it was, and nothing was
+      // half-written around it.
+      expect(existsSync(lock)).toBe(true);
+      expect(existsSync(credentialsPath(box))).toBe(false);
+      expect(existsSync(localConfigPath(box))).toBe(false);
+    }
   });
 
   it("refuses to write a value mise could not parse", () => {
