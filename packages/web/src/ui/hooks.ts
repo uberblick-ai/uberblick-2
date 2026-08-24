@@ -23,6 +23,8 @@ import type { ForeignBlock } from "../editor/palette.js";
 import { blockText, plainText } from "../editor/ytext.js";
 import { observeOutline } from "./outline.js";
 import type { OutlineEntry } from "./outline.js";
+import { observeThreads } from "./threads.js";
+import type { ThreadView } from "./threads.js";
 
 /** Acquire a shared room connection for as long as the component needs it. */
 export function useRoom(
@@ -218,6 +220,23 @@ export function useOutline(connection: RoomConnection | null): OutlineEntry[] {
     return observeOutline(connection.ydoc, setOutline);
   }, [connection]);
   return outline;
+}
+
+/**
+ * The open document's comment threads, live. Two observers under the hood (the
+ * annotations map and the blocks fragment), so a thread an agent creates and a
+ * range a human deletes both reach the rail the same way.
+ */
+export function useThreads(connection: RoomConnection | null): ThreadView[] {
+  const [threads, setThreads] = useState<ThreadView[]>([]);
+  useEffect(() => {
+    if (connection === null) {
+      setThreads([]);
+      return;
+    }
+    return observeThreads(connection.ydoc, setThreads);
+  }, [connection]);
+  return threads;
 }
 
 /**

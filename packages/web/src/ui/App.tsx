@@ -20,6 +20,7 @@ import { randomIdentity } from "../collab/identity.js";
 import { DocList } from "./DocList.js";
 import { EditorPane } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
+import { ThreadsPane } from "./ThreadsPane.js";
 import { useDirectory, useIdentity, useRoom, useStoredFlag } from "./hooks.js";
 
 /** Sidebar preference, persisted per browser. */
@@ -29,6 +30,12 @@ export function App(): ReactElement {
   const identity = useIdentity(randomIdentity);
   const [selected, setSelected] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useStoredFlag(SIDEBAR_COLLAPSED_KEY, false);
+  /**
+   * The thread the reader is looking at. It lives here because the two ends of
+   * the link are in different panes: a highlight in the editor and a card in the
+   * rail focus each other through this one id.
+   */
+  const [focusedThread, setFocusedThread] = useState<string | null>(null);
 
   const directory = useRoom(directoryRoom(WORKSPACE), identity);
   const doc = useRoom(
@@ -121,8 +128,19 @@ export function App(): ReactElement {
             onCreate={onCreate}
           />
         )}
-        <EditorPane connection={doc} />
-        <OutlinePane connection={doc} />
+        <EditorPane connection={doc} onSelectThread={setFocusedThread} />
+        {/* The outline and the threads rail stack in one right column. Both
+            sections render nothing when they have nothing to show, so the rail
+            hides itself when it is empty (`.ub-rail:empty`) rather than leaving
+            a blank gutter. */}
+        <aside className="ub-rail">
+          <OutlinePane connection={doc} />
+          <ThreadsPane
+            connection={doc}
+            focused={focusedThread}
+            onFocus={setFocusedThread}
+          />
+        </aside>
       </div>
     </main>
   );
