@@ -35,8 +35,13 @@ export function CommentForm({
   mentions?: string[];
   /** A refusal from the last submit, shown above the buttons. */
   error?: string | null;
-  /** Called with the trimmed text. Never called with an empty string. */
-  onSubmit: (text: string) => void;
+  /**
+   * Called with the trimmed text; never with an empty string. Returns whether
+   * the write went through — a refused comment keeps the text in the field,
+   * because the writer is about to try it somewhere else and typing it twice is
+   * the wrong way to learn that.
+   */
+  onSubmit: (text: string) => boolean;
   onCancel: () => void;
 }): ReactElement {
   const [text, setText] = useState("");
@@ -44,8 +49,7 @@ export function CommentForm({
   const body = text.trim();
   const submit = (): void => {
     if (body === "") return;
-    onSubmit(body);
-    setText("");
+    if (onSubmit(body)) setText("");
   };
 
   return (

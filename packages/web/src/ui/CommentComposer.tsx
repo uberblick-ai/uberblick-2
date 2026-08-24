@@ -14,7 +14,7 @@
  * that API takes (see editor/selection.ts) and the refusals it can answer with.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactElement, RefObject } from "react";
 import type * as Y from "yjs";
 import { AnnotationRangeError, createAnnotation } from "@uberblick/schema";
@@ -31,9 +31,12 @@ interface Point {
 }
 
 interface Draft extends Point {
-  /** Identity of the target range, so a re-render for the same one is a no-op. */
-  key: string;
   target: CommentTarget;
+}
+
+/** The range a target names, as a value two reads can be compared by. */
+function rangeOf(target: CommentTarget): string {
+  return `${target.blockId}:${target.start}:${target.end}`;
 }
 
 /** The gap between the selection and the card, in pixels. */
@@ -101,32 +104,39 @@ export function CommentComposer({
    */
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The range the last read saw, so a *different* one can drop a stale refusal. */
+  const range = useRef<string | null>(null);
 
   // Every transaction, not just `selectionUpdate`: text arriving under the
   // selection moves the range that would be annotated, and the card quotes it.
   useEffect(() => {
     const read = (): void => {
-      const target = commentTargetOf(editor);
+      const target = commentTargetOf(editor, ydoc);
       if (target === null) {
         // Nothing left to annotate: the card goes, and the field with it.
         setDraft(null);
         setOpen(false);
+        range.current = null;
         return;
       }
-      setDraft((previous) => {
-        const key = `${target.blockId}:${target.start}:${target.end}:${target.text}`;
-        // Same range, same card: keeping the object identity keeps the card
-        // from being repositioned on every unrelated transaction.
-        if (previous !== null && previous.key === key) return previous;
-        return { key, target, ...pointAt(editor, host.current) };
-      });
+      // A refusal is about one range. Aim at another and it no longer applies —
+      // which is how a reader answers "that range is already taken".
+      if (range.current !== rangeOf(target)) {
+        range.current = rangeOf(target);
+        setError(null);
+      }
+      // Rebuilt every read, position included. Everything on the card is derived
+      // from the target — the excerpt, the block reference, the clamped chip,
+      // and where the card sits — so anything held over from a previous read is
+      // a card describing a range that has moved on.
+      setDraft({ target, ...pointAt(editor, host.current) });
     };
     read();
     editor.on("transaction", read);
     return () => {
       editor.off("transaction", read);
     };
-  }, [editor, host]);
+  }, [editor, ydoc, host]);
 
   if (draft === null) return null;
   const { target } = draft;
@@ -137,7 +147,7 @@ export function CommentComposer({
     setError(null);
   };
 
-  const create = (text: string): void => {
+  const create = (text: string): boolean => {
     try {
       const thread = createAnnotation(
         ydoc,
@@ -151,10 +161,15 @@ export function CommentComposer({
       onCreated(thread.id);
       // Back to the prose, with the caret at the end of the new highlight
       // rather than still selecting it — a standing selection would re-offer to
-      // comment on a range that now belongs to this thread.
-      editor.commands.focus(editor.state.selection.to);
+      // comment on a range that now belongs to this thread. The end of the
+      // *marked* range, not of the selection: a clamped selection reached into
+      // a later block, and the caret belongs where the thread actually starts
+      // and ends.
+      editor.commands.focus(target.contentStart + target.end);
+      return true;
     } catch (failure) {
       setError(refusal(failure));
+      return false;
     }
   };
 

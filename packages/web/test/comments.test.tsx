@@ -18,6 +18,7 @@ import {
   editBlock,
   getAnnotation,
   getBlocks,
+  getBlocksFragment,
   initDoc,
   listAnnotationRanges,
   listAnnotations,
@@ -28,6 +29,7 @@ import { CommentComposer } from "../src/ui/CommentComposer.js";
 import { ThreadsPane } from "../src/ui/ThreadsPane.js";
 import { commentTargetOf } from "../src/editor/selection.js";
 import { withMention } from "../src/ui/CommentForm.js";
+import { resolvedHighlightCss } from "../src/ui/threads.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { mountEditor } from "./helpers.js";
 
@@ -71,15 +73,21 @@ function posIn(editor: Editor, index: number, offset: number): number {
 }
 
 /**
- * Select a range, the way a reader dragging over the prose does. Inside `act`
- * because the composer listens to the editor: the selection is what makes it
- * appear.
+ * Select a range, the way a reader dragging over the prose does — within one
+ * block, or on into a later one by naming `toBlock`. Inside `act` because the
+ * composer listens to the editor: the selection is what makes it appear.
  */
-function select(editor: Editor, block: number, from: number, to: number): void {
+function select(
+  editor: Editor,
+  block: number,
+  from: number,
+  to: number,
+  toBlock = block,
+): void {
   act(() => {
     editor.commands.setTextSelection({
       from: posIn(editor, block, from),
-      to: posIn(editor, block, to),
+      to: posIn(editor, toBlock, to),
     });
   });
 }
@@ -174,10 +182,10 @@ describe("the selection a thread anchors to", () => {
     const { ydoc, blocks } = annotatedDoc();
     const { editor, element } = mountEditor(ydoc);
     try {
-      expect(commentTargetOf(editor)).toBeNull();
+      expect(commentTargetOf(editor, ydoc)).toBeNull();
 
       select(editor, 1, 4, 15);
-      expect(commentTargetOf(editor)).toMatchObject({
+      expect(commentTargetOf(editor, ydoc)).toMatchObject({
         blockId: blocks[1],
         start: 4,
         end: 15,
@@ -201,13 +209,9 @@ describe("the selection a thread anchors to", () => {
     const { ydoc, blocks } = annotatedDoc();
     const { editor, element } = mountEditor(ydoc);
     try {
-      select(editor, 1, 20, PARAGRAPH.length);
-      // …and on into the next block.
-      editor.commands.setTextSelection({
-        from: posIn(editor, 1, 20),
-        to: posIn(editor, 2, 6),
-      });
-      expect(commentTargetOf(editor)).toMatchObject({
+      // From inside the first block, on into the next one.
+      select(editor, 1, 20, 6, 2);
+      expect(commentTargetOf(editor, ydoc)).toMatchObject({
         blockId: blocks[1],
         start: 20,
         end: PARAGRAPH.length,
@@ -217,6 +221,37 @@ describe("the selection a thread anchors to", () => {
     } finally {
       editor.destroy();
       element.remove();
+    }
+  });
+
+  /**
+   * The palette gate runs once, before the editor binds, so it cannot speak for
+   * a shape that arrives afterwards — and a block element holding two Y.XmlText
+   * children passes it anyway, since both children are plain text carrying
+   * declared marks. ProseMirror then shows the two texts as one run while the
+   * annotation API indexes only the first, so every offset read off the editor
+   * would name the wrong characters. Nothing is offered on such a block.
+   */
+  it("refuses a block whose Y text the editor is not showing one-for-one", () => {
+    const { ydoc } = annotatedDoc();
+    const { editor, element: host } = mountEditor(ydoc);
+    try {
+      // A peer writes a second Y.XmlText into the paragraph. The editor renders
+      // "…jumps.BBBB", the schema still reads only up to the full stop.
+      const remote = mirrorOf(ydoc);
+      act(() => {
+        const extra = new Y.XmlText();
+        extra.insert(0, "BBBB");
+        (getBlocksFragment(remote).get(1) as Y.XmlElement).insert(1, [extra]);
+      });
+      expect(editor.state.doc.child(1).textContent).toBe(`${PARAGRAPH}BBBB`);
+      expect(getBlocks(ydoc)[1]?.text).toBe(PARAGRAPH);
+
+      select(editor, 1, 4, 15);
+      expect(commentTargetOf(editor, ydoc)).toBeNull();
+    } finally {
+      editor.destroy();
+      host.remove();
     }
   });
 });
@@ -258,10 +293,15 @@ describe("starting a thread from the prose", () => {
     }
   });
 
-  it("refuses a range that already belongs to another thread, and says why", () => {
+  /**
+   * A refusal is not a reason to lose what someone wrote. The error names the
+   * range, so it goes when the reader aims at another one, and the comment
+   * itself waits in the field for the range that will take it.
+   */
+  it("refuses a range that already belongs to another thread, and keeps the text", () => {
     const { ydoc, blocks } = annotatedDoc();
     createAnnotation(ydoc, blocks[1]!, 4, 15, "agent-a", "mine");
-    const view = mountComposer(ydoc);
+    const view = mountComposer(ydoc, { author: "ben" });
     try {
       // Overlapping the existing thread by a single character is enough.
       select(view.editor, 1, 10, 19);
@@ -272,6 +312,57 @@ describe("starting a thread from the prose", () => {
       expect(listAnnotations(ydoc)).toHaveLength(1);
       expect(view.query(".ub-comment-error")?.textContent).toContain(
         "already part of another thread",
+      );
+      expect(view.query<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe(
+        "mine too",
+      );
+
+      // Aim at a free range and the refusal no longer applies…
+      select(view.editor, 1, 20, 25);
+      expect(view.query(".ub-comment-error")).toBeNull();
+      // …and the same text, never retyped, lands there.
+      view.submit();
+      expect(
+        listAnnotations(ydoc).find((thread) => thread.comments[0]?.author === "ben")
+          ?.comments[0]?.text,
+      ).toBe("mine too");
+      expect(listAnnotationRanges(ydoc, blocks[1]!)).toHaveLength(2);
+    } finally {
+      view.unmount();
+    }
+  });
+
+  /**
+   * Everything on the card is derived from the selection as it stands *now*.
+   * Extending a selection off the end of its first block changes neither the
+   * offsets nor the quoted text — only whether the range is being clamped — so
+   * a card that re-reads only when those change would go on claiming it was
+   * annotating the whole gesture.
+   */
+  it("re-reads the target on every transaction, so the clamp shows up", () => {
+    const { ydoc, blocks } = annotatedDoc();
+    const view = mountComposer(ydoc);
+    try {
+      // "jumps." — the tail of the block, so running past it leaves start, end
+      // and quoted text exactly as they were.
+      select(view.editor, 1, 20, PARAGRAPH.length);
+      view.open();
+      expect(view.query(".ub-chip-orphaned")).toBeNull();
+
+      select(view.editor, 1, 20, 6, 2);
+      expect(view.query(".ub-chip-orphaned")?.textContent).toBe("first block only");
+      expect(view.query(".ub-thread-excerpt")?.textContent).toBe("jumps.");
+
+      view.type("the tail only");
+      view.submit();
+      const [thread] = listAnnotations(ydoc);
+      expect(listAnnotationRanges(ydoc, blocks[1]!)).toEqual([
+        { threadId: thread?.id, start: 20, end: PARAGRAPH.length },
+      ]);
+      // The caret goes to the end of what was marked — in the first block, not
+      // in the block the selection happened to run into.
+      expect(view.editor.state.selection.from).toBe(
+        posIn(view.editor, 1, PARAGRAPH.length),
       );
     } finally {
       view.unmount();
@@ -459,6 +550,11 @@ describe("the rail writes back", () => {
         "why?",
       );
       expect(view.cards()[0]?.querySelector(".ub-comment-input")).toBeNull();
+
+      // Reopened by that same client: the reply was let go, not merely hidden,
+      // so the form does not come back — and does not steal the caret with it.
+      await settle(() => setAnnotationResolved(remote, thread.id, false));
+      expect(view.cards()[0]?.querySelector(".ub-comment-input")).toBeNull();
     } finally {
       view.unmount();
     }
@@ -525,16 +621,14 @@ describe("the rail writes back", () => {
   });
 
   /**
-   * The one concurrency case this change introduces that the schema package's
-   * own tests do not: a resolve written from the rail while another client
-   * splits the marked block underneath it. The schema tests pin that a mark
-   * survives a split; what is new here is that the thread's *state* is written
-   * on one replica while its anchor moves on the other.
+   * That a `comment` mark survives a block split is the schema package's own
+   * property, pinned by its own tests. What is this rail's business is that a
+   * resolve it wrote lands on a thread whose anchor moved underneath it: the
+   * state reaches the other replica, and the card is still in the rail.
    */
   it("survives a remote block split landing on a thread being resolved", async () => {
     const { ydoc, blocks } = annotatedDoc();
-    const paragraph = blocks[1]!;
-    const thread = createAnnotation(ydoc, paragraph, 4, 15, "agent-a", "why?");
+    const thread = createAnnotation(ydoc, blocks[1]!, 4, 15, "agent-a", "why?");
 
     // A second replica, editing apart: no updates flow until syncDocs below.
     const remote = new Y.Doc();
@@ -552,17 +646,7 @@ describe("the rail writes back", () => {
 
       await settle(() => syncDocs(ydoc, remote));
 
-      for (const replica of [ydoc, remote]) {
-        expect(getAnnotation(replica, thread.id)?.resolved).toBe(true);
-        expect(getAnnotation(replica, thread.id)?.comments).toHaveLength(1);
-        // The mark went with the text: half in each block, uncorrupted.
-        expect(listAnnotationRanges(replica, paragraph)).toEqual([
-          { threadId: thread.id, start: 4, end: 9 },
-        ]);
-        expect(listAnnotationRanges(replica, "split-1")).toEqual([
-          { threadId: thread.id, start: 0, end: 6 },
-        ]);
-      }
+      expect(getAnnotation(remote, thread.id)?.resolved).toBe(true);
       // …and the rail still finds it, anchored to the first half.
       expect(view.cards()).toHaveLength(1);
       expect(view.count()).toBe("0");
@@ -571,5 +655,20 @@ describe("the rail writes back", () => {
       editor.destroy();
       element.remove();
     }
+  });
+
+  /**
+   * A thread id is a key in a Y.Map, so any client can make one up — including
+   * one that would close the CSS string the fade rule puts it in. An id outside
+   * the shape the schema package generates gets no rule at all: its highlight
+   * stays amber, which is loud rather than dangerous.
+   */
+  it("writes no stylesheet rule for a thread id it cannot vouch for", () => {
+    const hostile = '"]{}\n*{display:none}';
+    expect(resolvedHighlightCss([hostile])).toBe("");
+    expect(resolvedHighlightCss([hostile, "b3d1f0e2-4c5a-11ee-be56-0242ac120002"]))
+      .toBe(
+        '[data-comment-thread="b3d1f0e2-4c5a-11ee-be56-0242ac120002"]{background:transparent;border-bottom:1px dotted var(--muted-foreground);}',
+      );
   });
 });

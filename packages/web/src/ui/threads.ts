@@ -43,6 +43,13 @@ const FLASH_MS = 1200;
 
 const FLASH_CLASS = "ub-comment-flash";
 
+/**
+ * Thread ids that may be written into a stylesheet verbatim. The schema package
+ * generates uuids, so this fits every id the system itself makes; anything else
+ * came from a client that made one up.
+ */
+const SAFE_THREAD_ID = /^[0-9A-Za-z-]+$/;
+
 const BLOCK_LABELS: Record<BlockType, string> = {
   paragraph: "Paragraph",
   heading: "Heading",
@@ -386,14 +393,18 @@ export function flashThreadHighlight(threadId: string): void {
  * amber ground goes and the underline thins to a dotted neutral rule. Faded,
  * not gone — the range is still annotated, and a reader must still be able to
  * find the conversation from the prose.
+ *
+ * A thread id is data — it is a key in a Y.Map any client can write — so it is
+ * checked against {@link SAFE_THREAD_ID} rather than escaped. Escaping a CSS
+ * string means getting backslashes, quotes *and* the line terminators that end
+ * a string early all right, and a rule this small is not worth that. An id the
+ * check refuses simply gets no fade rule: its highlight stays amber, which is
+ * loud and harmless.
  */
 export function resolvedHighlightCss(threadIds: readonly string[]): string {
-  if (threadIds.length === 0) return "";
-  const selector = threadIds
-    // Escaped for a CSS *string*, which `CSS.escape` (an identifier escaper)
-    // does not do: a thread id is data, and only the document decides it.
-    .map((id) => `[data-comment-thread="${id.replace(/[\\"]/g, "\\$&")}"]`)
-    .join(",");
+  const safe = threadIds.filter((id) => SAFE_THREAD_ID.test(id));
+  if (safe.length === 0) return "";
+  const selector = safe.map((id) => `[data-comment-thread="${id}"]`).join(",");
   return `${selector}{background:transparent;border-bottom:1px dotted var(--muted-foreground);}`;
 }
 

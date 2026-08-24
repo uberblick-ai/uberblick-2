@@ -70,7 +70,7 @@ function ThreadCard({
   collapsed: boolean;
   replying: boolean;
   onSelect: () => void;
-  onReply: (text: string) => void;
+  onReply: (text: string) => boolean;
   onReplyOpen: () => void;
   onReplyClose: () => void;
   onResolve: (resolved: boolean) => void;
@@ -170,6 +170,16 @@ export function ThreadsPane({
     if (focused !== null) scrollThreadCardIntoView(focused.id);
   }, [focused]);
 
+  // A pending reply outlives the conversation it belonged to unless it is let
+  // go: hiding the form while a thread reads as resolved is not the same as
+  // forgetting it, and a thread someone else resolves and then reopens would
+  // bring the form — and its focus grab — back with nobody having asked.
+  useEffect(() => {
+    if (replyTo === null) return;
+    const thread = threads.find((candidate) => candidate.id === replyTo);
+    if (thread === undefined || thread.resolved) setReplyTo(null);
+  }, [threads, replyTo]);
+
   if (connection === null || threads.length === 0) return null;
   const { ydoc } = connection;
   const open = threads.filter((thread) => !thread.resolved);
@@ -197,8 +207,11 @@ export function ThreadsPane({
       onReplyOpen={() => setReplyTo(thread.id)}
       onReplyClose={() => setReplyTo(null)}
       onReply={(text) => {
+        // `addComment` appends to a thread that is right here on screen; there
+        // is no range to clash with, so it has no refusal to answer with.
         addComment(ydoc, thread.id, author, text);
         setReplyTo(null);
+        return true;
       }}
       onResolve={(next) => {
         setAnnotationResolved(ydoc, thread.id, next);
