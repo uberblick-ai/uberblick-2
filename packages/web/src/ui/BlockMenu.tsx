@@ -87,12 +87,33 @@ const BUTTON_SIZE = 22;
  * list — and the browser reports that with `isComposing` (a `keyCode` of 229 on
  * the browsers that predate it). Taking those keys for the menu would make the
  * IME unusable inside a slash session. ProseMirror's own `composing` flag is
- * checked too: it stays true for a moment after `compositionend`, which is
- * exactly the window in which a stray Enter would arrive.
+ * checked too: it stays true for a moment after `compositionend`, which is one
+ * of the windows in which a stray Enter arrives.
+ *
+ * The other window is Safari's, and no flag on the event describes it — see
+ * {@link COMPOSITION_TAIL_MS}.
  */
-function composing(event: KeyboardEvent, editor: Editor): boolean {
+function composingKey(event: KeyboardEvent, editor: Editor): boolean {
   return event.isComposing || event.keyCode === 229 || editor.view.composing;
 }
+
+/**
+ * How long after a `compositionend` its confirming keystroke may still arrive.
+ *
+ * Safari fires `compositionend` *before* the Enter keydown that committed the
+ * candidate, and that keydown carries `isComposing: false` with ProseMirror's
+ * own flag already cleared — so nothing on the event says "this Enter was the
+ * IME's". Missing it means the menu converts a block while the reader was only
+ * accepting a candidate: their text is gone and a heading is there instead.
+ *
+ * So the composition's tail is remembered rather than read: the first keydown
+ * after a `compositionend` is left to the editor, and the memory is one-shot
+ * (consumed by that keydown) and time-boxed (an Enter pressed deliberately a
+ * moment later is the menu's again). Both bounds matter — one-shot alone would
+ * swallow a deliberate Enter that came minutes later, and the window alone
+ * would swallow every key in a fast composition-then-command sequence.
+ */
+const COMPOSITION_TAIL_MS = 100;
 
 /**
  * Where the menu goes for a slash session: just below the caret.
@@ -193,6 +214,37 @@ export function BlockMenu({
    */
   const dismissed = useRef(false);
   const card = useRef<HTMLDivElement | null>(null);
+  /** When the last composition ended — see {@link COMPOSITION_TAIL_MS}. */
+  const composedAt = useRef(0);
+
+  // One listener for both key paths: the prose and the gutter's search field
+  // are both inside the frame, and both are typed into with an IME.
+  useEffect(() => {
+    const frame = host.current;
+    if (frame === null) return;
+    const ended = (): void => {
+      composedAt.current = Date.now();
+    };
+    frame.addEventListener("compositionend", ended, true);
+    return () => {
+      frame.removeEventListener("compositionend", ended, true);
+    };
+  }, [host]);
+
+  /**
+   * Whether the menu may act on this keystroke. Always consumes the
+   * composition-tail memory, so it covers exactly the one keydown that followed
+   * a `compositionend`.
+   */
+  const menuOwnsKey = useCallback(
+    (event: KeyboardEvent): boolean => {
+      const tail = composedAt.current;
+      composedAt.current = 0;
+      if (tail !== 0 && Date.now() - tail <= COMPOSITION_TAIL_MS) return false;
+      return !composingKey(event, editor);
+    },
+    [editor],
+  );
 
   // The session is derived from editor state on every transaction: a remote
   // edit, an undo or a click that moves the caret closes the menu by itself.
@@ -273,31 +325,51 @@ export function BlockMenu({
     setGutterQuery("");
   }, []);
 
-  // The block the gutter points at can move or vanish under a peer's edit, and
-  // a button parked over the wrong block is a menu aimed at the wrong block. So
-  // the anchor is re-resolved by id on every transaction: gone means closed,
-  // moved means re-measured.
-  const anchorId = gutter?.blockId ?? hover?.blockId ?? null;
+  /**
+   * An *open* gutter menu follows its block on every transaction: gone means
+   * closed, moved means re-measured. It is the only anchor worth measuring —
+   * it is the one that can act, and there is at most one of them open.
+   *
+   * A merely hovered button gets the cheap treatment below instead. Following it
+   * too meant a `findBlockById` plus a `getBoundingClientRect` plus a
+   * `getComputedStyle` on **every transaction** — that is per keystroke, local
+   * or remote, for as long as the pointer rests anywhere over the prose, to keep
+   * a hint in the right place.
+   */
+  const menuAnchorId = gutter?.blockId ?? null;
   useEffect(() => {
-    if (anchorId === null) return;
+    if (menuAnchorId === null) return;
     const follow = (): void => {
-      const found = findBlockById(editor.state.doc, anchorId);
+      const found = findBlockById(editor.state.doc, menuAnchorId);
       if (found === null) {
-        setHover(null);
         closeGutter();
         return;
       }
       const top = gutterTop(editor, found.pos, host.current);
-      const move = (previous: Hover | null): Hover | null =>
-        previous === null || previous.top === top ? previous : { ...previous, top };
-      setHover(move);
-      setGutter(move);
+      setGutter((previous) =>
+        previous === null || previous.top === top ? previous : { ...previous, top },
+      );
     };
     editor.on("transaction", follow);
     return () => {
       editor.off("transaction", follow);
     };
-  }, [editor, host, anchorId, closeGutter]);
+  }, [editor, host, menuAnchorId, closeGutter]);
+
+  // The hovered button is a hint, and a hint whose block may have just moved is
+  // simply not shown: an edit hides it, and the next pointer move — which is the
+  // only gesture that can reach it anyway — puts it back where it belongs. Both
+  // commands re-resolve their block by id when they run, so nothing here is
+  // load-bearing for correctness.
+  useEffect(() => {
+    const drop = ({ transaction }: { transaction: Transaction }): void => {
+      if (transaction.docChanged) setHover(null);
+    };
+    editor.on("transaction", drop);
+    return () => {
+      editor.off("transaction", drop);
+    };
+  }, [editor]);
 
   const choose = useCallback(
     (entry: BlockMenuEntry | undefined): void => {
@@ -362,7 +434,7 @@ export function BlockMenu({
     if (path !== "slash" || !open) return;
     const target = editor.view.dom.parentElement ?? editor.view.dom;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (composing(event, editor)) return;
+      if (!menuOwnsKey(event)) return;
       if (!handleKey(event.key)) return;
       event.preventDefault();
       event.stopPropagation();
@@ -371,7 +443,7 @@ export function BlockMenu({
     return () => {
       target.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [editor, path, open, handleKey]);
+  }, [editor, path, open, handleKey, menuOwnsKey]);
 
   // A click anywhere else dismisses the gutter menu, the way every menu does.
   useEffect(() => {
@@ -438,7 +510,7 @@ export function BlockMenu({
               onKeyDown={(event) => {
                 // The field takes typed text, so it has an IME to stay out of
                 // the way of just as much as the prose does.
-                if (composing(event.nativeEvent, editor)) return;
+                if (!menuOwnsKey(event.nativeEvent)) return;
                 if (!handleKey(event.key)) return;
                 event.preventDefault();
                 event.stopPropagation();

@@ -67,18 +67,29 @@ interface Mounted {
    * it or let it through to ProseMirror.
    */
   press: (key: string, init?: KeyboardEventInit) => KeyboardEvent;
+  /** An input method finishing a composition in the prose. */
+  endComposition: () => void;
   unmount: () => void;
 }
 
-/** An editor with the menu mounted over it, the way `EditorPane` wires them. */
+/**
+ * An editor with the menu mounted over it, the way `EditorPane` wires them.
+ *
+ * The shape matters, not just the props: the frame stands in for
+ * `.ub-editor-frame` and has to be a real ancestor of the ProseMirror DOM,
+ * because that is how the menu hears keys (capture phase) and compositions
+ * (bubbling) from the prose. So the React root gets a container of its own
+ * beside the editor host — rendering into the frame itself would have React
+ * clear the frame's children and quietly detach the editor from it.
+ */
 function mountMenu(ydoc: Y.Doc): Mounted {
   const { editor, element } = mountEditor(ydoc);
   const frame = document.createElement("div");
   document.body.appendChild(frame);
-  // The frame stands in for `.ub-editor-frame`; the editor host is its child,
-  // because the menu takes keys on the host in the capture phase.
   frame.appendChild(element);
-  const root = createRoot(frame);
+  const container = document.createElement("div");
+  frame.appendChild(container);
+  const root = createRoot(container);
   act(() => {
     root.render(<BlockMenu editor={editor} host={{ current: frame }} />);
   });
@@ -105,6 +116,13 @@ function mountMenu(ydoc: Y.Doc): Mounted {
         editor.view.dom.dispatchEvent(event);
       });
       return event;
+    },
+    endComposition: () => {
+      act(() => {
+        editor.view.dom.dispatchEvent(
+          new CompositionEvent("compositionend", { bubbles: true, data: "へ" }),
+        );
+      });
     },
     unmount: () => {
       act(() => root.unmount());
@@ -311,17 +329,31 @@ describe("the slash menu", () => {
     }
   });
 
-  it("opens on this reader typing, not on the caret merely landing there", () => {
-    const { ydoc } = docWith([{ type: "paragraph", text: "/co" }]);
+  /**
+   * A paragraph *stored* as `/co` is prose — someone wrote it, and it has been
+   * sitting in the document ever since. Neither putting the caret in it nor
+   * carrying on typing in it is a request for a menu; only turning an empty
+   * paragraph into a slash query is.
+   */
+  it("stays shut in a block that was already prose, however it is edited", () => {
+    const { ydoc } = docWith([
+      { type: "paragraph", text: "/co" },
+      { type: "paragraph", text: "" },
+    ]);
     const { editor, query, unmount } = mountMenu(ydoc);
     try {
-      // A paragraph that happens to start with a slash is prose. Clicking at
-      // the end of it must not pop a menu nobody asked for.
       caret(editor, 0, 3);
       expect(query(".ub-blockmenu")).toBeNull();
 
-      // Typing is the gesture that means "menu".
+      // Typing on in it does not open one either: the block was not empty
+      // before this keystroke, so the slash is text somebody wrote.
       type(editor, "d");
+      expect(query(".ub-blockmenu")).toBeNull();
+      expect(getBlocks(ydoc)[0]?.text).toBe("/cod");
+
+      // The empty block below is where a slash *is* a command.
+      caret(editor, 1, 0);
+      type(editor, "/co");
       expect(query(".ub-blockmenu")).not.toBeNull();
     } finally {
       unmount();
@@ -404,6 +436,37 @@ describe("the slash menu", () => {
   });
 
   /**
+   * Safari's ordering, which no flag on the event describes: `compositionend`
+   * arrives *before* the Enter that committed the candidate, and that Enter says
+   * `isComposing: false` with ProseMirror's own flag already cleared. Taking it
+   * would convert the block a reader was still typing into.
+   */
+  it("leaves the first key after a composition ends to the editor", () => {
+    const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
+    const { editor, press, endComposition, unmount } = mountMenu(ydoc);
+    try {
+      caret(editor, 0, 0);
+      type(editor, "/he");
+
+      // compositionend, then a plain Enter — the IME's commit, wearing no mark
+      // of one.
+      endComposition();
+      press("Enter");
+      expect(getBlocks(ydoc).some((block) => block.type === "heading")).toBe(false);
+      expect(getBlocks(ydoc)[0]).toMatchObject({ id: ids[0], type: "paragraph" });
+
+      // The memory is one-shot: the *next* Enter is the menu's again. (The
+      // first one reached ProseMirror and split the block, so the session is in
+      // the second one now.)
+      type(editor, "/he");
+      press("Enter");
+      expect(getBlocks(ydoc)[1]).toMatchObject({ type: "heading", text: "" });
+    } finally {
+      unmount();
+    }
+  });
+
+  /**
    * The hazard a stale position hides: the block the menu was opened over is
    * deleted by a peer, and the saved number now points at its *successor*.
    * Acting on it would delete that block's content while looking, to the reader,
@@ -472,13 +535,18 @@ describe("the slash menu", () => {
 });
 
 describe("the gutter menu", () => {
-  /** Hover a block, then click the `+` its gutter reveals. */
-  function openGutterMenu(mounted: Mounted, index: number): void {
+  /** Move the pointer over a block, the way the gutter button is revealed. */
+  function hoverBlock(mounted: Mounted, index: number): void {
     const block = mounted.editor.view.dom.children[index];
     if (block === undefined) throw new Error(`no block ${index}`);
     act(() => {
       block.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
     });
+  }
+
+  /** Hover a block, then click the `+` its gutter reveals. */
+  function openGutterMenu(mounted: Mounted, index: number): void {
+    hoverBlock(mounted, index);
     const button = mounted.query<HTMLButtonElement>(".ub-gutter-add-on");
     if (button === null) throw new Error("the gutter button stayed hidden");
     act(() => button.click());
@@ -501,6 +569,33 @@ describe("the gutter menu", () => {
       expect(mounted.query(".ub-gutter-add")).not.toBeNull();
       expect(mounted.query(".ub-gutter-add-on")).toBeNull();
       expect(mounted.query(".ub-blockmenu")).toBeNull();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  /**
+   * A hovered button is a hint about a document that is still being edited, and
+   * keeping it in place through every transaction costs a lookup and two layout
+   * reads per keystroke — local or remote — for as long as the pointer rests
+   * anywhere over the prose. It is not worth that: an edit hides it, and the
+   * next pointer move puts it back. Safety does not depend on this, because the
+   * insert re-resolves its block by id when it runs.
+   */
+  it("hides the hovered button on an edit, and shows it again on the next move", () => {
+    const { ydoc } = docWith([{ type: "paragraph", text: "First" }]);
+    const mounted = mountMenu(ydoc);
+    try {
+      hoverBlock(mounted, 0);
+      expect(mounted.query(".ub-gutter-add-on")).not.toBeNull();
+
+      act(() => {
+        mounted.editor.commands.insertContentAt(1, "x");
+      });
+      expect(mounted.query(".ub-gutter-add-on")).toBeNull();
+
+      hoverBlock(mounted, 0);
+      expect(mounted.query(".ub-gutter-add-on")).not.toBeNull();
     } finally {
       mounted.unmount();
     }

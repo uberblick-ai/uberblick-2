@@ -239,15 +239,22 @@ function isChangeFromElsewhere(transaction: Transaction): boolean {
 
 /**
  * Whether `transaction` is the gesture that *opens* a slash session: this
- * reader, typing, into a block that was empty (the `/`) or already held a
- * shorter query (the next character of it).
+ * reader, typing, turning an **empty** paragraph into a slash query.
  *
- * Opening on "the document changed and the state now looks like a session" was
- * too generous by a mile: a peer appending to a paragraph that reads `/co`, a
- * paste, an undo, or any programmatic edit would pop a menu nobody asked for —
- * on a *remote* keystroke, in the middle of someone else's sentence. So the
- * question is asked of the transaction, not of the state it produced. Keeping an
- * already-open session is still the state's job (see `slashTriggerAt`).
+ * Asked only when no session is open, and deliberately the narrowest question
+ * that still admits the gesture. Two wider rules were tried and are wrong:
+ *
+ * - "the document changed and the state now looks like a session" pops a menu on
+ *   a peer's keystroke, a paste, an undo or any programmatic edit — a menu
+ *   appearing in the middle of someone else's sentence.
+ * - "…or the block already held a shorter query and now holds more of it" reads
+ *   sensibly and still misfires: a paragraph *stored* as `/co` is prose, and
+ *   clicking into it and typing a letter would open a menu over text that has
+ *   been sitting there since last week.
+ *
+ * Empty-before is the only state in which a leading `/` can only have meant the
+ * command. Keeping an already-open session as the query grows is the state's
+ * job, not this one's (see {@link slashTriggerAt}).
  */
 export function opensSlashSession(
   transaction: Transaction,
@@ -261,14 +268,7 @@ export function opensSlashSession(
 
   const before = findBlockById(transaction.before, trigger.blockId);
   if (before === null || before.node.type.name !== "paragraph") return false;
-
-  const was = before.node.textContent;
-  const now = `/${trigger.query}`;
-  // The `/` went into an empty paragraph, which is the gesture this menu is for.
-  if (was === "") return true;
-  // Or it extended a query the reader had already started: the block held a
-  // slash session's text before, and holds more of it now.
-  return SLASH_QUERY.test(was) && now.startsWith(was);
+  return before.node.textContent === "";
 }
 
 /**
