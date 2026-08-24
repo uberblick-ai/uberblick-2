@@ -174,12 +174,16 @@ your `node_modules`, long before Docker is involved.
 across the repo; it gives us stable native `fetch`/WebStreams, and `tsx` is the
 only TypeScript loader we need.
 
-**better-sqlite3 pinned to `^12`.** The 12.x line is what publishes prebuilt
-binaries for Node 26's ABI. On older majors the install falls back to compiling
-from source, which needs a full C++ toolchain on every contributor machine and
-in CI. pnpm 10 blocks install scripts by default, so `better-sqlite3` (and
-`esbuild`) are listed under `onlyBuiltDependencies` in `pnpm-workspace.yaml`;
-bumping the major means re-checking that prebuilds exist for the Node we pin.
+**SQLite: `node:sqlite` in the MCP server, better-sqlite3 under the hub.** The
+MCP server's local mirror uses Node's built-in `node:sqlite` — same file format,
+same synchronous API shape, nothing to compile at install time. The hub reaches
+SQLite through `@hocuspocus/extension-sqlite`, which brings better-sqlite3 with
+it, so the native module is still in the tree (pinned to `^12`: that is the line
+publishing prebuilt binaries for Node 26's ABI, and older majors fall back to
+compiling from source, which needs a C++ toolchain on every machine and in CI).
+pnpm 10 blocks install scripts by default, so `better-sqlite3` (and `esbuild`)
+are listed under `onlyBuiltDependencies` in `pnpm-workspace.yaml`; bumping the
+major means re-checking that prebuilds exist for the Node we pin.
 
 **One copy of yjs.** `yjs`, `y-protocols` and `y-prosemirror` keep module-level
 state and use `instanceof` across the doc boundary, so a duplicate silently

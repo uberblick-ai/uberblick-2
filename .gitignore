@@ -14,6 +14,9 @@ packages/*/data/
 *.sqlite-shm
 *.sqlite3
 *.db
+# …except the one database that is a test input rather than local state: bytes
+# written by the better-sqlite3 build, which `node:sqlite` has to keep reading.
+!packages/mcp-server/test/fixtures/*.sqlite
 
 # env / secrets
 # NOTE: fnox.toml IS committed — it is age-encrypted.

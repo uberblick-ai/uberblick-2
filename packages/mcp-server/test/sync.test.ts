@@ -8,7 +8,7 @@
  * updates landing in the log like any other.
  */
 
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { appendBlock, getBlocks, getMeta, listDirectory } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
@@ -243,7 +243,7 @@ describe("hub sync", () => {
     ]);
 
     // The invariant: the log records every update, remote origin included.
-    const db = new Database(databasePath, { readonly: true });
+    const db = new DatabaseSync(databasePath, { readOnly: true });
     try {
       const origins = db
         .prepare("SELECT origin, COUNT(*) AS n FROM updates WHERE room = ? GROUP BY origin")
