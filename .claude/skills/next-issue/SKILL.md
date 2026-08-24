@@ -58,23 +58,30 @@ protocol, scheduling semantics, and lint. This file does not restate it.
      startup/shutdown, networking, concurrency, or another stateful boundary;
      happy-path tests alone do not close those acceptance criteria;
    - record every gate result against the commit SHA it ran at — container
-     review, CI, your acceptance validation, the Codex verdict, the Copilot
-     state. Any new commit on the branch (fix-ups included) invalidates the
-     test/typecheck and review evidence: re-run those gates at the new
-     `headRefOid` rather than carrying an older verdict forward;
-   - your validation against every acceptance checkbox on the linked issue —
+     review, CI, your acceptance validation, the Codex verdict where that gate
+     applied, the Copilot state. Any new commit on the branch (fix-ups
+     included) invalidates the test/typecheck and review evidence: re-run
+     those gates at the new `headRefOid` rather than carrying an older verdict
+     forward;
+   - your validation against every acceptance checkbox on each linked issue —
      check a box only with evidence (command output, test name);
-   - footprint check: the diff stays within the issue's declared `Touches`;
+   - gate check: the diff stays within the declared `Touches` — the shared set
+     when the PR closes a batch;
    - GitHub Copilot review requested and returned;
-   - local Codex review of the PR. Mechanism depends on the environment:
-     when running under herdr (`test "${HERDR_ENV:-}" = 1`; use the herdr
-     skill and `herdr agent` to find the Codex pane), talk to that Codex
-     session directly and iterate — answer its findings, push fixes,
-     re-request — until both sides are satisfied; otherwise use the codex
-     plugin. Either way the review brief is the same:
-     be critical, and hunt specifically for overtesting and overengineering
-     per this repo's principles (KISS/YAGNI, least code wins, tests defend
-     contracts and invariants — not implementation trivia).
+   - local Codex review of the PR where CLAUDE.md's gate list calls for one —
+     it is the authority on scope; in short: a diff touching
+     `packages/schema`, `packages/mcp-server`, `packages/hub`, or
+     `pnpm-lock.yaml`, a large or architectural diff, or your own judgment
+     that an outside read helps; only when none of those fire may a trivial or
+     UI-only diff skip the round.
+     Mechanism depends on the environment: when running under herdr
+     (`test "${HERDR_ENV:-}" = 1`; use the herdr skill and `herdr agent` to
+     find the Codex pane), talk to that Codex session directly and iterate —
+     answer its findings, push fixes, re-request — until both sides are
+     satisfied; otherwise use the codex plugin. Either way the review brief is
+     the same: be critical, and hunt specifically for overtesting and
+     overengineering per this repo's principles (KISS/YAGNI, least code wins,
+     tests defend contracts and invariants — not implementation trivia).
    Triage findings: real ones become a fix-up brief for an Opus sub-agent on
    the branch; rejected ones get an explicit reply on the PR thread — never
    silent dismissal. **Final gate, immediately before merging:** re-fetch the
@@ -106,10 +113,10 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    a commit landing after the last check fails the merge instead of riding
    stale evidence; comparing `gh pr view <n> --json headRefOid` beforehand is
    for your report, not the guarantee. Either way a mismatch returns to the
-   gates: re-run them at the new head. After merging, confirm the issue
-   auto-closed, then update the product docs to the new status quo (uberblick
-   MCP tools once registered; until then, comment on the PR that the doc
-   update is pending).
+   gates: re-run them at the new head. After merging, confirm every issue the
+   PR closes auto-closed, then update the product docs to the new status quo
+   (uberblick MCP tools once registered; until then, comment on the PR that
+   the doc update is pending).
    **Dev stack, after every merge to `main`:** restart it so
    http://localhost:5173/ always serves the just-merged `main`. Killing a
    running dev server is sanctioned (owner directive) but bounded: terminate
@@ -132,10 +139,10 @@ protocol, scheduling semantics, and lint. This file does not restate it.
 4. **Compute the eligible set and order it** per the spec's scheduling
    semantics (deps closed, unclaimed; topology → Priority → number).
 
-5. **Conflict analysis.** Apply the spec's `Touches` rules (schema serializes
-   globally; disjoint parallelize; overlaps queue). Cap work in flight —
-   claimed issues plus unmerged PRs — at 3: the bottleneck is the gates, not
-   implementation.
+5. **Conflict analysis.** Apply the spec's scheduling rules (schema serializes
+   globally; expected file-level overlap decides, not the `Touches` sets). Cap
+   work in flight — claimed issues plus unmerged PRs — at 6: the bottleneck is
+   the gates, not implementation.
 
 6. **Dispatch.** For each issue to start: add `in-progress`, comment
    `Claimed: feat/<slug>` (or `fix/`). **Announce the work to the user** in
@@ -148,6 +155,12 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    contract: branch from fresh `main`, implement, `mise run test` +
    `mise run typecheck` green, push, open a PR with `Closes #N` and a body
    stating what changed and how it was verified. Sub-agents never merge.
+   Several individually-trivial issues with the same `Touches` set may go to
+   one agent as one batch: claim each issue separately, brief all their
+   bodies, and have the single PR close them all (`Closes #a, #b`) with a
+   combined diff reviewable in one sitting and a merge report checking each
+   issue's acceptance criteria — every condition of the spec's sizing
+   exception.
 
 7. **Report.** End with a short status a human can skim: PRs advanced (which
    gate), issues dispatched / bounced / parked, what the loop is waiting on.
