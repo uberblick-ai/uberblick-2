@@ -630,12 +630,11 @@ describe("the rail writes back", () => {
       ).toBe("This thread was resolved while you wrote — reopen it to reply.");
       expect(view.card(thread.id).querySelector(".ub-comment-input")).toBeNull();
 
-      // Reopening is the way back in: expand the settled card, reopen it, and
-      // the refusal goes with the thread it was about.
-      await settle(() =>
-        view.card(thread.id).querySelector<HTMLButtonElement>(".ub-thread")?.click(),
-      );
-      await settle(() => action(view.card(thread.id), "Reopen").click());
+      // The message is about a thread that reads as resolved, and whoever
+      // settled it can reopen it from anywhere. Nobody clicks anything here:
+      // the reopen arrives from the other replica and the message goes with the
+      // state that justified it.
+      await settle(() => setAnnotationResolved(remote, thread.id, false));
       expect(view.card(thread.id).querySelector(".ub-comment-error")).toBeNull();
       await settle(() => action(view.card(thread.id), "Reply").click());
       await view.type("because it is a pangram");

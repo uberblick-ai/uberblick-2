@@ -30,6 +30,10 @@
  * form is on its way out: resolving a thread takes the reply form with it (see
  * the effect below), so a message in the form's own error slot would be removed
  * in the same flush that wrote it.
+ *
+ * That message is then reconciled against the document like everything else on
+ * a card. It described the thread at one moment, and the same client that
+ * settled the thread can reopen it a second later — from anywhere.
  */
 
 import { useEffect, useState } from "react";
@@ -179,7 +183,11 @@ export function ThreadsPane({
    * mode the rail should stay in.
    */
   const [expanded, setExpanded] = useState<string | null>(null);
-  /** The one refused reply, and the thread it was refused on. */
+  /**
+   * The one refused reply, and the thread it was refused on. Set where a reply
+   * is turned away and cleared only by the watch below — the state it describes
+   * belongs to the document, so nothing here is entitled to clear it by hand.
+   */
   const [refusal, setRefusal] = useState<{ id: string; message: string } | null>(
     null,
   );
@@ -200,6 +208,27 @@ export function ThreadsPane({
     const thread = threads.find((candidate) => candidate.id === replyTo);
     if (thread === undefined || thread.resolved) setReplyTo(null);
   }, [threads, replyTo]);
+
+  // A refusal describes a thread at one moment, and that thread is shared:
+  // whoever settled it can reopen it, and an id that is gone can come back on a
+  // new thread. "Reopen it to reply" standing over an open thread is worse than
+  // silence, so the message lives exactly as long as the state that justified
+  // it — a remote reopen takes it away with nobody here clicking anything.
+  //
+  // The rail answers first: it is what the message is displayed beside, and its
+  // recompute on every document change is what runs this again. The document is
+  // the tiebreaker for the one window where the rail is a flush behind — the
+  // refusal is written in the same task the resolve arrives in, which is the
+  // whole reason it exists.
+  useEffect(() => {
+    if (refusal === null || connection === null) return;
+    const settled = threads.some(
+      (candidate) => candidate.id === refusal.id && candidate.resolved,
+    );
+    if (!settled && getAnnotation(connection.ydoc, refusal.id)?.resolved !== true) {
+      setRefusal(null);
+    }
+  }, [threads, refusal, connection]);
 
   if (connection === null || threads.length === 0) return null;
   const { ydoc } = connection;
@@ -226,10 +255,7 @@ export function ThreadsPane({
           setExpanded((current) => (current === thread.id ? null : thread.id));
         }
       }}
-      onReplyOpen={() => {
-        setRefusal(null);
-        setReplyTo(thread.id);
-      }}
+      onReplyOpen={() => setReplyTo(thread.id)}
       onReplyClose={() => setReplyTo(null)}
       onReply={(text) => {
         // Read the thread as the document has it *now*, not as this card was
@@ -250,14 +276,12 @@ export function ThreadsPane({
           setRefusal({ id: thread.id, message: "This thread no longer exists." });
           return false;
         }
-        setRefusal(null);
         setReplyTo(null);
         return true;
       }}
       onResolve={(next) => {
         setAnnotationResolved(ydoc, thread.id, next);
         setReplyTo((current) => (current === thread.id ? null : current));
-        setRefusal((current) => (current?.id === thread.id ? null : current));
         setExpanded(null);
       }}
     />
