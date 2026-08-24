@@ -335,10 +335,18 @@ export function BlockMenu({
     [editor],
   );
 
-  // The session is derived from editor state on every transaction: a remote
-  // edit, an undo or a click that moves the caret closes the menu by itself.
-  // *Opening* one is a stricter question, and belongs to the transaction —
-  // `opensSlashSession` refuses everything that is not this reader typing.
+  // Two questions with two different answers.
+  //
+  // Whether a session *stays* open is asked of the state, on every transaction:
+  // `slashTriggerAt` is recomputed, and the session lives exactly as long as it
+  // keeps validating. So anything that moves the caret out of the block, or
+  // stops its text looking like a query, closes the menu — a peer deleting the
+  // block, an undo, a click elsewhere — while a peer editing some *other* block
+  // leaves it alone, because none of that is what the menu is watching.
+  //
+  // Whether a session *opens* is asked of the transaction instead:
+  // `opensSlashSession` refuses everything that is not this reader typing into
+  // an empty paragraph, so none of those events can open one either.
   useEffect(() => {
     const read = (transaction: Transaction | null): void => {
       const trigger = slashTriggerAt(editor);

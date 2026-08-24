@@ -31,13 +31,15 @@
  *
  * ## The trigger is derived, never remembered
  *
- * {@link slashTriggerAt} answers "is a slash menu open right now?" from the
- * editor state alone: caret at the end of a top-level paragraph whose whole text
- * is `/` plus a run of non-space characters. Derived state means the menu closes
- * itself when a remote edit, an undo or a click moves the caret away, with no
- * bookkeeping to get wrong. A space ends the session — that is a reader writing
- * prose, not filtering — and `/` in a non-empty block never matches, because the
- * text before it would be in front of the slash.
+ * {@link slashTriggerAt} answers "does the editor state still describe a slash
+ * session?": caret at the end of a top-level paragraph whose whole text is `/`
+ * plus a run of non-space characters. Because the answer is recomputed rather
+ * than remembered, a session lasts exactly as long as it keeps validating —
+ * anything that moves the caret out of that block or stops its text looking like
+ * a query closes the menu, and there is no bookkeeping to get wrong. A space
+ * ends the session — that is a reader writing prose, not filtering — and `/` in
+ * a non-empty block never matches, because the text before it would be in front
+ * of the slash.
  *
  * *Opening* a session is a different question from *having* one, and is asked of
  * the transaction rather than the state — see {@link opensSlashSession}.
