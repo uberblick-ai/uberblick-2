@@ -34,10 +34,8 @@ import {
   constants,
   existsSync,
   fstatSync,
-  linkSync,
   openSync,
   readFileSync,
-  renameSync,
   statSync,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -45,6 +43,7 @@ import { dirname, join } from "node:path";
 import {
   describeFsError,
   isSymlinkRefusal,
+  publishStaged,
   removeQuietly,
   writeTempBeside,
 } from "./safe-write.js";
@@ -262,6 +261,12 @@ export type WriteOutcome =
  * Every refusal is a message and a still-working machine: the derived file is a
  * convenience for mise, and the authority is untouched either way.
  *
+ * Against another `ub init` this is exact, because the whole write phase runs
+ * under the init lock. Against an unrelated program writing this same path there
+ * is a residual window between the last classification and the `rename` — that
+ * is inherent, since no userland writer can hold a path still, and the fallout
+ * is bounded to a file this command owns and rewrites on the next run.
+ *
  * The mode dance mirrors `writeCredentials`: tighten first, because `mode` on
  * `writeFileSync` applies only to a file being created and is subject to the
  * umask, and this file holds the same secret.
@@ -325,16 +330,30 @@ export function writeLocalConfig(
   // writes *through* a symlink even if one is swapped in after the check: they
   // replace the name, they do not follow it.
   const staged = writeTempBeside(path, render(env));
+  let published: boolean;
   try {
     if (found.kind === "absent") {
-      linkSync(staged, path);
+      published = publishStaged(staged, path, "absent");
     } else {
-      renameSync(staged, path);
+      // `link` is its own check; `rename` is not, so the classification is
+      // repeated as late as it can be. It narrows the window rather than
+      // closing it — see the note on writeLocalConfig.
+      const now = inspect(path);
+      if (now.kind !== "ours") {
+        return {
+          written: false,
+          path,
+          reason:
+            `${path} changed while \`ub init\` was running, so it was left ` +
+            "alone. Run `ub init` again.",
+        };
+      }
+      published = publishStaged(staged, path, "regular");
     }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      throw error;
-    }
+  } finally {
+    removeQuietly(staged);
+  }
+  if (!published) {
     // Somebody created the file between the check and the publication. That is
     // the same answer as finding it there in the first place: leave it alone.
     return {
@@ -344,8 +363,6 @@ export function writeLocalConfig(
         `${path} appeared while \`ub init\` was running, so it was left alone. ` +
         "Run `ub init` again.",
     };
-  } finally {
-    removeQuietly(staged);
   }
   return { written: true, path };
 }

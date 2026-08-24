@@ -2,19 +2,23 @@
  * How `ub` writes the files it owns.
  *
  * Three of them carry configuration this command is the only writer of, and one
- * of those carries the hub signing secret. That makes two properties
- * non-negotiable, and neither is what `writeFileSync` gives you:
+ * of those carries the hub signing secret. That makes three properties
+ * non-negotiable, and none of them is what `writeFileSync` gives you:
  *
- * **Owner-only, with no window.** A file that already exists at 0644 keeps that
- * mode through a `writeFileSync`, because `mode:` applies only on creation. So
- * the descriptor is tightened with `fchmod` *before* anything is written into
- * it, never with a `chmod` on the path afterwards — by then the secret has
- * already been in a world-readable file.
+ * **Owner-only from birth.** A file that already exists at 0644 keeps that mode
+ * through a `writeFileSync`, because `mode:` applies only on creation. Nothing
+ * here ever writes into a file whose mode it has not already set: the contents
+ * are written to a fresh 0600 file and that file is moved into place.
  *
- * **Never through a symlink.** `O_NOFOLLOW` makes the open fail rather than
- * write the secret into whatever somebody pointed the name at. Everything after
- * that is done on the descriptor, so what was checked and what is written are
- * the same inode: no path is resolved twice.
+ * **Never through a symlink.** The path is classified through a descriptor
+ * opened with `O_NOFOLLOW`, so a symlink is a refusal rather than a secret
+ * written into whatever somebody pointed the name at. Publication is `link` or
+ * `rename`, which replace a name rather than following it — so even a symlink
+ * swapped in after the check cannot receive anything.
+ *
+ * **Whole, or not at all.** `ub status`, an MCP client and mise all read these
+ * files, possibly while this command writes them, and half a file is a parse
+ * error rather than an old value. Every publication is one atomic step.
  *
  * Reads deliberately stay path-based. Following a symlink to read a file you own
  * is not the hazard; writing one is.
@@ -25,8 +29,9 @@ import {
   constants,
   fchmodSync,
   fstatSync,
-  ftruncateSync,
+  linkSync,
   openSync,
+  renameSync,
   unlinkSync,
   writeSync,
 } from "node:fs";
@@ -39,7 +44,9 @@ const OWNER_ONLY = 0o600;
 /** An fs error's message: the path and the errno, never file contents. */
 export function describeFsError(error: unknown): string {
   const code = (error as NodeJS.ErrnoException).code;
-  return code === undefined ? "it could not be opened" : `it could not be opened (${code})`;
+  return code === undefined
+    ? "it could not be opened"
+    : `it could not be opened (${code})`;
 }
 
 /**
@@ -51,44 +58,53 @@ export function isSymlinkRefusal(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === "ELOOP";
 }
 
+/** What a path holds, as far as this module is willing to write to it. */
+export type Target =
+  | { kind: "absent" }
+  | { kind: "regular" }
+  | { kind: "refused"; because: string };
+
 /**
- * Create or rewrite `path` as an owner-only regular file.
+ * Classify a path through one descriptor, opened without following symlinks.
  *
- * @throws when the path is a symlink or is not a regular file. Both are refusals
- * rather than repairs: this module knows what it wrote there, and anything else
- * belongs to somebody who should be told rather than overwritten.
+ * The fd is closed again immediately: it exists so that "is this a regular
+ * file?" is answered about an inode rather than about a name that could be
+ * something else by the time anyone looks twice.
  */
-export function writeOwnerOnly(path: string, contents: string): void {
+export function classify(path: string): Target {
   let fd: number;
   try {
-    fd = openSync(
-      path,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW,
-      OWNER_ONLY,
-    );
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch (error) {
-    if (isSymlinkRefusal(error)) {
-      throw new Error(
-        `refusing to write ${path}: it is a symbolic link, and this file must ` +
-          "be a regular file you own — remove the link and run `ub init` again",
-      );
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "absent" };
     }
-    throw error;
+    if (isSymlinkRefusal(error)) {
+      return { kind: "refused", because: "it is a symbolic link" };
+    }
+    return { kind: "refused", because: describeFsError(error) };
   }
   try {
-    if (!fstatSync(fd).isFile()) {
-      throw new Error(
-        `refusing to write ${path}: it is not a regular file — move it aside ` +
-          "and run `ub init` again",
-      );
-    }
-    // Tighten first, truncate second, write last. In that order there is no
-    // instant at which this file holds new contents at an old, wider mode.
-    fchmodSync(fd, OWNER_ONLY);
-    ftruncateSync(fd, 0);
-    writeSync(fd, contents);
+    return fstatSync(fd).isFile()
+      ? { kind: "regular" }
+      : { kind: "refused", because: "it is not a regular file" };
   } finally {
     closeSync(fd);
+  }
+}
+
+/**
+ * Write every byte, however many `write(2)` calls that takes.
+ *
+ * A single `writeSync` may be short — that is the contract of the syscall, not
+ * an exotic failure — and a short write to a file holding the signing secret is
+ * a file that parses as something else or not at all.
+ */
+function writeAll(fd: number, contents: string): void {
+  const data = Buffer.from(contents, "utf8");
+  let written = 0;
+  while (written < data.length) {
+    written += writeSync(fd, data, written, data.length - written);
   }
 }
 
@@ -100,8 +116,11 @@ export function writeOwnerOnly(path: string, contents: string): void {
  * must). Same directory, because both of those are only atomic within one
  * filesystem.
  *
- * The name is unpredictable because it briefly holds the signing secret, and it
- * is created with `wx` so it can never land on somebody else's file.
+ * The name is unpredictable because the file briefly holds the signing secret,
+ * and it is created with `wx` so it can never land on somebody else's file. If
+ * anything at all goes wrong after that, the descriptor is closed and the file
+ * removed before the error propagates: a failed write must not leave a readable
+ * copy of a secret lying under a name nobody will think to look for.
  */
 export function writeTempBeside(path: string, contents: string): string {
   const temp = join(
@@ -109,20 +128,92 @@ export function writeTempBeside(path: string, contents: string): string {
     `.${basename(path)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
   );
   const fd = openSync(temp, "wx", OWNER_ONLY);
+  let published = false;
   try {
     fchmodSync(fd, OWNER_ONLY);
-    writeSync(fd, contents);
+    writeAll(fd, contents);
+    published = true;
   } finally {
     closeSync(fd);
+    if (!published) {
+      removeQuietly(temp);
+    }
   }
   return temp;
 }
 
-/** Remove a file that may already be gone. Used to clean up staging files. */
+/**
+ * Move a staged file onto `path`.
+ *
+ * `link` when the path was absent, because a claim must not overwrite whatever
+ * appeared since; `rename` when a file is already there, because a replacement
+ * must. Returns false when `link` lost the race, which is the caller's cue to
+ * leave the winner alone.
+ */
+export function publishStaged(
+  staged: string,
+  path: string,
+  onto: "absent" | "regular",
+): boolean {
+  try {
+    if (onto === "absent") {
+      linkSync(staged, path);
+    } else {
+      renameSync(staged, path);
+    }
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      return false;
+    }
+    throw error;
+  } finally {
+    // After `rename` this name is already gone; after `link` and after a loss it
+    // is not, and it is holding a secret.
+    removeQuietly(staged);
+  }
+}
+
+/**
+ * Create or replace `path` as an owner-only regular file, atomically.
+ *
+ * @throws when the path is a symlink or is not a regular file — both are
+ * refusals rather than repairs; when something else claimed the name first; and
+ * when the write itself fails.
+ */
+export function publishOwnerOnly(path: string, contents: string): void {
+  const target = classify(path);
+  if (target.kind === "refused") {
+    throw new Error(
+      `refusing to write ${path}: ${target.because} — this file must be a ` +
+        "regular file you own. Move it aside and run `ub init` again",
+    );
+  }
+  const staged = writeTempBeside(path, contents);
+  if (!publishStaged(staged, path, target.kind)) {
+    throw new Error(
+      `${path} appeared while \`ub init\` was writing it. Run \`ub init\` again`,
+    );
+  }
+}
+
+/**
+ * Remove a file that may already be gone.
+ *
+ * ENOENT is the ordinary case — a publication consumed the name. Anything else
+ * means a staging file survived, possibly holding a signing secret, and that is
+ * worth one line on stderr even though there is nothing to be done about it
+ * here. stderr because stdout belongs to reports and, elsewhere in this CLI, to
+ * a protocol.
+ */
 export function removeQuietly(path: string): void {
   try {
     unlinkSync(path);
-  } catch {
-    // ENOENT is the ordinary case: the link or rename consumed it.
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      process.stderr.write(
+        `ub: warning: could not remove ${path}: ${describeFsError(error)}\n`,
+      );
+    }
   }
 }

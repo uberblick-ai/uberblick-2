@@ -12,6 +12,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -24,6 +25,7 @@ import {
   resolveConfig,
   writeCredentials,
 } from "../src/config.js";
+import { writeTempBeside } from "../src/safe-write.js";
 import { removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -266,24 +268,22 @@ describe("claimSigningSecret", () => {
     expect(statSync(credentialsPath(box.env)).mode & 0o777).toBe(0o600);
   });
 
-  it("publishes the file complete, never as an empty name a loser could read", () => {
-    // The reason this uses `link` rather than an exclusive `open`: the latter is
-    // atomic about the NAME only, so between creating the file and writing it
-    // there is an instant where a second process sees `credentials.json` with
-    // nothing in it and concludes there is no secret. Every state this file is
-    // ever observable in must therefore parse and carry the secret.
+  it("leaves no staging file behind holding a second copy of the secret", () => {
+    // Deliberately NOT asserting that the published file is complete: with the
+    // secret written before the name is published, no single-process test can
+    // tell the `link` idiom from the exclusive `open` it replaced — the empty
+    // window the idiom closes is between two syscalls of another process. That
+    // property is structural. What IS observable is the staging file, which
+    // holds the secret under a name nobody would think to look for.
     const box = sandbox();
     claimSigningSecret("published-whole", box.env);
 
-    const path = credentialsPath(box.env);
-    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+    expect(JSON.parse(readFileSync(credentialsPath(box.env), "utf8"))).toEqual({
       signingSecret: "published-whole",
     });
-    // And nothing was left behind holding a copy of it under another name.
-    const directory = join(box.configHome, "uberblick");
-    for (const entry of readdirSync(directory)) {
-      expect(entry).toBe("credentials.json");
-    }
+    expect(readdirSync(join(box.configHome, "uberblick"))).toEqual([
+      "credentials.json",
+    ]);
   });
 
   it("fills in a credentials file that has other keys but no secret", () => {
@@ -298,6 +298,30 @@ describe("claimSigningSecret", () => {
 });
 
 describe("writing the files ub owns", () => {
+  it("writes every byte of a payload no single write(2) would carry", () => {
+    // `writeSync` may be short — that is the syscall's contract, not an exotic
+    // failure — and a short write to a file holding the signing secret is a file
+    // that parses as something else or not at all.
+    //
+    // Being honest about its reach: a single 8 MB write to a regular file does
+    // NOT actually come back short on the platforms this runs on, so this cannot
+    // reproduce the condition the loop exists for. What it does defend is the
+    // loop's arithmetic — an offset or length that drops the tail fails here,
+    // which is the regression a hand-written write loop actually suffers.
+    const box = sandbox();
+    mkdirSync(join(box.configHome, "uberblick"), { recursive: true });
+    const bulk = "x".repeat(8 * 1024 * 1024);
+
+    const staged = writeTempBeside(credentialsPath(box.env), bulk);
+    try {
+      expect(statSync(staged).size).toBe(bulk.length);
+      expect(readFileSync(staged, "utf8")).toBe(bulk);
+      expect(statSync(staged).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(staged, { force: true });
+    }
+  });
+
   it("refuses a symlink rather than writing the secret through it", () => {
     // Anything that can plant a symlink at `credentials.json` could otherwise
     // choose which file receives the signing secret — and where it ends up

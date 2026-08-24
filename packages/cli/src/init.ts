@@ -41,6 +41,8 @@ import {
   writeCredentials,
   writeUserConfig,
 } from "./config.js";
+import type { InitLock } from "./init-lock.js";
+import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import {
@@ -203,13 +205,8 @@ export async function initCommand(
   const resolved = resolveConfig();
   const inForce = resolveMcpConfig(resolved.env);
   const existing = readUserConfig();
-  const stored = readCredentials();
   // The same problem is reported by each reader; the set keeps it said once.
-  const warnings = new Set([
-    ...resolved.warnings,
-    ...existing.warnings,
-    ...stored.warnings,
-  ]);
+  const warnings = new Set([...resolved.warnings, ...existing.warnings]);
 
   // A pipe is not a person: it gets the defaults rather than a blocked prompt.
   const interactive = !flags.yes && process.stdin.isTTY === true;
@@ -281,88 +278,127 @@ export async function initCommand(
     return 2;
   }
 
-  // Merged over what is already there: a `hubUrl` somebody set, or a field a
-  // later version of `ub` writes, is not `ub init`'s to drop.
-  const configPath = writeUserConfig({
-    ...existing.raw,
-    workspace,
-    displayName: name,
-    color,
-  });
-
-  // --- the signing secret -------------------------------------------------
+  // Which checkout, if any, this is being run in. A property of the working
+  // directory rather than of the machine's configuration, so it needs no lock.
   const root = findCheckoutRoot(process.cwd());
-  const derived = root === null ? null : derivedSecret(root);
+
+  // --- everything that writes ---------------------------------------------
+  //
+  // Under one lock, from here to its release. Each file below is published
+  // atomically on its own, but the three of them have to agree with each other
+  // when this returns, and only serialising the whole phase gives that. It is
+  // taken after the prompts on purpose: a lock held while a terminal waits for
+  // somebody to type their name is a lock held for as long as they are at lunch.
+  let lock: InitLock;
+  try {
+    lock = await acquireInitLock();
+  } catch (error) {
+    io.err(`ub init: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+
+  let configPath: string;
+  let stored: ReturnType<typeof readCredentials>;
+  let secret: string | null;
+  let credentialNote: string;
+  let wroteCredentials = false;
+  let persistedWorkspace: string;
+  let localConfig: string | null = null;
+  let trustAfterRelease: string | null = null;
+  try {
+    // Read inside the lock, not before it: a decision made from a snapshot
+    // taken before the lock was held is a decision about a machine that may
+    // have changed since.
+    stored = readCredentials();
+    for (const warning of stored.warnings) {
+      warnings.add(warning);
+    }
+
+    // Merged over what is already there: a `hubUrl` somebody set, or a field a
+    // later version of `ub` writes, is not `ub init`'s to drop.
+    configPath = writeUserConfig({
+      ...existing.raw,
+      workspace,
+      displayName: name,
+      color,
+    });
+
+    // --- the signing secret -------------------------------------------------
+    const derived = root === null ? null : derivedSecret(root);
   // The raw environment, not `resolved.env`: what matters here is whether
   // somebody *else* supplies a secret, and `resolved.env` includes the one in
   // `credentials.json`. Our own derived file is not somebody else either —
   // inside a checkout mise puts it into this very environment, so counting it
   // would make a second run report a secret "already supplied" by itself.
-  const fromEnvironment = trimmed(process.env.HUB_AUTH_TOKEN);
-  const supplied =
-    fromEnvironment !== null && fromEnvironment !== derived
-      ? fromEnvironment
-      : null;
+    const fromEnvironment = trimmed(process.env.HUB_AUTH_TOKEN);
+    const supplied =
+      fromEnvironment !== null && fromEnvironment !== derived
+        ? fromEnvironment
+        : null;
 
-  let secret: string | null;
-  let credentialNote: string;
-  let wroteCredentials = false;
-  if (stored.signingSecret !== null) {
-    secret = stored.signingSecret;
-    credentialNote = "already on this machine";
-    // An exposed file was refused by every other command. Repairing the mode is
-    // the one useful thing to do about it, and keeping the value is the point:
-    // regenerating would cut this machine off from clients holding the old one.
-    if (stored.exposed) {
-      writeCredentials({ ...stored.raw, signingSecret: secret });
-      wroteCredentials = true;
-      credentialNote = "already on this machine (repaired the file's mode)";
-    }
-  } else if (supplied !== null) {
-    secret = null;
-    credentialNote = "supplied by the environment (fnox, or your shell)";
-  } else if (derived !== null) {
-    // The authority went missing while its derived copy survived. Restore it
-    // from that copy: the same value, not a new one.
-    secret = claimSigningSecret(derived);
-    wroteCredentials = true;
-    credentialNote = "restored from this checkout's local mise config";
-  } else {
-    // An exclusive create, so two fresh runs cannot each believe in a different
-    // secret: the loser adopts the winner's and says the same thing about it.
-    secret = claimSigningSecret(generateSecret());
-    wroteCredentials = true;
-    credentialNote = "generated for local development";
-  }
-
-  // --- the derived mise config --------------------------------------------
-  //
-  // Derived from what is ON DISK, not from what this process decided: another
-  // `ub init` may have written between the decision above and here, and a
-  // derived file that disagrees with its authority is the one outcome this
-  // command must not produce. Same for the workspace — `config.json` is its
-  // authority, so the file that mirrors it re-reads it.
-  const persisted = readCredentials();
-  const persistedWorkspace = readUserConfig().config.workspace ?? workspace;
-  if (secret !== null && persisted.signingSecret !== null) {
-    secret = persisted.signingSecret;
-  }
-
-  let localConfig: string | null = null;
-  if (root !== null && secret !== null) {
-    const outcome = writeLocalConfig(root, {
-      signingSecret: secret,
-      workspace: persistedWorkspace,
-      authorityPath: stored.path,
-    });
-    if (outcome.written) {
-      localConfig = outcome.path;
-      const trust = trustLocalConfig(outcome.path);
-      if (!trust.trusted) {
-        warnings.add(trust.hint);
+    if (stored.signingSecret !== null) {
+      secret = stored.signingSecret;
+      credentialNote = "already on this machine";
+      // An exposed file was refused by every other command. Repairing the mode
+      // is the one useful thing to do about it, and keeping the value is the
+      // point: regenerating would cut this machine off from clients holding it.
+      if (stored.exposed) {
+        writeCredentials({ ...stored.raw, signingSecret: secret });
+        wroteCredentials = true;
+        credentialNote = "already on this machine (repaired the file's mode)";
       }
+    } else if (supplied !== null) {
+      secret = null;
+      credentialNote = "supplied by the environment (fnox, or your shell)";
+    } else if (derived !== null) {
+      // The authority went missing while its derived copy survived. Restore it
+      // from that copy: the same value, not a new one.
+      secret = claimSigningSecret(derived);
+      wroteCredentials = true;
+      credentialNote = "restored from this checkout's local mise config";
     } else {
-      warnings.add(outcome.reason);
+      secret = claimSigningSecret(generateSecret());
+      wroteCredentials = true;
+      credentialNote = "generated for local development";
+    }
+
+    // --- the derived mise config --------------------------------------------
+    //
+    // Derived from what is ON DISK, not from what this process decided. Under
+    // the lock the two are the same thing; the re-read costs nothing and keeps
+    // the invariant true of the code rather than of the lock — a derived file
+    // that disagrees with its authority is the one outcome this must not
+    // produce. Same for the workspace, whose authority is `config.json`.
+    const persisted = readCredentials();
+    persistedWorkspace = readUserConfig().config.workspace ?? workspace;
+    if (secret !== null && persisted.signingSecret !== null) {
+      secret = persisted.signingSecret;
+    }
+
+    if (root !== null && secret !== null) {
+      const outcome = writeLocalConfig(root, {
+        signingSecret: secret,
+        workspace: persistedWorkspace,
+        authorityPath: stored.path,
+      });
+      if (outcome.written) {
+        localConfig = outcome.path;
+        // Trusting is a `mise` subprocess taking a few hundred milliseconds,
+        // and it needs no lock: it is idempotent and it reads the file rather
+        // than writing it.
+        trustAfterRelease = outcome.path;
+      } else {
+        warnings.add(outcome.reason);
+      }
+    }
+  } finally {
+    lock.release();
+  }
+
+  if (trustAfterRelease !== null) {
+    const trust = trustLocalConfig(trustAfterRelease);
+    if (!trust.trusted) {
+      warnings.add(trust.hint);
     }
   }
 

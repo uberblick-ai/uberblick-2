@@ -28,11 +28,15 @@
  * `./uberblick.json` chose — see {@link secretAppliesTo}.
  */
 
-import { linkSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { assertWorkspaceSegment } from "@uberblick/mcp-server";
-import { removeQuietly, writeOwnerOnly, writeTempBeside } from "./safe-write.js";
+import {
+  publishOwnerOnly,
+  publishStaged,
+  writeTempBeside,
+} from "./safe-write.js";
 
 /** The directory `ub`'s own files live in, under the XDG config home. */
 const CONFIG_DIR = "uberblick";
@@ -232,7 +236,7 @@ export function readUserConfig(env: NodeJS.ProcessEnv = process.env): {
  * but it is one user's configuration and no other account has business reading
  * or — the part that matters — writing the hub URL a signed token is sent to.
  *
- * Written by {@link writeOwnerOnly}, exactly like `credentials.json` beside it:
+ * Written by {@link publishOwnerOnly}, exactly like `credentials.json` beside it:
  * one rule for how this CLI puts a file on disk, rather than a weaker one for
  * the file that happens not to hold the secret.
  */
@@ -242,7 +246,7 @@ export function writeUserConfig(
 ): string {
   const path = userConfigPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeOwnerOnly(path, serialize(config));
+  publishOwnerOnly(path, serialize(config));
   return path;
 }
 
@@ -465,7 +469,7 @@ function serialize(value: unknown): string {
  * holds the secret every hub token is signed with, so it must never be readable
  * by another user on the machine. Every guarantee about how that is done — the
  * descriptor tightened before anything is written, symlinks refused rather than
- * followed — belongs to {@link writeOwnerOnly}, which is also what writes
+ * followed — belongs to {@link publishOwnerOnly}, which is also what writes
  * `config.json`.
  */
 export function writeCredentials(
@@ -474,7 +478,7 @@ export function writeCredentials(
 ): string {
   const path = credentialsPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeOwnerOnly(path, serialize(credentials));
+  publishOwnerOnly(path, serialize(credentials));
   return path;
 }
 
@@ -513,18 +517,12 @@ export function claimSigningSecret(
   const path = credentialsPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 
-  const staged = writeTempBeside(path, serialize({ [SIGNING_SECRET_KEY]: candidate }));
-  try {
-    linkSync(staged, path);
+  const staged = writeTempBeside(
+    path,
+    serialize({ [SIGNING_SECRET_KEY]: candidate }),
+  );
+  if (publishStaged(staged, path, "absent")) {
     return candidate;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      throw error;
-    }
-  } finally {
-    // Either it is published under its real name now, or it lost — and either
-    // way this staging name must not be left holding a secret.
-    removeQuietly(staged);
   }
 
   // Somebody else holds the name. Their secret is the one every other client on
