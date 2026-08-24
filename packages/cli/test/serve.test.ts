@@ -9,7 +9,9 @@
  * because a stray byte on stdout is a parse error and a dropped session.
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { closeSync, openSync } from "node:fs";
+import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
@@ -151,26 +153,53 @@ describe("ub mcp serve", () => {
     }
   });
 
-  it("forwards SIGHUP and then dies of it, like the server it wraps", async () => {
-    // The wrapper must be invisible to whoever supervises it. SIGHUP is the
-    // signal a vanished terminal sends and the server installs no handler for,
-    // so it is the one that proves both halves at once: the child receives it
-    // (it dies of it rather than surviving) and we re-raise it on ourselves
-    // (waitpid reports a signal death, not a plain exit with 128+n, which is
-    // what a process that merely chose that code looks like).
-    const box = sandbox();
-    const child = spawn(process.execPath, [UB_BIN, "mcp", "serve"], {
-      cwd: box.cwd,
-      env: box.env,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+  // The two signals the server installs no handler for, so the child dies OF
+  // them rather than exiting cleanly — which is what makes them the pair that
+  // proves the wrapper's lifecycle. SIGHUP is what a vanished terminal sends;
+  // SIGQUIT is Ctrl-\ and a supervisor escalating past SIGTERM.
+  it.each(["SIGHUP", "SIGQUIT"] as const)(
+    "forwards %s to the server, takes it down, and dies of it too",
+    async (signal) => {
+      const box = sandbox();
+      // A real client outlives the wrapper and holds the server's stdin open;
+      // that is the only condition under which failing to forward is visible.
+      // An ordinary pipe cannot reproduce it — Node closes our write end when
+      // the wrapper exits, the orphan then shuts down on stdin-close, and an
+      // unforwarded signal would look exactly like a forwarded one. A FIFO we
+      // keep open ourselves never reaches EOF, so a server the wrapper did not
+      // signal simply lives on, holding the inherited stdout and stderr.
+      const stdin = join(box.cwd, "client-stdin");
+      execFileSync("mkfifo", [stdin]);
+      // "r+" so this end is a writer too: the FIFO stays open with no reader.
+      const held = openSync(stdin, "r+");
 
-    const exited = new Promise<NodeJS.Signals | null>((resolve) => {
-      child.on("exit", (_code, signal) => resolve(signal));
-    });
-    await whenServing(child);
-    child.kill("SIGHUP");
+      const child = spawn(process.execPath, [UB_BIN, "mcp", "serve"], {
+        cwd: box.cwd,
+        env: box.env,
+        stdio: [held, "pipe", "pipe"],
+      });
+      // Both pipes have to be consumed or their EOF is never observed and
+      // `close` could not fire at all. stderr is read by `whenServing`.
+      child.stdout?.resume();
 
-    expect(await exited).toBe("SIGHUP");
-  });
+      // `close`, not `exit`: it waits for the inherited stdio to close as well,
+      // so an orphaned server keeps it from firing and the test times out. That
+      // is the forwarding half. Waiting on `exit` alone would prove nothing,
+      // because a wrapper that forwards nothing still dies of the signal.
+      const closed = new Promise<NodeJS.Signals | null>((resolve) => {
+        child.on("close", (_code, closedBy) => resolve(closedBy));
+      });
+      try {
+        await whenServing(child);
+        child.kill(signal);
+
+        // And the wrapper's own death is the signal, not a plain exit with
+        // 128+n: a supervisor reading WIFSIGNALED cannot tell it from a direct
+        // spawn. That is the re-raise half.
+        expect(await closed).toBe(signal);
+      } finally {
+        closeSync(held);
+      }
+    },
+  );
 });

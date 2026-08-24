@@ -41,9 +41,19 @@ function mcpServerMain(): string {
 /**
  * The signals a client or a shell sends a long-running stdio process, forwarded
  * to the child so the server shuts down its replicas and its hub connection.
- * SIGHUP is here because a terminal that goes away sends it and nothing else.
+ *
+ * The two beyond SIGINT and SIGTERM are here because a signal we do not forward
+ * kills only this process and orphans the child, which keeps the inherited stdio
+ * open: the client's transport stays alive talking to a server nobody supervises.
+ * SIGHUP is what a vanished terminal sends and nothing else; SIGQUIT is what
+ * Ctrl-\ and a supervisor escalating past SIGTERM send.
  */
-const FORWARDED: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+const FORWARDED: NodeJS.Signals[] = [
+  "SIGINT",
+  "SIGTERM",
+  "SIGHUP",
+  "SIGQUIT",
+];
 
 /** What a shell reports for a process killed by a signal. */
 function signalExitCode(signal: NodeJS.Signals): number {
