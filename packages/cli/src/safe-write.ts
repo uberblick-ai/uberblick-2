@@ -41,12 +41,18 @@ import { basename, dirname, join } from "node:path";
 /** Owner-only, and the mode every file in this module is created with. */
 const OWNER_ONLY = 0o600;
 
-/** An fs error's message: the path and the errno, never file contents. */
-export function describeFsError(error: unknown): string {
+/**
+ * An errno in brackets, or nothing. What a diagnostic is allowed to say about a
+ * file it could not use: the path, and why the kernel said no. Never contents.
+ */
+function errno(error: unknown): string {
   const code = (error as NodeJS.ErrnoException).code;
-  return code === undefined
-    ? "it could not be opened"
-    : `it could not be opened (${code})`;
+  return code === undefined ? "" : ` (${code})`;
+}
+
+/** Why a path could not be opened. Only ever used for a failed open. */
+export function describeFsError(error: unknown): string {
+  return `it could not be opened${errno(error)}`;
 }
 
 /**
@@ -224,8 +230,11 @@ export function removeQuietly(path: string): void {
     unlinkSync(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      // The verb has to match the operation that failed: "could not remove X:
+      // it could not be opened" is the kind of message that sends somebody
+      // looking in the wrong place.
       process.stderr.write(
-        `ub: warning: could not remove ${path}: ${describeFsError(error)}\n`,
+        `ub: warning: could not remove ${path}${errno(error)}\n`,
       );
     }
   }
