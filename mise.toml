@@ -95,17 +95,110 @@ pnpm --filter @uberblick/web run e2e
 
 [tasks.review]
 description = "Build and verify an immutable commit in Docker (REVIEW_SHA defaults to HEAD)"
-# Trust boundary (README, "Review isolation"): only the built context is
-# branch-owned. This task definition is read from the working tree it runs in,
-# so review from your own checkout and pass the SHA — `git archive` needs the
-# commit fetched, not checked out. The build stage keeps network because
-# installing the pinned pnpm and the lockfile needs the registry, so the
-# reviewed commit's `Dockerfile.review` diff is the thing to read first; only
-# the verification container is isolated.
+# Trust boundary (README, "Review isolation"): the reviewed commit supplies file
+# contents, and main supplies the build recipe — this task, `Dockerfile.review`,
+# `.dockerignore`, and how the context is assembled at all. The task
+# therefore refuses unless the checkout it runs in is a freshly fetched
+# `origin/main` with those runner paths unmodified, and it then reads the runner
+# files out of that commit object rather than off the mutable checkout.
+# `git archive` needs the reviewed commit fetched, not checked out. The build
+# stage keeps network because installing the pinned pnpm and the lockfile needs
+# the registry — so the reviewed lockfile's own install scripts do run there;
+# only the verification container is isolated.
+#
+# To re-prove that nothing but main steers a review: clone this repo into a temp
+# dir whose `origin/main` is this runner, give that clone a hostile
+# `core.attributesFile` and `.git/info/attributes`, an untracked
+# `Dockerfile.review.dockerignore` and a `git replace` aiming the fixture commit
+# at a benign one, and review a throwaway local commit
+# (`git commit-tree`, never pushed) carrying a hostile `Dockerfile.review`, a
+# `.gitattributes` with `export-ignore`/`export-subst`, a `.dockerignore`
+# symlinked at a host path, and a failing test. The hostile instruction must not
+# appear in the build log, the host path must be untouched, and the failing test
+# must still run.
 run = """
-review_sha="$(git rev-parse "${REVIEW_SHA:-HEAD}^{commit}")"
+set -eu
+
+# Before any object is resolved: a `refs/replace/*` entry in this repo would
+# swap the object graph under every command below, so that `<sha>` names one
+# commit and reads another — reviewing X while testing Y.
+GIT_NO_REPLACE_OBJECTS=1
+export GIT_NO_REPLACE_OBJECTS
+
+root="$(git rev-parse --show-toplevel)"
+review_sha="$(git -C "$root" rev-parse --verify --end-of-options "${REVIEW_SHA:-HEAD}^{commit}")"
+
+# One temp tree and one private ref, both released by a trap installed before
+# either exists. The fetch lands on that private ref rather than FETCH_HEAD,
+# which any concurrent fetch in the same repo would overwrite under us.
+review_ref="refs/review-runner/$$"
+parent=""
+cleanup() {
+  if [ -n "$parent" ]; then rm -rf "$parent"; fi
+  git -C "$root" update-ref -d "$review_ref" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 130' HUP INT TERM
+
+git -C "$root" fetch --quiet --force origin "main:$review_ref"
+main_sha="$(git -C "$root" rev-parse --verify "$review_ref")"
+if [ "$(git -C "$root" rev-parse HEAD)" != "$main_sha" ]; then
+  printf 'review: refusing — run from a checkout at origin/main (%s); this one is at %s.\\n' "$main_sha" "$(git -C "$root" rev-parse HEAD)" >&2
+  exit 1
+fi
+if ! git -C "$root" diff --quiet "$main_sha" -- mise.toml Dockerfile.review .dockerignore; then
+  printf 'review: refusing — the runner files (mise.toml, Dockerfile.review, .dockerignore) differ from origin/main.\\n' >&2
+  exit 1
+fi
+
+parent="$(mktemp -d)"
+runner="$parent/runner"
+context="$parent/context"
+tarball="$parent/source.tar"
+mkdir "$runner" "$context"
+
+# Build from the bytes the guard just checked, not from files the checkout could
+# change afterwards. The Dockerfile lives in a directory only this task writes,
+# which also puts BuildKit's `<dockerfile>.dockerignore` sidecar lookup — which
+# outranks the context's ignore file, and would accept an untracked sidecar that
+# no `git diff` can see — inside that same private directory.
+git -C "$root" show "$main_sha:Dockerfile.review" > "$runner/Dockerfile.review"
+
+# `export-ignore` silently drops a file from an archive and `export-subst`
+# rewrites one, so the context must be built where no attribute of any origin
+# applies. Attributes reach `git archive` from four places, and neither
+# `--attr-source` nor `attr.tree` overrides any of them for archive: the tree
+# being archived, `$GIT_DIR/info/attributes`, `core.attributesFile`, and the
+# system file. So work in a scratch git dir that borrows this repo's objects and
+# owns nothing else (source two), with the config path emptied and the system
+# file off (three and four), and archive a copy of the tree with every
+# `.gitattributes` removed (source one). The stripped tree is synthesized there
+# too, so the reviewed commit costs the invoking repository no new objects.
+archive_dir="$parent/archive.git"
+git init --quiet --bare --template= "$archive_dir"
+rm -f "$archive_dir/info/attributes"
+printf '%s/objects\\n' "$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)" > "$archive_dir/objects/info/alternates"
+
+# --work-tree is a formality `ls-files` insists on; every command here reads or
+# writes the scratch index and object store only, never the filesystem.
+scratch() {
+  GIT_ATTR_NOSYSTEM=1 git --git-dir="$archive_dir" --work-tree="$parent" -c core.attributesFile=/dev/null "$@"
+}
+scratch read-tree "$review_sha"
+scratch ls-files -z -- '.gitattributes' '*/.gitattributes' | scratch update-index --force-remove -z --stdin
+source_tree="$(scratch write-tree)"
+scratch archive --format=tar --output "$tarball" "$source_tree"
+tar -xf "$tarball" -C "$context"
+
+# The ignore file is build recipe too: a branch-owned one could exclude its own
+# failing tests. Remove the archived entry first — `rm` does not follow symlinks,
+# so a `.dockerignore` symlinked at a host path is unlinked, never written
+# through — and only then write main's.
+rm -rf "$context/.dockerignore"
+git -C "$root" show "$main_sha:.dockerignore" > "$context/.dockerignore"
+
 review_tag="uberblick-review:${review_sha}"
-git archive "$review_sha" | docker build --file Dockerfile.review --tag "$review_tag" -
+docker build --file "$runner/Dockerfile.review" --tag "$review_tag" "$context"
 docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges "$review_tag"
-printf 'Review image retained for probes: %s\n' "$review_tag"
+printf 'Review image retained for probes: %s\\n' "$review_tag"
 """

@@ -41,19 +41,20 @@ protocol, scheduling semantics, and lint. This file does not restate it.
 2. **Advance open PRs first** — an open PR is closer to value than a new
    dispatch, and this includes PRs that predate the loop. For each, drive the
    CLAUDE.md gates in order:
-   - resolve and record the PR's immutable `headRefOid`, fetch it, inspect that
-     commit's `Dockerfile.review`, then run
-     `REVIEW_SHA=<headRefOid> mise run review`; never treat tests from a mutable
-     shared checkout as review evidence. Fetch the commit — never check the PR
-     branch out to review it: `mise run review` reads its own task definition
-     from the current working tree, and `git archive` only needs the object.
-     For an older PR that predates
-     `Dockerfile.review`, construct a temporary trusted Dockerfile from the
-     toolchain declared at that SHA and still build from `git archive`;
-   - never pass branch-owned Docker builds secrets, host mounts, privileged
-     mode, or the Docker socket. Run the verification container without
-     network. Keep the SHA-tagged image long enough for focused probes, then
-     remove it when the PR is settled;
+   - resolve and record the PR's immutable `headRefOid`, fetch it, then run
+     `REVIEW_SHA=<headRefOid> mise run review` — one command, whatever the SHA
+     contains; never treat tests from a mutable shared checkout as review
+     evidence. Fetch the commit — never check the PR branch out to review it:
+     the runner takes its task definition and `Dockerfile.review` from
+     `origin/main`, and refuses unless the checkout it runs in is at that
+     freshly fetched commit with its runner files unmodified; `git archive`
+     only needs the object. The reviewed commit's own manifests still install
+     during the networked build stage — isolation is the verification
+     container, not the build;
+   - never pass the Docker build secrets, host mounts, privileged mode, or the
+     Docker socket. Run the verification container without network. Keep the
+     SHA-tagged image long enough for focused probes, then remove it when the
+     PR is settled;
    - probe failure behavior when the change crosses persistence,
      startup/shutdown, networking, concurrency, or another stateful boundary;
      happy-path tests alone do not close those acceptance criteria;

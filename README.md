@@ -129,44 +129,63 @@ still holds the older `pnpm --filter` spawn; rewriting it belongs to
 
 ## Review isolation
 
-`mise run review` resolves `REVIEW_SHA` to a commit, streams that commit through
-`git archive`, builds its `Dockerfile.review`, and runs the full typecheck and
-test gates in a disposable container. The build context therefore contains
-only committed files from the reviewed SHA: it cannot pick up a changing
-checkout, untracked files, local `node_modules`, `.git`, or plaintext secrets.
-The resulting image is tagged `uberblick-review:<full-sha>` and retained so a
-reviewer can run focused failure-path probes against the exact same environment.
+`mise run review` resolves `REVIEW_SHA` to a commit, extracts that commit with
+`git archive` into a temporary directory, builds it with the `Dockerfile.review`
+of freshly fetched `origin/main`, and runs the lint, typecheck, and test gates
+in a disposable container. The build context is exactly this: every committed
+file of the reviewed SHA except its `.gitattributes` files, plus main's
+`.dockerignore`. It cannot pick up a changing checkout, untracked files, local
+`node_modules`, `.git`, or plaintext secrets, and no `export-ignore` anywhere
+can quietly hold a file back from it. Everything temporary lives under one
+directory that a single trap removes on success and on failure — the trees the
+runner synthesizes are written in a scratch repository inside it, so the only
+mark a review leaves on your own repository is the fetch it needed, on a private
+ref that the same trap deletes. The resulting image is tagged
+`uberblick-review:<full-sha>` and retained so a reviewer can run focused
+failure-path probes against the exact same environment.
 
 ### The trust boundary
 
-`Dockerfile.review` belongs to the branch, so branches may add the OS/runtime
-dependencies their changes require — which makes it executable branch code.
-Two consequences follow, and neither is papered over.
+**Main owns the recipe; the reviewed commit owns the file contents.** The
+Dockerfile and the effective ignore policy come from the fetched `origin/main`
+commit — read out of the commit object into a private temporary directory, not
+off the checkout — so a branch's own `Dockerfile.review` is never read and its
+`.dockerignore` never applies. The context is archived from a copy of the
+reviewed tree with every `.gitattributes` stripped, out of a scratch git
+directory that borrows this repo's objects and nothing else, with
+`core.attributesFile` emptied and the system attributes file switched off —
+`git archive` obeys attributes from all four of those places, an `export-ignore`
+in any of them would quietly drop a failing test, and `export-subst` would
+rewrite file contents. `GIT_NO_REPLACE_OBJECTS` is set for the same reason: a
+`refs/replace/*` entry would let a SHA name one commit and read another.
+That is the whole reason the gate is one command with no
+preceding inspection ceremony: `REVIEW_SHA=<commit> mise run review`. It is not
+a claim that the reviewed code is inert — the manifests and lockfile it ships
+are its own, and their install scripts run in the build stage below.
+
+**The runner is exactly as trustworthy as the checkout it runs from**, so the
+task checks that checkout before it builds anything: it fetches `origin/main`
+and refuses unless HEAD is that commit and `mise.toml`, `Dockerfile.review`,
+and `.dockerignore` are unmodified against it. Those three paths are the check —
+not the whole tree, which is why the build reads them back from the commit
+rather than from the files it just compared. Reviewing a PR still never requires
+checking the branch out — `git archive` needs the commit *fetched*, not checked
+out, so stay on `main` and pass the SHA. Check out a branch you are reviewing
+and you have already handed it your `mise.toml`, your git hooks and your
+`node_modules`, long before Docker is involved.
 
 **The build stage has network; the verification stage does not.** Installing
 the pinned package manager and the lockfile's dependencies needs the npm
-registry, so `docker build` runs the branch's `RUN` instructions on Docker's
-default network. The verification container that runs the gates is the isolated
-half: `--network none --cap-drop ALL --security-opt no-new-privileges`.
-Restricting the build itself is not on the table — `docker build
---network=none` fails at the package-manager install, and a `RUN
---network=none` written *inside* the Dockerfile would be a control the branch
-could simply delete. So the build stage is guarded procedurally: read the
-reviewed commit's `Dockerfile.review` diff **before** you run anything, and
-note that a build only ever happens on an explicit
+registry, so `docker build` runs on Docker's default network — and the lockfile
+it installs from is still the branch's, so branch-chosen install scripts run
+there. The verification container that runs the gates is the isolated half:
+`--network none --cap-drop ALL --security-opt no-new-privileges`. Restricting
+the build itself is not on the table: `docker build --network=none` fails at
+the package-manager install. A build only ever happens on an explicit
 `REVIEW_SHA=<commit> mise run review` — nothing builds a branch automatically
 and no CI job builds one on push. The standing rule bounds the blast radius:
 never pass build secrets, host mounts, privileged mode, or the Docker socket,
 so a hostile build has no credentials of ours to exfiltrate.
-
-**The task definition comes from your checkout, not from the branch.**
-`mise run review` reads `mise.toml` from the working tree it runs in, so the
-launcher is trustworthy exactly as far as that tree is. Keep it that way:
-reviewing a PR never requires checking the branch out. The task builds
-`git archive <REVIEW_SHA>`, which needs the commit *fetched*, not checked out —
-so stay on your own `main` and pass the SHA. Check out a branch you are
-reviewing and you have already handed it your `mise.toml`, your git hooks and
-your `node_modules`, long before Docker is involved.
 
 ## Toolchain choices
 
