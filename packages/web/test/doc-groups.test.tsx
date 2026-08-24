@@ -121,9 +121,18 @@ describe("group collapse is a stored preference", () => {
     };
   }
 
-  /** Titles currently listed, group headers excluded. */
+  /**
+   * Titles currently listed, group headers excluded.
+   *
+   * A collapsed group keeps its list in the DOM — the open/closed transition is
+   * a CSS animation, which needs something to animate (#110) — so "visible"
+   * means "under a group body that is not collapsed", not "present". The body
+   * is `inert` while collapsed, so nothing here is reachable either.
+   */
   function visibleDocs(host: HTMLElement): string[] {
-    return [...host.querySelectorAll("li button")].map((el) => el.textContent ?? "");
+    return [
+      ...host.querySelectorAll('.ub-group-body:not([data-collapsed="true"]) li button'),
+    ].map((el) => el.textContent ?? "");
   }
 
   function headers(host: HTMLElement): HTMLButtonElement[] {

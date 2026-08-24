@@ -63,6 +63,31 @@ export function DocList({
 }
 
 /**
+ * The group header's disclosure mark: one shape, rotated.
+ *
+ * Drawn rather than typed. The bug this fixes (#110) was that the two glyphs
+ * `›` and `⌄` sit at different heights in their em boxes, so the mark neither
+ * lined up with the label nor stayed put when the group toggled — swapping one
+ * badly-centred glyph for another badly-centred glyph is the failure mode, not
+ * the fix. A path on a square viewBox is centred by construction and rotates
+ * about its own middle, which leaves CSS one job: `transform`.
+ */
+function Chevron(): ReactElement {
+  return (
+    <svg className="ub-group-caret" viewBox="0 0 8 8" aria-hidden="true">
+      <path
+        d="M3 1.6 L5.4 4 L3 6.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/**
  * One group. A component rather than inline markup so each group owns its own
  * `useStoredFlag` — the hook count stays fixed however many groups the
  * directory produces.
@@ -89,13 +114,18 @@ function DocGroupSection({
         aria-expanded={!collapsed}
         onClick={() => setCollapsed(!collapsed)}
       >
-        <span className="ub-group-caret" aria-hidden="true">
-          {collapsed ? "›" : "⌄"}
-        </span>
+        <Chevron />
         <span className="ub-group-label">{label}</span>
         <span className="ub-group-count">{entries.length}</span>
       </button>
-      {!collapsed && (
+      {/*
+        Always rendered, never conditionally: the open/closed transition is a
+        `grid-template-rows` animation (see styles.css), and CSS cannot animate
+        an element that is not there. `inert` is what keeps that honest — a
+        collapsed group is out of the tab order and out of the accessibility
+        tree, exactly as it was when React removed it from the DOM.
+      */}
+      <div className="ub-group-body" data-collapsed={collapsed} inert={collapsed}>
         <ul>
           {entries.map((entry) => (
             <li key={entry.uuid}>
@@ -110,7 +140,7 @@ function DocGroupSection({
             </li>
           ))}
         </ul>
-      )}
+      </div>
     </section>
   );
 }

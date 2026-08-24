@@ -8,19 +8,23 @@
  * the unit, because the honest unit here is messages and not updates.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { StatusLine } from "../src/ui/EditorPane.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 /** A connection that only reports status — no socket, no awareness, no peers. */
-function stubConnection(unsyncedChanges: number): RoomConnection {
+function stubConnection(
+  unsyncedChanges: number,
+  patch: Partial<RoomStatus> = {},
+): RoomConnection {
   const status: RoomStatus = {
     connected: false,
     synced: false,
     unsyncedChanges,
     localReplicaLoaded: false,
+    ...patch,
   };
   return {
     room: "main/doc",
@@ -33,13 +37,18 @@ function stubConnection(unsyncedChanges: number): RoomConnection {
   } as unknown as RoomConnection;
 }
 
-function label(unsyncedChanges: number): string | null {
+function label(
+  unsyncedChanges: number,
+  patch: Partial<RoomStatus> = {},
+): string | null {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  act(() => root.render(<StatusLine connection={stubConnection(unsyncedChanges)} />));
+  act(() =>
+    root.render(<StatusLine connection={stubConnection(unsyncedChanges, patch)} />),
+  );
   const text = host.querySelector(".ub-pending")?.textContent ?? null;
   act(() => root.unmount());
   host.remove();
@@ -54,5 +63,79 @@ describe("the status line names the unit of its backlog count", () => {
 
   it("says nothing when everything is acknowledged", () => {
     expect(label(0)).toBeNull();
+  });
+
+});
+
+/**
+ * The badge is hidden while the indicator reads "synced" (#76), which is only
+ * safe because a backlog is itself what stops the state being `synced`. The trap
+ * is `provider.isSynced`: the initial handshake raises it and nothing ever
+ * lowers it, so a room with writes stranded at the hub keeps reporting
+ * `synced: true` — and reading that flag alone would leave the line showing a
+ * green dot and no badge for as long as the outage lasted.
+ *
+ * This has to be asserted on the *settled* line. Every mount starts at
+ * "offline" and debounces towards the truth, so a line read before the window
+ * is up shows the badge whatever the derivation does — which is exactly how a
+ * broken derivation slips past an unsettled assertion.
+ */
+describe("a backlog is delayed by the calm treatment, never hidden by it", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function settledLine(status: Partial<RoomStatus>): {
+    word: string | null;
+    badge: string | null;
+  } {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+    vi.useFakeTimers();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() =>
+      root.render(<StatusLine connection={stubConnection(4, status)} />),
+    );
+    // Past every settle window, so what is on screen is what the reader sees.
+    act(() => void vi.advanceTimersByTime(5_000));
+    const read = {
+      word: host.querySelector(".ub-status-word")?.textContent ?? null,
+      badge:
+        host.querySelector(".ub-pending")?.textContent?.replace(/\s+/g, " ").trim() ??
+        null,
+    };
+    act(() => root.unmount());
+    host.remove();
+    return read;
+  }
+
+  it("reports a backlog the provider's synced flag has stopped tracking", () => {
+    expect(settledLine({ connected: true, synced: true })).toEqual({
+      word: "syncing…",
+      badge: "4 sync messages unacked",
+    });
+  });
+
+  it("says synced, with no badge, once the backlog is actually empty", () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+    vi.useFakeTimers();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() =>
+      root.render(
+        <StatusLine
+          connection={stubConnection(0, { connected: true, synced: true })}
+        />,
+      ),
+    );
+    act(() => void vi.advanceTimersByTime(5_000));
+    expect(host.querySelector(".ub-status-word")?.textContent).toBe("synced");
+    expect(host.querySelector(".ub-pending")).toBeNull();
+    act(() => root.unmount());
+    host.remove();
   });
 });
