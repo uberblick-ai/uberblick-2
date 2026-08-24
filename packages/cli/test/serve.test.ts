@@ -73,16 +73,40 @@ async function connect(
  * Wait for the server to say it is serving, on its own stderr. Readiness is
  * observed rather than timed: a sleep here would be the flaky way to write it.
  */
-function whenServing(child: ChildProcess): Promise<void> {
+function whenServing(child: ChildProcess): Promise<"serving"> {
   return new Promise((resolve) => {
     let seen = "";
     child.stderr?.on("data", (chunk: Buffer) => {
       seen += chunk.toString("utf8");
       if (seen.includes("serving")) {
-        resolve();
+        resolve("serving");
       }
     });
   });
+}
+
+/**
+ * Await something that might never happen, and say so instead of hanging.
+ *
+ * Every wait in the signal test needs its own bound, and each bound has to be
+ * cancelled when the wait wins — an uncancelled timer is referenced, so it would
+ * keep the event loop busy for its full duration after a passing case. Resolving
+ * with a sentinel rather than rejecting is deliberate: the caller asserts on it,
+ * so the failure is a readable expectation and the test still unwinds through
+ * its own teardown, which Vitest's outer timeout would skip.
+ */
+async function within<T, S>(work: Promise<T>, ms: number, sentinel: S): Promise<T | S> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<S>((resolve) => {
+        timer = setTimeout(() => resolve(sentinel), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -208,31 +232,28 @@ describe("ub mcp serve", () => {
       // so an orphaned server keeps it from firing. That is the forwarding half.
       // Waiting on `exit` alone would prove nothing, because a wrapper that
       // forwards nothing still dies of the signal itself.
-      const closed = new Promise<NodeJS.Signals | null | "the server outlived the wrapper">(
-        (resolve) => {
-          child.on("close", (_code, closedBy) => resolve(closedBy));
-        },
-      );
-
-      // Bounded here rather than at Vitest's outer timeout: that one fails the
-      // test without unwinding it, so `finally` would never run and a live MCP
-      // server would leak out of the suite. This resolves instead, so teardown
-      // always happens and the failure is the assertion below.
-      let timer: NodeJS.Timeout | undefined;
-      const outlived = new Promise<"the server outlived the wrapper">((resolve) => {
-        timer = setTimeout(() => resolve("the server outlived the wrapper"), 10_000);
+      const closed = new Promise<NodeJS.Signals | null>((resolve) => {
+        child.on("close", (_code, closedBy) => resolve(closedBy));
       });
 
       try {
-        await whenServing(child);
+        // Readiness gets its own bound, and the forwarding clock starts only
+        // once it is met: a server that dies before it ever says "serving"
+        // would otherwise run into Vitest's outer timeout — which fails the test
+        // without unwinding it, so teardown below would never run — and a slow
+        // boot would eat the window the signal is supposed to be answered in.
+        expect(await within(whenServing(child), 10_000, "never started")).toBe(
+          "serving",
+        );
         child.kill(signal);
 
         // And the wrapper's own death is the signal, not a plain exit with
         // 128+n: a supervisor reading WIFSIGNALED cannot tell it from a direct
         // spawn. That is the re-raise half.
-        expect(await Promise.race([closed, outlived])).toBe(signal);
+        expect(
+          await within(closed, 10_000, "the server outlived the wrapper"),
+        ).toBe(signal);
       } finally {
-        clearTimeout(timer);
         closeSync(writer);
         closeSync(childEnd);
         // Nothing should be left; kill the group in case something is, and wait
@@ -245,10 +266,7 @@ describe("ub mcp serve", () => {
         } catch {
           // ESRCH: the group is already gone, which is the expected case.
         }
-        await Promise.race([
-          closed,
-          new Promise((resolve) => setTimeout(resolve, 2_000)),
-        ]);
+        await within(closed, 2_000, "not reaped");
       }
     },
   );
