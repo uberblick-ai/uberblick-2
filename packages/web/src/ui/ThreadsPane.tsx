@@ -84,7 +84,10 @@ function ThreadCard({
   /** Resolved and not expanded: head and excerpt only. */
   collapsed: boolean;
   replying: boolean;
-  /** Why the last reply to this thread was refused, if it was. */
+  /**
+   * Why the last reply to this thread was refused, if it was — and null on a
+   * card that reads as open, because that is what the refusal is about.
+   */
   refusal: string | null;
   onSelect: () => void;
   onReply: (text: string) => boolean;
@@ -245,7 +248,13 @@ export function ThreadsPane({
       // may name a thread someone else resolved a moment ago, and expanding
       // that card must not offer a reply nobody asked for.
       replying={replyTo === thread.id && !thread.resolved}
-      refusal={refusal?.id === thread.id ? refusal.message : null}
+      // Same guard as `replying` above, for the same reason: the message is
+      // about a settled thread, so a card that reads as open must not show it —
+      // not even for the one committed frame between a reopen reaching the rail
+      // and the effect below letting the message go.
+      refusal={
+        thread.resolved && refusal?.id === thread.id ? refusal.message : null
+      }
       onSelect={() => {
         onFocus(thread.id);
         flashThreadHighlight(thread.id);
