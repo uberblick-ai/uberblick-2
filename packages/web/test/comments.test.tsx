@@ -15,11 +15,13 @@ import * as Y from "yjs";
 import {
   appendBlock,
   createAnnotation,
+  editBlock,
   getAnnotation,
   getBlocks,
   initDoc,
   listAnnotationRanges,
   listAnnotations,
+  setAnnotationResolved,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { CommentComposer } from "../src/ui/CommentComposer.js";
@@ -276,6 +278,44 @@ describe("starting a thread from the prose", () => {
     }
   });
 
+  /**
+   * The card follows the moving range: a remote edit above the selection shifts
+   * every offset in it, which is a *new* target for the same open field. What
+   * must not happen is the field closing and taking half a written comment with
+   * it — the commonest way to lose a comment nobody typed twice.
+   */
+  it("keeps a half-written comment while a remote edit moves the range", () => {
+    const { ydoc, blocks } = annotatedDoc();
+    const remote = mirrorOf(ydoc);
+    const view = mountComposer(ydoc, { author: "ben" });
+    try {
+      select(view.editor, 1, 4, 15);
+      view.open();
+      view.type("why quick?");
+
+      // A second client prepends to the same block: every offset shifts by 10.
+      act(() => {
+        editBlock(remote, blocks[1]!, PARAGRAPH, `Actually, ${PARAGRAPH}`);
+      });
+
+      // Still open, still holding what was typed…
+      expect(view.query<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe(
+        "why quick?",
+      );
+      // …and quoting the same words at their new offsets.
+      expect(view.query(".ub-thread-excerpt")?.textContent).toBe("quick brown");
+
+      view.submit();
+      const [thread] = listAnnotations(ydoc);
+      expect(thread?.comments[0]?.text).toBe("why quick?");
+      expect(listAnnotationRanges(remote, blocks[1]!)).toEqual([
+        { threadId: thread?.id, start: 14, end: 25 },
+      ]);
+    } finally {
+      view.unmount();
+    }
+  });
+
   it("types a mention as plain text into the comment", () => {
     const { ydoc } = annotatedDoc();
     const view = mountComposer(ydoc, { mentions: ["agent-a"] });
@@ -389,6 +429,36 @@ describe("the rail writes back", () => {
           (element) => element.textContent,
         ),
       ).toEqual(["why?", "because it is a pangram"]);
+    } finally {
+      view.unmount();
+    }
+  });
+
+  /**
+   * A reply form open on a thread another client then resolves. The reply
+   * belongs to a conversation that is over, so the form goes — and expanding
+   * the resolved card to read it back must not quietly offer it again.
+   */
+  it("takes back an open reply form when another client resolves the thread", async () => {
+    const { ydoc, blocks } = annotatedDoc();
+    const remote = mirrorOf(ydoc);
+    const thread = createAnnotation(ydoc, blocks[1]!, 4, 15, "agent-a", "why?");
+    const view = renderRail(ydoc);
+    try {
+      await settle(() => action(view.cards()[0]!, "Reply").click());
+      expect(view.cards()[0]?.querySelector(".ub-comment-input")).not.toBeNull();
+
+      await settle(() => setAnnotationResolved(remote, thread.id, true));
+      expect(view.cards()[0]?.querySelector(".ub-comment-input")).toBeNull();
+
+      // Expanding the resolved card shows the conversation, and no form.
+      await settle(() =>
+        view.cards()[0]?.querySelector<HTMLButtonElement>(".ub-thread")?.click(),
+      );
+      expect(view.cards()[0]?.querySelector(".ub-thread-text")?.textContent).toBe(
+        "why?",
+      );
+      expect(view.cards()[0]?.querySelector(".ub-comment-input")).toBeNull();
     } finally {
       view.unmount();
     }

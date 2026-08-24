@@ -181,7 +181,10 @@ export function ThreadsPane({
       thread={thread}
       focused={thread.id === focused?.id}
       collapsed={thread.resolved && expanded !== thread.id}
-      replying={replyTo === thread.id}
+      // A resolved thread never shows the form, however `replyTo` got here: it
+      // may name a thread someone else resolved a moment ago, and expanding
+      // that card must not offer a reply nobody asked for.
+      replying={replyTo === thread.id && !thread.resolved}
       onSelect={() => {
         onFocus(thread.id);
         flashThreadHighlight(thread.id);

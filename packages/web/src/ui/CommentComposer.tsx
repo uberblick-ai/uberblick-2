@@ -91,8 +91,15 @@ export function CommentComposer({
   onCreated: (threadId: string) => void;
 }): ReactElement | null {
   const [draft, setDraft] = useState<Draft | null>(null);
-  /** The draft the field is open for; anything else shows the affordance. */
-  const [openFor, setOpenFor] = useState<string | null>(null);
+  /**
+   * Whether the field is open — a flag, deliberately not the draft it was
+   * opened on. The range a thread would anchor to moves under a remote edit,
+   * and the card is designed to follow it and quote it live; tying the open
+   * field to one particular range would throw away half-written text every time
+   * someone else typed above the selection. The field closes on the writer's
+   * own gestures — submit, cancel, or losing the selection entirely.
+   */
+  const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Every transaction, not just `selectionUpdate`: text arriving under the
@@ -100,11 +107,16 @@ export function CommentComposer({
   useEffect(() => {
     const read = (): void => {
       const target = commentTargetOf(editor);
+      if (target === null) {
+        // Nothing left to annotate: the card goes, and the field with it.
+        setDraft(null);
+        setOpen(false);
+        return;
+      }
       setDraft((previous) => {
-        if (target === null) return null;
         const key = `${target.blockId}:${target.start}:${target.end}:${target.text}`;
-        // Same range, same card: keeping the object identity keeps the open
-        // field mounted (and its half-written text with it).
+        // Same range, same card: keeping the object identity keeps the card
+        // from being repositioned on every unrelated transaction.
         if (previous !== null && previous.key === key) return previous;
         return { key, target, ...pointAt(editor, host.current) };
       });
@@ -117,12 +129,11 @@ export function CommentComposer({
   }, [editor, host]);
 
   if (draft === null) return null;
-  const open = openFor === draft.key;
   const { target } = draft;
   const blockRef = blockRefLabel(target.blockType, target.blockIndex);
 
   const close = (): void => {
-    setOpenFor(null);
+    setOpen(false);
     setError(null);
   };
 
@@ -180,7 +191,7 @@ export function CommentComposer({
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
             setError(null);
-            setOpenFor(draft.key);
+            setOpen(true);
           }}
         >
           Comment on {blockRef}
