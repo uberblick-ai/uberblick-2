@@ -1,0 +1,11 @@
+{$TAILSCALE_HOST} {
+	handle /ws* {
+		reverse_proxy hub:1234
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

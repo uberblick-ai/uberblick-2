@@ -9,10 +9,11 @@
  * module only reads the injected value.
  *
  * ============================ LOUD WARNING ============================
- * HUB_AUTH_TOKEN is compiled into the bundle. That is LOCAL-SPIKE-ONLY — a
- * browser bundle is public, so this is not a secret once it ships anywhere but
- * localhost. The hosted design mints a per-OAuth-session token server-side and
- * the signing secret never reaches the client.
+ * HUB_AUTH_TOKEN is compiled into the bundle. That is PRIVATE-SPIKE-ONLY — a
+ * browser bundle is public, so this is not a secret once served. REMOTE.md
+ * limits the remote deployment to a private Tailscale network. The hosted
+ * design mints a per-OAuth-session token server-side and the signing secret
+ * never reaches the client.
  * =====================================================================
  */
 

@@ -10,10 +10,10 @@ import { defineConfig } from "vitest/config";
  * environment — never from a committed `.env`.
  *
  * ============================ LOUD WARNING ============================
- * Embedding HUB_AUTH_TOKEN in the bundle is a LOCAL-SPIKE-ONLY shortcut.
+ * Embedding HUB_AUTH_TOKEN in the bundle is a PRIVATE-SPIKE-ONLY shortcut.
  * Anything served to a browser is public: this secret would be readable by
- * every visitor of a hosted deployment. It is acceptable here only because the
- * hub runs on localhost against a dev secret.
+ * every visitor. It is acceptable here only on localhost or on the explicitly
+ * supported private-Tailscale deployment described in REMOTE.md.
  *
  * The hosted design is already decided (see CLAUDE.md, "Hosted future"): the
  * server mints a claims-shaped token per OAuth session and hands it to the
