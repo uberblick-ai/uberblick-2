@@ -102,8 +102,20 @@ function trimmed(value: string | undefined): string | null {
  * The workspace has to be one path segment as well as one room segment: it names
  * the SQLite file, and `path.join` happily follows `..` or a `\` out of the data
  * directory — on Windows both separators count.
+ *
+ * Exported because `ub` resolves a workspace from files as well as the
+ * environment and must apply this exact rule to all of them; `label` names the
+ * source in the message, so a bad value in `./uberblick.json` does not report
+ * itself as a bad `WORKSPACE_ID`.
+ *
+ * The rejected value is deliberately not in the message. `label` already says
+ * where to look, and a secret mistakenly exported as `WORKSPACE_ID` would
+ * otherwise be printed by the very error that refuses it.
  */
-function assertWorkspaceSegment(value: string): void {
+export function assertWorkspaceSegment(
+  value: string,
+  label = "WORKSPACE_ID",
+): void {
   const rejected =
     value === "" ||
     value === "." ||
@@ -113,8 +125,8 @@ function assertWorkspaceSegment(value: string): void {
     value.includes("\0");
   if (rejected) {
     throw new Error(
-      "WORKSPACE_ID must be a single path and room segment: no \"/\", no \"\\\", " +
-        `not "." or "..", got ${JSON.stringify(value)}`,
+      `${label} must be a single path and room segment: no "/", no "\\", ` +
+        'not "." or ".."',
     );
   }
 }

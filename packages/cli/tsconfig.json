@@ -1,0 +1,6 @@
+{
+  // No project references: @uberblick/mcp-server resolves to its TypeScript
+  // sources through its package exports, so tsc typechecks it in-program.
+  "extends": "../../tsconfig.base.json",
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

@@ -12,11 +12,14 @@
 
 export {
   DEFAULT_HUB_URL,
+  assertWorkspaceSegment,
   defaultDatabasePath,
   resolveMcpConfig,
 } from "./config.js";
 export type { McpConfig } from "./config.js";
 export { createMcpServer } from "./server.js";
 export type { UberblickMcpServer } from "./server.js";
+export { collectSyncStatus } from "./status.js";
+export type { RoomSyncStatus, SyncStatus } from "./status.js";
 export { log, logAt } from "./log.js";
 export type { LogLevel } from "./log.js";
