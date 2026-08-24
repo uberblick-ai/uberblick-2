@@ -16,7 +16,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { appendBlock, getBlocks, initDoc } from "@uberblick/schema";
@@ -391,7 +391,7 @@ describe("the pending watermark", () => {
     // Fail the second half of the append, from inside SQLite. Under an
     // append-then-mark implementation the update row is already committed by
     // this point and survives; in one transaction, neither effect lands.
-    const saboteur = new Database(databasePath);
+    const saboteur = new DatabaseSync(databasePath);
     saboteur.exec(
       "CREATE TRIGGER refuse_markers AFTER INSERT ON pending_rooms " +
         "BEGIN SELECT RAISE(ABORT, 'no markers today'); END",
@@ -405,7 +405,7 @@ describe("the pending watermark", () => {
     expect(writer.pendingRooms()).toEqual([]);
 
     // With the trigger gone, both effects land together.
-    const repair = new Database(databasePath);
+    const repair = new DatabaseSync(databasePath);
     repair.exec("DROP TRIGGER refuse_markers");
     repair.close();
 
@@ -509,7 +509,7 @@ describe("the pending watermark", () => {
     seeded.close();
 
     // Rewrite the marker in the pre-watermark shape, and leave no stub.
-    const legacy = new Database(databasePath);
+    const legacy = new DatabaseSync(databasePath);
     legacy.exec(
       "DROP TABLE pending_rooms;" +
         "CREATE TABLE pending_rooms (room TEXT PRIMARY KEY, since INTEGER NOT NULL);" +

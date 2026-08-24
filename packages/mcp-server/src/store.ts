@@ -22,6 +22,13 @@
  * busy timeout, writes are small single-statement transactions, and readers
  * catch up by polling the log tail — see `replica.ts`.
  *
+ * The binding is Node's built-in `node:sqlite` (`DatabaseSync`), synchronous
+ * like the process it serves and with nothing to compile at install time. It
+ * ships two conveniences fewer than better-sqlite3 did: pragmas go through
+ * `exec`, and transactions through {@link transactional}. The file format is
+ * ordinary SQLite either way, so a database written by the old binding opens
+ * here unchanged.
+ *
  * Sequence numbers come from an `AUTOINCREMENT` rowid. SQLite serialises
  * writers, so a row's `seq` order is also its commit order: a poller that has
  * applied everything up to `seq` cannot miss an earlier row appearing later.
@@ -29,8 +36,12 @@
 
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import Database from "better-sqlite3";
-import type { Database as Db, Statement } from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
+import type {
+  SQLInputValue,
+  SQLOutputValue,
+  StatementResultingChanges,
+} from "node:sqlite";
 
 /** Where an update came from. Both are logged; the distinction is diagnostic. */
 export type UpdateOrigin = "local" | "remote";
@@ -173,51 +184,88 @@ export function ftsQuery(raw: string): string | null {
     .join(" ");
 }
 
-function toBuffer(bytes: Uint8Array): Buffer {
-  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+/**
+ * A prepared statement whose parameter list is typed. `node:sqlite` types every
+ * binding as `SQLInputValue[]`, which checks neither arity nor order, so the
+ * statement table below is the one place those are declared.
+ */
+interface Prepared<P extends SQLInputValue[]> {
+  run(...params: P): StatementResultingChanges;
+  get(...params: P): Record<string, SQLOutputValue> | undefined;
+  all(...params: P): Record<string, SQLOutputValue>[];
 }
 
-function toBytes(value: Buffer | Uint8Array): Uint8Array {
-  return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+/**
+ * better-sqlite3's `.transaction()` wrapper, in the lines `node:sqlite` leaves
+ * to the caller: run `body` between BEGIN and COMMIT, roll back if it throws.
+ *
+ * A deferred `BEGIN`, which is what the old binding issued — a body that only
+ * reads takes a read snapshot and never blocks the other instance's writer.
+ *
+ * Nesting is unsupported and does not occur: none of the wrapped bodies calls
+ * another (the one that spans two reads calls plain statement methods). A
+ * nested call would fail loudly on SQLite's own "cannot start a transaction
+ * within a transaction", raised by `BEGIN` before the `try`, leaving the outer
+ * transaction intact for its own rollback.
+ */
+function transactional<A extends unknown[], R>(
+  db: DatabaseSync,
+  body: (...args: A) => R,
+): (...args: A) => R {
+  return (...args: A): R => {
+    db.exec("BEGIN");
+    try {
+      const result = body(...args);
+      db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      // Some failures (a full disk, an ON CONFLICT ROLLBACK) unwind the
+      // transaction inside SQLite; asking again would throw over the real error.
+      if (db.isTransaction) {
+        db.exec("ROLLBACK");
+      }
+      throw error;
+    }
+  };
 }
 
 export class MirrorStore {
   readonly databasePath: string;
 
-  private readonly db: Db;
+  private readonly db: DatabaseSync;
 
   private readonly statements: {
-    append: Statement<[string, Buffer, string, number]>;
-    after: Statement<[string, number]>;
-    countRoom: Statement<[string]>;
-    countAll: Statement<[]>;
-    snapshot: Statement<[string]>;
-    putSnapshot: Statement<[string, Buffer, number, number]>;
-    pruneUpdates: Statement<[string, number]>;
-    markPending: Statement<[string, number]>;
-    clearPending: Statement<[string, number]>;
-    listPending: Statement<[]>;
-    putDoc: Statement<[string, string]>;
-    dropDoc: Statement<[string]>;
-    dropTags: Statement<[string]>;
-    putTag: Statement<[string, string]>;
-    dropLinks: Statement<[string]>;
-    putLink: Statement<[string, string]>;
-    dropFts: Statement<[string]>;
-    putFts: Statement<[string, string, string]>;
-    search: Statement<[string, number]>;
-    backlinks: Statement<[string]>;
+    append: Prepared<[string, Uint8Array, string, number]>;
+    after: Prepared<[string, number]>;
+    countRoom: Prepared<[string]>;
+    countAll: Prepared<[]>;
+    snapshot: Prepared<[string]>;
+    putSnapshot: Prepared<[string, Uint8Array, number, number]>;
+    pruneUpdates: Prepared<[string, number]>;
+    markPending: Prepared<[string, number]>;
+    clearPending: Prepared<[string, number]>;
+    listPending: Prepared<[]>;
+    putDoc: Prepared<[string, string]>;
+    dropDoc: Prepared<[string]>;
+    dropTags: Prepared<[string]>;
+    putTag: Prepared<[string, string]>;
+    dropLinks: Prepared<[string]>;
+    putLink: Prepared<[string, string]>;
+    dropFts: Prepared<[string]>;
+    putFts: Prepared<[string, string, string]>;
+    search: Prepared<[string, number]>;
+    backlinks: Prepared<[string]>;
   };
 
   private readonly appendTx: (
     room: string,
-    payload: Buffer,
+    payload: Uint8Array,
     origin: UpdateOrigin,
   ) => number;
 
   private readonly compactTx: (
     room: string,
-    state: Buffer,
+    state: Uint8Array,
     throughSeq: number,
   ) => boolean;
 
@@ -233,18 +281,18 @@ export class MirrorStore {
       mkdirSync(dirname(databasePath), { recursive: true });
     }
 
-    this.db = new Database(databasePath);
+    this.db = new DatabaseSync(databasePath);
     // WAL so a reader never blocks the writer, and a busy timeout so a second
     // MCP server instance waits its turn instead of failing the tool call.
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("busy_timeout = 5000");
-    this.db.pragma("foreign_keys = ON");
+    this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.exec("PRAGMA busy_timeout = 5000");
+    this.db.exec("PRAGMA foreign_keys = ON");
     this.db.exec(SCHEMA);
     // After the schema, so the backfill can read `updates` and `snapshots`.
     this.migratePendingRooms();
 
-    const prepare = <T extends unknown[]>(sql: string): Statement<T> =>
-      this.db.prepare(sql) as Statement<T>;
+    const prepare = <P extends SQLInputValue[]>(sql: string): Prepared<P> =>
+      this.db.prepare(sql) as Prepared<P>;
 
     this.statements = {
       append: prepare(
@@ -321,8 +369,9 @@ export class MirrorStore {
 
     // The update and its pending marker land together, so a SIGKILL can never
     // leave a logged local change that nothing remembers to push.
-    this.appendTx = this.db.transaction(
-      (room: string, payload: Buffer, origin: UpdateOrigin): number => {
+    this.appendTx = transactional(
+      this.db,
+      (room: string, payload: Uint8Array, origin: UpdateOrigin): number => {
         const info = this.statements.append.run(
           room,
           payload,
@@ -342,8 +391,9 @@ export class MirrorStore {
     // so a stale compactor's write is refused rather than overwriting a newer
     // snapshot — and pruning stays safe either way, because whichever snapshot
     // survives covers at least as far as this one.
-    this.compactTx = this.db.transaction(
-      (room: string, state: Buffer, throughSeq: number): boolean => {
+    this.compactTx = transactional(
+      this.db,
+      (room: string, state: Uint8Array, throughSeq: number): boolean => {
         const written =
           this.statements.putSnapshot.run(room, state, throughSeq, Date.now())
             .changes > 0;
@@ -356,7 +406,8 @@ export class MirrorStore {
     // Read apart, a concurrent compaction can prune the rows between the
     // snapshot the reader saw and the tail it then reads, and the reader
     // advances past a gap Yjs can never fill.
-    this.readSinceTx = this.db.transaction(
+    this.readSinceTx = transactional(
+      this.db,
       (room: string, seq: number): LogSlice => {
         const stored = this.snapshot(room);
         const ahead = stored !== null && stored.throughSeq > seq;
@@ -368,7 +419,7 @@ export class MirrorStore {
       },
     );
 
-    this.indexTx = this.db.transaction((doc: IndexedDoc) => {
+    this.indexTx = transactional(this.db, (doc: IndexedDoc) => {
       this.statements.putDoc.run(doc.uuid, doc.title);
       this.statements.dropTags.run(doc.uuid);
       for (const tag of new Set(doc.tags)) {
@@ -382,7 +433,7 @@ export class MirrorStore {
       this.statements.putFts.run(doc.uuid, doc.title, doc.body);
     });
 
-    this.unindexTx = this.db.transaction((uuid: string) => {
+    this.unindexTx = transactional(this.db, (uuid: string) => {
       this.statements.dropFts.run(uuid);
       this.statements.dropTags.run(uuid);
       this.statements.dropLinks.run(uuid);
@@ -402,7 +453,7 @@ export class MirrorStore {
     payload: Uint8Array,
     origin: UpdateOrigin,
   ): number {
-    return this.appendTx(room, toBuffer(payload), origin);
+    return this.appendTx(room, payload, origin);
   }
 
   /**
@@ -421,9 +472,9 @@ export class MirrorStore {
   updatesAfter(room: string, seq: number): LoggedUpdate[] {
     const rows = this.statements.after.all(room, seq) as {
       seq: number;
-      payload: Buffer;
+      payload: Uint8Array;
     }[];
-    return rows.map((row) => ({ seq: row.seq, payload: toBytes(row.payload) }));
+    return rows.map((row) => ({ seq: row.seq, payload: row.payload }));
   }
 
   /** Whether the log holds anything at all for a room. */
@@ -435,11 +486,11 @@ export class MirrorStore {
 
   snapshot(room: string): StoredSnapshot | null {
     const row = this.statements.snapshot.get(room) as
-      | { state: Buffer; through_seq: number }
+      | { state: Uint8Array; through_seq: number }
       | undefined;
     return row === undefined
       ? null
-      : { state: toBytes(row.state), throughSeq: row.through_seq };
+      : { state: row.state, throughSeq: row.through_seq };
   }
 
   /**
@@ -453,7 +504,7 @@ export class MirrorStore {
    * the surviving snapshot covers it.
    */
   compact(room: string, state: Uint8Array, throughSeq: number): boolean {
-    return this.compactTx(room, toBuffer(state), throughSeq);
+    return this.compactTx(room, state, throughSeq);
   }
 
   updateCount(room: string): number {
@@ -476,7 +527,11 @@ export class MirrorStore {
 
   /** Rooms with local changes not known to have reached the hub. */
   pendingRooms(): PendingRoom[] {
-    return this.statements.listPending.all() as PendingRoom[];
+    const rows = this.statements.listPending.all() as {
+      room: string;
+      seq: number;
+    }[];
+    return rows.map((row) => ({ room: row.room, seq: row.seq }));
   }
 
   /** Upsert one document's derived rows. Idempotent. */
@@ -554,7 +609,7 @@ export class MirrorStore {
       return;
     }
 
-    this.db.transaction(() => {
+    transactional(this.db, () => {
       this.db.exec(
         "CREATE TABLE pending_rooms_migrated (room TEXT PRIMARY KEY, seq INTEGER NOT NULL);" +
           "INSERT INTO pending_rooms_migrated (room, seq) SELECT p.room, COALESCE(" +
@@ -567,7 +622,15 @@ export class MirrorStore {
     })();
   }
 
+  /**
+   * Idempotent, because a store outlives no single owner: the server closes it
+   * on shutdown and whoever handed it in may close it again. `node:sqlite`
+   * throws on a second close where better-sqlite3 shrugged, and a teardown path
+   * is the worst place to learn that.
+   */
   close(): void {
-    this.db.close();
+    if (this.db.isOpen) {
+      this.db.close();
+    }
   }
 }

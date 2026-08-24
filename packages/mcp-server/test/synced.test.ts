@@ -23,12 +23,12 @@ import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   StdioClientTransport,
   getDefaultEnvironment,
 } from "@modelcontextprotocol/sdk/client/stdio.js";
-import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { getBlocks } from "@uberblick/schema";
 import * as Y from "yjs";
@@ -155,16 +155,16 @@ async function startWriter(port: number): Promise<Writer> {
  */
 function storedBlocks(databasePath: string, room: string): string[] | null {
   try {
-    const database = new Database(databasePath, { readonly: true });
+    const database = new DatabaseSync(databasePath, { readOnly: true });
     try {
       const row = database
         .prepare('SELECT data FROM "documents" WHERE name = ?')
-        .get(room) as { data: Buffer } | undefined;
+        .get(room) as { data: Uint8Array } | undefined;
       if (row === undefined) {
         return null;
       }
       const doc = new Y.Doc();
-      Y.applyUpdate(doc, new Uint8Array(row.data));
+      Y.applyUpdate(doc, row.data);
       const blocks = getBlocks(doc).map((block) => block.text);
       doc.destroy();
       return blocks;
