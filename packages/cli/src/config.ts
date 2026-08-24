@@ -236,6 +236,10 @@ export function readUserConfig(env: NodeJS.ProcessEnv = process.env): {
  * Owner-only, like `credentials.json` beside it: nothing in here is a secret,
  * but it is one user's configuration and no other account has business reading
  * or — the part that matters — writing the hub URL a signed token is sent to.
+ *
+ * Same mode dance as {@link writeCredentials}, for the same reason: `mode:`
+ * applies only to a file being created and is subject to the umask besides, so a
+ * file that already exists at 0644 would keep that mode through every rewrite.
  */
 export function writeUserConfig(
   config: Record<string, unknown>,
@@ -243,7 +247,9 @@ export function writeUserConfig(
 ): string {
   const path = userConfigPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  tighten(path);
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(path, 0o600);
   return path;
 }
 
@@ -449,6 +455,24 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   };
 }
 
+/**
+ * Make an existing file owner-only BEFORE writing into it.
+ *
+ * `mode:` on `writeFileSync` applies only to a file being *created*, so a
+ * pre-existing 0644 file would otherwise hold the new contents while still
+ * world-readable until the chmod after the write. ENOENT is the ordinary case —
+ * there is no file yet — and `mode:` covers that one.
+ */
+function tighten(path: string): void {
+  try {
+    chmodSync(path, 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+}
+
 /** What `credentials.json` may hold today. Remote tokens arrive with #84. */
 export interface Credentials {
   /** The hub's HMAC signing secret — not a token. */
@@ -468,17 +492,7 @@ export function writeCredentials(
 ): string {
   const path = credentialsPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  // Tighten an existing file BEFORE writing into it. `mode` below applies only
-  // to a file being created, so a pre-existing 0644 file would otherwise hold
-  // the new secret while still world-readable until the chmod after the write.
-  // ENOENT is the ordinary case — there is no file yet — and `mode` covers it.
-  try {
-    chmodSync(path, 0o600);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-  }
+  tighten(path);
   writeFileSync(path, `${JSON.stringify(credentials, null, 2)}\n`, {
     mode: 0o600,
   });

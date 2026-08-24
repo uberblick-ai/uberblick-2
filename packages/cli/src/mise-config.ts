@@ -100,7 +100,8 @@ function ours(path: string): boolean {
  * Deliberately a match rather than a TOML parse: this module writes the file, so
  * its shape is known, and anything that does not match is treated as absent and
  * rewritten. A TOML parser would be a new dependency to read four lines we
- * generated ourselves.
+ * generated ourselves. The quoted literal goes back through `JSON.parse`, which
+ * exactly undoes the {@link toml} that wrote it.
  */
 export function derivedSecret(root: string): string | null {
   let text: string;
@@ -112,7 +113,16 @@ export function derivedSecret(root: string): string | null {
   if (!text.startsWith(MARKER)) {
     return null;
   }
-  return /^HUB_AUTH_TOKEN = "([^"\n]+)"$/m.exec(text)?.[1] ?? null;
+  const literal = /^HUB_AUTH_TOKEN = ("(?:[^"\\\n]|\\.)*")$/m.exec(text)?.[1];
+  if (literal === undefined) {
+    return null;
+  }
+  try {
+    const value: unknown = JSON.parse(literal);
+    return typeof value === "string" && value !== "" ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface DerivedEnvironment {
@@ -123,10 +133,20 @@ export interface DerivedEnvironment {
   authorityPath: string;
 }
 
+/**
+ * TOML basic-string form of a value.
+ *
+ * `JSON.stringify` is the escaper because TOML's basic string accepts every
+ * escape JSON emits — `\"`, `\\`, `\n`, `\t`, `\uXXXX` and the rest. Escaping
+ * rather than restricting is the point: the workspace rule has one owner
+ * (`assertWorkspaceSegment`), it allows a space or a quote, and a value every
+ * other command accepts must not be one this file cannot write.
+ */
+function toml(value: string): string {
+  return JSON.stringify(value);
+}
+
 function render(env: DerivedEnvironment): string {
-  // The generated secret's alphabet is `A-Za-z0-9._-` (see `ub init`), so it
-  // needs no TOML escaping — and a value that did would be refused by
-  // `remote-compose.sh` anyway.
   return `${MARKER}
 #
 # Derived from ${env.authorityPath} — same value, one owner. Do not edit: every
@@ -140,8 +160,8 @@ function render(env: DerivedEnvironment): string {
 # HUB_AUTH_TOKEN is the HMAC signing secret, not a token. Never commit it —
 # .gitignore covers this file.
 [env]
-WORKSPACE_ID = "${env.workspace}"
-HUB_AUTH_TOKEN = "${env.signingSecret}"
+WORKSPACE_ID = ${toml(env.workspace)}
+HUB_AUTH_TOKEN = ${toml(env.signingSecret)}
 `;
 }
 

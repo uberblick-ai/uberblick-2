@@ -32,7 +32,7 @@ import { randomBytes } from "node:crypto";
 import { userInfo } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
-import { resolveMcpConfig } from "@uberblick/mcp-server";
+import { assertWorkspaceSegment, resolveMcpConfig } from "@uberblick/mcp-server";
 import {
   readCredentials,
   readUserConfig,
@@ -79,14 +79,6 @@ const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
  * becoming somebody's cursor label.
  */
 const NAME_PATTERN = /^[^\p{Cc}\p{Cf}]{1,64}$/u;
-
-/**
- * The workspace is stricter here than `assertWorkspaceSegment` demands: `ub
- * init` writes it into a TOML string as well as a room key and a file name, so
- * the alphabet is the one that needs no escaping anywhere — the same one
- * `remote-compose.sh` insists on for the secret.
- */
-const WORKSPACE_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 /** A stable colour for a name, so the default does not move between runs. */
 function colorFor(name: string): string {
@@ -258,17 +250,24 @@ export async function initCommand(
       what: "colour",
       how: "6-digit hex, like #0e8085",
     },
-    {
-      value: workspace,
-      pattern: WORKSPACE_PATTERN,
-      what: "workspace",
-      how: "letters, digits, dot, underscore or hyphen",
-    },
   ]) {
     if (!check.pattern.test(check.value)) {
       io.err(`ub init: the ${check.what} must be ${check.how}\n`);
       return 2;
     }
+  }
+
+  // The workspace rule has exactly one owner, and it is not this file: a value
+  // `ub status` accepts must not be one `ub init` refuses. The label names where
+  // the value came from, and the rule's own message states the constraints.
+  try {
+    assertWorkspaceSegment(
+      workspace,
+      flags.workspace === undefined ? "the workspace" : "--workspace",
+    );
+  } catch (error) {
+    io.err(`ub init: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 2;
   }
 
   // Merged over what is already there: a `hubUrl` somebody set, or a field a

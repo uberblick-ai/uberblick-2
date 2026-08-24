@@ -15,6 +15,7 @@
 
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   readFileSync,
@@ -220,8 +221,10 @@ describe("ub init", () => {
 
     for (const argv of [
       ["init", "--yes", "--color", "teal"],
-      // A workspace names a room, a file and a TOML value.
+      // The workspace names a room AND a SQLite file, and `path.join` follows
+      // every one of these out of the data directory.
       ["init", "--yes", "--workspace", "a/b"],
+      ["init", "--yes", "--workspace", ".."],
       ["init", "--yes", "--mcp", "--no-mcp"],
     ]) {
       const run = runUb(argv, box, WITHOUT_MISE);
@@ -229,6 +232,40 @@ describe("ub init", () => {
       expect(run.stdout).toBe("");
       expect(run.output).not.toContain(secret);
     }
+
+    // The rejection is the shared rule's, so it names the source and states the
+    // real constraints rather than a rule this command invented.
+    const named = runUb(["init", "--yes", "--workspace", "a/b"], box, WITHOUT_MISE);
+    expect(named.stderr).toMatch(/--workspace must be a single path and room segment/);
+    expect(named.stderr).toMatch(/not "\."/);
+  });
+
+  it("accepts every workspace the shared rule accepts, and quotes it correctly", () => {
+    // The regression Copilot caught: `ub init` had its own, stricter alphabet, so
+    // it exited 2 for workspaces every other command is happy with. There is one
+    // owner of that rule — `assertWorkspaceSegment` — and writing the value into
+    // TOML is an escaping problem, not a reason to narrow it.
+    for (const workspace of ["team b", 'sales"q3', "équipe"]) {
+      const box = sandbox({ checkout: true });
+      const run = runUb(["init", "--yes", "--workspace", workspace], box, WITHOUT_MISE);
+      expect(run.status, run.stderr).toBe(0);
+      expect(userConfig(box).workspace).toBe(workspace);
+
+      const local = readFileSync(localConfigPath(box), "utf8");
+      expect(local).toContain(`WORKSPACE_ID = ${JSON.stringify(workspace)}`);
+      // And the file is still readable by the reader that has to rebuild it.
+      expect(derivedSecret(box)).toBe(storedSecret(box));
+    }
+  });
+
+  it("repairs the mode of a config.json that was left readable", () => {
+    const box = sandbox({ checkout: true, userConfig: { workspace: "main" } });
+    chmodSync(join(box.configHome, "uberblick", "config.json"), 0o644);
+
+    expect(runUb(["init", "--yes"], box, WITHOUT_MISE).status).toBe(0);
+    expect(
+      statSync(join(box.configHome, "uberblick", "config.json")).mode & 0o077,
+    ).toBe(0);
   });
 
   it("offers the MCP wiring, and honours --no-mcp instead of blocking", () => {
