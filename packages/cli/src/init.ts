@@ -332,11 +332,11 @@ export async function initCommand(
 
     // --- the signing secret -------------------------------------------------
     const derived = root === null ? null : derivedSecret(root);
-  // The raw environment, not `resolved.env`: what matters here is whether
-  // somebody *else* supplies a secret, and `resolved.env` includes the one in
-  // `credentials.json`. Our own derived file is not somebody else either —
-  // inside a checkout mise puts it into this very environment, so counting it
-  // would make a second run report a secret "already supplied" by itself.
+    // The raw environment, not `resolved.env`: what matters here is whether
+    // somebody *else* supplies a secret, and `resolved.env` includes the one in
+    // `credentials.json`. Our own derived file is not somebody else either —
+    // inside a checkout mise puts it into this very environment, so counting it
+    // would make a second run report a secret "already supplied" by itself.
     const fromEnvironment = trimmed(process.env.HUB_AUTH_TOKEN);
     const supplied =
       fromEnvironment !== null && fromEnvironment !== derived

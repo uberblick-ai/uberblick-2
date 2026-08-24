@@ -26,14 +26,23 @@
  * be removed at all turns the wait into a spin. A crashed holder on a
  * single-user machine is instead a visible situation with a one-line fix, and
  * the timeout message says exactly which file to delete and how old it is.
- * Nothing here ever unlinks a lock this process did not create.
+ * Nothing here ever unlinks a lock this process did not create — releasing
+ * checks the file's identity, not just its name, so a lock somebody deleted
+ * mid-run and somebody else then took is left alone.
  *
  * The atomic publications underneath stay exactly as they were. This lock makes
  * the common case orderly; they are what keeps a writer that is not `ub init` at
  * all from tearing a file in half.
  */
 
-import { mkdirSync, openSync, closeSync, statSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  statSync,
+  writeSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { credentialsPath } from "./config.js";
 import { removeQuietly } from "./safe-write.js";
@@ -76,6 +85,26 @@ function shellQuote(path: string): string {
 }
 
 /**
+ * Whether `path` still names the file this process created.
+ *
+ * Device and inode together identify a file independently of its name, so a lock
+ * that was deleted and recreated by somebody else fails this even though the
+ * path is unchanged.
+ */
+function isSameFile(
+  path: string,
+  identity: { dev: number; ino: number },
+): boolean {
+  try {
+    const stats = statSync(path);
+    return stats.dev === identity.dev && stats.ino === identity.ino;
+  } catch {
+    // Already gone: somebody removed it, and there is nothing to release.
+    return false;
+  }
+}
+
+/**
  * How long that lock has been there, for the message. Never a decision — see the
  * module comment on why nothing here acts on a lock's age.
  */
@@ -113,9 +142,14 @@ export async function acquireInitLock(
       // as attempted first, because POSIX releases the descriptor even when
       // `close` reports an error.
       let closeAttempted = false;
+      let identity: { dev: number; ino: number };
       try {
         // Whoever finds this file wants to know which process to look for.
         writeSync(fd, `${process.pid}\n`);
+        // Which inode this name refers to *now*, so that releasing can tell
+        // this lock from a different file that later took the same name.
+        const stats = fstatSync(fd);
+        identity = { dev: stats.dev, ino: stats.ino };
         closeAttempted = true;
         closeSync(fd);
       } catch (error) {
@@ -132,11 +166,18 @@ export async function acquireInitLock(
       let released = false;
       return {
         path,
-        // The only `unlink` of a lock anywhere in this CLI, and it can only
-        // reach a file this process created with `wx` a moment ago.
+        // The only `unlink` of a lock anywhere in this CLI, and it releases the
+        // file this process created rather than whatever holds the name by then:
+        // if somebody deletes the lock mid-run and another `ub init` takes it,
+        // the name is theirs and this must not touch it. What remains is the
+        // instant between the check and the unlink, which no userland writer can
+        // close — and which needs that same deletion to happen inside it.
         release() {
-          if (!released) {
-            released = true;
+          if (released) {
+            return;
+          }
+          released = true;
+          if (isSameFile(path, identity)) {
             removeQuietly(path);
           }
         },
