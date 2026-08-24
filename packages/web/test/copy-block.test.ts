@@ -131,13 +131,18 @@ describe("copying a source block", () => {
       value: execCommand,
     });
 
-    element.querySelector<HTMLButtonElement>(".ub-copy")!.click();
-    await vi.waitFor(() => expect(execCommand).toHaveBeenCalled());
-    expect(copied).toBe(SHELL);
-    // The scratch textarea is gone again; it exists only for the selection.
-    expect(document.querySelector("textarea")).toBeNull();
-
-    Reflect.deleteProperty(document, "execCommand");
-    editor.destroy();
+    // `finally`, because a failing assertion here would otherwise leave the
+    // stub on `document` for every test after it in this file — and the next
+    // failure would then be somewhere else entirely.
+    try {
+      element.querySelector<HTMLButtonElement>(".ub-copy")!.click();
+      await vi.waitFor(() => expect(execCommand).toHaveBeenCalled());
+      expect(copied).toBe(SHELL);
+      // The scratch textarea is gone again; it exists only for the selection.
+      expect(document.querySelector("textarea")).toBeNull();
+    } finally {
+      Reflect.deleteProperty(document, "execCommand");
+      editor.destroy();
+    }
   });
 });

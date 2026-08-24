@@ -111,7 +111,7 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
     return read;
   }
 
-  it("keeps reporting one the provider's synced flag has stopped tracking", () => {
+  it("reports a backlog the provider's synced flag has stopped tracking", () => {
     expect(settledLine({ connected: true, synced: true })).toEqual({
       word: "syncing…",
       badge: "4 sync messages unacked",
