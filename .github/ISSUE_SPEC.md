@@ -110,15 +110,16 @@ doesn't answer? Then the issue is not `ready`.**
 
 ## Sizing
 
-One issue = one PR, reviewable in one sitting. Work that honestly needs
-multiple PRs becomes a parent issue split into loop-ready children; parents
-are never labeled `ready`, only their children are.
+One issue = one PR by default, reviewable in one sitting. Work that honestly
+needs multiple PRs becomes a parent issue split into loop-ready children;
+parents are never labeled `ready`, only their children are.
 
-The rule also runs the other way: individually-trivial issues declaring the
+The exception runs the other way: individually-trivial issues declaring the
 same `Touches` set may be implemented by one agent as one PR closing several
 (`Closes #a, #b`), provided the combined diff is still reviewable in one
 sitting, the footprint check validates that combined diff against the shared
-set, and the merge report checks each issue's acceptance criteria separately.
+set, and the PR carries a merge report checking each issue's acceptance
+criteria separately — a batch PR carries that report whatever its merge tier.
 
 ## Lint — the exact checks
 
