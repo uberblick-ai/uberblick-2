@@ -19,6 +19,7 @@ import {
   useRawBlocks,
   useRoomStatus,
 } from "./hooks.js";
+import { threadIdFromTarget } from "./threads.js";
 
 /**
  * Exported for the label test only.
@@ -174,7 +175,13 @@ function BlockToolbar({ editor }: { editor: Editor }): ReactElement {
   );
 }
 
-function BoundEditor({ connection }: { connection: RoomConnection }): ReactElement {
+function BoundEditor({
+  connection,
+  onSelectThread,
+}: {
+  connection: RoomConnection;
+  onSelectThread: (threadId: string) => void;
+}): ReactElement {
   const host = useRef<HTMLDivElement | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
 
@@ -190,12 +197,21 @@ function BoundEditor({ connection }: { connection: RoomConnection }): ReactEleme
       fragment: getBlocksFragment(connection.ydoc),
       awareness: connection.provider.awareness,
     });
+    // A comment highlight is a plain span ProseMirror renders from the `comment`
+    // mark, so the click that focuses its thread is read by delegation on the
+    // host: no ProseMirror plugin, and nothing competing with the caret.
+    const focusThread = (event: MouseEvent): void => {
+      const threadId = threadIdFromTarget(event.target);
+      if (threadId !== null) onSelectThread(threadId);
+    };
+    element.addEventListener("click", focusThread);
     setEditor(binding.editor);
     return () => {
+      element.removeEventListener("click", focusThread);
       setEditor(null);
       binding.destroy();
     };
-  }, [connection]);
+  }, [connection, onSelectThread]);
 
   return (
     <>
@@ -207,8 +223,14 @@ function BoundEditor({ connection }: { connection: RoomConnection }): ReactEleme
 
 export function EditorPane({
   connection,
+  onSelectThread,
 }: {
   connection: RoomConnection | null;
+  /**
+   * Called when a click lands inside a comment highlight, so the rail can focus
+   * that thread. Must be referentially stable — it is an effect dependency.
+   */
+  onSelectThread: (threadId: string) => void;
 }): ReactElement {
   const meta = useDocMeta(connection);
   const foreign = useForeignBlocks(connection);
@@ -241,7 +263,7 @@ export function EditorPane({
             summary={describeForeignBlocks(foreign)}
           />
         ) : (
-          <BoundEditor connection={connection} />
+          <BoundEditor connection={connection} onSelectThread={onSelectThread} />
         )}
       </div>
     </section>
