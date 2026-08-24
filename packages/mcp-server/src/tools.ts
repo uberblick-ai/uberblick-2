@@ -52,6 +52,7 @@ import { z } from "zod";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
 import type { Replica, Replicas } from "./replica.js";
+import { collectSyncStatus } from "./status.js";
 
 /** A tool failure with a stable machine-readable code. */
 class ToolError extends Error {
@@ -665,28 +666,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "to serve until the server is restarted.",
       inputSchema: {},
     },
-    // Diagnostics must still answer when persistence has failed — that is
-    // exactly when someone needs to know why every other tool stopped.
-    guarded(async () => {
-      await replicas.settle({ requireHealthy: false });
-      const pending = replicas.store.pendingRooms();
-      return json({
-        session: replicas.config.sessionId,
-        agent: replicas.name,
-        workspace: replicas.config.workspaceId,
-        database: replicas.store.databasePath,
-        hub: replicas.sync.state(),
-        unsyncedChanges: pending.length,
-        pendingRooms: pending,
-        inFlightUpdates: replicas.sync.unsyncedChanges(),
-        rooms: replicas.attachedReplicas().map((replica) => ({
-          room: replica.room,
-          appliedSeq: replica.lastSeq,
-          synced: replicas.isRoomQuiet(replica.room),
-        })),
-        logEntries: replicas.store.logSize(),
-        persistence: replicas.persistenceError(),
-      });
-    }),
+    // The same snapshot `ub status` prints — see ./status.ts. Diagnostics must
+    // still answer when persistence has failed, which is exactly when someone
+    // needs to know why every other tool stopped.
+    guarded(async () => json(await collectSyncStatus(replicas))),
   );
 }

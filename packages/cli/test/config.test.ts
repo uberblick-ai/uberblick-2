@@ -1,0 +1,165 @@
+/**
+ * Configuration resolution is the contract every `ub` subcommand inherits, and
+ * precedence is the part that is easy to get subtly wrong. Environment first,
+ * because `HUB_URL=… ub mcp serve` has to keep working; then the committable
+ * per-directory file; then the user's own config; then the built-in defaults,
+ * which live in the MCP server and are not redefined here.
+ */
+
+import { join } from "node:path";
+import { statSync } from "node:fs";
+import { DEFAULT_HUB_URL, resolveMcpConfig } from "@uberblick/mcp-server";
+import { afterAll, describe, expect, it } from "vitest";
+import { resolveConfig, writeCredentials } from "../src/config.js";
+import { removeTempDirs, sandbox } from "./helpers.js";
+
+afterAll(removeTempDirs);
+
+describe("resolveConfig", () => {
+  it("defaults when no configuration file exists anywhere", () => {
+    const box = sandbox();
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
+
+    expect(resolved.warnings).toEqual([]);
+    expect(resolved.origins).toEqual({
+      workspace: "default",
+      hubUrl: "default",
+      credential: null,
+    });
+
+    // The defaults themselves are the MCP server's, reached by handing it the
+    // resolved environment — one definition of the workspace, the hub and the
+    // database path.
+    const config = resolveMcpConfig(resolved.env);
+    expect(config.workspaceId).toBe("main");
+    expect(config.hubUrl).toBe(DEFAULT_HUB_URL);
+    expect(config.authSecret).toBeNull();
+    expect(config.databasePath).toBe(
+      join(box.dataHome, "uberblick", "main.sqlite"),
+    );
+  });
+
+  it("resolves workspace and hub URL in precedence order", () => {
+    const files = {
+      userConfig: { workspace: "from-user", hubUrl: "ws://user:1" },
+      directoryFile: { workspace: "from-directory", hubUrl: "ws://directory:2" },
+    };
+
+    const user = sandbox({ userConfig: files.userConfig });
+    const fromUser = resolveConfig({ env: user.env, cwd: user.cwd });
+    expect(resolveMcpConfig(fromUser.env).workspaceId).toBe("from-user");
+    expect(resolveMcpConfig(fromUser.env).hubUrl).toBe("ws://user:1");
+    expect(fromUser.origins.workspace).toBe("user config");
+    expect(fromUser.origins.hubUrl).toBe("user config");
+
+    const both = sandbox(files);
+    const fromDirectory = resolveConfig({ env: both.env, cwd: both.cwd });
+    expect(resolveMcpConfig(fromDirectory.env).workspaceId).toBe("from-directory");
+    expect(resolveMcpConfig(fromDirectory.env).hubUrl).toBe("ws://directory:2");
+    expect(fromDirectory.origins.workspace).toBe("directory file");
+    expect(fromDirectory.origins.hubUrl).toBe("directory file");
+
+    const withEnv = sandbox(files);
+    const fromEnv = resolveConfig({
+      env: {
+        ...withEnv.env,
+        WORKSPACE_ID: "from-env",
+        HUB_URL: "ws://env:3",
+      },
+      cwd: withEnv.cwd,
+    });
+    expect(resolveMcpConfig(fromEnv.env).workspaceId).toBe("from-env");
+    expect(resolveMcpConfig(fromEnv.env).hubUrl).toBe("ws://env:3");
+    expect(fromEnv.origins.workspace).toBe("environment");
+    expect(fromEnv.origins.hubUrl).toBe("environment");
+  });
+
+  it("takes the signing secret from credentials.json, and the environment first", () => {
+    const box = sandbox({ credentials: { signingSecret: "from-file" } });
+
+    const fromFile = resolveConfig({ env: box.env, cwd: box.cwd });
+    expect(fromFile.origins.credential).toBe("credentials file");
+    expect(resolveMcpConfig(fromFile.env).authSecret).toBe("from-file");
+
+    const fromEnv = resolveConfig({
+      env: { ...box.env, HUB_AUTH_TOKEN: "from-env" },
+      cwd: box.cwd,
+    });
+    expect(fromEnv.origins.credential).toBe("environment");
+    expect(resolveMcpConfig(fromEnv.env).authSecret).toBe("from-env");
+  });
+
+  it("rejects a workspace that is not a single path segment, naming the source", () => {
+    // The MCP server's rule, applied to file-sourced values: the workspace names
+    // the SQLite file, and `path.join` follows every one of these out of the
+    // data directory.
+    for (const workspace of ["a/b", "..", ".", "..\\outside"]) {
+      const box = sandbox({ directoryFile: { workspace } });
+      expect(() => resolveConfig({ env: box.env, cwd: box.cwd })).toThrow(
+        /uberblick\.json/,
+      );
+    }
+
+    const fromEnv = sandbox();
+    expect(() =>
+      resolveConfig({
+        env: { ...fromEnv.env, WORKSPACE_ID: "a/b" },
+        cwd: fromEnv.cwd,
+      }),
+    ).toThrow(/WORKSPACE_ID/);
+  });
+
+  it("warns about a file it cannot use, and falls through to the layer below", () => {
+    const box = sandbox({
+      userConfig: { workspace: "from-user" },
+      raw: { directoryFile: "{ not json" },
+    });
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
+
+    expect(resolved.warnings.join("\n")).toMatch(/uberblick\.json.*invalid JSON/);
+    expect(resolveMcpConfig(resolved.env).workspaceId).toBe("from-user");
+
+    // A known key of the wrong type is the same story: warn, do not adopt.
+    const typed = sandbox({ directoryFile: { workspace: 42 } });
+    const fromTyped = resolveConfig({ env: typed.env, cwd: typed.cwd });
+    expect(fromTyped.warnings.join("\n")).toMatch(/"workspace".*non-empty string/);
+    expect(resolveMcpConfig(fromTyped.env).workspaceId).toBe("main");
+  });
+
+  it("warns when the credentials file is readable by anyone else", () => {
+    const box = sandbox({
+      credentials: { signingSecret: "secret" },
+      credentialsMode: 0o644,
+    });
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
+    expect(resolved.warnings.join("\n")).toMatch(/mode 0644.*should be 0600/);
+  });
+
+  it("refuses a signing secret in a committable file", () => {
+    const box = sandbox({ directoryFile: { signingSecret: "nope" } });
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
+
+    expect(resolved.warnings.join("\n")).toMatch(/credentials\.json/);
+    expect(resolveMcpConfig(resolved.env).authSecret).toBeNull();
+  });
+});
+
+describe("writeCredentials", () => {
+  it("creates the file 0600, and repairs the mode of one that already exists", () => {
+    const box = sandbox({
+      credentials: { signingSecret: "old" },
+      credentialsMode: 0o644,
+    });
+
+    const path = writeCredentials({ signingSecret: "new" }, box.env);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+
+    const fresh = sandbox();
+    const created = writeCredentials({ signingSecret: "new" }, fresh.env);
+    expect(statSync(created).mode & 0o777).toBe(0o600);
+    expect(
+      resolveMcpConfig(resolveConfig({ env: fresh.env, cwd: fresh.cwd }).env)
+        .authSecret,
+    ).toBe("new");
+  });
+});

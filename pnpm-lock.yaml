@@ -20,6 +20,28 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/cli:
+    dependencies:
+      '@uberblick/mcp-server':
+        specifier: workspace:*
+        version: link:../mcp-server
+    devDependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.30.0
+        version: 1.30.0(zod@4.4.3)
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@26.2.0)(jsdom@30.0.1)(vite@8.2.2(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.12))
+
   packages/hub:
     dependencies:
       '@hocuspocus/extension-sqlite':

@@ -13,8 +13,9 @@ mirror (FTS5, tags, backlinks), and a Tiptap/ProseMirror web client.
 | `packages/hub`             | Hocuspocus sync hub, SQLite persistence. Binds `HUB_HOST`:`PORT` (default `127.0.0.1:1234`). |
 | `packages/mcp-server`      | MCP stdio server, local SQLite mirror, block-scoped tools.            |
 | `packages/web`             | Vite + React + Tiptap viewer/editor.                                  |
+| `packages/cli`             | The `ub` command line: config resolution, `ub status`, `ub mcp serve`. |
 
-All four are private workspace packages and resolve to their TypeScript sources
+All five are private workspace packages and resolve to their TypeScript sources
 (`exports` → `./src/index.ts`). Nothing imports build output: `tsx`, `vite` and
 `vitest` compile TypeScript directly, and `tsc` is only ever a typechecker here
 (`build` and `typecheck` both run `tsc --noEmit`). There is no `dist/` in any
@@ -88,6 +89,37 @@ What that config is careful about, since none of it is obvious:
 `mise run import-seed` is the one-time import of `docs-seed/` into the system.
 After it, the product docs live in the documents, and are read and written
 through the MCP tools rather than by editing the seed files.
+
+## The `ub` command line
+
+`ub` is what a *user* of uberblick runs. The contributor verbs — dev, lint,
+typecheck, test, e2e, review — stay mise tasks and are deliberately not
+duplicated there. Distribution comes later, so until then run it out of the
+checkout:
+
+```
+node packages/cli/bin/ub.mjs status          # workspace, hub, credential, sync state
+node packages/cli/bin/ub.mjs status --json   # the same, as one JSON object
+node packages/cli/bin/ub.mjs mcp serve       # the stdio entry point for an MCP client
+```
+
+Configuration is JSON and every layer is optional — absent configuration is a
+default, never an error, and no command requires an `init` to have run.
+Precedence, highest first:
+
+| Layer | Holds |
+| --- | --- |
+| environment (`WORKSPACE_ID`, `HUB_URL`, `HUB_AUTH_TOKEN`) | wins, so `HUB_URL=… ub mcp serve` keeps working |
+| `./uberblick.json` | binds one checkout to one workspace. Committable, so never secrets |
+| `$XDG_CONFIG_HOME/uberblick/config.json` | per-user default workspace and hub endpoint |
+| `$XDG_CONFIG_HOME/uberblick/credentials.json`, mode 0600 | the hub signing secret. Never printed by any command |
+| built-in defaults | workspace `main`, hub `ws://localhost:1234` |
+
+`ub mcp serve` resolves that configuration and runs the MCP server with it, so
+the server keeps its environment-only contract — no flags, no config file — and
+a client's spawn line never has to change again when internals move. `.mcp.json`
+still holds the older `pnpm --filter` spawn; rewriting it belongs to
+`ub mcp install`.
 
 ## Review isolation
 
