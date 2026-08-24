@@ -1,10 +1,14 @@
 /**
  * How `better-sqlite3.sqlite` was made. Kept so the fixture is reproducible.
  *
- * It was run once, on the commit that still used better-sqlite3, with:
+ * It was run once, on the commit that still used better-sqlite3, from the repo
+ * root — through `mise exec`, the toolchain entry point, like everything else
+ * here:
  *
- *   pnpm --filter @uberblick/mcp-server exec tsx \
+ *   mise exec -- pnpm --filter @uberblick/mcp-server exec tsx \
  *     test/fixtures/make-legacy.ts test/fixtures/better-sqlite3.sqlite
+ *
+ * (The target path is relative to the package, which is where `pnpm exec` runs.)
  *
  * Do not re-run it here. `MirrorStore` speaks `node:sqlite` now, so it would
  * overwrite the fixture with bytes from the new binding and quietly turn the
