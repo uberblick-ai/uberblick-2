@@ -548,6 +548,132 @@ body {
   color: var(--muted-foreground);
 }
 
+/* A settled conversation, kept and quietened: below the open ones, dimmed, and
+   collapsed to its head until the reader opens it back up. */
+.ub-thread-resolved {
+  opacity: 0.65;
+}
+
+.ub-rail-subhead {
+  margin-top: 0.9rem;
+}
+
+/* Beside the card's button, never inside it: a button may not contain one. */
+.ub-thread-actions {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.3rem 0 0 0.6rem;
+}
+
+/* ---- writing a comment ---- */
+
+/* The composer card, anchored next to the selection it is about to annotate.
+   The frame is the positioned ancestor; ProseMirror owns the editor's own
+   children, so the card lives beside it rather than inside it. */
+.ub-editor-frame {
+  position: relative;
+}
+
+.ub-composer {
+  position: absolute;
+  z-index: 5;
+  width: 20rem;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--brand);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: 0 8px 24px oklch(0 0 0 / 25%);
+  font-size: 0.85rem;
+}
+
+/* Before the field opens the card is just the affordance, so it shrinks to it. */
+.ub-composer:has(.ub-composer-open) {
+  width: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.ub-composer-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.ub-composer .ub-thread-excerpt {
+  font-size: 0.8rem;
+}
+
+.ub-comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ub-comment-input {
+  font: inherit;
+  font-size: 0.85rem;
+  resize: vertical;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.ub-comment-input:focus {
+  outline: none;
+  border-color: var(--ring);
+}
+
+.ub-mentions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+/* A mention is a typing shortcut for a convention, not a link to anything: the
+   chip inserts `@name` as text, and nothing is delivered anywhere. */
+.ub-mention {
+  font: inherit;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  cursor: pointer;
+}
+
+.ub-comment-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.25rem;
+}
+
+.ub-comment-buttons .ub-tool:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ub-comment-error {
+  margin: 0;
+  font-size: 0.75rem;
+  background: var(--destructive-subtle);
+  color: var(--foreground);
+  border-radius: var(--radius-sm);
+  padding: 0.2rem 0.35rem;
+}
+
 .ub-title {
   font-size: 1.4rem;
   font-weight: 700;
@@ -727,7 +853,11 @@ body {
 /* An annotated range. Amber ground plus an amber underline — the underline is
    what keeps the range legible when the ground alone is too quiet (a highlight
    the reader has to hunt for is not a highlight). Clickable: it focuses the
-   thread's card in the rail. */
+   thread's card in the rail.
+
+   A *resolved* thread's range fades to a neutral rule with no ground. That rule
+   cannot live here — it is per thread — so the rail emits it as a stylesheet
+   keyed by thread id; see `resolvedHighlightCss` in threads.ts. */
 .ub-comment {
   background: var(--brand-subtle);
   border-bottom: 2px solid var(--brand);

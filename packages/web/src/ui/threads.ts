@@ -43,12 +43,34 @@ const FLASH_MS = 1200;
 
 const FLASH_CLASS = "ub-comment-flash";
 
+/**
+ * Thread ids that may be written into a stylesheet verbatim. The schema package
+ * generates uuids — 36 characters — so this fits every id the system itself
+ * makes with room to spare; anything else came from a client that made one up.
+ *
+ * Bounded, because "harmless characters" is only half the question: an id that
+ * is a megabyte of hyphens injects a megabyte of selector per resolved thread,
+ * on every render of the rail. The shape a uuid cannot exceed is the shape this
+ * rule accepts.
+ */
+const SAFE_THREAD_ID = /^[0-9A-Za-z-]{1,64}$/;
+
 const BLOCK_LABELS: Record<BlockType, string> = {
   paragraph: "Paragraph",
   heading: "Heading",
   code: "Code block",
   mermaid: "Mermaid block",
 };
+
+/**
+ * How a block is named to a reader: by its kind and its place in the document,
+ * counted from one. The composer names the block it is about to annotate the
+ * same way a card names the block it is anchored in, because they are the same
+ * sentence at two moments.
+ */
+export function blockRefLabel(type: BlockType, index: number): string {
+  return `${BLOCK_LABELS[type]} ${index + 1}`;
+}
 
 /**
  * A comment plus the key the rail renders it under. A stored comment carries no
@@ -201,7 +223,7 @@ function blockRefFor(
   const block = byId.get(blockId);
   const index = order.get(blockId);
   if (block === undefined || index === undefined) return "deleted block";
-  return `${BLOCK_LABELS[block.type]} ${index + 1}`;
+  return blockRefLabel(block.type, index);
 }
 
 /**
@@ -360,6 +382,35 @@ export function flashThreadHighlight(threadId: string): void {
       }, FLASH_MS),
     );
   }
+}
+
+/**
+ * The rule that fades a resolved thread's highlight back into the prose.
+ *
+ * A stylesheet and not a class on the span, because the span is ProseMirror's:
+ * it is rebuilt whenever the text inside it changes, and a class this app wrote
+ * would vanish on the next keystroke and come back only at the next annotation
+ * change. A selector matching `data-comment-thread` — which the mark itself
+ * renders (editor/nodes.ts) — survives every redraw, and resolving a thread is
+ * rare enough that regenerating one rule costs nothing.
+ *
+ * The declarations are the resolved *state* of `.ub-comment` in styles.css: the
+ * amber ground goes and the underline thins to a dotted neutral rule. Faded,
+ * not gone — the range is still annotated, and a reader must still be able to
+ * find the conversation from the prose.
+ *
+ * A thread id is data — it is a key in a Y.Map any client can write — so it is
+ * checked against {@link SAFE_THREAD_ID}, in shape *and* in length, rather than
+ * escaped. Escaping a CSS string means getting backslashes, quotes *and* the
+ * line terminators that end a string early all right, and a rule this small is
+ * not worth that. An id the check refuses simply gets no fade rule: its
+ * highlight stays amber, which is loud and harmless.
+ */
+export function resolvedHighlightCss(threadIds: readonly string[]): string {
+  const safe = threadIds.filter((id) => SAFE_THREAD_ID.test(id));
+  if (safe.length === 0) return "";
+  const selector = safe.map((id) => `[data-comment-thread="${id}"]`).join(",");
+  return `${selector}{background:transparent;border-bottom:1px dotted var(--muted-foreground);}`;
 }
 
 /** Scroll a thread's card into view inside the rail. */
