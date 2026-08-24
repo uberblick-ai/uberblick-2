@@ -10,7 +10,7 @@
  */
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
+import { closeSync, constants, openSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -83,6 +83,35 @@ function whenServing(child: ChildProcess): Promise<void> {
       }
     });
   });
+}
+
+/**
+ * A stand-in for a client that outlives the wrapper, which is the only condition
+ * under which a signal the wrapper fails to forward is observable: a real MCP
+ * client keeps running and keeps the server's stdin open, so an orphaned server
+ * never sees EOF and lives on. An ordinary pipe cannot reproduce that — Node
+ * closes our write end as soon as the wrapper exits, the orphan shuts down on
+ * stdin-close, and a missing forward looks exactly like a working one.
+ *
+ * The two ends are deliberately separate descriptors. The child must get a
+ * read-only one: an `O_RDWR` descriptor would make the server a writer to its
+ * own stdin, so closing the parent's end could never produce EOF and a failing
+ * test would hang instead of failing (and `O_RDWR` on a FIFO is undefined by
+ * POSIX besides). Opening read-only blocks until a writer appears and write-only
+ * blocks until a reader does, hence the non-blocking placeholder that breaks the
+ * deadlock and is dropped once the real pair exists.
+ */
+function clientStdin(path: string): { childEnd: number; writer: number } {
+  execFileSync("mkfifo", [path]);
+  const placeholder = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const writer = openSync(path, constants.O_WRONLY);
+    // Returns at once, a writer now exists — and blocking, so the child's stdin
+    // is an ordinary descriptor.
+    return { childEnd: openSync(path, constants.O_RDONLY), writer };
+  } finally {
+    closeSync(placeholder);
+  }
 }
 
 describe("ub mcp serve", () => {
@@ -161,34 +190,39 @@ describe("ub mcp serve", () => {
     "forwards %s to the server, takes it down, and dies of it too",
     async (signal) => {
       const box = sandbox();
-      // A real client outlives the wrapper and holds the server's stdin open;
-      // that is the only condition under which failing to forward is visible.
-      // An ordinary pipe cannot reproduce it — Node closes our write end when
-      // the wrapper exits, the orphan then shuts down on stdin-close, and an
-      // unforwarded signal would look exactly like a forwarded one. A FIFO we
-      // keep open ourselves never reaches EOF, so a server the wrapper did not
-      // signal simply lives on, holding the inherited stdout and stderr.
-      const stdin = join(box.cwd, "client-stdin");
-      execFileSync("mkfifo", [stdin]);
-      // "r+" so this end is a writer too: the FIFO stays open with no reader.
-      const held = openSync(stdin, "r+");
-
+      const { childEnd, writer } = clientStdin(join(box.cwd, "client-stdin"));
+      // Its own process group, so teardown can take a survivor down by group
+      // even after the wrapper — the group's leader — is gone. `child.kill`
+      // below still targets the wrapper's pid alone, which is the case at issue.
       const child = spawn(process.execPath, [UB_BIN, "mcp", "serve"], {
         cwd: box.cwd,
         env: box.env,
-        stdio: [held, "pipe", "pipe"],
+        stdio: [childEnd, "pipe", "pipe"],
+        detached: true,
       });
       // Both pipes have to be consumed or their EOF is never observed and
       // `close` could not fire at all. stderr is read by `whenServing`.
       child.stdout?.resume();
 
       // `close`, not `exit`: it waits for the inherited stdio to close as well,
-      // so an orphaned server keeps it from firing and the test times out. That
-      // is the forwarding half. Waiting on `exit` alone would prove nothing,
-      // because a wrapper that forwards nothing still dies of the signal.
-      const closed = new Promise<NodeJS.Signals | null>((resolve) => {
-        child.on("close", (_code, closedBy) => resolve(closedBy));
+      // so an orphaned server keeps it from firing. That is the forwarding half.
+      // Waiting on `exit` alone would prove nothing, because a wrapper that
+      // forwards nothing still dies of the signal itself.
+      const closed = new Promise<NodeJS.Signals | null | "the server outlived the wrapper">(
+        (resolve) => {
+          child.on("close", (_code, closedBy) => resolve(closedBy));
+        },
+      );
+
+      // Bounded here rather than at Vitest's outer timeout: that one fails the
+      // test without unwinding it, so `finally` would never run and a live MCP
+      // server would leak out of the suite. This resolves instead, so teardown
+      // always happens and the failure is the assertion below.
+      let timer: NodeJS.Timeout | undefined;
+      const outlived = new Promise<"the server outlived the wrapper">((resolve) => {
+        timer = setTimeout(() => resolve("the server outlived the wrapper"), 10_000);
       });
+
       try {
         await whenServing(child);
         child.kill(signal);
@@ -196,9 +230,25 @@ describe("ub mcp serve", () => {
         // And the wrapper's own death is the signal, not a plain exit with
         // 128+n: a supervisor reading WIFSIGNALED cannot tell it from a direct
         // spawn. That is the re-raise half.
-        expect(await closed).toBe(signal);
+        expect(await Promise.race([closed, outlived])).toBe(signal);
       } finally {
-        closeSync(held);
+        clearTimeout(timer);
+        closeSync(writer);
+        closeSync(childEnd);
+        // Nothing should be left; kill the group in case something is, and wait
+        // for the reaping so the suite never carries a survivor into the next
+        // test. `child.pid` is undefined only if the spawn itself failed.
+        try {
+          if (child.pid !== undefined) {
+            process.kill(-child.pid, "SIGKILL");
+          }
+        } catch {
+          // ESRCH: the group is already gone, which is the expected case.
+        }
+        await Promise.race([
+          closed,
+          new Promise((resolve) => setTimeout(resolve, 2_000)),
+        ]);
       }
     },
   );
