@@ -65,8 +65,8 @@ protocol, scheduling semantics, and lint. This file does not restate it.
      forward;
    - your validation against every acceptance checkbox on each linked issue —
      check a box only with evidence (command output, test name);
-   - footprint check: the diff stays within the declared `Touches` — the
-     shared set when the PR closes a batch;
+   - gate check: the diff stays within the declared `Touches` — the shared set
+     when the PR closes a batch;
    - GitHub Copilot review requested and returned;
    - local Codex review of the PR where CLAUDE.md's gate list calls for one —
      it is the authority on scope; in short: a diff touching

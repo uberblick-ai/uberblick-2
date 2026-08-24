@@ -37,7 +37,7 @@ Touches: mcp-server, schema
 
 - **Eligible** = labeled `ready` AND every `Depends-on` issue is closed AND
   not claimed.
-- Parallelism is judged at **file** level, not footprint level: overlapping
+- Parallelism is judged at **file** level, not `Touches`-set level: overlapping
   `Touches` sets do not by themselves queue. From the issues' scope and
   Pointers the loop forms an expectation of which files each will edit, and
   dispatches in parallel (separate worktrees) whenever those are expected to be
