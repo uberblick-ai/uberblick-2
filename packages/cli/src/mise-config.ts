@@ -30,16 +30,24 @@
  */
 
 import {
-  type Stats,
-  chmodSync,
+  closeSync,
+  constants,
   existsSync,
-  lstatSync,
+  fstatSync,
+  linkSync,
+  openSync,
   readFileSync,
+  renameSync,
   statSync,
-  writeFileSync,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
+import {
+  describeFsError,
+  isSymlinkRefusal,
+  removeQuietly,
+  writeTempBeside,
+} from "./safe-write.js";
 
 /** mise's conventional local config: read after `mise.toml`, and gitignored. */
 export const LOCAL_CONFIG_FILE = "mise.local.toml";
@@ -107,34 +115,33 @@ type Inspection =
   | { kind: "unusable"; because: string };
 
 function inspect(path: string): Inspection {
-  let stats: Stats;
+  let fd: number;
   try {
-    stats = lstatSync(path);
+    // O_NOFOLLOW, so a symlink is an ELOOP refusal rather than a decision made
+    // about one file and applied to another.
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return { kind: "absent" };
     }
-    return { kind: "unusable", because: describe(error) };
+    if (isSymlinkRefusal(error)) {
+      return { kind: "unusable", because: "it is a symbolic link" };
+    }
+    return { kind: "unusable", because: describeFsError(error) };
   }
-  if (stats.isSymbolicLink()) {
-    return { kind: "unusable", because: "it is a symbolic link" };
-  }
-  if (!stats.isFile()) {
-    return { kind: "unusable", because: "it is not a regular file" };
-  }
-  let text: string;
   try {
-    text = readFileSync(path, "utf8");
+    // Both facts come from the descriptor, so they describe the same inode: the
+    // name is resolved once, here, and never again.
+    if (!fstatSync(fd).isFile()) {
+      return { kind: "unusable", because: "it is not a regular file" };
+    }
+    const text = readFileSync(fd, "utf8");
+    return text.startsWith(MARKER) ? { kind: "ours", text } : { kind: "foreign" };
   } catch (error) {
-    return { kind: "unusable", because: describe(error) };
+    return { kind: "unusable", because: describeFsError(error) };
+  } finally {
+    closeSync(fd);
   }
-  return text.startsWith(MARKER) ? { kind: "ours", text } : { kind: "foreign" };
-}
-
-/** An fs error's message names the path and the errno, never file contents. */
-function describe(error: unknown): string {
-  const code = (error as NodeJS.ErrnoException).code;
-  return code === undefined ? "it could not be read" : `it could not be read (${code})`;
 }
 
 /**
@@ -304,11 +311,42 @@ export function writeLocalConfig(
     };
   }
 
-  if (found.kind === "ours") {
-    chmodSync(path, 0o600);
+  // Published, not written in place. Two things follow, and both matter:
+  //
+  // - mise may be reading this file right now, and half of a TOML file is a
+  //   parse error that takes every task in the directory down. `link` and
+  //   `rename` both swap a complete file in, in one step.
+  // - Whichever `ub init` publishes last publishes contents derived from an
+  //   authority that can no longer change (see `claimSigningSecret`), so the
+  //   order they finish in stops mattering.
+  //
+  // `link` for a path that was absent, because it must not overwrite anything
+  // that appeared since; `rename` for one of ours, because it must. Neither
+  // writes *through* a symlink even if one is swapped in after the check: they
+  // replace the name, they do not follow it.
+  const staged = writeTempBeside(path, render(env));
+  try {
+    if (found.kind === "absent") {
+      linkSync(staged, path);
+    } else {
+      renameSync(staged, path);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw error;
+    }
+    // Somebody created the file between the check and the publication. That is
+    // the same answer as finding it there in the first place: leave it alone.
+    return {
+      written: false,
+      path,
+      reason:
+        `${path} appeared while \`ub init\` was running, so it was left alone. ` +
+        "Run `ub init` again.",
+    };
+  } finally {
+    removeQuietly(staged);
   }
-  writeFileSync(path, render(env), { mode: 0o600 });
-  chmodSync(path, 0o600);
   return { written: true, path };
 }
 

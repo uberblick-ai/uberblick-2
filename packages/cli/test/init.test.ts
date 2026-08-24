@@ -354,7 +354,7 @@ describe("ub init", () => {
     chmodSync(localConfigPath(unreadable), 0o000);
     const first = runUb(["init", "--yes"], unreadable, WITHOUT_MISE);
     expect(first.status).toBe(0);
-    expect(first.stderr).toMatch(/was left alone: it could not be read/);
+    expect(first.stderr).toMatch(/was left alone: it could not be opened/);
     expect(statSync(localConfigPath(unreadable)).mode & 0o777).toBe(0o000);
 
     const linked = sandbox({ checkout: true });

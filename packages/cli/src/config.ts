@@ -28,16 +28,11 @@
  * `./uberblick.json` chose — see {@link secretAppliesTo}.
  */
 
-import {
-  chmodSync,
-  mkdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { linkSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { assertWorkspaceSegment } from "@uberblick/mcp-server";
+import { removeQuietly, writeOwnerOnly, writeTempBeside } from "./safe-write.js";
 
 /** The directory `ub`'s own files live in, under the XDG config home. */
 const CONFIG_DIR = "uberblick";
@@ -237,9 +232,9 @@ export function readUserConfig(env: NodeJS.ProcessEnv = process.env): {
  * but it is one user's configuration and no other account has business reading
  * or — the part that matters — writing the hub URL a signed token is sent to.
  *
- * Same mode dance as {@link writeCredentials}, for the same reason: `mode:`
- * applies only to a file being created and is subject to the umask besides, so a
- * file that already exists at 0644 would keep that mode through every rewrite.
+ * Written by {@link writeOwnerOnly}, exactly like `credentials.json` beside it:
+ * one rule for how this CLI puts a file on disk, rather than a weaker one for
+ * the file that happens not to hold the secret.
  */
 export function writeUserConfig(
   config: Record<string, unknown>,
@@ -247,9 +242,7 @@ export function writeUserConfig(
 ): string {
   const path = userConfigPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  tighten(path);
-  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-  chmodSync(path, 0o600);
+  writeOwnerOnly(path, serialize(config));
   return path;
 }
 
@@ -455,28 +448,14 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   };
 }
 
-/**
- * Make an existing file owner-only BEFORE writing into it.
- *
- * `mode:` on `writeFileSync` applies only to a file being *created*, so a
- * pre-existing 0644 file would otherwise hold the new contents while still
- * world-readable until the chmod after the write. ENOENT is the ordinary case —
- * there is no file yet — and `mode:` covers that one.
- */
-function tighten(path: string): void {
-  try {
-    chmodSync(path, 0o600);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-  }
-}
-
 /** What `credentials.json` may hold today. Remote tokens arrive with #84. */
 export interface Credentials {
   /** The hub's HMAC signing secret — not a token. */
   signingSecret?: string;
+}
+
+function serialize(value: unknown): string {
+  return `${JSON.stringify(value, null, 2)}\n`;
 }
 
 /**
@@ -484,7 +463,10 @@ export interface Credentials {
  *
  * The writer lives next to the reader because the mode is the point: this file
  * holds the secret every hub token is signed with, so it must never be readable
- * by another user on the machine. `ub init` (#78) is its first caller.
+ * by another user on the machine. Every guarantee about how that is done — the
+ * descriptor tightened before anything is written, symlinks refused rather than
+ * followed — belongs to {@link writeOwnerOnly}, which is also what writes
+ * `config.json`.
  */
 export function writeCredentials(
   credentials: Credentials,
@@ -492,13 +474,7 @@ export function writeCredentials(
 ): string {
   const path = credentialsPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  tighten(path);
-  writeFileSync(path, `${JSON.stringify(credentials, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  // And state the mode outright afterwards, rather than inferring it from the
-  // two paths above: `mode` on creation is still subject to the umask.
-  chmodSync(path, 0o600);
+  writeOwnerOnly(path, serialize(credentials));
   return path;
 }
 
@@ -509,18 +485,26 @@ export function writeCredentials(
  * This is the race `ub init` must not lose. Two fresh runs (a `mise run setup`
  * and an editor's MCP client starting at the same moment) would each generate a
  * secret, and last-write-wins leaves one of them convinced of a value that is no
- * longer there. So the create is exclusive: exactly one process can create the
+ * longer there. So the claim is exclusive: exactly one process can publish the
  * file, and every loser adopts the winner's secret rather than its own.
  *
- * `wx` is the whole mechanism — `open(O_CREAT|O_EXCL)` is atomic on every
- * filesystem this runs on, so no lock file, no temp-and-rename, and no window
- * where the file exists without its contents.
+ * **Written first, published second.** The mechanism is `link`, not an exclusive
+ * `open`. `open(O_CREAT|O_EXCL)` is atomic about the *name* but not about the
+ * contents: between the create and the write there is an instant where the file
+ * exists and is empty, and a loser that reads it then finds no secret and
+ * concludes there is none — which is the whole bug, one syscall further along.
+ * `link` publishes a name and complete contents in a single atomic step, and
+ * fails with EEXIST if anything already holds that name. There is therefore no
+ * moment at which `credentials.json` exists and is not readable, and no lock
+ * file is needed to say so.
  *
- * The remaining case is a `credentials.json` that already exists without a
- * signing secret in it (a remote token from #84, say). There the merge is an
- * ordinary read-modify-write, and two of those can still interleave — which is
- * survivable precisely because callers re-read this file before deriving
- * anything from it, so they converge on whatever the last writer left.
+ * The remaining case is a `credentials.json` that already exists *without* a
+ * signing secret in it (a remote token from #84, say). Adding one there is an
+ * ordinary read-modify-write of a file this user already owns, and two of those
+ * can still interleave. That is accepted: it is not the security-bearing race —
+ * no two secrets can exist after this function — and callers re-read the file
+ * before deriving anything from it, so they converge on what the last writer
+ * left.
  */
 export function claimSigningSecret(
   candidate: string,
@@ -528,24 +512,35 @@ export function claimSigningSecret(
 ): string {
   const path = credentialsPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+
+  const staged = writeTempBeside(path, serialize({ [SIGNING_SECRET_KEY]: candidate }));
   try {
-    writeFileSync(
-      path,
-      `${JSON.stringify({ [SIGNING_SECRET_KEY]: candidate }, null, 2)}\n`,
-      { flag: "wx", mode: 0o600 },
-    );
-    chmodSync(path, 0o600);
+    linkSync(staged, path);
     return candidate;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
       throw error;
     }
+  } finally {
+    // Either it is published under its real name now, or it lost — and either
+    // way this staging name must not be left holding a secret.
+    removeQuietly(staged);
   }
 
+  // Somebody else holds the name. Their secret is the one every other client on
+  // this machine will use, so it becomes ours.
   const existing = readCredentials(env);
   if (existing.signingSecret !== null) {
-    // Somebody else won. Their secret is the one every other client will use.
     return existing.signingSecret;
+  }
+  // `link` leaves no empty window, so a file with no secret in it genuinely has
+  // none. One re-read anyway, and only when the file did not parse at all — the
+  // shape a half-written file would have if some other writer ever produced one.
+  if (existing.raw === null) {
+    const second = readCredentials(env);
+    if (second.signingSecret !== null) {
+      return second.signingSecret;
+    }
   }
   writeCredentials({ ...existing.raw, [SIGNING_SECRET_KEY]: candidate }, env);
   return candidate;

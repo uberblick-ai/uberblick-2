@@ -7,7 +7,15 @@
  */
 
 import { join } from "node:path";
-import { readFileSync, statSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { DEFAULT_HUB_URL, resolveMcpConfig } from "@uberblick/mcp-server";
 import { afterAll, describe, expect, it } from "vitest";
 import {
@@ -258,6 +266,26 @@ describe("claimSigningSecret", () => {
     expect(statSync(credentialsPath(box.env)).mode & 0o777).toBe(0o600);
   });
 
+  it("publishes the file complete, never as an empty name a loser could read", () => {
+    // The reason this uses `link` rather than an exclusive `open`: the latter is
+    // atomic about the NAME only, so between creating the file and writing it
+    // there is an instant where a second process sees `credentials.json` with
+    // nothing in it and concludes there is no secret. Every state this file is
+    // ever observable in must therefore parse and carry the secret.
+    const box = sandbox();
+    claimSigningSecret("published-whole", box.env);
+
+    const path = credentialsPath(box.env);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      signingSecret: "published-whole",
+    });
+    // And nothing was left behind holding a copy of it under another name.
+    const directory = join(box.configHome, "uberblick");
+    for (const entry of readdirSync(directory)) {
+      expect(entry).toBe("credentials.json");
+    }
+  });
+
   it("fills in a credentials file that has other keys but no secret", () => {
     // Not the exclusive-create path: the file exists, so this is an ordinary
     // read-modify-write, and what it must not do is drop what it did not write.
@@ -266,6 +294,25 @@ describe("claimSigningSecret", () => {
 
     const written = JSON.parse(readFileSync(credentialsPath(box.env), "utf8"));
     expect(written).toEqual({ remoteToken: "keep-me", signingSecret: "mine" });
+  });
+});
+
+describe("writing the files ub owns", () => {
+  it("refuses a symlink rather than writing the secret through it", () => {
+    // Anything that can plant a symlink at `credentials.json` could otherwise
+    // choose which file receives the signing secret — and where it ends up
+    // readable. The refusal names the fix.
+    const box = sandbox();
+    const target = join(box.configHome, "elsewhere.json");
+    mkdirSync(join(box.configHome, "uberblick"), { recursive: true });
+    writeFileSync(target, "{}\n", "utf8");
+    symlinkSync(target, credentialsPath(box.env));
+
+    expect(() => writeCredentials({ signingSecret: "never" }, box.env)).toThrow(
+      /it is a symbolic link/,
+    );
+    expect(readFileSync(target, "utf8")).toBe("{}\n");
+    expect(lstatSync(credentialsPath(box.env)).isSymbolicLink()).toBe(true);
   });
 });
 
