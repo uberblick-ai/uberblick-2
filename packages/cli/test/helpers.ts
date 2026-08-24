@@ -12,7 +12,7 @@
  * test of their machine — including a hub connection to their real corpus.
  */
 
-import { type SpawnSyncReturns, spawnSync } from "node:child_process";
+import { type SpawnSyncReturns, spawn, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -159,6 +159,40 @@ export function runUb(
   const stdout = result.stdout ?? "";
   const stderr = result.stderr ?? "";
   return { status: result.status, stdout, stderr, output: `${stdout}${stderr}` };
+}
+
+/**
+ * The same, without blocking — so a test can have two `ub` processes racing each
+ * other, which is the only way to observe what concurrent runs do to a file they
+ * both write.
+ */
+export function runUbAsync(
+  args: string[],
+  box: Sandbox,
+  extraEnv: NodeJS.ProcessEnv = {},
+): Promise<Run> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [UB_BIN, ...args], {
+      cwd: box.cwd,
+      env: { ...box.env, ...extraEnv },
+      timeout: 25_000,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", reject);
+    // `close`, not `exit`: both pipes have to be drained before the output is
+    // complete, and a test asserting "the secret appears nowhere" on a truncated
+    // capture would pass for the wrong reason.
+    child.on("close", (status) => {
+      resolve({ status, stdout, stderr, output: `${stdout}${stderr}` });
+    });
+  });
 }
 
 /** A hub address nothing listens on: `ub status` must not wait on the network. */

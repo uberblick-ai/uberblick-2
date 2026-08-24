@@ -18,9 +18,12 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
+  mkdirSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -30,6 +33,7 @@ import {
   REPO_ROOT,
   removeTempDirs,
   runUb,
+  runUbAsync,
   sandbox,
   type Sandbox,
 } from "./helpers.js";
@@ -68,6 +72,13 @@ function derivedSecret(box: Sandbox): string | null {
 
 /** mise is not on this PATH, which makes the trust step's failure path testable. */
 const WITHOUT_MISE = { PATH: "/usr/bin:/bin" };
+
+/**
+ * U+007F, written as an escape so it is visible in this source rather than an
+ * invisible byte. It is the character `JSON.stringify` leaves raw and TOML
+ * forbids raw — the reason values are checked before the derived file is written.
+ */
+const DELETE = "\u007f";
 
 const hasGit = spawnSync("git", ["--version"]).status === 0;
 
@@ -256,6 +267,107 @@ describe("ub init", () => {
       // And the file is still readable by the reader that has to rebuild it.
       expect(derivedSecret(box)).toBe(storedSecret(box));
     }
+  });
+
+  it("keeps the authority and the derived file agreeing under concurrent runs", async () => {
+    // Several fresh `ub init`s at the same moment — a `mise run setup` and an
+    // editor's MCP client, say. Last-write-wins would leave one of them having
+    // written a derived file for a secret that is no longer the authority's.
+    //
+    // Six at a time rather than two, though being honest about what this can
+    // prove: node's startup dominates each run, so the microseconds where the
+    // interleave happens are hard to hit on purpose, and reverting the fix does
+    // NOT reliably turn this red. The load-bearing regression test is the
+    // deterministic one in config.test.ts — the loser adopting the winner's
+    // secret, with no timing involved. What this defends is the property under
+    // real concurrency: every process exits 0 (an exclusive create that threw
+    // EEXIST at the caller would not), and the pair on disk agrees afterwards.
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const box = sandbox({ checkout: true });
+      const runs = await Promise.all(
+        Array.from({ length: 6 }, () =>
+          runUbAsync(["init", "--yes"], box, WITHOUT_MISE),
+        ),
+      );
+      for (const run of runs) {
+        expect(run.status, run.output).toBe(0);
+      }
+
+      const authority = storedSecret(box);
+      expect(derivedSecret(box)).toBe(authority);
+      // Exactly one secret survives: neither process printed its own, and the
+      // one on disk is the one both of them now describe.
+      for (const run of runs) {
+        expect(run.output).not.toContain(authority);
+      }
+    }
+  });
+
+  it("refuses to write a value mise could not parse", () => {
+    // `JSON.stringify` is not a complete TOML escaper: it leaves U+007F raw,
+    // and TOML forbids it raw in a basic string. `assertWorkspaceSegment`
+    // accepts it — a room key does not care — so this refusal belongs to the
+    // file rather than to the shared rule, and it happens before the write.
+    const box = sandbox({ checkout: true });
+    const run = runUb(
+      ["init", "--yes", "--workspace", `team${DELETE}`],
+      box,
+      WITHOUT_MISE,
+    );
+    expect(run.status).toBe(2);
+    expect(run.stderr).toMatch(
+      /--workspace cannot be used because it contains control characters/,
+    );
+    expect(existsSync(localConfigPath(box))).toBe(false);
+  });
+
+  it("keeps a path out of the file it writes, however that path is spelled", () => {
+    // The authority's path is attacker-influenced (XDG_CONFIG_HOME), the derived
+    // file is TOML, and `ub init` asks mise to TRUST it — so a newline in that
+    // path must not be able to add a line to it. It is not interpolated at all.
+    const box = sandbox({ checkout: true });
+    const evil = join(box.configHome, 'evil\nINJECTED = "yes"');
+    mkdirSync(evil, { recursive: true });
+
+    const run = runUb(["init", "--yes"], box, {
+      ...WITHOUT_MISE,
+      XDG_CONFIG_HOME: evil,
+    });
+    expect(run.status).toBe(0);
+
+    const local = readFileSync(localConfigPath(box), "utf8");
+    expect(local).not.toMatch(/INJECTED/);
+    expect(local).not.toContain(evil);
+    // Still a file whose one derived value reads back.
+    const secret = JSON.parse(
+      readFileSync(join(evil, ...CREDENTIALS), "utf8"),
+    ).signingSecret;
+    expect(derivedSecret(box)).toBe(secret);
+  });
+
+  it("leaves a mise.local.toml it cannot read, and one that is a symlink", () => {
+    // Failing open here means chmodding and truncating somebody else's file —
+    // or, through a symlink, writing the signing secret into whatever the link
+    // points at.
+    const unreadable = sandbox({ checkout: true });
+    writeFileSync(localConfigPath(unreadable), "[env]\nMINE = \"1\"\n");
+    chmodSync(localConfigPath(unreadable), 0o000);
+    const first = runUb(["init", "--yes"], unreadable, WITHOUT_MISE);
+    expect(first.status).toBe(0);
+    expect(first.stderr).toMatch(/was left alone: it could not be read/);
+    expect(statSync(localConfigPath(unreadable)).mode & 0o777).toBe(0o000);
+
+    const linked = sandbox({ checkout: true });
+    const target = join(linked.cwd, "target.toml");
+    writeFileSync(target, "[env]\nMINE = \"1\"\n");
+    symlinkSync(target, localConfigPath(linked));
+    const second = runUb(["init", "--yes"], linked, WITHOUT_MISE);
+    expect(second.status).toBe(0);
+    expect(second.stderr).toMatch(/was left alone: it is a symbolic link/);
+    // The link is intact and its target never saw the secret.
+    expect(lstatSync(localConfigPath(linked)).isSymbolicLink()).toBe(true);
+    expect(readFileSync(target, "utf8")).toBe("[env]\nMINE = \"1\"\n");
+    expect(readFileSync(target, "utf8")).not.toContain(storedSecret(linked));
   });
 
   it("repairs the mode of a config.json that was left readable", () => {

@@ -34,6 +34,7 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { assertWorkspaceSegment, resolveMcpConfig } from "@uberblick/mcp-server";
 import {
+  claimSigningSecret,
   readCredentials,
   readUserConfig,
   resolveConfig,
@@ -46,6 +47,7 @@ import {
   derivedSecret,
   findCheckoutRoot,
   isOwnerOnly,
+  tomlUnsafeReason,
   trustLocalConfig,
   writeLocalConfig,
 } from "./mise-config.js";
@@ -269,6 +271,15 @@ export async function initCommand(
     io.err(`ub init: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
   }
+  // And the one thing that rule does not cover, because it is about the files
+  // this command writes rather than about rooms: a workspace with a control
+  // character in it cannot be put into the derived TOML at all.
+  const unsafe = tomlUnsafeReason(workspace);
+  if (unsafe !== null) {
+    const label = flags.workspace === undefined ? "the workspace" : "--workspace";
+    io.err(`ub init: ${label} cannot be used because ${unsafe}\n`);
+    return 2;
+  }
 
   // Merged over what is already there: a `hubUrl` somebody set, or a field a
   // later version of `ub` writes, is not `ub init`'s to drop.
@@ -313,23 +324,35 @@ export async function initCommand(
   } else if (derived !== null) {
     // The authority went missing while its derived copy survived. Restore it
     // from that copy: the same value, not a new one.
-    secret = derived;
-    writeCredentials({ ...stored.raw, signingSecret: secret });
+    secret = claimSigningSecret(derived);
     wroteCredentials = true;
     credentialNote = "restored from this checkout's local mise config";
   } else {
-    secret = generateSecret();
-    writeCredentials({ ...stored.raw, signingSecret: secret });
+    // An exclusive create, so two fresh runs cannot each believe in a different
+    // secret: the loser adopts the winner's and says the same thing about it.
+    secret = claimSigningSecret(generateSecret());
     wroteCredentials = true;
     credentialNote = "generated for local development";
   }
 
   // --- the derived mise config --------------------------------------------
+  //
+  // Derived from what is ON DISK, not from what this process decided: another
+  // `ub init` may have written between the decision above and here, and a
+  // derived file that disagrees with its authority is the one outcome this
+  // command must not produce. Same for the workspace — `config.json` is its
+  // authority, so the file that mirrors it re-reads it.
+  const persisted = readCredentials();
+  const persistedWorkspace = readUserConfig().config.workspace ?? workspace;
+  if (secret !== null && persisted.signingSecret !== null) {
+    secret = persisted.signingSecret;
+  }
+
   let localConfig: string | null = null;
   if (root !== null && secret !== null) {
     const outcome = writeLocalConfig(root, {
       signingSecret: secret,
-      workspace,
+      workspace: persistedWorkspace,
       authorityPath: stored.path,
     });
     if (outcome.written) {
@@ -357,7 +380,9 @@ export async function initCommand(
 
   let report = "uberblick initialised\n\n";
   report += field("identity", `${name} ${color}`);
-  report += field("workspace", workspace);
+  // What is on disk, which under a concurrent run is not always what this
+  // process asked for. The report describes the machine, not the intention.
+  report += field("workspace", persistedWorkspace);
   report += field("hub", inForce.hubUrl);
   // "credential", not "token": the value is the secret tokens are signed with,
   // and it is not in this report — only where it came from.

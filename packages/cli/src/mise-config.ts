@@ -30,8 +30,10 @@
  */
 
 import {
+  type Stats,
   chmodSync,
   existsSync,
+  lstatSync,
   readFileSync,
   statSync,
   writeFileSync,
@@ -85,13 +87,54 @@ export function localConfigPath(root: string): string {
   return join(root, LOCAL_CONFIG_FILE);
 }
 
-/** True when the file at `path` is absent or was written by this module. */
-function ours(path: string): boolean {
+/**
+ * What is at `path`, and whether this module may replace it.
+ *
+ * Every branch here is a decision about somebody else's file, so it fails
+ * **closed**: only `absent` and `ours` are writable, and everything unexpected —
+ * a permission error, a directory, a symlink, a socket — is refused with a
+ * reason rather than treated as "probably fine". Reading with a bare try/catch
+ * would say "not there" to all of them, and the next step chmods and truncates.
+ *
+ * `lstat`, not `stat`: a symlink must be seen as a symlink. Following one would
+ * let anything that can create `mise.local.toml` choose which file receives the
+ * signing secret — and `writeFileSync` follows symlinks happily.
+ */
+type Inspection =
+  | { kind: "absent" }
+  | { kind: "ours"; text: string }
+  | { kind: "foreign" }
+  | { kind: "unusable"; because: string };
+
+function inspect(path: string): Inspection {
+  let stats: Stats;
   try {
-    return readFileSync(path, "utf8").startsWith(MARKER);
-  } catch {
-    return true;
+    stats = lstatSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "absent" };
+    }
+    return { kind: "unusable", because: describe(error) };
   }
+  if (stats.isSymbolicLink()) {
+    return { kind: "unusable", because: "it is a symbolic link" };
+  }
+  if (!stats.isFile()) {
+    return { kind: "unusable", because: "it is not a regular file" };
+  }
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    return { kind: "unusable", because: describe(error) };
+  }
+  return text.startsWith(MARKER) ? { kind: "ours", text } : { kind: "foreign" };
+}
+
+/** An fs error's message names the path and the errno, never file contents. */
+function describe(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === undefined ? "it could not be read" : `it could not be read (${code})`;
 }
 
 /**
@@ -104,16 +147,11 @@ function ours(path: string): boolean {
  * exactly undoes the {@link toml} that wrote it.
  */
 export function derivedSecret(root: string): string | null {
-  let text: string;
-  try {
-    text = readFileSync(localConfigPath(root), "utf8");
-  } catch {
+  const found = inspect(localConfigPath(root));
+  if (found.kind !== "ours") {
     return null;
   }
-  if (!text.startsWith(MARKER)) {
-    return null;
-  }
-  const literal = /^HUB_AUTH_TOKEN = ("(?:[^"\\\n]|\\.)*")$/m.exec(text)?.[1];
+  const literal = /^HUB_AUTH_TOKEN = ("(?:[^"\\\n]|\\.)*")$/m.exec(found.text)?.[1];
   if (literal === undefined) {
     return null;
   }
@@ -129,7 +167,12 @@ export interface DerivedEnvironment {
   /** The hub signing secret. Written verbatim; never logged. */
   signingSecret: string;
   workspace: string;
-  /** Where the authority lives, named in the file so the file explains itself. */
+  /**
+   * Where the authority lives. Used in messages to the user only — never
+   * rendered into the file, because a path is attacker-influenced input (an
+   * `XDG_CONFIG_HOME` with a newline in it) and this file is fed to mise and
+   * then trusted.
+   */
   authorityPath: string;
 }
 
@@ -141,17 +184,52 @@ export interface DerivedEnvironment {
  * rather than restricting is the point: the workspace rule has one owner
  * (`assertWorkspaceSegment`), it allows a space or a quote, and a value every
  * other command accepts must not be one this file cannot write.
+ *
+ * It is not a *complete* escaper, which is why {@link tomlUnsafeReason} guards
+ * the two values that reach it — see there.
  */
 function toml(value: string): string {
   return JSON.stringify(value);
 }
 
+/**
+ * Why a value cannot go into a TOML basic string, or null when it can.
+ *
+ * Two gaps in `JSON.stringify` as a TOML escaper, both of which would produce a
+ * file that `ub init` exits 0 on and mise then refuses to parse — taking every
+ * task in the directory down with it:
+ *
+ * - It leaves U+007F and the C1 range raw. TOML forbids U+007F in a basic
+ *   string outright.
+ * - It emits `\uD800`-style escapes for unpaired surrogates, which are not
+ *   Unicode scalar values and so are not valid TOML escapes either.
+ *
+ * Refusing at the boundary rather than escaping harder: a control character in a
+ * workspace name or a signing secret is a mistake worth naming, and neither
+ * value has any business carrying one. The generated secret is base64url, so it
+ * passes by construction; this catches a hand-edited `credentials.json` and an
+ * exotic `--workspace`.
+ */
+export function tomlUnsafeReason(value: string): string | null {
+  if (/\p{Cc}/u.test(value)) {
+    return "it contains control characters";
+  }
+  // Under `u` the pattern iterates code points, so a well-formed pair is one
+  // astral code point and never matches; only an unpaired surrogate does.
+  // (`String.isWellFormed` says the same thing, but is ES2024 and the repo's
+  // `lib` is ES2023 — not a knob worth turning for one call.)
+  if (/\p{Surrogate}/u.test(value)) {
+    return "it contains unpaired surrogates";
+  }
+  return null;
+}
+
 function render(env: DerivedEnvironment): string {
   return `${MARKER}
 #
-# Derived from ${env.authorityPath} — same value, one owner. Do not edit: every
-# \`ub init\` rewrites it from that file. Delete it and rerun \`ub init\` and it
-# comes back with the same value.
+# Derived from $XDG_CONFIG_HOME/uberblick/credentials.json — same value, one
+# owner. Do not edit: every \`ub init\` rewrites it from that file. Delete it and
+# rerun \`ub init\` and it comes back with the same value.
 #
 # It exists because mise tasks and \`.mcp.json\` inherit their environment from
 # mise rather than from \`ub\`. \`fnox exec\` overrides it, so a decryptable
@@ -170,7 +248,12 @@ export type WriteOutcome =
   | { written: false; path: string; reason: string };
 
 /**
- * Write the derived config, owner-only, unless a foreign file is in the way.
+ * Write the derived config, owner-only, unless something is in the way.
+ *
+ * Nothing but an absent path or this module's own output is ever replaced, and
+ * a value mise could not parse is refused before the write rather than after.
+ * Every refusal is a message and a still-working machine: the derived file is a
+ * convenience for mise, and the authority is untouched either way.
  *
  * The mode dance mirrors `writeCredentials`: tighten first, because `mode` on
  * `writeFileSync` applies only to a file being created and is subject to the
@@ -181,7 +264,27 @@ export function writeLocalConfig(
   env: DerivedEnvironment,
 ): WriteOutcome {
   const path = localConfigPath(root);
-  if (!ours(path)) {
+
+  for (const value of [
+    { what: "the workspace", text: env.workspace },
+    // Never the secret itself in the message — only the fact and the fix.
+    { what: `the signing secret in ${env.authorityPath}`, text: env.signingSecret },
+  ]) {
+    const unsafe = tomlUnsafeReason(value.text);
+    if (unsafe !== null) {
+      return {
+        written: false,
+        path,
+        reason:
+          `${path} was not written: ${value.what} cannot go into a TOML file ` +
+          `because ${unsafe}. mise would refuse to parse the result, and that ` +
+          "takes down every task in this directory.",
+      };
+    }
+  }
+
+  const found = inspect(path);
+  if (found.kind === "foreign") {
     return {
       written: false,
       path,
@@ -191,12 +294,18 @@ export function writeLocalConfig(
         `in ${env.authorityPath} — or move the file aside and rerun.`,
     };
   }
-  try {
+  if (found.kind === "unusable") {
+    return {
+      written: false,
+      path,
+      reason:
+        `${path} was left alone: ${found.because}. Move it aside and rerun ` +
+        "`ub init`, which will write a fresh one.",
+    };
+  }
+
+  if (found.kind === "ours") {
     chmodSync(path, 0o600);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
   }
   writeFileSync(path, render(env), { mode: 0o600 });
   chmodSync(path, 0o600);

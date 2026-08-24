@@ -7,10 +7,15 @@
  */
 
 import { join } from "node:path";
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { DEFAULT_HUB_URL, resolveMcpConfig } from "@uberblick/mcp-server";
 import { afterAll, describe, expect, it } from "vitest";
-import { resolveConfig, writeCredentials } from "../src/config.js";
+import {
+  claimSigningSecret,
+  credentialsPath,
+  resolveConfig,
+  writeCredentials,
+} from "../src/config.js";
 import { removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -235,6 +240,32 @@ describe("resolveConfig", () => {
 
     expect(resolved.warnings.join("\n")).toMatch(/credentials\.json/);
     expect(resolveMcpConfig(resolved.env).authSecret).toBeNull();
+  });
+});
+
+describe("claimSigningSecret", () => {
+  it("lets the first caller win, and every later one adopt", () => {
+    // The concurrency contract, without the timing: two fresh `ub init`s each
+    // generate a candidate, and only one of them may become the secret. A
+    // second value replacing the first would strand every client — the hub, the
+    // web bundle, the MCP servers — that already holds it.
+    const box = sandbox();
+    expect(claimSigningSecret("first-candidate", box.env)).toBe("first-candidate");
+    expect(claimSigningSecret("second-candidate", box.env)).toBe("first-candidate");
+
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
+    expect(resolveMcpConfig(resolved.env).authSecret).toBe("first-candidate");
+    expect(statSync(credentialsPath(box.env)).mode & 0o777).toBe(0o600);
+  });
+
+  it("fills in a credentials file that has other keys but no secret", () => {
+    // Not the exclusive-create path: the file exists, so this is an ordinary
+    // read-modify-write, and what it must not do is drop what it did not write.
+    const box = sandbox({ credentials: { remoteToken: "keep-me" } });
+    expect(claimSigningSecret("mine", box.env)).toBe("mine");
+
+    const written = JSON.parse(readFileSync(credentialsPath(box.env), "utf8"));
+    expect(written).toEqual({ remoteToken: "keep-me", signingSecret: "mine" });
   });
 });
 

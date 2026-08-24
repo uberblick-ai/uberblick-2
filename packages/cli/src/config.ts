@@ -501,3 +501,52 @@ export function writeCredentials(
   chmodSync(path, 0o600);
   return path;
 }
+
+/**
+ * Put a signing secret in `credentials.json` and return the one now on disk —
+ * which is not necessarily the candidate.
+ *
+ * This is the race `ub init` must not lose. Two fresh runs (a `mise run setup`
+ * and an editor's MCP client starting at the same moment) would each generate a
+ * secret, and last-write-wins leaves one of them convinced of a value that is no
+ * longer there. So the create is exclusive: exactly one process can create the
+ * file, and every loser adopts the winner's secret rather than its own.
+ *
+ * `wx` is the whole mechanism — `open(O_CREAT|O_EXCL)` is atomic on every
+ * filesystem this runs on, so no lock file, no temp-and-rename, and no window
+ * where the file exists without its contents.
+ *
+ * The remaining case is a `credentials.json` that already exists without a
+ * signing secret in it (a remote token from #84, say). There the merge is an
+ * ordinary read-modify-write, and two of those can still interleave — which is
+ * survivable precisely because callers re-read this file before deriving
+ * anything from it, so they converge on whatever the last writer left.
+ */
+export function claimSigningSecret(
+  candidate: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const path = credentialsPath(env);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  try {
+    writeFileSync(
+      path,
+      `${JSON.stringify({ [SIGNING_SECRET_KEY]: candidate }, null, 2)}\n`,
+      { flag: "wx", mode: 0o600 },
+    );
+    chmodSync(path, 0o600);
+    return candidate;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw error;
+    }
+  }
+
+  const existing = readCredentials(env);
+  if (existing.signingSecret !== null) {
+    // Somebody else won. Their secret is the one every other client will use.
+    return existing.signingSecret;
+  }
+  writeCredentials({ ...existing.raw, [SIGNING_SECRET_KEY]: candidate }, env);
+  return candidate;
+}
