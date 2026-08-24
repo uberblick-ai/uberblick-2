@@ -26,9 +26,13 @@
  * be removed at all turns the wait into a spin. A crashed holder on a
  * single-user machine is instead a visible situation with a one-line fix, and
  * the timeout message says exactly which file to delete and how old it is.
- * Nothing here ever unlinks a lock this process did not create — releasing
- * checks the file's identity, not just its name, so a lock somebody deleted
- * mid-run and somebody else then took is left alone.
+ * Nothing here ever unlinks a lock this process did not create: the descriptor
+ * from the exclusive create is **held open for the lock's whole lifetime**, and
+ * releasing compares that descriptor against the name before removing it. A
+ * remembered inode number would not do — inode numbers are recycled once the
+ * file they belonged to is gone — but a held descriptor keeps the file alive, so
+ * the comparison cannot be fooled by a lock somebody deleted mid-run and
+ * somebody else then took.
  *
  * The atomic publications underneath stay exactly as they were. This lock makes
  * the common case orderly; they are what keeps a writer that is not `ub init` at
@@ -38,6 +42,7 @@
 import {
   closeSync,
   fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
   statSync,
@@ -85,21 +90,43 @@ function shellQuote(path: string): string {
 }
 
 /**
- * Whether `path` still names the file this process created.
+ * Close a descriptor whose close outcome nothing can act on.
  *
- * Device and inode together identify a file independently of its name, so a lock
- * that was deleted and recreated by somebody else fails this even though the
- * path is unchanged.
+ * Never called twice on the same descriptor: POSIX releases it even when `close`
+ * reports an error, so a retry could land on an unrelated file that has since
+ * been given the same number.
  */
-function isSameFile(
-  path: string,
-  identity: { dev: number; ino: number },
-): boolean {
+function closeQuietly(fd: number): void {
   try {
-    const stats = statSync(path);
-    return stats.dev === identity.dev && stats.ino === identity.ino;
+    closeSync(fd);
   } catch {
-    // Already gone: somebody removed it, and there is nothing to release.
+    // Nothing left to do about it, and nothing left that depends on it.
+  }
+}
+
+/**
+ * Whether `path` still names the file `fd` refers to.
+ *
+ * Device and inode identify a file independently of its name — but only while
+ * something pins the file, which is exactly what `fd` does. A *remembered*
+ * (dev, ino) pair is not enough: once the last descriptor closes and the file is
+ * unlinked, the filesystem is free to hand that inode number to the next file
+ * created, so a lock somebody deleted and recreated could match a recorded pair
+ * and be unlinked as if it were ours. Holding the descriptor open for the lock's
+ * whole lifetime makes that impossible: the inode cannot be reused while it is
+ * held, so `fstat` on it is always the file this process created.
+ *
+ * `lstat`, not `stat`: if the name has since become a symlink, the answer is
+ * "not ours" rather than whatever it points at.
+ */
+function namesHeldFile(fd: number, path: string): boolean {
+  try {
+    const held = fstatSync(fd);
+    const named = lstatSync(path);
+    return held.dev === named.dev && held.ino === named.ino;
+  } catch {
+    // Gone, replaced by something unreadable, or a descriptor already closed:
+    // in every case this process has no lock left to release.
     return false;
   }
 }
@@ -133,34 +160,22 @@ export async function acquireInitLock(
 
   for (;;) {
     try {
+      // Held open for the lock's whole lifetime, which is what makes releasing
+      // it safe — see {@link namesHeldFile}. Nothing else needs the descriptor.
       const fd = openSync(path, "wx", 0o600);
-      // From here the lock exists, so every failure has to take it away again:
-      // a lock left behind by a process that never went on to hold it is one
-      // nobody will ever release, and there is no takeover to rescue it. The
-      // close is inside the guarded region for the reason it is in
-      // `writeTempBeside` — that is where a deferred error surfaces — and marked
-      // as attempted first, because POSIX releases the descriptor even when
-      // `close` reports an error.
-      let closeAttempted = false;
-      let identity: { dev: number; ino: number };
       try {
         // Whoever finds this file wants to know which process to look for.
         writeSync(fd, `${process.pid}\n`);
-        // Which inode this name refers to *now*, so that releasing can tell
-        // this lock from a different file that later took the same name.
-        const stats = fstatSync(fd);
-        identity = { dev: stats.dev, ino: stats.ino };
-        closeAttempted = true;
-        closeSync(fd);
       } catch (error) {
-        if (!closeAttempted) {
-          try {
-            closeSync(fd);
-          } catch {
-            // Already unwinding; the unlink below is what matters.
-          }
+        // The lock exists from the create onward, so a failure here has to take
+        // it away again: one left behind by a process that never went on to hold
+        // it is one nobody will ever release, and there is no takeover to rescue
+        // it. Unlink first, close second — the same order as `release`, and for
+        // the same reason.
+        if (namesHeldFile(fd, path)) {
+          removeQuietly(path);
         }
-        removeQuietly(path);
+        closeQuietly(fd);
         throw error;
       }
       let released = false;
@@ -169,17 +184,24 @@ export async function acquireInitLock(
         // The only `unlink` of a lock anywhere in this CLI, and it releases the
         // file this process created rather than whatever holds the name by then:
         // if somebody deletes the lock mid-run and another `ub init` takes it,
-        // the name is theirs and this must not touch it. What remains is the
-        // instant between the check and the unlink, which no userland writer can
-        // close — and which needs that same deletion to happen inside it.
+        // the name is theirs and this must not touch it.
+        //
+        // Unlink first, close second. While the descriptor is open the file it
+        // refers to cannot be recycled, so the comparison and the removal are
+        // about the same file with certainty; closing first would reopen the
+        // window this exists to shut.
         release() {
           if (released) {
             return;
           }
           released = true;
-          if (isSameFile(path, identity)) {
+          if (namesHeldFile(fd, path)) {
             removeQuietly(path);
           }
+          // A deferred write error can surface here. The lock is already gone,
+          // which is all a caller in a `finally` cares about, and throwing out
+          // of a release would mask whatever sent us into that `finally`.
+          closeQuietly(fd);
         },
       };
     } catch (error) {
