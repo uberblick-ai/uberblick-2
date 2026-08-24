@@ -112,8 +112,51 @@ function composingKey(event: KeyboardEvent, editor: Editor): boolean {
  * moment later is the menu's again). Both bounds matter — one-shot alone would
  * swallow a deliberate Enter that came minutes later, and the window alone
  * would swallow every key in a fast composition-then-command sequence.
+ *
+ * Time-boxed is not narrow enough on its own, though: see {@link armsTail}.
  */
 const COMPOSITION_TAIL_MS = 100;
+
+/** Which of the menu's two typing surfaces a key or a composition came from. */
+type KeySource = "editor" | "search";
+
+/**
+ * Safari, by the test ProseMirror itself uses (`browser.safari` is
+ * `/Apple Computer/.test(navigator.vendor)`).
+ *
+ * A browser check rather than pure behaviour-sniffing, and deliberately so:
+ * ProseMirror gates its own composition workarounds on exactly this, and the
+ * ordering being worked around is one browser's. Read at call time so nothing
+ * is baked in at module load.
+ */
+function isSafariLike(): boolean {
+  return (
+    typeof navigator !== "undefined" && /Apple Computer/.test(navigator.vendor ?? "")
+  );
+}
+
+/**
+ * Whether a `compositionend` should arm the tail at all.
+ *
+ * The tail exists for one ordering and must not fire outside it. Chrome and
+ * Firefox deliver the committing Enter *before* `compositionend` — the guard
+ * already declined it as composing, so nothing is owed, and arming there would
+ * hand the reader's next deliberate Enter to ProseMirror and split the very
+ * paragraph they were converting. Three conditions, all necessary:
+ *
+ * - `confirmed`: the keydown immediately before this event was a composing
+ *   Enter, i.e. the commit already came through. That is the Chrome/Firefox
+ *   ordering, and it must NOT arm. (Arrows walking a candidate list are not a
+ *   commit and do not count, which keeps Safari's ordering armed when the
+ *   reader navigated candidates before committing.)
+ * - Safari: the ordering being compensated for is Safari's.
+ * - `source`: the composition ended in the control this menu is listening to.
+ *   A composition finished in some other field inside the frame owes the menu
+ *   nothing.
+ */
+function armsTail(confirmed: boolean, source: KeySource | null): boolean {
+  return !confirmed && source !== null && isSafariLike();
+}
 
 /**
  * Where the menu goes for a slash session: just below the caret.
@@ -214,34 +257,73 @@ export function BlockMenu({
    */
   const dismissed = useRef(false);
   const card = useRef<HTMLDivElement | null>(null);
+  /** The gutter menu's search field, when one is open — a composition surface. */
+  const search = useRef<HTMLInputElement | null>(null);
   /** When the last composition ended — see {@link COMPOSITION_TAIL_MS}. */
   const composedAt = useRef(0);
+  /** And where, so the tail only ever covers the surface it ended in. */
+  const composedIn = useRef<KeySource | null>(null);
+  /** Whether the keydown just before was a composing Enter — see {@link armsTail}. */
+  const confirmed = useRef(false);
+
+  /** Which of the menu's typing surfaces holds `target`, if either does. */
+  const sourceOf = useCallback(
+    (target: EventTarget | null): KeySource | null => {
+      if (!(target instanceof Node)) return null;
+      if (editor.view.dom.contains(target)) return "editor";
+      const field = search.current;
+      if (field !== null && (field === target || field.contains(target))) {
+        return "search";
+      }
+      return null;
+    },
+    [editor],
+  );
 
   // One listener for both key paths: the prose and the gutter's search field
   // are both inside the frame, and both are typed into with an IME.
   useEffect(() => {
     const frame = host.current;
     if (frame === null) return;
-    const ended = (): void => {
+    const ended = (event: Event): void => {
+      const afterConfirm = confirmed.current;
+      confirmed.current = false;
+      const source = sourceOf(event.target);
+      if (!armsTail(afterConfirm, source)) return;
       composedAt.current = Date.now();
+      composedIn.current = source;
     };
     frame.addEventListener("compositionend", ended, true);
     return () => {
       frame.removeEventListener("compositionend", ended, true);
     };
-  }, [host]);
+  }, [host, sourceOf]);
 
   /**
-   * Whether the menu may act on this keystroke. Always consumes the
-   * composition-tail memory, so it covers exactly the one keydown that followed
-   * a `compositionend`.
+   * Whether the menu may act on this keystroke.
+   *
+   * Always consumes the composition-tail memory, so the tail covers exactly the
+   * one keydown that followed its `compositionend` — and only when that keydown
+   * came from the surface the composition ended in.
    */
   const menuOwnsKey = useCallback(
-    (event: KeyboardEvent): boolean => {
+    (event: KeyboardEvent, source: KeySource): boolean => {
+      const composing = composingKey(event, editor);
+      // A composing Enter is the commit key arriving *before* `compositionend`,
+      // which is how Chrome's and Firefox's ordering is told from Safari's.
+      confirmed.current = composing && event.key === "Enter";
+
       const tail = composedAt.current;
+      const endedIn = composedIn.current;
       composedAt.current = 0;
-      if (tail !== 0 && Date.now() - tail <= COMPOSITION_TAIL_MS) return false;
-      return !composingKey(event, editor);
+      composedIn.current = null;
+
+      if (composing) return false;
+      return !(
+        tail !== 0 &&
+        endedIn === source &&
+        Date.now() - tail <= COMPOSITION_TAIL_MS
+      );
     },
     [editor],
   );
@@ -434,7 +516,7 @@ export function BlockMenu({
     if (path !== "slash" || !open) return;
     const target = editor.view.dom.parentElement ?? editor.view.dom;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!menuOwnsKey(event)) return;
+      if (!menuOwnsKey(event, "editor")) return;
       if (!handleKey(event.key)) return;
       event.preventDefault();
       event.stopPropagation();
@@ -497,6 +579,7 @@ export function BlockMenu({
         >
           {path === "gutter" && (
             <input
+              ref={search}
               className="ub-blockmenu-search"
               placeholder="Search blocks…"
               aria-label="Search blocks"
@@ -510,7 +593,7 @@ export function BlockMenu({
               onKeyDown={(event) => {
                 // The field takes typed text, so it has an IME to stay out of
                 // the way of just as much as the prose does.
-                if (!menuOwnsKey(event.nativeEvent)) return;
+                if (!menuOwnsKey(event.nativeEvent, "search")) return;
                 if (!handleKey(event.key)) return;
                 event.preventDefault();
                 event.stopPropagation();

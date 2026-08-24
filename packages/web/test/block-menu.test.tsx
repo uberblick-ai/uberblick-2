@@ -440,16 +440,22 @@ describe("the slash menu", () => {
    * arrives *before* the Enter that committed the candidate, and that Enter says
    * `isComposing: false` with ProseMirror's own flag already cleared. Taking it
    * would convert the block a reader was still typing into.
+   *
+   * The browser gate is ProseMirror's own (`/Apple Computer/` on the vendor
+   * string), and jsdom presents exactly that — asserted here, so a future jsdom
+   * that stops doing so fails loudly instead of quietly retiring this case.
+   * What the two orderings actually turn on is the sequence below.
    */
-  it("leaves the first key after a composition ends to the editor", () => {
+  it("leaves an unconfirmed composition's next key to the editor", () => {
+    expect(navigator.vendor).toMatch(/Apple Computer/);
     const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
     const { editor, press, endComposition, unmount } = mountMenu(ydoc);
     try {
       caret(editor, 0, 0);
       type(editor, "/he");
 
-      // compositionend, then a plain Enter — the IME's commit, wearing no mark
-      // of one.
+      // compositionend with no commit key before it: the commit is still owed,
+      // and it will arrive wearing no mark of one.
       endComposition();
       press("Enter");
       expect(getBlocks(ydoc).some((block) => block.type === "heading")).toBe(false);
@@ -461,6 +467,70 @@ describe("the slash menu", () => {
       type(editor, "/he");
       press("Enter");
       expect(getBlocks(ydoc)[1]).toMatchObject({ type: "heading", text: "" });
+    } finally {
+      unmount();
+    }
+  });
+
+  /**
+   * The other ordering, and the reason the tail has to be scoped: Chrome and
+   * Firefox deliver the committing Enter *before* `compositionend`. The guard
+   * has already declined that Enter as composing, so nothing is owed — and a
+   * reader who then presses Enter to pick an entry must get their entry, not a
+   * split paragraph.
+   */
+  it("keeps the next key when the composition's commit already came through", () => {
+    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
+    const { editor, press, endComposition, unmount } = mountMenu(ydoc);
+    try {
+      caret(editor, 0, 0);
+      type(editor, "/he");
+
+      // The Chrome/Firefox sequence: the committing Enter arrives while still
+      // composing — declined by the guard — and the composition ends after it.
+      // (In a browser ProseMirror ignores that keydown as well; jsdom has no
+      // composition to ignore, so it splits the block, which is harmless here.)
+      press("Enter", { isComposing: true });
+      endComposition();
+
+      // Straight on to a session and a deliberate Enter, well inside the tail's
+      // window. Nothing is owed to the IME, so this Enter is the menu's — an
+      // over-armed tail would hand it to ProseMirror and split the paragraph
+      // the reader was converting.
+      type(editor, "/he");
+      press("Enter");
+      expect(getBlocks(ydoc).map((block) => [block.type, block.text])).toEqual([
+        ["paragraph", "/he"],
+        ["heading", ""],
+      ]);
+    } finally {
+      unmount();
+    }
+  });
+
+  /**
+   * A composition that ends somewhere else in the frame owes this menu nothing —
+   * the tail is scoped to the surface its own session is typed into.
+   */
+  it("ignores a composition that ended outside the prose", () => {
+    const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
+    const mounted = mountMenu(ydoc);
+    const { editor, press, unmount } = mounted;
+    try {
+      caret(editor, 0, 0);
+      type(editor, "/he");
+
+      // Some other control inside the frame finishes a composition.
+      const elsewhere = document.createElement("input");
+      mounted.frame.appendChild(elsewhere);
+      act(() => {
+        elsewhere.dispatchEvent(
+          new CompositionEvent("compositionend", { bubbles: true, data: "へ" }),
+        );
+      });
+
+      press("Enter");
+      expect(getBlocks(ydoc)[0]).toMatchObject({ id: ids[0], type: "heading" });
     } finally {
       unmount();
     }
