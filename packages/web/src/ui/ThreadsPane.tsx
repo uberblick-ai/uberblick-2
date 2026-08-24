@@ -20,11 +20,21 @@
  * Both writes go through the schema package's annotation API — `addComment` and
  * `setAnnotationResolved` — in one transaction each, so a reply and a resolve
  * reach a second client exactly the way an agent's do.
+ *
+ * A card on screen is always a render old, and the document is shared: the
+ * thread it names can be resolved or deleted by anyone between the render and
+ * the click. So a reply re-reads the thread at submit and refuses if it is gone
+ * or settled, rather than appending to a conversation that is over. A refusal
+ * keeps the writer's text — that is `CommentForm`'s contract for returning
+ * false — and says why on the card rather than inside the form, because the
+ * form is on its way out: resolving a thread takes the reply form with it (see
+ * the effect below), so a message in the form's own error slot would be removed
+ * in the same flush that wrote it.
  */
 
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
-import { addComment, setAnnotationResolved } from "@uberblick/schema";
+import { addComment, getAnnotation, setAnnotationResolved } from "@uberblick/schema";
 import type { AnnotationComment } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useThreads } from "./hooks.js";
@@ -58,6 +68,7 @@ function ThreadCard({
   focused,
   collapsed,
   replying,
+  refusal,
   onSelect,
   onReply,
   onReplyOpen,
@@ -69,6 +80,8 @@ function ThreadCard({
   /** Resolved and not expanded: head and excerpt only. */
   collapsed: boolean;
   replying: boolean;
+  /** Why the last reply to this thread was refused, if it was. */
+  refusal: string | null;
   onSelect: () => void;
   onReply: (text: string) => boolean;
   onReplyOpen: () => void;
@@ -114,6 +127,10 @@ function ThreadCard({
           </span>
         )}
       </button>
+      {/* Outside the `collapsed` branch below: a reply refused because someone
+          else resolved the thread arrives on a card that is collapsing in the
+          same flush, and the reason has to outlive that. */}
+      {refusal !== null && <p className="ub-comment-error">{refusal}</p>}
       {!collapsed &&
         (replying ? (
           <CommentForm
@@ -162,6 +179,10 @@ export function ThreadsPane({
    * mode the rail should stay in.
    */
   const [expanded, setExpanded] = useState<string | null>(null);
+  /** The one refused reply, and the thread it was refused on. */
+  const [refusal, setRefusal] = useState<{ id: string; message: string } | null>(
+    null,
+  );
 
   // A highlight click focuses a card that may be scrolled out of the rail. Keyed
   // on the whole focus and not its id, so clicking the same highlight again
@@ -195,6 +216,7 @@ export function ThreadsPane({
       // may name a thread someone else resolved a moment ago, and expanding
       // that card must not offer a reply nobody asked for.
       replying={replyTo === thread.id && !thread.resolved}
+      refusal={refusal?.id === thread.id ? refusal.message : null}
       onSelect={() => {
         onFocus(thread.id);
         flashThreadHighlight(thread.id);
@@ -204,18 +226,38 @@ export function ThreadsPane({
           setExpanded((current) => (current === thread.id ? null : thread.id));
         }
       }}
-      onReplyOpen={() => setReplyTo(thread.id)}
+      onReplyOpen={() => {
+        setRefusal(null);
+        setReplyTo(thread.id);
+      }}
       onReplyClose={() => setReplyTo(null)}
       onReply={(text) => {
-        // `addComment` appends to a thread that is right here on screen; there
-        // is no range to clash with, so it has no refusal to answer with.
-        addComment(ydoc, thread.id, author, text);
+        // Read the thread as the document has it *now*, not as this card was
+        // rendered: between the two, another client may have resolved it or
+        // deleted it, and neither should quietly take a reply.
+        if (getAnnotation(ydoc, thread.id)?.resolved === true) {
+          setRefusal({
+            id: thread.id,
+            message:
+              "This thread was resolved while you wrote — reopen it to reply.",
+          });
+          return false;
+        }
+        // `addComment` looks the thread up itself and returns null when it is
+        // not there, so it — not the read above — is the last word on whether
+        // anything was written.
+        if (addComment(ydoc, thread.id, author, text) === null) {
+          setRefusal({ id: thread.id, message: "This thread no longer exists." });
+          return false;
+        }
+        setRefusal(null);
         setReplyTo(null);
         return true;
       }}
       onResolve={(next) => {
         setAnnotationResolved(ydoc, thread.id, next);
         setReplyTo((current) => (current === thread.id ? null : current));
+        setRefusal((current) => (current?.id === thread.id ? null : current));
         setExpanded(null);
       }}
     />

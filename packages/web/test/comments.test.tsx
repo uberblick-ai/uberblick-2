@@ -25,6 +25,7 @@ import {
   setAnnotationResolved,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
+import { TextSelection } from "@tiptap/pm/state";
 import { CommentComposer } from "../src/ui/CommentComposer.js";
 import { ThreadsPane } from "../src/ui/ThreadsPane.js";
 import { commentTargetOf } from "../src/editor/selection.js";
@@ -201,16 +202,42 @@ describe("the selection a thread anchors to", () => {
   });
 
   /**
-   * A thread has exactly one anchor block, so a selection running past the end
-   * of its first block is clamped to that block — and says so, which is what
-   * lets the composer quote back exactly what it is about to mark.
+   * A thread has exactly one anchor block, so a selection spanning several is
+   * clamped to the first block of the range — and says so, which is what lets
+   * the composer quote back exactly what it is about to mark.
+   *
+   * The *first block of the range*, not the block the gesture started in: the
+   * target is read off `$from`, so a backwards drag clamps to where it ended.
+   * One rule for both directions, and it is the one a reader can check against
+   * the highlight.
    */
-  it("clamps a selection that runs past its first block", () => {
+  it("clamps a multi-block selection to the first block of the range", () => {
     const { ydoc, blocks } = annotatedDoc();
     const { editor, element } = mountEditor(ydoc);
     try {
       // From inside the first block, on into the next one.
       select(editor, 1, 20, 6, 2);
+      expect(commentTargetOf(editor, ydoc)).toMatchObject({
+        blockId: blocks[1],
+        start: 20,
+        end: PARAGRAPH.length,
+        text: "jumps.",
+        clamped: true,
+      });
+
+      // The same range dragged the other way: anchor in the later block, head
+      // in the earlier one.
+      act(() => {
+        const { state } = editor;
+        editor.view.dispatch(
+          state.tr.setSelection(
+            TextSelection.create(state.doc, posIn(editor, 2, 6), posIn(editor, 1, 20)),
+          ),
+        );
+      });
+      expect(editor.state.selection.anchor).toBeGreaterThan(
+        editor.state.selection.head,
+      );
       expect(commentTargetOf(editor, ydoc)).toMatchObject({
         blockId: blocks[1],
         start: 20,
@@ -435,6 +462,7 @@ describe("the rail writes back", () => {
     author = "ben",
   ): {
     cards: () => HTMLElement[];
+    card: (threadId: string) => HTMLElement;
     count: () => string | null;
     resolvedCss: () => string;
     type: (text: string) => Promise<void>;
@@ -458,6 +486,11 @@ describe("the rail writes back", () => {
     ];
     return {
       cards,
+      card: (threadId) => {
+        const found = cards().find((card) => card.id === `ub-thread-${threadId}`);
+        if (found === undefined) throw new Error(`no card for ${threadId}`);
+        return found;
+      },
       count: () => host.querySelector(".ub-rail-head .ub-muted")?.textContent ?? null,
       resolvedCss: () =>
         host.querySelector("[data-resolved-highlights]")?.textContent ?? "",
@@ -488,6 +521,15 @@ describe("the rail writes back", () => {
     return found;
   }
 
+  /** Submit the reply form open on a card — the last of its buttons. */
+  function submitReply(card: HTMLElement): void {
+    const buttons = [
+      ...card.querySelectorAll<HTMLButtonElement>(".ub-comment-buttons button"),
+    ];
+    if (buttons.length === 0) throw new Error("no reply form");
+    buttons.at(-1)?.click();
+  }
+
   it("appends a reply authored by this client, live to a second client", async () => {
     const { ydoc, blocks } = annotatedDoc();
     const remote = mirrorOf(ydoc);
@@ -496,14 +538,7 @@ describe("the rail writes back", () => {
     try {
       await settle(() => action(view.cards()[0]!, "Reply").click());
       await view.type("because it is a pangram");
-      await settle(() => {
-        const buttons = [
-          ...view
-            .cards()[0]!
-            .querySelectorAll<HTMLButtonElement>(".ub-comment-buttons button"),
-        ];
-        buttons.at(-1)?.click();
-      });
+      await settle(() => submitReply(view.cards()[0]!));
 
       expect(getAnnotation(remote, thread.id)?.comments).toEqual([
         { author: "agent-a", text: "why?", createdAt: expect.any(String) },
@@ -555,6 +590,57 @@ describe("the rail writes back", () => {
       // so the form does not come back — and does not steal the caret with it.
       await settle(() => setAnnotationResolved(remote, thread.id, false));
       expect(view.cards()[0]?.querySelector(".ub-comment-input")).toBeNull();
+    } finally {
+      view.unmount();
+    }
+  });
+
+  /**
+   * The other half of the same race. The card under the pointer is always a
+   * render old, so the resolve can land in the *same task* as the click, before
+   * the rail has been told to take the form away. The handler is then looking
+   * at a card that still says "open" — and a reply written into a conversation
+   * someone else has just closed is the kind of write nobody sees again.
+   *
+   * So the thread is re-read at submit and the reply refused, which is what
+   * `CommentForm`'s false return means: the text stays where it was typed.
+   */
+  it("refuses a reply to a thread another client resolved in the same task", async () => {
+    const { ydoc, blocks } = annotatedDoc();
+    const remote = mirrorOf(ydoc);
+    const thread = createAnnotation(ydoc, blocks[1]!, 4, 15, "agent-a", "why?");
+    const view = renderRail(ydoc);
+    try {
+      await settle(() => action(view.cards()[0]!, "Reply").click());
+      await view.type("because it is a pangram");
+
+      // One task: the rail's observer only queues a microtask, so the click is
+      // handled against the render that still shows an open thread.
+      await settle(() => {
+        setAnnotationResolved(remote, thread.id, true);
+        submitReply(view.card(thread.id));
+      });
+
+      // Nothing was appended, on either replica…
+      expect(getAnnotation(remote, thread.id)?.comments).toHaveLength(1);
+      expect(getAnnotation(ydoc, thread.id)?.comments).toHaveLength(1);
+      // …and the card says why, on the card rather than in a form that is gone.
+      expect(
+        view.card(thread.id).querySelector(".ub-comment-error")?.textContent,
+      ).toBe("This thread was resolved while you wrote — reopen it to reply.");
+      expect(view.card(thread.id).querySelector(".ub-comment-input")).toBeNull();
+
+      // Reopening is the way back in: expand the settled card, reopen it, and
+      // the refusal goes with the thread it was about.
+      await settle(() =>
+        view.card(thread.id).querySelector<HTMLButtonElement>(".ub-thread")?.click(),
+      );
+      await settle(() => action(view.card(thread.id), "Reopen").click());
+      expect(view.card(thread.id).querySelector(".ub-comment-error")).toBeNull();
+      await settle(() => action(view.card(thread.id), "Reply").click());
+      await view.type("because it is a pangram");
+      await settle(() => submitReply(view.card(thread.id)));
+      expect(getAnnotation(remote, thread.id)?.comments).toHaveLength(2);
     } finally {
       view.unmount();
     }
@@ -670,5 +756,8 @@ describe("the rail writes back", () => {
       .toBe(
         '[data-comment-thread="b3d1f0e2-4c5a-11ee-be56-0242ac120002"]{background:transparent;border-bottom:1px dotted var(--muted-foreground);}',
       );
+    // Harmless characters, hostile size: a uuid is 36 characters, and an id
+    // that goes on for a megabyte is a megabyte of selector on every render.
+    expect(resolvedHighlightCss(["a".repeat(100_000)])).toBe("");
   });
 });

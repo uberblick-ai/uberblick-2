@@ -45,10 +45,15 @@ const FLASH_CLASS = "ub-comment-flash";
 
 /**
  * Thread ids that may be written into a stylesheet verbatim. The schema package
- * generates uuids, so this fits every id the system itself makes; anything else
- * came from a client that made one up.
+ * generates uuids — 36 characters — so this fits every id the system itself
+ * makes with room to spare; anything else came from a client that made one up.
+ *
+ * Bounded, because "harmless characters" is only half the question: an id that
+ * is a megabyte of hyphens injects a megabyte of selector per resolved thread,
+ * on every render of the rail. The shape a uuid cannot exceed is the shape this
+ * rule accepts.
  */
-const SAFE_THREAD_ID = /^[0-9A-Za-z-]+$/;
+const SAFE_THREAD_ID = /^[0-9A-Za-z-]{1,64}$/;
 
 const BLOCK_LABELS: Record<BlockType, string> = {
   paragraph: "Paragraph",
@@ -395,11 +400,11 @@ export function flashThreadHighlight(threadId: string): void {
  * find the conversation from the prose.
  *
  * A thread id is data — it is a key in a Y.Map any client can write — so it is
- * checked against {@link SAFE_THREAD_ID} rather than escaped. Escaping a CSS
- * string means getting backslashes, quotes *and* the line terminators that end
- * a string early all right, and a rule this small is not worth that. An id the
- * check refuses simply gets no fade rule: its highlight stays amber, which is
- * loud and harmless.
+ * checked against {@link SAFE_THREAD_ID}, in shape *and* in length, rather than
+ * escaped. Escaping a CSS string means getting backslashes, quotes *and* the
+ * line terminators that end a string early all right, and a rule this small is
+ * not worth that. An id the check refuses simply gets no fade rule: its
+ * highlight stays amber, which is loud and harmless.
  */
 export function resolvedHighlightCss(threadIds: readonly string[]): string {
   const safe = threadIds.filter((id) => SAFE_THREAD_ID.test(id));
