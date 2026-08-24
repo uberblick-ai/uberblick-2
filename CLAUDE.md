@@ -102,6 +102,11 @@ before moving on.
   Copilot/Codex finding; and any change to the process itself — `.github/`
   spec/workflow files or `.claude/skills/` (a bug in the loop's own rules
   multiplies into everything it merges).
+- **`packages/cli` — tiered from the diff, not the package name** (owner
+  decision, 2026-08-24). A diff that adds or changes the user-facing command
+  surface — new subcommands, a changed user↔uberblick interaction, anything
+  relevant to distribution or to new users — is tier 3; a logical extension or
+  a bugfix of already-shipped CLI behavior is tier 2.
 
 The tier-3 trigger list is the autonomy dial: Ben shrinks (or grows) it by
 editing this section as the foundation stabilizes. "Gates green" is
