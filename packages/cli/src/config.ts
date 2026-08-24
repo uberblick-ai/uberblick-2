@@ -186,6 +186,68 @@ function pick(layers: Layer[]): { value: string | null; origin: Origin; label: s
 }
 
 /**
+ * What `config.json` may hold. `ub init` writes it; {@link resolveConfig} reads
+ * the two fields that resolve into an environment, and the identity fields ride
+ * along for the awareness name and colour a client publishes.
+ */
+export interface UserConfig {
+  // `| undefined` explicitly, under `exactOptionalPropertyTypes`: a field the
+  // file does not carry reads as undefined rather than being absent.
+  workspace?: string | undefined;
+  hubUrl?: string | undefined;
+  /** Awareness display name. */
+  displayName?: string | undefined;
+  /** Awareness colour, 6-digit hex — the only form y-prosemirror accepts. */
+  color?: string | undefined;
+}
+
+/**
+ * Read `config.json` for editing rather than for resolution.
+ *
+ * `ub init` has to preserve what it did not ask about — a `hubUrl` from
+ * `ub remote join`, a field a later version writes — so it gets the raw object
+ * back as well as the fields it understands. Resolution stays in
+ * {@link resolveConfig}, which needs origins and per-layer labels this does not.
+ */
+export function readUserConfig(env: NodeJS.ProcessEnv = process.env): {
+  /** The file as parsed, or null when it is absent or unusable. */
+  raw: Record<string, unknown> | null;
+  config: UserConfig;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const path = userConfigPath(env);
+  const raw = readJsonObject(path, warnings);
+  return {
+    raw,
+    config: {
+      workspace: stringField(raw, "workspace", path, warnings) ?? undefined,
+      hubUrl: stringField(raw, "hubUrl", path, warnings) ?? undefined,
+      displayName: stringField(raw, "displayName", path, warnings) ?? undefined,
+      color: stringField(raw, "color", path, warnings) ?? undefined,
+    },
+    warnings,
+  };
+}
+
+/**
+ * Write `config.json`, and return its path.
+ *
+ * Owner-only, like `credentials.json` beside it: nothing in here is a secret,
+ * but it is one user's configuration and no other account has business reading
+ * or — the part that matters — writing the hub URL a signed token is sent to.
+ */
+export function writeUserConfig(
+  config: Record<string, unknown>,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const path = userConfigPath(env);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  return path;
+}
+
+/**
  * A signing secret in a file that is not `credentials.json` is a mistake worth
  * naming: `./uberblick.json` is meant to be committed, and `config.json` is the
  * file `ub` will happily print fields from.
@@ -249,6 +311,38 @@ function secretAppliesTo(hubUrlOrigin: Origin): boolean {
   return hubUrlOrigin !== "directory file";
 }
 
+/**
+ * Read `credentials.json`.
+ *
+ * **`signingSecret` is the file's value whether or not the file is exposed.**
+ * Anything *resolving* configuration must treat an exposed file as absent — see
+ * {@link credentialsAreExposed} and how {@link resolveConfig} uses this. The
+ * value is still returned because `ub init` repairs the mode of such a file by
+ * rewriting it, and rewriting it means keeping what it held: regenerating would
+ * cut this machine off from every other client already holding that secret.
+ */
+export function readCredentials(env: NodeJS.ProcessEnv = process.env): {
+  path: string;
+  /** The file as parsed, or null when it is absent or unusable. */
+  raw: Record<string, unknown> | null;
+  signingSecret: string | null;
+  /** True when the file exists and other users can read it. */
+  exposed: boolean;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const path = credentialsPath(env);
+  const exposed = credentialsAreExposed(path, warnings);
+  const raw = readJsonObject(path, warnings);
+  return {
+    path,
+    raw,
+    signingSecret: stringField(raw, SIGNING_SECRET_KEY, path, warnings),
+    exposed,
+    warnings,
+  };
+}
+
 export interface ResolveOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
@@ -309,16 +403,10 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
 
   // Credentials are read last and from one file only. Nothing committable may
   // carry a secret, so there is no directory-file layer here by design. An
-  // exposed file is not read at all: its one actionable message is the mode.
-  const credentials = credentialsAreExposed(paths.credentials, warnings)
-    ? null
-    : readJsonObject(paths.credentials, warnings);
-  const secretFromFile = stringField(
-    credentials,
-    SIGNING_SECRET_KEY,
-    paths.credentials,
-    warnings,
-  );
+  // exposed file is refused outright: its one actionable message is the mode.
+  const credentials = readCredentials(env);
+  warnings.push(...credentials.warnings);
+  const secretFromFile = credentials.exposed ? null : credentials.signingSecret;
   const secretFromEnv = trimmed(env.HUB_AUTH_TOKEN);
 
   let secret: string | null = secretFromEnv;

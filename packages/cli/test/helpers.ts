@@ -23,6 +23,9 @@ export const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 export const UB_BIN = join(PACKAGE_ROOT, "bin", "ub.mjs");
 
+/** The repository root, so a test can read the real `.gitignore`. */
+export const REPO_ROOT = dirname(dirname(PACKAGE_ROOT));
+
 /** Everything `ub` resolves from the environment, removed before every run. */
 const RESOLVED_VARIABLES = [
   "WORKSPACE_ID",
@@ -55,6 +58,13 @@ export interface SandboxFiles {
    * has — how a test asks for a file `ub` is supposed to refuse.
    */
   credentialsMode?: number;
+  /**
+   * Make the working directory look like an uberblick checkout: `mise.toml` and
+   * a root `package.json` named `uberblick`, which is what `ub init` requires
+   * before it writes a derived mise config into a directory. Both markers are
+   * needed, so a bare mise project does not qualify.
+   */
+  checkout?: boolean;
 }
 
 export interface Sandbox {
@@ -89,6 +99,10 @@ export function sandbox(files: SandboxFiles = {}): Sandbox {
   const credentialsPath = join(configHome, "uberblick", "credentials.json");
   const directoryPath = join(cwd, "uberblick.json");
 
+  if (files.checkout === true) {
+    writeText(join(cwd, "mise.toml"), "[env]\n");
+    writeJson(join(cwd, "package.json"), { name: "uberblick", private: true });
+  }
   if (files.userConfig !== undefined) writeJson(userConfigPath, files.userConfig);
   if (files.credentials !== undefined) writeJson(credentialsPath, files.credentials);
   if (files.directoryFile !== undefined) writeJson(directoryPath, files.directoryFile);

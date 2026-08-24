@@ -10,6 +10,7 @@
  * reason to run it by hand.
  */
 
+import { initCommand } from "./init.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { mcpCommand } from "./serve.js";
@@ -21,7 +22,15 @@ export const HELP = `uberblick — local-first, CRDT-backed collaborative docume
 usage: ub <command> [options]
 
 commands:
+  init [options]    identity, workspace and a local development signing secret
   status [--json]   workspace, hub, credential, database and sync state
+
+init options:
+  -y, --yes         take every default; never prompt (also the default with no TTY)
+  --name <name>     awareness display name
+  --color <#rrggbb> awareness cursor colour
+  --workspace <id>  workspace to work in
+  --mcp, --no-mcp   whether to wire up an MCP client (--mcp arrives with #88)
 
 options:
   -h, --help        show this help
@@ -42,6 +51,9 @@ export async function runCli(
   if (command === "--version" || command === "-v") {
     io.out(`${cliVersion()}\n`);
     return 0;
+  }
+  if (command === "init") {
+    return await initCommand(rest, io);
   }
   if (command === "status") {
     return await statusCommand(rest, io);

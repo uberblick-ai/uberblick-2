@@ -20,6 +20,14 @@ packages/*/data/
 .env
 .env.*
 
+# mise's local config, which `ub init` writes as a file DERIVED from
+# $XDG_CONFIG_HOME/uberblick/credentials.json: it carries the generated
+# development signing secret so the mise tasks and .mcp.json see the same value.
+# Never committed — and the ignore covers the other names mise honours, so a
+# contributor's own local config cannot carry a secret into a commit either.
+mise.local.toml
+.mise.local.toml
+
 # playwright run artifacts (traces, screenshots, HTML report)
 test-results/
 playwright-report/
