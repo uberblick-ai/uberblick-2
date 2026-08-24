@@ -6,13 +6,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { getBlocksFragment, setTitle } from "@uberblick/schema";
-import type { BlockType, HeadingLevel } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { bindGuardedEditor } from "../editor/guarded-binding.js";
 import { describeForeignBlocks } from "../editor/palette.js";
 import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
+import { BlockMenu } from "./BlockMenu.js";
 import {
   useDocMeta,
   useForeignBlocks,
@@ -134,10 +134,15 @@ function ForeignFallback({
 }
 
 /**
- * The block palette, as buttons. The four types and nothing else — which is the
- * point: a restricted palette you cannot select from is not a palette.
+ * The language of the code block the caret is in, and nothing else.
+ *
+ * What used to sit here was a row of block-type buttons; block types are now
+ * chosen from the insertion menu (`/` and the gutter `+`), so the row is gone
+ * (#105). The language is not a block type — it is an attribute of one — and
+ * dropping this field would leave a human no way to set it at all, so it stays,
+ * shown only while it applies.
  */
-function BlockToolbar({ editor }: { editor: Editor }): ReactElement {
+function CodeLanguageField({ editor }: { editor: Editor }): ReactElement | null {
   const [, tick] = useState(0);
   useEffect(() => {
     const bump = (): void => tick((n) => n + 1);
@@ -148,51 +153,21 @@ function BlockToolbar({ editor }: { editor: Editor }): ReactElement {
   }, [editor]);
 
   const current = selectedBlock(editor);
-  const active = (type: BlockType, level?: HeadingLevel): boolean => {
-    if (current === null || current.type !== type) return false;
-    if (level === undefined) return true;
-    return String(current.attrs.level ?? "1") === String(level);
-  };
-  const button = (
-    label: string,
-    type: BlockType,
-    level?: HeadingLevel,
-  ): ReactElement => (
-    <button
-      key={label}
-      type="button"
-      className={active(type, level) ? "ub-tool ub-tool-on" : "ub-tool"}
-      onMouseDown={(event) => {
-        // Keep the selection: a focus change would move the caret out of the
-        // block we are about to re-type.
-        event.preventDefault();
-        retypeSelectedBlock(editor, type, level === undefined ? {} : { level });
-      }}
-    >
-      {label}
-    </button>
-  );
+  if (current === null || current.type !== "code") return null;
 
   return (
     <div className="ub-toolbar">
-      {button("¶", "paragraph")}
-      {button("H1", "heading", 1)}
-      {button("H2", "heading", 2)}
-      {button("H3", "heading", 3)}
-      {button("code", "code")}
-      {button("mermaid", "mermaid")}
-      {current?.type === "code" && (
-        <input
-          className="ub-lang"
-          placeholder="language"
-          value={
-            typeof current.attrs.language === "string" ? current.attrs.language : ""
-          }
-          onChange={(event) =>
-            retypeSelectedBlock(editor, "code", { language: event.target.value })
-          }
-        />
-      )}
+      <input
+        className="ub-lang"
+        placeholder="language"
+        aria-label="Code language"
+        value={
+          typeof current.attrs.language === "string" ? current.attrs.language : ""
+        }
+        onChange={(event) =>
+          retypeSelectedBlock(editor, "code", { language: event.target.value })
+        }
+      />
     </div>
   );
 }
@@ -243,11 +218,13 @@ function BoundEditor({
 
   return (
     <>
-      {editor !== null && <BlockToolbar editor={editor} />}
-      {/* The composer is positioned against this frame, not against the editor
-          itself: ProseMirror owns every child of `.ub-editor`. */}
+      {editor !== null && <CodeLanguageField editor={editor} />}
+      {/* The composer and the block menu are positioned against this frame, not
+          against the editor itself: ProseMirror owns every child of
+          `.ub-editor`. */}
       <div className="ub-editor-frame" ref={frame}>
         <div className="ub-editor" ref={host} />
+        {editor !== null && <BlockMenu editor={editor} host={frame} />}
         {editor !== null && (
           <CommentComposer
             editor={editor}

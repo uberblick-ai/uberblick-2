@@ -62,6 +62,10 @@
   --measure: 72ch;
   --sidebar-width: 16rem;
   --outline-width: 15rem;
+  /* Reserved down the left of the content column for the block gutter's `+`.
+     Permanent, so hovering a block reveals the button without moving a pixel
+     of prose. */
+  --block-gutter: 1.75rem;
 
   /* Geist for UI and prose, Geist Mono for machine-flavoured text — room keys,
      uuids, sync detail, group labels. Both are bundled (see the @font-face
@@ -353,11 +357,15 @@ body {
 }
 
 /* The reading column: capped at the measure and centred, so collapsing the
-   sidebar or hiding the outline re-centres the prose instead of stretching it. */
+   sidebar or hiding the outline re-centres the prose instead of stretching it.
+
+   The left padding is the block gutter, reserved for good — see
+   `--block-gutter` and the "block insertion menu" section below. */
 .ub-column {
   width: 100%;
   max-width: var(--measure);
   margin-inline: auto;
+  padding-left: var(--block-gutter);
   display: flex;
   flex-direction: column;
 }
@@ -748,8 +756,11 @@ body {
   margin-left: auto;
 }
 
-/* ---- block toolbar ---- */
+/* ---- editor chrome above the prose ---- */
 
+/* The row that used to hold the block-type buttons. Block types now come from
+   the insertion menu (see the last section), so all that is left here is the
+   code block's language field. */
 .ub-toolbar {
   display: flex;
   align-items: center;
@@ -766,16 +777,6 @@ body {
   background: var(--secondary);
   color: var(--secondary-foreground);
   cursor: pointer;
-}
-
-/* The brand amber is light in both themes, so it works as an accent (border,
-   1px, non-text) but not as label text: `--brand` on `--brand-subtle` is
-   1.98:1 in the light theme. The label stays `--foreground` (15.4:1 dark,
-   17.0:1 light). */
-.ub-tool-on {
-  background: var(--brand-subtle);
-  border-color: var(--brand);
-  color: var(--foreground);
 }
 
 .ub-lang {
@@ -1100,11 +1101,139 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .ub-group-caret,
   .ub-group-body,
-  .ub-copy {
+  .ub-copy,
+  .ub-gutter-add {
     transition: none;
   }
 
   .ub-spinner {
     animation: none;
   }
+}
+
+/* ---- block insertion menu ---- */
+
+/* The gutter `+`. Absolutely positioned inside the column's reserved left
+   padding, so revealing it changes opacity and nothing else — no block twitches
+   sideways as the pointer crosses it. `top` is set inline, from the hovered
+   block's own box. */
+.ub-gutter-add {
+  position: absolute;
+  left: calc(-1 * var(--block-gutter));
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+}
+
+.ub-gutter-add-on {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ub-gutter-add-on:hover {
+  background: var(--secondary);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+/* The menu itself. One card for both entry paths — anchored at the caret for a
+   slash, under the `+` for the gutter — so there is one thing to style and one
+   thing to read. */
+.ub-blockmenu {
+  position: absolute;
+  z-index: 6;
+  width: 17rem;
+  max-width: 100%;
+  padding: 0.3rem;
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  /* The same lift as the comment composer — both are cards floating over the
+     prose, and two different shadows would read as two different surfaces. */
+  box-shadow: 0 8px 24px oklch(0 0 0 / 25%);
+}
+
+.ub-blockmenu-search {
+  font: inherit;
+  font-size: 0.85rem;
+  width: 100%;
+  margin-bottom: 0.3rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.ub-blockmenu-list {
+  max-height: 17rem;
+  overflow-y: auto;
+}
+
+/* The group heading. Mono and quiet: it is a label, not an entry. */
+.ub-blockmenu-group {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  margin: 0.35rem 0 0.15rem;
+  padding: 0 0.4rem;
+}
+
+.ub-blockmenu-entry {
+  font: inherit;
+  font-size: 0.9rem;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* The highlight follows the keyboard and the pointer alike, so it is one class
+   rather than a `:hover` rule that could disagree with the arrow keys. */
+.ub-blockmenu-on {
+  background: var(--accent);
+  border-color: var(--border);
+  color: var(--accent-foreground);
+}
+
+.ub-blockmenu-label {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The shortcut column: the token that picks this entry out of a query. Mono,
+   because it is literal text. */
+.ub-blockmenu-hint {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.ub-blockmenu-empty {
+  margin: 0;
+  padding: 0.4rem;
 }

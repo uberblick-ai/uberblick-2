@@ -19,6 +19,7 @@
  */
 
 import type { Editor } from "@tiptap/core";
+import type { Transaction } from "@tiptap/pm/state";
 import { BLOCK_TYPES } from "@uberblick/schema";
 import type { BlockType, HeadingLevel } from "@uberblick/schema";
 
@@ -48,16 +49,72 @@ export function selectedBlock(
 }
 
 /**
- * Re-type the block containing the selection. Returns false when there is
- * nothing to re-type, when the block is already that type with those attrs, or
- * when the target type cannot hold the block's content.
+ * Re-type the block at `pos` by adding a `setNodeMarkup` step to `tr`. Returns
+ * false — leaving `tr` untouched — when there is no block there, when it is
+ * already that type with those attrs, or when the target type cannot hold the
+ * block's content.
  *
  * That last case is prose with inline marks going to `code` or `mermaid`, which
  * hold source text and allow only the `comment` mark. `setNodeMarkup` would
- * *throw* there — `validContent` checks marks as well as node types — and this is
- * a click handler, so the refusal is a `false`, not an exception. The schema
- * package refuses the same transition with a typed error; neither side strips
- * marks to force it through.
+ * *throw* there — `validContent` checks marks as well as node types — and the
+ * callers are UI handlers, so the refusal is a `false`, not an exception. The
+ * schema package refuses the same transition with a typed error; neither side
+ * strips marks to force it through.
+ *
+ * A transaction rather than a dispatch, because the block menu composes the
+ * re-type with the step that consumes its typed `/query`: both belong to one
+ * gesture, so both belong in one transaction and therefore one undo step. The
+ * block is read off `tr.doc`, so an earlier step in the same transaction is what
+ * `validContent` sees.
+ */
+export function retypeBlockInTransaction(
+  tr: Transaction,
+  pos: number,
+  type: BlockType,
+  attrs: RetypeAttrs = {},
+): boolean {
+  const node = tr.doc.nodeAt(pos);
+  if (node === null) return false;
+  const currentType = node.type.name;
+  if (!(BLOCK_TYPES as readonly string[]).includes(currentType)) return false;
+
+  const nodeType = tr.doc.type.schema.nodes[type];
+  if (nodeType === undefined) return false;
+
+  // Attributes are strings, matching what the schema package stores — see
+  // editor/nodes.ts. The id is carried over, never regenerated.
+  const next: Record<string, unknown> = { id: node.attrs.id };
+  if (type === "heading") {
+    next.level = String(
+      attrs.level ??
+        (currentType === "heading" ? attrString(node.attrs.level) ?? "1" : "1"),
+    );
+  }
+  if (type === "code") {
+    next.language =
+      attrs.language ??
+      (currentType === "code" ? attrString(node.attrs.language) : null);
+  }
+
+  // Both sides normalised to `string | null`: an absent attribute reads as
+  // `undefined` on a ProseMirror node but `null` in `next`, and comparing those
+  // directly would make every no-op look like a change.
+  const unchanged =
+    currentType === type &&
+    (next.level ?? null) === attrString(node.attrs.level) &&
+    (next.language ?? null) === attrString(node.attrs.language);
+  if (unchanged) return false;
+
+  if (!nodeType.validContent(node.content)) return false;
+
+  tr.setNodeMarkup(pos, nodeType, next);
+  return true;
+}
+
+/**
+ * Re-type the block containing the selection, in a transaction of its own.
+ * Returns what {@link retypeBlockInTransaction} answered — nothing is dispatched
+ * when the re-type is refused or is a no-op.
  */
 export function retypeSelectedBlock(
   editor: Editor,
@@ -67,38 +124,9 @@ export function retypeSelectedBlock(
   const current = selectedBlock(editor);
   if (current === null) return false;
 
-  const nodeType = editor.state.schema.nodes[type];
-  if (nodeType === undefined) return false;
+  const tr = editor.state.tr;
+  if (!retypeBlockInTransaction(tr, current.pos, type, attrs)) return false;
 
-  // Attributes are strings, matching what the schema package stores — see
-  // editor/nodes.ts. The id is carried over, never regenerated.
-  const next: Record<string, unknown> = { id: current.attrs.id };
-  if (type === "heading") {
-    next.level = String(
-      attrs.level ??
-        (current.type === "heading" ? attrString(current.attrs.level) ?? "1" : "1"),
-    );
-  }
-  if (type === "code") {
-    next.language =
-      attrs.language ??
-      (current.type === "code" ? attrString(current.attrs.language) : null);
-  }
-
-  // Both sides normalised to `string | null`: an absent attribute reads as
-  // `undefined` on a ProseMirror node but `null` in `next`, and comparing those
-  // directly would make every no-op look like a change.
-  const unchanged =
-    current.type === type &&
-    (next.level ?? null) === attrString(current.attrs.level) &&
-    (next.language ?? null) === attrString(current.attrs.language);
-  if (unchanged) return false;
-
-  const node = editor.state.doc.nodeAt(current.pos);
-  if (node === null || !nodeType.validContent(node.content)) return false;
-
-  editor.view.dispatch(
-    editor.state.tr.setNodeMarkup(current.pos, nodeType, next),
-  );
+  editor.view.dispatch(tr);
   return true;
 }
