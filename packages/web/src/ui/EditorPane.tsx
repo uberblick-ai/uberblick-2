@@ -47,6 +47,11 @@ import { threadIdFromTarget } from "./threads.js";
  *    the settled state is not `synced`. In the two settled states the room key
  *    and "local cache" are therefore at identical positions; a badge in its old
  *    place, between them and the word, could not have been.
+ *
+ * The suppression in (3) is safe only because a non-empty backlog is itself
+ * part of what makes the state busy (`rawSyncState`). A backlog that outlives
+ * the settle window moves the indicator to `syncing…` and brings the badge back
+ * with it; the pair can delay the news by 400ms, never swallow it.
  */
 export function StatusLine({
   connection,

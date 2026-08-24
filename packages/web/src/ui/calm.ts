@@ -16,6 +16,10 @@
  * - **Bad news never waits.** `offline` is adopted immediately. A debounce that
  *   also delayed a disconnect would quietly undo the one thing #49 is for, so
  *   the zero in the table below is the load-bearing entry.
+ *
+ * Delaying a state is the only licence taken here. Hiding one is not: a backlog
+ * that outlives its window is drawn, however long it lasts. Calm is a cadence,
+ * never a quieter version of the truth.
  */
 
 import { useEffect, useState } from "react";
@@ -30,10 +34,21 @@ export const SETTLE_MS: Readonly<Record<SyncState, number>> = {
   synced: 300,
 };
 
-/** The state the connection is actually in, undebounced. */
+/**
+ * The state the connection is actually in, undebounced.
+ *
+ * `synced` requires an empty backlog as well as the provider's own flag.
+ * `provider.isSynced` means "the initial handshake completed", and it is never
+ * lowered again — queuing an unacknowledged message does not reset it. Reading
+ * the flag alone would therefore call a room with writes stranded at the hub
+ * "synced" forever, and #76 suppresses the backlog badge in that state, so the
+ * two together would hide the outage outright rather than merely calming it.
+ * The backlog is the other half of the truth, so it is the other half of the
+ * condition.
+ */
 export function rawSyncState(status: RoomStatus): SyncState {
   if (!status.connected) return "offline";
-  return status.synced ? "synced" : "syncing";
+  return status.synced && status.unsyncedChanges === 0 ? "synced" : "syncing";
 }
 
 /**
