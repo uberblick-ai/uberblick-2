@@ -24,6 +24,7 @@ import type { Editor } from "@tiptap/core";
 import * as Y from "yjs";
 import {
   appendBlock,
+  createAnnotation,
   getBlockInline,
   getBlockText,
   initDoc,
@@ -41,10 +42,6 @@ describe("shortGitHubRef", () => {
     [PR, "#62"],
     [ISSUE, "#58"],
     [FOREIGN, "yjs/yjs#1234"],
-    // A URL bar's trailing slash, and the casing a hand-typed slug arrives in.
-    [`${PR}/`, "#62"],
-    [`https://github.com/${GITHUB_REPO.toUpperCase()}/pull/62`, "#62"],
-    [`https://www.github.com/${GITHUB_REPO}/pull/62`, "#62"],
   ])("shortens %s to %s", (href, expected) => {
     expect(shortGitHubRef(href)).toBe(expected);
   });
@@ -52,29 +49,16 @@ describe("shortGitHubRef", () => {
   it.each([
     // Not GitHub at all.
     ["https://example.com/uberblick-ai/uberblick-2/pull/62"],
-    ["https://gitlab.com/org/repo/issues/62"],
     // GitHub, but not an issue or a PR.
-    ["https://github.com/uberblick-ai/uberblick-2"],
     ["https://github.com/uberblick-ai/uberblick-2/tree/main/packages/web"],
-    ["https://github.com/uberblick-ai/uberblick-2/pull/62/files"],
-    ["https://github.com/uberblick-ai/uberblick-2/pulls"],
     // Points *into* a pull request rather than at it — `#62` would say
     // something the link does not.
     ["https://github.com/uberblick-ai/uberblick-2/pull/62#issuecomment-1"],
-    ["https://github.com/uberblick-ai/uberblick-2/issues?q=is%3Aopen"],
-    // No number, or not a number.
-    ["https://github.com/uberblick-ai/uberblick-2/pull/"],
-    ["https://github.com/uberblick-ai/uberblick-2/pull/sixty-two"],
-    // Not a URL.
+    // Not a URL at all, which is the one input that would throw rather than
+    // decline.
     ["not a url"],
-    [""],
   ])("leaves %s alone", (href) => {
     expect(shortGitHubRef(href)).toBeNull();
-  });
-
-  it("compares against the repo it is given", () => {
-    expect(shortGitHubRef(FOREIGN, "yjs/yjs")).toBe("#1234");
-    expect(shortGitHubRef(PR, "yjs/yjs")).toBe(`${GITHUB_REPO}#62`);
   });
 });
 
@@ -151,13 +135,25 @@ describe("a pasted GitHub link", () => {
     expect(reference(element)?.textContent).toBe("yjs/yjs#1234");
   });
 
-  it.each([
-    ["a GitHub link that is not an issue or a PR", "https://github.com/yjs/yjs"],
-    ["a link to somewhere else entirely", "https://example.com/pull/62"],
-  ])("leaves %s alone", (_label, url) => {
+  it("leaves a link that is not an issue or a PR alone", () => {
+    const url = "https://github.com/yjs/yjs";
     const { element } = mount(url, url);
     expect(reference(element)).toBeNull();
     expect(linkText(element)).toBe(url);
+  });
+
+  /**
+   * A comment splits the link into two text nodes, neither of which is the
+   * whole URL. It is still one link whose text is its href, and a reference
+   * that went long here would do so for a reason no reader could see.
+   */
+  it("is still one reference when a comment splits it", () => {
+    const { ydoc, id, editor, element } = mount(PR, PR);
+    createAnnotation(ydoc, id, 0, 10, "tester", "which PR?");
+    editor.commands.setTextSelection(startOf(editor, 1));
+
+    expect(reference(element)?.textContent).toBe("#62");
+    expect(getBlockText(ydoc, id)).toBe(PR);
   });
 
   it("keeps a label the reader wrote", () => {

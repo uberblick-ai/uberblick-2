@@ -32,6 +32,7 @@
  */
 
 import { Extension } from "@tiptap/core";
+import type { MarkType, Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
@@ -100,36 +101,73 @@ function refElement(label: string, href: string): HTMLElement {
   return anchor;
 }
 
+/** One link, however many text nodes it is drawn in. */
+interface LinkRun {
+  href: string;
+  from: number;
+  text: string;
+}
+
+/**
+ * The link runs in one text block, each gathered across every text node it
+ * spans.
+ *
+ * Per text node would be wrong, not merely incomplete: a `comment` mark over
+ * half a URL, or a bold word inside a link, splits one link into several text
+ * nodes. Each piece is then shorter than the href, the bare-URL test fails on
+ * all of them, and a reference stays long for a reason the reader cannot see.
+ * Adjacent nodes carrying the same href are the same link, so they are one run.
+ */
+function linkRuns(block: ProseMirrorNode, base: number, linkType: MarkType): LinkRun[] {
+  const runs: LinkRun[] = [];
+  let offset = 0;
+  block.forEach((child) => {
+    const start = base + offset;
+    offset += child.nodeSize;
+    const mark = child.isText
+      ? child.marks.find((candidate) => candidate.type === linkType)
+      : undefined;
+    const href: unknown = mark?.attrs.href;
+    if (typeof href !== "string") return;
+    const open = runs[runs.length - 1];
+    // Same href *and* touching: two different links side by side, or the same
+    // URL twice with prose between, are two references.
+    if (open !== undefined && open.href === href && open.from + open.text.length === start) {
+      open.text += child.text ?? "";
+      return;
+    }
+    runs.push({ href, from: start, text: child.text ?? "" });
+  });
+  return runs;
+}
+
 function build(state: EditorState): DecorationSet {
   const linkType = state.schema.marks.link;
   if (linkType === undefined) return DecorationSet.empty;
   const { from: selFrom, to: selTo } = state.selection;
   const decorations: Decoration[] = [];
   state.doc.descendants((node, pos) => {
-    if (!node.isText) return true;
-    const mark = node.marks.find((candidate) => candidate.type === linkType);
-    if (mark === undefined) return false;
-    const href: unknown = mark.attrs.href;
-    // The bare-URL test. A link run split by another mark — half of it
-    // commented, say — matches no single text node and simply stays long,
-    // which is the harmless outcome.
-    if (typeof href !== "string" || node.text !== href) return false;
-    const short = shortGitHubRef(href);
-    if (short === null) return false;
-    const to = pos + node.nodeSize;
-    // Inclusive at both ends: arrowing in from outside lands the caret *on* a
-    // boundary, and that already counts as inside for revealing.
-    if (selFrom <= to && selTo >= pos) return false;
-    decorations.push(
-      Decoration.inline(pos, to, { class: GITHUB_URL_CLASS }),
-      Decoration.widget(pos, () => refElement(short, href), {
-        side: -1,
-        // No inherited marks: the reference is its own anchor, and nesting it
-        // inside the link mark's `<a>` would be invalid HTML.
-        marks: [],
-        key: `gh:${short}:${href}`,
-      }),
-    );
+    if (!node.isTextblock) return true;
+    for (const run of linkRuns(node, pos + 1, linkType)) {
+      // The bare-URL test: a label the reader wrote is theirs to keep.
+      if (run.text !== run.href) continue;
+      const short = shortGitHubRef(run.href);
+      if (short === null) continue;
+      const to = run.from + run.text.length;
+      // Inclusive at both ends: arrowing in from outside lands the caret *on* a
+      // boundary, and that already counts as inside for revealing.
+      if (selFrom <= to && selTo >= run.from) continue;
+      decorations.push(
+        Decoration.inline(run.from, to, { class: GITHUB_URL_CLASS }),
+        Decoration.widget(run.from, () => refElement(short, run.href), {
+          side: -1,
+          // No inherited marks: the reference is its own anchor, and nesting it
+          // inside the link mark's `<a>` would be invalid HTML.
+          marks: [],
+          key: `gh:${short}:${run.href}`,
+        }),
+      );
+    }
     return false;
   });
   return DecorationSet.create(state.doc, decorations);
