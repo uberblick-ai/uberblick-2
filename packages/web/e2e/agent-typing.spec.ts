@@ -85,6 +85,9 @@ async function createDoc(page: Page, title: string): Promise<void> {
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(editor(page)).toBeVisible();
   await page.locator(".ub-title").fill(title);
+  // Pinned, because the sidebar lists what is pinned and nothing else (#115) —
+  // and this is how the *other* context navigates to it.
+  await page.locator(".ub-pin-toggle").click();
   await expect(docButton(page, title)).toBeVisible();
 }
 

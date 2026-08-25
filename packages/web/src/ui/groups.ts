@@ -1,20 +1,17 @@
 /**
- * The sidebar's one-level grouping: a pure derivation of the directory listing.
+ * The document's group, derived from its tags: what the breadcrumb and the
+ * identity line's badge call the open document's neighbourhood.
  *
- * Tags are the grouping key because every directory stub already carries them —
- * no schema change, no path semantics, identity stays UUID-only. Nothing is
- * stored for the grouping itself, so a retag that reaches the directory doc
- * moves a document between groups with no extra plumbing.
- *
- * Deeper or custom hierarchy is typed-properties territory, not this.
+ * This used to group the sidebar as well. It does not any more — the sidebar is
+ * the `_sidebar` document, explicitly curated (#115) — so what is left is one
+ * derivation over `meta.tags`, which is why a retag still reaches the breadcrumb
+ * on the write itself with nothing stored in between.
  */
 
-import type { DirectoryEntry } from "@uberblick/schema";
-
 /**
- * The known tags, in the order the sidebar shows them. A document carrying more
- * than one of them belongs to the first one here — the order is the tie-break,
- * not the document's own tag order, so two replicas group identically.
+ * The known tags, in canonical order. A document carrying more than one of them
+ * belongs to the first one here — the order is the tie-break, not the
+ * document's own tag order, so two replicas name the same group.
  */
 export const GROUP_TAGS = [
   "start-here",
@@ -26,7 +23,7 @@ export const GROUP_TAGS = [
 
 export type GroupTag = (typeof GROUP_TAGS)[number];
 
-/** Key of the trailing group: documents carrying none of the known tags. */
+/** The group of documents carrying none of the known tags. */
 export const UNGROUPED_KEY = "other";
 
 export type GroupKey = GroupTag | typeof UNGROUPED_KEY;
@@ -40,49 +37,17 @@ const LABELS: Record<GroupKey, string> = {
   [UNGROUPED_KEY]: "Other",
 };
 
-export interface DocGroup {
-  key: GroupKey;
-  label: string;
-  entries: DirectoryEntry[];
-}
-
 /** The group a set of tags belongs to: the first known tag, in canonical order. */
 export function groupKeyForTags(tags: readonly string[]): GroupKey {
   return GROUP_TAGS.find((tag) => tags.includes(tag)) ?? UNGROUPED_KEY;
 }
 
-/** The group a single entry belongs to. */
-export function groupKeyFor(entry: DirectoryEntry): GroupKey {
-  return groupKeyForTags(entry.tags);
-}
-
 /**
- * The label the sidebar header shows for a group — and, through
- * `groupKeyForTags`, the one the open document's breadcrumb shows. The
- * breadcrumb reads the document's own `meta.tags` rather than its directory
- * stub, because the stub is a cache of them: a retag reaches the breadcrumb on
- * the write itself instead of waiting for the repair that follows it.
+ * The label the breadcrumb and the identity-line badge show for a group. Both
+ * read the document's own `meta.tags` rather than its directory stub, because
+ * the stub is a cache of them: a retag lands here on the write itself instead
+ * of waiting for the repair that follows it.
  */
 export function groupLabel(key: GroupKey): string {
   return LABELS[key];
-}
-
-/**
- * The directory listing as groups, in canonical order with the untagged group
- * last. Entries keep the order `listDirectory` gave them; empty groups are
- * omitted, so the sidebar never shows a header with nothing under it.
- */
-export function groupEntries(entries: DirectoryEntry[]): DocGroup[] {
-  const buckets = new Map<GroupKey, DirectoryEntry[]>();
-  for (const entry of entries) {
-    const key = groupKeyFor(entry);
-    const bucket = buckets.get(key);
-    if (bucket === undefined) buckets.set(key, [entry]);
-    else bucket.push(entry);
-  }
-  const keys: GroupKey[] = [...GROUP_TAGS, UNGROUPED_KEY];
-  return keys.flatMap((key) => {
-    const bucket = buckets.get(key);
-    return bucket === undefined ? [] : [{ key, label: LABELS[key], entries: bucket }];
-  });
 }
