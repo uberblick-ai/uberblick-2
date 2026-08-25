@@ -15,6 +15,8 @@
  */
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { MirrorStore } from "../src/store.js";
@@ -30,6 +32,7 @@ import type { Rig } from "./helpers.js";
 
 const ALPHA = "1a5e7c30-9d64-4b12-8f7a-2c0b6e9d4a11";
 const BETA = "b2d9e4c7-5a13-4f80-8e6b-71c0a9d35f2e";
+const DOC = "6f0c1d2e-3a4b-4c5d-8e9f-0a1b2c3d4e5f";
 
 const stores: MirrorStore[] = [];
 const rigs: Rig[] = [];
@@ -53,6 +56,25 @@ function recordedWorkspace(databasePath: string): string | undefined {
   }
 }
 
+/** The database file itself, so a refused open can be shown to touch nothing. */
+function checksum(databasePath: string): string {
+  return createHash("sha256").update(readFileSync(databasePath)).digest("hex");
+}
+
+/** The tables the file has, in the order SQLite lists them. */
+function tables(databasePath: string): string[] {
+  const db = new DatabaseSync(databasePath);
+  try {
+    return (
+      db
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table'")
+        .all() as { name: string }[]
+    ).map((row) => row.name);
+  } finally {
+    db.close();
+  }
+}
+
 afterEach(async () => {
   for (const rig of rigs.splice(0)) await rig.close();
   for (const opened of stores.splice(0)) opened.close();
@@ -69,15 +91,27 @@ describe("the replica database", () => {
     expect(() => open(databasePath, ALPHA)).not.toThrow();
   });
 
-  it("refuses to open under a different workspace, naming both and the path", () => {
+  it("refuses to open under a different workspace, without touching the file", () => {
     const databasePath = tempDatabasePath();
-    open(databasePath, ALPHA).close();
+    const alpha = open(databasePath, ALPHA);
+    alpha.appendUpdate(`${ALPHA}/${DOC}`, new Uint8Array([1, 2, 3]), "local");
+    alpha.close();
+    // A derived table dropped, as a database from before that table existed
+    // would be: bootstrapping the schema here would rebuild it — in a file this
+    // server has no business writing to at all.
+    const db = new DatabaseSync(databasePath);
+    db.exec("DROP TABLE doc_links");
+    db.close();
+    const before = checksum(databasePath);
 
     expect(() => open(databasePath, BETA)).toThrow(
       new RegExp(`${ALPHA}[\\s\\S]*${BETA}`),
     );
     expect(() => open(databasePath, BETA)).toThrow(databasePath);
-    // The refusal leaves the claim alone: it is still alpha's file.
+    // Refused means untouched: no table created, no migration run, no claim
+    // overwritten. The file is byte-for-byte what alpha left behind.
+    expect(tables(databasePath)).not.toContain("doc_links");
+    expect(checksum(databasePath)).toBe(before);
     expect(recordedWorkspace(databasePath)).toBe(ALPHA);
   });
 

@@ -118,15 +118,23 @@ function parseTags(packed: string | null): string[] {
     : [];
 }
 
-const SCHEMA = `
--- What this file is, as opposed to what is in it. One row so far: \`workspace\`,
--- the uuid whose corpus this replica holds. The index tables carry no workspace
--- column, so the file itself is the boundary — see \`claimWorkspace\`.
+/**
+ * What this file is, as opposed to what is in it. One row so far:
+ * \`workspace\`, the uuid whose corpus this replica holds. The index tables
+ * carry no workspace column, so the file itself is the boundary.
+ *
+ * Its own script, run before {@link SCHEMA}: it is everything the store is
+ * allowed to write to a file it has not yet established is its own. See
+ * \`claimWorkspace\`.
+ */
+const META_SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+`;
 
+const SCHEMA = `
 CREATE TABLE IF NOT EXISTS updates (
   seq     INTEGER PRIMARY KEY AUTOINCREMENT,
   room    TEXT NOT NULL,
@@ -302,7 +310,7 @@ export class MirrorStore {
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA busy_timeout = 5000");
     this.db.exec("PRAGMA foreign_keys = ON");
-    // Whether this file already held a corpus, asked before the schema creates
+    // Whether this file already held a corpus, asked before anything creates
     // the table it asks about: it is what tells adopting an existing database
     // apart from stamping a new one.
     const preexisting =
@@ -311,10 +319,12 @@ export class MirrorStore {
           "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'updates'",
         )
         .get() !== undefined;
-    this.db.exec(SCHEMA);
-    // Before anything reads or writes a document — a database belonging to
-    // another workspace must not be touched at all, not even by the migration.
+    // Ownership first, and on its own table: a file belonging to another
+    // workspace is left exactly as it was found — no tables created, no index
+    // built, no migration run.
+    this.db.exec(META_SCHEMA);
     this.claimWorkspace(workspaceId, preexisting);
+    this.db.exec(SCHEMA);
     // After the schema, so the backfill can read `updates` and `snapshots`.
     this.migratePendingRooms();
 
@@ -635,6 +645,9 @@ export class MirrorStore {
    * servers pinned to different workspaces at one database would union their
    * corpora in `search` and `backlinks`. Recording the workspace makes the file
    * self-describing, so the second one to open says so and stops.
+   *
+   * It runs before the rest of the schema, on the one table it needs, so that
+   * a refused open leaves the other workspace's file byte-identical.
    *
    * The insert is `DO NOTHING` and the recorded value is read back after it:
    * two processes creating one database at once both try, one wins, and the
