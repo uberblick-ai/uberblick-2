@@ -1,0 +1,406 @@
+/**
+ * `ub doctor` — one test per documented failure mode, and one per property the
+ * report itself has to hold.
+ *
+ * The checks are only worth anything if they are right about the world, so the
+ * world is real here: a real hub on an ephemeral port, a real foreign process
+ * holding one, a real unwritable directory. Every run goes through
+ * {@link runUbAsync}, never `runUb`: `spawnSync` blocks this process's event
+ * loop, so a `ub` child probing a hub or a socket *this* process is serving
+ * would find it unreachable and the test would assert the opposite of the
+ * truth.
+ */
+
+import { createHash } from "node:crypto";
+import type { Server as HttpServer } from "node:http";
+import { createServer as createHttpServer } from "node:http";
+import { createServer } from "node:net";
+import type { Server, Socket } from "node:net";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { Hub } from "@uberblick/hub";
+import { createHub, silentLogger } from "@uberblick/hub";
+import { afterEach, describe, expect, it } from "vitest";
+import type { Run, Sandbox } from "./helpers.js";
+import { DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox } from "./helpers.js";
+
+const WORKSPACE = "9f2c47a1-5b83-4e60-91d7-2a6c8b40e3f5";
+const SECRET = "doctor-test-signing-secret-4b91c7";
+
+const hubs: Hub[] = [];
+const servers: { server: Server | HttpServer; sockets: Socket[] }[] = [];
+
+afterEach(async () => {
+  for (const hub of hubs.splice(0)) {
+    await hub.stop();
+  }
+  for (const { server, sockets } of servers.splice(0)) {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  removeTempDirs();
+});
+
+async function startHub(box: Sandbox): Promise<Hub> {
+  const hub = await createHub({
+    authSecret: SECRET,
+    port: 0,
+    databasePath: join(box.cwd, "hub.sqlite"),
+    log: silentLogger,
+    debounce: 20,
+    maxDebounce: 200,
+    shutdownTimeoutMs: 5_000,
+  });
+  hubs.push(hub);
+  return hub;
+}
+
+/** A process that holds a port and answers nothing — the foreign-holder case. */
+async function foreignProcess(): Promise<number> {
+  const sockets: Socket[] = [];
+  const server = createServer((socket) => sockets.push(socket));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  servers.push({ server, sockets });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("the foreign process did not bind a port");
+  }
+  return address.port;
+}
+
+/**
+ * A server that completes the websocket handshake and then says nothing.
+ *
+ * The far side that is up, speaks enough of the protocol to open a socket, and
+ * never serves the room — which is what a stuck hub looks like, and equally
+ * what somebody else's Hocuspocus server looks like.
+ */
+async function silentServer(): Promise<number> {
+  const sockets: Socket[] = [];
+  const server = createHttpServer();
+  server.on("upgrade", (request, socket: Socket) => {
+    sockets.push(socket);
+    const key = request.headers["sec-websocket-key"] ?? "";
+    const accept = createHash("sha1")
+      .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest("base64");
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\n" +
+        "Upgrade: websocket\r\n" +
+        "Connection: Upgrade\r\n" +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+    // …and not one frame after that.
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  servers.push({ server, sockets });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("the silent server did not bind a port");
+  }
+  return address.port;
+}
+
+/** A port nothing is listening on: bound, read back, and released. */
+async function freePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("could not reserve a port");
+  }
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return address.port;
+}
+
+interface Check {
+  name: string;
+  status: "pass" | "fail" | "skipped";
+  reason: string;
+  remedy: string | null;
+}
+
+async function doctor(
+  box: Sandbox,
+  extraEnv: NodeJS.ProcessEnv = {},
+): Promise<{ run: Run; checks: Map<string, Check>; ok: boolean }> {
+  // PORT and HUB_HOST are the hub's half of the port configuration, and a
+  // developer's shell may well have them: every test names them itself so the
+  // port checks answer about the fixture rather than about the machine.
+  const run = await runUbAsync(["doctor", "--json"], box, {
+    PORT: "1",
+    HUB_HOST: "127.0.0.1",
+    ...extraEnv,
+  });
+  const report = JSON.parse(run.stdout) as { ok: boolean; checks: Check[] };
+  return {
+    run,
+    ok: report.ok,
+    checks: new Map(report.checks.map((check) => [check.name, check])),
+  };
+}
+
+function check(checks: Map<string, Check>, name: string): Check {
+  const found = checks.get(name);
+  if (found === undefined) {
+    throw new Error(`no ${name} check in the report`);
+  }
+  return found;
+}
+
+describe("ub doctor", () => {
+  it("reports every check with no configuration at all, and never throws", async () => {
+    const box = sandbox();
+    const { run, checks, ok } = await doctor(box);
+
+    // A stack with nothing configured still gets an answer for every check.
+    expect([...checks.keys()]).toEqual([
+      "workspace",
+      "credential",
+      "database",
+      "hub",
+      "port",
+      "bind",
+      "mcp",
+    ]);
+    for (const one of checks.values()) {
+      expect(one.status).toMatch(/^(pass|fail|skipped)$/);
+      expect(one.reason).not.toBe("");
+      if (one.status === "fail") {
+        expect(one.remedy).not.toBeNull();
+      }
+    }
+    // The one value with no default: a failed check naming the two commands
+    // that set one, not a thrown error.
+    expect(check(checks, "workspace").status).toBe("fail");
+    expect(check(checks, "workspace").remedy).toMatch(/ub init/);
+    expect(check(checks, "workspace").remedy).toMatch(/ub workspace use/);
+    expect(ok).toBe(false);
+    expect(run.status).not.toBe(0);
+  });
+
+  it("reports the built-in defaults when only a workspace is configured", async () => {
+    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    const { checks } = await doctor(box);
+
+    expect(check(checks, "workspace").status).toBe("pass");
+    // No credential, so nothing was dialled — and the endpoint that would have
+    // been is the built-in default.
+    expect(check(checks, "hub").status).toBe("skipped");
+    expect(check(checks, "hub").reason).toMatch(/ws:\/\/localhost:1234/);
+    expect(check(checks, "database").reason).toBe(
+      join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`),
+    );
+  });
+
+  it("calls an absent credential a skip that keeps every MCP tool working", async () => {
+    const { checks, ok } = await doctor(
+      sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } }),
+    );
+    const credential = check(checks, "credential");
+
+    // Offline-first by construction: no secret disables sync and nothing else,
+    // so this is never the check that fails.
+    expect(credential.status).toBe("skipped");
+    expect(credential.reason).toMatch(/hub sync is disabled/);
+    expect(credential.reason).toMatch(/every MCP tool still works/);
+    expect(credential.remedy).toMatch(/ub init/);
+    // The hub is not dialled either, so nothing here failed on the network.
+    expect(check(checks, "hub").status).toBe("skipped");
+    expect(ok).toBe(false); // the MCP wiring check, which no sandbox has
+  });
+
+  it("reports a configured credential without printing it", async () => {
+    const box = sandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      credentials: { signingSecret: SECRET },
+    });
+    const { run, checks } = await doctor(box);
+
+    expect(check(checks, "credential").status).toBe("pass");
+    expect(check(checks, "credential").reason).toMatch(/credentials file/);
+    // Neither the secret nor a token minted from it, on either stream.
+    expect(run.output).not.toContain(SECRET);
+    expect(run.output).not.toMatch(/eyJ[A-Za-z0-9_-]{8,}\./);
+  });
+
+  it("fails the credential check when the file lets other users read it", async () => {
+    const box = sandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      credentials: { signingSecret: SECRET },
+      credentialsMode: 0o644,
+    });
+    const { run, checks } = await doctor(box);
+    const credential = check(checks, "credential");
+
+    // The secret exists and was refused: a real failure with a one-line fix.
+    expect(credential.status).toBe("fail");
+    expect(credential.reason).toMatch(/mode 0644/);
+    expect(credential.remedy).toMatch(/chmod 600 .*credentials\.json/);
+    expect(run.output).not.toContain(SECRET);
+  });
+
+  it("fails the hub check with no hub running, and names the URL it dialled", async () => {
+    const { checks, run } = await doctor(
+      sandbox({
+        userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+        credentials: { signingSecret: SECRET },
+      }),
+    );
+    const hub = check(checks, "hub");
+
+    expect(hub.status).toBe("fail");
+    expect(hub.reason).toContain(DEAD_HUB_URL);
+    expect(hub.remedy).toMatch(/mise run hub/);
+    expect(run.status).not.toBe(0);
+  });
+
+  it("passes the hub check against a running hub, and says our hub holds the port", async () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const hub = await startHub(box);
+    const { checks } = await doctor(box, {
+      WORKSPACE_ID: WORKSPACE,
+      HUB_URL: `ws://127.0.0.1:${hub.port}`,
+      PORT: String(hub.port),
+    });
+
+    expect(check(checks, "hub").status).toBe("pass");
+    expect(check(checks, "port").status).toBe("pass");
+    // Taken is not a problem when we are the ones holding it.
+    expect(check(checks, "bind").status).toBe("pass");
+    expect(check(checks, "bind").reason).toMatch(/uberblick hub/);
+  });
+
+  it("names both values when the hub's port and HUB_URL's disagree", async () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const hub = await startHub(box);
+    const dialled = await freePort();
+    const { checks } = await doctor(box, {
+      WORKSPACE_ID: WORKSPACE,
+      HUB_URL: `ws://127.0.0.1:${dialled}`,
+      PORT: String(hub.port),
+    });
+    const port = check(checks, "port");
+
+    expect(port.status).toBe("fail");
+    // Which two values disagree…
+    expect(port.reason).toContain(String(hub.port));
+    expect(port.reason).toContain(String(dialled));
+    // …and why they have to be set together: the hub never reads HUB_URL.
+    expect(port.remedy).toMatch(/PORT/);
+    expect(port.remedy).toMatch(/HUB_URL/);
+    expect(port.remedy).toMatch(/never reads HUB_URL/);
+  });
+
+  it("tells a foreign process holding the port from our own hub", async () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const port = await foreignProcess();
+    const { checks } = await doctor(box, {
+      WORKSPACE_ID: WORKSPACE,
+      HUB_URL: `ws://127.0.0.1:${port}`,
+      PORT: String(port),
+    });
+    const bind = check(checks, "bind");
+
+    expect(bind.status).toBe("fail");
+    expect(bind.reason).toContain(`127.0.0.1:${port}`);
+    expect(bind.reason).toMatch(/not an uberblick hub/);
+    expect(bind.remedy).toMatch(/set PORT for the hub and HUB_URL for the clients together/);
+  });
+
+  it("refuses to call a hub that never serves the room reachable, or the port ours", async () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const port = await silentServer();
+    const { checks } = await doctor(box, {
+      WORKSPACE_ID: WORKSPACE,
+      HUB_URL: `ws://127.0.0.1:${port}`,
+      PORT: String(port),
+    });
+
+    // Up, and serving nothing: a connection is not a hub.
+    expect(check(checks, "hub").status).toBe("fail");
+    expect(check(checks, "hub").reason).toMatch(/did not finish syncing/);
+    // And speaking the protocol is not proof of whose server it is — only a
+    // directory read with our own token would be.
+    expect(check(checks, "bind").status).toBe("skipped");
+    expect(check(checks, "bind").reason).toMatch(/speaks the protocol/);
+    expect(check(checks, "bind").reason).not.toMatch(/is held by an uberblick hub/);
+    expect(check(checks, "bind").remedy).toMatch(/same signing secret/);
+  });
+
+  // `access(W_OK)` is advisory for root, which would make the fixture a
+  // directory root can write to and the assertion a lie.
+  it.skipIf(process.getuid?.() === 0)(
+    "fails the database check when its directory cannot be written, and prints the path",
+    async () => {
+      const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+      const readOnly = join(box.cwd, "read-only");
+      mkdirSync(readOnly);
+      chmodSync(readOnly, 0o500);
+      try {
+        const database = join(readOnly, "uberblick.sqlite");
+        const { checks } = await doctor(box, { UBERBLICK_DB: database });
+
+        expect(check(checks, "database").status).toBe("fail");
+        expect(check(checks, "database").reason).toContain(database);
+        expect(check(checks, "database").remedy).toMatch(/UBERBLICK_DB/);
+      } finally {
+        // Or the sandbox cannot be removed afterwards.
+        chmodSync(readOnly, 0o700);
+      }
+    },
+  );
+
+  it("reports which MCP client is wired up, and points at `ub mcp install` when none is", async () => {
+    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const none = await doctor(box);
+
+    expect(check(none.checks, "mcp").status).toBe("fail");
+    expect(check(none.checks, "mcp").remedy).toMatch(/ub mcp install/);
+
+    // Claude Code's project-scoped config, written the way `ub mcp install` does.
+    const config = join(box.cwd, ".mcp.json");
+    writeFileSync(
+      config,
+      `${JSON.stringify(
+        { mcpServers: { uberblick: { type: "stdio", command: "ub", args: ["mcp", "serve"] } } },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    const wired = await doctor(box);
+
+    expect(check(wired.checks, "mcp").status).toBe("pass");
+    expect(check(wired.checks, "mcp").reason).toContain(config);
+  });
+
+  it("writes exactly one JSON object to stdout with --json, and nothing else", async () => {
+    const box = sandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      credentials: { signingSecret: SECRET },
+    });
+    const run = await runUbAsync(["doctor", "--json"], box, { PORT: "1" });
+
+    // One object: parsing the whole stream is the assertion — a second object,
+    // a log line or a stray warning would all break it.
+    const report = JSON.parse(run.stdout) as { ok: boolean; checks: unknown[] };
+    expect(run.stdout.trimEnd().endsWith("}")).toBe(true);
+    expect(Array.isArray(report.checks)).toBe(true);
+    expect(report.ok).toBe(false);
+    expect(run.status).toBe(1);
+    expect(run.output).not.toContain(SECRET);
+  });
+
+  it("renders the same verdicts for a human, with the remedy under the failure", async () => {
+    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const run = await runUbAsync(["doctor"], box, { PORT: "1" });
+
+    expect(run.stdout).toMatch(/ok {4}workspace/);
+    expect(run.stdout).toMatch(/skip {2}credential/);
+    expect(run.stdout).toMatch(/FAIL {2}mcp/);
+    expect(run.stdout).toMatch(/→ .*ub mcp install/);
+    expect(run.stdout).toMatch(/\d+ failed, \d+ passed, \d+ skipped/);
+    expect(run.status).not.toBe(0);
+  });
+});
