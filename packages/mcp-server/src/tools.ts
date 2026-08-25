@@ -656,7 +656,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Lift a document's archive tombstone: it returns to list_docs, to the web sidebar and to the search index, with " +
         "the title and tags the directory recorded for it. The counterpart to archive_doc, and the sanctioned way " +
         "back — a rename or a retag from a replica that has seen the archive deliberately cannot revive a document. " +
-        "Restoring one that is not archived does nothing at all.\n\n" +
+        "Restoring one that is not archived leaves its archive state alone, but is not quite a no-op: the directory " +
+        "entry is a cache of the document's own metadata, and this trues it up, so a stub that had drifted is " +
+        "repaired in passing.\n\n" +
         "Check `indexed`. It is true when this replica holds the document itself and has just re-derived its search " +
         "rows — the usual case. It is false in two: when this replica knows the document only from the directory, and " +
         "when the index write was refused. Either way the restore is real, replicates, and shows in list_docs " +
