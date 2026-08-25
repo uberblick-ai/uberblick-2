@@ -8,19 +8,67 @@
  *
  * The one property worth more than the rest: `use` replaces a field, it does not
  * replace a file. Everything else its author put in `./uberblick.json` is still
- * there afterwards.
+ * there afterwards — and the derived `mise.local.toml`, which the mise tasks
+ * actually read, follows the binding without losing the secret in it.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox } from "./helpers.js";
+import {
+  DEAD_HUB_URL,
+  removeTempDirs,
+  runUb,
+  runUbAsync,
+  sandbox,
+  type Sandbox,
+} from "./helpers.js";
 
 afterAll(removeTempDirs);
 
 const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
 const OTHER = "4d8e0000-1111-4222-8333-444455556666";
 const UNRELATED = "b7c3d914-5a20-4e6f-8d13-9f04a2c68e75";
+
+/** No `mise` on PATH, so no `mise trust` subprocess in the middle of a test. */
+const WITHOUT_MISE = { PATH: "/usr/bin:/bin" };
+
+function localConfigPath(box: Sandbox): string {
+  return join(box.cwd, "mise.local.toml");
+}
+
+/**
+ * A checkout as `ub init` leaves it: a derived `mise.local.toml` carrying a
+ * generated signing secret, a workspace, and an endpoint to notice the loss of.
+ *
+ * Built by running the real `ub init` rather than by hand — what the regeneration
+ * has to preserve is what that command actually wrote.
+ */
+function initialisedCheckout(workspace: string): Sandbox {
+  const box = sandbox({ checkout: true, userConfig: { hubUrl: DEAD_HUB_URL } });
+  const init = runUb(["init", "--yes", "--no-mcp", "--workspace", workspace], box, WITHOUT_MISE);
+  expect(init.status, init.output).toBe(0);
+  return box;
+}
+
+function localConfig(box: Sandbox): string {
+  return readFileSync(localConfigPath(box), "utf8");
+}
+
+/** Everything in the derived file except the workspace `use` is there to change. */
+function apartFromWorkspace(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => !line.startsWith("WORKSPACE_ID = "))
+    .join("\n");
+}
 
 /** A `<uuid>.sqlite` in the data directory: a workspace with a local replica. */
 function withDatabase(box: { dataHome: string }, uuid: string): void {
@@ -221,6 +269,172 @@ describe("ub workspace use", () => {
     const run = runUb(["workspace", "use", "--user", WORKSPACE], box);
     expect(run.status).not.toBe(0);
     expect(readFileSync(path, "utf8")).toBe(broken);
+  });
+});
+
+describe("ub workspace use and the derived mise config", () => {
+  it("moves the derived WORKSPACE_ID, keeps every other derived value, and names both files", () => {
+    // The mise tasks read this file and nothing else, so a binding that stops at
+    // `./uberblick.json` leaves `mise run web` and `mise run import-seed` serving
+    // the workspace this directory used to be bound to — silently.
+    const box = initialisedCheckout(OTHER);
+    // A line README tells people to add to exactly this `[env]`. It is not one
+    // of the three values `ub` owns, so a rewrite must leave it where it is.
+    appendFileSync(
+      localConfigPath(box),
+      `WORKSPACES = "docs-${OTHER},docs-${WORKSPACE}"\n`,
+      "utf8",
+    );
+    const before = localConfig(box);
+    expect(before).toContain(`WORKSPACE_ID = "${OTHER}"`);
+
+    const run = runUb(["workspace", "use", WORKSPACE], box, WITHOUT_MISE);
+    expect(run.status, run.output).toBe(0);
+
+    const after = localConfig(box);
+    expect(after).toContain(`WORKSPACE_ID = "${WORKSPACE}"`);
+    expect(after).toContain(`WORKSPACES = "docs-${OTHER},docs-${WORKSPACE}"`);
+    // Byte for byte apart from that one line: the signing secret above all, but
+    // the endpoint, the header the file is recognised by, and the line somebody
+    // added themselves. Rewriting a file that holds the secret is only
+    // acceptable if it cannot lose anything in it.
+    expect(apartFromWorkspace(after)).toBe(apartFromWorkspace(before));
+    expect(after).toContain(`HUB_URL = "${DEAD_HUB_URL}"`);
+
+    // Both files, because both were written — a report naming one of them is
+    // how somebody ends up debugging a task that serves the old workspace.
+    expect(run.stdout).toContain(join(box.cwd, "uberblick.json"));
+    expect(run.stdout).toContain(localConfigPath(box));
+  });
+
+  it("follows resolution rather than the file it wrote: --user under a directory file that outranks it", () => {
+    // `--user` binds the machine, and `./uberblick.json` still wins for this
+    // checkout. The derived file mirrors what `ub` resolves, so it keeps naming
+    // the directory file's workspace — and the precedence warning still fires.
+    const box = initialisedCheckout(OTHER);
+    writeFileSync(
+      join(box.cwd, "uberblick.json"),
+      `${JSON.stringify({ workspace: UNRELATED }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const run = runUb(["workspace", "use", "--user", WORKSPACE], box, WITHOUT_MISE);
+    expect(run.status, run.output).toBe(0);
+    expect(localConfig(box)).toContain(`WORKSPACE_ID = "${UNRELATED}"`);
+    expect(run.stderr).toMatch(/takes precedence over/);
+  });
+
+  it("moves the derived file even when the environment outranks the binding", () => {
+    // The mise-activated shell: mise exports WORKSPACE_ID *from this very file*,
+    // so counting it would make the file its own highest-precedence input — a
+    // fixed point at the old workspace, and a switch that can never take. The
+    // warning is still owed, because this shell is the one that stays wrong.
+    const box = initialisedCheckout(OTHER);
+    const run = runUb(["workspace", "use", WORKSPACE], box, {
+      ...WITHOUT_MISE,
+      WORKSPACE_ID: OTHER,
+    });
+
+    expect(run.status, run.output).toBe(0);
+    expect(run.stderr).toMatch(/environment sets .*takes precedence over/);
+    expect(localConfig(box)).toContain(`WORKSPACE_ID = "${WORKSPACE}"`);
+  });
+
+  it("keeps a secret the shell genuinely supplies, rather than discarding it as an echo", () => {
+    // Only the derived file's *own* echo is discounted. A `HUB_AUTH_TOKEN` that
+    // differs from what the file supplies is somebody's deliberate act — fnox,
+    // the documented way to authorise a repository-chosen hub — and dropping it
+    // would derive a file for a secret nobody is using.
+    const box = initialisedCheckout(OTHER);
+    const external = "an-externally-supplied-signing-secret";
+
+    const run = runUb(["workspace", "use", WORKSPACE], box, {
+      ...WITHOUT_MISE,
+      HUB_AUTH_TOKEN: external,
+    });
+    expect(run.status, run.output).toBe(0);
+    expect(localConfig(box)).toContain(`HUB_AUTH_TOKEN = "${external}"`);
+  });
+
+  it("fails, naming both files, when the binding moved and the derived file could not", () => {
+    // The split-brain the lock exists to prevent, arrived by another road: the
+    // binding is written, the file every mise task reads is not, and exiting 0
+    // would send a script's next step at the workspace this command was asked to
+    // leave. A `mise.local.toml` nobody derived is left alone, as it always was.
+    const box = initialisedCheckout(OTHER);
+    const foreign = '[env]\nWORKSPACE_ID = "mine"\n';
+    writeFileSync(localConfigPath(box), foreign, "utf8");
+
+    const run = runUb(["workspace", "use", WORKSPACE], box, WITHOUT_MISE);
+    expect(run.status, run.output).toBe(1);
+    expect(run.stderr).toContain(join(box.cwd, "uberblick.json"));
+    expect(run.stderr).toContain(localConfigPath(box));
+    expect(localConfig(box)).toBe(foreign);
+    // The binding did move, and the report says so without claiming the pair
+    // agrees.
+    expect(directoryFile(box).workspace).toBe(WORKSPACE);
+    expect(run.stdout).not.toContain("mise config");
+  });
+
+  it("writes no mise config outside a checkout, and creates none in a checkout without one", () => {
+    // Creating it is `ub init`'s job: the file carries the signing secret, and a
+    // fresh one is untrusted — which takes down every mise task in the directory.
+    const outside = sandbox();
+    expect(runUb(["workspace", "use", WORKSPACE], outside, WITHOUT_MISE).status).toBe(0);
+    expect(existsSync(localConfigPath(outside))).toBe(false);
+
+    const uninitialised = sandbox({ checkout: true });
+    const run = runUb(["workspace", "use", WORKSPACE], uninitialised, WITHOUT_MISE);
+    expect(run.status, run.output).toBe(0);
+    expect(directoryFile(uninitialised).workspace).toBe(WORKSPACE);
+    expect(existsSync(localConfigPath(uninitialised))).toBe(false);
+    expect(run.stdout).not.toContain("mise config");
+  });
+
+  it("holds the init lock across both writes, so neither happens without the other", async () => {
+    // The deterministic half of the concurrency contract, held by hand so the
+    // timing is a fact rather than a hope: with the lock taken, `use` has not
+    // written the binding either — the pair is what the lock covers.
+    const box = initialisedCheckout(OTHER);
+    const lock = join(box.configHome, "uberblick", ".init.lock");
+    mkdirSync(dirname(lock), { recursive: true });
+    writeFileSync(lock, "999999\n");
+
+    const running = runUbAsync(["workspace", "use", WORKSPACE], box, WITHOUT_MISE);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(existsSync(join(box.cwd, "uberblick.json"))).toBe(false);
+    expect(localConfig(box)).toContain(`WORKSPACE_ID = "${OTHER}"`);
+
+    rmSync(lock);
+    const run = await running;
+    expect(run.status, run.output).toBe(0);
+    expect(directoryFile(box).workspace).toBe(WORKSPACE);
+    expect(localConfig(box)).toContain(`WORKSPACE_ID = "${WORKSPACE}"`);
+    // And the lock it took in turn is not left behind.
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it("leaves the binding and the derived file agreeing under concurrent runs", async () => {
+    // Two switches at the same moment. Without the lock the writes interleave
+    // into a derived file naming one run's workspace over the other's binding —
+    // the state where `ub status` and every mise task disagree.
+    const orders: Array<[string, string]> = [
+      [WORKSPACE, UNRELATED],
+      [UNRELATED, WORKSPACE],
+    ];
+    for (const [first, second] of orders) {
+      const box = initialisedCheckout(OTHER);
+      const runs = await Promise.all([
+        runUbAsync(["workspace", "use", first], box, WITHOUT_MISE),
+        runUbAsync(["workspace", "use", second], box, WITHOUT_MISE),
+      ]);
+      for (const run of runs) {
+        expect(run.status, run.output).toBe(0);
+      }
+      expect(localConfig(box)).toContain(
+        `WORKSPACE_ID = "${directoryFile(box).workspace}"`,
+      );
+    }
   });
 });
 

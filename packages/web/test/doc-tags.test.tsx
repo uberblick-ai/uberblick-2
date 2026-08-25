@@ -4,9 +4,8 @@
  * One claim, told twice: **the chips are a human front door to the write an
  * agent already makes.** `set_tags` replaces `meta.tags` wholesale; so does the
  * header. Everything that follows a retag today — the directory stub, the
- * sidebar group, the breadcrumb, `list_docs` on a second client — follows a
- * chip for the same reason and over the same path, with nothing in the UI told
- * about any of it.
+ * breadcrumb, `list_docs` on a second client — follows a chip for the same
+ * reason and over the same path, with nothing in the UI told about any of it.
  *
  * Both tests mount the real app over shared Y.Docs (the `archived.test.tsx`
  * harness), because the interesting half of this feature is what the write
@@ -165,11 +164,9 @@ function suggestions(host: HTMLElement): string[] {
   );
 }
 
-/** The sidebar's group headers — where the document lives right now. */
-function groups(host: HTMLElement): string[] {
-  return [...host.querySelectorAll(".ub-group-label")].map(
-    (node) => node.textContent ?? "",
-  );
+/** The breadcrumb's group — where the document lives right now. */
+function crumb(host: HTMLElement): string {
+  return host.querySelector(".ub-crumb-group")?.textContent ?? "";
 }
 
 /** Type a word into the add field and commit it with Enter. */
@@ -206,7 +203,7 @@ describe("tags are editable in the doc header", () => {
     // workspace used first.
     expect(suggestions(host)).toEqual(["reference", "verify"]);
     expect(chips(host)).toEqual([]);
-    expect(groups(host)).toEqual(["Verify", "Reference", "Other"]);
+    expect(crumb(host)).toBe("Other");
 
     // ---- adding a tag is the write set_tags makes ----
     act(() => typeInto(field(host), "Feature"));
@@ -223,10 +220,8 @@ describe("tags are editable in the doc header", () => {
     // The stub is repaired from meta, so the second client sees it without
     // anyone telling it: this is what `list_docs` reads.
     expect(getDirectoryEntry(peer, UUID)?.tags).toEqual(["feature"]);
-    // And the document has moved groups, live, in the sidebar and the crumb —
-    // out of "Other" entirely, which empties and stops being drawn.
-    expect(groups(host)).toEqual(["Features", "Verify", "Reference"]);
-    expect(host.querySelector(".ub-crumb-group")?.textContent).toBe("Features");
+    // And the document has moved groups, live, in the crumb.
+    expect(crumb(host)).toBe("Features");
     // A tag already on the document is not offered again.
     expect(suggestions(host)).toEqual(["reference", "verify"]);
 
@@ -253,7 +248,7 @@ describe("tags are editable in the doc header", () => {
     expect(chips(host)).toEqual([]);
     expect(getMeta(ydoc).tags).toEqual([]);
     expect(getDirectoryEntry(peer, UUID)?.tags).toEqual([]);
-    expect(groups(host)).toEqual(["Verify", "Reference", "Other"]);
+    expect(crumb(host)).toBe("Other");
   });
 
   /**
@@ -282,7 +277,7 @@ describe("tags are editable in the doc header", () => {
     act(() => setTags(agent, ["reference", "verify"]));
     expect(chips(host)).toEqual(["reference", "verify"]);
     expect(getMeta(ydoc).tags).toEqual(["reference", "verify"]);
-    expect(host.querySelector(".ub-crumb-group")?.textContent).toBe("Verify");
+    expect(crumb(host)).toBe("Verify");
     expect(getDirectoryEntry(directory, UUID)?.tags).toEqual([
       "reference",
       "verify",

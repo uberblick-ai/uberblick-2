@@ -19,6 +19,7 @@ import {
   initDoc,
   restoreDirectoryEntry,
   roomForDoc,
+  sidebarRoom,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
@@ -27,7 +28,7 @@ import { acquireRoom } from "../collab/rooms.js";
 import { randomIdentity } from "../collab/identity.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { DocChrome } from "./DocChrome.js";
-import { DocList } from "./DocList.js";
+import { Sidebar, togglePin } from "./Sidebar.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
@@ -56,6 +57,7 @@ import {
   usePresence,
   useRoom,
   useRoomStatus,
+  useSidebar,
   useStoredFlag,
   useThreads,
 } from "./hooks.js";
@@ -329,7 +331,20 @@ export function App(): ReactElement {
       : null,
     identity,
   );
+  const sidebar = useRoom(
+    hubReady && workspace !== null ? sidebarRoom(workspace.uuid) : null,
+    identity,
+  );
   const entries = useDirectory(directory);
+  /**
+   * The curated sidebar (#115), live — the same reading a second browser and an
+   * agent's `get_sidebar` produce, because all three are `readSidebar` over the
+   * one synced document.
+   */
+  const sidebarGroups = useSidebar(sidebar);
+  /** Whether the open document is pinned — what the header's Pin control shows. */
+  const pinned =
+    selected !== null && sidebarGroups.some((group) => group.docs.includes(selected));
   /**
    * The workspace's tags, from the directory stubs alone — the suggestions the
    * open document's tag strip offers. Derived here because the listing is
@@ -405,6 +420,17 @@ export function App(): ReactElement {
     (segment: string) => navigate(`/${segment}`),
     [navigate],
   );
+
+  /**
+   * Pin the open document, or unpin it: the keyboard-reachable path into the
+   * sidebar, from the one place that is always about the document on screen.
+   * Which group and which position are the drag's business — this only decides
+   * that the document belongs in the sidebar at all.
+   */
+  const onTogglePin = useCallback(() => {
+    if (sidebar === null || selected === null) return;
+    togglePin(sidebar.ydoc, selected);
+  }, [sidebar, selected]);
 
   /** Opening a document is navigating to it. There is nothing else to update. */
   const segment = workspace?.segment ?? null;
@@ -501,6 +527,8 @@ export function App(): ReactElement {
           presence={presence}
           meta={meta}
           threads={threads}
+          pinned={pinned}
+          onTogglePin={sidebar !== null && selected !== null ? onTogglePin : null}
           threadsOpen={threadsOpen}
           onToggleThreads={onToggleThreads}
           syncOpen={syncOpen}
@@ -512,8 +540,10 @@ export function App(): ReactElement {
       </header>
       <div className="ub-body">
         {!collapsed && (
-          <DocList
+          <Sidebar
             connection={directory}
+            sidebar={sidebar}
+            groups={sidebarGroups}
             entries={entries}
             selected={selected}
             onSelect={onSelect}

@@ -503,7 +503,7 @@ function readCorpus(replicas: Replicas): Corpus {
  * open across a network wait.
  */
 export async function syncWorkspace(config: McpConfig): Promise<Corpus> {
-  const store = new MirrorStore(config.databasePath);
+  const store = new MirrorStore(config.databasePath, config.workspaceId);
   const replicas = new Replicas(config, store);
   try {
     await replicas.settle();

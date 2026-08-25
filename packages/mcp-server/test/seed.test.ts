@@ -67,7 +67,7 @@ async function runImport(
       ? {}
       : { hubUrl: hubUrl(port), authSecret: TEST_SECRET }),
   });
-  const store = new MirrorStore(databasePath);
+  const store = new MirrorStore(databasePath, WORKSPACE);
   const replicas = new Replicas(config, store);
   try {
     const results = await importSeedDocs(replicas, readSeedDocs(dir));
@@ -232,7 +232,7 @@ describe("seed import", () => {
   // then is what duplicates a corpus, so the importer refuses instead.
   it("skips a doc the directory knows but this replica never received", async () => {
     const databasePath = tempDatabasePath();
-    const store = new MirrorStore(databasePath);
+    const store = new MirrorStore(databasePath, WORKSPACE);
     // A secret with an unreachable hub: sync is enabled, so a stub with no
     // document means "somewhere else has it", not "it does not exist".
     const replicas = new Replicas(
@@ -324,7 +324,7 @@ describe("seed import", () => {
   // not something to do quietly and report as success.
   it("skips a tombstoned uuid instead of writing a doc nothing can list", async () => {
     const databasePath = tempDatabasePath();
-    const store = new MirrorStore(databasePath);
+    const store = new MirrorStore(databasePath, WORKSPACE);
     const replicas = new Replicas(testConfig({ databasePath }), store);
     try {
       const seed = seeds[0];
@@ -347,7 +347,7 @@ describe("seed import", () => {
   // imported would be a lie a teardown then throws away.
   it("fails the run when the log refuses a write", async () => {
     const databasePath = tempDatabasePath();
-    const faulty = new FailingStore(databasePath);
+    const faulty = new FailingStore(databasePath, WORKSPACE);
     const replicas = new Replicas(testConfig({ databasePath }), faulty);
     try {
       faulty.failing = true;

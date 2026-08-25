@@ -553,4 +553,7 @@ log is the authoritative replica, so no secret means no sync, not no service
 (`sync_status` reports `hub.status: "disabled"`). `WORKSPACE_ID` it does
 require — with none set it exits non-zero, naming `ub init` — and it reads
 `UBERBLICK_DB` (default `$XDG_DATA_HOME/uberblick/<workspaceUuid>.sqlite`, keyed
-by the bare uuid so both spellings of a workspace hydrate one file).
+by the bare uuid so both spellings of a workspace hydrate one file). A database
+records the workspace it holds, so pointing `UBERBLICK_DB` at another
+workspace's file makes the server exit non-zero naming both ids and the path
+rather than merging two corpora into one index.

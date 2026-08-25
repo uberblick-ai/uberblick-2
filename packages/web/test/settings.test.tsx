@@ -19,7 +19,7 @@ import type { Root } from "react-dom/client";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DocList } from "../src/ui/DocList.js";
+import { Sidebar } from "../src/ui/Sidebar.js";
 import { SettingsDialog } from "../src/ui/SettingsDialog.js";
 import {
   SETTINGS_KEY,
@@ -159,8 +159,10 @@ describe("the settings dialog", () => {
     const open = vi.fn();
     act(() => {
       root.render(
-        <DocList
+        <Sidebar
           connection={null}
+          sidebar={null}
+          groups={[]}
           entries={[]}
           selected={null}
           onSelect={() => {}}

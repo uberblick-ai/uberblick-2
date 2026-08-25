@@ -40,7 +40,7 @@ export interface UberblickMcpServer {
  */
 export function createMcpServer(
   config: McpConfig,
-  store: MirrorStore = new MirrorStore(config.databasePath),
+  store: MirrorStore = new MirrorStore(config.databasePath, config.workspaceId),
 ): UberblickMcpServer {
   const replicas = new Replicas(config, store);
 
