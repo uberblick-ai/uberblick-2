@@ -283,7 +283,14 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     // the only signal, and leaving it unhandled is also an unhandled rejection.
     // There is no cache to read, so the honest terminal answer is "read, found
     // nothing", and the room runs on live sync alone.
-    persistence._db.catch(localReadDone);
+    //
+    // Read defensively, because `_db` is the library's own field and not part
+    // of what it promises to keep: a version that renames it should cost us
+    // this one signal, not every room. Without it a blocked database falls back
+    // to the pre-existing behaviour — the read never finishes — rather than
+    // throwing where the room is opened.
+    const opening = (persistence as { _db?: Promise<IDBDatabase> })._db;
+    opening?.catch(localReadDone);
   } else {
     // No IndexedDB at all (jsdom, some embedded webviews): the same terminal
     // state, reached without an attempt.
