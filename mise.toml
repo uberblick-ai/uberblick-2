@@ -13,6 +13,14 @@ fnox = "1"
 [env]
 HUB_URL = "ws://localhost:1234"
 
+# `ub` and `uberblick` as plain commands inside the checkout. pnpm links the
+# cli package's declared bin entries here on install (the root package.json
+# depends on it for exactly that reason); mise prepends this directory for any
+# activated shell in the checkout and for every `mise run`/`mise exec`, and
+# drops it again on leaving. Nothing is installed outside the checkout —
+# distribution is a separate concern.
+_.path = ["{{config_root}}/node_modules/.bin"]
+
 [tasks.setup]
 description = "Fresh checkout to running: pinned toolchain, frozen dependencies, then `ub init`"
 # The fresh-checkout entry point, and a superset of `ub init` rather than a

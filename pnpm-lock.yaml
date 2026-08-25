@@ -16,6 +16,9 @@ importers:
       '@biomejs/biome':
         specifier: 2.5.9
         version: 2.5.9
+      '@uberblick/cli':
+        specifier: workspace:*
+        version: link:packages/cli
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

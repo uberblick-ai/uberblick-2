@@ -259,7 +259,7 @@ On the computer that holds the documents, with the local hub still running —
 MCP session has pulled them down:
 
 ```sh
-node packages/cli/bin/ub.mjs remote promote wss://<TAILSCALE_HOST>/ws
+ub remote promote wss://<TAILSCALE_HOST>/ws
 ```
 
 It hydrates the local directory and every live document into the update log,
@@ -280,7 +280,7 @@ On a second computer, from a fresh clone:
 
 ```sh
 mise trust && mise run setup -- --yes --workspace <WORKSPACE_ID>
-node packages/cli/bin/ub.mjs remote join wss://<TAILSCALE_HOST>/ws \
+ub remote join wss://<TAILSCALE_HOST>/ws \
   --secret-file ~/uberblick-remote-secret
 mise run web
 ```

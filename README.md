@@ -230,17 +230,26 @@ through the MCP tools rather than by editing the seed files.
 
 `ub` is what a *user* of uberblick runs. The contributor verbs — dev, lint,
 typecheck, test, e2e, review — stay mise tasks and are deliberately not
-duplicated there. Distribution comes later, so until then run it out of the
-checkout:
+duplicated there. Distribution comes later; until then `ub` lives exactly where
+the checkout does:
 
 ```
-node packages/cli/bin/ub.mjs init            # identity, workspace, signing secret
-node packages/cli/bin/ub.mjs status          # workspace, hub, credential, sync state
-node packages/cli/bin/ub.mjs status --json   # the same, as one JSON object
-node packages/cli/bin/ub.mjs remote          # the endpoint in force, and what sharing it buys
-node packages/cli/bin/ub.mjs mcp install     # register uberblick with an MCP client
-node packages/cli/bin/ub.mjs mcp serve       # the stdio entry point for an MCP client
+ub init            # identity, workspace, signing secret
+ub status          # workspace, hub, credential, sync state
+ub status --json   # the same, as one JSON object
+ub remote          # the endpoint in force, and what sharing it buys
+ub mcp install     # register uberblick with an MCP client
+ub mcp serve       # the stdio entry point for an MCP client
 ```
+
+Both declared names work — `ub` and `uberblick`. What puts them on PATH is mise:
+`mise.toml` adds the checkout's `node_modules/.bin` to `[env] _.path`, and
+`mise run install` (so also `mise run setup`) is what links the cli package's
+declared bins there. So with [mise activated in your
+shell](https://mise.jdx.dev/getting-started.html) the commands resolve inside
+the checkout and nowhere else — `cd` out and `ub` is gone again. Without
+activation, or in CI, prefix them: `mise x -- ub status`. And before the first
+install there is nothing to link, so `mise run setup` comes first.
 
 Inside a checkout prefer `mise run init` over calling `ub init` directly: the
 task wraps it in `fnox exec`, which is how a decryptable secret becomes visible
@@ -293,7 +302,7 @@ computers, not there. The hub it starts is empty.
 running so the browser-created ones can be collected:
 
 ```
-node packages/cli/bin/ub.mjs remote promote wss://<host>.ts.net/ws
+ub remote promote wss://<host>.ts.net/ws
 ```
 
 That reads the whole local workspace through the local hub into the update log,
@@ -317,7 +326,7 @@ promotion rather than colliding with it.
 
 ```
 mise trust && mise run setup -- --yes --workspace <workspace id>
-node packages/cli/bin/ub.mjs remote join wss://<host>.ts.net/ws \
+ub remote join wss://<host>.ts.net/ws \
   --secret-file ~/uberblick-remote-secret
 mise run web            # the web client alone; the hub is the remote one
 ```
