@@ -16,6 +16,7 @@ import {
   getMeta,
   getMetaMap,
   initDoc,
+  restoreDirectoryEntry,
   roomForDoc,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -39,6 +40,7 @@ import {
 } from "./route.js";
 import type { Route } from "./route.js";
 import {
+  useArchived,
   useDirectory,
   useDocMeta,
   useHubEndpoint,
@@ -63,6 +65,8 @@ export function RoutePane({
   connection,
   meta,
   author,
+  archived,
+  onRestore,
   onSelectThread,
 }: {
   route: Route;
@@ -79,6 +83,10 @@ export function RoutePane({
    */
   meta: DocMeta | null;
   author: string;
+  /** Whether the directory tombstones this document — see `useArchived`. */
+  archived: boolean;
+  /** Lift that tombstone. The only action an archived document offers. */
+  onRestore: () => void;
   onSelectThread: (threadId: string) => void;
 }): ReactElement {
   if (route.kind === "unknown-workspace") {
@@ -130,6 +138,8 @@ export function RoutePane({
     <EditorPane
       connection={connection}
       author={author}
+      archived={archived}
+      onRestore={onRestore}
       onSelectThread={onSelectThread}
     />
   );
@@ -162,6 +172,17 @@ export function App(): ReactElement {
   );
   const entries = useDirectory(directory);
   const meta = useDocMeta(doc);
+  const archived = useArchived(directory, selected);
+
+  /**
+   * Lift the tombstone — the same schema call `restore_doc` makes, against the
+   * same directory document, so a restore from here and a restore from an agent
+   * are one operation with two front doors.
+   */
+  const onRestore = useCallback(() => {
+    if (directory === null || selected === null) return;
+    restoreDirectoryEntry(directory.ydoc, selected);
+  }, [directory, selected]);
 
   /**
    * Normalise the address to the one form the app hands out: `/` becomes
@@ -269,6 +290,8 @@ export function App(): ReactElement {
           connection={doc}
           meta={meta}
           author={identity.name}
+          archived={archived}
+          onRestore={onRestore}
           onSelectThread={onFocusThread}
         />
         {/* The outline and the threads rail stack in one right column. Both
@@ -281,6 +304,7 @@ export function App(): ReactElement {
             connection={doc}
             focused={focusedThread}
             author={identity.name}
+            readOnly={archived}
             onFocus={onFocusThread}
           />
         </aside>

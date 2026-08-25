@@ -72,6 +72,7 @@ function ThreadCard({
   focused,
   collapsed,
   replying,
+  readOnly,
   refusal,
   onSelect,
   onReply,
@@ -84,6 +85,8 @@ function ThreadCard({
   /** Resolved and not expanded: head and excerpt only. */
   collapsed: boolean;
   replying: boolean;
+  /** The conversation is readable, but nothing on the card writes. */
+  readOnly: boolean;
   /**
    * Why the last reply to this thread was refused, if it was — and null on a
    * card that reads as open, because that is what the refusal is about.
@@ -138,7 +141,10 @@ function ThreadCard({
           else resolved the thread arrives on a card that is collapsing in the
           same flush, and the reason has to outlive that. */}
       {refusal !== null && <p className="ub-comment-error">{refusal}</p>}
+      {/* An archived document's threads are history: every comment stays
+          readable, and there is nothing here that would write to it. */}
       {!collapsed &&
+        !readOnly &&
         (replying ? (
           <CommentForm
             placeholder="Reply…"
@@ -170,12 +176,18 @@ export function ThreadsPane({
   connection,
   focused,
   author,
+  readOnly = false,
   onFocus,
 }: {
   connection: RoomConnection | null;
   focused: ThreadFocus | null;
   /** The awareness name this client publishes — the author of its replies. */
   author: string;
+  /**
+   * Read the threads, write nothing — what an archived document allows. The
+   * rail keeps every card, and drops Reply, Resolve and Reopen.
+   */
+  readOnly?: boolean;
   onFocus: (threadId: string) => void;
 }): ReactElement | null {
   const threads = useThreads(connection);
@@ -206,11 +218,21 @@ export function ThreadsPane({
   // go: hiding the form while a thread reads as resolved is not the same as
   // forgetting it, and a thread someone else resolves and then reopens would
   // bring the form — and its focus grab — back with nobody having asked.
+  //
+  // Read-only is the same hazard with a different cause: archiving a document
+  // hides the form without forgetting it, and the restore would bring it back
+  // and take the focus with it (`CommentForm` autofocuses), on a gesture nobody
+  // made. Whoever archived it ended the conversation for now; the reply is let
+  // go with it.
   useEffect(() => {
     if (replyTo === null) return;
+    if (readOnly) {
+      setReplyTo(null);
+      return;
+    }
     const thread = threads.find((candidate) => candidate.id === replyTo);
     if (thread === undefined || thread.resolved) setReplyTo(null);
-  }, [threads, replyTo]);
+  }, [threads, replyTo, readOnly]);
 
   // A refusal describes a thread at one moment, and that thread is shared:
   // whoever settled it can reopen it, and an id that is gone can come back on a
@@ -248,6 +270,7 @@ export function ThreadsPane({
       // may name a thread someone else resolved a moment ago, and expanding
       // that card must not offer a reply nobody asked for.
       replying={replyTo === thread.id && !thread.resolved}
+      readOnly={readOnly}
       // Same guard as `replying` above, for the same reason: the message is
       // about a settled thread, so a card that reads as open must not show it —
       // not even for the one committed frame between a reopen reaching the rail
