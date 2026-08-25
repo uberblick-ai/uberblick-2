@@ -209,7 +209,7 @@ describe("sidebar doc", () => {
     expect(destinations).toEqual(["Work", "Work"]);
   });
 
-  it("keeps a document pinned when a move races an unpin", () => {
+  it("unpins on both replicas when a move races an unpin", () => {
     const { a, b, work, reading } = seededPair();
     pinDoc(a, work, ALPHA);
     syncDocs(a, b);
@@ -218,19 +218,25 @@ describe("sidebar doc", () => {
     moveDoc(b, ALPHA, reading, 0);
     syncDocs(a, b);
 
-    // The unpin deleted the pin it could see; the move inserted one it never
-    // saw. Both replicas agree, and there is exactly one pin — no duplicate.
+    // The unpin wins. Yjs alone would keep the move's insert — the unpin's
+    // delete cannot reach a pin it never saw — so the tombstone is what makes
+    // the decided outcome hold, on both replicas alike.
+    expect(readSidebar(a)).toEqual(readSidebar(b));
+    expect(readSidebar(a)).toEqual([
+      { id: work, name: "Work", docs: [] },
+      { id: reading, name: "Reading", docs: [] },
+    ]);
+
+    // A deliberate re-pin is the way back, and it beats the older unpin: it
+    // clears the tombstone and sweeps up the pin that was being shadowed, so
+    // the document lands where this call puts it and nowhere else.
+    pinDoc(b, reading, ALPHA);
+    syncDocs(a, b);
     expect(readSidebar(a)).toEqual(readSidebar(b));
     expect(readSidebar(a)).toEqual([
       { id: work, name: "Work", docs: [] },
       { id: reading, name: "Reading", docs: [ALPHA] },
     ]);
-
-    // The other direction leaves nothing behind: an unpin that has seen the
-    // move removes every occurrence.
-    unpinDoc(b, ALPHA);
-    syncDocs(a, b);
-    expect(readSidebar(a).flatMap((group) => group.docs)).toEqual([]);
   });
 
   it("drops the pins of a group deleted concurrently with a pin into it", () => {

@@ -98,10 +98,12 @@ export type { WorkspaceId } from "./workspace.js";
 export {
   SIDEBAR_GROUPS_KEY,
   SIDEBAR_ORDER_KEY,
+  SIDEBAR_UNPINNED_KEY,
   createGroup,
   deleteGroup,
   getSidebarGroups,
   getSidebarOrder,
+  getSidebarUnpinned,
   moveDoc,
   moveGroup,
   pinDoc,

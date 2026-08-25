@@ -11,9 +11,10 @@
  * list of references, so nothing here can change, hide or delete a document.
  * Unpinning and deleting a group are sidebar-only acts.
  *
- * Layout — two top-level keys, deliberately:
- *   - `groups` Y.Map: groupId → Y.Map { name: string, docs: Y.Array<uuid> }
- *   - `order`  Y.Array<groupId>: the group order
+ * Layout — three top-level keys, deliberately:
+ *   - `groups`   Y.Map: groupId → Y.Map { name: string, docs: Y.Array<uuid> }
+ *   - `order`    Y.Array<groupId>: the group order
+ *   - `unpinned` Y.Map: uuid → true, an unpin tombstone (see below)
  *
  * The order is an array of *ids*, not of the groups themselves, because Yjs has
  * no move: reordering is delete-then-insert. Moving a string id rewrites
@@ -43,11 +44,29 @@
  *     not depend on which move it made or integrated last. The shadowed copy
  *     clears on the next write touching that uuid.
  *
- *   - **A move concurrent with an unpin keeps the document pinned.** The unpin
- *     deletes the pin its replica could see; the move inserted one it never
- *     saw, and a delete does not reach forward. That is the contract, pinned by
- *     `sidebar.test.ts` — it is Yjs, not a preference, and it is the same shape
- *     as the directory's rename-races-archive outcome.
+ *   - **An unpin beats a move it raced: the document ends up unpinned.** This
+ *     one is a decision, not a gift from Yjs, and Yjs on its own gives the
+ *     opposite: the unpin deletes the pin its own replica could see, the move
+ *     inserts a pin the unpin never saw, and a delete does not reach forward —
+ *     so the losing insert would survive as a live pin. The `unpinned` map is
+ *     what buys the decided behaviour. `unpinDoc` records the uuid there, and
+ *     `readSidebar` hides every pin of a recorded uuid, so the orphaned insert
+ *     is shadowed rather than honoured. Enforced on read, like the single-pin
+ *     rule and for the same reason: a read-side rule needs no agreement between
+ *     replicas to reach the same answer on each of them.
+ *
+ *   - **A deliberate re-pin beats an older unpin.** `pinDoc` clears the
+ *     tombstone and sweeps away any shadowed pins of that uuid before
+ *     inserting, so re-pinning is a clean start rather than a fight with the
+ *     document's own history. "Older" is causal, not chronological: a re-pin
+ *     that has seen the tombstone removes it, while a re-pin *concurrent* with
+ *     an unpin loses, because Yjs keeps a concurrent `set` over a `delete`
+ *     whichever order they are made in. That happens to point the same way as
+ *     the decision, so the rule holds without a counter or a clock.
+ *
+ *     The tombstone stays honest through one invariant: it is written only for
+ *     a document that is visibly pinned, and cleared only by a replica that can
+ *     already see it. Nothing outside this module may write that map.
  *
  * Ordering is stored, never computed: `readSidebar` returns groups and pins in
  * exactly the order the arrays hold. Nothing in this module sorts by title.
@@ -66,6 +85,9 @@ export const SIDEBAR_GROUPS_KEY = "groups";
 /** The key of the sidebar's group-order Y.Array. */
 export const SIDEBAR_ORDER_KEY = "order";
 
+/** The key of the sidebar's unpin-tombstone Y.Map. */
+export const SIDEBAR_UNPINNED_KEY = "unpinned";
+
 const NAME_KEY = "name";
 const DOCS_KEY = "docs";
 
@@ -77,6 +99,17 @@ export function getSidebarGroups(sidebarDoc: Y.Doc): Y.Map<unknown> {
 /** The group-order array inside a sidebar doc. */
 export function getSidebarOrder(sidebarDoc: Y.Doc): Y.Array<string> {
   return sidebarDoc.getArray<string>(SIDEBAR_ORDER_KEY);
+}
+
+/**
+ * The unpin tombstones inside a sidebar doc: uuid → true.
+ *
+ * An entry means "hide every pin of this uuid". Only {@link unpinDoc} writes
+ * one and only {@link pinDoc} clears one; see the module header for why that
+ * invariant is what makes the map safe.
+ */
+export function getSidebarUnpinned(sidebarDoc: Y.Doc): Y.Map<boolean> {
+  return sidebarDoc.getMap<boolean>(SIDEBAR_UNPINNED_KEY);
 }
 
 function groupById(sidebarDoc: Y.Doc, groupId: string): Y.Map<unknown> | null {
@@ -137,8 +170,13 @@ function removePinEverywhere(sidebarDoc: Y.Doc, uuid: string): void {
   for (const pins of allPinLists(sidebarDoc)) removeAll(pins, uuid);
 }
 
-/** True when `uuid` is pinned in any group. */
-function isPinned(sidebarDoc: Y.Doc, uuid: string): boolean {
+/**
+ * True when `uuid` reads as pinned — the same view {@link readSidebar} gives.
+ * A tombstoned uuid is not pinned however many shadowed pins storage still
+ * holds for it.
+ */
+function isVisiblyPinned(sidebarDoc: Y.Doc, uuid: string): boolean {
+  if (getSidebarUnpinned(sidebarDoc).has(uuid)) return false;
   return allPinLists(sidebarDoc).some((pins) =>
     pins.toArray().includes(uuid),
   );
@@ -189,6 +227,11 @@ export function deleteGroup(sidebarDoc: Y.Doc, groupId: string): void {
  * One pin per document across the whole sidebar: pinning a uuid that is already
  * pinned anywhere does nothing, even into another group. Moving it is
  * {@link moveDoc}.
+ *
+ * This is the only way back from an unpin, and it is deliberate about it: the
+ * tombstone is cleared and any pins it was shadowing are swept away first, so
+ * the document lands exactly where this call puts it rather than wherever a
+ * race left it.
  */
 export function pinDoc(
   sidebarDoc: Y.Doc,
@@ -198,22 +241,38 @@ export function pinDoc(
 ): void {
   const group = groupById(sidebarDoc, groupId);
   const pins = group === null ? null : pinsOf(group);
-  if (pins === null || isPinned(sidebarDoc, uuid)) return;
-  pins.insert(clampIndex(index, pins.length), [uuid]);
+  if (pins === null || isVisiblyPinned(sidebarDoc, uuid)) return;
+  sidebarDoc.transact(() => {
+    getSidebarUnpinned(sidebarDoc).delete(uuid);
+    removePinEverywhere(sidebarDoc, uuid);
+    pins.insert(clampIndex(index, pins.length), [uuid]);
+  });
 }
 
-/** Unpin a document, wherever it sits. The document itself is untouched. */
+/**
+ * Unpin a document, wherever it sits. The document itself is untouched.
+ *
+ * Removing the pins is not enough on its own — a move made concurrently on
+ * another replica would reinstate one — so this also records a tombstone that
+ * hides the uuid until someone pins it again. See the module header.
+ */
 export function unpinDoc(sidebarDoc: Y.Doc, uuid: string): void {
-  if (!isPinned(sidebarDoc, uuid)) return;
+  if (!isVisiblyPinned(sidebarDoc, uuid)) return;
   sidebarDoc.transact(() => {
     removePinEverywhere(sidebarDoc, uuid);
+    getSidebarUnpinned(sidebarDoc).set(uuid, true);
   });
 }
 
 /**
  * Move a document to `index` in `toGroupId` — within its group or across
  * groups. `index` counts positions in the target group *after* the document has
- * been taken out of it. A uuid that was not pinned is simply pinned.
+ * been taken out of it.
+ *
+ * Moving only ever moves a pin that is there: a uuid that does not read as
+ * pinned is left alone rather than pinned. Pinning is {@link pinDoc}, which is
+ * where the deliberate re-pin of an unpinned document belongs — keeping the two
+ * apart is what stops a move from quietly overriding an unpin.
  */
 export function moveDoc(
   sidebarDoc: Y.Doc,
@@ -223,7 +282,7 @@ export function moveDoc(
 ): void {
   const group = groupById(sidebarDoc, toGroupId);
   const pins = group === null ? null : pinsOf(group);
-  if (pins === null) return;
+  if (pins === null || !isVisiblyPinned(sidebarDoc, uuid)) return;
   sidebarDoc.transact(() => {
     removePinEverywhere(sidebarDoc, uuid);
     pins.insert(clampIndex(index, pins.length), [uuid]);
@@ -245,11 +304,13 @@ export function moveGroup(
 }
 
 /**
- * The sidebar in stored order, with the one-pin-per-document rule applied: a
- * uuid appearing more than once keeps its first occurrence, which is the same
- * occurrence on every replica. Nothing is sorted.
+ * The sidebar in stored order, with both read-side rules applied: a uuid
+ * carrying an unpin tombstone is hidden entirely, and a uuid appearing more
+ * than once keeps its first occurrence — the same occurrence on every replica.
+ * Nothing is sorted.
  */
 export function readSidebar(sidebarDoc: Y.Doc): SidebarGroup[] {
+  const unpinned = getSidebarUnpinned(sidebarDoc);
   const pinned = new Set<string>();
   const out: SidebarGroup[] = [];
   for (const id of orderedGroupIds(sidebarDoc)) {
@@ -258,6 +319,7 @@ export function readSidebar(sidebarDoc: Y.Doc): SidebarGroup[] {
     const docs: string[] = [];
     for (const uuid of pinsOf(group)?.toArray() ?? []) {
       if (typeof uuid !== "string" || pinned.has(uuid)) continue;
+      if (unpinned.has(uuid)) continue;
       pinned.add(uuid);
       docs.push(uuid);
     }
