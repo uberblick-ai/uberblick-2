@@ -22,20 +22,31 @@ const ALPHA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const BETA = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const GAMMA = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
-/** Two replicas of one sidebar, already sharing two groups. */
-function seededPair(): {
-  a: Y.Doc;
-  b: Y.Doc;
-  work: string;
-  reading: string;
-} {
+/**
+ * Two replicas of one sidebar, already sharing two groups.
+ *
+ * The client ids are explicit because Yjs breaks some ties by clientID order,
+ * so a test that happened to run with one ordering could pass while the same
+ * code diverged on another machine. Every claim here has to hold either way.
+ */
+function seededPair(
+  clientIds: [number, number] = [1, 2],
+): { a: Y.Doc; b: Y.Doc; work: string; reading: string } {
   const a = new Y.Doc();
+  a.clientID = clientIds[0];
   const work = createGroup(a, "Work");
   const reading = createGroup(a, "Reading");
   const b = new Y.Doc();
+  b.clientID = clientIds[1];
   syncDocs(a, b);
   return { a, b, work, reading };
 }
+
+/** Both clientID orderings, so no assertion can rest on a coin flip. */
+const CLIENT_ORDERS: [number, number][] = [
+  [1, 2],
+  [2, 1],
+];
 
 // The well-known room name itself is pinned once, in rooms.test.ts.
 describe("sidebar doc", () => {
@@ -210,72 +221,78 @@ describe("sidebar doc", () => {
     expect(destinations).toEqual(["Work", "Work"]);
   });
 
-  it("unpins on both replicas when a move races an unpin", () => {
-    const { a, b, work, reading } = seededPair();
-    pinDoc(a, work, ALPHA);
-    syncDocs(a, b);
+  it.each(CLIENT_ORDERS)(
+    "unpins on both replicas when a move races an unpin (clients %i, %i)",
+    (first, second) => {
+      const { a, b, work, reading } = seededPair([first, second]);
+      pinDoc(a, work, ALPHA);
+      syncDocs(a, b);
 
-    unpinDoc(a, ALPHA);
-    moveDoc(b, ALPHA, reading, 0);
-    syncDocs(a, b);
+      unpinDoc(a, ALPHA);
+      moveDoc(b, ALPHA, reading, 0);
+      syncDocs(a, b);
 
-    // The unpin wins. Yjs alone would keep the move's insert — the unpin's
-    // delete cannot reach a pin it never saw — so the tombstone is what makes
-    // the decided outcome hold, on both replicas alike.
-    expect(readSidebar(a)).toEqual(readSidebar(b));
-    expect(readSidebar(a)).toEqual([
-      { id: work, name: "Work", docs: [] },
-      { id: reading, name: "Reading", docs: [] },
-    ]);
+      // The decided rule. Removing the pins cannot carry it on its own — the
+      // unpin's delete never reaches the pin the move inserted — so the unpin
+      // counter does: the moved pin still carries the level it was made under,
+      // which no longer clears the raised one.
+      expect(readSidebar(a)).toEqual(readSidebar(b));
+      expect(readSidebar(a)).toEqual([
+        { id: work, name: "Work", docs: [] },
+        { id: reading, name: "Reading", docs: [] },
+      ]);
 
-    // A deliberate re-pin is the way back, and it beats the older unpin: it
-    // clears the tombstone and sweeps up the pin that was being shadowed, so
-    // the document lands where this call puts it and nowhere else.
-    pinDoc(b, reading, ALPHA);
-    syncDocs(a, b);
-    expect(readSidebar(a)).toEqual(readSidebar(b));
-    expect(readSidebar(a)).toEqual([
-      { id: work, name: "Work", docs: [] },
-      { id: reading, name: "Reading", docs: [ALPHA] },
-    ]);
-  });
+      // A deliberate re-pin is the way back: it stamps the pin with the level
+      // it can see and sweeps up the one that was being shadowed, so the
+      // document lands where this call puts it and nowhere else.
+      pinDoc(b, reading, ALPHA);
+      syncDocs(a, b);
+      expect(readSidebar(a)).toEqual(readSidebar(b));
+      expect(readSidebar(a)).toEqual([
+        { id: work, name: "Work", docs: [] },
+        { id: reading, name: "Reading", docs: [ALPHA] },
+      ]);
+    },
+  );
 
-  it("keeps the tombstone when a re-pin races an unpin that never saw it", () => {
-    // The one case where the two replicas disagree about whether the document
-    // is pinned, which is what makes a concurrent set and delete of the same
-    // tombstone key reachable at all. B unpins and re-pins entirely on its own
-    // side, so B's delete targets B's own tombstone; A, still holding the
-    // original pin, unpins and writes a second, unrelated tombstone.
-    const { a, b, work, reading } = seededPair();
-    pinDoc(a, work, ALPHA);
-    syncDocs(a, b);
+  it.each(CLIENT_ORDERS)(
+    "resolves an unpin racing a re-pin neither replica saw as pinned (clients %i, %i)",
+    (first, second) => {
+      // The case where the replicas disagree about whether the document is
+      // pinned at all: B unpins and re-pins entirely on its own side, while A,
+      // still holding the original pin, unpins. Both unpins are made from
+      // level 0, so both write 1 — to their own client's key, never the same
+      // one, so nothing is overwritten and nothing is deleted.
+      const { a, b, work, reading } = seededPair([first, second]);
+      pinDoc(a, work, ALPHA);
+      syncDocs(a, b);
 
-    unpinDoc(b, ALPHA);
-    pinDoc(b, reading, ALPHA);
-    unpinDoc(a, ALPHA);
-    syncDocs(a, b);
+      unpinDoc(b, ALPHA);
+      pinDoc(b, reading, ALPHA);
+      unpinDoc(a, ALPHA);
+      syncDocs(a, b);
 
-    // Yjs keeps a concurrent set over a delete, so A's tombstone survives B's
-    // clear and the re-pinned document reads as unpinned — the same answer on
-    // both replicas. Unpin winning a race it is part of is the decided rule;
-    // this pins the mechanism the header claims, not just the outcome.
-    expect(getSidebarUnpinned(a).has(ALPHA)).toBe(true);
-    expect(readSidebar(a)).toEqual(readSidebar(b));
-    expect(readSidebar(a)).toEqual([
-      { id: work, name: "Work", docs: [] },
-      { id: reading, name: "Reading", docs: [] },
-    ]);
+      // Each replica's own counter survives the merge intact.
+      expect(getSidebarUnpinned(a).get(`${ALPHA}#${a.clientID}`)).toBe(1);
+      expect(getSidebarUnpinned(a).get(`${ALPHA}#${b.clientID}`)).toBe(1);
 
-    // And it is not stuck: a re-pin that has seen the surviving tombstone
-    // clears it and sweeps up the pin it was shadowing.
-    pinDoc(a, work, ALPHA);
-    syncDocs(a, b);
-    expect(readSidebar(a)).toEqual(readSidebar(b));
-    expect(readSidebar(a)).toEqual([
-      { id: work, name: "Work", docs: [ALPHA] },
-      { id: reading, name: "Reading", docs: [] },
-    ]);
-  });
+      // The level is the max, 1, and B's re-pin was stamped 1 — so the tie
+      // reads as pinned, by the rule rather than by whichever clientID sorts
+      // first. Same answer under either ordering, which is the whole point.
+      expect(readSidebar(a)).toEqual(readSidebar(b));
+      expect(readSidebar(a)).toEqual([
+        { id: work, name: "Work", docs: [] },
+        { id: reading, name: "Reading", docs: [ALPHA] },
+      ]);
+
+      // And an unpin that has seen all of it still wins: it raises its own
+      // counter past the re-pin's stamp.
+      unpinDoc(a, ALPHA);
+      syncDocs(a, b);
+      expect(readSidebar(a)).toEqual(readSidebar(b));
+      expect(readSidebar(a).flatMap((group) => group.docs)).toEqual([]);
+    },
+  );
 
   it("drops the pins of a group deleted concurrently with a pin into it", () => {
     const { a, b, work, reading } = seededPair();
