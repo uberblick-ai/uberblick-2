@@ -20,6 +20,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Hub } from "@uberblick/hub";
 import { createHub, mintToken, silentLogger } from "@uberblick/hub";
+import { parseRoom } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { McpConfig } from "../src/config.js";
 import { createMcpServer } from "../src/server.js";
@@ -268,6 +269,11 @@ export interface PeerClient {
  * A second client on a room, standing in for the web UI: a plain
  * `HocuspocusProvider` over a Y.Doc, so what it observes is what a browser
  * would observe.
+ *
+ * The token's workspace claim comes from the room, exactly as the web client
+ * mints it (`packages/web/src/collab/rooms.ts`): the hub refuses a room outside
+ * the claim, so a claim pinned to one workspace would make a peer on a second
+ * workspace's room fail authentication rather than observe it.
  */
 export async function peerClient(
   port: number,
@@ -276,7 +282,7 @@ export async function peerClient(
 ): Promise<PeerClient> {
   const token = await mintToken(TEST_SECRET, {
     sub: "test-peer",
-    workspace: WORKSPACE,
+    workspace: parseRoom(room).workspaceId,
     scope: "read-write",
   });
   const provider = new HocuspocusProvider({
