@@ -475,6 +475,22 @@ describe("ub remote", () => {
     expect(stored.replacedSecret).toBe(true);
     expect(stored.warnings).toEqual([]);
     expect(stored.outrankedBy).toBe(null);
+
+    // Same hub, not same spelling: a root slash is what `new URL` adds to an
+    // empty path, so a HUB_URL carrying one is not a second hub.
+    const slashed = sandbox({ credentials: { signingSecret: SECRET } });
+    slashed.env.HUB_URL = "wss://hub.example.ts.net/";
+
+    const spelled = setRemote("wss://hub.example.ts.net", {
+      secret: OTHER_SECRET,
+      env: slashed.env,
+      cwd: slashed.cwd,
+    });
+
+    expect(storedSecret(slashed)).toBe(OTHER_SECRET);
+    expect(spelled.replacedSecret).toBe(true);
+    expect(spelled.warnings).toEqual([]);
+    expect(spelled.outrankedBy).toBe(null);
   });
 });
 

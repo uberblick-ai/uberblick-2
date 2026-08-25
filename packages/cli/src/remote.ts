@@ -131,8 +131,7 @@ const SHARING_BOUNDARY =
  * endpoint being written outranks nothing that matters: the value takes effect,
  * there is no switch that did not happen, and nothing is worth saying — which is
  * the ordinary shape of a second machine whose `HUB_URL` already points at the
- * hub it is joining. Endpoints compare as trimmed strings, because that is what
- * `resolveConfig` hands to a client and what {@link normalizeRemoteUrl} keeps.
+ * hub it is joining. Same hub, not same spelling — see {@link sameEndpoint}.
  */
 interface Outranking {
   /** `HUB_URL` or `./uberblick.json`. */
@@ -159,9 +158,35 @@ function outranking(
       : { layer: `"hubUrl" in ./uberblick.json`, endpoint: pinned };
   };
   const outranked = found();
-  return outranked === null || outranked.endpoint === requested.trim()
+  return outranked === null || sameEndpoint(outranked.endpoint, requested)
     ? null
     : outranked;
+}
+
+/**
+ * Whether two configured endpoints name the same hub.
+ *
+ * `wss://hub/` and `wss://hub` are one hub spelled two ways — `new URL` says so
+ * by normalizing the empty path to a root slash and lowercasing the host — and a
+ * higher layer spelling it the other way must not read as a conflict, or the
+ * second machine this exists for is refused the credential it joined to get.
+ *
+ * A value that does not parse falls back to its trimmed text, so garbage in
+ * `HUB_URL` compares unequal and keeps the warning path rather than throwing
+ * from inside a decision about whether to warn. {@link normalizeRemoteUrl} has
+ * already refused anything unparseable on the requested side; this is about the
+ * layer above, which nothing validates.
+ */
+function sameEndpoint(a: string, b: string): boolean {
+  const canonical = (value: string): string => {
+    const text = value.trim();
+    try {
+      return new URL(text).href;
+    } catch {
+      return text;
+    }
+  };
+  return canonical(a) === canonical(b);
 }
 
 function outrankedNote(outranked: Outranking, what: string): string {
