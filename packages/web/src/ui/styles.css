@@ -1247,3 +1247,97 @@ body {
   margin: 0;
   padding: 0.4rem;
 }
+
+/* ---- changed-block marks ---- */
+
+/* Two halves of one signal: an accent line in the block's gutter, and a dot on
+ * the outline entry for the section that block is in. Both are session-local
+ * and ephemeral — a reload starts clean, because nothing about them is stored
+ * (see `src/editor/changed-blocks.ts`).
+ *
+ * The tokens live here rather than up in the main block so the whole feature is
+ * one section to read, and one section to delete.
+ */
+:root {
+  /* Where the accent line sits inside `--block-gutter`. The insertion `+` is
+     22px wide against the gutter's outer edge, so the 6px nearest the text is
+     free — the line goes there, and the two never overlap. */
+  --changed-bar-inset: 0.375rem;
+  --changed-bar-width: 2px;
+}
+
+/* The line is a pseudo-element on the block itself, and the gutter it sits in
+   is reserved whether anything is in it or not — so a block being marked
+   changes paint and nothing else. No prose moves, ever.
+
+   `position: relative` is there only to make the block the pseudo-element's
+   containing block; it shifts nothing.
+
+   The class is applied by a ProseMirror node decoration, which lands on a
+   NodeView's outer element exactly as it lands on a plain paragraph. That is
+   why `code` and `mermaid` need no marker of their own: those blocks own their
+   DOM (`src/editor/source-chrome.ts`), and nothing here reaches into it. */
+.ub-changed {
+  position: relative;
+}
+
+.ub-changed::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(-1 * var(--changed-bar-inset));
+  width: var(--changed-bar-width);
+  border-radius: 1px;
+  background: var(--brand);
+  pointer-events: none;
+  animation: ub-changed-in 160ms ease-out;
+}
+
+/* An element's own `overflow` clips its pseudo-elements, and `.ub-code` is a
+   scroll container — so the line would be invisible on exactly the block type
+   an agent most often rewrites. It stops clipping while it is marked.
+   `white-space: pre-wrap` already wraps every line that can wrap, so this only
+   ever concerns an unbreakable token, and only until the mark clears. */
+.ub-code.ub-changed {
+  overflow: visible;
+}
+
+@keyframes ub-changed-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* The rail's half — the only half a reader can see while the block is out of
+   viewport. The slot is always in the flow, so switching the dot on moves no
+   heading text sideways. */
+.ub-outline-dot {
+  display: inline-block;
+  vertical-align: middle;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-right: 0.4rem;
+  border-radius: 50%;
+  background: var(--brand);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.ub-outline-dot-on {
+  opacity: 1;
+}
+
+/* Both are decoration on a state change that has already happened. */
+@media (prefers-reduced-motion: reduce) {
+  .ub-changed::after {
+    animation: none;
+  }
+
+  .ub-outline-dot {
+    transition: none;
+  }
+}

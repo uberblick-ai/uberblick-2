@@ -18,6 +18,7 @@ import { acquireRoom } from "../collab/rooms.js";
 import type { RoomConnection, RoomStatus } from "../collab/rooms.js";
 import { AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
 import type { AwarenessUser } from "../collab/identity.js";
+import { changedBlocks } from "../editor/changed-blocks.js";
 import { findForeignBlocks } from "../editor/palette.js";
 import type { ForeignBlock } from "../editor/palette.js";
 import { blockText, plainText } from "../editor/ytext.js";
@@ -220,6 +221,33 @@ export function useOutline(connection: RoomConnection | null): OutlineEntry[] {
     return observeOutline(connection.ydoc, setOutline);
   }, [connection]);
   return outline;
+}
+
+/** No marks. One frozen instance, so "nothing changed" never re-renders anything. */
+const NO_CHANGES: ReadonlySet<string> = new Set<string>();
+
+/**
+ * Blocks a remote client has changed since this reader last looked, live.
+ *
+ * A snapshot rather than the tracker's own set: React compares by identity, and
+ * a set that mutates in place would never look different to it.
+ */
+export function useChangedBlocks(
+  connection: RoomConnection | null,
+): ReadonlySet<string> {
+  const [changed, setChanged] = useState<ReadonlySet<string>>(NO_CHANGES);
+  useEffect(() => {
+    if (connection === null) {
+      setChanged(NO_CHANGES);
+      return;
+    }
+    const marks = changedBlocks(connection);
+    const read = (): void =>
+      setChanged(marks.ids().size === 0 ? NO_CHANGES : new Set(marks.ids()));
+    read();
+    return marks.subscribe(read);
+  }, [connection]);
+  return changed;
 }
 
 /**

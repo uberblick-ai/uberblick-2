@@ -9,6 +9,8 @@ import type { Schema } from "@tiptap/pm/model";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { BlockIds } from "./block-ids.js";
+import { ChangedBlockMarks } from "./changed-marks.js";
+import type { ChangedBlocks } from "./changed-blocks.js";
 import { Collaboration } from "./collaboration.js";
 import { paletteExtensions } from "./nodes.js";
 
@@ -31,6 +33,11 @@ export interface CreateEditorOptions {
   editable?: boolean;
   /** Block-id source; injectable for deterministic tests. */
   newBlockId?: () => string;
+  /**
+   * The document's changed-block tracker. Omitted, the editor draws no
+   * changed-block marks — which is what an editor with no reader wants.
+   */
+  changed?: ChangedBlocks;
 }
 
 export function createUberblickEditor(options: CreateEditorOptions): Editor {
@@ -43,6 +50,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
       fragment: options.fragment,
       awareness: options.awareness ?? null,
     }),
+    ChangedBlockMarks.configure({ marks: options.changed ?? null }),
   ];
 
   return new Editor({
