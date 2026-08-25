@@ -47,7 +47,7 @@ import {
   inspect,
   targetFile,
 } from "./mcp-config.js";
-import type { Endpoint } from "./probes.js";
+import type { Endpoint, HubReach } from "./probes.js";
 import {
   dialHost,
   endpointOf,
@@ -220,23 +220,23 @@ function databaseCheck(config: McpConfig | null): Check {
  * that asks who holds the port — which are usually the same endpoint, and a
  * second connection would only say the same thing more slowly.
  */
-function hubProber(config: McpConfig): (url: string) => Promise<string> {
-  const seen = new Map<string, Promise<string>>();
+function hubProber(config: McpConfig): Dial {
+  const seen = new Map<string, Promise<HubReach>>();
   return (url) => {
     const known = seen.get(url);
     if (known !== undefined) {
       return known;
     }
-    const probe = probeHub(config, url).then((state) => state.status);
+    const probe = probeHub(config, url);
     seen.set(url, probe);
     return probe;
   };
 }
 
-async function hubCheck(
-  config: McpConfig | null,
-  dial: (url: string) => Promise<string>,
-): Promise<Check> {
+/** What both hub checks are handed: an endpoint in, what a client found out. */
+type Dial = (url: string) => Promise<HubReach>;
+
+async function hubCheck(config: McpConfig | null, dial: Dial): Promise<Check> {
   if (config === null) {
     return skipped("hub", "no workspace configured, so no hub token could be minted");
   }
@@ -255,6 +255,16 @@ async function hubCheck(
       "hub",
       `${config.hubUrl} refused the signing secret`,
       "give the hub and this machine the same secret — `ub status` says which layer this one came from",
+    );
+  }
+  if (status === "unsettled") {
+    // Up, and not serving: the socket opened and the directory room never
+    // arrived. Reporting this as reachable is how a client that will never sync
+    // gets called healthy.
+    return fail(
+      "hub",
+      `${config.hubUrl} answered but the directory room did not finish syncing`,
+      "check the hub's log — it accepted the connection without serving the room; restarting it with `mise run hub` is the usual fix",
     );
   }
   return fail(
@@ -317,7 +327,7 @@ async function bindCheck(
   config: McpConfig | null,
   endpoint: Endpoint | null,
   env: NodeJS.ProcessEnv,
-  dial: (url: string) => Promise<string>,
+  dial: Dial,
 ): Promise<Check> {
   if (config === null || endpoint === null) {
     return skipped("bind", "no local endpoint resolves, so no port was tested");
@@ -355,8 +365,19 @@ async function bindCheck(
       ? config.hubUrl
       : `ws://${dialHost(bind.host)}:${bind.port}`,
   );
-  if (status === "connected" || status === "auth-failed") {
+  if (status === "connected") {
     return pass("bind", `${address} is held by an uberblick hub — it is already running`);
+  }
+  if (status === "auth-failed" || status === "unsettled") {
+    // It speaks the protocol, and that is all it proved. Only a directory read
+    // with our own token identifies our hub; anything else could be somebody
+    // else's Hocuspocus server, and calling it ours would send a person looking
+    // for a hub that is not there.
+    return skipped(
+      "bind",
+      `${address} is held by something that speaks the protocol but did not serve this workspace with our credential`,
+      "if it is your hub, give it and this machine the same signing secret; if it is not, set PORT for the hub and HUB_URL for the clients together",
+    );
   }
   return fail(
     "bind",
@@ -455,7 +476,8 @@ export async function doctorReport(
   const resolvedEnv = resolved?.env ?? env;
   const endpoint = config === null ? null : endpointOf(config.hubUrl);
   // Both hub checks take their config first, so a null one never dials.
-  const dial = config === null ? async () => "disabled" : hubProber(config);
+  const dial: Dial =
+    config === null ? async () => "disabled" : hubProber(config);
 
   const checks: Check[] = [
     workspaceCheck(resolvedEnv, resolved, config, error),

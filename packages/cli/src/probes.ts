@@ -27,17 +27,32 @@ import type { HubState, McpConfig } from "@uberblick/mcp-server";
 import { inspectRemote } from "@uberblick/mcp-server";
 
 /**
+ * What a dial found, which is one answer more than a connection has.
+ *
+ * `unsettled` is the far side that is up, accepts the socket, and then does not
+ * serve the room: `waitForQuiet` returns on its deadline exactly as it does on
+ * success, so a probe reading only the connection state would call that
+ * `connected` and a caller would report a hub that never answered as healthy.
+ */
+export type HubReach = HubState["status"] | "unsettled";
+
+/**
  * Dial an endpoint as a real client would and report what happened.
  *
  * Bounded by the configuration's own connect and sync budgets — the ones a
- * client uses — so what this waits for is what a client would wait for.
+ * client uses — so what this waits for is what a client would wait for. Only
+ * `connected` means the directory room was actually read with our token, which
+ * is the one positive signal that the far side is our hub.
  */
 export async function probeHub(
   config: McpConfig,
   hubUrl: string = config.hubUrl,
-): Promise<HubState> {
+): Promise<HubReach> {
   const corpus = await inspectRemote({ ...config, hubUrl });
-  return corpus.hub;
+  const status = corpus.hub.status;
+  // `complete` is false exactly when the directory room never went quiet. A
+  // connection that could not finish reading it is not a reachable hub.
+  return status === "connected" && !corpus.complete ? "unsettled" : status;
 }
 
 export type PortState =

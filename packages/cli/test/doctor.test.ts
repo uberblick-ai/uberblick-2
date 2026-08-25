@@ -11,6 +11,9 @@
  * truth.
  */
 
+import { createHash } from "node:crypto";
+import type { Server as HttpServer } from "node:http";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
@@ -25,7 +28,7 @@ const WORKSPACE = "9f2c47a1-5b83-4e60-91d7-2a6c8b40e3f5";
 const SECRET = "doctor-test-signing-secret-4b91c7";
 
 const hubs: Hub[] = [];
-const servers: { server: Server; sockets: Socket[] }[] = [];
+const servers: { server: Server | HttpServer; sockets: Socket[] }[] = [];
 
 afterEach(async () => {
   for (const hub of hubs.splice(0)) {
@@ -61,6 +64,39 @@ async function foreignProcess(): Promise<number> {
   const address = server.address();
   if (address === null || typeof address === "string") {
     throw new Error("the foreign process did not bind a port");
+  }
+  return address.port;
+}
+
+/**
+ * A server that completes the websocket handshake and then says nothing.
+ *
+ * The far side that is up, speaks enough of the protocol to open a socket, and
+ * never serves the room — which is what a stuck hub looks like, and equally
+ * what somebody else's Hocuspocus server looks like.
+ */
+async function silentServer(): Promise<number> {
+  const sockets: Socket[] = [];
+  const server = createHttpServer();
+  server.on("upgrade", (request, socket: Socket) => {
+    sockets.push(socket);
+    const key = request.headers["sec-websocket-key"] ?? "";
+    const accept = createHash("sha1")
+      .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest("base64");
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\n" +
+        "Upgrade: websocket\r\n" +
+        "Connection: Upgrade\r\n" +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+    // …and not one frame after that.
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  servers.push({ server, sockets });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("the silent server did not bind a port");
   }
   return address.port;
 }
@@ -270,6 +306,26 @@ describe("ub doctor", () => {
     expect(bind.reason).toContain(`127.0.0.1:${port}`);
     expect(bind.reason).toMatch(/not an uberblick hub/);
     expect(bind.remedy).toMatch(/set PORT for the hub and HUB_URL for the clients together/);
+  });
+
+  it("refuses to call a hub that never serves the room reachable, or the port ours", async () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const port = await silentServer();
+    const { checks } = await doctor(box, {
+      WORKSPACE_ID: WORKSPACE,
+      HUB_URL: `ws://127.0.0.1:${port}`,
+      PORT: String(port),
+    });
+
+    // Up, and serving nothing: a connection is not a hub.
+    expect(check(checks, "hub").status).toBe("fail");
+    expect(check(checks, "hub").reason).toMatch(/did not finish syncing/);
+    // And speaking the protocol is not proof of whose server it is — only a
+    // directory read with our own token would be.
+    expect(check(checks, "bind").status).toBe("skipped");
+    expect(check(checks, "bind").reason).toMatch(/speaks the protocol/);
+    expect(check(checks, "bind").reason).not.toMatch(/is held by an uberblick hub/);
+    expect(check(checks, "bind").remedy).toMatch(/same signing secret/);
   });
 
   // `access(W_OK)` is advisory for root, which would make the fixture a
