@@ -59,10 +59,18 @@ function decodeSegment(segment: string): string {
 
 /** Resolve a pathname against the workspace this client is configured for. */
 export function parseRoute(pathname: string, workspace: string): Route {
-  const segments = pathname
-    .split("/")
-    .filter((segment) => segment !== "")
-    .map(decodeSegment);
+  const parts = pathname.split("/");
+  // A pathname always starts with "/", so the head is always an empty string;
+  // one trailing slash is a benign spelling of the same address and is dropped
+  // (`canonicalPath` then takes it out of the address bar). Every *other* empty
+  // segment is a malformed link — `/main//<uuid>` names no room, and
+  // `parseRoom` rejects empty segments too, so the two agree about what a
+  // well-formed `<workspace>/<uuid>` is.
+  if (parts.length > 1 && parts[parts.length - 1] === "") parts.pop();
+  const segments = parts.slice(1).map(decodeSegment);
+  if (segments.some((segment) => segment === "")) {
+    return { kind: "invalid", reason: "It has an empty path segment." };
+  }
 
   // `/` — the app with nothing open. Canonicalised to `/<workspace>` by
   // `canonicalPath`, so the doc list has an address of its own.

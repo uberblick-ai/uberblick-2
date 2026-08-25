@@ -11,6 +11,7 @@ import { bindGuardedEditor } from "../editor/guarded-binding.js";
 import { changedBlocks } from "../editor/changed-blocks.js";
 import { clearWhenSeen } from "../editor/changed-marks.js";
 import { describeForeignBlocks } from "../editor/palette.js";
+import { writeToClipboard } from "../editor/source-chrome.js";
 import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
@@ -45,6 +46,8 @@ export function PaneNotice({ children }: { children: ReactNode }): ReactElement 
 /** How long the copy confirmation stays up, in milliseconds. */
 const COPIED_MS = 1_500;
 
+type CopyResult = "idle" | "copied" | "failed";
+
 /**
  * The room key, doubling as the document's shareable link (#68).
  *
@@ -54,25 +57,25 @@ const COPIED_MS = 1_500;
  * positioned out of flow for the reason the rest of this line is built the way
  * it is (#76): nothing here may move sideways, and a word appearing in the row
  * would move everything after it.
+ *
+ * The copy goes through `writeToClipboard`, not `navigator.clipboard`: that API
+ * exists only in a secure context, and serving this client over plain http on a
+ * tailnet host is a supported deployment (REMOTE.md). The shared helper falls
+ * back to `execCommand`, and reports whether either worked — so a failure is
+ * said out loud rather than swallowed into a button that quietly does nothing.
  */
 function CopyLink({ room }: { room: string }): ReactElement {
-  const [copied, setCopied] = useState(false);
+  const [result, setResult] = useState<CopyResult>("idle");
 
   useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), COPIED_MS);
+    if (result === "idle") return;
+    const timer = setTimeout(() => setResult("idle"), COPIED_MS);
     return () => clearTimeout(timer);
-  }, [copied]);
+  }, [result]);
 
   const copy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(shareUrl(room, window.location.origin));
-      setCopied(true);
-    } catch {
-      // No clipboard: denied permission, or an insecure context, where
-      // `navigator.clipboard` is not there at all. The link is on screen and
-      // selectable, so there is nothing to recover from and nothing to say.
-    }
+    const ok = await writeToClipboard(shareUrl(room, window.location.origin));
+    setResult(ok ? "copied" : "failed");
   };
 
   return (
@@ -80,7 +83,11 @@ function CopyLink({ room }: { room: string }): ReactElement {
       <button
         type="button"
         className="ub-room"
-        title="Copy link to this document"
+        // The visible label is the room key, which names the document but not
+        // the action. `title` is not reliably announced, so the accessible name
+        // is set explicitly and carries both.
+        aria-label={`Copy link to ${room}`}
+        title={`Copy link to ${room}`}
         onClick={() => void copy()}
       >
         {room}
@@ -88,7 +95,7 @@ function CopyLink({ room }: { room: string }): ReactElement {
       {/* Rendered always, empty when idle: `role="status"` only announces
           changes to a region the reader was already in. */}
       <span className="ub-copied" role="status">
-        {copied ? "link copied" : ""}
+        {result !== "idle" && (result === "copied" ? "link copied" : "copy failed")}
       </span>
     </span>
   );

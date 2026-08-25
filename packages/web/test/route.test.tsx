@@ -23,7 +23,7 @@
  * claims about a real server and a real browser profile — `e2e/deep-link.spec.ts`.
  */
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, beforeEach } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { ReactElement } from "react";
@@ -86,6 +86,22 @@ describe("an address names a document, the list, or neither", () => {
       expect(route(`/main/${bad}`).kind).toBe("invalid");
     }
     expect(route(`/main/${UUID}/blocks`).kind).toBe("invalid");
+  });
+
+  it("rejects an empty path segment rather than quietly closing the gap", () => {
+    // `/main//<uuid>` names no room. Skipping the hole would make a link that
+    // is wrong look like one that works, and `parseRoom` rejects empty segments
+    // too — the two agree on what a well-formed address is.
+    expect(route(`/main//${UUID}`).kind).toBe("invalid");
+    expect(route("/main//").kind).toBe("invalid");
+    expect(route(`//main/${UUID}`).kind).toBe("invalid");
+    expect(route(`/main/${UUID}//`).kind).toBe("invalid");
+
+    // One trailing slash is the same address, not a malformed one, and is
+    // normalised out of the address bar.
+    expect(route(`/main/${UUID}/`)).toEqual({ kind: "doc", uuid: UUID });
+    expect(canonicalPath(route(`/main/${UUID}/`), "main")).toBe(`/main/${UUID}`);
+    expect(route("/main/")).toEqual({ kind: "list" });
   });
 
   it("accepts an upper-case uuid and round-trips it byte for byte", () => {
@@ -360,10 +376,37 @@ describe("an address that resolves to no document says which one, and why", () =
   });
 });
 
+/** Click the room key on a mounted status line and return what it then says. */
+async function clickCopy(): Promise<{ label: string; ariaLabel: string; said: string }> {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+    true;
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  act(() => root.render(<StatusLine connection={stubConnection(`main/${UUID}`)} />));
+
+  const button = host.querySelector<HTMLButtonElement>(".ub-room");
+  const label = button?.textContent ?? "";
+  const ariaLabel = button?.getAttribute("aria-label") ?? "";
+  await act(async () => {
+    button?.click();
+  });
+  const said = host.querySelector(".ub-copied")?.textContent ?? "";
+
+  act(() => root.unmount());
+  host.remove();
+  return { label, ariaLabel, said };
+}
+
 describe("the room key copies the document's canonical link", () => {
+  const realExecCommand = (document as unknown as { execCommand?: unknown }).execCommand;
+
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, "clipboard");
+    (document as unknown as { execCommand?: unknown }).execCommand = realExecCommand;
+  });
+
   it("copies the address a fresh browser would open, not the bare room key", async () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
     const written: string[] = [];
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -375,27 +418,57 @@ describe("the room key copies the document's canonical link", () => {
       },
     });
 
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() => root.render(<StatusLine connection={stubConnection(`main/${UUID}`)} />));
+    const { label, ariaLabel, said } = await clickCopy();
 
-    const button = host.querySelector<HTMLButtonElement>(".ub-room");
     // The affordance is the line that already named the document — no new chrome.
-    expect(button?.textContent).toBe(`main/${UUID}`);
+    expect(label).toBe(`main/${UUID}`);
+    // …but the visible label names the document, not the action, so the
+    // accessible name has to carry both. `title` is not reliably announced.
+    expect(ariaLabel).toBe(`Copy link to main/${UUID}`);
 
-    await act(async () => {
-      button?.click();
-    });
     // Exactly what `parseRoute` resolves back to this document.
     expect(written).toEqual([`${window.location.origin}/main/${UUID}`]);
     expect(route(new URL(written[0] as string).pathname)).toEqual({
       kind: "doc",
       uuid: UUID,
     });
-    expect(host.querySelector(".ub-copied")?.textContent).toBe("link copied");
+    expect(said).toBe("link copied");
+  });
 
-    act(() => root.unmount());
-    host.remove();
+  it("still copies where navigator.clipboard does not exist", async () => {
+    // The supported plain-http tailnet deployment (REMOTE.md). `navigator
+    // .clipboard` is secure-context only, so the whole affordance rides on the
+    // shared helper's `execCommand` fallback — a button that is silently dead
+    // there is worse than no button.
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    const copied: string[] = [];
+    (document as unknown as { execCommand: unknown }).execCommand = (
+      command: string,
+    ): boolean => {
+      if (command !== "copy") return false;
+      // What the fallback actually copies is the selection, so read it back
+      // from the element it selected rather than trusting the call.
+      const active = document.activeElement;
+      if (active instanceof HTMLTextAreaElement) copied.push(active.value);
+      return true;
+    };
+
+    const { said } = await clickCopy();
+
+    expect(copied).toEqual([`${window.location.origin}/main/${UUID}`]);
+    expect(said).toBe("link copied");
+  });
+
+  it("says so when the copy fails, rather than looking like it worked", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    (document as unknown as { execCommand: unknown }).execCommand = (): boolean => false;
+
+    expect((await clickCopy()).said).toBe("copy failed");
   });
 });
