@@ -236,6 +236,7 @@ the checkout does:
 
 ```
 ub init            # identity, workspace, signing secret
+ub open            # serve the web app and a hub, and open the browser
 ub status          # workspace, hub, credential, sync state
 ub status --json   # the same, as one JSON object
 ub remote          # the endpoint in force, and what sharing it buys
