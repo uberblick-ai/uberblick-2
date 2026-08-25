@@ -66,8 +66,8 @@ export interface StatusReport {
   persistence: SyncStatus["persistence"];
 }
 
-/** How an origin reads in the human output. */
-const ORIGIN_LABELS: Record<Origin, string> = {
+/** How an origin reads in the human output. Shared with `ub workspace`. */
+export const ORIGIN_LABELS: Record<Origin, string> = {
   environment: "environment",
   "directory file": `./${DIRECTORY_FILE}`,
   "user config": "user config",
