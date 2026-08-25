@@ -18,6 +18,7 @@ import { remoteCommand } from "./remote.js";
 import { serveCommand } from "./serve.js";
 import { statusCommand } from "./status.js";
 import { cliVersion } from "./version.js";
+import { workspaceCommand } from "./workspace.js";
 
 export const HELP = `uberblick — local-first, CRDT-backed collaborative documents
 
@@ -26,8 +27,15 @@ usage: ub <command> [options]
 commands:
   init [options]         identity, workspace and a local development signing secret
   status [--json]        workspace, hub, credential, database and sync state
+  workspace [command]    which workspace this directory works in
   remote [command]       the endpoint documents sync with, and the one-time bridges
   mcp install [target]   register uberblick with an MCP client
+
+workspace commands:
+  workspace              the workspace in force, and which layer chose it
+  workspace list         workspaces this machine has a database for ([--json])
+  workspace use <id>     bind this directory to a workspace, by uuid,
+                         <slug>-<uuid> or a unique prefix (--user: this machine)
 
 remote commands:
   remote                 the endpoint in force and what sharing it buys
@@ -77,6 +85,9 @@ export async function runCli(
   }
   if (command === "status") {
     return await statusCommand(rest, io);
+  }
+  if (command === "workspace") {
+    return workspaceCommand(rest, io);
   }
   if (command === "remote") {
     return await remoteCommand(rest, io);

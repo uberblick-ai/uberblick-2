@@ -200,18 +200,23 @@ export function publishStaged(
  * refusals rather than repairs; when something else claimed the name first; and
  * when the write itself fails.
  */
-export function publishOwnerOnly(path: string, contents: string): void {
+export function publishOwnerOnly(
+  path: string,
+  contents: string,
+  /** The command named in a refusal — whichever one the user actually ran. */
+  command = "ub init",
+): void {
   const target = classify(path);
   if (target.kind === "refused") {
     throw new Error(
       `refusing to write ${path}: ${target.because} — this file must be a ` +
-        "regular file you own. Move it aside and run `ub init` again",
+        `regular file you own. Move it aside and run \`${command}\` again`,
     );
   }
   const staged = writeTempBeside(path, contents);
   if (!publishStaged(staged, path, target.kind)) {
     throw new Error(
-      `${path} appeared while \`ub init\` was writing it. Run \`ub init\` again`,
+      `${path} appeared while \`${command}\` was writing it. Run it again`,
     );
   }
 }
