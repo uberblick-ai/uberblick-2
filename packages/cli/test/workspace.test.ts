@@ -105,6 +105,20 @@ describe("ub workspace list", () => {
       databasePath: join(box.dataHome, "uberblick", `${UNRELATED}.sqlite`),
     });
   });
+
+  it("fails rather than reporting a short list when the data directory cannot be read", () => {
+    // A swallowed error would read as "no workspaces here", and `use` resolves
+    // prefixes against this — so it would go on to say "no match" about a
+    // workspace that is sitting right there.
+    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    mkdirSync(box.dataHome, { recursive: true });
+    writeFileSync(join(box.dataHome, "uberblick"), "not a directory", "utf8");
+
+    const run = runUb(["workspace", "list"], box);
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toMatch(join(box.dataHome, "uberblick"));
+    expect(run.stdout).toBe("");
+  });
 });
 
 describe("ub workspace use", () => {
@@ -194,6 +208,19 @@ describe("ub workspace use", () => {
       readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"),
     );
     expect(config).toEqual({ workspace: WORKSPACE, displayName: "Ben" });
+  });
+
+  it("--user refuses a user config that does not parse, rather than replacing it", () => {
+    // The write republishes the whole file. Treating an unreadable one as empty
+    // would drop the identity and endpoint in it, and the mistake would be
+    // invisible: the command would report success.
+    const broken = '{ "displayName": "Ben",\n';
+    const box = sandbox({ raw: { userConfig: broken } });
+    const path = join(box.configHome, "uberblick", "config.json");
+
+    const run = runUb(["workspace", "use", "--user", WORKSPACE], box);
+    expect(run.status).not.toBe(0);
+    expect(readFileSync(path, "utf8")).toBe(broken);
   });
 });
 

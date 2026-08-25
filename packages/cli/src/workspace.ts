@@ -29,14 +29,13 @@ import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";
 import {
   DIRECTORY_FILE,
-  readUserConfig,
   resolveConfig,
   userConfigPath,
   writeUserConfig,
 } from "./config.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
-import { publishOwnerOnly } from "./safe-write.js";
+import { describeFsError, publishOwnerOnly } from "./safe-write.js";
 import { ORIGIN_LABELS } from "./status.js";
 
 export const WORKSPACE_HELP = `usage: ub workspace [command]
@@ -117,12 +116,19 @@ export function listWorkspaces(
   const current = inForce(options);
 
   const uuids = new Set<string>();
+  const directory = databaseDirectory(env);
   let names: string[] = [];
   try {
-    names = readdirSync(databaseDirectory(env));
-  } catch {
-    // No data directory means no databases, which is a fresh machine, not an
-    // error. The configured workspace below is still listed.
+    names = readdirSync(directory);
+  } catch (error) {
+    // A missing data directory means no databases, which is a fresh machine.
+    // Anything else — a permission, an I/O error — means the answer would be
+    // *short*, and a short list is not a harmless one: `use` resolves prefixes
+    // against it, so a swallowed error becomes "no workspace starts with that"
+    // for a workspace that is sitting right there.
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new Error(`cannot list ${directory}: ${describeFsError(error)}`);
+    }
   }
   for (const name of names) {
     const match = DATABASE_FILE.exec(name);
@@ -196,7 +202,14 @@ function listCommand(argv: string[], io: Io): number {
     return 2;
   }
 
-  const { entries, warnings } = listWorkspaces();
+  let listed: { entries: WorkspaceEntry[]; warnings: string[] };
+  try {
+    listed = listWorkspaces();
+  } catch (error) {
+    io.err(`ub workspace list: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+  const { entries, warnings } = listed;
   warn(io, warnings);
 
   if (json) {
@@ -268,13 +281,15 @@ function resolveId(
 }
 
 /**
- * `./uberblick.json` as it is on disk, for merging into.
+ * A config file as it is on disk, for merging into.
  *
  * A file that exists but cannot be believed is a refusal, not a default: this
- * command replaces one field, and treating an unparseable file as an empty
- * object would throw away whatever else its author put in it.
+ * command replaces one field and republishes the whole file, so treating an
+ * unparseable one as an empty object would throw away everything else its
+ * author put in it. That is as true of `config.json` — an identity, an
+ * endpoint — as of `./uberblick.json`, which is why both go through here.
  */
-function readDirectoryFile(path: string): Record<string, unknown> {
+function readMergeTarget(path: string): Record<string, unknown> {
   let text: string;
   try {
     text = readFileSync(path, "utf8");
@@ -329,7 +344,15 @@ function useCommand(argv: string[], io: Io): number {
     return 2;
   }
 
-  const { entries } = listWorkspaces();
+  let entries: WorkspaceEntry[];
+  try {
+    entries = listWorkspaces().entries;
+  } catch (error) {
+    // Refused rather than resolved against a short list: a prefix that quietly
+    // stopped matching would bind this directory to the wrong workspace.
+    io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
   const resolved = resolveId(raw, entries);
   if ("error" in resolved) {
     io.err(`ub workspace use: ${resolved.error}\n`);
@@ -342,15 +365,16 @@ function useCommand(argv: string[], io: Io): number {
   try {
     if (user) {
       // Merged over what is on disk: identity and the endpoint are not this
-      // command's to drop.
-      writeUserConfig({ ...readUserConfig().raw, workspace: id });
+      // command's to drop — and neither is a file that did not parse, which is
+      // refused rather than quietly replaced with a one-field file.
+      writeUserConfig({ ...readMergeTarget(path), workspace: id });
     } else {
       // Owner-only like every other file this CLI publishes. Nothing in here is
       // a secret and git does not record the mode, so one writer with one rule
       // is worth more than a second rule for the committable file.
       publishOwnerOnly(
         path,
-        serialize({ ...readDirectoryFile(path), workspace: id }),
+        serialize({ ...readMergeTarget(path), workspace: id }),
         "ub workspace use",
       );
     }
