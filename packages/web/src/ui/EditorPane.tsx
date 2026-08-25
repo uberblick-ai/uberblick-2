@@ -176,7 +176,10 @@ export function StatusLine({
         )}
       </span>
       <span className="ub-status-word">{label}</span>
-      {status.localReplicaLoaded && <span className="ub-muted">local cache</span>}
+      {/* `hasLocalCache`, not `localReplicaLoaded`: the second only says the
+          local read is over, and it is over immediately where there is no
+          IndexedDB to read. */}
+      {status.hasLocalCache && <span className="ub-muted">local cache</span>}
       <CopyLink room={connection.room} />
       {state !== "synced" && status.unsyncedChanges > 0 && (
         <span className="ub-pending">

@@ -126,6 +126,9 @@ it("settles the local read when IndexedDB refuses to open, and still says it is 
   // Terminal: the read is over and found nothing, which is an answer — so the
   // link says what it is waiting for instead of staying blank forever.
   expect(connection.status.localReplicaLoaded).toBe(true);
+  // …and the read being over is not a cache: nothing was stored, and the status
+  // line must not tell the reader otherwise.
+  expect(connection.status.hasLocalCache).toBe(false);
   expect(host.querySelector(".ub-notice")?.textContent).toContain("Waiting for sync");
 
   act(() => root.unmount());

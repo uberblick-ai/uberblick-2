@@ -33,7 +33,7 @@ function fakeHandle(room: string): unknown {
       provider: {
         awareness: { getStates: () => new Map(), on: () => {}, off: () => {}, clientID: 1 },
       },
-      status: { connected: false, synced: false, unsyncedChanges: 0, localReplicaLoaded: false },
+      status: { connected: false, synced: false, unsyncedChanges: 0, localReplicaLoaded: false, hasLocalCache: false },
       onStatusChange: () => () => {},
       whenLocalReplicaLoaded: Promise.resolve(),
     },

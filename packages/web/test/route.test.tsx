@@ -303,6 +303,7 @@ function openingConnection(room: string): {
     synced: false,
     unsyncedChanges: 0,
     localReplicaLoaded: false,
+    hasLocalCache: false,
   };
   const listeners = new Set<(next: RoomStatus) => void>();
   // Deferred, so the promise and the flag say the same thing: both are the
@@ -326,7 +327,12 @@ function openingConnection(room: string): {
   return {
     connection,
     load: (from?: Y.Doc) => {
-      if (from !== undefined) Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(from));
+      // Content means there was a cache to read; `load()` with none means the
+      // read finished and found nothing. Both end the read.
+      if (from !== undefined) {
+        Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(from));
+        status.hasLocalCache = true;
+      }
       status.localReplicaLoaded = true;
       localReplicaLoaded();
       for (const listener of listeners) listener({ ...status });
@@ -412,6 +418,7 @@ function stubConnection(room: string): RoomConnection {
     synced: false,
     unsyncedChanges: 0,
     localReplicaLoaded: true,
+    hasLocalCache: false,
   };
   return {
     room,

@@ -163,6 +163,7 @@ function fakeConnection(
     synced: false,
     unsyncedChanges: 0,
     localReplicaLoaded: false,
+    hasLocalCache: false,
   };
   const listeners = new Set<(next: RoomStatus) => void>();
   const emit = (): void => {

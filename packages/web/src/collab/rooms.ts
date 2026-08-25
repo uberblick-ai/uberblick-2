@@ -156,11 +156,28 @@ export interface RoomStatus {
   unsyncedChanges: number;
   /**
    * True once the local read is done: the IndexedDB replica has been applied to
-   * the Y.Doc — or there is no IndexedDB, so there was never anything to apply.
-   * Either way the Y.Doc now holds everything this replica has offline, so an
-   * empty document is an answer rather than a not-yet.
+   * the Y.Doc — or there is no IndexedDB, or it refused to open, so there was
+   * never anything to apply. Either way the Y.Doc now holds everything this
+   * replica has offline, so an empty document is an answer rather than a
+   * not-yet.
+   *
+   * A question about *time*, not about storage: it says the read is over, never
+   * that anything was read. For "is this document actually cached here",
+   * which is a different claim and the one worth showing a reader, see
+   * {@link RoomStatus.hasLocalCache}.
    */
   localReplicaLoaded: boolean;
+  /**
+   * True only where IndexedDB actually opened and applied its replica — the
+   * document survives a reload of this browser with the hub down.
+   *
+   * Split from `localReplicaLoaded` because the status line says the words
+   * "local cache" to the reader, and a browser with no IndexedDB (or one that
+   * refused to open it) reaches the end of its local read with no cache at all.
+   * Sharing one flag between the two would put that promise on screen in
+   * exactly the environments that cannot keep it.
+   */
+  hasLocalCache: boolean;
 }
 
 export interface RoomConnection {
@@ -216,6 +233,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     synced: provider.isSynced,
     unsyncedChanges: provider.unsyncedChanges,
     localReplicaLoaded: false,
+    hasLocalCache: false,
   };
   const listeners = new Set<(status: RoomStatus) => void>();
   const emit = (): void => {
@@ -276,7 +294,12 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   };
   if (typeof indexedDB !== "undefined") {
     persistence = new IndexeddbPersistence(room, ydoc);
-    persistence.once("synced", localReadDone);
+    persistence.once("synced", () => {
+      // The only path where a cache genuinely exists: the database opened and
+      // its updates are in the Y.Doc.
+      status.hasLocalCache = true;
+      localReadDone();
+    });
     // Opening the database can fail outright: a private window, a browser told
     // to block site data, a quota refusal. `y-indexeddb` has no error event and
     // never emits `synced` after that — the rejection of its open promise is
