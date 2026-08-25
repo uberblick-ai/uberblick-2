@@ -184,6 +184,44 @@ What that spawn is careful about, since none of it is obvious:
 For a standalone smoke test, `mise run mcp` runs the same thing in the
 foreground.
 
+### A second workspace
+
+Several workspaces coexist on one hub, with separate corpora and no way to see
+across: the room key carries the workspace (`<workspaceId>/<docUuid>`, the
+directory at `<workspaceId>/_directory`), the token claim is scoped to it, and
+the local database is `<uuid>.sqlite`. There is nothing to create and nothing to
+migrate — a workspace is a uuid, and its rooms exist the moment something opens
+one. What it is *not* is tenancy: one shared secret still mints a token for any
+workspace, so this separates corpora, not people.
+
+Give a second project its own workspace by pinning it in that checkout, which is
+what `./uberblick.json` is for — committable, and never secrets. Once #162 lands
+that is one command:
+
+```
+ub workspace use ablauf-$(uuidgen | tr A-Z a-z)
+```
+
+Until then, edit the `workspace` field of `./uberblick.json` in place (creating
+the file with that one field if it does not exist). Write the field, never the
+file: a `hubUrl` beside it — or a field a later version of `ub` writes — is not
+this change's to drop.
+
+`ub mcp install` then registers the plain `ub mcp serve`, which resolves that
+workspace from the directory it runs in. Where a client config spawns the server
+some other way — this repository's own `.mcp.json` does — put the id in the
+spawn's environment instead, as `WORKSPACE_ID=ablauf-<uuid>`: the environment
+wins over every file layer. Either way it is the same server, the same hub and a
+different corpus.
+
+The web client takes one more value, `WORKSPACES`: a comma-separated list of the
+workspaces to offer in the topbar switcher, e.g.
+`WORKSPACES="uberblick-<uuid>,ablauf-<uuid>"`. Plaintext config like `HUB_URL`,
+so it belongs in mise's `[env]` — in `mise.local.toml`, since the ids are a uuid
+per machine — and it is a *menu*, not an authority: switching workspaces is
+navigating to `/<workspace>`, and a link into an unlisted workspace still opens
+it. With none set, the switcher is the plain workspace label it has always been.
+
 `mise run import-seed` is the one-time import of `docs-seed/` into the system.
 After it, the product docs live in the documents, and are read and written
 through the MCP tools rather than by editing the seed files.

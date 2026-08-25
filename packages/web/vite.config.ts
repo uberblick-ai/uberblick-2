@@ -14,6 +14,12 @@ import { defineConfig } from "vitest/config";
  * other address carries its own: a bundle is not bound to a workspace, and an
  * empty define means `/` says so rather than guessing. See src/ui/route.ts.
  *
+ * `__WORKSPACES__` is `WORKSPACES`, the comma-separated list of workspaces this
+ * build offers to switch between — plaintext config like `HUB_URL`, and empty
+ * by default because the ids are a uuid per machine. It feeds the switcher and
+ * nothing else: switching workspaces is navigating, so the list changes what is
+ * on the menu, never which corpus an address opens.
+ *
  * `__HUB_URL__` is a *default*, not the answer. The client prefers the hub
  * endpoint served at `/uberblick-config.json` on its own origin and falls back
  * to this value when no such document is deployed — which is exactly the dev
@@ -39,6 +45,7 @@ export default defineConfig({
     __HUB_URL__: JSON.stringify(process.env.HUB_URL ?? "ws://localhost:1234"),
     __HUB_AUTH_TOKEN__: JSON.stringify(process.env.HUB_AUTH_TOKEN ?? ""),
     __WORKSPACE_ID__: JSON.stringify(process.env.WORKSPACE_ID ?? ""),
+    __WORKSPACES__: JSON.stringify(process.env.WORKSPACES ?? ""),
   },
   server: {
     port: 5173,

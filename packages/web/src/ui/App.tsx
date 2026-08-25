@@ -21,12 +21,13 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
-import { CONFIGURED_WORKSPACE } from "../config.js";
+import { CONFIGURED_WORKSPACE, CONFIGURED_WORKSPACES } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
 import { randomIdentity } from "../collab/identity.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { DocChrome } from "./DocChrome.js";
 import { DocList } from "./DocList.js";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { ThreadsPane } from "./ThreadsPane.js";
@@ -40,6 +41,7 @@ import {
   parseRoute,
   replicaHasAnswered,
   useRoutePath,
+  workspaceList,
 } from "./route.js";
 import type { Route } from "./route.js";
 import {
@@ -320,6 +322,21 @@ export function App(): ReactElement {
     if (canonical !== null && canonical !== path) navigate(canonical, "replace");
   }, [path, navigate]);
 
+  /**
+   * The workspaces on the switcher's menu, and going to one.
+   *
+   * Recomputed every render rather than memoised: `workspace` is rebuilt by
+   * `parseRoute` each time anyway, so a memo would be a dependency that always
+   * changed — and the work is splitting a short string.
+   */
+  const workspaces = workspaceList(CONFIGURED_WORKSPACES, workspace);
+  const onSwitchWorkspace = useCallback(
+    // A workspace's list, not a document: two corpora share no uuid, so
+    // carrying the open document across would be a link to nowhere.
+    (segment: string) => navigate(`/${segment}`),
+    [navigate],
+  );
+
   /** Opening a document is navigating to it. There is nothing else to update. */
   const segment = workspace?.segment ?? null;
   const onSelect = useCallback(
@@ -398,10 +415,11 @@ export function App(): ReactElement {
           {collapsed ? "»" : "«"}
         </button>
         <span className="ub-brand">uberblick</span>
-        {/* As the address spells it: the slug is what a person reads. */}
-        <span className="ub-muted">
-          {workspace === null ? "no workspace" : `workspace ${workspace.segment}`}
-        </span>
+        <WorkspaceSwitcher
+          workspaces={workspaces}
+          current={workspace}
+          onSwitch={onSwitchWorkspace}
+        />
         {/* The open document's breadcrumb, and the activity and connection
             pills. The document's room when there is one, the directory's when
             there is not: one shared socket, so it is the same truth about the
