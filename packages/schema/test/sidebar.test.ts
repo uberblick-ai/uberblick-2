@@ -5,6 +5,7 @@ import {
   createGroup,
   deleteGroup,
   getBlocks,
+  getSidebarUnpinned,
   initDoc,
   moveDoc,
   moveGroup,
@@ -236,6 +237,43 @@ describe("sidebar doc", () => {
     expect(readSidebar(a)).toEqual([
       { id: work, name: "Work", docs: [] },
       { id: reading, name: "Reading", docs: [ALPHA] },
+    ]);
+  });
+
+  it("keeps the tombstone when a re-pin races an unpin that never saw it", () => {
+    // The one case where the two replicas disagree about whether the document
+    // is pinned, which is what makes a concurrent set and delete of the same
+    // tombstone key reachable at all. B unpins and re-pins entirely on its own
+    // side, so B's delete targets B's own tombstone; A, still holding the
+    // original pin, unpins and writes a second, unrelated tombstone.
+    const { a, b, work, reading } = seededPair();
+    pinDoc(a, work, ALPHA);
+    syncDocs(a, b);
+
+    unpinDoc(b, ALPHA);
+    pinDoc(b, reading, ALPHA);
+    unpinDoc(a, ALPHA);
+    syncDocs(a, b);
+
+    // Yjs keeps a concurrent set over a delete, so A's tombstone survives B's
+    // clear and the re-pinned document reads as unpinned — the same answer on
+    // both replicas. Unpin winning a race it is part of is the decided rule;
+    // this pins the mechanism the header claims, not just the outcome.
+    expect(getSidebarUnpinned(a).has(ALPHA)).toBe(true);
+    expect(readSidebar(a)).toEqual(readSidebar(b));
+    expect(readSidebar(a)).toEqual([
+      { id: work, name: "Work", docs: [] },
+      { id: reading, name: "Reading", docs: [] },
+    ]);
+
+    // And it is not stuck: a re-pin that has seen the surviving tombstone
+    // clears it and sweeps up the pin it was shadowing.
+    pinDoc(a, work, ALPHA);
+    syncDocs(a, b);
+    expect(readSidebar(a)).toEqual(readSidebar(b));
+    expect(readSidebar(a)).toEqual([
+      { id: work, name: "Work", docs: [ALPHA] },
+      { id: reading, name: "Reading", docs: [] },
     ]);
   });
 
