@@ -36,6 +36,8 @@ import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { threadCardId } from "../src/ui/threads.js";
 
 const WORKSPACE = "main";
+/** The annotated paragraph. "quick brown" — [4, 15) — is the marked range. */
+const PARAGRAPH = "The quick brown fox jumps.";
 const UUID = "5c2f8a41-7b93-4d6e-a018-3f9c2b7e5d04";
 
 const OFFLINE: RoomStatus = {
@@ -77,8 +79,13 @@ let mounted: { root: Root; host: HTMLElement } | null = null;
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
-  // jsdom implements neither, and the rail scrolls a card into view.
+  // jsdom implements none of these. The rail scrolls a card into view, and
+  // ProseMirror measures the caret's Range to scroll a split block into view.
   Element.prototype.scrollIntoView = function scrollIntoView() {};
+  const empty = new DOMRect();
+  Range.prototype.getClientRects = () =>
+    [empty] as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect = () => empty;
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response("", { status: 404 }),
   );
@@ -100,11 +107,15 @@ afterEach(() => {
  * back until it has read its hub endpoint, so a synchronous render commits a
  * shell with no panes in it.
  */
-async function openAnnotatedDoc(): Promise<{ host: HTMLElement; threadId: string }> {
+async function openAnnotatedDoc(): Promise<{
+  host: HTMLElement;
+  ydoc: Y.Doc;
+  threadId: string;
+}> {
   const directory = room(directoryRoom(WORKSPACE)).ydoc;
   const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
   initDoc(ydoc, { uuid: UUID, title: "Annotated" });
-  appendBlock(ydoc, { type: "paragraph", text: "The quick brown fox jumps." });
+  appendBlock(ydoc, { type: "paragraph", text: PARAGRAPH });
   upsertDirectoryEntry(directory, { uuid: UUID, title: "Annotated" });
   const blockId = getBlocks(ydoc)[0]!.id;
   const thread = createAnnotation(ydoc, blockId, 4, 15, "ben", "why quick?");
@@ -117,7 +128,7 @@ async function openAnnotatedDoc(): Promise<{ host: HTMLElement; threadId: string
   await act(async () => {
     root.render(<App />);
   });
-  return { host, threadId: thread.id };
+  return { host, ydoc, threadId: thread.id };
 }
 
 function highlight(host: HTMLElement, threadId: string): HTMLElement {
@@ -158,15 +169,59 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
     expect(document.activeElement).toBe(card);
   });
 
+  /**
+   * The other half of the same mechanism, and the reason it is a *capture*
+   * handler that stops propagation: an Enter meant for the editor must still
+   * reach ProseMirror, which would otherwise never split a block again.
+   *
+   * The caret is put inside the annotated range itself — the worst case, where
+   * the highlight is an ancestor of the text the reader is typing in — and the
+   * key press is aimed at the contenteditable, which is what holds focus when
+   * someone types. What is asserted is the editor's own outcome: the block
+   * splits, in the document. An intercepted Enter cannot produce that, and no
+   * amount of the handler behaving well can fake it.
+   */
   it("leaves Enter alone when the caret, not the highlight, is what is focused", async () => {
-    const { host, threadId } = await openAnnotatedDoc();
+    const { host, ydoc, threadId } = await openAnnotatedDoc();
     const prose = host.querySelector<HTMLElement>(".ub-editor .ProseMirror");
     expect(prose).not.toBeNull();
+    const span = highlight(host, threadId);
+    expect(getBlocks(ydoc)).toHaveLength(1);
 
-    press(prose!, "Enter");
+    // A real caret, inside the annotated text — and set *after* focusing, since
+    // focusing a ProseMirror view syncs the DOM selection from its own state.
+    prose!.focus();
+    const range = document.createRange();
+    range.setStart(span.firstChild!, 2);
+    range.collapse(true);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    expect(document.activeElement).toBe(prose);
+    expect(selection.anchorNode?.parentElement).toBe(span);
 
-    // Nothing was selected, so nothing took focus off the prose — the key press
-    // belongs to the editor.
+    act(() => {
+      prose!.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+
+    // ProseMirror got the key and did what Enter does: the paragraph is two
+    // blocks now, and no text was lost between them.
+    //
+    // Where the split fell is not asserted. jsdom fires no `selectionchange`,
+    // so ProseMirror never observes the DOM caret set above and splits at the
+    // position its own state still holds — a jsdom gap, not a claim of this
+    // test. That the split happened at all is what an intercepted Enter could
+    // not produce.
+    const blocks = getBlocks(ydoc);
+    expect(blocks).toHaveLength(2);
+    expect(blocks.map((block) => block.text).join("")).toBe(PARAGRAPH);
+    // And nothing was selected, so nothing took focus off the prose.
     const card = host.querySelector<HTMLButtonElement>(
       `#${CSS.escape(threadCardId(threadId))} button`,
     );

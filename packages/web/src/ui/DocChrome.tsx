@@ -17,7 +17,8 @@ import type { DocMeta } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
 import { groupKeyForTags, groupLabel } from "./groups.js";
-import { useDocRev, useRemoteActivity, useRoomStatus, useThreads } from "./hooks.js";
+import { useDocRev, useRemoteActivity, useRoomStatus } from "./hooks.js";
+import type { ThreadView } from "./threads.js";
 
 /** What an untitled document is called wherever its name is shown. */
 const UNTITLED = "Untitled";
@@ -63,20 +64,30 @@ function Breadcrumb({ meta }: { meta: DocMeta }): ReactElement {
 export function DocChrome({
   connection,
   meta,
+  threads,
   threadsOpen,
   onToggleThreads,
 }: {
   connection: RoomConnection | null;
   /** The open document's metadata, or null when none is open or read yet. */
   meta: DocMeta | null;
+  /**
+   * The open document's threads — what the rail would show. Passed rather than
+   * read here, because the app shell decides on the same value whether the
+   * drawer may be open at all.
+   */
+  threads: readonly ThreadView[];
   /** Whether the threads rail is open as a drawer — see `.ub-rail-open`. */
   threadsOpen: boolean;
   onToggleThreads: () => void;
 }): ReactElement {
   const activity = useRemoteActivity(connection);
-  // The rail's own count, read the same way the rail reads it: open threads, not
-  // every conversation the document has ever had.
-  const openThreads = useThreads(connection).filter((thread) => !thread.resolved);
+  // The count is the open threads, the way the rail counts them. It is *not*
+  // what decides whether the handle is drawn: a document whose conversations are
+  // all resolved still has a rail full of them, and a reader who cannot reach it
+  // has lost the archive. So the handle follows the rail's content and the
+  // number follows the rail's head — including when that number is zero.
+  const openThreads = threads.filter((thread) => !thread.resolved).length;
   const state = useCalmSyncState(rawSyncState(useRoomStatus(connection)));
   const label = state === "syncing" ? "syncing…" : state;
   // `meta.uuid === ""` is a room that answered with nothing in it — see
@@ -91,7 +102,7 @@ export function DocChrome({
             overlay instead; above that width the rail is already on screen and
             the stylesheet drops this button. A document with nothing to say has
             no handle either. */}
-        {openThreads.length > 0 && (
+        {threads.length > 0 && (
           <button
             type="button"
             className="ub-threads-toggle"
@@ -99,7 +110,7 @@ export function DocChrome({
             aria-controls="ub-rail"
             onClick={onToggleThreads}
           >
-            Threads <span className="ub-muted">{openThreads.length}</span>
+            Threads <span className="ub-muted">{openThreads}</span>
           </button>
         )}
         {activity !== null && (

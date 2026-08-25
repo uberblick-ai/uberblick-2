@@ -114,6 +114,7 @@ function mount(fix: Fixture): { host: HTMLElement; root: Root } {
         <DocChrome
           connection={fix.connection}
           meta={getMeta(fix.ydoc)}
+          threads={[]}
           threadsOpen={false}
           onToggleThreads={() => {}}
         />
