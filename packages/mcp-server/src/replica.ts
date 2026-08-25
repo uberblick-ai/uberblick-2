@@ -127,6 +127,17 @@ export class Replicas {
    */
   private readonly staleStubs = new Set<string>();
 
+  /**
+   * Entries whose reconciliation was refused, and when.
+   *
+   * Separate from {@link staleStubs} because the two deserve opposite
+   * treatment: a stub that just changed is reconciled at once, while one the
+   * store already refused is paced. Insertion order is the retry order, and
+   * re-queuing deletes before setting, so a failing entry rotates to the back
+   * instead of monopolising the one retry slot each drain allows.
+   */
+  private readonly failedStubs = new Map<string, number>();
+
   /** Display name published in awareness. Refined once the client identifies. */
   private agentName: string;
 
@@ -431,40 +442,82 @@ export class Replicas {
    * from the document on the document's own updates, and on restore.
    */
   private reconcileDirectory(): void {
-    const changed = [...this.staleStubs];
+    const fresh = [...this.staleStubs];
     this.staleStubs.clear();
-    for (const uuid of changed) {
-      try {
-        const entry = getDirectoryEntry(this.directory().doc, uuid);
-        if (entry === null) {
-          continue;
-        }
-        if (entry.deleted === true) {
-          this.store.unindexDoc(uuid);
-          continue;
-        }
-        // A live entry for a document this replica has never attached is left
-        // to `adoptKnownDocs`, which attaches and indexes it on the next
-        // settle. Attaching from in here would join rooms as a side effect of
-        // an observer.
-        if (!this.known(uuid)) {
-          continue;
-        }
-        const replica = this.replica(uuid);
-        const meta = getMeta(replica.doc);
-        if (meta.uuid !== "") {
-          this.indexRows(replica, meta);
-        }
-      } catch (error) {
-        // The store refused. Put the uuid back, so the next settle or directory
-        // update tries again: dropping it would leave this replica's index
-        // permanently disagreeing with the directory, with nothing left to
-        // notice — and would let a tool report an index change that never
-        // happened.
-        this.staleStubs.add(uuid);
-        log.warn("failed to reconcile a directory entry", error);
+    const retry = this.stubDueForRetry(new Set(fresh));
+    for (const uuid of retry === null ? fresh : [...fresh, retry]) {
+      this.reconcileStub(uuid);
+    }
+  }
+
+  /**
+   * The one previously-failed entry due another attempt, if any.
+   *
+   * One, not all: a persistent refusal is usually a locked database, where each
+   * attempt spends SQLite's busy timeout before failing again. Retrying every
+   * queued entry on every settle would multiply that wait by the backlog and
+   * charge it to whichever tool call happened to arrive — a slow database would
+   * become a stalled server. Taking one per drain keeps any single call's cost
+   * flat while still draining the backlog, since every call takes the next one.
+   */
+  private stubDueForRetry(fresh: Set<string>): string | null {
+    const now = Date.now();
+    for (const [uuid, failedAt] of this.failedStubs) {
+      if (fresh.has(uuid)) {
+        continue;
+      }
+      if (now - failedAt >= this.config.reconcileRetryMs) {
+        return uuid;
       }
     }
+    return null;
+  }
+
+  /**
+   * Bring one document's index rows in line with its directory entry.
+   *
+   * Clears the entry's failure record first, so a stub that changed again is
+   * treated as fresh work rather than as a pending retry.
+   */
+  private reconcileStub(uuid: string): void {
+    this.failedStubs.delete(uuid);
+    try {
+      const entry = getDirectoryEntry(this.directory().doc, uuid);
+      if (entry === null) {
+        return;
+      }
+      if (entry.deleted === true) {
+        this.store.unindexDoc(uuid);
+        return;
+      }
+      // A live entry for a document this replica has never attached is left
+      // to `adoptKnownDocs`, which attaches and indexes it on the next
+      // settle. Attaching from in here would join rooms as a side effect of
+      // an observer.
+      if (!this.known(uuid)) {
+        return;
+      }
+      const replica = this.replica(uuid);
+      const meta = getMeta(replica.doc);
+      if (meta.uuid !== "") {
+        this.indexRows(replica, meta);
+      }
+    } catch (error) {
+      this.recordStubFailure(uuid, error);
+    }
+  }
+
+  /**
+   * Remember that an entry's reconciliation was refused.
+   *
+   * Never a give-up: the entry stays queued and a later drain takes it. Deleting
+   * before setting moves it to the back of the retry order, so one entry the
+   * store keeps refusing cannot starve the rest.
+   */
+  private recordStubFailure(uuid: string, error: unknown): void {
+    this.failedStubs.delete(uuid);
+    this.failedStubs.set(uuid, Date.now());
+    log.warn("failed to reconcile a directory entry", error);
   }
 
   /**
@@ -476,7 +529,7 @@ export class Replicas {
    * stays queued and a later settle retries it.
    */
   indexReconciled(uuid: string): boolean {
-    return !this.staleStubs.has(uuid);
+    return !this.staleStubs.has(uuid) && !this.failedStubs.has(uuid);
   }
 
   /** Whether this replica holds the document itself, not just its stub. */
@@ -572,7 +625,19 @@ export class Replicas {
       if (entry.deleted === true) {
         // A doc deleted elsewhere leaves the derived index; `list_docs` reads
         // the directory, and search must not surface a tombstoned doc.
-        this.store.unindexDoc(entry.uuid);
+        //
+        // Guarded and paced like every other reconciliation. Unguarded, a store
+        // that keeps refusing this one write would throw here on every settle —
+        // turning a stale index row into an error from every unrelated tool.
+        // Once it has failed, the entry belongs to the retry queue, and this
+        // loop leaves it alone.
+        if (!this.failedStubs.has(entry.uuid)) {
+          try {
+            this.store.unindexDoc(entry.uuid);
+          } catch (error) {
+            this.recordStubFailure(entry.uuid, error);
+          }
+        }
         continue;
       }
       if (!this.known(entry.uuid)) {
@@ -656,8 +721,9 @@ export class Replicas {
     this.adoptKnownDocs();
     // Retry whatever the store refused last time. Reconciliation normally rides
     // directory updates, and a failed entry would otherwise wait for the next
-    // one — which may never come for a document nobody touches again.
-    if (this.staleStubs.size > 0) {
+    // one — which may never come for a document nobody touches again. At most
+    // one previously-failed entry is retried per call; see stubDueForRetry.
+    if (this.staleStubs.size > 0 || this.failedStubs.size > 0) {
       this.reconcileDirectory();
     }
   }

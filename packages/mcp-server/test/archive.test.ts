@@ -35,13 +35,28 @@ class CountingStore extends MirrorStore {
 
   failNextIndex = false;
 
+  /** Refuse every index write, the way a database locked for good would. */
+  failEveryIndex = false;
+
+  failUnindex = false;
+
+  indexAttempts = 0;
+
   override indexDoc(doc: IndexedDoc): void {
-    if (this.failNextIndex) {
+    this.indexAttempts += 1;
+    if (this.failEveryIndex || this.failNextIndex) {
       this.failNextIndex = false;
       throw new Error("simulated index failure");
     }
     this.indexed.push(doc.uuid);
     super.indexDoc(doc);
+  }
+
+  override unindexDoc(uuid: string): void {
+    if (this.failUnindex) {
+      throw new Error("simulated unindex failure");
+    }
+    super.unindexDoc(uuid);
   }
 }
 
@@ -235,6 +250,60 @@ describe("restore_doc", () => {
       return hits.hits.length === 1;
     });
     expect(rig.instance.replicas.indexReconciled(doc.uuid)).toBe(true);
+  });
+
+  // A database locked for good must cost a stale index row, not a stalled
+  // server: each failed attempt spends SQLite's busy timeout, so retrying the
+  // whole backlog on every tool call would charge that wait to every caller.
+  it("paces a persistently refused entry instead of retrying it every call", async () => {
+    const store = new CountingStore(tempDatabasePath());
+    const rig = await startServer(
+      testConfig({ reconcileRetryMs: 60_000 }),
+      store,
+    );
+    rigs.push(rig);
+
+    const doc = await seedDoc(rig);
+    await rig.ok("archive_doc", { uuid: doc.uuid });
+
+    store.failEveryIndex = true;
+    const restored = await rig.ok("restore_doc", { uuid: doc.uuid });
+    expect(restored.indexed).toBe(false);
+
+    const afterFirstFailure = store.indexAttempts;
+    for (let call = 0; call < 4; call += 1) {
+      // Unrelated work keeps working — the refusal is not allowed to leak out
+      // of the index and into every other tool.
+      const listed = await rig.call("list_docs", {});
+      expect(listed.isError).toBe(false);
+    }
+
+    // Inside the cooldown, and nothing else touched the entry, so the store was
+    // not asked again.
+    expect(store.indexAttempts).toBe(afterFirstFailure);
+    expect(rig.instance.replicas.indexReconciled(doc.uuid)).toBe(false);
+  });
+
+  // The unindex in adoptKnownDocs runs on every settle, outside the drain. Left
+  // unguarded, a store refusing it turned a stale row into an error from every
+  // unrelated tool.
+  it("survives a refused unindex during adoption", async () => {
+    const store = new CountingStore(tempDatabasePath());
+    const rig = await startServer(testConfig(), store);
+    rigs.push(rig);
+
+    const doc = await seedDoc(rig);
+    await rig.ok("archive_doc", { uuid: doc.uuid });
+
+    // The tombstone is already reconciled and off the queue, so the next
+    // settle's adoption pass is what meets the refusal.
+    store.failUnindex = true;
+    const listed = await rig.call("list_docs", {});
+    expect(listed.isError).toBe(false);
+    expect(listed.payload.docs).toEqual([]);
+
+    const searched = await rig.call("search", { query: "glossary" });
+    expect(searched.isError).toBe(false);
   });
 
   it("republishes metadata that changed while the document was archived", async () => {
