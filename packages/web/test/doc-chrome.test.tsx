@@ -55,7 +55,10 @@ function fixture(status: Partial<RoomStatus> = {}): Fixture {
     connected: true,
     synced: true,
     unsyncedChanges: 0,
+    // The chrome says nothing about the local replica — the status line owns
+    // those words — so both flags are off and the pills are read on their own.
     localReplicaLoaded: false,
+    hasLocalCache: false,
     ...status,
   };
   const connection = {
@@ -180,6 +183,30 @@ describe("the doc chrome reads the document, the awareness and the status", () =
       });
       expect(text(host, ".ub-pill-agent")).toBe(
         "Claude · demo agent editing block 3",
+      );
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("counts blocks the way a reader sees them, shadowed duplicates aside", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    // A losing copy of the first block, left between the two by concurrent
+    // re-types: it carries block one's id, so no reader resolves it and
+    // `getBlocks` does not return it. Counting it would put the caret in the
+    // third block of a document whose second block it is sitting in.
+    const duplicate = new Y.XmlElement("paragraph");
+    duplicate.setAttribute("id", fix.blockIds[0] ?? "");
+    duplicate.insert(0, [new Y.XmlText("a losing copy")]);
+    getBlocksFragment(fix.ydoc).insert(1, [duplicate]);
+    // Physically third, visibly second.
+    publishAgentCursor(fix, 2);
+    const { host, root } = mount(fix);
+    try {
+      expect(text(host, ".ub-pill-agent")).toBe(
+        "Claude · demo agent editing block 2",
       );
     } finally {
       act(() => root.unmount());

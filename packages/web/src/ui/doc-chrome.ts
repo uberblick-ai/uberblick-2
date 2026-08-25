@@ -22,8 +22,41 @@ export interface RemoteActivity {
   block: number;
 }
 
+/**
+ * The block elements a reader can see, in document order.
+ *
+ * The first element to claim an id wins; every later element carrying that id
+ * is *shadowed* — two replicas re-typing one block converge on two elements
+ * sharing its id, and only the first is a block anyone resolves. An element
+ * with no id has claimed no identity, so two of those are two blocks and both
+ * are visible.
+ *
+ * This is schema's `partitionById` rule, re-derived because schema exports no
+ * projection helper and adding one would be a schema change in service of
+ * chrome. Both derivations below go through it, so the block a pill numbers and
+ * the blocks a rev folds are the blocks `getBlocks` would have returned.
+ */
+function visibleBlocks(fragment: Y.XmlFragment): Y.XmlElement[] {
+  const seen = new Set<string>();
+  const visible: Y.XmlElement[] = [];
+  for (const child of fragment.toArray()) {
+    if (!(child instanceof Y.XmlElement)) continue;
+    const id = child.getAttribute("id") ?? "";
+    if (id !== "") {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    visible.push(child);
+  }
+  return visible;
+}
+
 /** The block a relative position lands in, 1-based, or null if it lands nowhere. */
-function blockOf(ydoc: Y.Doc, blocks: unknown[], anchor: unknown): number | null {
+function blockOf(
+  ydoc: Y.Doc,
+  blocks: readonly Y.XmlElement[],
+  anchor: unknown,
+): number | null {
   let absolute: { type: Y.AbstractType<unknown> } | null = null;
   try {
     absolute = Y.createAbsolutePositionFromRelativePosition(
@@ -39,6 +72,10 @@ function blockOf(ydoc: Y.Doc, blocks: unknown[], anchor: unknown): number | null
   // A caret is anchored in the block's Y.XmlText; the block is its parent.
   const element =
     absolute.type instanceof Y.XmlElement ? absolute.type : absolute.type.parent;
+  if (!(element instanceof Y.XmlElement)) return null;
+  // Not found means the caret is somewhere no reader is looking: outside a
+  // block, or inside a shadowed duplicate. Both earn silence rather than a
+  // number that disagrees with the document on screen.
   const index = blocks.indexOf(element);
   return index === -1 ? null : index + 1;
 }
@@ -62,7 +99,7 @@ export function readActivity(
   ydoc: Y.Doc,
   awareness: Awareness,
 ): RemoteActivity | null {
-  const blocks = getBlocksFragment(ydoc).toArray();
+  const blocks = visibleBlocks(getBlocksFragment(ydoc));
   const found: RemoteActivity[] = [];
   awareness.getStates().forEach((state, clientId) => {
     if (clientId === awareness.clientID) return;
@@ -147,14 +184,10 @@ function blockElementOf(target: Y.AbstractType<unknown>): Y.XmlElement | null {
  * The cache is rebuilt by the fold rather than pruned, so a block that leaves
  * the document takes its entry with it.
  *
- * **Shadowed duplicates are skipped**, the same first-wins rule schema applies
- * in `partitionById` and therefore in `getBlocks`. Two replicas re-typing one
- * block converge on two elements sharing its id, and only the first is a block
- * anyone can see; folding both would count a hidden element as content, and the
+ * **Shadowed duplicates are skipped** — the fold walks `visibleBlocks`, not the
+ * raw fragment. Folding a hidden element would count it as content, and the
  * repair that later deletes it would move the rev with nothing on screen having
- * changed. Re-derived here rather than reused because schema exports no
- * projection helper — the rule is four lines, and reaching for a new export
- * would be a schema change for chrome.
+ * changed.
  */
 export function observeDocRev(ydoc: Y.Doc, emit: (rev: string) => void): () => void {
   const fragment = getBlocksFragment(ydoc);
@@ -163,17 +196,8 @@ export function observeDocRev(ydoc: Y.Doc, emit: (rev: string) => void): () => v
   const fold = (seeded?: ReadonlyMap<string, string>): string => {
     const next = new Map<Y.XmlElement, string>();
     const lines: string[] = [];
-    const seen = new Set<string>();
-    for (const child of fragment.toArray()) {
-      if (!(child instanceof Y.XmlElement)) continue;
+    for (const child of visibleBlocks(fragment)) {
       const id = child.getAttribute("id") ?? "";
-      // First element to claim an id wins; later ones are shadowed and are not
-      // content. An element with no id has claimed no identity, so two of those
-      // are two blocks and both count.
-      if (id !== "") {
-        if (seen.has(id)) continue;
-        seen.add(id);
-      }
       // A miss is an element this fold has not seen: a new block, one an event
       // invalidated, or the replacement a re-type left behind. `getBlock` is the
       // schema's own read, so a shadowed duplicate never supplies the rev.
