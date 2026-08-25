@@ -41,11 +41,11 @@ import type { ReactElement } from "react";
 import { addComment, getAnnotation, setAnnotationResolved } from "@uberblick/schema";
 import type { AnnotationComment } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
-import { useThreads } from "./hooks.js";
 import { CommentForm } from "./CommentForm.js";
 import {
   commentTimestamp,
   flashThreadHighlight,
+  focusThreadCard,
   resolvedHighlightCss,
   scrollThreadCardIntoView,
   threadCardId,
@@ -174,12 +174,20 @@ function ThreadCard({
 
 export function ThreadsPane({
   connection,
+  threads,
   focused,
   author,
   readOnly = false,
   onFocus,
 }: {
   connection: RoomConnection | null;
+  /**
+   * Every thread in the open document, in reading order. Observed by the app
+   * shell rather than here: the topbar's handle and the drawer's own open/closed
+   * state are read off the same list, and three observers over one Y.Doc would
+   * recompute the same rail three times on every keystroke.
+   */
+  threads: readonly ThreadView[];
   focused: ThreadFocus | null;
   /** The awareness name this client publishes — the author of its replies. */
   author: string;
@@ -190,7 +198,6 @@ export function ThreadsPane({
   readOnly?: boolean;
   onFocus: (threadId: string) => void;
 }): ReactElement | null {
-  const threads = useThreads(connection);
   const [replyTo, setReplyTo] = useState<string | null>(null);
   /**
    * The one resolved thread the reader has opened back up. One at a time: the
@@ -210,8 +217,15 @@ export function ThreadsPane({
   // A highlight click focuses a card that may be scrolled out of the rail. Keyed
   // on the whole focus and not its id, so clicking the same highlight again
   // scrolls the rail back to its card — see `ThreadFocus`.
+  //
+  // A keyboard activation also takes DOM focus with it, which is the far end of
+  // the path a Tab and an Enter started in the prose (#101). In an effect and
+  // not at the key press, because the rail may be a drawer that this very
+  // selection opened: the card is focusable once React has committed it.
   useEffect(() => {
-    if (focused !== null) scrollThreadCardIntoView(focused.id);
+    if (focused === null) return;
+    scrollThreadCardIntoView(focused.id);
+    if (focused.viaKeyboard) focusThreadCard(focused.id);
   }, [focused]);
 
   // A pending reply outlives the conversation it belonged to unless it is let

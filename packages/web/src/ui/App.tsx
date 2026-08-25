@@ -31,7 +31,7 @@ import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { ThreadsPane } from "./ThreadsPane.js";
 import { focusThread } from "./threads.js";
-import type { ThreadFocus } from "./threads.js";
+import type { SelectThread, ThreadFocus } from "./threads.js";
 import {
   canonicalPath,
   docIsHydrated,
@@ -50,6 +50,7 @@ import {
   useRoom,
   useRoomStatus,
   useStoredFlag,
+  useThreads,
 } from "./hooks.js";
 
 /** Sidebar preference, persisted per browser. */
@@ -91,7 +92,7 @@ export function RoutePane({
   archived: boolean;
   /** Lift that tombstone. The only action an archived document offers. */
   onRestore: () => void;
-  onSelectThread: (threadId: string) => void;
+  onSelectThread: SelectThread;
 }): ReactElement {
   // Before the branches: a hook may not sit behind an early return. Only
   // `localReplicaLoaded` is read here — it is what tells the empty document a
@@ -169,9 +170,77 @@ export function App(): ReactElement {
    * rail focus each other through this one value.
    */
   const [focusedThread, setFocusedThread] = useState<ThreadFocus | null>(null);
-  const onFocusThread = useCallback((threadId: string) => {
-    setFocusedThread((previous) => focusThread(previous, threadId));
+  /**
+   * Whether the rail is open as an overlay drawer (#101). It only means anything
+   * below 1100px, where the stylesheet has hidden the rail: above that width the
+   * rail is a column and `.ub-rail-open` declares nothing.
+   */
+  const [threadsOpen, setThreadsOpen] = useState(false);
+  /**
+   * What opened the drawer, so closing it can hand focus back there. Closing
+   * *hides* the rail below 1100px, and focus inside a hidden panel is focus
+   * nobody has — the reader would be back at the top of the page.
+   */
+  const threadsOpener = useRef<HTMLElement | null>(null);
+
+  /** Close the drawer, and give focus back to whatever opened it. */
+  const closeThreads = useCallback(() => {
+    setThreadsOpen(false);
+    const opener = threadsOpener.current;
+    threadsOpener.current = null;
+    // Only when the focus is in the rail that is about to go. A reader whose
+    // focus is somewhere else did not ask to be moved, and Escape is a key they
+    // may well have meant for something on screen.
+    const inRail = document.activeElement?.closest(".ub-rail") ?? null;
+    if (inRail === null) return;
+    // The highlight the reader came from, if ProseMirror has not redrawn it
+    // since; the handle otherwise, which is always somewhere to stand.
+    const back =
+      opener?.isConnected === true
+        ? opener
+        : document.querySelector<HTMLElement>(".ub-threads-toggle");
+    back?.focus();
   }, []);
+
+  const onFocusThread = useCallback<SelectThread>((threadId, viaKeyboard) => {
+    setFocusedThread((previous) =>
+      focusThread(previous, threadId, viaKeyboard === true),
+    );
+    // The highlight is still what holds focus here — the card takes it a commit
+    // later, from the rail's own effect — so this is the reader's way back.
+    if (viaKeyboard === true && document.activeElement instanceof HTMLElement) {
+      threadsOpener.current = document.activeElement;
+    }
+    // Selecting a thread is asking to read it, so the drawer opens whether the
+    // reader got here from a highlight or from the toggle. On a wide window this
+    // is a state change nothing renders.
+    setThreadsOpen(true);
+  }, []);
+
+  const onToggleThreads = useCallback(() => {
+    if (threadsOpen) {
+      closeThreads();
+      return;
+    }
+    // The click has already put focus on the handle, which is where closing
+    // should leave it.
+    threadsOpener.current = null;
+    setThreadsOpen(true);
+  }, [threadsOpen, closeThreads]);
+
+  /** Escape closes the drawer — the way out of an overlay. */
+  useEffect(() => {
+    if (!threadsOpen) return;
+    const close = (event: KeyboardEvent): void => {
+      // A control inside the rail may have handled this Escape already — a
+      // reply form cancelling, say, which preventDefaults it. Dismissing the
+      // form and closing the drawer out from under it are two gestures, and the
+      // reader made one.
+      if (event.key === "Escape" && !event.defaultPrevented) closeThreads();
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [threadsOpen, closeThreads]);
 
   // No room before the hub endpoint is known (#91): the shared websocket is
   // built from the first room acquired, so one acquired early would pin the
@@ -185,6 +254,21 @@ export function App(): ReactElement {
   const entries = useDirectory(directory);
   const meta = useDocMeta(doc);
   const archived = useArchived(directory, selected);
+  /**
+   * The open document's threads: the rail's content, read once here because two
+   * things depend on it — the handle in the topbar, and whether the drawer is
+   * allowed to be open at all.
+   */
+  const threads = useThreads(doc);
+
+  /**
+   * A drawer over an empty rail is a panel of nothing. The rail can empty out
+   * *under* an open drawer — the last thread deleted, or the reader navigating
+   * to a document that has none — with nobody having closed anything.
+   */
+  useEffect(() => {
+    if (threads.length === 0 && threadsOpen) closeThreads();
+  }, [threads.length, threadsOpen, closeThreads]);
 
   /**
    * Lift the tombstone — the same schema call `restore_doc` makes, against the
@@ -287,7 +371,13 @@ export function App(): ReactElement {
             pills. The document's room when there is one, the directory's when
             there is not: one shared socket, so it is the same truth about the
             same hub either way. */}
-        <DocChrome connection={doc ?? directory} meta={meta} />
+        <DocChrome
+          connection={doc ?? directory}
+          meta={meta}
+          threads={threads}
+          threadsOpen={threadsOpen}
+          onToggleThreads={onToggleThreads}
+        />
         <span className="ub-me" style={{ borderColor: identity.color }}>
           {identity.name}
         </span>
@@ -315,10 +405,14 @@ export function App(): ReactElement {
             sections render nothing when they have nothing to show, so the rail
             hides itself when it is empty (`.ub-rail:empty`) rather than leaving
             a blank gutter. */}
-        <aside className="ub-rail">
+        <aside
+          id="ub-rail"
+          className={threadsOpen ? "ub-rail ub-rail-open" : "ub-rail"}
+        >
           <OutlinePane connection={doc} />
           <ThreadsPane
             connection={doc}
+            threads={threads}
             focused={focusedThread}
             author={identity.name}
             readOnly={archived}
