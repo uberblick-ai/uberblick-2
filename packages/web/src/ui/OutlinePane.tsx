@@ -17,6 +17,9 @@ import type { RoomConnection } from "../collab/rooms.js";
 import { useChangedBlocks, useOutline } from "./hooks.js";
 import { outlineDots, scrollBlockIntoView } from "./outline.js";
 
+/** What a dot means, in words. Exported so the test asserts the same string. */
+export const CHANGED_SECTION_LABEL = "changed since you last looked";
+
 export function OutlinePane({
   connection,
 }: {
@@ -36,7 +39,9 @@ export function OutlinePane({
             <button
               type="button"
               onClick={() => scrollBlockIntoView(entry.id)}
-              {...(dots.has(entry.id) ? { title: "Changed since you looked" } : {})}
+              {...(dots.has(entry.id)
+                ? { title: CHANGED_SECTION_LABEL }
+                : {})}
             >
               <span
                 className={
@@ -45,6 +50,14 @@ export function OutlinePane({
                 aria-hidden="true"
               />
               {entry.text.trim() === "" ? <em>Untitled heading</em> : entry.text}
+              {/* The dot is a colour, and a colour has no accessible name. The
+                  words are in the entry's own text rather than an `aria-label`,
+                  which would replace the heading with them; `title` alone would
+                  be a tooltip most screen readers are configured not to
+                  announce. */}
+              {dots.has(entry.id) && (
+                <span className="ub-sr-only"> — {CHANGED_SECTION_LABEL}</span>
+              )}
             </button>
           </li>
         ))}

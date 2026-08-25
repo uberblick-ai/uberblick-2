@@ -202,6 +202,18 @@ export function changedBlocks(connection: RoomConnection): ChangedBlocks {
   let replicaSettled = false;
   let syncedOnce = false;
   let recording = false;
+  let unwatchStatus: (() => void) | null = null;
+
+  /**
+   * Stop listening to the room's status. Called the moment the document has
+   * arrived: after that the listener answers the same question the same way on
+   * every reconnect for the life of the room, and the room's own teardown
+   * (`acquireRoom`'s release) would be the only thing left to drop it.
+   */
+  const stopWatchingStatus = (): void => {
+    unwatchStatus?.();
+    unwatchStatus = null;
+  };
 
   /** Both conditions, re-asked on every signal — never an order of arrival. */
   const openIfArrived = (status: RoomStatus): void => {
@@ -212,6 +224,7 @@ export function changedBlocks(connection: RoomConnection): ChangedBlocks {
     if (status.connected && !syncedOnce) return;
     recording = true;
     marks.start();
+    stopWatchingStatus();
   };
 
   void connection.whenLocalReplicaLoaded.then(() => {
@@ -219,10 +232,14 @@ export function changedBlocks(connection: RoomConnection): ChangedBlocks {
     openIfArrived(connection.status);
   });
 
-  connection.onStatusChange((status) => {
+  unwatchStatus = connection.onStatusChange((status) => {
     if (status.synced) syncedOnce = true;
     openIfArrived(status);
   });
+  // `onStatusChange` calls its listener once, synchronously, before handing
+  // back the unsubscribe — so a room that had already arrived by then could not
+  // have unsubscribed itself above.
+  if (recording) stopWatchingStatus();
 
   return marks;
 }

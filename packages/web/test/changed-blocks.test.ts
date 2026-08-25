@@ -23,17 +23,34 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import * as Y from "yjs";
 import { appendBlock, editBlock, getBlocks, initDoc } from "@uberblick/schema";
+import type { Editor } from "@tiptap/core";
 import {
   changedBlocks,
   trackChangedBlocks,
 } from "../src/editor/changed-blocks.js";
 import type { ChangedBlocks } from "../src/editor/changed-blocks.js";
 import { clearWhenSeen } from "../src/editor/changed-marks.js";
+import { retypeSelectedBlock } from "../src/editor/retype.js";
 import { outlineDots } from "../src/ui/outline.js";
+import {
+  CHANGED_SECTION_LABEL,
+  OutlinePane,
+} from "../src/ui/OutlinePane.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { mountEditor } from "./helpers.js";
+
+/** Put the caret in the block with this id. */
+function caretIn(editor: Editor, blockId: string): void {
+  let start = 0;
+  editor.state.doc.forEach((node, offset) => {
+    if (node.attrs.id === blockId) start = offset;
+  });
+  editor.commands.setTextSelection(start + 1);
+}
 
 const HEADING = "Sync";
 const PARAGRAPH = "The quick brown fox jumps.";
@@ -125,6 +142,7 @@ function fakeConnection(
   replicaLoaded: () => void;
   connect: () => void;
   hubSynced: () => void;
+  listenerCount: () => number;
 } {
   let resolveLocal: () => void = () => {};
   const whenLocalReplicaLoaded = new Promise<void>((resolve) => {
@@ -166,6 +184,7 @@ function fakeConnection(
       status.synced = true;
       emit();
     },
+    listenerCount: () => listeners.size,
   };
 }
 
@@ -244,6 +263,21 @@ describe("the document arriving is not a change, in any order", () => {
 
     expect(marked(marks)).toEqual([blocks[1]!]);
   });
+
+  it("stops listening to the room once the document has arrived", async () => {
+    const ydoc = new Y.Doc();
+    const room = fakeConnection(ydoc, { connected: true });
+    changedBlocks(room.connection);
+    expect(room.listenerCount()).toBe(1);
+
+    room.replicaLoaded();
+    await flush();
+    room.hubSynced();
+
+    // Every later status change asks the same question and gets the same
+    // answer, for the life of the room.
+    expect(room.listenerCount()).toBe(0);
+  });
 });
 
 /** An IntersectionObserver the test drives, since jsdom has none. */
@@ -251,11 +285,14 @@ class FakeIntersectionObserver {
   static latest: FakeIntersectionObserver | null = null;
   readonly targets = new Set<Element>();
   readonly root: Element | Document | null;
+  readonly thresholds: number[];
   constructor(
     private readonly callback: IntersectionObserverCallback,
     init?: IntersectionObserverInit,
   ) {
     this.root = init?.root ?? null;
+    const threshold = init?.threshold ?? 0;
+    this.thresholds = Array.isArray(threshold) ? [...threshold] : [threshold];
     FakeIntersectionObserver.latest = this;
   }
   observe(target: Element): void {
@@ -413,6 +450,26 @@ describe("a block that has been read stops being marked", () => {
     }
   });
 
+  it("asks often enough for a block that can never fill the pane", async () => {
+    const { marks, remote, blocks, observer, stop } = watching();
+    try {
+      editBlock(remote, blocks[1]!, PARAGRAPH, "Rewritten by an agent.");
+      await flush();
+
+      // An observer only calls back on a threshold crossing. A block ten times
+      // the pane's height peaks at a ratio of 0.1, so `[0, 1]` would give it
+      // exactly one callback — the one where it first touched the pane, which
+      // is the one moment "fills the pane" is guaranteed to be false.
+      const { thresholds } = observer();
+      expect(thresholds.length).toBeGreaterThan(2);
+      expect(thresholds.filter((step) => step > 0 && step < 0.1).length)
+        .toBeGreaterThan(0);
+      expect(marks.has(blocks[1]!)).toBe(true);
+    } finally {
+      stop();
+    }
+  });
+
   it("measures against the pane the prose scrolls in, not the window", () => {
     const { local } = replicas();
     const marks = trackChangedBlocks(local);
@@ -500,6 +557,77 @@ describe("the mark reaches both places a reader looks", () => {
       expect(stillMarked()).not.toBeNull();
     } finally {
       editor.destroy();
+    }
+  });
+
+  it("keeps the marker when this reader re-types the marked block", async () => {
+    const { local, remote, blocks } = replicas();
+    const marks = trackChangedBlocks(local);
+    marks.start();
+    const { editor, element } = mountEditor(local, { changed: marks });
+    const drawn = (id: string): Element | null =>
+      element.querySelector(`[id="${id}"].ub-changed`);
+    try {
+      editBlock(remote, blocks[1]!, PARAGRAPH, "Rewritten by an agent.");
+      editBlock(remote, blocks[2]!, CODE, "console.log(2)");
+      await flush();
+      expect(drawn(blocks[1]!)).not.toBeNull();
+
+      // A re-type is local, keeps the block id and keeps the block count, so it
+      // moves neither the tracker nor anything else this plugin watches — but
+      // it replaces the block's markup, which deletes the decoration's own
+      // positions. The marker used to vanish here while the outline dot stayed.
+      caretIn(editor, blocks[1]!);
+      retypeSelectedBlock(editor, "heading", { level: 2 });
+      await flush();
+      expect(marks.has(blocks[1]!)).toBe(true);
+      expect(drawn(blocks[1]!)).not.toBeNull();
+
+      // Same shape, one attribute: setting a code block's language.
+      caretIn(editor, blocks[2]!);
+      retypeSelectedBlock(editor, "code", { language: "js" });
+      await flush();
+      expect(marks.has(blocks[2]!)).toBe(true);
+      expect(drawn(blocks[2]!)).not.toBeNull();
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("names the dot in the outline entry, not only in a tooltip", async () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "doc-3", title: "Rail" });
+    appendBlock(ydoc, { type: "heading", text: "Quiet", level: 2 });
+    appendBlock(ydoc, { type: "heading", text: "Loud", level: 2 });
+    const headings = blockIds(ydoc);
+
+    const room = fakeConnection(ydoc, { connected: false });
+    const marks = changedBlocks(room.connection);
+    room.replicaLoaded();
+    await flush();
+
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+    editBlock(peer, headings[1]!, "Loud", "Loud, rewritten");
+    relay(peer, ydoc);
+    expect(marks.has(headings[1]!)).toBe(true);
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => {
+        root.render(createElement(OutlinePane, { connection: room.connection }));
+      });
+      const buttons = [...host.querySelectorAll("button")];
+      expect(buttons).toHaveLength(2);
+      // A colour has no accessible name; the words are in the entry's own text.
+      expect(buttons[0]?.textContent).not.toContain(CHANGED_SECTION_LABEL);
+      expect(buttons[1]?.textContent).toContain(CHANGED_SECTION_LABEL);
+      expect(buttons[1]?.textContent).toContain("Loud, rewritten");
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
     }
   });
 

@@ -1259,56 +1259,47 @@ body {
  * one section to read, and one section to delete.
  */
 :root {
-  /* Where the accent line sits inside `--block-gutter`. The insertion `+` is
-     22px wide against the gutter's outer edge, so the 6px nearest the text is
-     free — the line goes there, and the two never overlap. */
+  /* How far out into `--block-gutter` the accent line reaches, and how thick it
+     is. The insertion `+` is 22px wide against the gutter's outer edge, so the
+     6px nearest the text is free — the line lives there, and the two never
+     overlap. */
   --changed-bar-inset: 0.375rem;
   --changed-bar-width: 2px;
 }
 
-/* The line is a pseudo-element on the block itself, and the gutter it sits in
-   is reserved whether anything is in it or not — so a block being marked
-   changes paint and nothing else. No prose moves, ever.
+/* The line is a **box-shadow**, not a pseudo-element, and that is the whole
+   trick. `.ub-code` is a scroll container (`overflow-x: auto`), and an
+   element's own overflow clips its pseudo-elements — so a `::after` in the
+   gutter was invisible on exactly the block type an agent most often rewrites,
+   and the only way to show it was to turn that block's horizontal scrolling
+   off while it was marked. An outer box-shadow is a box decoration rather than
+   content: the element's own overflow does not clip it, so `code` keeps its
+   scrollbar and still gets its line.
 
-   `position: relative` is there only to make the block the pseudo-element's
-   containing block; it shifts nothing.
+   The shape comes out of the offset and the spread. A negative spread shrinks
+   the shadow's rectangle before the offset moves it left, and the spec clips an
+   outer shadow so that nothing is painted inside the border box — what is left
+   is a bar `--changed-bar-width` wide sitting `--changed-bar-inset` out from the
+   block's edge, inset top and bottom by the same amount. It costs no layout: a
+   shadow is painted, never laid out, and the gutter it sits in is reserved
+   whether anything is in it or not. No prose moves, ever.
 
    The class is applied by a ProseMirror node decoration, which lands on a
    NodeView's outer element exactly as it lands on a plain paragraph. That is
    why `code` and `mermaid` need no marker of their own: those blocks own their
    DOM (`src/editor/source-chrome.ts`), and nothing here reaches into it. */
 .ub-changed {
-  position: relative;
-}
-
-.ub-changed::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: calc(-1 * var(--changed-bar-inset));
-  width: var(--changed-bar-width);
-  border-radius: 1px;
-  background: var(--brand);
-  pointer-events: none;
+  box-shadow: calc(-1 * var(--changed-bar-inset)) 0 0
+    calc(var(--changed-bar-width) - var(--changed-bar-inset)) var(--brand);
   animation: ub-changed-in 160ms ease-out;
 }
 
-/* An element's own `overflow` clips its pseudo-elements, and `.ub-code` is a
-   scroll container — so the line would be invisible on exactly the block type
-   an agent most often rewrites. It stops clipping while it is marked.
-   `white-space: pre-wrap` already wraps every line that can wrap, so this only
-   ever concerns an unbreakable token, and only until the mark clears. */
-.ub-code.ub-changed {
-  overflow: visible;
-}
-
+/* Only `from` is given: the block's own box-shadow is the destination, so the
+   line fades up in place rather than being described twice. */
 @keyframes ub-changed-in {
   from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
+    box-shadow: calc(-1 * var(--changed-bar-inset)) 0 0
+      calc(var(--changed-bar-width) - var(--changed-bar-inset)) transparent;
   }
 }
 
@@ -1331,9 +1322,24 @@ body {
   opacity: 1;
 }
 
+/* What the dot means, for anyone who cannot see a colour. In the entry's own
+   text so it lands in the accessible name; off-screen rather than
+   `display: none`, which would take it out of the accessibility tree too. */
+.ub-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* Both are decoration on a state change that has already happened. */
 @media (prefers-reduced-motion: reduce) {
-  .ub-changed::after {
+  .ub-changed {
     animation: none;
   }
 

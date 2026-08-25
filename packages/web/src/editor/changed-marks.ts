@@ -83,6 +83,7 @@ function build(
   return { generation, decorations: DecorationSet.create(doc, decorations) };
 }
 
+
 export const ChangedBlockMarks = Extension.create<ChangedBlockMarkOptions>({
   name: "uberblickChangedBlocks",
 
@@ -100,23 +101,42 @@ export const ChangedBlockMarks = Extension.create<ChangedBlockMarkOptions>({
           init: (_config, state: EditorState) => build(state.doc, marks),
           // Kept and mapped, not rebuilt: without this the document would be
           // rescanned on every keystroke for as long as anything is marked.
+          //
+          // Mapping is trusted only while it carries every decoration through
+          // intact, and `onRemove` is how it says otherwise. That one callback
+          // covers both ways a block decoration stops being drawable, because
+          // `DecorationSet.map` re-checks node decorations against the new
+          // document (`NodeType.valid`) rather than merely moving them:
+          //
+          // - the range itself is deleted, which is what a local re-type does —
+          //   `setBlockType` replaces the block's markup, so the decoration's
+          //   own positions go with it. A re-type keeps the block id and the
+          //   block count and never touches the tracker, so nothing else here
+          //   could notice the marker had silently gone;
+          // - the range survives but no longer covers exactly one block, which
+          //   is what splitting or joining a marked block does. A decoration
+          //   spanning two blocks matches neither, so it would be drawn on
+          //   nothing at all.
+          //
+          // Either way the answer is the same: rebuild from the tracker, which
+          // is the only thing that actually knows what is marked.
           apply: (transaction, previous, _old, next) => {
-            // A split or a merge moves blocks across the mapping, and a node
-            // decoration that no longer spans exactly one block draws on
-            // nothing. `childCount` is O(1), and both are rare.
-            const structural =
-              transaction.before.childCount !== transaction.doc.childCount;
-            if (marks.generation() !== previous.generation || structural) {
+            if (marks.generation() !== previous.generation) {
               return build(next.doc, marks);
             }
             if (!transaction.docChanged) return previous;
-            return {
-              generation: previous.generation,
-              decorations: previous.decorations.map(
-                transaction.mapping,
-                transaction.doc,
-              ),
-            };
+            let dropped = false;
+            const decorations = previous.decorations.map(
+              transaction.mapping,
+              transaction.doc,
+              {
+                onRemove: () => {
+                  dropped = true;
+                },
+              },
+            );
+            if (dropped) return build(next.doc, marks);
+            return { generation: previous.generation, decorations };
           },
         },
         props: {
@@ -144,6 +164,22 @@ export const ChangedBlockMarks = Extension.create<ChangedBlockMarkOptions>({
 
 /** Slack for sub-pixel layout, in CSS pixels. */
 const VIEWPORT_EPSILON_PX = 1;
+
+/**
+ * Every hundredth of the way in, rather than just "any" and "all".
+ *
+ * An IntersectionObserver only calls back when a threshold is crossed, and a
+ * block taller than the pane never reaches a ratio of 1 — so with `[0, 1]` the
+ * only callback it ever gets is the one where it first touched the pane, at
+ * whatever ratio it happened to have then. The "fills the pane" test below
+ * would then be asked at the one moment it is guaranteed to be false. A block
+ * ten times the height of the pane peaks at a ratio of 0.1, so the steps have
+ * to be fine enough to still land inside its whole range.
+ */
+const VISIBILITY_THRESHOLDS: number[] = Array.from(
+  { length: 101 },
+  (_unused, step) => step / 100,
+);
 
 /**
  * Whether the reader can see the whole block.
@@ -265,7 +301,7 @@ export function clearWhenSeen(
         arm(id);
       }
     },
-    { root, threshold: [0, 1] },
+    { root, threshold: VISIBILITY_THRESHOLDS },
   );
 
   const sync = (): void => {
