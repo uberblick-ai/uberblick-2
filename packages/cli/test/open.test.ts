@@ -197,6 +197,51 @@ async function open(
   }
 }
 
+/**
+ * Start `ub open` and interrupt it the moment `when` says so.
+ *
+ * Deliberately does not wait for the banner: the window this exists to test is
+ * the one *before* there is one — after the hub has bound its socket and before
+ * the command is fully up — and waiting on the hub's own port is what makes
+ * hitting that window repeatable rather than a matter of timing.
+ */
+async function interruptWhen(
+  box: Sandbox,
+  args: string[],
+  extraEnv: NodeJS.ProcessEnv,
+  when: () => Promise<void>,
+): Promise<{ status: number | null; signal: string | null; output: string }> {
+  const child = spawn(process.execPath, [UB_BIN, "open", ...args], {
+    cwd: box.cwd,
+    env: { ...box.env, ...extraEnv },
+  });
+  children.push(child);
+  let output = "";
+  child.stdout.on("data", (chunk: Buffer) => {
+    output += chunk.toString("utf8");
+  });
+  child.stderr.on("data", (chunk: Buffer) => {
+    output += chunk.toString("utf8");
+  });
+  await when();
+  child.kill("SIGINT");
+  return await new Promise((done) => {
+    child.on("close", (status, signal) => done({ status, signal, output }));
+  });
+}
+
+/** Resolve once something is listening on `port` — here, the hub `ub open` started. */
+async function untilBound(port: number): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if ((await probePort("127.0.0.1", port)).state !== "free") {
+      return;
+    }
+    await sleep(20);
+  }
+  throw new Error(`nothing ever bound port ${port}`);
+}
+
 /** Run `ub open` expecting it to refuse, and hand back what it said. */
 async function openFails(
   box: Sandbox,
@@ -445,6 +490,76 @@ describe("ub open", () => {
     expect(second.output).toContain("`ub open`");
 
     expect((await app.interrupt()).status).toBe(0);
+  }, 60_000);
+
+  it("never binds a hub off loopback, whatever HUB_URL says", async () => {
+    const { box, env } = configured();
+    const port = await freePort();
+
+    // 0.0.0.0 is an address to *listen* on, and a hub bound there is on every
+    // interface — offering the whole network a hub whose only credential is one
+    // shared signing secret.
+    const refused = await openFails(box, ["--port", String(await freePort())], {
+      ...env,
+      HUB_URL: `ws://0.0.0.0:${port}`,
+    });
+    expect(refused.status).toBe(1);
+    expect(refused.output).toContain("binds loopback only");
+    expect(refused.output).toContain("0.0.0.0");
+    // Refused means refused: nothing was left listening there.
+    expect((await probePort("0.0.0.0", port)).state).toBe("free");
+  }, 60_000);
+
+  it("starts a hub only for an endpoint the hub it starts could answer", async () => {
+    const { box, env } = configured();
+    const port = await freePort();
+    const webPort = await freePort();
+
+    // A hub started here speaks plain ws on loopback. Announcing one at an
+    // endpoint it does not answer would be a hub nothing can reach.
+    const tls = await openFails(box, ["--port", String(webPort)], {
+      ...env,
+      HUB_URL: `wss://127.0.0.1:${port}`,
+    });
+    expect(tls.status).toBe(1);
+    expect(tls.output).toContain("plain ws://");
+
+    const noPort = await openFails(box, ["--port", String(webPort)], {
+      ...env,
+      HUB_URL: "ws://127.0.0.1",
+    });
+    expect(noPort.status).toBe(1);
+    expect(noPort.output).toContain("names no port to bind");
+
+    const ephemeral = await openFails(box, ["--port", String(webPort)], {
+      ...env,
+      HUB_URL: "ws://127.0.0.1:0",
+    });
+    expect(ephemeral.status).toBe(1);
+    expect(ephemeral.output).toContain("names no port to bind");
+  }, 90_000);
+
+  it("an interrupt while it is still coming up stops the hub it started", async () => {
+    const { box, env } = configured();
+    const hubPort = await freePort();
+    const webPort = await freePort();
+
+    // Interrupted the instant the hub has bound its socket — before the web
+    // server is up, and so before there is any banner.
+    const run = await interruptWhen(
+      box,
+      ["--port", String(webPort)],
+      { ...env, HUB_URL: `ws://127.0.0.1:${hubPort}` },
+      () => untilBound(hubPort),
+    );
+
+    // Exit 0, not death by signal: with the handlers installed only once
+    // everything is up, Node's default SIGINT kills the process right here —
+    // taking the hub down without the flush its durability contract is made of.
+    expect(run.signal).toBeNull();
+    expect(run.status).toBe(0);
+    expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
+    expect((await probePort("127.0.0.1", hubPort)).state).toBe("free");
   }, 60_000);
 
   it("refuses when the hub's endpoint is held by something that is not a hub", async () => {

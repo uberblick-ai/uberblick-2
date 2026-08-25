@@ -382,6 +382,61 @@ interface HubDecision {
 }
 
 /**
+ * Addresses a hub started *here* may bind: loopback, and nothing else.
+ *
+ * Deliberately narrower than {@link isLocalHost}, which also admits the
+ * wildcards `0.0.0.0` and `::` — those are addresses to *listen* on, and a hub
+ * bound to one is on every interface. The hub's only credential is a single
+ * shared signing secret, so that would hand the whole network a hub which
+ * trusts anyone holding it. `HUB_HOST=0.0.0.0 mise run hub` is the deliberate
+ * opt-in and `ub open` is not it. Probing such an endpoint for a hub somebody
+ * else started stays fine: this governs only what this command starts.
+ */
+function isLoopbackHost(host: string): boolean {
+  return host === "localhost" || host === "::1" || /^127\./.test(host);
+}
+
+/**
+ * Why no hub may be started for this endpoint, or null when one may.
+ *
+ * {@link createHub} starts a plain websocket listener on one address and one
+ * port, and the configuration document tells the bundle to dial `hubUrl` — so
+ * an endpoint the started hub would not actually answer has to be a refusal,
+ * never a hub announced as running that nothing can reach. Ruled out: any
+ * scheme but `ws:` (there is no TLS here, so `wss://` would be dialled and
+ * never answered), an endpoint with no explicit port (the scheme's default
+ * 80/443 is not a port anybody asked a hub to bind), port 0 (ephemeral — the
+ * bundle would be told to dial 0), and a non-loopback host per
+ * {@link isLoopbackHost}.
+ */
+function whyNotStartable(hubUrl: string, parsed: URL): string | null {
+  const preamble = `nothing answers ${hubUrl}, and no hub can be started for it: `;
+  if (parsed.protocol !== "ws:") {
+    return (
+      `${preamble}a hub started here speaks plain ws:// on loopback, so it would ` +
+      `never answer ${parsed.protocol}// — start one yourself, or set HUB_URL to ` +
+      "a ws:// endpoint"
+    );
+  }
+  if (parsed.port === "" || Number(parsed.port) === 0) {
+    return (
+      `${preamble}it names no port to bind, and a hub started here binds exactly ` +
+      "the port the web app dials rather than guessing one"
+    );
+  }
+  const host = parsed.hostname.replace(/^\[|\]$/g, "");
+  if (!isLoopbackHost(host)) {
+    return (
+      `${preamble}\`ub open\` binds loopback only, and ${host} is not a loopback ` +
+      "address. A hub's only credential is one shared signing secret, so binding " +
+      "it there would offer that hub to every interface — `HUB_HOST=… mise run " +
+      "hub` is the deliberate way to do that on purpose"
+    );
+  }
+  return null;
+}
+
+/**
  * Make a hub available at the resolved endpoint, or explain why there is none.
  *
  * Reachability is a real client — {@link probeHub} mints a token and reads the
@@ -402,6 +457,10 @@ async function ensureHub(
         "set it to a ws:// or wss:// URL",
     );
   }
+  // It parses, because `endpointOf` just parsed it too — but this keeps the
+  // scheme and whether a port was written down, which is what decides below
+  // whether a hub may be started for it.
+  const parsed = new URL(hubUrl);
   if (!isLocalHost(endpoint.host)) {
     return { started: null, note: `${hubUrl} (remote — nothing started here)` };
   }
@@ -435,6 +494,14 @@ async function ensureHub(
     }
   }
 
+  // Asked only now, and only about starting: an endpoint a hub already answers
+  // is used whatever it looks like, and only one nobody answers has to be one
+  // this command could actually stand a hub up on.
+  const refusal = whyNotStartable(hubUrl, parsed);
+  if (refusal !== null) {
+    throw new Error(refusal);
+  }
+
   // The hub binds HUB_HOST:PORT and never reads HUB_URL, so the two are only
   // ever in step because somebody kept them there. A hub started here exists to
   // answer the bundle this command serves, so the endpoint wins — and a PORT
@@ -450,6 +517,9 @@ async function ensureHub(
 
   let hub: Hub;
   try {
+    // `endpoint.host` is loopback — {@link whyNotStartable} has already refused
+    // everything else — so this binds the address the web app dials and no
+    // other interface.
     hub = await createHub(
       resolveHubConfig({
         ...resolved,
@@ -552,17 +622,74 @@ function parseOptions(argv: string[]): Options {
   return { port, browser: values.browser ?? true, help: values.help ?? false };
 }
 
-/** Wait for the signal that ends the foreground, then stop listening for it. */
-function untilInterrupted(): Promise<void> {
-  return new Promise((done) => {
-    const stop = (): void => {
-      process.off("SIGINT", stop);
-      process.off("SIGTERM", stop);
-      done();
-    };
-    process.on("SIGINT", stop);
-    process.on("SIGTERM", stop);
+/** What this command started, and is therefore responsible for stopping. */
+interface Owned {
+  hub: Hub | null;
+  server: Server | null;
+}
+
+interface Foreground {
+  /** True once a signal has arrived. Checked between startup steps. */
+  interrupted: () => boolean;
+  /** Resolves on the first SIGINT or SIGTERM. */
+  signalled: Promise<void>;
+  /** Stop everything started so far, drop the handlers, and return `code`. */
+  shutdown: (code: number) => Promise<number>;
+}
+
+/**
+ * Take the foreground **before** anything is started.
+ *
+ * The ordering is the whole point. Node's default SIGINT kills the process
+ * outright, so a handler installed only once the command is fully up leaves a
+ * window — between the hub binding its socket and the web server binding its
+ * own — in which Ctrl-C takes the hub down without its flush, which is the one
+ * step the hub's durability contract is made of. Handlers first, then start
+ * things and register them here as they come up; a signal at any point tears
+ * down exactly what exists.
+ */
+function takeForeground(owned: Owned, io: Io): Foreground {
+  let seen = false;
+  let wake!: () => void;
+  const signalled = new Promise<void>((done) => {
+    wake = done;
   });
+  const onSignal = (): void => {
+    seen = true;
+    wake();
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+
+  const shutdown = async (code: number): Promise<number> => {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+
+    const server = owned.server;
+    if (server !== null) {
+      // `close()` refuses new connections and drops idle ones;
+      // `closeAllConnections` is what stops a request already in flight from
+      // holding the port — and the whole point of a foreground command is that
+      // Ctrl-C ends it now, not when a browser finishes downloading a chunk.
+      await new Promise<void>((done) => {
+        server.close(() => done());
+        server.closeAllConnections();
+      });
+    }
+    if (owned.hub !== null) {
+      try {
+        // Flushes before it closes — the hub's own durability contract, which
+        // no exit path here may skip.
+        await owned.hub.stop();
+      } catch (error) {
+        io.err(`ub open: the hub did not shut down cleanly: ${message(error)}\n`);
+        return 1;
+      }
+    }
+    return code;
+  };
+
+  return { interrupted: () => seen, signalled, shutdown };
 }
 
 export async function openCommand(
@@ -592,6 +719,10 @@ export async function openCommand(
   const hubUrl = trimmed(resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
   const env: NodeJS.ProcessEnv = { ...resolved.env, HUB_URL: hubUrl };
 
+  const owned: Owned = { hub: null, server: null };
+  const foreground = takeForeground(owned, io);
+  let hubNote = "";
+
   const plan = bundlePlan(env);
   const missing =
     plan.action === "missing"
@@ -604,25 +735,33 @@ export async function openCommand(
       `ub open: ${missing}. Build one with \`mise run build-web\` in a checkout, ` +
         "or point UBERBLICK_WEB_DIST at a bundle.\n",
     );
-    return 1;
+    return await foreground.shutdown(1);
   }
   if (plan.action === "build" && !(await buildBundle(env, io))) {
     io.err("ub open: the web build failed, so there is nothing to serve\n");
-    return 1;
+    return await foreground.shutdown(1);
+  }
+  if (foreground.interrupted()) {
+    return await foreground.shutdown(0);
   }
 
-  let decision: HubDecision;
   try {
-    decision = await ensureHub(env, hubUrl, io);
+    const decided = await ensureHub(env, hubUrl, io);
+    owned.hub = decided.started;
+    hubNote = decided.note;
   } catch (error) {
     io.err(`ub open: ${message(error)}\n`);
-    return 1;
+    return await foreground.shutdown(1);
+  }
+  if (foreground.interrupted()) {
+    return await foreground.shutdown(0);
   }
 
   const workspace = trimmed(env.WORKSPACE_ID);
   const server = serveBundle(plan.dir, configDocument(hubUrl, workspace));
   try {
     await listen(server, WEB_HOST, options.port);
+    owned.server = server;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "EADDRINUSE") {
@@ -637,13 +776,12 @@ export async function openCommand(
     } else {
       io.err(`ub open: could not serve on port ${options.port}: ${message(error)}\n`);
     }
-    await decision.started?.stop().catch(() => {});
-    return 1;
+    return await foreground.shutdown(1);
   }
 
   const url = `http://${WEB_HOST}:${options.port}/`;
   let banner = `uberblick is at ${url}\n\n`;
-  banner += `  hub        ${decision.note}\n`;
+  banner += `  hub        ${hubNote}\n`;
   banner += `  workspace  ${workspace ?? "none configured — run `ub init`"}\n`;
   banner += `  bundle     ${plan.dir}\n\n`;
   banner += "Ctrl-C to stop.\n";
@@ -653,26 +791,9 @@ export async function openCommand(
     openBrowser(url, env, io);
   }
 
-  await untilInterrupted();
+  await foreground.signalled;
 
-  // Ctrl-C stops what this command started, and only that. `close()` refuses new
-  // connections and drops idle ones; `closeAllConnections` is what stops a
-  // request already in flight from holding the port — and the whole point of a
-  // foreground command is that Ctrl-C ends it now, not when a browser finishes
-  // downloading a chunk.
-  await new Promise<void>((done) => {
-    server.close(() => done());
-    server.closeAllConnections();
-  });
-  if (decision.started !== null) {
-    try {
-      // Flushes before it closes — the hub's own durability contract, which a
-      // Ctrl-C must not skip.
-      await decision.started.stop();
-    } catch (error) {
-      io.err(`ub open: the hub did not shut down cleanly: ${message(error)}\n`);
-      return 1;
-    }
-  }
-  return 0;
+  // Ctrl-C stops what this command started, and only that: a hub somebody else
+  // was already running was never registered as owned, so it is still there.
+  return await foreground.shutdown(0);
 }
