@@ -1,26 +1,34 @@
 /**
  * Client configuration.
  *
- * The hub endpoint is resolved at *runtime*, from a JSON document the same
- * origin serves at {@link HUB_CONFIG_PATH}. A bundle reaches users who cannot
- * rebuild it — `ub` serves the web UI — so a value baked at our build time
- * would pin every one of those bundles to one hub. Everything else here is
- * still injected by Vite `define` (see vite.config.ts).
+ * The hub endpoint *and* the workspaces this client offers are resolved at
+ * *runtime*, from a JSON document the same origin serves at
+ * {@link HUB_CONFIG_PATH}. A bundle reaches users who cannot rebuild it — `ub`
+ * serves the web UI — so a value baked at our build time would pin every one of
+ * those bundles to one hub and one workspace. Everything else here is still
+ * injected by Vite `define` (see vite.config.ts).
  *
  * The path and the shape are contract, not implementation detail: this module,
  * the Caddy config and `ub open` (#97) all have to agree on them. The document
- * is `{"hubUrl": "wss://host/ws"}` — one key, a string, anything else ignored.
- * The value must be a bare `ws://` or `wss://` address: no userinfo, no query,
- * no fragment. It carries the endpoint and nothing else, which is what keeps it
- * from becoming a credential channel; #84 owns the signing secret that is still
- * compiled into the bundle.
+ * is
+ *
+ *     {"hubUrl": "wss://host/ws", "workspaces": ["uberblick-<uuid>", "<uuid>"]}
+ *
+ * — two keys, anything else ignored. `hubUrl` must be a bare `ws://` or
+ * `wss://` address: no userinfo, no query, no fragment. It carries the endpoint
+ * and nothing else, which is what keeps it from becoming a credential channel;
+ * #84 owns the signing secret that is still compiled into the bundle.
+ * `workspaces` is the menu, in order, and its first entry is what `/` — the one
+ * address that names no workspace — redirects to. It may also be written as one
+ * comma-separated string, because the environments that serve this document
+ * substitute plain strings and cannot build a JSON array (see the Caddyfile).
  *
  * Rule from CLAUDE.md: no hardcoded hub addresses anywhere except the in-code
  * fallback default. There are still exactly two, both fallbacks behind the
  * served document: the one vite.config.ts substitutes when HUB_URL is unset in
  * the build environment, and FALLBACK_HUB_URL below, which applies when this
  * module is loaded outside a Vite build and nothing was injected.
- * {@link resolveHubUrl} reports which of the three it used.
+ * {@link resolveClientConfig} reports which of the three it used.
  *
  * ============================ LOUD WARNING ============================
  * HUB_AUTH_TOKEN is compiled into the bundle. That is PRIVATE-SPIKE-ONLY — a
@@ -30,6 +38,8 @@
  * never reaches the client.
  * =====================================================================
  */
+
+import { parseWorkspaceId } from "@uberblick/schema";
 
 // Injected as string literals at build time. Declared, never imported.
 declare const __HUB_URL__: string;
@@ -50,16 +60,28 @@ const FALLBACK_HUB_URL = "ws://localhost:1234";
  */
 export const HUB_CONFIG_PATH = "/uberblick-config.json";
 
-function injected(value: string | undefined, fallback: string): string {
-  return value === undefined || value === "" ? fallback : value;
-}
+/** Which of the three sources supplied a value actually in use. */
+export type ConfigSource = "document" | "define" | "fallback";
 
-/** Which of the three sources supplied the endpoint actually in use. */
-export type HubUrlSource = "document" | "define" | "fallback";
-
-export interface HubUrlResolution {
-  url: string;
-  source: HubUrlSource;
+export interface ClientConfig {
+  /** The hub this session dials. */
+  hubUrl: string;
+  hubUrlSource: ConfigSource;
+  /**
+   * The workspaces on the switcher's menu, in order — the first is what `/`
+   * redirects to. Empty when nothing configured any.
+   *
+   * Entries are kept exactly as configured, decoration and all: the slug is
+   * display, and `ui/route.ts` owns what a workspace id is. A define-supplied
+   * entry is deliberately *not* validated here — a build carrying the legacy
+   * `main` has to reach `parseRoute`, which is what tells its developer the
+   * configured value is not a workspace id rather than that there is none
+   * (#182). A document-supplied one is validated, because a typo in a deployed
+   * config file is not somewhere anyone can go.
+   */
+  workspaces: readonly string[];
+  /** No `"fallback"`: there is no in-code workspace, only a build without one. */
+  workspacesSource: "document" | "define";
 }
 
 /**
@@ -69,10 +91,41 @@ export interface HubUrlResolution {
  * so the reported source stays truthful when a build's `HUB_URL` happens to
  * equal the in-code fallback — which is the common case, not a corner one.
  */
-const BUILT_IN: HubUrlResolution =
+const BUILT_IN_HUB_URL: Pick<ClientConfig, "hubUrl" | "hubUrlSource"> =
   typeof __HUB_URL__ === "string" && __HUB_URL__ !== ""
-    ? { url: __HUB_URL__, source: "define" }
-    : { url: FALLBACK_HUB_URL, source: "fallback" };
+    ? { hubUrl: __HUB_URL__, hubUrlSource: "define" }
+    : { hubUrl: FALLBACK_HUB_URL, hubUrlSource: "fallback" };
+
+/**
+ * The workspaces a build carries: `WORKSPACE_ID` first — it is the one that has
+ * always answered `/` — then `WORKSPACES`, the menu.
+ *
+ * One ordered list, because the served document is one ordered list and the
+ * client must not hold two different ideas of what a workspace list is. Both
+ * defines are the *dev server's* answer now: `mise run dev` serves no
+ * configuration document, and that is the only place they are the whole answer.
+ *
+ * Repeats are dropped, because naming the default workspace in `WORKSPACES` as
+ * well is the ordinary configuration and the count in the diagnostic has to
+ * match the menu. Two *spellings* of one workspace are a uuid comparison, which
+ * `workspaceList` owns.
+ */
+const BUILT_IN_WORKSPACES: readonly string[] = [
+  ...new Set(
+    [
+      typeof __WORKSPACE_ID__ === "string" ? __WORKSPACE_ID__ : "",
+      ...(typeof __WORKSPACES__ === "string" ? __WORKSPACES__ : "").split(","),
+    ]
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== ""),
+  ),
+];
+
+const BUILT_IN: ClientConfig = {
+  ...BUILT_IN_HUB_URL,
+  workspaces: BUILT_IN_WORKSPACES,
+  workspacesSource: "define",
+};
 
 /**
  * Whether `value` is an address this client may dial, and nothing more.
@@ -107,28 +160,82 @@ function usableEndpoint(value: string): { url: string } | { rejected: string } {
 }
 
 /**
- * The endpoint the document names, or the reason it could not be used.
+ * The workspaces the document lists, or why it supplied none.
  *
- * Unusable is deliberately *one* outcome covering a non-200, a non-JSON body,
- * JSON without a string `hubUrl`, and a `hubUrl` that is not a bare ws(s)
- * address. Under the SPA fallback (#68), `try_files … /index.html` answers an
- * absent document with 200 and the app's own HTML, so "missing" and "wrong
- * shape" are the same observation in production — splitting them would mean a
- * branch only the dev server ever takes. Extra keys are ignored rather than
- * rejected: the contract is one key, and a document that grows another must not
- * strand an already deployed bundle.
+ * Two spellings, one meaning: a JSON array of ids, or one comma-separated
+ * string. The string form exists because the deployment that serves this
+ * document is a Caddy `respond` with an environment variable substituted into
+ * it, and an operator's `.env` holds `a,b` — the same spelling `WORKSPACES`
+ * already has in mise `[env]`. Refusing it would have put JSON quoting rules
+ * into a dotenv file.
+ *
+ * An entry that is not a workspace id is dropped and counted, never offered: a
+ * menu item that navigates to the invalid-link screen reads as a broken
+ * workspace. `dropped` is a count and nothing more — it reaches one diagnostic,
+ * and this document is the one place a value must never be echoed.
+ */
+function usableWorkspaces(
+  value: unknown,
+): { list: string[]; dropped: number } | { rejected: string } {
+  if (value === undefined) return { rejected: "it lists no workspaces" };
+  const entries =
+    typeof value === "string" ? value.split(",") : Array.isArray(value) ? value : null;
+  if (entries === null) {
+    return { rejected: "its workspaces is neither a list nor a string" };
+  }
+  const list: string[] = [];
+  let dropped = 0;
+  for (const entry of entries) {
+    const id = typeof entry === "string" ? entry.trim() : "";
+    try {
+      parseWorkspaceId(id);
+      list.push(id);
+    } catch {
+      // An empty entry is a formatting artefact of the string spelling (`a,,b`,
+      // or an unset variable substituting to nothing), not a typo anybody needs
+      // to be told about.
+      if (id !== "") dropped += 1;
+    }
+  }
+  if (list.length === 0) {
+    return { rejected: "none of its workspaces is a workspace id" };
+  }
+  return { list, dropped };
+}
+
+/** Each key of the document, read on its own — see {@link readDocument}. */
+interface DocumentConfig {
+  hubUrl: { url: string } | { rejected: string };
+  workspaces: { list: string[]; dropped: number } | { rejected: string };
+}
+
+/**
+ * What the document says, or the reason none of it could be used.
+ *
+ * A document-level failure is deliberately *one* outcome covering a non-200, a
+ * non-JSON body and JSON that is not an object. Under the SPA fallback (#68),
+ * `try_files … /index.html` answers an absent document with 200 and the app's
+ * own HTML, so "missing" and "wrong shape" are the same observation in
+ * production — splitting them would mean a branch only the dev server ever
+ * takes.
+ *
+ * Its two keys then fail *independently*: a deployment that serves an endpoint
+ * but no workspaces is an ordinary deployment — a hub is required, a workspace
+ * list is not — and it must keep its endpoint. Extra keys are ignored rather
+ * than rejected: a document that grows another key must not strand an already
+ * deployed bundle.
  *
  * No reason ever quotes the response. A misrouted request can return anything —
  * an upstream error page, another service's secret — and a diagnostic that
  * echoed it would copy that into the browser console and every log that
- * collects one. The rejected `hubUrl` is withheld for the same reason: the
- * values most worth naming are exactly the ones that might carry a credential.
+ * collects one. The rejected values are withheld for the same reason: the ones
+ * most worth naming are exactly the ones that might carry a credential.
  */
 function readDocument(
   status: number,
   contentType: string,
   body: string,
-): { url: string } | { rejected: string } {
+): DocumentConfig | { rejected: string } {
   if (status !== 200) {
     return { rejected: `it answered ${status}` };
   }
@@ -144,15 +251,19 @@ function readDocument(
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { rejected: "it is not a JSON object" };
   }
-  const url = (parsed as Record<string, unknown>).hubUrl;
-  if (typeof url !== "string" || url === "") {
-    return { rejected: "it has no string hubUrl" };
-  }
-  return usableEndpoint(url);
+  const document = parsed as Record<string, unknown>;
+  const url = document.hubUrl;
+  return {
+    hubUrl:
+      typeof url === "string" && url !== ""
+        ? usableEndpoint(url)
+        : { rejected: "it has no string hubUrl" },
+    workspaces: usableWorkspaces(document.workspaces),
+  };
 }
 
 /**
- * How long the read may take before the built-in value is used instead.
+ * How long the read may take before the built-in values are used instead.
  *
  * Not a nicety. Room acquisition waits on this read, and a request that hangs
  * — a proxy holding the connection open, a captive portal — never rejects on
@@ -163,17 +274,17 @@ function readDocument(
 export const HUB_CONFIG_TIMEOUT_MS = 3_000;
 
 /**
- * Read the hub endpoint: the served document, else the build-time define, else
- * the in-code fallback.
+ * Read the client configuration: the served document, else the build-time
+ * defines, else the in-code fallback.
  *
  * Never rejects, and always settles. A client left with no hub at all would be
  * worse than one dialling a stale address, and the `rejected` reason — which
- * {@link resolveHubUrl} logs — is what keeps the difference legible.
+ * {@link resolveClientConfig} logs — is what keeps the difference legible.
  */
-export async function readHubUrl(
+export async function readClientConfig(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
   timeoutMs: number = HUB_CONFIG_TIMEOUT_MS,
-): Promise<HubUrlResolution & { rejected?: string }> {
+): Promise<ClientConfig & { rejected?: string }> {
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(), timeoutMs);
   let status: number;
@@ -204,34 +315,61 @@ export async function readHubUrl(
   } finally {
     clearTimeout(timer);
   }
+
   const outcome = readDocument(status, contentType, body);
   if ("rejected" in outcome) return { ...BUILT_IN, rejected: outcome.rejected };
-  return { url: outcome.url, source: "document" };
+
+  const notes: string[] = [];
+  if ("rejected" in outcome.hubUrl) notes.push(outcome.hubUrl.rejected);
+  if ("rejected" in outcome.workspaces) notes.push(outcome.workspaces.rejected);
+  else if (outcome.workspaces.dropped > 0) {
+    notes.push(
+      `${outcome.workspaces.dropped} of its workspaces are not workspace ids`,
+    );
+  }
+
+  return {
+    ...("rejected" in outcome.hubUrl
+      ? BUILT_IN_HUB_URL
+      : { hubUrl: outcome.hubUrl.url, hubUrlSource: "document" as const }),
+    ...("rejected" in outcome.workspaces
+      ? { workspaces: BUILT_IN_WORKSPACES, workspacesSource: "define" as const }
+      : { workspaces: outcome.workspaces.list, workspacesSource: "document" as const }),
+    ...(notes.length === 0 ? {} : { rejected: notes.join("; ") }),
+  };
 }
 
-let resolved: HubUrlResolution | null = null;
-let pending: Promise<HubUrlResolution> | null = null;
+let resolved: ClientConfig | null = null;
+let pending: Promise<ClientConfig> | null = null;
 
 /**
- * Resolve the endpoint, once per session, and say where it came from.
+ * Resolve the configuration, once per session, and say where it came from.
  *
  * Memoised rather than merely idempotent: the entry module starts the read as
  * early as it can, and the hook that gates room acquisition on it joins that
  * same read instead of issuing a second one.
  */
-export function resolveHubUrl(
+export function resolveClientConfig(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<HubUrlResolution> {
-  pending ??= readHubUrl(fetchImpl).then(({ url, source, rejected }) => {
-    resolved = { url, source };
-    // One line, always: the source in force, and — when there was one — why the
-    // document was not used. A hub that is merely misconfigured otherwise looks
-    // exactly like a hub that is down.
+): Promise<ClientConfig> {
+  pending ??= readClientConfig(fetchImpl).then(({ rejected, ...config }) => {
+    resolved = config;
+    // One line, always: the sources in force, and — when there was one — why
+    // the document was not used. A hub that is merely misconfigured otherwise
+    // looks exactly like a hub that is down, and a switcher with nothing on it
+    // looks exactly like a deployment that was never given a workspace.
     const say = rejected === undefined ? console.info : console.warn;
+    const used =
+      config.hubUrlSource === "document" || config.workspacesSource === "document";
     const why =
-      rejected === undefined ? "" : `; ${HUB_CONFIG_PATH} unused — ${rejected}`;
-    say(`uberblick web: hub ${url} (source: ${source})${why}`);
-    return resolved;
+      rejected === undefined
+        ? ""
+        : `; ${HUB_CONFIG_PATH} ${used ? "partly used" : "unused"} — ${rejected}`;
+    say(
+      `uberblick web: hub ${config.hubUrl} (source: ${config.hubUrlSource}), ` +
+        `workspaces ${config.workspaces.length} (source: ${config.workspacesSource})${why}`,
+    );
+    return config;
   });
   return pending;
 }
@@ -241,15 +379,27 @@ export function resolveHubUrl(
  *
  * A function, not a `const`: the value is not known until a `fetch` completes,
  * and `rooms.ts` builds the shared websocket from a React effect, which
- * `useHubEndpoint` holds back until {@link resolveHubUrl} has settled.
+ * `useHubEndpoint` holds back until {@link resolveClientConfig} has settled.
  */
 export function hubUrl(): string {
   if (resolved === null) {
     throw new Error(
-      "uberblick web: the hub endpoint was read before resolveHubUrl() settled",
+      "uberblick web: the hub endpoint was read before resolveClientConfig() settled",
     );
   }
-  return resolved.url;
+  return resolved.hubUrl;
+}
+
+/**
+ * The workspaces in force — the switcher's menu, first entry answering `/`.
+ *
+ * Empty before the read settles, which is the same answer as "none configured"
+ * and wants the same behaviour: no redirect out of `/`, no menu. The read gates
+ * the first *connect*, not the render, so `App` does render before it settles;
+ * `useHubEndpoint` is what re-renders it with the answer.
+ */
+export function configuredWorkspaces(): readonly string[] {
+  return resolved?.workspaces ?? [];
 }
 
 /**
@@ -257,47 +407,8 @@ export function hubUrl(): string {
  * (`--if-missing warn`), which is a legitimate state: contributors without the
  * age key still get a running dev server, they just cannot authenticate.
  */
-export const HUB_AUTH_TOKEN: string = injected(
-  typeof __HUB_AUTH_TOKEN__ === "string" ? __HUB_AUTH_TOKEN__ : undefined,
-  "",
-);
-
-/**
- * The workspace this build was configured with, or null when it was built
- * without one.
- *
- * It answers exactly one address — `/`, which names no workspace — by
- * redirecting to it. Every other address carries its own workspace in the first
- * path segment, because this client cannot enumerate workspaces and must never
- * guess which corpus a link belongs to.
- *
- * Injected from `WORKSPACE_ID` at build time, the way `__HUB_URL__` is: mise
- * `[env]` supplies it in dev (`ub init` writes it into the derived
- * `mise.local.toml`), and a bundle built without one simply has no `/`.
- */
-export const CONFIGURED_WORKSPACE: string | null =
-  typeof __WORKSPACE_ID__ === "string" && __WORKSPACE_ID__ !== ""
-    ? __WORKSPACE_ID__
-    : null;
-
-/**
- * The workspaces this build offers to switch between, as configured — decorated
- * ids separated by commas, or the empty string when none were.
- *
- * Raw on purpose: this module owns reading the define, and `workspaceList` in
- * ui/route.ts owns what a workspace id is. The list is a *menu*, never an
- * authority — the address still names the workspace, so an id missing from here
- * still opens, and an id in it that this hub has never heard of is simply an
- * empty corpus. Switching is navigating, and that is the whole feature (#151).
- *
- * Plaintext config like `HUB_URL`: mise `[env]` supplies it, and since the ids
- * are a uuid per machine the value belongs in the local config, not in a
- * committed default.
- */
-export const CONFIGURED_WORKSPACES: string = injected(
-  typeof __WORKSPACES__ === "string" ? __WORKSPACES__ : undefined,
-  "",
-);
+export const HUB_AUTH_TOKEN: string =
+  typeof __HUB_AUTH_TOKEN__ === "string" ? __HUB_AUTH_TOKEN__ : "";
 
 /**
  * The repository whose issue and PR links render as a bare `#62` — every other

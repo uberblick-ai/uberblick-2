@@ -2,8 +2,10 @@
  * Two workspaces on one hub, as the web client sees them (#151).
  *
  * The client is not multi-tenant and gains nothing here that resembles tenancy.
- * All that is added is a *menu*: `WORKSPACES` lists the workspaces this build
- * offers, and picking one navigates. So there are exactly two things worth
+ * All that is added is a *menu*: the configured list (the served document's,
+ * else the build's defines — see `hub-config.test.ts` for where it comes from)
+ * names the workspaces this client offers, and picking one navigates. So there
+ * are exactly two things worth
  * pinning, and they are the two an agent could break without a test failing
  * anywhere else:
  *
@@ -34,8 +36,8 @@ const ABLAUF_UUID = "b2d9e4c7-5a13-4f80-8e6b-71c0a9d35f2e";
 const UBERBLICK = `uberblick-${UBERBLICK_UUID}`;
 const ABLAUF = `ablauf-${ABLAUF_UUID}`;
 
-/** The value a `WORKSPACES` in mise `[env]` would carry. */
-const CONFIGURED = `${UBERBLICK},${ABLAUF}`;
+/** What the client resolved: the served document's list, else the defines'. */
+const CONFIGURED = [UBERBLICK, ABLAUF];
 
 const uberblick: Workspace = { uuid: UBERBLICK_UUID, segment: UBERBLICK };
 const ablauf: Workspace = { uuid: ABLAUF_UUID, segment: ABLAUF };
@@ -44,7 +46,7 @@ describe("the configured list is a menu, and the address is still the authority"
   it("lists every configured workspace, in the order configured", () => {
     expect(workspaceList(CONFIGURED, uberblick)).toEqual([uberblick, ablauf]);
     // Whitespace around an entry is somebody formatting their config file.
-    expect(workspaceList(` ${UBERBLICK} , ${ABLAUF} `, null)).toEqual([
+    expect(workspaceList([` ${UBERBLICK} `, ` ${ABLAUF} `], null)).toEqual([
       uberblick,
       ablauf,
     ]);
@@ -53,14 +55,14 @@ describe("the configured list is a menu, and the address is still the authority"
   it("has no menu when nothing was configured, and still knows where it is", () => {
     // The ordinary single-workspace build: the switcher renders the label it
     // always did rather than a control that can only pick where you are.
-    expect(workspaceList("", uberblick)).toEqual([uberblick]);
-    expect(workspaceList("", null)).toEqual([]);
+    expect(workspaceList([], uberblick)).toEqual([uberblick]);
+    expect(workspaceList([], null)).toEqual([]);
   });
 
   it("drops an entry that is not a workspace id instead of offering it", () => {
     // A menu item that navigates to the invalid-link screen is worse than an
     // item that is not there: the reader would read it as a broken workspace.
-    expect(workspaceList(`main,,${ABLAUF},not-a-uuid`, null)).toEqual([ablauf]);
+    expect(workspaceList(["main", "", ABLAUF, "not-a-uuid"], null)).toEqual([ablauf]);
   });
 
   it("counts two spellings of one workspace once, keeping the address's own", () => {
@@ -68,8 +70,8 @@ describe("the configured list is a menu, and the address is still the authority"
     // show the spelling the reader is actually at — otherwise it reads as
     // sitting in a workspace they are not in.
     const bare: Workspace = { uuid: UBERBLICK_UUID, segment: UBERBLICK_UUID };
-    expect(workspaceList(`${UBERBLICK},${UBERBLICK_UUID}`, bare)).toEqual([bare]);
-    expect(workspaceList(`${UBERBLICK},${UBERBLICK_UUID}`, ablauf)).toEqual([
+    expect(workspaceList([UBERBLICK, UBERBLICK_UUID], bare)).toEqual([bare]);
+    expect(workspaceList([UBERBLICK, UBERBLICK_UUID], ablauf)).toEqual([
       uberblick,
       ablauf,
     ]);
@@ -79,7 +81,7 @@ describe("the configured list is a menu, and the address is still the authority"
     // Arriving by a link into an unlisted workspace is normal — a link carries
     // its workspace. Showing it is how the reader can tell where they are, and
     // the configured ones are then the way back.
-    expect(workspaceList(UBERBLICK, ablauf)).toEqual([uberblick, ablauf]);
+    expect(workspaceList([UBERBLICK], ablauf)).toEqual([uberblick, ablauf]);
   });
 });
 
@@ -87,7 +89,7 @@ describe("the configured list is a menu, and the address is still the authority"
  * App's wiring for the switcher: the address bar in, a navigation out. The same
  * two calls App makes, so what this drives is the app's own path.
  */
-function Probe({ configured }: { configured: string }): ReactElement {
+function Probe({ configured }: { configured: readonly string[] }): ReactElement {
   const [path, navigate] = useRoutePath();
   const route = parseRoute(path, null);
   const current = route.kind === "no-workspace" ? null : route.workspace;
@@ -150,7 +152,7 @@ describe("switching workspace is navigating to it", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
-    act(() => root.render(<Probe configured={UBERBLICK} />));
+    act(() => root.render(<Probe configured={[UBERBLICK]} />));
 
     expect(window.location.pathname).toBe(`/${ABLAUF}/${uuid}`);
     expect(parseRoute(window.location.pathname, null)).toEqual({
@@ -170,7 +172,7 @@ describe("switching workspace is navigating to it", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
-    act(() => root.render(<Probe configured="" />));
+    act(() => root.render(<Probe configured={[]} />));
 
     expect(host.querySelector(".ub-workspace")).toBeNull();
     expect(host.textContent).toBe(`workspace ${UBERBLICK}`);

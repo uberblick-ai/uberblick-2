@@ -35,7 +35,7 @@ const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
  * `rooms.ts` reads the hub address and the signing secret from the config
  * module, and the hub's port is only known once it is listening — so the config
  * is mocked and the module imported after the hub is up. The mock stands in for
- * a completed `resolveHubUrl()`; resolution itself is covered by
+ * a completed `resolveClientConfig()`; resolution itself is covered by
  * `hub-config.test.ts`.
  */
 const injected = vi.hoisted(() => ({ url: "", secret: "" }));
