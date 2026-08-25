@@ -9,6 +9,12 @@ import { defineConfig } from "vitest/config";
  * this command in. Both are read here, at config time, from the task's
  * environment — never from a committed `.env`.
  *
+ * `__HUB_URL__` is a *default*, not the answer. The client prefers the hub
+ * endpoint served at `/uberblick-config.json` on its own origin and falls back
+ * to this value when no such document is deployed — which is exactly the dev
+ * server, where nothing serves that path and `mise run dev` therefore needs no
+ * configuration document. See src/config.ts.
+ *
  * ============================ LOUD WARNING ============================
  * Embedding HUB_AUTH_TOKEN in the bundle is a PRIVATE-SPIKE-ONLY shortcut.
  * Anything served to a browser is public: this secret would be readable by

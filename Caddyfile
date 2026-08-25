@@ -1,4 +1,20 @@
 {$TAILSCALE_HOST} {
+	# The client's runtime configuration: the hub endpoint it dials, and nothing
+	# else (#91). Served rather than baked into the bundle, so pointing this
+	# deployment at another hub is `HUB_URL=… up --detach`, not a rebuild.
+	#
+	# It must be matched before the SPA fallback below. `try_files … /index.html`
+	# exists for deep links (#68) and would answer a mis-deployed configuration
+	# path with the app's own HTML, which the client can only report as a
+	# configuration error. `no-store` is load-bearing for the same reason the
+	# document exists: a cached copy keeps a retargeted deployment dialling the
+	# old hub.
+	handle /uberblick-config.json {
+		header Cache-Control "no-store"
+		header Content-Type "application/json"
+		respond `{"hubUrl":"{$HUB_URL}"}` 200
+	}
+
 	handle /ws* {
 		reverse_proxy hub:1234
 	}

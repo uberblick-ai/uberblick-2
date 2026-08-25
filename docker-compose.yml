@@ -25,6 +25,13 @@ services:
       - hub
     environment:
       TAILSCALE_HOST: "${TAILSCALE_HOST:?set TAILSCALE_HOST in .env}"
+      # What Caddy serves at /uberblick-config.json, and therefore the hub the
+      # browser actually dials — the build argument above is only the fallback
+      # compiled into the bundle. Deliberately not named HUB_URL on the host
+      # side: that name already means "the hub my local tools dial" (mise
+      # `[env]`, MCP clients), and inheriting a developer's `ws://localhost:1234`
+      # here would silently serve it to every visitor.
+      HUB_URL: "${WEB_HUB_URL:-wss://${TAILSCALE_HOST:?set TAILSCALE_HOST in .env}/ws}"
     ports:
       - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:443:443"
     restart: unless-stopped

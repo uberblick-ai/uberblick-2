@@ -2,7 +2,8 @@
 
 This deployment runs one hub and one prebuilt web client on a Linux host that
 is already in a private Tailscale network. Caddy serves the single-page app,
-proxies `/ws` to the hub, and asks the host's Tailscale daemon for the HTTPS
+serves the client's runtime configuration at `/uberblick-config.json`, proxies
+`/ws` to the hub, and asks the host's Tailscale daemon for the HTTPS
 certificate. The hub is not published directly.
 
 > the served bundle contains the shared write-token signing secret — this deployment is supported only on a private Tailscale network until server-minted sessions exist; an unguessable public hostname is not a security boundary.
@@ -39,7 +40,8 @@ cp remote.env.example .env
 tailscale ip -4
 ```
 
-Edit `.env` and set all three values:
+Edit `.env` and set the three required values (`WEB_HUB_URL` is optional; see
+[Pointing the client at another hub](#pointing-the-client-at-another-hub)):
 
 - `TAILSCALE_HOST` is the host's full `*.ts.net` MagicDNS name, with no scheme
   or trailing slash.
@@ -60,7 +62,7 @@ secret contents from cache keys, so the derived non-secret build argument is
 what forces a web rebuild after token rotation.
 
 Validate the configuration without rendering its secret values, build the web
-bundle with `wss://<TAILSCALE_HOST>/ws` baked in, and start both services:
+bundle, and start both services:
 
 ```sh
 sh remote-compose.sh config --quiet
@@ -70,16 +72,38 @@ sh remote-compose.sh logs --tail=100 hub caddy
 ```
 
 Open `https://<TAILSCALE_HOST>` from a second computer on the same tailnet. In
-the browser developer tools, the collaboration WebSocket must be
-`wss://<TAILSCALE_HOST>/ws`; an `ws://` request means the image was built with
-the wrong `TAILSCALE_HOST`. The directory should hydrate after the socket
-connects.
+the browser developer tools, `https://<TAILSCALE_HOST>/uberblick-config.json`
+must return `{"hubUrl":"wss://<TAILSCALE_HOST>/ws"}` and the collaboration
+WebSocket must be that same address; a `ws://localhost` request means the
+document did not arrive and the client fell back to the value compiled into the
+bundle. The directory should hydrate after the socket connects.
 
-The web configuration is compiled into the image. After changing
-`TAILSCALE_HOST` or `HUB_AUTH_TOKEN`, rebuild it with
-`sh remote-compose.sh up --build --detach`; restarting the existing container
-cannot change the bundle. Do not run `docker compose config` without `--quiet`:
-the rendered configuration contains `HUB_AUTH_TOKEN` in the hub environment.
+Do not run `docker compose config` without `--quiet`: the rendered
+configuration contains `HUB_AUTH_TOKEN` in the hub environment.
+
+### Pointing the client at another hub
+
+The hub endpoint is **not** baked into the bundle. The client fetches
+`/uberblick-config.json` from the origin it was served from and takes `hubUrl`
+from it; the compiled-in value is only the fallback for when no such document
+is deployed. Caddy renders that document from the `HUB_URL` it is given, which
+`docker-compose.yml` fills from `WEB_HUB_URL` in `.env`, defaulting to
+`wss://<TAILSCALE_HOST>/ws`.
+
+So retargeting the client is an edit to that document, not a rebuild — set
+`WEB_HUB_URL` in `.env` and recreate the Caddy container:
+
+```sh
+sh remote-compose.sh up --detach caddy
+```
+
+The document is served with `Cache-Control: no-store`, so the next page load
+picks up the change. It carries the endpoint and nothing else: the client
+rejects any other key, so a token can never be added to it.
+
+`HUB_AUTH_TOKEN` is still compiled into the bundle, so rotating it does need
+`sh remote-compose.sh up --build --detach`. Removing it from the bundle
+entirely is separate work (#84).
 
 ## Two-computer verification protocol
 
