@@ -24,6 +24,7 @@ import {
   useRoomStatus,
 } from "./hooks.js";
 import { CommentComposer } from "./CommentComposer.js";
+import { DocMetaLine } from "./DocChrome.js";
 import { shareUrl } from "./route.js";
 import { threadIdFromTarget } from "./threads.js";
 
@@ -459,6 +460,8 @@ export function EditorPane({
           }}
         />
         <StatusLine connection={connection} />
+        {/* What this document is, and which version of it is on screen. */}
+        <DocMetaLine connection={connection} meta={meta} />
         {foreign.length > 0 ? (
           <ForeignFallback
             connection={connection}

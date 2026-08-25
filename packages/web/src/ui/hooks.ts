@@ -29,6 +29,8 @@ import { changedBlocks } from "../editor/changed-blocks.js";
 import { findForeignBlocks } from "../editor/palette.js";
 import type { ForeignBlock } from "../editor/palette.js";
 import { blockText, plainText } from "../editor/ytext.js";
+import { docRev, readActivity, sameActivity } from "./doc-chrome.js";
+import type { RemoteActivity } from "./doc-chrome.js";
 import { observeOutline } from "./outline.js";
 import type { OutlineEntry } from "./outline.js";
 import { observeThreads } from "./threads.js";
@@ -267,6 +269,66 @@ export function usePeers(connection: RoomConnection | null): Peer[] {
     return () => awareness.off("change", read);
   }, [connection]);
   return peers;
+}
+
+/**
+ * The remote session the chrome names, live — see `readActivity` for which one
+ * that is and why it is not called an agent in the code.
+ *
+ * The reading is compared before it is stored, and that is the point rather
+ * than an optimisation: awareness fires `change` on every caret movement, so a
+ * peer typing a sentence produces dozens of readings that all say the same
+ * thing. Storing them by identity would redraw the pill once per keystroke.
+ *
+ * Awareness is the only subscription: the pill names a block *number*, which
+ * moves when blocks are inserted above it, but a caret that stays put while the
+ * document reflows is a stale number for as long as its session is idle — a
+ * second observer over the fragment would buy a rarely-wrong number at the cost
+ * of re-reading every awareness state on every keystroke in the document.
+ */
+export function useAgentActivity(
+  connection: RoomConnection | null,
+): RemoteActivity | null {
+  const [activity, setActivity] = useState<RemoteActivity | null>(null);
+  useEffect(() => {
+    const awareness = connection?.provider.awareness ?? null;
+    if (connection === null || awareness === null) {
+      setActivity(null);
+      return;
+    }
+    const read = (): void => {
+      const next = readActivity(connection.ydoc, awareness);
+      setActivity((previous) => (sameActivity(previous, next) ? previous : next));
+    };
+    read();
+    awareness.on("change", read);
+    return () => awareness.off("change", read);
+  }, [connection]);
+  return activity;
+}
+
+/**
+ * The open document's rev, live — or null while there is no document.
+ *
+ * Deep, like every other content view here: a rev that only tracked the shape
+ * of the fragment would sit still through every edit inside a block, which is
+ * most of them.
+ */
+export function useDocRev(connection: RoomConnection | null): string | null {
+  const [rev, setRev] = useState<string | null>(null);
+  useEffect(() => {
+    if (connection === null) {
+      setRev(null);
+      return;
+    }
+    const { ydoc } = connection;
+    const fragment = getBlocksFragment(ydoc);
+    const read = (): void => setRev(docRev(ydoc));
+    read();
+    fragment.observeDeep(read);
+    return () => fragment.unobserveDeep(read);
+  }, [connection]);
+  return rev;
 }
 
 /**

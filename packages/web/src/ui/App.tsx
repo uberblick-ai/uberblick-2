@@ -25,6 +25,7 @@ import { WORKSPACE } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
 import { randomIdentity } from "../collab/identity.js";
 import type { RoomConnection } from "../collab/rooms.js";
+import { DocChrome } from "./DocChrome.js";
 import { DocList } from "./DocList.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
@@ -282,6 +283,11 @@ export function App(): ReactElement {
         </button>
         <span className="ub-brand">uberblick</span>
         <span className="ub-muted">workspace {WORKSPACE}</span>
+        {/* The open document's breadcrumb, and the activity and connection
+            pills. The document's room when there is one, the directory's when
+            there is not: one shared socket, so it is the same truth about the
+            same hub either way. */}
+        <DocChrome connection={doc ?? directory} meta={meta} />
         <span className="ub-me" style={{ borderColor: identity.color }}>
           {identity.name}
         </span>
