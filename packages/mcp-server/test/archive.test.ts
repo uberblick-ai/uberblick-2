@@ -119,6 +119,7 @@ describe("archive_doc", () => {
       title: "Concepts",
       tags: ["reference"],
       deleted: true,
+      pinned: false,
     });
 
     // Search reads the derived index, which a directory write does not itself
@@ -287,6 +288,9 @@ describe("restore_doc", () => {
       uuid: doc.uuid,
       title: "Concepts",
       tags: ["reference"],
+      // The legacy-tag seed reaches a restored document like any other: it
+      // carries `reference`, so the sidebar's first read pins it.
+      pinned: true,
     });
 
     const hits = await rig.ok("search", { query: "glossary" });
@@ -473,6 +477,7 @@ describe("restore_doc", () => {
       uuid: doc.uuid,
       title: "Concepts",
       tags: ["retired"],
+      pinned: false,
     });
   });
 });

@@ -27,6 +27,7 @@ import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import {
   DIRECTORY_SUFFIX,
+  SIDEBAR_SUFFIX,
   directoryRoom,
   getBlocks,
   getBlocksFragment,
@@ -36,6 +37,7 @@ import {
   listDirectory,
   repairDuplicateBlocks,
   roomForDoc,
+  sidebarRoom,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
@@ -51,11 +53,12 @@ import { HubSync } from "./sync.js";
 const LOG_ORIGIN = Symbol("uberblick/log");
 
 export interface Replica {
-  /** `<workspaceId>/<uuid>`, or the workspace's `_directory` room. */
+  /** `<workspaceId>/<uuid>`, or one of the workspace's well-known rooms. */
   readonly room: string;
-  /** The document uuid, or `_directory`. */
+  /** The document uuid, or `_directory` / `_sidebar`. */
   readonly id: string;
   readonly isDirectory: boolean;
+  readonly isSidebar: boolean;
   readonly doc: Y.Doc;
   readonly awareness: Awareness;
   /** The highest log sequence applied to this replica. */
@@ -173,6 +176,11 @@ export class Replicas {
     // The directory doc exists from boot: discovery is a synced doc, and every
     // stub repair needs it in hand.
     this.directory();
+    // So does the sidebar, and for the same reason `settle` matters to it: a
+    // room attached from boot is one the hub gets to fill in before any tool
+    // reads it, so curation made elsewhere is in hand before this replica acts
+    // on the absence of it.
+    this.sidebar();
     for (const pending of this.store.pendingRooms()) {
       this.adoptRoom(pending.room);
     }
@@ -227,6 +235,17 @@ export class Replicas {
     );
   }
 
+  /**
+   * The workspace's sidebar replica — the curated navigation doc, hydrated,
+   * logged and synced exactly like the directory and like any document.
+   */
+  sidebar(): Replica {
+    return this.ensureRoom(
+      sidebarRoom(this.config.workspaceId),
+      SIDEBAR_SUFFIX,
+    );
+  }
+
   /** The replica for one document, hydrated from the log and attached to the hub. */
   replica(uuid: string): Replica {
     return this.ensureRoom(roomForDoc(this.config.workspaceId, uuid), uuid);
@@ -259,6 +278,7 @@ export class Replicas {
       room,
       id,
       isDirectory: id === DIRECTORY_SUFFIX,
+      isSidebar: id === SIDEBAR_SUFFIX,
       doc,
       awareness,
       lastSeq: 0,
@@ -390,6 +410,12 @@ export class Replicas {
   private afterChange(replica: Replica): void {
     if (replica.isDirectory) {
       this.reconcileDirectory();
+      return;
+    }
+    // The sidebar holds uuids, not blocks and not metadata: there is no stub to
+    // repair and nothing to index. Falling through would ask a document-shaped
+    // question of a doc that is not one.
+    if (replica.isSidebar) {
       return;
     }
     this.repairDuplicates(replica);

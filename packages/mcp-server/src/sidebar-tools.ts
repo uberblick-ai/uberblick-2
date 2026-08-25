@@ -1,0 +1,382 @@
+/**
+ * The sidebar tools: get_sidebar, pin_doc, unpin_doc, sidebar_group.
+ *
+ * The sidebar is explicit curation — an ordered list of named groups, each an
+ * ordered list of document uuids, in the synced `<workspaceId>/_sidebar` room.
+ * `@uberblick/schema`'s sidebar module owns the semantics (one pin per
+ * document, unpin counters, order is stored and never computed); this module is
+ * the agent-facing surface over it, and deliberately adds only three things:
+ *
+ * 1. **Groups are named, not identified.** An agent thinks in "Start here", not
+ *    in a group uuid, so every tool takes a group id *or* a name, and pin_doc
+ *    creates the group when the name is new. Ids still come back from
+ *    get_sidebar, and win the lookup, so two groups that ended up sharing a
+ *    name are still separately addressable.
+ * 2. **Titles are resolved from directory stubs, never by opening documents.**
+ *    Rendering navigation must not join every pinned room. A uuid the directory
+ *    has never heard of, and one whose entry is tombstoned, are reported as
+ *    `unknown` and `archived` rather than dropped: a pin nothing can resolve is
+ *    exactly what the reader has to see in order to unpin it.
+ * 3. **The one-time seed.** Before the sidebar existed, the web UI grouped the
+ *    corpus by four tags. The first tool call that reads an empty sidebar in a
+ *    workspace that has documents carrying those tags reproduces that grouping
+ *    once — including the owner's reading order, Overview before Install and
+ *    run — after which tags are metadata and the sidebar is the navigation.
+ *
+ * The seed's "has it already run?" is the sidebar being non-empty, not a flag:
+ * a flag would be new state inside a schema-owned document, and the whole point
+ * of the migration is to stop being a derivation. The honest consequence is
+ * that a sidebar deliberately emptied down to zero groups seeds again on the
+ * next read. It is bounded — the seed only ever adds groups the tags describe,
+ * and never touches a sidebar that holds one — and it is why the sidebar room
+ * is attached from boot in `replica.ts`: `settle` gives the hub its chance to
+ * deliver curation made elsewhere before this replica acts on its absence.
+ */
+
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import {
+  createGroup,
+  deleteGroup,
+  getDirectoryEntry,
+  listDirectory,
+  moveDoc,
+  moveGroup,
+  pinDoc,
+  readSidebar,
+  renameGroup,
+  unpinDoc,
+} from "@uberblick/schema";
+import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
+import { z } from "zod";
+import type { Replica, Replicas } from "./replica.js";
+
+/**
+ * The tag groups the web sidebar derived before curation was stored, in the
+ * order it showed them. The seed reproduces exactly this, once.
+ */
+const LEGACY_TAG_GROUPS = [
+  { tag: "start-here", name: "Start here" },
+  { tag: "feature", name: "Features" },
+  { tag: "verify", name: "Verify" },
+  { tag: "reference", name: "Reference" },
+] as const;
+
+/**
+ * Titles that lead their group in the seeded sidebar, in this order.
+ *
+ * The owner's reading order for the onboarding docs (2026-08-24): Overview
+ * first, Install and run second. Alphabetical order gets that backwards, which
+ * is the ordering intent the sidebar exists to carry. It applies to the seed
+ * and to nothing else — after it, order is whatever an agent or a human made it.
+ */
+const SEED_LEADING_TITLES = ["Overview", "Install and run"];
+
+/** What the tools need from `tools.ts`, so neither module imports the other. */
+export interface SidebarToolContext {
+  /** The directory entry for a uuid, or a `doc_not_found` failure. */
+  requireStub(uuid: string): DirectoryEntry;
+  /** `{applied, synced, hub}` for a write that just landed. */
+  durability(replica: Replica): Record<string, unknown>;
+  /** Wrap a handler so every throw becomes a structured tool failure. */
+  guarded<Args>(
+    handler: (args: Args) => Promise<CallToolResult>,
+  ): (args: Args) => Promise<CallToolResult>;
+  json(payload: unknown): CallToolResult;
+  /** A tool failure with a stable machine-readable code, ready to throw. */
+  error(
+    code: string,
+    message: string,
+    detail?: Record<string, unknown>,
+  ): Error;
+}
+
+/** How a pinned uuid resolves against the directory. */
+type PinStatus = "ok" | "archived" | "unknown";
+
+interface PinnedDoc {
+  uuid: string;
+  /** The stub's cached title, or null when the directory has no entry. */
+  title: string | null;
+  status: PinStatus;
+}
+
+/**
+ * The seed's ordering: the leading titles first, then everything else in the
+ * order `listDirectory` gave it (by title).
+ */
+function seedOrder(entries: DirectoryEntry[]): DirectoryEntry[] {
+  const leading = SEED_LEADING_TITLES.flatMap((title) =>
+    entries.filter((entry) => entry.title === title),
+  );
+  return [...leading, ...entries.filter((entry) => !leading.includes(entry))];
+}
+
+/**
+ * Reproduce the legacy tag grouping in an empty sidebar, once.
+ *
+ * A document carrying more than one legacy tag lands in the first group that
+ * claims it, which is what the derived sidebar did — one pin per document is a
+ * sidebar rule, not a convention this could break.
+ */
+function seedFromTags(replicas: Replicas, sidebar: Replica): void {
+  const buckets = new Map<string, DirectoryEntry[]>();
+  for (const entry of listDirectory(replicas.directory().doc)) {
+    const group = LEGACY_TAG_GROUPS.find((candidate) =>
+      entry.tags.includes(candidate.tag),
+    );
+    if (group === undefined) continue;
+    const bucket = buckets.get(group.tag);
+    if (bucket === undefined) buckets.set(group.tag, [entry]);
+    else bucket.push(entry);
+  }
+  if (buckets.size === 0) return;
+
+  // One transaction, so the migration is one update in the log and one merge on
+  // every other replica — never a half-built sidebar somebody else can see.
+  sidebar.doc.transact(() => {
+    for (const { tag, name } of LEGACY_TAG_GROUPS) {
+      const bucket = buckets.get(tag);
+      if (bucket === undefined) continue;
+      const groupId = createGroup(sidebar.doc, name);
+      for (const entry of seedOrder(bucket)) {
+        pinDoc(sidebar.doc, groupId, entry.uuid);
+      }
+    }
+  });
+}
+
+/**
+ * The sidebar replica, seeded from the legacy tags if it is still empty.
+ *
+ * Call after `replicas.settle()`: the seed reads the directory and decides on
+ * the absence of curation, and both want the log tail and the hub's word first.
+ */
+export function ensureSidebar(replicas: Replicas): Replica {
+  const sidebar = replicas.sidebar();
+  if (readSidebar(sidebar.doc).length === 0) {
+    seedFromTags(replicas, sidebar);
+  }
+  return sidebar;
+}
+
+/** Every uuid the sidebar pins, for `list_docs`' derived `pinned` flag. */
+export function pinnedUuids(replicas: Replicas): Set<string> {
+  const pinned = new Set<string>();
+  for (const group of readSidebar(ensureSidebar(replicas).doc)) {
+    for (const uuid of group.docs) pinned.add(uuid);
+  }
+  return pinned;
+}
+
+/** A group by id, else by name — first match in sidebar order. */
+function findGroup(groups: SidebarGroup[], key: string): SidebarGroup | null {
+  return (
+    groups.find((group) => group.id === key) ??
+    groups.find((group) => group.name === key) ??
+    null
+  );
+}
+
+/** The sidebar as an agent reads it: stored order, titles from the directory. */
+function sidebarPayload(
+  replicas: Replicas,
+  sidebar: Replica,
+): Record<string, unknown> {
+  const directory = replicas.directory().doc;
+  const resolve = (uuid: string): PinnedDoc => {
+    const stub = getDirectoryEntry(directory, uuid);
+    if (stub === null) return { uuid, title: null, status: "unknown" };
+    return {
+      uuid,
+      title: stub.title,
+      status: stub.deleted === true ? "archived" : "ok",
+    };
+  };
+  return {
+    workspace: replicas.config.workspaceId,
+    groups: readSidebar(sidebar.doc).map((group) => ({
+      id: group.id,
+      name: group.name,
+      docs: group.docs.map(resolve),
+    })),
+  };
+}
+
+const groupArg = z
+  .string()
+  .min(1)
+  .describe("Group name, or the group id get_sidebar returned.");
+
+const indexArg = z
+  .number()
+  .int()
+  .min(0)
+  .optional()
+  .describe("Position, clamped into range. Omitted means last.");
+
+/** What every sidebar tool says about the shape it answers with. */
+const SIDEBAR_SHAPE =
+  "Every sidebar tool answers with the whole sidebar — `groups`, in order, each with its `id`, its `name` and its " +
+  "`docs` in order — so a caller never has to re-read to see where a change landed. A pinned document's `title` " +
+  "comes from its directory stub, never from opening the document. `status` is `ok`, `archived` (the document is " +
+  "tombstoned but still pinned) or `unknown` (no directory entry at all — a document nothing can resolve, left " +
+  "visible so it can be unpinned).";
+
+export function registerSidebarTools(
+  server: McpServer,
+  replicas: Replicas,
+  context: SidebarToolContext,
+): void {
+  server.registerTool(
+    "get_sidebar",
+    {
+      title: "Read the sidebar",
+      description:
+        "The workspace's curated navigation: named groups of pinned documents, in the order they are stored. " +
+        "This is not the corpus — unpinned documents are fully alive and reachable through list_docs, search, " +
+        "links and backlinks; they are simply not entry points.\n\n" +
+        SIDEBAR_SHAPE,
+      inputSchema: {},
+    },
+    context.guarded(async () => {
+      await replicas.settle();
+      const sidebar = ensureSidebar(replicas);
+      return context.json({
+        ...sidebarPayload(replicas, sidebar),
+        hub: replicas.sync.state(),
+      });
+    }),
+  );
+
+  server.registerTool(
+    "pin_doc",
+    {
+      title: "Pin a document into a sidebar group",
+      description:
+        "Pin a document into a group, creating the group when no group carries that name. `index` places it; " +
+        "omit it to append.\n\n" +
+        "One pin per document across the whole sidebar, so this is also how a pinned document is moved or " +
+        "reordered: pinning one that is already pinned moves it to `index` in the named group — carrying the pin " +
+        "as it stands rather than re-pinning it, so a concurrent unpin still wins — and `index` then counts " +
+        "positions in the target group after the document has been taken out of it.\n\n" +
+        SIDEBAR_SHAPE,
+      inputSchema: {
+        uuid: z.uuid().describe("Document UUID."),
+        group: groupArg,
+        index: indexArg,
+      },
+    },
+    context.guarded(async ({ uuid, group, index }) => {
+      await replicas.settle();
+      // The sidebar stores uuids and nothing else, so a typo pinned here is a
+      // reference nothing can ever resolve. Identity is checked against the
+      // directory — an archived document is still pinnable, because archiving
+      // is a directory act and get_sidebar surfaces it either way.
+      context.requireStub(uuid);
+      const sidebar = ensureSidebar(replicas);
+      const groups = readSidebar(sidebar.doc);
+      const target = findGroup(groups, group);
+      const groupId = target?.id ?? createGroup(sidebar.doc, group);
+      const moved = groups.some((entry) => entry.docs.includes(uuid));
+      if (moved) moveDoc(sidebar.doc, uuid, groupId, index);
+      else pinDoc(sidebar.doc, groupId, uuid, index);
+      return context.json({
+        uuid,
+        group: { id: groupId, name: target?.name ?? group },
+        moved,
+        ...sidebarPayload(replicas, sidebar),
+        ...context.durability(sidebar),
+      });
+    }),
+  );
+
+  server.registerTool(
+    "unpin_doc",
+    {
+      title: "Unpin a document",
+      description:
+        "Remove a document from the sidebar, wherever it sits. The document itself is untouched: unpinning is a " +
+        "navigation act, not a delete — archive_doc is the one that tombstones a document.\n\n" +
+        "An unpin beats a move made concurrently on another replica, so a document does not reappear because " +
+        "somebody was dragging it at the time. It takes no group: one pin per document means there is only ever " +
+        "one place to remove it from. `unpinned` is false when the document was not pinned to begin with.\n\n" +
+        SIDEBAR_SHAPE,
+      inputSchema: {
+        // No directory check: a pin whose document nothing can resolve is
+        // exactly the one that most needs removing.
+        uuid: z.uuid().describe("Document UUID."),
+      },
+    },
+    context.guarded(async ({ uuid }) => {
+      await replicas.settle();
+      const sidebar = ensureSidebar(replicas);
+      const wasPinned = readSidebar(sidebar.doc).some((group) =>
+        group.docs.includes(uuid),
+      );
+      unpinDoc(sidebar.doc, uuid);
+      return context.json({
+        uuid,
+        unpinned: wasPinned,
+        ...sidebarPayload(replicas, sidebar),
+        ...context.durability(sidebar),
+      });
+    }),
+  );
+
+  server.registerTool(
+    "sidebar_group",
+    {
+      title: "Rename, delete or move a sidebar group",
+      description:
+        "Manage the groups themselves. `rename` needs `name`; `move` takes `index` (omitted: last); `delete` " +
+        "removes the group and its pins — the documents are untouched, because the group only ever held their " +
+        "uuids, and they stay reachable through list_docs and search.\n\n" +
+        "There is no create action: pin_doc creates a group by naming one that does not exist, which is how a " +
+        "group comes into being with something in it rather than empty.\n\n" +
+        SIDEBAR_SHAPE,
+      inputSchema: {
+        action: z
+          .enum(["rename", "delete", "move"])
+          .describe("What to do with the group."),
+        group: groupArg,
+        name: z.string().min(1).optional().describe("The new name. rename only."),
+        index: indexArg,
+      },
+    },
+    context.guarded(async ({ action, group, name, index }) => {
+      await replicas.settle();
+      const sidebar = ensureSidebar(replicas);
+      const target = findGroup(readSidebar(sidebar.doc), group);
+      if (target === null) {
+        throw context.error(
+          "group_not_found",
+          `No sidebar group "${group}" in workspace ${replicas.config.workspaceId}`,
+          { group, applied: false, synced: false },
+        );
+      }
+      let renamed = target.name;
+      if (action === "rename") {
+        if (name === undefined) {
+          throw context.error("invalid_arguments", "rename needs a `name`", {
+            group,
+            applied: false,
+            synced: false,
+          });
+        }
+        renameGroup(sidebar.doc, target.id, name);
+        renamed = name;
+      } else if (action === "delete") {
+        deleteGroup(sidebar.doc, target.id);
+      } else {
+        moveGroup(sidebar.doc, target.id, index);
+      }
+      return context.json({
+        action,
+        group: { id: target.id, name: renamed },
+        ...sidebarPayload(replicas, sidebar),
+        ...context.durability(sidebar),
+      });
+    }),
+  );
+}
