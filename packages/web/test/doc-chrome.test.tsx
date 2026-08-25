@@ -111,7 +111,12 @@ function mount(fix: Fixture): { host: HTMLElement; root: Root } {
   act(() =>
     root.render(
       <>
-        <DocChrome connection={fix.connection} meta={getMeta(fix.ydoc)} />
+        <DocChrome
+          connection={fix.connection}
+          meta={getMeta(fix.ydoc)}
+          threadsOpen={false}
+          onToggleThreads={() => {}}
+        />
         <DocMetaLine connection={fix.connection} meta={getMeta(fix.ydoc)} />
       </>,
     ),

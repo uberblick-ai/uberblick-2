@@ -112,14 +112,30 @@ export interface ThreadView {
 export interface ThreadFocus {
   id: string;
   click: number;
+  /**
+   * The selection came from the keyboard, so DOM focus follows it to the card.
+   *
+   * A pointer click must not: the reader's caret is in the prose where they put
+   * it, and yanking focus into the rail would take it away from them. A reader
+   * who arrived by Tab and Enter has nothing to lose and everything to gain —
+   * without this, the highlight is a control that leads nowhere.
+   */
+  viaKeyboard: boolean;
 }
+
+/**
+ * Select a thread. `viaKeyboard` says the selection came from a key press, which
+ * is what decides whether DOM focus follows — see {@link ThreadFocus}.
+ */
+export type SelectThread = (threadId: string, viaKeyboard?: boolean) => void;
 
 /** The focus after selecting `threadId`, given the focus before it. */
 export function focusThread(
   previous: ThreadFocus | null,
   threadId: string,
+  viaKeyboard = false,
 ): ThreadFocus {
-  return { id: threadId, click: (previous?.click ?? 0) + 1 };
+  return { id: threadId, click: (previous?.click ?? 0) + 1, viaKeyboard };
 }
 
 interface Anchor {
@@ -345,6 +361,20 @@ export function threadIdFromTarget(target: EventTarget | null): string | null {
 }
 
 /**
+ * The thread a key press activated, or null — the keyboard's `threadIdFromTarget`.
+ *
+ * Enter and Space are what `role="button"` promises, and the target is the
+ * decision: a key press with the *caret* in an annotated range targets the
+ * contenteditable host, which no highlight is an ancestor of, so typing inside a
+ * comment is untouched. Only a highlight the reader has actually focused — by
+ * Tab — reads as an activation.
+ */
+export function threadIdFromActivation(event: KeyboardEvent): string | null {
+  if (event.key !== "Enter" && event.key !== " ") return null;
+  return threadIdFromTarget(event.target);
+}
+
+/**
  * The timer that will clear each flashing span's class. Keyed by the element so a
  * second click cancels the first click's timer instead of letting it strip the
  * class out from under the new flash — and weakly, because ProseMirror is free to
@@ -418,6 +448,21 @@ export function scrollThreadCardIntoView(threadId: string): void {
   document
     .getElementById(threadCardId(threadId))
     ?.scrollIntoView({ block: "nearest" });
+}
+
+/**
+ * Move DOM focus to a thread's card — the far end of the keyboard path.
+ *
+ * The card's body is the one `<button>` in it (see ThreadsPane), which is
+ * already the rail's single tab stop per thread, so landing there hands the
+ * reader the conversation *and* the Reply and Resolve controls beside it in
+ * tab order.
+ */
+export function focusThreadCard(threadId: string): void {
+  document
+    .getElementById(threadCardId(threadId))
+    ?.querySelector<HTMLElement>("button")
+    ?.focus();
 }
 
 /** The reader's own locale: a byline is display data, not document data. */

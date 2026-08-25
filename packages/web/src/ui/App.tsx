@@ -31,7 +31,7 @@ import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { ThreadsPane } from "./ThreadsPane.js";
 import { focusThread } from "./threads.js";
-import type { ThreadFocus } from "./threads.js";
+import type { SelectThread, ThreadFocus } from "./threads.js";
 import {
   canonicalPath,
   docIsHydrated,
@@ -91,7 +91,7 @@ export function RoutePane({
   archived: boolean;
   /** Lift that tombstone. The only action an archived document offers. */
   onRestore: () => void;
-  onSelectThread: (threadId: string) => void;
+  onSelectThread: SelectThread;
 }): ReactElement {
   // Before the branches: a hook may not sit behind an early return. Only
   // `localReplicaLoaded` is read here — it is what tells the empty document a
@@ -169,9 +169,31 @@ export function App(): ReactElement {
    * rail focus each other through this one value.
    */
   const [focusedThread, setFocusedThread] = useState<ThreadFocus | null>(null);
-  const onFocusThread = useCallback((threadId: string) => {
-    setFocusedThread((previous) => focusThread(previous, threadId));
+  /**
+   * Whether the rail is open as an overlay drawer (#101). It only means anything
+   * below 1100px, where the stylesheet has hidden the rail: above that width the
+   * rail is a column and `.ub-rail-open` declares nothing.
+   */
+  const [threadsOpen, setThreadsOpen] = useState(false);
+  const onFocusThread = useCallback<SelectThread>((threadId, viaKeyboard) => {
+    setFocusedThread((previous) =>
+      focusThread(previous, threadId, viaKeyboard === true),
+    );
+    // Selecting a thread is asking to read it, so the drawer opens whether the
+    // reader got here from a highlight or from the toggle. On a wide window this
+    // is a state change nothing renders.
+    setThreadsOpen(true);
   }, []);
+
+  /** Escape closes the drawer — the way out of an overlay. */
+  useEffect(() => {
+    if (!threadsOpen) return;
+    const close = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setThreadsOpen(false);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [threadsOpen]);
 
   // No room before the hub endpoint is known (#91): the shared websocket is
   // built from the first room acquired, so one acquired early would pin the
@@ -287,7 +309,12 @@ export function App(): ReactElement {
             pills. The document's room when there is one, the directory's when
             there is not: one shared socket, so it is the same truth about the
             same hub either way. */}
-        <DocChrome connection={doc ?? directory} meta={meta} />
+        <DocChrome
+          connection={doc ?? directory}
+          meta={meta}
+          threadsOpen={threadsOpen}
+          onToggleThreads={() => setThreadsOpen((open) => !open)}
+        />
         <span className="ub-me" style={{ borderColor: identity.color }}>
           {identity.name}
         </span>
@@ -315,7 +342,10 @@ export function App(): ReactElement {
             sections render nothing when they have nothing to show, so the rail
             hides itself when it is empty (`.ub-rail:empty`) rather than leaving
             a blank gutter. */}
-        <aside className="ub-rail">
+        <aside
+          id="ub-rail"
+          className={threadsOpen ? "ub-rail ub-rail-open" : "ub-rail"}
+        >
           <OutlinePane connection={doc} />
           <ThreadsPane
             connection={doc}

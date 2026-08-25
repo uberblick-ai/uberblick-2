@@ -318,10 +318,32 @@ body {
   color: var(--foreground);
 }
 
+/* The threads drawer's handle (#101). `display: none` here and `inline-flex`
+   inside the narrow media query below: above 1100px the rail is a column beside
+   the prose, and a button that opens what is already open says nothing. */
+.ub-threads-toggle {
+  display: none;
+  align-items: center;
+  gap: 0.35rem;
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
 .ub-body {
   display: flex;
   flex: 1;
   min-height: 0;
+  /* The containing block for the threads drawer, which overlays the panes at
+     narrow widths rather than taking a column from them. */
+  position: relative;
 }
 
 /* ---- doc list ---- */
@@ -493,9 +515,36 @@ body {
   display: none;
 }
 
-/* Below this the three panes stop fitting; the rail is the one that goes. */
+/* Below this the three panes stop fitting; the rail is the one that goes — and
+   with it the only way to read a thread, which is what the drawer is for (#101).
+   The toggle appears, and opening it brings the rail back *over* the prose
+   instead of taking a column the window does not have. */
 @media (max-width: 1100px) {
   .ub-rail {
+    display: none;
+  }
+
+  .ub-threads-toggle {
+    display: inline-flex;
+  }
+
+  .ub-rail.ub-rail-open {
+    display: flex;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    z-index: 5;
+    width: min(20rem, 85vw);
+    background: var(--card);
+    color: var(--card-foreground);
+    box-shadow: -8px 0 24px rgb(0 0 0 / 0.18);
+  }
+
+  /* The drawer is the threads. The outline stays hidden: it is the section the
+     narrow layout gave up first, and a reader who opened "Threads" asked for
+     one thing. */
+  .ub-rail-open .ub-outline {
     display: none;
   }
 }
@@ -1099,6 +1148,14 @@ h3.ub-heading {
   border-bottom: 2px solid var(--brand);
   border-radius: 2px;
   cursor: pointer;
+}
+
+/* The highlight is a tab stop (#101), so it has to look like one when the
+   keyboard is on it. An explicit ring rather than the platform default, which
+   is a hairline drawn over an amber ground. */
+.ub-comment:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 
 /* Clicking a card flashes its range: a ring in the brand amber, pulsed and then

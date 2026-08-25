@@ -248,7 +248,22 @@ export const CommentMark = Mark.create({
           element.getAttribute("data-comment-thread"),
         renderHTML: (attributes: Record<string, unknown>) =>
           typeof attributes.threadId === "string"
-            ? { "data-comment-thread": attributes.threadId }
+            ? {
+                "data-comment-thread": attributes.threadId,
+                // The keyboard's half of the prose→rail link (#101). A
+                // highlight is a control: Tab reaches it, Enter and Space
+                // activate it through the same delegated handler the click
+                // goes through, and focus lands on the thread's card.
+                //
+                // On the attribute rather than in `renderHTML` below, so the
+                // three ride exactly with `data-comment-thread`: a mark with
+                // no thread id has nothing to activate, and a focusable span
+                // that does nothing is a tab stop that wastes the reader's
+                // time.
+                tabindex: "0",
+                role: "button",
+                "aria-label": "Comment thread",
+              }
             : {},
       },
     };

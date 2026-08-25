@@ -46,6 +46,7 @@ import { CommentForm } from "./CommentForm.js";
 import {
   commentTimestamp,
   flashThreadHighlight,
+  focusThreadCard,
   resolvedHighlightCss,
   scrollThreadCardIntoView,
   threadCardId,
@@ -210,8 +211,15 @@ export function ThreadsPane({
   // A highlight click focuses a card that may be scrolled out of the rail. Keyed
   // on the whole focus and not its id, so clicking the same highlight again
   // scrolls the rail back to its card — see `ThreadFocus`.
+  //
+  // A keyboard activation also takes DOM focus with it, which is the far end of
+  // the path a Tab and an Enter started in the prose (#101). In an effect and
+  // not at the key press, because the rail may be a drawer that this very
+  // selection opened: the card is focusable once React has committed it.
   useEffect(() => {
-    if (focused !== null) scrollThreadCardIntoView(focused.id);
+    if (focused === null) return;
+    scrollThreadCardIntoView(focused.id);
+    if (focused.viaKeyboard) focusThreadCard(focused.id);
   }, [focused]);
 
   // A pending reply outlives the conversation it belonged to unless it is let

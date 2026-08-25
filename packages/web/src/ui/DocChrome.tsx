@@ -17,7 +17,7 @@ import type { DocMeta } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
 import { groupKeyForTags, groupLabel } from "./groups.js";
-import { useDocRev, useRemoteActivity, useRoomStatus } from "./hooks.js";
+import { useDocRev, useRemoteActivity, useRoomStatus, useThreads } from "./hooks.js";
 
 /** What an untitled document is called wherever its name is shown. */
 const UNTITLED = "Untitled";
@@ -63,12 +63,20 @@ function Breadcrumb({ meta }: { meta: DocMeta }): ReactElement {
 export function DocChrome({
   connection,
   meta,
+  threadsOpen,
+  onToggleThreads,
 }: {
   connection: RoomConnection | null;
   /** The open document's metadata, or null when none is open or read yet. */
   meta: DocMeta | null;
+  /** Whether the threads rail is open as a drawer — see `.ub-rail-open`. */
+  threadsOpen: boolean;
+  onToggleThreads: () => void;
 }): ReactElement {
   const activity = useRemoteActivity(connection);
+  // The rail's own count, read the same way the rail reads it: open threads, not
+  // every conversation the document has ever had.
+  const openThreads = useThreads(connection).filter((thread) => !thread.resolved);
   const state = useCalmSyncState(rawSyncState(useRoomStatus(connection)));
   const label = state === "syncing" ? "syncing…" : state;
   // `meta.uuid === ""` is a room that answered with nothing in it — see
@@ -78,6 +86,22 @@ export function DocChrome({
     <>
       {named && <Breadcrumb meta={meta} />}
       <span className="ub-chrome-pills">
+        {/* The drawer's handle (#101). Below 1100px there is no room for the
+            rail beside the prose, so it is hidden and this opens it as an
+            overlay instead; above that width the rail is already on screen and
+            the stylesheet drops this button. A document with nothing to say has
+            no handle either. */}
+        {openThreads.length > 0 && (
+          <button
+            type="button"
+            className="ub-threads-toggle"
+            aria-expanded={threadsOpen}
+            aria-controls="ub-rail"
+            onClick={onToggleThreads}
+          >
+            Threads <span className="ub-muted">{openThreads.length}</span>
+          </button>
+        )}
         {activity !== null && (
           <span
             className="ub-pill ub-pill-agent"
