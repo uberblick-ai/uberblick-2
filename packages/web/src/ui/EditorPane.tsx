@@ -14,7 +14,7 @@ import { describeForeignBlocks } from "../editor/palette.js";
 import { writeToClipboard } from "../editor/source-chrome.js";
 import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
 import type { RoomConnection } from "../collab/rooms.js";
-import { rawSyncState, useCalmSyncState } from "./calm.js";
+import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
 import { BlockMenu } from "./BlockMenu.js";
 import {
   useDocMeta,
@@ -152,16 +152,8 @@ function CopyLink({
 /**
  * Exported for the label test only.
  *
- * The backlog count names its unit, because `sync_status` reports a *rooms*
- * count under a similar name and two numbers labelled "pending" invite the
- * question of which one is lying.
- *
- * The unit is provider sync messages awaiting the hub's acknowledgement — not
- * Yjs updates, which the counter cannot report: the provider merges a batch of
- * updates into one message, counts a message before it goes out, and resets the
- * backlog to the single sync-handshake message on every reconnect. So "1 sync
- * message unacked" can stand for a whole document's worth of unsent work —
- * which is why the label does not say "1 update".
+ * The backlog count names its unit (`backlogLabel`, shared with the sync
+ * panel), because `sync_status` reports a *rooms* count under a similar name.
  *
  * Three things keep the line still while someone types (#76):
  *
@@ -210,10 +202,7 @@ export function StatusLine({
       {status.hasLocalCache && <span className="ub-muted">local cache</span>}
       <CopyLink room={connection.room} segment={segment} />
       {state !== "synced" && status.unsyncedChanges > 0 && (
-        <span className="ub-pending">
-          {status.unsyncedChanges} sync message
-          {status.unsyncedChanges === 1 ? "" : "s"} unacked
-        </span>
+        <span className="ub-pending">{backlogLabel(status.unsyncedChanges)}</span>
       )}
       <span className="ub-peers">
         {peers.map((peer) => (

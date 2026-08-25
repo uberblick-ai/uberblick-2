@@ -11,14 +11,24 @@ import type { Awareness } from "y-protocols/awareness";
 import { blockRev, getBlock, getBlocks, getBlocksFragment } from "@uberblick/schema";
 import { AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
 
-/** A remote session with a caret in this document, and the block it sits in. */
-export interface RemoteActivity {
+/** A remote session in this room, and the block its caret sits in if any. */
+export interface RemotePresence {
   /** Stable key: names collide, client ids do not. */
   clientId: number;
   name: string;
-  /** The session's own presence colour — the pill is drawn in it. */
+  /** The session's own presence colour — its chip is drawn in it. */
   color: string;
-  /** 1-based position of the block in the document. */
+  /**
+   * 1-based position of the block its caret is in, or null when there is no
+   * saying: no cursor published, or one anchored where no reader is looking.
+   * Null is "not known", never "block zero" — the sync panel omits the words
+   * rather than naming a block it cannot resolve.
+   */
+  block: number | null;
+}
+
+/** A remote session with a caret in a block this document can name. */
+export interface RemoteActivity extends RemotePresence {
   block: number;
 }
 
@@ -81,26 +91,20 @@ function blockOf(
 }
 
 /**
- * The one remote session to name in the chrome, or null when nobody has a caret
- * here.
+ * Every remote session in this room, by client id.
  *
  * Awareness carries no "this is an agent" marker today — an MCP session
  * publishes the same `user` and `cursor` fields a browser tab does (#73's
- * `lastAction` is what would tell them apart), so this reports whichever remote
- * session has a caret in this document and lets the name say who it is. In the
- * spike that session is the agent: a second human is already a cursor in the
- * prose and a chip in the presence strip, and naming them here as well costs
- * nothing and lies about nothing.
+ * `lastAction` is what would tell them apart), so this reports the sessions and
+ * lets each name say who it is.
  *
- * One session, lowest client id, so two carets do not swap the pill back and
- * forth between them; the presence strip is where everyone is listed.
+ * A state carrying neither a `user` nor a cursor is skipped: there is nobody to
+ * name and nowhere to point, and a row for it would be a session invented out
+ * of an empty map entry.
  */
-export function readActivity(
-  ydoc: Y.Doc,
-  awareness: Awareness,
-): RemoteActivity | null {
+export function readPresence(ydoc: Y.Doc, awareness: Awareness): RemotePresence[] {
   const blocks = visibleBlocks(getBlocksFragment(ydoc));
-  const found: RemoteActivity[] = [];
+  const found: RemotePresence[] = [];
   awareness.getStates().forEach((state, clientId) => {
     if (clientId === awareness.clientID) return;
     const fields = state as {
@@ -108,9 +112,9 @@ export function readActivity(
       cursor?: { anchor?: unknown } | null;
     };
     const anchor = fields.cursor?.anchor;
-    if (anchor === undefined || anchor === null) return;
-    const block = blockOf(ydoc, blocks, anchor);
-    if (block === null) return;
+    if (fields.user === undefined && (anchor === undefined || anchor === null)) {
+      return;
+    }
     found.push({
       clientId,
       name:
@@ -121,24 +125,58 @@ export function readActivity(
         typeof fields.user?.color === "string"
           ? fields.user.color
           : AWARENESS_FALLBACK_COLOR,
-      block,
+      block:
+        anchor === undefined || anchor === null
+          ? null
+          : blockOf(ydoc, blocks, anchor),
     });
   });
   found.sort((a, b) => a.clientId - b.clientId);
-  return found[0] ?? null;
+  return found;
 }
 
-/** Whether two readings would draw the same pill. */
-export function sameActivity(
-  a: RemoteActivity | null,
-  b: RemoteActivity | null,
-): boolean {
+/**
+ * The one session the chrome names: the lowest client id whose caret is in a
+ * block this document can name, or null when nobody's is.
+ *
+ * Lowest client id, so two carets do not swap the pill back and forth between
+ * them; the sync panel's present-now list is where everyone appears. In the
+ * spike that session is the agent — awareness carries no "this is an agent"
+ * marker, so the name is what says who it is (see {@link readPresence}).
+ *
+ * A projection of the reading rather than a second walk of the awareness map:
+ * the pill and the list are two views of one snapshot, which is what stops them
+ * disagreeing about who is where.
+ */
+export function activeSession(
+  presence: readonly RemotePresence[],
+): RemoteActivity | null {
+  return (
+    presence.find(
+      (session): session is RemoteActivity => session.block !== null,
+    ) ?? null
+  );
+}
+
+/** Whether two readings would draw the same chip. */
+function sameSession(a: RemotePresence | null, b: RemotePresence | null): boolean {
   if (a === null || b === null) return a === b;
   return (
     a.clientId === b.clientId &&
     a.block === b.block &&
     a.name === b.name &&
     a.color === b.color
+  );
+}
+
+/** Whether two readings would draw the same present-now list. */
+export function samePresence(
+  a: readonly RemotePresence[],
+  b: readonly RemotePresence[],
+): boolean {
+  return (
+    a.length === b.length &&
+    a.every((session, at) => sameSession(session, b[at] ?? null))
   );
 }
 

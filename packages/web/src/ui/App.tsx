@@ -21,7 +21,7 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
-import { CONFIGURED_WORKSPACE, CONFIGURED_WORKSPACES } from "../config.js";
+import { CONFIGURED_WORKSPACE, CONFIGURED_WORKSPACES, hubUrl } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
 import { randomIdentity } from "../collab/identity.js";
 import type { RoomConnection } from "../collab/rooms.js";
@@ -30,6 +30,7 @@ import { DocList } from "./DocList.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
+import { SyncPanel } from "./SyncPanel.js";
 import { ThreadsPane } from "./ThreadsPane.js";
 import { workspaceTags } from "./tags.js";
 import { focusThread } from "./threads.js";
@@ -50,6 +51,7 @@ import {
   useDocMeta,
   useHubEndpoint,
   useIdentity,
+  usePresence,
   useRoom,
   useRoomStatus,
   useStoredFlag,
@@ -201,6 +203,8 @@ export function App(): ReactElement {
    * rail is a column and `.ub-rail-open` declares nothing.
    */
   const [threadsOpen, setThreadsOpen] = useState(false);
+  /** Whether the sync detail panel is open (#72) — the connection pill's state. */
+  const [syncOpen, setSyncOpen] = useState(false);
   /**
    * What opened the drawer, so closing it can hand focus back there. Closing
    * *hides* the rail below 1100px, and focus inside a hidden panel is focus
@@ -225,6 +229,23 @@ export function App(): ReactElement {
         ? opener
         : document.querySelector<HTMLElement>(".ub-threads-toggle");
     back?.focus();
+  }, []);
+
+  const onToggleSync = useCallback(() => setSyncOpen((open) => !open), []);
+
+  /**
+   * Close the panel, and give focus back to the pill that opened it.
+   *
+   * Only when the focus is inside the panel that is about to go — its own ×,
+   * usually — because focus on a detached element is focus nobody has, and the
+   * reader would be returned to the top of the page. A click on the pill needs
+   * no repair: focus is already there.
+   */
+  const closeSync = useCallback(() => {
+    setSyncOpen(false);
+    const inPanel = document.activeElement?.closest(".ub-sync-panel") ?? null;
+    if (inPanel === null) return;
+    document.querySelector<HTMLElement>(".ub-sync-toggle")?.focus();
   }, []);
 
   const onFocusThread = useCallback<SelectThread>((threadId, viaKeyboard) => {
@@ -297,6 +318,18 @@ export function App(): ReactElement {
    * allowed to be open at all.
    */
   const threads = useThreads(doc);
+  /**
+   * The room the connection pill reports on and the sync panel details: the
+   * open document's, or the directory's when none is open. The socket is
+   * shared, so it is the same truth about the same hub either way.
+   */
+  const chromeRoom = doc ?? directory;
+  /**
+   * Who else is in that room, read *here* and handed to both readers. The pill
+   * names one session and the panel lists them all; one subscription over the
+   * awareness map is what keeps those two views of the same fact identical.
+   */
+  const presence = usePresence(chromeRoom);
 
   /**
    * A drawer over an empty rail is a panel of nothing. The rail can empty out
@@ -434,11 +467,14 @@ export function App(): ReactElement {
             there is not: one shared socket, so it is the same truth about the
             same hub either way. */}
         <DocChrome
-          connection={doc ?? directory}
+          connection={chromeRoom}
+          presence={presence}
           meta={meta}
           threads={threads}
           threadsOpen={threadsOpen}
           onToggleThreads={onToggleThreads}
+          syncOpen={syncOpen}
+          onToggleSync={onToggleSync}
         />
         <span className="ub-me" style={{ borderColor: identity.color }}>
           {identity.name}
@@ -482,6 +518,19 @@ export function App(): ReactElement {
             onFocus={onFocusThread}
           />
         </aside>
+        {/* The sync detail panel (#72), over the panes rather than beside them:
+            it is opened to answer a question and closed again. The room the
+            pill reports on, the sessions the pill names one of, and the
+            endpoint the socket was built from — null only in the moment before
+            that read settles. */}
+        {syncOpen && (
+          <SyncPanel
+            connection={chromeRoom}
+            presence={presence}
+            endpoint={hubReady ? hubUrl() : null}
+            onClose={closeSync}
+          />
+        )}
       </div>
     </main>
   );

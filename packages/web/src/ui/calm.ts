@@ -52,6 +52,25 @@ export function rawSyncState(status: RoomStatus): SyncState {
 }
 
 /**
+ * The backlog, in the unit the provider actually counts.
+ *
+ * One wording, in one place, because two surfaces say it — the status line
+ * under the title and the sync panel — and `sync_status` reports a count of
+ * unsynced *rooms* under a similar name. Two numbers labelled "pending" invite
+ * the question of which one is lying.
+ *
+ * The unit is provider sync messages awaiting the hub's acknowledgement, not
+ * Yjs updates: the provider merges a batch of updates into one message, counts
+ * a message before it goes out, and resets the backlog to the single
+ * sync-handshake message on every reconnect. So "1 sync message unacked" can
+ * stand for a whole document's worth of unsent work — which is why this does
+ * not say "1 update".
+ */
+export function backlogLabel(count: number): string {
+  return `${count} sync message${count === 1 ? "" : "s"} unacked`;
+}
+
+/**
  * The state the indicator should draw: `raw`, once it has survived its settle
  * window.
  *
