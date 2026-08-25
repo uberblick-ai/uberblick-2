@@ -764,6 +764,57 @@ body {
   background: var(--destructive);
 }
 
+/* ---- the room key as a shareable link (#68) ---- */
+
+/* The room key is the document's address, so it is the copy affordance. It has
+   to keep looking like the muted text it replaced: no border, no padding, no
+   change of width. The whole point of this line is that nothing on it moves. */
+.ub-room-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.ub-room {
+  font: inherit;
+  color: var(--muted-foreground);
+  background: none;
+  border: none;
+  padding: 0;
+  height: auto;
+  cursor: pointer;
+}
+
+.ub-room:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+
+.ub-room:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Out of flow, and only there while it has something to say: a confirmation
+   that took part in the layout would push everything after it sideways for a
+   second and a half. */
+.ub-copied {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 0.2rem;
+  padding: 0 0.3rem;
+  border-radius: var(--radius-sm);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.ub-copied:empty {
+  display: none;
+}
+
 .ub-pending {
   background: var(--status-warning-subtle);
   color: var(--foreground);
@@ -1020,6 +1071,28 @@ h3.ub-heading {
 
 .ub-foreign-list {
   font-size: 0.85rem;
+}
+
+/* ---- what an address resolved to, when it was not a document (#68) ---- */
+
+/* Quieter than the unsupported-content banner above and built the same way: a
+   <strong> lead in UI weight, then the detail. None of these three states is an
+   error the reader caused — an unsynced link is the ordinary case — so none of
+   them gets the destructive ground. */
+.ub-notice {
+  margin: 0.4rem 0;
+  line-height: 1.6;
+  max-width: 52ch;
+}
+
+.ub-notice strong {
+  font-weight: 500;
+}
+
+.ub-notice code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
 }
 
 .ub-foreign-list pre {
