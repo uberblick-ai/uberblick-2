@@ -121,7 +121,12 @@ function mount(fix: Fixture): { host: HTMLElement; root: Root } {
           threadsOpen={false}
           onToggleThreads={() => {}}
         />
-        <DocMetaLine connection={fix.connection} meta={getMeta(fix.ydoc)} />
+        <DocMetaLine
+          connection={fix.connection}
+          meta={getMeta(fix.ydoc)}
+          knownTags={["reference"]}
+          archived={false}
+        />
       </>,
     ),
   );

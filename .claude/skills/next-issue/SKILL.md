@@ -175,7 +175,15 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    Copilot/Codex finding. A tier-3 trigger means you do not merge: label the
    PR `needs-human`, comment which trigger fired, fire a PushNotification
    naming the PR and the trigger so the owner learns a merge decision awaits
-   them, then park it and continue with the next PR or issue. Tier 1 and
+   them, then park it and continue with the next PR or issue.
+   **Exception — `human-approved`:** a PR carrying the owner-set
+   `human-approved` label is merge-authorized: execute the merge as tier 2
+   (merge report first), every other gate unchanged — evidence fresh at the
+   exact merge head, zero unaddressed remarks. The label is the owner's act
+   alone; never set it yourself, and never treat an owner comment as the
+   label. Approval covers the PR's reviewed shape plus fix-ups and rebases;
+   if later commits change the design beyond that, re-add `needs-human` with
+   a comment naming the delta instead of merging. Tier 1 and
    Tier 2 self-merge as specified there (Tier 2 requires the merge-report
    comment on the PR first). Every merge report ends with two
    machine-readable lines — `findings_p1_p2_p3: <n>/<n>/<n>` and

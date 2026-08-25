@@ -963,11 +963,20 @@ body {
 
 /* ---- the document's identity line, above the prose (#69) ---- */
 
+/* The eyebrow above the H1 (design surface 1a): what kind of document this is,
+   what it is tagged, and which version of it is on screen.
+
+   One row, fixed height, never wrapping. That is what lets the tag chips live
+   here without the title moving: the add field is always drawn, so the height
+   with no chips is the height with six, and the chips scroll sideways inside
+   their own box instead of taking a second line. */
 .ub-doc-meta {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin: 0 0 0.85rem;
+  flex-wrap: nowrap;
+  min-height: 1.55rem;
+  margin: 0 0 0.15rem;
   font-size: 0.75rem;
   color: var(--muted-foreground);
 }
@@ -980,11 +989,84 @@ body {
   color: var(--brand);
 }
 
+/* The document's tags, in the row's flexible middle (#122). The scroll is the
+   promise the row makes to the title: a workspace that tags heavily gets a
+   sideways overflow, never a second line. The scrollbar is hidden because the
+   chips are a handful of words, not a pane. */
+.ub-tags {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ub-tags::-webkit-scrollbar {
+  display: none;
+}
+
+.ub-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.05rem 0.15rem 0.05rem 0.5rem;
+  white-space: nowrap;
+}
+
+/* No remove affordance on an archived document, so the chip closes up. */
+.ub-tag:not(:has(.ub-tag-x)) {
+  padding-right: 0.5rem;
+}
+
+.ub-tag-x {
+  border: 0;
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  line-height: 1;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.ub-tag-x:hover {
+  color: var(--foreground);
+}
+
+.ub-tag-x:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* A field, not a box: it is one of the row's words until it is focused. Its
+   width is fixed for the same reason everything else here is — a field that
+   grew as the reader typed would drag the row around them. */
+.ub-tag-add {
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: inherit;
+  font: inherit;
+  width: 9ch;
+  flex: none;
+  padding: 0.05rem 0.1rem;
+}
+
+.ub-tag-add:focus {
+  outline: none;
+  border-bottom-color: var(--ring);
+}
+
 /* Machine facts, in the machine face — and monospaced for the other reason
    too: the rev changes on every edit, and a proportional one would breathe in
    and out under the title while somebody types. */
 .ub-doc-ids {
   font-family: var(--font-mono);
+  flex: none;
 }
 
 /* ---- editor chrome above the prose ---- */

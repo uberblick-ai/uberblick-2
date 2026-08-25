@@ -70,10 +70,11 @@ vi.mock("@hocuspocus/provider", () => {
   };
 });
 
+// No workspace here: `rooms.ts` reads the workspace out of the room name it is
+// asked to open, not out of the configuration.
 vi.mock("../src/config.js", () => ({
   hubUrl: () => "ws://127.0.0.1:1",
   HUB_AUTH_TOKEN: "test-secret",
-  WORKSPACE: "main",
 }));
 
 const { acquireRoom } = await import("../src/collab/rooms.js");
@@ -93,6 +94,7 @@ function LinkedPane({ connection }: { connection: RoomConnection }): ReactElemen
       connection={connection}
       meta={useDocMeta(connection)}
       author="tester"
+      knownTags={[]}
       archived={false}
       onRestore={() => {}}
       onSelectThread={() => {}}

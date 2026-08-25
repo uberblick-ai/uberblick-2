@@ -140,7 +140,16 @@ export interface Run {
   output: string;
 }
 
-/** Run `ub` to completion in a sandbox. */
+/**
+ * Run `ub` to completion in a sandbox.
+ *
+ * **`spawnSync` blocks this process's event loop.** A test that runs a hub
+ * in-process and then calls this will watch the child fail to connect to it and
+ * report `hub-down` against a hub that is, from anywhere else, plainly up —
+ * because nothing in this process can accept the connection until the child has
+ * exited. Use {@link runUbAsync} whenever the `ub` under test has to talk to
+ * something this process is serving.
+ */
 export function runUb(
   args: string[],
   box: Sandbox,
@@ -170,12 +179,16 @@ export function runUbAsync(
   args: string[],
   box: Sandbox,
   extraEnv: NodeJS.ProcessEnv = {},
+  // A bridge command against a hub that never answers spends its whole sync
+  // budget before it can honestly refuse, which is longer than any other `ub`
+  // invocation takes.
+  timeoutMs = 25_000,
 ): Promise<Run> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [UB_BIN, ...args], {
       cwd: box.cwd,
       env: { ...box.env, ...extraEnv },
-      timeout: 25_000,
+      timeout: timeoutMs,
     });
     let stdout = "";
     let stderr = "";

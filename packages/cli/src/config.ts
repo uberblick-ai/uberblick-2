@@ -348,6 +348,23 @@ export function readCredentials(env: NodeJS.ProcessEnv = process.env): {
   };
 }
 
+/**
+ * The endpoint `./uberblick.json` pins, or null.
+ *
+ * Its own function because it answers a question resolution cannot: not "what
+ * is in force" but "will anything I write to `config.json` take effect". The
+ * directory file outranks the user config, so a command that persists an
+ * endpoint has to say so rather than print a value that will be ignored — and
+ * it cannot simply write *there* instead, because {@link secretAppliesTo}
+ * withholds the stored secret from a repository-chosen hub, so an endpoint in
+ * that file would authenticate against nothing.
+ */
+export function directoryHubUrl(cwd: string = process.cwd()): string | null {
+  const path = join(cwd, DIRECTORY_FILE);
+  const warnings: string[] = [];
+  return stringField(readJsonObject(path, warnings), "hubUrl", path, warnings);
+}
+
 export interface ResolveOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;

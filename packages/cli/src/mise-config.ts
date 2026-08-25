@@ -174,6 +174,22 @@ export interface DerivedEnvironment {
   signingSecret: string;
   workspace: string;
   /**
+   * The endpoint the mise tasks should dial, or undefined to leave `mise.toml`'s
+   * committed default in force.
+   *
+   * `ub` resolves `hubUrl` from `config.json` itself, but nothing else in the
+   * repository does: `mise run web` bakes `HUB_URL` into the bundle from mise's
+   * environment, and `mise.toml` commits `ws://localhost:1234`. Without this
+   * line, `ub remote join` would leave the browser talking to a hub on this
+   * machine while `ub` talked to the remote — one workspace split across two
+   * hubs, which is precisely the stranding these commands exist to prevent.
+   *
+   * It goes here rather than into the committed `mise.toml` because an endpoint
+   * is per-machine client configuration, and the repository's default has to
+   * keep working for a contributor who never set a remote.
+   */
+  hubUrl?: string | undefined;
+  /**
    * Where the authority lives. Used in messages to the user only — never
    * rendered into the file, because a path is attacker-influenced input (an
    * `XDG_CONFIG_HOME` with a newline in it) and this file is fed to mise and
@@ -235,9 +251,11 @@ export function tomlUnsafeReason(value: string): string | null {
 function render(env: DerivedEnvironment): string {
   return `${MARKER}
 #
-# Derived from $XDG_CONFIG_HOME/uberblick/credentials.json — same value, one
-# owner. Do not edit: every \`ub init\` rewrites it from that file. Delete it and
-# rerun \`ub init\` and it comes back with the same value.
+# Derived from $XDG_CONFIG_HOME/uberblick/{credentials,config}.json — same
+# values, one owner. Do not edit: \`ub init\` writes it from those files, and it
+# is the only command that does. \`ub remote\` changes the authority files
+# without regenerating this — rerun \`ub init\` to pick the new endpoint and
+# secret up. Delete it and rerun \`ub init\` and it comes back the same.
 #
 # It exists because mise tasks and \`.mcp.json\` inherit their environment from
 # mise rather than from \`ub\`. \`fnox exec\` overrides it, so a decryptable
@@ -247,7 +265,9 @@ function render(env: DerivedEnvironment): string {
 # .gitignore covers this file.
 [env]
 WORKSPACE_ID = ${toml(env.workspace)}
-HUB_AUTH_TOKEN = ${toml(env.signingSecret)}
+HUB_AUTH_TOKEN = ${toml(env.signingSecret)}${
+    env.hubUrl === undefined ? "" : `\nHUB_URL = ${toml(env.hubUrl)}`
+  }
 `;
 }
 
@@ -283,6 +303,9 @@ export function writeLocalConfig(
     { what: "the workspace", text: env.workspace },
     // Never the secret itself in the message — only the fact and the fix.
     { what: `the signing secret in ${env.authorityPath}`, text: env.signingSecret },
+    ...(env.hubUrl === undefined
+      ? []
+      : [{ what: "the hub endpoint", text: env.hubUrl }]),
   ]) {
     const unsafe = tomlUnsafeReason(value.text);
     if (unsafe !== null) {

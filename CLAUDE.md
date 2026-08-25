@@ -106,7 +106,10 @@ before moving on.
   (while updating the product docs); audit findings become issues, not
   reverts, unless critical.
 - **Tier 3 — `needs-human`, pre-merge.** Label the PR `needs-human`, park it,
-  continue with other eligible issues. Triggers: any diff touching `schema`;
+  continue with other eligible issues. The owner authorizes by swapping
+  `needs-human` for `human-approved` (owner-set only); the loop then executes
+  that merge as tier 2 — merge report, fresh gate evidence at the merge head,
+  zero unaddressed remarks all still required. Triggers: any diff touching `schema`;
   changes to this file's decided-architecture or invariants sections; new
   *runtime* dependencies; auth/token semantics; overruling a major
   Copilot/Codex finding; and any change to the process itself — `.github/`

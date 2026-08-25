@@ -199,6 +199,7 @@ checkout:
 node packages/cli/bin/ub.mjs init            # identity, workspace, signing secret
 node packages/cli/bin/ub.mjs status          # workspace, hub, credential, sync state
 node packages/cli/bin/ub.mjs status --json   # the same, as one JSON object
+node packages/cli/bin/ub.mjs remote          # the endpoint in force, and what sharing it buys
 node packages/cli/bin/ub.mjs mcp install     # register uberblick with an MCP client
 node packages/cli/bin/ub.mjs mcp serve       # the stdio entry point for an MCP client
 ```
@@ -234,6 +235,114 @@ came from a committable `./uberblick.json`, the secret in `credentials.json` is
 not attached to it and `ub` says so — a clone must not be able to point your
 credential at its author's endpoint. Exporting `HUB_AUTH_TOKEN`, or setting
 `HUB_URL` yourself, is the explicit opt-in and always applies.
+
+### Going remote: local first, then a hub, then a second computer
+
+The normal journey is local first and remote later, and `ub remote` is the part
+that keeps a corpus from being left behind when the endpoint changes. Documents
+a browser created live only in the local hub until an MCP session pulls them
+down, so simply changing `HUB_URL` strands them.
+
+**On the remote host** — a Linux box in your tailnet — bring the hub and the web
+client up from a plain checkout, as [REMOTE.md](REMOTE.md) describes. That host
+runs `sh remote-compose.sh up --build --detach` and nothing else; every command
+below runs on one of *your* computers, not there. The hub it starts is empty.
+
+**On the computer that already has your documents**, with `mise run hub` still
+running so the browser-created ones can be collected:
+
+```
+node packages/cli/bin/ub.mjs remote promote wss://<host>.ts.net/ws
+```
+
+That reads the whole local workspace through the local hub into the update log,
+looks at the target with a throwaway client that writes nothing, uploads, and
+then opens the target *again* as a fresh client and compares what it finds with
+what you hold — in both directions, tombstones included, and by content rather
+than by name. Only if that matches is the endpoint persisted. "Verified" here
+means the hub acknowledged the writes and a fresh client read them back; it does
+not mean the hub has flushed them to disk.
+
+It refuses if the local hub is not running, because documents a browser made
+live only there until an MCP session pulls them down. It refuses if the target
+accepted the connection but never finished serving its directory — what such a
+hub holds is unknown, which is not the same as holding nothing. And it refuses
+without writing anything if the target holds documents this workspace has never
+heard of, naming both counts. A shared uuid is not that: it is one document's
+lineage on two hubs, which Yjs merges, so rerunning finishes an interrupted
+promotion rather than colliding with it.
+
+**On a second computer**, from a fresh clone with nothing in its workspace:
+
+```
+mise trust && mise run setup -- --yes --workspace <workspace id>
+node packages/cli/bin/ub.mjs remote join wss://<host>.ts.net/ws \
+  --secret-file ~/uberblick-remote-secret
+mise run web            # the web client alone; the hub is the remote one
+```
+
+The workspace id is the one the first machine's `ub status` prints, decorated or
+bare. Give it: a workspace id is a uuid and `ub init` with none in force
+generates a *new* one, so a machine that invented its own would join the remote
+hub and find nothing of yours on it — the rooms are keyed by a different id.
+
+`ub init` writes configuration and imports no documents, so a fresh checkout's
+workspace really is empty and `join` has nothing to duplicate — do not run
+`mise run import-seed` there, the product documents arrive over the wire. `join`
+hydrates the full remote directory and every live document into the local update
+log, verifies it by the same read-back, and only then persists the endpoint. An
+unreachable or auth-rejecting remote leaves your configuration exactly as it
+was. It refuses a local workspace holding documents the remote has never heard
+of, naming both counts.
+
+Unlike `promote`, `join` does **not** require a local hub — a second computer
+has none. It says so instead, and says the part that matters: the check that
+decides whether this workspace is empty could then see only the update log. A
+checkout whose documents only ever reached a local hub that is switched off
+reads as empty from here, so `join` would accept it, pull down the remote corpus
+and repoint every client away from the hub holding its work. If this machine has
+a local hub with documents on it, start it and rerun instead.
+
+The secret that reached the remote replaces whatever `ub init` generated here,
+in `credentials.json` at mode 0600, and the command says it is doing so. That is
+the whole point on a second machine: `ub init` invents a *random* secret, and
+the remote verifies with the first machine's.
+
+**What "persisted" covers, and what outranks it.** The endpoint goes into
+`$XDG_CONFIG_HOME/uberblick/config.json`, which is where `ub`, `ub mcp serve`
+and the MCP server it spawns resolve it. That file is the *third* layer:
+`HUB_URL` in the environment beats it, and so does a `hubUrl` in a committable
+`./uberblick.json`. When either does, these commands say which one wins rather
+than reporting a switch that did not happen — `ub remote set` exits non-zero,
+and after a bridge the report says the documents moved but names the endpoint
+still in force. Writing the higher layer instead is not the fix: `./uberblick.json`
+is committable, and the stored signing secret is deliberately withheld from a
+repository-chosen hub, so clients pointed there would dial it with no credential
+at all.
+
+A deployed web client does not read any of these: it resolves its endpoint at
+runtime from the served `/uberblick-config.json`. A checkout's `mise run web`
+still takes `HUB_URL` from mise's environment, so point a development build at a
+remote hub with `HUB_URL=… mise run web`.
+
+Archived documents travel as directory state — a tombstone replicates and stays
+a tombstone — but their content is not moved: "every live document" is what a
+bridge is for.
+
+The remote's signing secret comes from `--secret-file <path>` (a file only you
+can read, mode 0600 — a `credentials.json` works, or the bare secret) or from a
+hidden prompt when the configured one is refused and there is a terminal to ask.
+Never as an argument: a command line is in every `ps` listing and every shell
+history. Neither the secret nor a token signed with it is printed by any of
+these commands.
+
+`ub remote set <url>` is the third verb, and it moves nothing — the right one
+only when there is nothing to move. `ub remote` with no remote configured says
+so and exits 0; with one, it prints the endpoint and states the boundary you
+actually get: the served web bundle carries the shared signing secret, so
+reaching the app is the same as holding the credential, and the deployment is
+supported only on a private network until accounts land (#84). There is no
+`invite` command (#92) for that reason.
 
 `ub mcp serve` resolves that configuration and runs the MCP server with it, so
 the server keeps its environment-only contract — no flags, no config file — and

@@ -8,7 +8,7 @@
  * with the URL.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
   appendBlock,
@@ -30,6 +30,7 @@ import { DocList } from "./DocList.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { ThreadsPane } from "./ThreadsPane.js";
+import { workspaceTags } from "./tags.js";
 import { focusThread } from "./threads.js";
 import type { SelectThread, ThreadFocus } from "./threads.js";
 import {
@@ -69,6 +70,7 @@ export function RoutePane({
   connection,
   meta,
   author,
+  knownTags,
   archived,
   onRestore,
   onSelectThread,
@@ -88,6 +90,8 @@ export function RoutePane({
    */
   meta: DocMeta | null;
   author: string;
+  /** The workspace's tags, for the identity line's add field (#122). */
+  knownTags: readonly string[];
   /** Whether the directory tombstones this document — see `useArchived`. */
   archived: boolean;
   /** Lift that tombstone. The only action an archived document offers. */
@@ -156,6 +160,7 @@ export function RoutePane({
       // spelled, which is what a copied link has to keep.
       segment={route.workspace.segment}
       author={author}
+      knownTags={knownTags}
       archived={archived}
       onRestore={onRestore}
       onSelectThread={onSelectThread}
@@ -266,6 +271,13 @@ export function App(): ReactElement {
     identity,
   );
   const entries = useDirectory(directory);
+  /**
+   * The workspace's tags, from the directory stubs alone — the suggestions the
+   * open document's tag strip offers. Derived here because the listing is
+   * already here, and reading it a second time would be a second observer over
+   * the same map.
+   */
+  const knownTags = useMemo(() => workspaceTags(entries), [entries]);
   const meta = useDocMeta(doc);
   const archived = useArchived(directory, selected);
   /**
@@ -420,6 +432,7 @@ export function App(): ReactElement {
           connection={doc}
           meta={meta}
           author={identity.name}
+          knownTags={knownTags}
           archived={archived}
           onRestore={onRestore}
           onSelectThread={onFocusThread}
