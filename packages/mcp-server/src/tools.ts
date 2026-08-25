@@ -1,11 +1,13 @@
 /**
  * The v0 MCP tool set.
  *
- * Thirteen tools and no more: create_doc, get_doc, list_docs, search,
+ * Fifteen tools and no more: create_doc, get_doc, list_docs, search,
  * backlinks, edit_block, insert_block, delete_block, set_tags, set_links,
- * annotate, export_markdown, sync_status. There is deliberately no
- * whole-document write — every content change names one block — and no
- * markdown-import tool, because markdown is an export format.
+ * archive_doc, restore_doc, annotate, export_markdown, sync_status. There is
+ * deliberately no whole-document write — every content change names one block
+ * — no markdown-import tool, because markdown is an export format, and no hard
+ * delete: archive_doc tombstones the directory stub and leaves every byte of
+ * the document where it was.
  *
  * Every handler starts with `replicas.settle()`: replay the log tail (another
  * MCP instance may have written since the last call) and, on boot or after a
@@ -43,8 +45,10 @@ import {
   listAnnotations,
   listDirectory,
   resolveAnnotationRange,
+  restoreDirectoryEntry,
   setLinks,
   setTags,
+  tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { Annotation, BlockInput, HeadingLevel } from "@uberblick/schema";
@@ -170,6 +174,18 @@ const SYNCED_MEANS =
   "volatile copy of the update. That is recoverable rather than fatal: `applied: true` is the durable half — " +
   "this server's append-only update log holds the write before the tool returns and re-sends it on reconnect — " +
   "so losing it for good takes the crash plus no replica holding that update ever coming back.";
+
+/**
+ * What concurrency does to an archive, in the words an agent reads.
+ *
+ * A directory stub is written whole, so two replicas disagreeing about one
+ * document's fate converge on an update order rather than on an intent. Saying
+ * so is cheaper than an agent inferring a guarantee that is not there.
+ */
+const ARCHIVE_IS_LAST_WRITE_WINS =
+  "Concurrency: a directory entry is written as a whole object, so an archive_doc racing a restore_doc on another " +
+  "replica converges on whichever update Yjs orders last — not on whichever call happened later by the clock. When it " +
+  "matters which way it went, re-read with list_docs and `include_deleted: true`.";
 
 /** The same narrowing for the mutators that do not restate it in full. */
 const SYNCED_IS_ACKNOWLEDGED =
@@ -540,6 +556,70 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const replica = requireDoc(uuid);
       setLinks(replica.doc, links);
       return json({ uuid, links, ...durability(replica) });
+    }),
+  );
+
+  /**
+   * Archiving and restoring both write the *directory*, not the document, so
+   * both report durability for the directory room — that is the room whose
+   * update has to reach the hub — and both re-derive the document's index rows
+   * by hand, because a directory write does not run the document's observer.
+   */
+  server.registerTool(
+    "archive_doc",
+    {
+      title: "Archive a document",
+      description:
+        "Hide a document: tombstones its directory stub, so it leaves list_docs, the web sidebar and the search index. " +
+        "This is not erasure and not a delete. Every block, mark and annotation stays exactly where it was: get_doc still " +
+        "serves the document by uuid, and list_docs with `include_deleted: true` still lists it, flagged `deleted`. " +
+        "restore_doc is the way back. There is no tool that erases content, by design.\n\n" +
+        ARCHIVE_IS_LAST_WRITE_WINS +
+        "\n\n" +
+        SYNCED_IS_ACKNOWLEDGED,
+      inputSchema: { uuid: uuidArg },
+    },
+    guarded(async ({ uuid }) => {
+      await replicas.settle();
+      const replica = requireDoc(uuid);
+      const directory = replicas.directory();
+      tombstoneDirectoryEntry(directory.doc, uuid);
+      replicas.reindex(replica);
+      return json({
+        uuid,
+        title: getMeta(replica.doc).title,
+        archived: true,
+        ...durability(directory),
+      });
+    }),
+  );
+
+  server.registerTool(
+    "restore_doc",
+    {
+      title: "Restore an archived document",
+      description:
+        "Lift a document's archive tombstone: it returns to list_docs, to the web sidebar and to the search index, its " +
+        "title and tags brought back in line with the document's own metadata, which is what they are cached from. " +
+        "The counterpart to archive_doc, and the only way back — a rename or a retag " +
+        "deliberately cannot revive an archived document. Restoring one that was never archived leaves it as it is.\n\n" +
+        ARCHIVE_IS_LAST_WRITE_WINS +
+        "\n\n" +
+        SYNCED_IS_ACKNOWLEDGED,
+      inputSchema: { uuid: uuidArg },
+    },
+    guarded(async ({ uuid }) => {
+      await replicas.settle();
+      const replica = requireDoc(uuid);
+      const directory = replicas.directory();
+      restoreDirectoryEntry(directory.doc, uuid);
+      replicas.reindex(replica);
+      return json({
+        uuid,
+        title: getMeta(replica.doc).title,
+        archived: false,
+        ...durability(directory),
+      });
     }),
   );
 

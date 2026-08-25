@@ -633,6 +633,19 @@ export class Replicas {
   }
 
   /**
+   * Re-derive one document's index rows from its current directory standing.
+   *
+   * Changes to the *directory* do not reach {@link afterChange} — it ignores
+   * the directory replica, because a stub is not a document — so archiving or
+   * restoring a doc would otherwise leave search answering from rows the
+   * directory no longer agrees with. This runs the same branch a document
+   * update runs: tombstoned unindexes, live re-indexes.
+   */
+  reindex(replica: Replica): void {
+    this.afterChange(replica);
+  }
+
+  /**
    * Publish this agent's caret in a block, in y-prosemirror's wire format: an
    * encoded relative position under `cursor` (`{anchor, head}`), alongside the
    * `user` field the web UI renders. The cursor is withdrawn after a TTL — an

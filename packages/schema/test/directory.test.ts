@@ -4,6 +4,7 @@ import {
   getDirectoryEntry,
   getDirectoryMap,
   listDirectory,
+  restoreDirectoryEntry,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "../src/index.js";
@@ -72,6 +73,30 @@ describe("directory doc", () => {
       tags: [],
       deleted: true,
     });
+  });
+
+  it("restores a tombstoned entry, keeping its title and tags", () => {
+    const dir = new Y.Doc();
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha", tags: ["x"] });
+    tombstoneDirectoryEntry(dir, ALPHA);
+    restoreDirectoryEntry(dir, ALPHA);
+
+    // Restoring is the sanctioned exception to the sticky tombstone — and it
+    // brings the entry back as it was, not as a blank one.
+    expect(listDirectory(dir)).toEqual([
+      { uuid: ALPHA, title: "Alpha", tags: ["x"] },
+    ]);
+    expect(getDirectoryEntry(dir, ALPHA)).toEqual({
+      uuid: ALPHA,
+      title: "Alpha",
+      tags: ["x"],
+    });
+
+    // And the stickiness it suspended is not disabled: a later tombstone still
+    // holds against a later upsert.
+    tombstoneDirectoryEntry(dir, ALPHA);
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha, renamed late" });
+    expect(listDirectory(dir)).toEqual([]);
   });
 
   it("tombstones a uuid it has never seen", () => {

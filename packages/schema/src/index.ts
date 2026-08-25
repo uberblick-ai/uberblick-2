@@ -95,6 +95,7 @@ export {
   getDirectoryEntry,
   getDirectoryMap,
   listDirectory,
+  restoreDirectoryEntry,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "./directory.js";

@@ -64,6 +64,7 @@ export interface DirectoryUpsert {
  *
  * A tombstone is sticky: upserting an entry that is already tombstoned keeps
  * `deleted: true`, so a late-arriving rename cannot resurrect a deleted doc.
+ * Lifting one is deliberate and explicit — see `restoreDirectoryEntry`.
  */
 export function upsertDirectoryEntry(
   dirDoc: Y.Doc,
@@ -92,6 +93,33 @@ export function tombstoneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
       title: existing?.title ?? "",
       tags: existing?.tags ?? [],
       deleted: true,
+    } satisfies StoredEntry);
+  });
+}
+
+/**
+ * Lift a tombstone: clears `deleted` and keeps title and tags as they stand.
+ *
+ * This is the one sanctioned way back. `upsertDirectoryEntry` deliberately
+ * cannot do it — a rename that raced a delete must not resurrect the document —
+ * so restoring has to be an act of its own, never a side effect of a write that
+ * meant something else.
+ *
+ * Restoring a uuid that was never tombstoned is a no-op in effect, and
+ * restoring one the directory has never seen creates a live, untitled stub;
+ * both mirror how `tombstoneDirectoryEntry` treats an unknown uuid.
+ *
+ * Entries are whole-object writes, so a restore concurrent with a tombstone
+ * converges on whichever update Yjs orders last — not on whichever human meant
+ * it more recently.
+ */
+export function restoreDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
+  const docs = getDirectoryMap(dirDoc);
+  dirDoc.transact(() => {
+    const existing = readStored(docs.get(uuid));
+    docs.set(uuid, {
+      title: existing?.title ?? "",
+      tags: existing?.tags ?? [],
     } satisfies StoredEntry);
   });
 }
