@@ -5,7 +5,7 @@
  * ## Session-local and ephemeral, deliberately
  *
  * Nothing here is written to the Y.Doc, to the IndexedDB replica or to
- * localStorage. The marks live in a plain Set held against the open document's
+ * localStorage. The marks live in a plain Map held against the open document's
  * Y.Doc, so closing the tab, reloading the page or reopening the document
  * starts you with a clean slate — there is no read-state to migrate and none to
  * get wrong. That is the whole scope of #120: this says "you have not read this
@@ -22,16 +22,32 @@
  * edit) — that is the same rule rather than a list of exceptions, which is why
  * the rule is worth having.
  *
- * ## Why the document arriving is not a change
+ * ## Why the document arriving is not a change, and why that is a state
  *
  * Hydration is also "an update from elsewhere": the IndexedDB replay and the
  * hub's first sync both land as remote transactions carrying the whole
  * document. Recording those would paint every block the moment you opened a
- * document, which is noise, not news. So a tracker records nothing until
- * {@link ChangedBlocks.start}, and {@link changedBlocks} starts it once the
- * local replica has been applied and wipes it again on the hub's *first* sync.
- * Later syncs are catch-up after a reconnect — changes made while you were
- * offline, which is exactly what this feature is for — so those do mark.
+ * document, which is noise, not news.
+ *
+ * The suppression is therefore a **state**, not an order of events. A tracker
+ * records nothing until the document has *arrived*, and it has arrived when
+ * both of these are true:
+ *
+ * - the local replica has finished replaying (`whenLocalReplicaLoaded`), and
+ * - the provider has completed a sync, **if it is connected at all**.
+ *
+ * Both hydration payloads are applied to the Y.Doc before the signal that
+ * announces them, so whichever order the two arrive in, they land while the
+ * tracker is still deaf — which is why nothing has to be un-marked afterwards.
+ * An earlier version wiped the set on the first sync instead, and that was
+ * wrong in both directions: a hub-then-replica open left the replay marked, and
+ * an offline open had its genuine catch-up erased by the sync that finally
+ * arrived.
+ *
+ * The `connected` clause is what makes the offline case work. A disconnected
+ * provider owes this reader nothing, so the replica alone completes the
+ * arrival; when the hub does turn up later, everything it brings is a change
+ * made while the reader was away, and marking it is the entire point.
  *
  * ## Why subscribers are notified late
  *
@@ -45,19 +61,26 @@
 
 import * as Y from "yjs";
 import { getBlocksFragment } from "@uberblick/schema";
-import type { RoomConnection } from "../collab/rooms.js";
+import type { RoomConnection, RoomStatus } from "../collab/rooms.js";
 
 /** The marked blocks of one document, and the ways they are marked and cleared. */
 export interface ChangedBlocks {
-  /** The ids currently marked. Live — do not hold on to it across a change. */
-  ids(): ReadonlySet<string>;
+  /**
+   * The marked blocks, each with the generation it was last changed at. A block
+   * changed *again* while it was already marked gets a new generation, which is
+   * how a reader's part-finished look at it is invalidated.
+   */
+  touched(): ReadonlyMap<string, number>;
   has(id: string): boolean;
+  /**
+   * Bumped on every change to the set — the cache key for anything derived from
+   * it, so a derived value can be kept rather than recomputed per keystroke.
+   */
+  generation(): number;
   /** Begin recording. Idempotent; nothing is recorded before it is called. */
   start(): void;
   /** This block has been read. */
   clear(id: string): void;
-  /** Drop every mark. */
-  reset(): void;
   /** Returns the unsubscribe. Listeners are called on a microtask — see above. */
   subscribe(listener: () => void): () => void;
 }
@@ -70,8 +93,9 @@ export interface ChangedBlocks {
  */
 export function trackChangedBlocks(ydoc: Y.Doc): ChangedBlocks {
   const fragment = getBlocksFragment(ydoc);
-  const marked = new Set<string>();
+  const marked = new Map<string, number>();
   const listeners = new Set<() => void>();
+  let generation = 0;
   let recording = false;
   let queued = false;
 
@@ -84,12 +108,6 @@ export function trackChangedBlocks(ydoc: Y.Doc): ChangedBlocks {
       queued = false;
       for (const listener of [...listeners]) listener();
     });
-  };
-
-  const mark = (id: unknown): boolean => {
-    if (typeof id !== "string" || id === "" || marked.has(id)) return false;
-    marked.add(id);
-    return true;
   };
 
   /** The id of the top-level block an event happened in, or `undefined`. */
@@ -105,7 +123,10 @@ export function trackChangedBlocks(ydoc: Y.Doc): ChangedBlocks {
     transaction: Y.Transaction,
   ): void => {
     if (!recording || transaction.local) return;
-    let touched = false;
+    const touched = new Set<string>();
+    const add = (id: unknown): void => {
+      if (typeof id === "string" && id !== "") touched.add(id);
+    };
     for (const event of events) {
       if (event.path.length === 0) {
         // The fragment itself: blocks arriving or leaving. Only arrivals can be
@@ -113,34 +134,35 @@ export function trackChangedBlocks(ydoc: Y.Doc): ChangedBlocks {
         for (const change of event.changes.delta) {
           if (!Array.isArray(change.insert)) continue;
           for (const child of change.insert) {
-            if (child instanceof Y.XmlElement) {
-              touched = mark(child.getAttribute("id")) || touched;
-            }
+            if (child instanceof Y.XmlElement) add(child.getAttribute("id"));
           }
         }
         continue;
       }
       // Anything deeper — the block's text, its marks, its attributes — is a
       // change to the block the path starts at.
-      touched = mark(blockOfEvent(event.path)) || touched;
+      add(blockOfEvent(event.path));
     }
-    if (touched) notify();
+    if (touched.size === 0) return;
+    // One generation per remote transaction, stamped on every block it touched:
+    // a block marked again is a block the reader has *not* read, whatever they
+    // were part-way through.
+    generation += 1;
+    for (const id of touched) marked.set(id, generation);
+    notify();
   };
   fragment.observeDeep(record);
 
   return {
-    ids: () => marked,
+    touched: () => marked,
     has: (id) => marked.has(id),
+    generation: () => generation,
     start: () => {
       recording = true;
     },
     clear: (id) => {
       if (!marked.delete(id)) return;
-      notify();
-    },
-    reset: () => {
-      if (marked.size === 0) return;
-      marked.clear();
+      generation += 1;
       notify();
     },
     subscribe: (listener) => {
@@ -168,28 +190,38 @@ export function changedBlocksFor(ydoc: Y.Doc): ChangedBlocks {
 const armed = new WeakSet<Y.Doc>();
 
 /**
- * The tracker for a connection's document, started at the right moment — see
- * "Why the document arriving is not a change" above. Wired once per document,
- * however many components ask for it.
+ * The tracker for a connection's document, started once the document has
+ * arrived — see "Why the document arriving is not a change" above. Wired once
+ * per document, however many components ask for it.
  */
 export function changedBlocks(connection: RoomConnection): ChangedBlocks {
   const marks = changedBlocksFor(connection.ydoc);
   if (armed.has(connection.ydoc)) return marks;
   armed.add(connection.ydoc);
 
-  // The local replica lands before this resolves, so starting here cannot
-  // record it. With no IndexedDB (jsdom, private-mode Safari) it resolves
-  // immediately, which is right: there is no replay to sit out.
-  void connection.whenLocalReplicaLoaded.then(() => marks.start());
-
+  let replicaSettled = false;
   let syncedOnce = false;
-  connection.onStatusChange((status) => {
-    if (syncedOnce || !status.synced) return;
-    syncedOnce = true;
-    // The hub's first sync may have landed either side of the replica's, so
-    // start (in case it has not happened yet) and wipe (in case it had).
+  let recording = false;
+
+  /** Both conditions, re-asked on every signal — never an order of arrival. */
+  const openIfArrived = (status: RoomStatus): void => {
+    if (recording || !replicaSettled) return;
+    // A connected provider still owes this reader the hub's copy of the
+    // document. A disconnected one owes nothing, and waiting on a sync that may
+    // never come would mean an offline session marked nothing, ever.
+    if (status.connected && !syncedOnce) return;
+    recording = true;
     marks.start();
-    marks.reset();
+  };
+
+  void connection.whenLocalReplicaLoaded.then(() => {
+    replicaSettled = true;
+    openIfArrived(connection.status);
+  });
+
+  connection.onStatusChange((status) => {
+    if (status.synced) syncedOnce = true;
+    openIfArrived(status);
   });
 
   return marks;

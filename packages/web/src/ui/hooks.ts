@@ -242,8 +242,10 @@ export function useChangedBlocks(
       return;
     }
     const marks = changedBlocks(connection);
-    const read = (): void =>
-      setChanged(marks.ids().size === 0 ? NO_CHANGES : new Set(marks.ids()));
+    const read = (): void => {
+      const touched = marks.touched();
+      setChanged(touched.size === 0 ? NO_CHANGES : new Set(touched.keys()));
+    };
     read();
     return marks.subscribe(read);
   }, [connection]);
