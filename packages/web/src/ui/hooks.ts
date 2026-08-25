@@ -23,6 +23,8 @@ import type { DirectoryEntry, DocMeta } from "@uberblick/schema";
 import { acquireRoom } from "../collab/rooms.js";
 import type { RoomConnection, RoomStatus } from "../collab/rooms.js";
 import { resolveHubUrl } from "../config.js";
+import { getSetting, subscribeSettings } from "../settings.js";
+import type { Settings } from "../settings.js";
 import { AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
 import type { AwarenessUser } from "../collab/identity.js";
 import { changedBlocks } from "../editor/changed-blocks.js";
@@ -495,4 +497,17 @@ export function useStoredFlag(
     [key],
   );
   return [value, set];
+}
+
+/**
+ * One local setting, live: the value now, and a re-render when it changes.
+ *
+ * `useSyncExternalStore` over the settings module's own subscription, so the
+ * dialog that wrote a value and any other reader of it are looking at one
+ * source. Every field is a string or null, so the snapshot compares by value
+ * and there is no cache to keep — see settings.ts.
+ */
+export function useSetting<K extends keyof Settings>(key: K): Settings[K] {
+  const read = useCallback(() => getSetting(key), [key]);
+  return useSyncExternalStore(subscribeSettings, read, read);
 }

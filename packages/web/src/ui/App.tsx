@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
+import { createPortal } from "react-dom";
 import {
   appendBlock,
   directoryRoom,
@@ -30,6 +31,7 @@ import { DocList } from "./DocList.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
+import { SettingsDialog } from "./SettingsDialog.js";
 import { SyncPanel } from "./SyncPanel.js";
 import { ThreadsPane } from "./ThreadsPane.js";
 import { workspaceTags } from "./tags.js";
@@ -205,6 +207,12 @@ export function App(): ReactElement {
   const [threadsOpen, setThreadsOpen] = useState(false);
   /** Whether the sync detail panel is open (#72) — the connection pill's state. */
   const [syncOpen, setSyncOpen] = useState(false);
+  /**
+   * Whether the local settings dialog is open (#176). A dialog rather than an
+   * address: settings are a detour, and the reader comes back to the document
+   * they left with Back still meaning what it meant.
+   */
+  const [settingsOpen, setSettingsOpen] = useState(false);
   /**
    * What opened the drawer, so closing it can hand focus back there. Closing
    * *hides* the rail below 1100px, and focus inside a hidden panel is focus
@@ -443,7 +451,10 @@ export function App(): ReactElement {
   }, [doc, directory]);
 
   return (
-    <main className="ub-app">
+    // `inert` while the settings dialog is up: the whole shell leaves the tab
+    // order and stops taking clicks, so a modal is genuinely modal rather than
+    // a panel with a trap that only holds once focus is already inside it.
+    <main className="ub-app" inert={settingsOpen}>
       <header className="ub-header">
         {/* Lives in the header so it stays visible while the sidebar is gone. */}
         <button
@@ -488,6 +499,7 @@ export function App(): ReactElement {
             selected={selected}
             onSelect={onSelect}
             onCreate={onCreate}
+            onOpenSettings={() => setSettingsOpen(true)}
           />
         )}
         <RoutePane
@@ -532,6 +544,20 @@ export function App(): ReactElement {
           />
         )}
       </div>
+      {/* Local settings (#176). Mounted only while open, and owning nothing but
+          its own dismissal — everything it edits lives in settings.ts.
+
+          Portalled to `document.body` rather than rendered into the shell,
+          because a modal has to be *outside* what it makes unreachable: the
+          scrim covers the viewport, and `inert` above takes the whole app —
+          header included — out of the pointer path and the tab order for as
+          long as the dialog is up. Inside the shell it would be inerted along
+          with everything else. */}
+      {settingsOpen &&
+        createPortal(
+          <SettingsDialog onClose={() => setSettingsOpen(false)} />,
+          document.body,
+        )}
     </main>
   );
 }
