@@ -24,8 +24,10 @@ import {
   useRoomStatus,
 } from "./hooks.js";
 import { CommentComposer } from "./CommentComposer.js";
+import { DocMetaLine } from "./DocChrome.js";
 import { shareUrl } from "./route.js";
-import { threadIdFromTarget } from "./threads.js";
+import { threadIdFromActivation, threadIdFromTarget } from "./threads.js";
+import type { SelectThread } from "./threads.js";
 
 /**
  * The pane frame with a message in it instead of a document.
@@ -312,7 +314,7 @@ function BoundEditor({
   author: string;
   /** Read-only, and none of the chrome that writes. */
   archived: boolean;
-  onSelectThread: (threadId: string) => void;
+  onSelectThread: SelectThread;
 }): ReactElement {
   const host = useRef<HTMLDivElement | null>(null);
   const frame = useRef<HTMLDivElement | null>(null);
@@ -353,10 +355,28 @@ function BoundEditor({
       const threadId = threadIdFromTarget(event.target);
       if (threadId !== null) onSelectThread(threadId);
     };
+    // And the keyboard's version of that click (#101): the span is a
+    // `role="button"` tab stop, so Enter and Space on a *focused* highlight
+    // select its thread and send focus after it.
+    //
+    // Capture, and it stops there: ProseMirror binds keydown on the
+    // contenteditable inside this element, and an Enter that reached it would
+    // split a block. Nothing else is intercepted — a key press with the caret
+    // in the prose targets the contenteditable, which is no highlight's
+    // descendant, so `threadIdFromActivation` reads it as null.
+    const activateThread = (event: KeyboardEvent): void => {
+      const threadId = threadIdFromActivation(event);
+      if (threadId === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onSelectThread(threadId, true);
+    };
     element.addEventListener("click", focusThread);
+    element.addEventListener("keydown", activateThread, true);
     setEditor(binding.editor);
     return () => {
       element.removeEventListener("click", focusThread);
+      element.removeEventListener("keydown", activateThread, true);
       setEditor(null);
       binding.destroy();
     };
@@ -451,7 +471,7 @@ export function EditorPane({
    * that thread. Must be referentially stable — it is an effect dependency.
    * Also called with a thread this client has just started.
    */
-  onSelectThread: (threadId: string) => void;
+  onSelectThread: SelectThread;
 }): ReactElement {
   const meta = useDocMeta(connection);
   const foreign = useForeignBlocks(connection);
@@ -488,6 +508,8 @@ export function EditorPane({
           }}
         />
         <StatusLine connection={connection} segment={segment} />
+        {/* What this document is, and which version of it is on screen. */}
+        <DocMetaLine connection={connection} meta={meta} />
         {foreign.length > 0 ? (
           <ForeignFallback
             connection={connection}

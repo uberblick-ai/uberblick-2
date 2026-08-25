@@ -19,6 +19,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { act } from "react";
+import type { ComponentProps, ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import * as Y from "yjs";
 import {
@@ -44,6 +45,22 @@ import {
 import type { ThreadFocus, ThreadView } from "../src/ui/threads.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { mountEditor } from "./helpers.js";
+import { useThreads } from "../src/ui/hooks.js";
+
+/**
+ * `ThreadsPane` over a live document — the wiring the app shell provides.
+ *
+ * The pane takes its threads as a prop now (the shell observes them once, for
+ * the rail and the topbar's handle together), so a test that mutates the
+ * document under a mounted rail has to supply the same subscription. This is
+ * that subscription, and it is the app's own hook doing it.
+ */
+function LiveThreadsPane(
+  props: Omit<ComponentProps<typeof ThreadsPane>, "threads">,
+): ReactElement | null {
+  return <ThreadsPane {...props} threads={useThreads(props.connection)} />;
+}
+
 
 /** The workspace these stub room keys sit in. A workspace id is a uuid. */
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
@@ -276,7 +293,7 @@ describe("the rail renders its cards", () => {
     const draw = (next: ThreadFocus | null): void => {
       act(() => {
         root.render(
-          <ThreadsPane
+          <LiveThreadsPane
             connection={stubConnection(ydoc)}
             focused={next}
             author="ben"
@@ -444,7 +461,7 @@ describe("a highlight and its card focus each other", () => {
     try {
       act(() => {
         root.render(
-          <ThreadsPane
+          <LiveThreadsPane
             connection={{ room: `${WORKSPACE}/doc-1`, ydoc } as unknown as RoomConnection}
             focused={null}
             author="ben"
@@ -485,7 +502,7 @@ describe("a highlight and its card focus each other", () => {
     try {
       act(() => {
         root.render(
-          <ThreadsPane
+          <LiveThreadsPane
             connection={{ room: `${WORKSPACE}/doc-1`, ydoc } as unknown as RoomConnection}
             focused={null}
             author="ben"

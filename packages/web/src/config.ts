@@ -278,3 +278,14 @@ export const CONFIGURED_WORKSPACE: string | null =
   typeof __WORKSPACE_ID__ === "string" && __WORKSPACE_ID__ !== ""
     ? __WORKSPACE_ID__
     : null;
+
+/**
+ * The repository whose issue and PR links render as a bare `#62` — every other
+ * repository reads `org/repo#62`. Display only; see editor/github-refs.ts.
+ *
+ * A plain constant, flagged as such: the spike has one repository and one
+ * workspace, and the honest place for this once a hosted hub has many is a
+ * per-workspace setting, not a build-time value. Compared case-insensitively,
+ * because GitHub's own slugs are.
+ */
+export const GITHUB_REPO = "uberblick-ai/uberblick-2";

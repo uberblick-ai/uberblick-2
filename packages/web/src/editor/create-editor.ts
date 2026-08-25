@@ -12,6 +12,7 @@ import { BlockIds } from "./block-ids.js";
 import { ChangedBlockMarks } from "./changed-marks.js";
 import type { ChangedBlocks } from "./changed-blocks.js";
 import { Collaboration } from "./collaboration.js";
+import { GitHubRefs } from "./github-refs.js";
 import { BlockInputRules } from "./input-rules.js";
 import { paletteExtensions } from "./nodes.js";
 import { AgentTypingTheater } from "./typing-theater.js";
@@ -66,6 +67,9 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
       fragment: options.fragment,
       awareness: options.awareness ?? null,
     }),
+    // Presentation over state that is already true, like the two below it: the
+    // stored text of a pasted GitHub link stays the full URL.
+    GitHubRefs,
     ChangedBlockMarks.configure({ marks: options.changed ?? null }),
     // After the changed-block marker, and reading the same tracker: the gutter
     // line says *that* a block changed the moment it does, whatever the
