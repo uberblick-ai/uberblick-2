@@ -123,6 +123,55 @@ sh remote-compose.sh up --detach
 
 The hub handles Compose's `SIGTERM` by flushing pending document updates before
 it exits. SQLite is `/data/hub.sqlite` in the `hub-data` named volume, so normal
-container replacement and `sh remote-compose.sh down` preserve it. Backups and
-moving an existing local workspace into this deployment are separate
-follow-ups.
+container replacement and `sh remote-compose.sh down` preserve it. Backups are a
+separate follow-up (#85).
+
+## Moving an existing local workspace onto this hub
+
+The hub this deployment starts is empty. `ub remote` moves a workspace onto it,
+and onto a second computer afterwards. Which process runs where matters:
+everything in this section runs on **your** computers, not on the remote host,
+which only ever runs `sh remote-compose.sh`.
+
+On the computer that holds the documents, with the local hub still running —
+`mise run hub` — because documents a browser created live only there until an
+MCP session has pulled them down:
+
+```sh
+node packages/cli/bin/ub.mjs remote promote wss://<TAILSCALE_HOST>/ws
+```
+
+It hydrates the local directory and every live document into the update log,
+uploads them, then opens the remote as a fresh client and compares what it finds
+against what you hold, document by document. The endpoint in
+`$XDG_CONFIG_HOME/uberblick/config.json` is rewritten only after that comparison
+succeeds, so a failed or partial run leaves you pointed at the hub that still
+works. Rerunning it finishes rather than collides. It exits non-zero without
+writing anything if the local hub is unreachable, or if the remote already holds
+documents this workspace does not.
+
+On a second computer, from a fresh clone:
+
+```sh
+mise trust && mise run setup -- --yes
+node packages/cli/bin/ub.mjs remote join wss://<TAILSCALE_HOST>/ws \
+  --secret-file ~/uberblick-remote-secret
+mise run web
+```
+
+`ub init` imports no documents, so that workspace is empty and there is nothing
+to duplicate — do not run `mise run import-seed` on it. `join` pulls the whole
+remote directory and every live document into the local update log, verifies it
+the same way, and only then persists the endpoint; `mise run web` then starts the
+web client alone, against the remote hub. An unreachable or auth-rejecting
+remote writes nothing at all.
+
+The `--secret-file` argument is a path, never the secret: it must be a file only
+you can read (mode 0600), holding either the bare value from the host's `.env`
+or a `credentials.json` carrying it. Without the flag, the secret already
+configured is tried first and a terminal is prompted with the input hidden.
+Nothing here prints the secret or a token signed with it.
+
+Archived documents replicate as directory state and stay archived; their content
+is not moved. Merging two independently populated workspaces is not supported —
+both bridges refuse it explicitly, naming both document counts.
