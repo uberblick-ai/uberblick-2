@@ -12,6 +12,7 @@
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
+  setTags,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -162,6 +163,78 @@ describe("archive_doc", () => {
     });
     expect(refused.isError).toBe(true);
     expect(refused.payload.error).toBe("doc_not_found");
+  });
+});
+
+describe("an archived document is read-only", () => {
+  it("refuses every mutating tool, naming restore_doc", async () => {
+    const rig = await localRig();
+    const doc = await seedDoc(rig);
+    const blockId = doc.blocks[0].id;
+    await rig.ok("archive_doc", { uuid: doc.uuid });
+
+    for (const [tool, args] of [
+      [
+        "edit_block",
+        { uuid: doc.uuid, block_id: blockId, old_text: BODY, new_text: "No." },
+      ],
+      ["insert_block", { uuid: doc.uuid, type: "paragraph", text: "No." }],
+      ["set_tags", { uuid: doc.uuid, tags: ["retired"] }],
+    ] as const) {
+      const refused = await rig.call(tool, args);
+      expect(refused.isError).toBe(true);
+      expect(refused.payload).toMatchObject({
+        error: "doc_archived",
+        uuid: doc.uuid,
+        // A refusal changed nothing, and says so in the same words a write
+        // would have used.
+        applied: false,
+        synced: false,
+      });
+      expect(refused.payload.message).toContain("restore_doc");
+    }
+
+    // Refused, not merely reported as refused.
+    const read = await rig.ok("get_doc", { uuid: doc.uuid });
+    expect(read.blocks.map((block: any) => block.text)).toEqual([BODY]);
+    expect(read.tags).toEqual(["reference"]);
+  });
+
+  it("goes back to accepting edits once restored", async () => {
+    const rig = await localRig();
+    const doc = await seedDoc(rig);
+    const blockId = doc.blocks[0].id;
+    await rig.ok("archive_doc", { uuid: doc.uuid });
+    await rig.ok("restore_doc", { uuid: doc.uuid });
+
+    const edited = await rig.ok("edit_block", {
+      uuid: doc.uuid,
+      block_id: blockId,
+      old_text: BODY,
+      new_text: "A glossary, rewritten.",
+    });
+    expect(edited).toMatchObject({ applied: true });
+    expect(edited.block.text).toBe("A glossary, rewritten.");
+  });
+
+  // Reading an archive is the whole point of archiving rather than deleting.
+  it("keeps serving reads", async () => {
+    const rig = await localRig();
+    const doc = await seedDoc(rig);
+    await rig.ok("set_links", { uuid: doc.uuid, links: [] });
+    await rig.ok("archive_doc", { uuid: doc.uuid });
+
+    const exported = await rig.ok("export_markdown", { uuid: doc.uuid });
+    expect(exported.markdown).toContain(BODY);
+    expect((await rig.ok("backlinks", { uuid: doc.uuid })).backlinks).toEqual(
+      [],
+    );
+    expect((await rig.ok("list_docs")).docs).toEqual([]);
+    expect(
+      (await rig.ok("list_docs", { include_deleted: true })).docs.map(
+        (entry: any) => entry.uuid,
+      ),
+    ).toEqual([doc.uuid]);
   });
 });
 
@@ -386,11 +459,13 @@ describe("restore_doc", () => {
     const doc = await seedDoc(rig);
     await rig.ok("archive_doc", { uuid: doc.uuid });
 
-    // Editing an archived document is allowed, and its stub does not follow:
-    // stub repair rides document updates, and those stop at the tombstone. The
-    // directory would otherwise keep serving the tags it was archived with
-    // while search answers from the new ones — divergence with no way back.
-    await rig.ok("set_tags", { uuid: doc.uuid, tags: ["retired"] });
+    // A retag from a replica that had not seen the archive — this server's own
+    // tools would refuse it, but a CRDT update arriving from elsewhere is not
+    // something any tool guard can stop. Its stub does not follow: stub repair
+    // rides document updates, and those stop at the tombstone. The directory
+    // would otherwise keep serving the tags it was archived with while search
+    // answers from the new ones — divergence with no way back.
+    setTags(rig.instance.replicas.replica(doc.uuid).doc, ["retired"]);
     await rig.ok("restore_doc", { uuid: doc.uuid });
 
     const listed = await rig.ok("list_docs");
