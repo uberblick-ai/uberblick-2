@@ -26,7 +26,9 @@ import {
   editBlock,
   getBlock,
   getBlocks,
+  getBlocksFragment,
   initDoc,
+  repairDuplicateBlocks,
   setBlockType,
 } from "@uberblick/schema";
 import { observeDocRev } from "../src/ui/doc-chrome.js";
@@ -100,6 +102,28 @@ describe("the document rev is recomputed incrementally", () => {
       setBlockType(fix.ydoc, fix.alpha, "heading", { level: 2 });
       expect(fix.revs.at(-1)).not.toBe(fix.revs[0]);
       expect(vi.mocked(getBlocks)).not.toHaveBeenCalled();
+    } finally {
+      fix.stop();
+    }
+  });
+
+  it("folds a shadowed duplicate as the nothing it is", () => {
+    const fix = fixture();
+    const before = fix.revs[0];
+    try {
+      // What two replicas re-typing one block converge on: two elements sharing
+      // an id, of which only the first is a block anyone can see. `getBlocks`
+      // shadows the second, so the rev has to as well — otherwise a hidden
+      // element counts as content, and the repair that eventually deletes it
+      // moves the rev with nothing on screen having changed.
+      const duplicate = new Y.XmlElement("paragraph");
+      duplicate.setAttribute("id", fix.alpha);
+      duplicate.insert(0, [new Y.XmlText("a losing copy, with other text")]);
+      getBlocksFragment(fix.ydoc).insert(1, [duplicate]);
+      expect(fix.revs.at(-1)).toBe(before);
+
+      repairDuplicateBlocks(fix.ydoc);
+      expect(fix.revs.at(-1)).toBe(before);
     } finally {
       fix.stop();
     }

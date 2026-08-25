@@ -146,6 +146,15 @@ function blockElementOf(target: Y.AbstractType<unknown>): Y.XmlElement | null {
  *
  * The cache is rebuilt by the fold rather than pruned, so a block that leaves
  * the document takes its entry with it.
+ *
+ * **Shadowed duplicates are skipped**, the same first-wins rule schema applies
+ * in `partitionById` and therefore in `getBlocks`. Two replicas re-typing one
+ * block converge on two elements sharing its id, and only the first is a block
+ * anyone can see; folding both would count a hidden element as content, and the
+ * repair that later deletes it would move the rev with nothing on screen having
+ * changed. Re-derived here rather than reused because schema exports no
+ * projection helper — the rule is four lines, and reaching for a new export
+ * would be a schema change for chrome.
  */
 export function observeDocRev(ydoc: Y.Doc, emit: (rev: string) => void): () => void {
   const fragment = getBlocksFragment(ydoc);
@@ -154,13 +163,20 @@ export function observeDocRev(ydoc: Y.Doc, emit: (rev: string) => void): () => v
   const fold = (seeded?: ReadonlyMap<string, string>): string => {
     const next = new Map<Y.XmlElement, string>();
     const lines: string[] = [];
+    const seen = new Set<string>();
     for (const child of fragment.toArray()) {
       if (!(child instanceof Y.XmlElement)) continue;
       const id = child.getAttribute("id") ?? "";
+      // First element to claim an id wins; later ones are shadowed and are not
+      // content. An element with no id has claimed no identity, so two of those
+      // are two blocks and both count.
+      if (id !== "") {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
       // A miss is an element this fold has not seen: a new block, one an event
       // invalidated, or the replacement a re-type left behind. `getBlock` is the
-      // schema's own read, so the shadowing rule for duplicate ids stays in the
-      // one place it lives.
+      // schema's own read, so a shadowed duplicate never supplies the rev.
       const rev = revs.get(child) ?? seeded?.get(id) ?? getBlock(ydoc, id)?.rev ?? "";
       next.set(child, rev);
       lines.push(`${id} ${rev}`);
