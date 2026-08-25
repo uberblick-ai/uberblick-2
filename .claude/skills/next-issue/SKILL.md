@@ -160,11 +160,10 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    them; the live doc does not. Where this session has the uberblick MCP
    server registered as tools the sub-agent inherits it; where it does not,
    the agent reaches the same tools through a throwaway stdio client script
-   spawning the `.mcp.json` command
-   (`fnox exec --if-missing warn -- pnpm --silent --filter @uberblick/mcp-server start`),
-   the pattern #77 and #134 use; that script is a temporary file in a scratch
-   directory outside the committed worktree, never part of the diff. The
-   brief says which of the two applies.
+   spawning the command recorded in `.mcp.json`, the pattern #77 and #134
+   use; that script is a temporary file in a scratch directory outside the
+   committed worktree, never part of the diff. The brief says which of the
+   two applies.
    Then the contract: branch from fresh `main`, implement, `mise run test` +
    `mise run typecheck` green, push, open a PR with `Closes #N` and a body
    stating what changed and how it was verified; and any live doc the agent
