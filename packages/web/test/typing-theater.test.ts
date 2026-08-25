@@ -565,15 +565,41 @@ describe("the reduced-motion guard on the pulse is not dead CSS", () => {
    * to suppress is 600ms long. So the file is read as text and the order
    * asserted directly — the one thing that has to be true for the guard to
    * mean anything.
+   *
+   * Both rules are found by *shape*, never by their exact text. What the
+   * cascade depends on is which rule comes second, and re-indenting the file or
+   * moving a comment changes neither that nor anything else — a test that broke
+   * on it would be reporting on the formatter, not on the bug.
    */
   it("declares the guard after the rule it turns off", () => {
     const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
     const css = readFileSync(resolve(webRoot, "src/ui/styles.css"), "utf8");
-    const animates = css.indexOf(`animation: ub-typed-pulse`);
-    const guard = css.indexOf(`.${PULSE_CLASS} {\n    animation: none;\n  }`);
-    expect(animates).toBeGreaterThan(-1);
-    expect(guard).toBeGreaterThan(-1);
-    expect(guard).toBeGreaterThan(animates);
+    // `[^{}]*` keeps each match inside one rule body — comments and all, but
+    // never across a brace.
+    const opensPulseRule = `\\.${PULSE_CLASS}\\s*\\{[^{}]*`;
+
+    // The rule that animates: a `.ub-typed-pulse { … }` block naming its own
+    // keyframes.
+    const animates = new RegExp(
+      `${opensPulseRule}animation:\\s*${PULSE_CLASS}\\b`,
+    ).exec(css);
+
+    // The guard, matched as a whole `@media` block — so "inside a
+    // reduced-motion query" is something this asserts rather than assumes. The
+    // alternation walks exactly one level of nesting: the rule within the query.
+    const guard = [
+      ...css.matchAll(
+        /@media[^{]*prefers-reduced-motion:\s*reduce[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g,
+      ),
+    ].find((block) =>
+      new RegExp(`${opensPulseRule}animation:\\s*none\\b`).test(block[0]),
+    );
+
+    const animatesAt = animates?.index ?? -1;
+    const guardAt = guard?.index ?? -1;
+    expect(animatesAt).toBeGreaterThan(-1);
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(guardAt).toBeGreaterThan(animatesAt);
   });
 });
 
