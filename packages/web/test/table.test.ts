@@ -23,11 +23,13 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   appendBlock,
+  createAnnotation,
   editBlock,
   exportMarkdown,
   getBlocks,
   importMarkdown,
   initDoc,
+  listAnnotationRanges,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { EDITING_CLASS } from "../src/editor/table.js";
@@ -190,6 +192,36 @@ describe("the table block", () => {
       caret(editor, 1, 0);
       expect(paste("a | b\nc | d")).toBe(false);
       expect(getBlocks(ydoc)[1]?.type).toBe("paragraph");
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  /**
+   * The conversion rewrites one paragraph's text and deletes another, and
+   * neither can carry an annotation across: the anchor is a mark on the very
+   * characters being replaced. A thread must never be destroyed by someone
+   * typing a row of hyphens, so a marked paragraph is left as it is — the
+   * reader keeps their text and their thread, and the table is still a menu
+   * entry or a paste away.
+   */
+  it("refuses to convert a paragraph carrying an annotation", () => {
+    const { ydoc, ids } = docWith([HEADER, ""]);
+    const thread = createAnnotation(ydoc, ids[0] ?? "", 2, 6, "reviewer", "why?");
+    const { editor } = mountEditor(ydoc);
+    try {
+      caret(editor, 1, 0);
+      type(editor, DELIMITER);
+
+      // Two paragraphs, exactly as they were typed…
+      expect(getBlocks(ydoc).map((block) => [block.type, block.text])).toEqual([
+        ["paragraph", HEADER],
+        ["paragraph", DELIMITER],
+      ]);
+      // …and the thread is still anchored to the characters it was about.
+      expect(listAnnotationRanges(ydoc, ids[0] ?? "")).toEqual([
+        { threadId: thread.id, start: 2, end: 6 },
+      ]);
     } finally {
       editor.destroy();
     }

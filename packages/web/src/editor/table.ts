@@ -205,7 +205,31 @@ export function tableEditingPlugin(): Plugin {
 
 /** Whether `header` and `delimiter` are the first two lines of a GFM table. */
 function opensTable(header: string, delimiter: string): boolean {
-  return header.includes("|") && parseGfmTable(`${header}\n${delimiter}`) !== null;
+  return parseGfmTable(`${header}\n${delimiter}`) !== null;
+}
+
+/**
+ * Whether any of `node`'s text carries a mark.
+ *
+ * The typed conversion rewrites one paragraph's text and deletes another, and
+ * neither operation can carry a mark across honestly: an annotation anchored in
+ * the header would lose the characters it is anchored to, and one in the
+ * delimiter row would go with the block. Inline formatting cannot come either —
+ * a table is source text, so `comment` is the only mark it may hold.
+ *
+ * So a marked paragraph is not converted at all. Refusing is the whole fix: the
+ * reader keeps their text, their thread and their formatting, and the table is
+ * still one block menu entry (or one paste) away. Remapping the anchors instead
+ * would mean offset arithmetic across a merge of two blocks, which is a lot of
+ * machinery to make a rare gesture slightly smoother.
+ */
+function carriesMarks(node: ProseMirrorNode): boolean {
+  let marked = false;
+  node.descendants((child) => {
+    if (child.marks.length > 0) marked = true;
+    return !marked;
+  });
+  return marked;
 }
 
 /**
@@ -255,7 +279,8 @@ function convertToTable(
  * moment two paragraphs become one table. The keystroke is taken as the typing
  * it is and the conversion follows as its own undo step, so one undo gives the
  * reader back what they wrote; the same two-dispatch shape, and the same reason,
- * as the markdown input rules.
+ * as the markdown input rules. A paragraph carrying any mark is left alone —
+ * see {@link carriesMarks}.
  *
  * **Pasted** is GFM table text on the clipboard. It is handled here rather than
  * left to ProseMirror's plain-text parser, which folds the newlines out of it
@@ -278,6 +303,10 @@ export function tableFromTextPlugin(): Plugin {
         const header = view.state.doc.child(index - 1);
         if (header.type.name !== "paragraph") return false;
         if (!opensTable(header.textContent, delimiter)) return false;
+        // Nothing anchored or formatted is silently rewritten away — see
+        // {@link carriesMarks}. The keystroke is then plain typing, which is
+        // what returning false leaves it as.
+        if (carriesMarks(header) || carriesMarks(block)) return false;
 
         const headerId = header.attrs.id;
         const delimiterId = block.attrs.id;

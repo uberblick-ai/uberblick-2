@@ -506,6 +506,47 @@ describe("lists and quotes", () => {
     });
   });
 
+  /**
+   * The pipes that make a table are *structural* ones. A `\|` is a pipe in
+   * somebody's prose, and a reader that counted it would take a paragraph plus
+   * a line of hyphens — a setext heading, in any other reader — as a
+   * single-column table, swallowing the paragraph into it.
+   */
+  it("does not count an escaped pipe as table structure", () => {
+    expect(parseGfmTable("a \\| b\n---")).toBeNull();
+    // Prose, and prose keeps its backslash: `\|` is not one of the escapes the
+    // inline reader resolves, so the text is the line.
+    expect(importMarkdown("a \\| b\n---").blocks).toEqual([
+      { type: "paragraph", text: "a \\| b\n---" },
+    ]);
+
+    // The same line with a real pipe in it is a table, one column wide.
+    expect(parseGfmTable("| a \\| b |\n| --- |")).toEqual({
+      header: ["a | b"],
+      align: [null],
+      rows: [],
+    });
+  });
+
+  /**
+   * `- | -` is both a legal one-hyphen delimiter row (GFM's own example writes
+   * `:-: | -----------:`) and a list item, and a table read swallows the
+   * paragraph above it into a block nobody wrote. The list read costs nothing,
+   * so the list wins.
+   */
+  it("reads a delimiter row that is also a list line as the list item it looks like", () => {
+    expect(importMarkdown("a | b\n- | -\n").blocks).toEqual([
+      { type: "paragraph", text: "a | b" },
+      { type: "list-item", text: "| -", list: "bullet", indent: 0 },
+    ]);
+
+    // A delimiter row no list could claim still opens a table, one hyphen and
+    // all — the length of the runs was never what made it one.
+    expect(importMarkdown("a | b\n:-: | -\n").blocks).toEqual([
+      { type: "table", text: "a | b\n:-: | -" },
+    ]);
+  });
+
   it("reads an empty item and an empty quote line without losing the block", () => {
     expect(importMarkdown(["-", "> "].join("\n")).blocks).toEqual([
       { type: "list-item", text: "", list: "bullet", indent: 0 },

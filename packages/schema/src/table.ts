@@ -28,16 +28,35 @@ export interface GfmTable {
   rows: string[][];
 }
 
-/** `---`, `:--`, `--:` or `:-:`, the four shapes of a delimiter cell. */
+/**
+ * A delimiter cell: hyphens, with a colon at either end for alignment.
+ *
+ * One hyphen is enough, because GFM says so — the spec's own table example is
+ * `:-: | -----------:`, a centred column and a right-aligned one. What tells a
+ * delimiter row apart from prose is not the length of its runs but that every
+ * cell is one of these *and* the row carries a structural pipe; see
+ * {@link parseGfmTable}.
+ */
 const DELIMITER_CELL = /^:?-+:?$/;
+
+/** A row split on its structural pipes, and how many of those there were. */
+interface Row {
+  cells: string[];
+  /**
+   * Unescaped pipes in the line. Zero means the line carries no table structure
+   * at all: any pipe in it is somebody's prose, and its one "cell" is the line.
+   */
+  pipes: number;
+}
 
 /**
  * One row's cells. Pipes separate; a backslash escapes one into the cell text;
  * a pipe at either end of the line is decoration rather than an empty cell.
  */
-function splitRow(line: string): string[] {
+function scanRow(line: string): Row {
   const trimmed = line.trim();
   const cells: string[] = [];
+  let pipes = 0;
   let current = "";
   for (let i = 0; i < trimmed.length; i += 1) {
     const char = trimmed[i];
@@ -47,6 +66,7 @@ function splitRow(line: string): string[] {
       continue;
     }
     if (char === "|") {
+      pipes += 1;
       cells.push(current);
       current = "";
       continue;
@@ -56,7 +76,7 @@ function splitRow(line: string): string[] {
   cells.push(current);
   if (trimmed.startsWith("|")) cells.shift();
   if (trimmed.endsWith("|") && !trimmed.endsWith("\\|")) cells.pop();
-  return cells.map((cell) => cell.trim());
+  return { cells: cells.map((cell) => cell.trim()), pipes };
 }
 
 function alignOf(delimiter: string): ColumnAlign {
@@ -78,23 +98,31 @@ function alignOf(delimiter: string): ColumnAlign {
  */
 export function parseGfmTable(source: string): GfmTable | null {
   const lines = source.replace(/\s+$/, "").split("\n");
-  const headerLine = lines[0] ?? "";
-  const delimiterLine = lines[1] ?? "";
-  if (lines.length < 2 || !headerLine.includes("|")) return null;
+  if (lines.length < 2) return null;
 
-  const header = splitRow(headerLine);
-  const delimiters = splitRow(delimiterLine);
-  if (header.length === 0 || delimiters.length !== header.length) return null;
-  if (!delimiters.every((cell) => DELIMITER_CELL.test(cell))) return null;
+  const header = scanRow(lines[0] ?? "");
+  const delimiters = scanRow(lines[1] ?? "");
+  // A structural pipe in each row, and structural is the load-bearing word: a
+  // `\|` is a pipe in somebody's prose. Counting one would read `a \| b` over
+  // `---` — which is a setext heading — as a one-column table, and swallow the
+  // paragraph into it.
+  if (header.pipes === 0 || delimiters.pipes === 0) return null;
+  if (header.cells.length === 0) return null;
+  if (delimiters.cells.length !== header.cells.length) return null;
+  if (!delimiters.cells.every((cell) => DELIMITER_CELL.test(cell))) return null;
 
   const rows = lines
     .slice(2)
     .filter((line) => line.trim() !== "")
     .map((line) => {
-      const cells = splitRow(line);
+      const { cells } = scanRow(line);
       // Short rows are padded and long ones truncated, which is what GFM does.
-      return header.map((_, column) => cells[column] ?? "");
+      return header.cells.map((_, column) => cells[column] ?? "");
     });
 
-  return { header, align: delimiters.map(alignOf), rows };
+  return {
+    header: header.cells,
+    align: delimiters.cells.map(alignOf),
+    rows,
+  };
 }

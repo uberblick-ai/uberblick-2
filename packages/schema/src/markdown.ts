@@ -1551,15 +1551,23 @@ export function importMarkdown(markdown: string): ImportedDoc {
     }
 
     // A table is two lines before it is anything — a header row and a delimiter
-    // row — so it is recognised with a lookahead, by the same parser that draws
-    // one. Its lines are then taken verbatim: the block stores GFM source.
+    // row — so it is recognised with a lookahead, and by the same parser that
+    // draws one: it is the parser that knows which pipes are structure and which
+    // are somebody's `\|`. Its lines are then taken verbatim, because the block
+    // stores GFM source.
+    //
+    // A delimiter row that is also a list line loses to the list. `- | -` is
+    // both — a one-hyphen delimiter row is legal GFM — and reading it as a
+    // delimiter would swallow the paragraph above it into a table nobody wrote,
+    // while reading it as the list item it looks like costs the reader nothing.
+    const delimiterLine = lines[i + 1] ?? "";
     if (
-      line.includes("|") &&
-      parseGfmTable(`${line}\n${lines[i + 1] ?? ""}`) !== null
+      parseGfmTable(`${line}\n${delimiterLine}`) !== null &&
+      LIST_LINE.exec(delimiterLine) === null
     ) {
       flush();
       openItems = [];
-      const table = [line, lines[i + 1] ?? ""];
+      const table = [line, delimiterLine];
       let j = i + 2;
       while (
         j < lines.length &&
