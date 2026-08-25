@@ -41,8 +41,19 @@ export function snapshotFragment(ydoc: Y.Doc): FragmentSnapshot[] {
 }
 
 /**
- * Mount an editor on a detached element. jsdom is enough for ProseMirror; the
- * element is not attached to the document because we never need layout.
+ * Mount an editor on a fresh element **inside `document.body`**. jsdom is
+ * enough for ProseMirror, which needs no layout — but attachment is not about
+ * layout, and the editor is not the only thing reading this DOM.
+ *
+ * Anything that finds a block by its id needs the block to be in the document
+ * to find it: `document.getElementById` (the outline's scroll-to, and the
+ * changed-block watcher) returns nothing for a detached tree, and
+ * IntersectionObserver's root is discovered by walking up to a scrolling
+ * ancestor, which a detached element does not have. A test mounting into a
+ * detached div would pass by exercising the fallbacks rather than the rules.
+ *
+ * Callers are free to move the returned element somewhere more specific — the
+ * changed-block tests re-parent it into a stubbed scrolling pane.
  */
 export function mountEditor(
   ydoc: Y.Doc,
