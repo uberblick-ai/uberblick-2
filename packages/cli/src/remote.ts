@@ -224,7 +224,29 @@ export function setRemote(
   const nextConfig = { ...current.raw, hubUrl: url };
 
   const stored = readCredentials(env);
-  const changingSecret = secret !== null && secret !== stored.signingSecret;
+
+  // Read before anything is written, because it decides whether the credential
+  // may move: `config.json` is only the third layer, and when a higher one
+  // names a different hub *that* is the endpoint every client dials. Storing
+  // the target's secret anyway would leave the endpoint in force authenticated
+  // with a credential that is not its own — the exact mismatch the ordering
+  // below exists to prevent, arrived at from the other side. The endpoint is
+  // still written, because it is what takes over the moment the higher layer
+  // goes away; the secret is not, and the report says so.
+  // (Neither answer depends on the write: `HUB_URL` and `./uberblick.json` are
+  // untouched by it, and with neither present nothing outranks anything.)
+  const outrankedBy = outranking(resolveConfig({ env, cwd }), cwd);
+  const newSecret = secret !== null && secret !== stored.signingSecret;
+  if (newSecret && outrankedBy !== null) {
+    warnings.push(
+      `${credentialsFile} was left alone: ${outrankedBy.layer} names ` +
+        `${outrankedBy.endpoint}, so that is the endpoint in force, and ` +
+        `storing ${url}'s signing secret would leave it authenticating ` +
+        "against a hub the secret does not belong to. Remove the higher layer " +
+        "and rerun to store it.",
+    );
+  }
+  const changingSecret = newSecret && outrankedBy === null;
   if (changingSecret) {
     // Captured before anything moves, so the rollback below has something to
     // put back. Null means the file did not exist and rollback is a removal.
@@ -260,7 +282,7 @@ export function setRemote(
     written,
     warnings,
     replacedSecret: changingSecret,
-    outrankedBy: outranking(resolveConfig({ env, cwd }), cwd),
+    outrankedBy,
   };
 }
 

@@ -437,6 +437,28 @@ describe("ub remote", () => {
     ).toThrow();
     expect(storedSecret(box)).toBe(SECRET);
   });
+
+  it("keeps the stored credential when a higher layer outranks the endpoint", () => {
+    // Same invariant from the other side: the endpoint in force is HUB_URL's,
+    // so storing the target's secret would leave *that* hub authenticating
+    // with a credential belonging to a hub nobody is dialling. The endpoint is
+    // still written — it takes over the moment HUB_URL goes away.
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    box.env.HUB_URL = "ws://127.0.0.1:9999";
+
+    const persistence = setRemote("wss://hub.example.ts.net", {
+      secret: OTHER_SECRET,
+      env: box.env,
+      cwd: box.cwd,
+    });
+
+    expect(storedSecret(box)).toBe(SECRET);
+    expect(persistence.replacedSecret).toBe(false);
+    expect(persistence.warnings.join("\n")).toContain(
+      "HUB_URL in the environment",
+    );
+    expect(persistedHubUrl(box)).toBe("wss://hub.example.ts.net");
+  });
 });
 
 describe("ub remote promote", () => {
