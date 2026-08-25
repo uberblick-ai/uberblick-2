@@ -10,6 +10,7 @@
  * reason to run it by hand.
  */
 
+import { doctorCommand } from "./doctor.js";
 import { initCommand } from "./init.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
@@ -27,6 +28,7 @@ usage: ub <command> [options]
 commands:
   init [options]         identity, workspace and a local development signing secret
   status [--json]        workspace, hub, credential, database and sync state
+  doctor [--json]        check the local stack against its known failure modes
   workspace [command]    which workspace this directory works in
   remote [command]       the endpoint documents sync with, and the one-time bridges
   mcp install [target]   register uberblick with an MCP client
@@ -83,6 +85,9 @@ export async function runCli(
   }
   if (command === "status") {
     return await statusCommand(rest, io);
+  }
+  if (command === "doctor") {
+    return await doctorCommand(rest, io);
   }
   if (command === "workspace") {
     return workspaceCommand(rest, io);
