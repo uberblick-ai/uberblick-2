@@ -12,7 +12,7 @@
  * test of their machine — including a hub connection to their real corpus.
  */
 
-import { type SpawnSyncReturns, spawnSync } from "node:child_process";
+import { type SpawnSyncReturns, spawn, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -22,6 +22,9 @@ import { fileURLToPath } from "node:url";
 export const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 export const UB_BIN = join(PACKAGE_ROOT, "bin", "ub.mjs");
+
+/** The repository root, so a test can read the real `.gitignore`. */
+export const REPO_ROOT = dirname(dirname(PACKAGE_ROOT));
 
 /** Everything `ub` resolves from the environment, removed before every run. */
 const RESOLVED_VARIABLES = [
@@ -55,6 +58,13 @@ export interface SandboxFiles {
    * has — how a test asks for a file `ub` is supposed to refuse.
    */
   credentialsMode?: number;
+  /**
+   * Make the working directory look like an uberblick checkout: `mise.toml` and
+   * a root `package.json` named `uberblick`, which is what `ub init` requires
+   * before it writes a derived mise config into a directory. Both markers are
+   * needed, so a bare mise project does not qualify.
+   */
+  checkout?: boolean;
 }
 
 export interface Sandbox {
@@ -89,6 +99,10 @@ export function sandbox(files: SandboxFiles = {}): Sandbox {
   const credentialsPath = join(configHome, "uberblick", "credentials.json");
   const directoryPath = join(cwd, "uberblick.json");
 
+  if (files.checkout === true) {
+    writeText(join(cwd, "mise.toml"), "[env]\n");
+    writeJson(join(cwd, "package.json"), { name: "uberblick", private: true });
+  }
   if (files.userConfig !== undefined) writeJson(userConfigPath, files.userConfig);
   if (files.credentials !== undefined) writeJson(credentialsPath, files.credentials);
   if (files.directoryFile !== undefined) writeJson(directoryPath, files.directoryFile);
@@ -145,6 +159,40 @@ export function runUb(
   const stdout = result.stdout ?? "";
   const stderr = result.stderr ?? "";
   return { status: result.status, stdout, stderr, output: `${stdout}${stderr}` };
+}
+
+/**
+ * The same, without blocking — so a test can have two `ub` processes racing each
+ * other, which is the only way to observe what concurrent runs do to a file they
+ * both write.
+ */
+export function runUbAsync(
+  args: string[],
+  box: Sandbox,
+  extraEnv: NodeJS.ProcessEnv = {},
+): Promise<Run> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [UB_BIN, ...args], {
+      cwd: box.cwd,
+      env: { ...box.env, ...extraEnv },
+      timeout: 25_000,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", reject);
+    // `close`, not `exit`: both pipes have to be drained before the output is
+    // complete, and a test asserting "the secret appears nowhere" on a truncated
+    // capture would pass for the wrong reason.
+    child.on("close", (status) => {
+      resolve({ status, stdout, stderr, output: `${stdout}${stderr}` });
+    });
+  });
 }
 
 /** A hub address nothing listens on: `ub status` must not wait on the network. */

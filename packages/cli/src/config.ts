@@ -28,16 +28,15 @@
  * `./uberblick.json` chose — see {@link secretAppliesTo}.
  */
 
-import {
-  chmodSync,
-  mkdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { assertWorkspaceSegment } from "@uberblick/mcp-server";
+import {
+  publishOwnerOnly,
+  publishStaged,
+  writeTempBeside,
+} from "./safe-write.js";
 
 /** The directory `ub`'s own files live in, under the XDG config home. */
 const CONFIG_DIR = "uberblick";
@@ -186,6 +185,72 @@ function pick(layers: Layer[]): { value: string | null; origin: Origin; label: s
 }
 
 /**
+ * What `config.json` may hold. `ub init` writes it; {@link resolveConfig} reads
+ * the two fields that resolve into an environment, and the identity fields ride
+ * along for the awareness name and colour a client publishes.
+ */
+export interface UserConfig {
+  // `| undefined` explicitly, under `exactOptionalPropertyTypes`: a field the
+  // file does not carry reads as undefined rather than being absent.
+  workspace?: string | undefined;
+  hubUrl?: string | undefined;
+  /** Awareness display name. */
+  displayName?: string | undefined;
+  /** Awareness colour, 6-digit hex — the only form y-prosemirror accepts. */
+  color?: string | undefined;
+}
+
+/**
+ * Read `config.json` for editing rather than for resolution.
+ *
+ * `ub init` has to preserve what it did not ask about — a `hubUrl` from
+ * `ub remote join`, a field a later version writes — so it gets the raw object
+ * back as well as the fields it understands. Resolution stays in
+ * {@link resolveConfig}, which needs origins and per-layer labels this does not.
+ */
+export function readUserConfig(env: NodeJS.ProcessEnv = process.env): {
+  /** The file as parsed, or null when it is absent or unusable. */
+  raw: Record<string, unknown> | null;
+  config: UserConfig;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const path = userConfigPath(env);
+  const raw = readJsonObject(path, warnings);
+  return {
+    raw,
+    config: {
+      workspace: stringField(raw, "workspace", path, warnings) ?? undefined,
+      hubUrl: stringField(raw, "hubUrl", path, warnings) ?? undefined,
+      displayName: stringField(raw, "displayName", path, warnings) ?? undefined,
+      color: stringField(raw, "color", path, warnings) ?? undefined,
+    },
+    warnings,
+  };
+}
+
+/**
+ * Write `config.json`, and return its path.
+ *
+ * Owner-only, like `credentials.json` beside it: nothing in here is a secret,
+ * but it is one user's configuration and no other account has business reading
+ * or — the part that matters — writing the hub URL a signed token is sent to.
+ *
+ * Written by {@link publishOwnerOnly}, exactly like `credentials.json` beside it:
+ * one rule for how this CLI puts a file on disk, rather than a weaker one for
+ * the file that happens not to hold the secret.
+ */
+export function writeUserConfig(
+  config: Record<string, unknown>,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const path = userConfigPath(env);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  publishOwnerOnly(path, serialize(config));
+  return path;
+}
+
+/**
  * A signing secret in a file that is not `credentials.json` is a mistake worth
  * naming: `./uberblick.json` is meant to be committed, and `config.json` is the
  * file `ub` will happily print fields from.
@@ -249,6 +314,38 @@ function secretAppliesTo(hubUrlOrigin: Origin): boolean {
   return hubUrlOrigin !== "directory file";
 }
 
+/**
+ * Read `credentials.json`.
+ *
+ * **`signingSecret` is the file's value whether or not the file is exposed.**
+ * Anything *resolving* configuration must treat an exposed file as absent — see
+ * {@link credentialsAreExposed} and how {@link resolveConfig} uses this. The
+ * value is still returned because `ub init` repairs the mode of such a file by
+ * rewriting it, and rewriting it means keeping what it held: regenerating would
+ * cut this machine off from every other client already holding that secret.
+ */
+export function readCredentials(env: NodeJS.ProcessEnv = process.env): {
+  path: string;
+  /** The file as parsed, or null when it is absent or unusable. */
+  raw: Record<string, unknown> | null;
+  signingSecret: string | null;
+  /** True when the file exists and other users can read it. */
+  exposed: boolean;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const path = credentialsPath(env);
+  const exposed = credentialsAreExposed(path, warnings);
+  const raw = readJsonObject(path, warnings);
+  return {
+    path,
+    raw,
+    signingSecret: stringField(raw, SIGNING_SECRET_KEY, path, warnings),
+    exposed,
+    warnings,
+  };
+}
+
 export interface ResolveOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
@@ -309,16 +406,10 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
 
   // Credentials are read last and from one file only. Nothing committable may
   // carry a secret, so there is no directory-file layer here by design. An
-  // exposed file is not read at all: its one actionable message is the mode.
-  const credentials = credentialsAreExposed(paths.credentials, warnings)
-    ? null
-    : readJsonObject(paths.credentials, warnings);
-  const secretFromFile = stringField(
-    credentials,
-    SIGNING_SECRET_KEY,
-    paths.credentials,
-    warnings,
-  );
+  // exposed file is refused outright: its one actionable message is the mode.
+  const credentials = readCredentials(env);
+  warnings.push(...credentials.warnings);
+  const secretFromFile = credentials.exposed ? null : credentials.signingSecret;
   const secretFromEnv = trimmed(env.HUB_AUTH_TOKEN);
 
   let secret: string | null = secretFromEnv;
@@ -367,12 +458,19 @@ export interface Credentials {
   signingSecret?: string;
 }
 
+function serialize(value: unknown): string {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
 /**
  * Write `credentials.json` with mode 0600, and return its path.
  *
  * The writer lives next to the reader because the mode is the point: this file
  * holds the secret every hub token is signed with, so it must never be readable
- * by another user on the machine. `ub init` (#78) is its first caller.
+ * by another user on the machine. Every guarantee about how that is done — the
+ * descriptor tightened before anything is written, symlinks refused rather than
+ * followed — belongs to {@link publishOwnerOnly}, which is also what writes
+ * `config.json`.
  */
 export function writeCredentials(
   credentials: Credentials,
@@ -380,22 +478,68 @@ export function writeCredentials(
 ): string {
   const path = credentialsPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  // Tighten an existing file BEFORE writing into it. `mode` below applies only
-  // to a file being created, so a pre-existing 0644 file would otherwise hold
-  // the new secret while still world-readable until the chmod after the write.
-  // ENOENT is the ordinary case — there is no file yet — and `mode` covers it.
-  try {
-    chmodSync(path, 0o600);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
+  publishOwnerOnly(path, serialize(credentials));
+  return path;
+}
+
+/**
+ * Put a signing secret in `credentials.json` and return the one now on disk —
+ * which is not necessarily the candidate.
+ *
+ * This is the race `ub init` must not lose. Two fresh runs (a `mise run setup`
+ * and an editor's MCP client starting at the same moment) would each generate a
+ * secret, and last-write-wins leaves one of them convinced of a value that is no
+ * longer there. So the claim is exclusive: exactly one process can publish the
+ * file, and every loser adopts the winner's secret rather than its own.
+ *
+ * **Written first, published second.** The mechanism is `link`, not an exclusive
+ * `open`. `open(O_CREAT|O_EXCL)` is atomic about the *name* but not about the
+ * contents: between the create and the write there is an instant where the file
+ * exists and is empty, and a loser that reads it then finds no secret and
+ * concludes there is none — which is the whole bug, one syscall further along.
+ * `link` publishes a name and complete contents in a single atomic step, and
+ * fails with EEXIST if anything already holds that name. There is therefore no
+ * moment at which `credentials.json` exists and is not readable, and no lock
+ * file is needed to say so.
+ *
+ * The remaining case is a `credentials.json` that already exists *without* a
+ * signing secret in it (a remote token from #84, say). Adding one there is an
+ * ordinary read-modify-write of a file this user already owns, and two of those
+ * can still interleave. That is accepted: it is not the security-bearing race —
+ * no two secrets can exist after this function — and callers re-read the file
+ * before deriving anything from it, so they converge on what the last writer
+ * left.
+ */
+export function claimSigningSecret(
+  candidate: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const path = credentialsPath(env);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+
+  const staged = writeTempBeside(
+    path,
+    serialize({ [SIGNING_SECRET_KEY]: candidate }),
+  );
+  if (publishStaged(staged, path, "absent")) {
+    return candidate;
+  }
+
+  // Somebody else holds the name. Their secret is the one every other client on
+  // this machine will use, so it becomes ours.
+  const existing = readCredentials(env);
+  if (existing.signingSecret !== null) {
+    return existing.signingSecret;
+  }
+  // `link` leaves no empty window, so a file with no secret in it genuinely has
+  // none. One re-read anyway, and only when the file did not parse at all — the
+  // shape a half-written file would have if some other writer ever produced one.
+  if (existing.raw === null) {
+    const second = readCredentials(env);
+    if (second.signingSecret !== null) {
+      return second.signingSecret;
     }
   }
-  writeFileSync(path, `${JSON.stringify(credentials, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  // And state the mode outright afterwards, rather than inferring it from the
-  // two paths above: `mode` on creation is still subject to the umask.
-  chmodSync(path, 0o600);
-  return path;
+  writeCredentials({ ...existing.raw, [SIGNING_SECRET_KEY]: candidate }, env);
+  return candidate;
 }

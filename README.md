@@ -21,15 +21,68 @@ All five are private workspace packages and resolve to their TypeScript sources
 (`build` and `typecheck` both run `tsc --noEmit`). There is no `dist/` in any
 resolution path.
 
-## Running things
+## Getting it running
 
-[mise](https://mise.jdx.dev) tasks are the only supported entry points. Do not
-invoke `pnpm` directly — the tasks pin the toolchain and wrap commands in
-`fnox exec` so secrets are present.
+From a fresh clone, with only `git` and [mise](https://mise.jdx.dev) installed:
 
 ```
-mise install          # Node 26, pnpm 10, fnox 1
-mise exec -- pnpm install
+mise trust && mise run setup -- --yes
+mise run dev                          # hub + web on http://localhost:5173
+```
+
+`mise run setup` installs the pinned toolchain and the frozen lockfile, then runs
+`ub init` — which settles your awareness identity (display name and cursor
+colour), the workspace, and a development signing secret for the local hub.
+`--yes` takes every default and never prompts, so it is safe unattended; drop it
+to be asked. Run it again any time: it is idempotent, and it will not replace a
+secret that already exists. `mise run init` re-runs just the `ub init` step.
+
+`mise trust` first because mise refuses to read a config file with an `[env]`
+block it has not been told to trust — and it is a hard error, not a warning.
+`ub init` runs `mise trust` on the file it writes for the same reason.
+
+What this supports is exactly one arrangement: **one workspace, one trusted user,
+multiple clients and machines; no login and no tenant isolation.** Everything
+below is a consequence of that.
+
+### The signing secret
+
+`HUB_AUTH_TOKEN` is the HMAC **secret** hub tokens are signed with, not a token.
+There are two ways to have one, and they do not fight:
+
+- **The repository owner's path — fnox.** The real secret lives age-encrypted in
+  `fnox.toml`, and every task wraps its command in `fnox exec`. With the age key
+  at `~/.config/fnox/age.txt`, that value wins: `fnox exec` **overwrites**
+  `HUB_AUTH_TOKEN` in the environment it hands to the command. `ub init`
+  generates nothing when it can already see one.
+- **Everybody else — a generated development secret.** With no age key,
+  `fnox exec --if-missing warn` warns and leaves the variable alone, and
+  `ub init` writes 32 random bytes to
+  `$XDG_CONFIG_HOME/uberblick/credentials.json` (mode 0600). That file is the
+  authority. Because mise tasks and `.mcp.json` inherit their environment from
+  mise rather than from `ub`, `ub init` also writes a gitignored
+  `mise.local.toml` **derived** from it: same value, one owner, rewritten
+  whenever the two drift, and restored with the same value if you delete it.
+
+So the precedence a mise task sees, highest first: a decryptable fnox secret,
+then the derived `mise.local.toml`, then `mise.toml`'s own `[env]`. Note that
+mise's `[env]` overrides an exported shell variable, so once `mise.local.toml`
+exists, `HUB_AUTH_TOKEN=… mise run hub` no longer overrides it — use `fnox`, or
+edit that file. `ub` itself resolves the other way round, environment first; see
+"The `ub` command line" below.
+
+The secret is never printed — not by `ub init`, not by `ub status`, not by an
+error path. The most any of them says is where it came from.
+
+## Running things
+
+mise tasks are the only supported entry points. Do not invoke `pnpm` directly —
+the tasks pin the toolchain and wrap commands in `fnox exec` so secrets are
+present.
+
+```
+mise run setup        # one-command bootstrap: toolchain, dependencies, `ub init`
+mise run init         # just the `ub init` step, idempotent
 
 mise run hub          # Hocuspocus sync hub
 mise run mcp          # MCP server, standalone smoke test only (see below)
@@ -98,20 +151,30 @@ duplicated there. Distribution comes later, so until then run it out of the
 checkout:
 
 ```
+node packages/cli/bin/ub.mjs init            # identity, workspace, signing secret
 node packages/cli/bin/ub.mjs status          # workspace, hub, credential, sync state
 node packages/cli/bin/ub.mjs status --json   # the same, as one JSON object
 node packages/cli/bin/ub.mjs mcp serve       # the stdio entry point for an MCP client
 ```
 
+Inside a checkout prefer `mise run init` over calling `ub init` directly: the
+task wraps it in `fnox exec`, which is how a decryptable secret becomes visible
+to it in the first place. Every question `ub init` asks has a flag (`--name`,
+`--color`, `--workspace`, `--yes`), and a non-interactive stdin takes the
+defaults rather than blocking, so it needs no TTY. `--mcp` / `--no-mcp` decide
+whether it offers to wire up an agent's MCP client; that wiring itself arrives
+with `ub mcp install` (#88), and until then `.mcp.json` already registers the
+server for MCP clients that read it.
+
 Configuration is JSON and every layer is optional — absent configuration is a
-default, never an error, and no command requires an `init` to have run.
+default, never an error, and no command requires `ub init` to have run.
 Precedence, highest first:
 
 | Layer | Holds |
 | --- | --- |
 | environment (`WORKSPACE_ID`, `HUB_URL`, `HUB_AUTH_TOKEN`) | wins, so `HUB_URL=… ub mcp serve` keeps working |
 | `./uberblick.json` | binds one checkout to one workspace. Committable, so never secrets — and never the hub the stored secret is sent to |
-| `$XDG_CONFIG_HOME/uberblick/config.json` | per-user default workspace and hub endpoint |
+| `$XDG_CONFIG_HOME/uberblick/config.json` | per-user identity (display name, cursor colour), default workspace and hub endpoint — what `ub init` writes |
 | `$XDG_CONFIG_HOME/uberblick/credentials.json`, mode 0600 | the hub signing secret. Never printed by any command, and refused outright — not merely warned about — if anyone but its owner can read it |
 | built-in defaults | workspace `main`, hub `ws://localhost:1234` |
 
@@ -220,12 +283,15 @@ secrets go there: plaintext local defaults such as `HUB_URL`
 
 Contributors without the age key are not blocked. The task wrappers pass
 `fnox exec --if-missing warn` explicitly, so a secret fnox cannot decrypt logs a
-warning and the command still runs with that variable unset instead of aborting.
-`mise run lint`, `mise run test` and `mise run typecheck` don't shell through
-fnox at all.
+warning and the command still runs with that variable left as it found it instead
+of aborting — which is what lets `ub init`'s generated secret through. With the
+key, `fnox exec` overwrites the variable, so the encrypted value wins. See
+"The signing secret" above for the whole precedence chain. `mise run lint`,
+`mise run test` and `mise run typecheck` don't shell through fnox at all.
 
-`HUB_AUTH_TOKEN` is the HMAC secret hub tokens are signed with. The hub refuses
-to start without it — a hub that cannot verify a token would accept anything.
+`HUB_AUTH_TOKEN` is the HMAC secret hub tokens are signed with, and `ub init`
+generates one when fnox cannot supply it. The hub refuses to start without it —
+a hub that cannot verify a token would accept anything.
 The MCP server treats it as optional and runs local-only without it: its update
 log is the authoritative replica, so no secret means no sync, not no service
 (`sync_status` reports `hub.status: "disabled"`). It also reads `WORKSPACE_ID`

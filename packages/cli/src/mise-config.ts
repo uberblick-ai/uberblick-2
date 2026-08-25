@@ -1,0 +1,404 @@
+/**
+ * The derived per-checkout mise config.
+ *
+ * The authority for local configuration is
+ * `$XDG_CONFIG_HOME/uberblick/{config,credentials}.json`, and `ub` reads it
+ * directly. Everything else in this repository does not: `mise run hub`,
+ * `mise run web`, `mise run import-seed` and the `.mcp.json` spawn all inherit
+ * their environment from mise, and the hub in particular refuses to start
+ * without `HUB_AUTH_TOKEN`. So `ub init` also writes `mise.local.toml` — mise's
+ * conventional gitignored local config — as a file **derived** from that
+ * authority: same value, one owner, rewritten whenever it drifts. Delete it and
+ * rerun `ub init` and it comes back with the same value; it is regenerated, not
+ * re-randomised, because the authority is elsewhere.
+ *
+ * Two mise behaviours shape this module, both verified against mise 2026.7:
+ *
+ * - A config file mise does not trust is a hard error, not a warning, for every
+ *   task in the directory. So a file written here is useless until `mise trust`
+ *   has seen it, and {@link trustLocalConfig} is part of writing it, not a
+ *   nicety.
+ * - mise's `[env]` overrides the ambient environment, and `fnox exec` in turn
+ *   overrides mise's. That is the precedence this file lives in: a decryptable
+ *   fnox secret always wins over the derived value, which is why the owner's
+ *   encrypted path is unaffected by anything here.
+ *
+ * The file is only ever written inside an uberblick checkout — the thing whose
+ * mise tasks need it — and never on top of a `mise.local.toml` somebody else
+ * wrote: it carries {@link MARKER} so its own output is recognisable, and a
+ * foreign file is left alone rather than silently replaced.
+ */
+
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  statSync,
+} from "node:fs";
+import { spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import {
+  describeFsError,
+  isSymlinkRefusal,
+  publishStaged,
+  removeQuietly,
+  writeTempBeside,
+} from "./safe-write.js";
+
+/** mise's conventional local config: read after `mise.toml`, and gitignored. */
+export const LOCAL_CONFIG_FILE = "mise.local.toml";
+
+/** How this file's own output is recognised. Never change it casually. */
+export const MARKER = "# Written by `ub init`.";
+
+/**
+ * The nearest ancestor that is an uberblick checkout, or null.
+ *
+ * Both markers are required. `mise.toml` alone is any mise project, and writing
+ * a secret into a stranger's repository — whose `.gitignore` need not cover
+ * `mise.local.toml` — is exactly the accident that must not happen.
+ */
+export function findCheckoutRoot(from: string): string | null {
+  let dir = from;
+  for (;;) {
+    if (existsSync(join(dir, "mise.toml")) && isUberblickPackage(dir)) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      return null;
+    }
+    dir = parent;
+  }
+}
+
+function isUberblickPackage(dir: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(
+      readFileSync(join(dir, "package.json"), "utf8"),
+    );
+    return (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      (parsed as { name?: unknown }).name === "uberblick"
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function localConfigPath(root: string): string {
+  return join(root, LOCAL_CONFIG_FILE);
+}
+
+/**
+ * What is at `path`, and whether this module may replace it.
+ *
+ * Every branch here is a decision about somebody else's file, so it fails
+ * **closed**: only `absent` and `ours` are writable, and everything unexpected —
+ * a permission error, a directory, a symlink, a socket — is refused with a
+ * reason rather than treated as "probably fine". Reading with a bare try/catch
+ * would say "not there" to all of them, and the next step chmods and truncates.
+ *
+ * `lstat`, not `stat`: a symlink must be seen as a symlink. Following one would
+ * let anything that can create `mise.local.toml` choose which file receives the
+ * signing secret — and `writeFileSync` follows symlinks happily.
+ */
+type Inspection =
+  | { kind: "absent" }
+  | { kind: "ours"; text: string }
+  | { kind: "foreign" }
+  | { kind: "unusable"; because: string };
+
+function inspect(path: string): Inspection {
+  let fd: number;
+  try {
+    // O_NOFOLLOW, so a symlink is an ELOOP refusal rather than a decision made
+    // about one file and applied to another.
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "absent" };
+    }
+    if (isSymlinkRefusal(error)) {
+      return { kind: "unusable", because: "it is a symbolic link" };
+    }
+    return { kind: "unusable", because: describeFsError(error) };
+  }
+  try {
+    // Both facts come from the descriptor, so they describe the same inode: the
+    // name is resolved once, here, and never again.
+    if (!fstatSync(fd).isFile()) {
+      return { kind: "unusable", because: "it is not a regular file" };
+    }
+    const text = readFileSync(fd, "utf8");
+    return text.startsWith(MARKER) ? { kind: "ours", text } : { kind: "foreign" };
+  } catch (error) {
+    return { kind: "unusable", because: describeFsError(error) };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * The signing secret the derived file currently carries, or null.
+ *
+ * Deliberately a match rather than a TOML parse: this module writes the file, so
+ * its shape is known, and anything that does not match is treated as absent and
+ * rewritten. A TOML parser would be a new dependency to read four lines we
+ * generated ourselves. The quoted literal goes back through `JSON.parse`, which
+ * exactly undoes the {@link toml} that wrote it.
+ */
+export function derivedSecret(root: string): string | null {
+  const found = inspect(localConfigPath(root));
+  if (found.kind !== "ours") {
+    return null;
+  }
+  const literal = /^HUB_AUTH_TOKEN = ("(?:[^"\\\n]|\\.)*")$/m.exec(found.text)?.[1];
+  if (literal === undefined) {
+    return null;
+  }
+  try {
+    const value: unknown = JSON.parse(literal);
+    return typeof value === "string" && value !== "" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface DerivedEnvironment {
+  /** The hub signing secret. Written verbatim; never logged. */
+  signingSecret: string;
+  workspace: string;
+  /**
+   * Where the authority lives. Used in messages to the user only — never
+   * rendered into the file, because a path is attacker-influenced input (an
+   * `XDG_CONFIG_HOME` with a newline in it) and this file is fed to mise and
+   * then trusted.
+   */
+  authorityPath: string;
+}
+
+/**
+ * TOML basic-string form of a value.
+ *
+ * `JSON.stringify` is the escaper because TOML's basic string accepts every
+ * escape JSON emits — `\"`, `\\`, `\n`, `\t`, `\uXXXX` and the rest. Escaping
+ * rather than restricting is the point: the workspace rule has one owner
+ * (`assertWorkspaceSegment`), it allows a space or a quote, and a value every
+ * other command accepts must not be one this file cannot write.
+ *
+ * It is not a *complete* escaper, which is why {@link tomlUnsafeReason} guards
+ * the two values that reach it — see there.
+ */
+function toml(value: string): string {
+  return JSON.stringify(value);
+}
+
+/**
+ * Why a value cannot go into a TOML basic string, or null when it can.
+ *
+ * Two gaps in `JSON.stringify` as a TOML escaper, both of which would produce a
+ * file that `ub init` exits 0 on and mise then refuses to parse — taking every
+ * task in the directory down with it:
+ *
+ * - It leaves U+007F and the C1 range raw. TOML forbids U+007F in a basic
+ *   string outright.
+ * - It emits `\uD800`-style escapes for unpaired surrogates, which are not
+ *   Unicode scalar values and so are not valid TOML escapes either.
+ *
+ * Refusing at the boundary rather than escaping harder: a control character in a
+ * workspace name or a signing secret is a mistake worth naming, and neither
+ * value has any business carrying one. The generated secret is base64url, so it
+ * passes by construction; this catches a hand-edited `credentials.json` and an
+ * exotic `--workspace`.
+ */
+export function tomlUnsafeReason(value: string): string | null {
+  if (/\p{Cc}/u.test(value)) {
+    return "it contains control characters";
+  }
+  // Under `u` the pattern iterates code points, so a well-formed pair is one
+  // astral code point and never matches; only an unpaired surrogate does.
+  // (`String.isWellFormed` says the same thing, but is ES2024 and the repo's
+  // `lib` is ES2023 — not a knob worth turning for one call.)
+  if (/\p{Surrogate}/u.test(value)) {
+    return "it contains unpaired surrogates";
+  }
+  return null;
+}
+
+function render(env: DerivedEnvironment): string {
+  return `${MARKER}
+#
+# Derived from $XDG_CONFIG_HOME/uberblick/credentials.json — same value, one
+# owner. Do not edit: every \`ub init\` rewrites it from that file. Delete it and
+# rerun \`ub init\` and it comes back with the same value.
+#
+# It exists because mise tasks and \`.mcp.json\` inherit their environment from
+# mise rather than from \`ub\`. \`fnox exec\` overrides it, so a decryptable
+# \`HUB_AUTH_TOKEN\` in fnox.toml still wins for every task.
+#
+# HUB_AUTH_TOKEN is the HMAC signing secret, not a token. Never commit it —
+# .gitignore covers this file.
+[env]
+WORKSPACE_ID = ${toml(env.workspace)}
+HUB_AUTH_TOKEN = ${toml(env.signingSecret)}
+`;
+}
+
+export type WriteOutcome =
+  | { written: true; path: string }
+  | { written: false; path: string; reason: string };
+
+/**
+ * Write the derived config, owner-only, unless something is in the way.
+ *
+ * Nothing but an absent path or this module's own output is ever replaced, and
+ * a value mise could not parse is refused before the write rather than after.
+ * Every refusal is a message and a still-working machine: the derived file is a
+ * convenience for mise, and the authority is untouched either way.
+ *
+ * Against another `ub init` this is exact, because the whole write phase runs
+ * under the init lock. Against an unrelated program writing this same path there
+ * is a residual window between the last classification and the `rename` — that
+ * is inherent, since no userland writer can hold a path still, and the fallout
+ * is bounded to a file this command owns and rewrites on the next run.
+ *
+ * The mode dance mirrors `writeCredentials`: tighten first, because `mode` on
+ * `writeFileSync` applies only to a file being created and is subject to the
+ * umask, and this file holds the same secret.
+ */
+export function writeLocalConfig(
+  root: string,
+  env: DerivedEnvironment,
+): WriteOutcome {
+  const path = localConfigPath(root);
+
+  for (const value of [
+    { what: "the workspace", text: env.workspace },
+    // Never the secret itself in the message — only the fact and the fix.
+    { what: `the signing secret in ${env.authorityPath}`, text: env.signingSecret },
+  ]) {
+    const unsafe = tomlUnsafeReason(value.text);
+    if (unsafe !== null) {
+      return {
+        written: false,
+        path,
+        reason:
+          `${path} was not written: ${value.what} cannot go into a TOML file ` +
+          `because ${unsafe}. mise would refuse to parse the result, and that ` +
+          "takes down every task in this directory.",
+      };
+    }
+  }
+
+  const found = inspect(path);
+  if (found.kind === "foreign") {
+    return {
+      written: false,
+      path,
+      reason:
+        `${path} was not written by \`ub init\`, so it was left alone. Add ` +
+        `HUB_AUTH_TOKEN and WORKSPACE_ID to its [env] yourself — the value is ` +
+        `in ${env.authorityPath} — or move the file aside and rerun.`,
+    };
+  }
+  if (found.kind === "unusable") {
+    return {
+      written: false,
+      path,
+      reason:
+        `${path} was left alone: ${found.because}. Move it aside and rerun ` +
+        "`ub init`, which will write a fresh one.",
+    };
+  }
+
+  // Published, not written in place. Two things follow, and both matter:
+  //
+  // - mise may be reading this file right now, and half of a TOML file is a
+  //   parse error that takes every task in the directory down. `link` and
+  //   `rename` both swap a complete file in, in one step.
+  // - Whichever `ub init` publishes last publishes contents derived from an
+  //   authority that can no longer change (see `claimSigningSecret`), so the
+  //   order they finish in stops mattering.
+  //
+  // `link` for a path that was absent, because it must not overwrite anything
+  // that appeared since; `rename` for one of ours, because it must. Neither
+  // writes *through* a symlink even if one is swapped in after the check: they
+  // replace the name, they do not follow it.
+  const staged = writeTempBeside(path, render(env));
+  let published: boolean;
+  try {
+    if (found.kind === "absent") {
+      published = publishStaged(staged, path, "absent");
+    } else {
+      // `link` is its own check; `rename` is not, so the classification is
+      // repeated as late as it can be. It narrows the window rather than
+      // closing it — see the note on writeLocalConfig.
+      const now = inspect(path);
+      if (now.kind !== "ours") {
+        return {
+          written: false,
+          path,
+          reason:
+            `${path} changed while \`ub init\` was running, so it was left ` +
+            "alone. Run `ub init` again.",
+        };
+      }
+      published = publishStaged(staged, path, "regular");
+    }
+  } finally {
+    removeQuietly(staged);
+  }
+  if (!published) {
+    // Somebody created the file between the check and the publication. That is
+    // the same answer as finding it there in the first place: leave it alone.
+    return {
+      written: false,
+      path,
+      reason:
+        `${path} appeared while \`ub init\` was running, so it was left alone. ` +
+        "Run `ub init` again.",
+    };
+  }
+  return { written: true, path };
+}
+
+/** True when the file exists and no other user can read it. */
+export function isOwnerOnly(path: string): boolean {
+  try {
+    return (statSync(path).mode & 0o077) === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Have mise trust the file we just wrote.
+ *
+ * Not optional politeness: mise refuses *every* task in a directory holding a
+ * config file it does not trust, so skipping this would leave a checkout worse
+ * off than before `ub init` ran. Best effort all the same — mise need not be on
+ * PATH for an installed `ub`, and a user who has to run one command is better
+ * served by being told which one than by a failed init.
+ */
+export function trustLocalConfig(
+  path: string,
+): { trusted: true } | { trusted: false; hint: string } {
+  const hint = `run \`mise trust ${path}\` — until then mise refuses every task in that directory`;
+  try {
+    const result = spawnSync("mise", ["trust", path], {
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    if (result.status === 0) {
+      return { trusted: true };
+    }
+    return { trusted: false, hint };
+  } catch {
+    return { trusted: false, hint };
+  }
+}
