@@ -176,6 +176,48 @@ describe("hub sync", () => {
     ).toBeGreaterThan(0);
   });
 
+  // An archive changes which documents are findable without changing any
+  // document, so the observing replica gets no content update to react to. If
+  // only the acting replica reconciled its index, every other one would answer
+  // search from rows the directory stopped agreeing with — and a restore would
+  // never come back, because nothing else re-indexes a document already
+  // attached.
+  it("follows an archive and a restore on a second replica, with no content edit", async () => {
+    const running = await hub();
+    const author = await serverOn(running.port);
+    const doc = await author.ok("create_doc", {
+      title: "Concepts",
+      blocks: [{ type: "paragraph", text: "a glossary of pangolin terms" }],
+    });
+    await waitForQuiet(author);
+
+    const observer = await serverOn(running.port, {
+      databasePath: tempDatabasePath(),
+    });
+    await waitUntil("the second replica to index the document", async () => {
+      const hits = await observer.ok("search", { query: "pangolin" });
+      return hits.hits.length === 1;
+    });
+
+    await author.ok("archive_doc", { uuid: doc.uuid });
+    await waitUntil("the archive to reach the second replica", async () => {
+      const hits = await observer.ok("search", { query: "pangolin" });
+      return hits.hits.length === 0;
+    });
+    expect((await observer.ok("list_docs", {})).docs).toEqual([]);
+
+    await author.ok("restore_doc", { uuid: doc.uuid });
+    await waitUntil("the restore to reach the second replica", async () => {
+      const hits = await observer.ok("search", { query: "pangolin" });
+      return hits.hits.length === 1;
+    });
+    expect(
+      (await observer.ok("list_docs", {})).docs.map(
+        (entry: { uuid: string }) => entry.uuid,
+      ),
+    ).toEqual([doc.uuid]);
+  });
+
   it("makes concurrent first calls wait for the same hydration", async () => {
     const running = await hub();
     const author = await serverOn(running.port);

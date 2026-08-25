@@ -51,7 +51,12 @@ import {
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
-import type { Annotation, BlockInput, HeadingLevel } from "@uberblick/schema";
+import type {
+  Annotation,
+  BlockInput,
+  DirectoryEntry,
+  HeadingLevel,
+} from "@uberblick/schema";
 import { z } from "zod";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
@@ -184,8 +189,11 @@ const SYNCED_MEANS =
  */
 const ARCHIVE_IS_LAST_WRITE_WINS =
   "Concurrency: a directory entry is written as a whole object, so an archive_doc racing a restore_doc on another " +
-  "replica converges on whichever update Yjs orders last — not on whichever call happened later by the clock. When it " +
-  "matters which way it went, re-read with list_docs and `include_deleted: true`.";
+  "replica converges on whichever update Yjs orders last — not on whichever call happened later by the clock. The same " +
+  "applies to a plain rename or retag made on a replica that had not yet seen the archive: it is a whole-entry write " +
+  "too, so it can bring the document back with nobody calling restore_doc. An archive holds against writers that have " +
+  "seen it, which is not the same as holding against every concurrent one. When it matters which way it went, re-read " +
+  "with list_docs and `include_deleted: true`.";
 
 /** The same narrowing for the mutators that do not restate it in full. */
 const SYNCED_IS_ACKNOWLEDGED =
@@ -257,6 +265,44 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       `Document ${uuid} is known but its room has not synced to this replica yet`,
       { uuid, inDirectory: stub !== null, hub: replicas.sync.state() },
     );
+  };
+
+  /**
+   * Resolve a document for an operation that writes only its directory stub.
+   *
+   * Deliberately weaker than {@link requireDoc}: archiving and restoring change
+   * the directory, not the document, so demanding that the document itself have
+   * reached this replica would strand exactly the case that needs the tool — a
+   * fresh server that knows an archived document only from the directory could
+   * never restore it, because an archived room is not one `adoptKnownDocs`
+   * attaches.
+   *
+   * A uuid the directory has never seen is still refused. Tombstoning a typo
+   * would publish an entry for a document that never existed, and a tombstone
+   * is sticky.
+   */
+  const requireStub = (uuid: string): DirectoryEntry => {
+    const stub = getDirectoryEntry(replicas.directory().doc, uuid);
+    if (stub === null) {
+      throw new ToolError(
+        "doc_not_found",
+        `No document ${uuid} in the directory of workspace ${replicas.config.workspaceId}`,
+        { uuid, inDirectory: false, hub: replicas.sync.state() },
+      );
+    }
+    return stub;
+  };
+
+  /**
+   * The document's own title where this replica holds it, the stub's cached one
+   * otherwise — `meta.title` wins whenever there is a document to ask.
+   */
+  const titleFor = (uuid: string, stub: DirectoryEntry): string => {
+    if (!replicas.known(uuid)) {
+      return stub.title;
+    }
+    const meta = getMeta(replicas.replica(uuid).doc);
+    return meta.uuid === "" ? stub.title : meta.title;
   };
 
   /**
@@ -560,10 +606,13 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
   );
 
   /**
-   * Archiving and restoring both write the *directory*, not the document, so
-   * both report durability for the directory room — that is the room whose
-   * update has to reach the hub — and both re-derive the document's index rows
-   * by hand, because a directory write does not run the document's observer.
+   * Archiving and restoring both write the *directory*, not the document.
+   *
+   * Two consequences. They report durability for the directory room, because
+   * that is the room whose update has to reach the hub. And they do not touch
+   * the derived index themselves: `Replicas` reconciles it from the directory
+   * update, which means the index follows an archive on every replica that
+   * observes it, not only on the one that called the tool.
    */
   server.registerTool(
     "archive_doc",
@@ -581,16 +630,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     },
     guarded(async ({ uuid }) => {
       await replicas.settle();
-      const replica = requireDoc(uuid);
+      const stub = requireStub(uuid);
       const directory = replicas.directory();
+      const title = titleFor(uuid, stub);
       tombstoneDirectoryEntry(directory.doc, uuid);
-      replicas.reindex(replica);
-      return json({
-        uuid,
-        title: getMeta(replica.doc).title,
-        archived: true,
-        ...durability(directory),
-      });
+      return json({ uuid, title, archived: true, ...durability(directory) });
     }),
   );
 
@@ -599,10 +643,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     {
       title: "Restore an archived document",
       description:
-        "Lift a document's archive tombstone: it returns to list_docs, to the web sidebar and to the search index, its " +
-        "title and tags brought back in line with the document's own metadata, which is what they are cached from. " +
-        "The counterpart to archive_doc, and the only way back — a rename or a retag " +
-        "deliberately cannot revive an archived document. Restoring one that was never archived leaves it as it is.\n\n" +
+        "Lift a document's archive tombstone: it returns to list_docs, to the web sidebar and to the search index, with " +
+        "the title and tags the directory recorded for it. The counterpart to archive_doc, and the sanctioned way " +
+        "back — a rename or a retag from a replica that has seen the archive deliberately cannot revive a document. " +
+        "Restoring one that is not archived does nothing at all.\n\n" +
         ARCHIVE_IS_LAST_WRITE_WINS +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED,
@@ -610,13 +654,12 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     },
     guarded(async ({ uuid }) => {
       await replicas.settle();
-      const replica = requireDoc(uuid);
+      const stub = requireStub(uuid);
       const directory = replicas.directory();
       restoreDirectoryEntry(directory.doc, uuid);
-      replicas.reindex(replica);
       return json({
         uuid,
-        title: getMeta(replica.doc).title,
+        title: titleFor(uuid, stub),
         archived: false,
         ...durability(directory),
       });

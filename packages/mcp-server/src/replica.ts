@@ -349,6 +349,7 @@ export class Replicas {
    */
   private afterChange(replica: Replica): void {
     if (replica.isDirectory) {
+      this.reconcileDirectory();
       return;
     }
     this.repairDuplicates(replica);
@@ -364,17 +365,67 @@ export class Replicas {
         return;
       }
       this.repairStub(meta);
-      this.store.indexDoc({
-        uuid: meta.uuid,
-        title: meta.title,
-        tags: meta.tags,
-        links: meta.links,
-        body: getBlocks(replica.doc)
-          .map((block) => block.text)
-          .join("\n"),
-      });
+      this.indexRows(replica, meta);
     } catch (error) {
       log.warn("failed to mirror a document change", error);
+    }
+  }
+
+  /** One document's derived rows, read off the document itself. */
+  private indexRows(replica: Replica, meta: DocMeta): void {
+    this.store.indexDoc({
+      uuid: meta.uuid,
+      title: meta.title,
+      tags: meta.tags,
+      links: meta.links,
+      body: getBlocks(replica.doc)
+        .map((block) => block.text)
+        .join("\n"),
+    });
+  }
+
+  /**
+   * Bring the derived index in line with the directory.
+   *
+   * A directory update changes which documents are supposed to be findable
+   * without changing any document, and nothing else notices: `afterChange`
+   * reacts to *document* updates, and `adoptKnownDocs` only ever attaches
+   * documents it has not attached before. Without this, an archive or a restore
+   * performed on another replica leaves this one's index as it was — and a
+   * restored document stays unsearchable here until somebody happens to edit
+   * it.
+   *
+   * Runs from the same observer that logs the directory update, so it fires for
+   * local and remote origins alike, and only after that update is durable.
+   *
+   * Deliberately does not repair stubs: that would write to the directory from
+   * inside the directory's own update handler. Titles are cached data, repaired
+   * from the document on the document's own updates.
+   */
+  private reconcileDirectory(): void {
+    for (const entry of listDirectory(this.directory().doc, {
+      includeDeleted: true,
+    })) {
+      try {
+        if (entry.deleted === true) {
+          this.store.unindexDoc(entry.uuid);
+          continue;
+        }
+        // A live entry for a document this replica has never attached is left
+        // to `adoptKnownDocs`, which attaches and indexes it on the next
+        // settle. Attaching from in here would join rooms as a side effect of
+        // an observer.
+        if (!this.known(entry.uuid)) {
+          continue;
+        }
+        const replica = this.replica(entry.uuid);
+        const meta = getMeta(replica.doc);
+        if (meta.uuid !== "") {
+          this.indexRows(replica, meta);
+        }
+      } catch (error) {
+        log.warn("failed to reconcile a directory entry", error);
+      }
     }
   }
 
@@ -630,19 +681,6 @@ export class Replicas {
     for (const replica of this.replicas.values()) {
       this.afterChange(replica);
     }
-  }
-
-  /**
-   * Re-derive one document's index rows from its current directory standing.
-   *
-   * Changes to the *directory* do not reach {@link afterChange} — it ignores
-   * the directory replica, because a stub is not a document — so archiving or
-   * restoring a doc would otherwise leave search answering from rows the
-   * directory no longer agrees with. This runs the same branch a document
-   * update runs: tombstoned unindexes, live re-indexes.
-   */
-  reindex(replica: Replica): void {
-    this.afterChange(replica);
   }
 
   /**

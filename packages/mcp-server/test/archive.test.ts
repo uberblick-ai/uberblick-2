@@ -11,6 +11,10 @@
  */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
+import {
+  tombstoneDirectoryEntry,
+  upsertDirectoryEntry,
+} from "@uberblick/schema";
 import { removeTempDirs, startServer, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
@@ -96,6 +100,30 @@ describe("archive_doc", () => {
 });
 
 describe("restore_doc", () => {
+  it("restores a document this replica knows only from the directory", async () => {
+    const rig = await localRig();
+    const uuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+
+    // A document archived elsewhere: the directory carries it, the room never
+    // reached this replica — and never will, because an archived room is not
+    // one `adoptKnownDocs` attaches. Gating on local hydration would strand it
+    // archived forever.
+    const directory = rig.instance.replicas.directory().doc;
+    upsertDirectoryEntry(directory, { uuid, title: "Archived elsewhere" });
+    tombstoneDirectoryEntry(directory, uuid);
+
+    const restored = await rig.ok("restore_doc", { uuid });
+    expect(restored).toMatchObject({
+      uuid,
+      title: "Archived elsewhere",
+      archived: false,
+      applied: true,
+    });
+
+    const listed = await rig.ok("list_docs");
+    expect(listed.docs.map((entry: any) => entry.uuid)).toContain(uuid);
+  });
+
   it("reverses an archive, in discovery and in search alike", async () => {
     const rig = await localRig();
     const doc = await seedDoc(rig);
