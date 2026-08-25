@@ -52,6 +52,7 @@ import { spawn } from "node:child_process";
 import { createReadStream, statSync } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
+import { isIPv4 } from "node:net";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -391,9 +392,21 @@ interface HubDecision {
  * trusts anyone holding it. `HUB_HOST=0.0.0.0 mise run hub` is the deliberate
  * opt-in and `ub open` is not it. Probing such an endpoint for a hub somebody
  * else started stays fine: this governs only what this command starts.
+ *
+ * **A literal, or one of two exact names — never a prefix.** `/^127\./` also
+ * matches the *DNS name* `127.attacker.example`, whose resolution somebody else
+ * controls: the string looks like loopback, the socket binds wherever that name
+ * resolves, and the shared-secret hub is off loopback again by another door. So
+ * the only things accepted here are an actual IPv4 literal in 127.0.0.0/8
+ * (`isIPv4` rejects every name, so the `127.` test is then genuinely a first
+ * octet), the IPv6 loopback literal, and the name `localhost` — which resolves
+ * to loopback by definition rather than by lookup.
  */
 function isLoopbackHost(host: string): boolean {
-  return host === "localhost" || host === "::1" || /^127\./.test(host);
+  if (host === "localhost" || host === "::1" || host === "[::1]") {
+    return true;
+  }
+  return isIPv4(host) && host.startsWith("127.");
 }
 
 /**

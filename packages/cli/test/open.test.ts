@@ -508,7 +508,18 @@ describe("ub open", () => {
     expect(refused.output).toContain("0.0.0.0");
     // Refused means refused: nothing was left listening there.
     expect((await probePort("0.0.0.0", port)).state).toBe("free");
-  }, 60_000);
+
+    // And a *name* that merely looks like loopback is not one: where
+    // `127.attacker.example` resolves is somebody else's decision, so a prefix
+    // test on the string would bind the shared-secret hub wherever they say.
+    const named = await openFails(box, ["--port", String(await freePort())], {
+      ...env,
+      HUB_URL: `ws://127.attacker.example:${port}`,
+    });
+    expect(named.status).toBe(1);
+    expect(named.output).toContain("binds loopback only");
+    expect(named.output).toContain("127.attacker.example");
+  }, 90_000);
 
   it("starts a hub only for an endpoint the hub it starts could answer", async () => {
     const { box, env } = configured();
