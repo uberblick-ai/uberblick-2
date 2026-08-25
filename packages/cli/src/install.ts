@@ -7,6 +7,14 @@
  * pinned any of them would be a second copy of configuration that already has an
  * owner, and it would go stale the first time somebody ran `ub init`.
  *
+ * **The one deliberate exception: `--workspace`.** It registers a *second*
+ * entry, named `uberblick-<label>`, spawning the same line plus one pinned
+ * variable — `WORKSPACE_ID`, the top precedence layer. That is how one agent
+ * session reads two corpora: one process per workspace, two named toolsets, no
+ * workspace parameter on any tool. Everything else is still resolved at spawn,
+ * and a pinned entry does not follow `ub workspace use` — which every report
+ * about one says out loud, because it is the exception.
+ *
  * **Two ways to write, and the vendor's own comes first.** Claude Code ships
  * `claude mcp add`, and Codex ships `codex mcp add` for its global config, so
  * those are used where they apply: the vendor knows its own file, and one of
@@ -14,6 +22,10 @@
  * rather not rewrite. Cursor ships no such subcommand, and `codex mcp add` has
  * no flag for project scope, so those are written here. When a vendor CLI is not
  * installed the file path is taken instead, and the report names which one ran.
+ * A pinned entry is the exception: it is always written here, because whether a
+ * given vendor CLI of a given version takes an environment flag — and under
+ * which spelling — is not something to guess at. Guessing wrong would register
+ * an entry with no pin, quietly serving the wrong corpus.
  *
  * **What it refuses.** Deciding what is already there is always done by reading
  * the file, whichever path does the writing. An entry that is already ours is a
@@ -53,6 +65,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
+import { parseWorkspaceId } from "@uberblick/schema";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import type { Entry, Scope, TargetName } from "./mcp-config.js";
@@ -73,6 +86,8 @@ import {
   removeQuietly,
   writeTempBeside,
 } from "./safe-write.js";
+import type { WorkspaceEntry } from "./workspace.js";
+import { listWorkspaces, resolveWorkspaceId } from "./workspace.js";
 
 /** The default when `ub mcp install` is run with no target named. */
 const DEFAULT_TARGET: TargetName = "claude";
@@ -87,9 +102,23 @@ interface Flags {
   scope: Scope;
   print: boolean;
   force: boolean;
+  /** The workspace to pin a secondary entry to, as it was typed. */
+  workspace: string | null;
+  /** What to call that entry, when `--name` said. */
+  label: string | null;
   /** The command to install, when `-- …` overrode it. */
   entry: Entry;
 }
+
+/**
+ * A label that is a plain key in both formats a client config can be.
+ *
+ * The entry name is `uberblick-<label>`, and that name is a JSON member and a
+ * TOML table header. Keeping it to the bare-key alphabet is what lets both be
+ * written without quoting rules, and it keeps the name typeable — it is what
+ * the agent session will call the toolset.
+ */
+const LABEL = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
 /**
  * Everything after a bare `--` is the command to install, verbatim.
@@ -117,6 +146,8 @@ function parseFlags(argv: string[]): Flags {
       user: { type: "boolean", default: false },
       print: { type: "boolean", default: false },
       force: { type: "boolean", default: false },
+      workspace: { type: "string" },
+      name: { type: "string" },
     },
     allowPositionals: true,
   });
@@ -138,6 +169,18 @@ function parseFlags(argv: string[]): Flags {
   if (override !== null && override.length === 0) {
     throw new Error("`--` must be followed by the command to install");
   }
+  const label = values.name ?? null;
+  if (label !== null && values.workspace === undefined) {
+    throw new Error(
+      "--name names the entry --workspace pins, so it needs a --workspace",
+    );
+  }
+  if (label !== null && !LABEL.test(label)) {
+    throw new Error(
+      `--name ${JSON.stringify(label)} cannot be part of an entry name — ` +
+        'letters, digits, "-" and "_", starting with a letter or a digit',
+    );
+  }
 
   return {
     target: known ? (named as TargetName) : DEFAULT_TARGET,
@@ -147,16 +190,62 @@ function parseFlags(argv: string[]): Flags {
     scope: values.user === true ? "user" : "project",
     print: values.print === true,
     force: values.force === true,
+    workspace: values.workspace ?? null,
+    label,
     entry:
       override === null
         ? DEFAULT_ENTRY
-        : { command: override[0] as string, args: override.slice(1) },
+        : {
+            name: SERVER_NAME,
+            command: override[0] as string,
+            args: override.slice(1),
+          },
   };
 }
 
 /** The command as somebody would type it, for the report. */
 function commandLine(entry: Entry): string {
   return [entry.command, ...entry.args].join(" ");
+}
+
+/**
+ * The same entry under its own name, pinned to one workspace.
+ *
+ * The id is stored as it was typed, decoration included, exactly as
+ * `ub workspace use` stores it: the slug is what makes a config file readable,
+ * and only what reaches a room, a token or the database is the bare uuid.
+ *
+ * The default label is that slug, because it is the name the workspace already
+ * has. A bare uuid has none, so its first group stands in — short enough to
+ * type as a toolset name, and distinct among the handful of workspaces one
+ * machine holds.
+ */
+function pinnedTo(entry: Entry, id: string, label: string | null): Entry {
+  const { uuid, slug } = parseWorkspaceId(id);
+  return {
+    ...entry,
+    name: `${SERVER_NAME}-${label ?? slug ?? (uuid.split("-")[0] as string)}`,
+    env: { WORKSPACE_ID: id },
+  };
+}
+
+/**
+ * The pin, in a report — including the sentence that says what it costs.
+ *
+ * A pinned entry is the one thing in a client config that `ub` will not
+ * re-resolve later, so a report that named the workspace without saying that
+ * would be describing something a reader will reasonably expect to follow
+ * `ub workspace use`.
+ */
+function pinReport(entry: Entry): { fields: string; note: string } {
+  const id = entry.env?.WORKSPACE_ID;
+  if (id === undefined) {
+    return { fields: "", note: "" };
+  }
+  return {
+    fields: field("entry", entry.name) + field("workspace", id),
+    note: `\nThis entry is pinned to ${id}; it does not follow \`ub workspace use\`.\n`,
+  };
 }
 
 // --- the file, held open ----------------------------------------------------
@@ -351,20 +440,26 @@ function vendorCli(
   scope: Scope,
   entry: Entry,
 ): Vendor | null {
+  // A pinned entry is written here, never delegated: see the header. The pin is
+  // the entry's whole reason to exist, and an installer that dropped it would
+  // register a second toolset onto the first one's corpus.
+  if (entry.env !== undefined) {
+    return null;
+  }
   const command = [entry.command, ...entry.args];
   if (target === "claude") {
     const at = ["--scope", scope];
     return {
       program: "claude",
-      add: ["mcp", "add", SERVER_NAME, ...at, "--", ...command],
-      remove: ["mcp", "remove", SERVER_NAME, ...at],
+      add: ["mcp", "add", entry.name, ...at, "--", ...command],
+      remove: ["mcp", "remove", entry.name, ...at],
     };
   }
   if (target === "codex" && scope === "user") {
     return {
       program: "codex",
-      add: ["mcp", "add", SERVER_NAME, "--", ...command],
-      remove: ["mcp", "remove", SERVER_NAME],
+      add: ["mcp", "add", entry.name, "--", ...command],
+      remove: ["mcp", "remove", entry.name],
     };
   }
   return null;
@@ -423,6 +518,32 @@ export async function installCommand(
     return 2;
   }
 
+  // What is being installed: the primary entry, or the secondary one a
+  // `--workspace` pin asks for. Resolved before anything is opened, so a bad id
+  // is a usage error rather than a half-finished install — and resolved exactly
+  // as `ub workspace use` resolves one, so a prefix names the same workspace in
+  // both commands.
+  let entry = flags.entry;
+  if (flags.workspace !== null) {
+    let known: WorkspaceEntry[];
+    try {
+      known = listWorkspaces().entries;
+    } catch (error) {
+      // Refused rather than resolved against a short list: a prefix that
+      // quietly stopped matching would pin a client config to another corpus.
+      io.err(
+        `ub mcp install: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      return 1;
+    }
+    const resolved = resolveWorkspaceId(flags.workspace, known);
+    if ("error" in resolved) {
+      io.err(`ub mcp install: ${resolved.error}\n`);
+      return 2;
+    }
+    entry = pinnedTo(flags.entry, resolved.id, flags.label);
+  }
+
   // A client this command does not know is exactly what `--print` is for, and
   // it is answered before anything looks at the filesystem: there is no file of
   // ours to look at.
@@ -431,7 +552,7 @@ export async function installCommand(
       `ub mcp install: ${JSON.stringify(flags.unlisted)} is not a client \`ub\` ` +
         "knows — this is the generic stdio form to paste into its own config\n",
     );
-    io.out(snippet("json", flags.entry));
+    io.out(snippet("json", entry));
     return 0;
   }
 
@@ -444,7 +565,7 @@ export async function installCommand(
     io.err(
       `ub mcp install: ${where} config path is ${file.path} — paste this into it\n`,
     );
-    io.out(snippet(file.format, flags.entry));
+    io.out(snippet(file.format, entry));
     return 0;
   }
 
@@ -463,7 +584,7 @@ export async function installCommand(
     let matches = false;
     if (existingFile !== null) {
       try {
-        const state = inspect(file.format, existingFile.text, flags.entry);
+        const state = inspect(file.format, existingFile.text, entry);
         existing = state.existing;
         matches = state.matches;
       } catch (error) {
@@ -481,21 +602,24 @@ export async function installCommand(
       }
     }
 
+    const pin = pinReport(entry);
+
     if (matches) {
       let report = "already installed\n\n";
       report += field("target", where);
       report += field("file", file.path);
-      report += field("command", commandLine(flags.entry));
-      io.out(report);
+      report += field("command", commandLine(entry));
+      report += pin.fields;
+      io.out(report + pin.note);
       return 0;
     }
 
     if (existing !== null && !flags.force) {
       io.err(
-        `ub mcp install: ${file.path} already registers "${SERVER_NAME}" as ` +
+        `ub mcp install: ${file.path} already registers "${entry.name}" as ` +
           "something else, so it was left alone.\n\n" +
           `existing\n${existing}\n\n` +
-          `proposed\n${snippet(file.format, flags.entry).trimEnd()}\n\n` +
+          `proposed\n${snippet(file.format, entry).trimEnd()}\n\n` +
           "Values other than the command are hidden. Re-run with --force to " +
           "replace it; the file is backed up first.\n",
       );
@@ -514,7 +638,7 @@ export async function installCommand(
         backup = backUp(file.path, existingFile);
       }
 
-      const vendor = vendorCli(flags.target, flags.scope, flags.entry);
+      const vendor = vendorCli(flags.target, flags.scope, entry);
       let ran: VendorRun = { kind: "absent" };
       if (vendor !== null) {
         if (existingFile !== null) {
@@ -550,7 +674,7 @@ export async function installCommand(
         mkdirSync(dirname(file.path), { recursive: true });
         publish(
           file.path,
-          withEntry(file.format, existingFile?.text ?? null, flags.entry),
+          withEntry(file.format, existingFile?.text ?? null, entry),
           existingFile,
         );
         via = `edited ${file.path}`;
@@ -566,11 +690,13 @@ export async function installCommand(
     let report = `uberblick registered with ${flags.target}\n\n`;
     report += field("target", where);
     report += field("file", file.path);
-    report += field("command", commandLine(flags.entry));
+    report += field("command", commandLine(entry));
+    report += pin.fields;
     report += field("via", via);
     if (backup !== null) {
       report += field("backup", backup);
     }
+    report += pin.note;
     report += "\nRestart the client, or reload its MCP servers, to pick this up.\n";
     io.out(report);
     return 0;

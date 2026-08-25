@@ -42,21 +42,41 @@ export type TargetName = (typeof TARGETS)[number];
 
 export type Scope = "project" | "user";
 
-/** A program and its arguments — what the client will spawn. */
+/** A server as a client registers it: a name, and the program it spawns. */
 export interface Entry {
+  /**
+   * The key it is registered under — {@link SERVER_NAME} for the entry `ub`
+   * installs by default, `uberblick-<label>` for a workspace-pinned one.
+   */
+  name: string;
   command: string;
   args: string[];
+  /**
+   * Environment pinned into the entry, absent for the unpinned one.
+   *
+   * The only value that ever goes here is `WORKSPACE_ID`, and only for the
+   * secondary entries `--workspace` writes: an entry that exists to serve one
+   * named workspace is the one thing a client config can say that `ub` cannot
+   * work out for itself.
+   */
+  env?: Record<string, string>;
 }
 
 /**
  * The line every client is pointed at.
  *
- * No arguments and no environment, ever: which workspace, which hub and which
+ * No arguments and no environment: which workspace, which hub and which
  * credential apply is resolved by `ub` itself, from the layers `config.ts`
- * documents. A client config that pinned any of them would be a second,
- * stale copy of configuration that already has an owner.
+ * documents. A client config that pinned any of them would be a second, stale
+ * copy of configuration that already has an owner. The one exception is a
+ * *second* entry, under its own name and pinned to one workspace on purpose —
+ * see `install.ts`. This one never carries configuration.
  */
-export const DEFAULT_ENTRY: Entry = { command: "ub", args: ["mcp", "serve"] };
+export const DEFAULT_ENTRY: Entry = {
+  name: SERVER_NAME,
+  command: "ub",
+  args: ["mcp", "serve"],
+};
 
 export type Format = "json" | "toml";
 
@@ -272,7 +292,7 @@ function uniqueMember(
  * spawns `other`. Which key wins is the whole question, so it is not answered by
  * whichever parser happened to be asked.
  */
-function assertUnambiguousJson(text: string): void {
+function assertUnambiguousJson(text: string, name: string): void {
   const rootOpen = skipJsonWs(text, 0);
   if (text[rootOpen] !== "{") {
     return;
@@ -284,15 +304,15 @@ function assertUnambiguousJson(text: string): void {
   }
   const ours = uniqueMember(
     objectMembers(text, servers.valueStart).members,
-    SERVER_NAME,
-    `"${SERVER_NAME}"`,
+    name,
+    `"${name}"`,
   );
   if (ours === null || text[ours.valueStart] !== "{") {
     return;
   }
   const fields = objectMembers(text, ours.valueStart).members;
   for (const key of KNOWN_JSON_KEYS) {
-    uniqueMember(fields, key, `"${SERVER_NAME}"'s "${key}"`);
+    uniqueMember(fields, key, `"${name}"'s "${key}"`);
   }
 }
 
@@ -377,6 +397,32 @@ function insertMember(
  */
 const KNOWN_JSON_KEYS = new Set(["type", "command", "args", "env"]);
 
+/**
+ * Whether an entry's environment is the one we would write.
+ *
+ * Exactly, in both directions. For the unpinned entry that means absent or
+ * empty — `claude mcp add` writes `env: {}` where `ub` writes nothing — and for
+ * a pinned one it means the same variable set to the same workspace. An entry
+ * pinned to a *different* workspace is a conflict to report, never an install
+ * to declare finished: the pin is the whole reason that entry exists.
+ */
+function envMatches(
+  value: unknown,
+  wanted: Record<string, string> | undefined,
+): boolean {
+  const expected = Object.entries(wanted ?? {});
+  if (value === undefined) {
+    return expected.length === 0;
+  }
+  if (!isPlainObject(value)) {
+    return false;
+  }
+  return (
+    Object.keys(value).length === expected.length &&
+    expected.every(([key, held]) => value[key] === held)
+  );
+}
+
 function jsonMatches(value: unknown, entry: Entry): boolean {
   if (!isPlainObject(value)) {
     return false;
@@ -390,8 +436,7 @@ function jsonMatches(value: unknown, entry: Entry): boolean {
   if (type !== undefined && type !== "stdio") {
     return false;
   }
-  const env = value.env;
-  if (env !== undefined && !(isPlainObject(env) && Object.keys(env).length === 0)) {
+  if (!envMatches(value.env, entry.env)) {
     return false;
   }
   const args = value.args ?? [];
@@ -448,12 +493,12 @@ function inspectJson(text: string, entry: Entry): Found {
   }
   // Before anything is read out of the parsed document: what `JSON.parse` just
   // produced is only one of the answers a duplicate key can give.
-  assertUnambiguousJson(text);
+  assertUnambiguousJson(text, entry.name);
   const servers = doc.mcpServers;
   if (servers !== undefined && !isPlainObject(servers)) {
     throw new UnusableConfig('its "mcpServers" is not a JSON object');
   }
-  const value = servers?.[SERVER_NAME];
+  const value = servers?.[entry.name];
   if (value === undefined) {
     return { existing: null, matches: false };
   }
@@ -465,8 +510,18 @@ function inspectJson(text: string, entry: Entry): Found {
 
 function serverObject(entry: Entry): Record<string, unknown> {
   // `type` is explicit because Cursor's documentation requires it for local
-  // servers, and Claude Code accepts it — one object serves both.
-  return { type: "stdio", command: entry.command, args: entry.args };
+  // servers, and Claude Code accepts it — one object serves both. `env` is
+  // written only when there is one, so an unpinned entry stays exactly the
+  // three keys it has always been.
+  const object: Record<string, unknown> = {
+    type: "stdio",
+    command: entry.command,
+    args: entry.args,
+  };
+  if (entry.env !== undefined) {
+    object.env = entry.env;
+  }
+  return object;
 }
 
 /**
@@ -476,7 +531,7 @@ function serverObject(entry: Entry): Record<string, unknown> {
  */
 function withEntryJson(text: string | null, entry: Entry): string {
   if (text === null) {
-    return `${JSON.stringify({ mcpServers: { [SERVER_NAME]: serverObject(entry) } }, null, 2)}\n`;
+    return snippetJson(entry);
   }
   const unit = indentOf(text);
   const rootOpen = skipJsonWs(text, 0);
@@ -487,20 +542,20 @@ function withEntryJson(text: string | null, entry: Entry): string {
   const servers = uniqueMember(root.members, "mcpServers", '"mcpServers"');
   if (servers === null) {
     return insertMember(text, rootOpen, root, "mcpServers", {
-      [SERVER_NAME]: serverObject(entry),
+      [entry.name]: serverObject(entry),
     }, unit);
   }
   if (text[servers.valueStart] !== "{") {
     throw new UnusableConfig('its "mcpServers" is not a JSON object');
   }
   const inner = objectMembers(text, servers.valueStart);
-  const ours = uniqueMember(inner.members, SERVER_NAME, `"${SERVER_NAME}"`);
+  const ours = uniqueMember(inner.members, entry.name, `"${entry.name}"`);
   if (ours === null) {
     return insertMember(
       text,
       servers.valueStart,
       inner,
-      SERVER_NAME,
+      entry.name,
       serverObject(entry),
       unit,
     );
@@ -510,13 +565,13 @@ function withEntryJson(text: string | null, entry: Entry): string {
     : null;
   return (
     text.slice(0, ours.keyStart) +
-    renderMember(SERVER_NAME, serverObject(entry), indent, unit) +
+    renderMember(entry.name, serverObject(entry), indent, unit) +
     text.slice(ours.valueEnd)
   );
 }
 
 function snippetJson(entry: Entry): string {
-  return `${JSON.stringify({ mcpServers: { [SERVER_NAME]: serverObject(entry) } }, null, 2)}\n`;
+  return `${JSON.stringify({ mcpServers: { [entry.name]: serverObject(entry) } }, null, 2)}\n`;
 }
 
 // --- TOML: reading a line at a time -----------------------------------------
@@ -540,15 +595,26 @@ function tomlString(value: string): string {
  */
 function tomlBlock(entry: Entry): string {
   const args = entry.args.map(tomlString).join(", ");
+  const pinned = Object.entries(entry.env ?? {});
+  // The table name and any pinned variable are bare keys by construction — the
+  // names are `uberblick` and `uberblick-<label>`, and the only variable is
+  // `WORKSPACE_ID` — so neither needs quoting here.
   return (
-    `[mcp_servers.${SERVER_NAME}]\n` +
+    `[mcp_servers.${entry.name}]\n` +
     `command = ${tomlString(entry.command)}\n` +
-    `args = [${args}]\n`
+    `args = [${args}]\n` +
+    (pinned.length === 0
+      ? ""
+      : `env = { ${pinned
+          .map(([key, value]) => `${key} = ${tomlString(value)}`)
+          .join(", ")} }\n`)
   );
 }
 
-/** The table this module owns, as the key path TOML actually addresses. */
-const OUR_PATH = ["mcp_servers", SERVER_NAME];
+/** The table one entry owns, as the key path TOML actually addresses. */
+function ourPath(name: string): string[] {
+  return ["mcp_servers", name];
+}
 
 function samePath(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((part, index) => part === b[index]);
@@ -850,7 +916,9 @@ function scanToml(text: string): TomlLine[] {
  */
 function ourRegion(
   lines: TomlLine[],
+  name: string,
 ): { start: number; end: number } | null {
+  const OUR_PATH = ourPath(name);
   let table: string[] = [];
   let found: { start: number; end: number } | null = null;
   for (const [index, line] of lines.entries()) {
@@ -872,7 +940,7 @@ function ourRegion(
       if (samePath(line.path, OUR_PATH)) {
         if (found !== null) {
           throw new UnusableConfig(
-            `it defines [mcp_servers.${SERVER_NAME}] more than once`,
+            `it defines [mcp_servers.${name}] more than once`,
           );
         }
         found = { start: index, end: lines.length };
@@ -902,8 +970,8 @@ function ourRegion(
     }
     if (samePath(absolute, OUR_PATH) || underPath(absolute, OUR_PATH)) {
       throw new UnusableConfig(
-        `it writes \`${SERVER_NAME}\` as an inline value rather than as a ` +
-          `[mcp_servers.${SERVER_NAME}] table`,
+        `it writes \`${name}\` as an inline value rather than as a ` +
+          `[mcp_servers.${name}] table`,
       );
     }
   }
@@ -986,7 +1054,7 @@ function redactTomlRegion(classified: TomlLine[]): string {
 function inspectToml(text: string, entry: Entry): Found {
   const source = text.split("\n");
   const classified = scanToml(text);
-  const region = ourRegion(classified);
+  const region = ourRegion(classified, entry.name);
   if (region === null) {
     return { existing: null, matches: false };
   }
@@ -1003,7 +1071,7 @@ function withEntryToml(text: string | null, entry: Entry): string {
     return block;
   }
   const source = text.split("\n");
-  const region = ourRegion(scanToml(text));
+  const region = ourRegion(scanToml(text), entry.name);
   if (region !== null) {
     return [
       ...source.slice(0, region.start),

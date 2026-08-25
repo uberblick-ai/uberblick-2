@@ -27,9 +27,18 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
 import { openConfig, publish, verifyUnchanged } from "../src/install.js";
-import { REPO_ROOT, type Sandbox, removeTempDirs, runUb, sandbox } from "./helpers.js";
+import {
+  REPO_ROOT,
+  type Sandbox,
+  UB_BIN,
+  removeTempDirs,
+  runUb,
+  sandbox,
+} from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -917,5 +926,268 @@ describe("the checkout's own .mcp.json", () => {
     );
     expect(run.status).toBe(0);
     expect(read(join(box.cwd, ".mcp.json"))).toBe(committed);
+  });
+});
+
+/**
+ * `--workspace` — the one thing an entry is allowed to pin.
+ *
+ * The ids are the ones `workspace.test.ts` resolves against, so both commands
+ * are held to the same fixtures: two share a prefix, one does not.
+ */
+describe("ub mcp install --workspace", () => {
+  const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
+  const OTHER = "4d8e0000-1111-4222-8333-444455556666";
+  const UNRELATED = "b7c3d914-5a20-4e6f-8d13-9f04a2c68e75";
+
+  /** A `<uuid>.sqlite` in the data directory: a workspace with a local replica. */
+  function withDatabase(box: Sandbox, uuid: string): void {
+    const dir = join(box.dataHome, "uberblick");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${uuid}.sqlite`), "", "utf8");
+  }
+
+  /** The entry every install has always written. */
+  const UNPINNED = { type: "stdio", command: "ub", args: ["mcp", "serve"] };
+
+  function servers(box: Sandbox): Record<string, unknown> {
+    return JSON.parse(read(join(box.cwd, ".mcp.json"))).mcpServers;
+  }
+
+  function install(box: Sandbox, ...flags: string[]) {
+    return runUb(["mcp", "install", "claude", "--project", ...flags], box, NO_VENDOR);
+  }
+
+  it("adds a named, pinned entry beside the primary one, and says what the pin costs", () => {
+    const box = sandbox();
+    expect(install(box).status).toBe(0);
+    const before = read(join(box.cwd, ".mcp.json"));
+
+    const run = install(box, "--workspace", WORKSPACE, "--name", "ablauf");
+    expect(run.status).toBe(0);
+
+    // The whole file, before and after: one entry arrived, and the primary is
+    // exactly what it was — in value here, and byte for byte below.
+    expect(JSON.parse(before).mcpServers).toEqual({ uberblick: UNPINNED });
+    expect(servers(box)).toEqual({
+      uberblick: UNPINNED,
+      "uberblick-ablauf": { ...UNPINNED, env: { WORKSPACE_ID: WORKSPACE } },
+    });
+    expect(soleInsertion(before, read(join(box.cwd, ".mcp.json")))).not.toBeNull();
+
+    // The pin is the one thing `ub` will not re-resolve at spawn, so the report
+    // says so rather than leaving it to be discovered.
+    expect(run.stdout).toContain("uberblick-ablauf");
+    expect(run.stdout).toContain(`This entry is pinned to ${WORKSPACE}`);
+    expect(run.stdout).toContain("does not follow `ub workspace use`");
+  });
+
+  it("writes today's unpinned entry byte-for-byte when nothing is pinned", () => {
+    // Written out rather than generated: the flag must not have moved a single
+    // byte of what every install without it has always produced.
+    const box = sandbox();
+    expect(install(box).status).toBe(0);
+    expect(read(join(box.cwd, ".mcp.json"))).toBe(
+      '{\n  "mcpServers": {\n    "uberblick": {\n      "type": "stdio",\n' +
+        '      "command": "ub",\n      "args": [\n        "mcp",\n        "serve"\n' +
+        "      ]\n    }\n  }\n}\n",
+    );
+  });
+
+  it("stores a decorated id as typed, and resolves a prefix to the id it names", () => {
+    const box = sandbox();
+    withDatabase(box, WORKSPACE);
+    withDatabase(box, OTHER);
+    withDatabase(box, UNRELATED);
+
+    // Decoration is kept whole — the slug is what makes a config readable, and
+    // it is the name the entry takes when nobody says otherwise.
+    const decorated = `ablauf-${WORKSPACE}`;
+    expect(install(box, "--workspace", decorated).status).toBe(0);
+    expect(servers(box)["uberblick-ablauf"]).toEqual({
+      ...UNPINNED,
+      env: { WORKSPACE_ID: decorated },
+    });
+
+    // A prefix is a way of typing an id, not an id: it is resolved, and a bare
+    // uuid has no slug to name the entry with, so its first group stands in.
+    expect(install(box, "--workspace", "b7c").status).toBe(0);
+    expect(servers(box)[`uberblick-${UNRELATED.slice(0, 8)}`]).toEqual({
+      ...UNPINNED,
+      env: { WORKSPACE_ID: UNRELATED },
+    });
+  });
+
+  it("refuses an unusable id with `ub workspace use`'s own messages, and writes nothing", () => {
+    const box = sandbox();
+    withDatabase(box, WORKSPACE);
+    withDatabase(box, OTHER);
+
+    // Ambiguous: both `4d8e…` uuids start with it, and the refusal names them.
+    const ambiguous = install(box, "--workspace", "4d8e");
+    expect(ambiguous.status).toBe(2);
+    expect(ambiguous.stderr).toMatch(WORKSPACE);
+    expect(ambiguous.stderr).toMatch(OTHER);
+
+    const noMatch = install(box, "--workspace", "ffff");
+    expect(noMatch.status).toBe(2);
+    expect(noMatch.stderr).toMatch(/no workspace on this machine starts with/);
+
+    const notAUuid = install(box, "--workspace", "my-notes");
+    expect(notAUuid.status).toBe(2);
+    expect(notAUuid.stderr).toMatch(/is not a workspace id/);
+
+    // A name with nothing to pin would be a second entry running the same
+    // unpinned command under a second name, which is not a thing to install.
+    const unpinned = install(box, "--name", "ablauf");
+    expect(unpinned.status).toBe(2);
+    expect(unpinned.stderr).toMatch(/needs a --workspace/);
+
+    expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
+  });
+
+  it("refuses somebody else's entry under the pinned name, and --force replaces only that one", () => {
+    const box = sandbox();
+    const path = join(box.cwd, ".mcp.json");
+    const before =
+      '{\n  "mcpServers": {\n' +
+      '    "uberblick": {"command": "ub", "args": ["mcp", "serve"]},\n' +
+      '    "uberblick-ablauf": {\n      "command": "somebody-elses",\n' +
+      '      "args": ["serve"]\n    }\n  }\n}\n';
+    writeFileSync(path, before, "utf8");
+
+    const refused = install(box, "--workspace", WORKSPACE, "--name", "ablauf");
+    expect(refused.status).toBe(1);
+    // Named as the entry that is in the way, with both sides of the decision.
+    expect(refused.stderr).toContain('"uberblick-ablauf"');
+    expect(refused.stderr).toContain("somebody-elses");
+    expect(refused.stderr).toMatch(/proposed/);
+    expect(refused.stderr).toMatch(/--force/);
+    expect(read(path)).toBe(before);
+
+    const forced = install(box, "--workspace", WORKSPACE, "--name", "ablauf", "--force");
+    expect(forced.status).toBe(0);
+    const change = soleChange(before, read(path));
+    expect(change.removed).toContain("somebody-elses");
+    // The primary entry is nowhere near the span that changed.
+    expect(change.removed).not.toContain('"command": "ub"');
+    expect(read(path)).toContain('"uberblick": {"command": "ub", "args": ["mcp", "serve"]}');
+  });
+
+  it("does not repin an entry to another workspace without being asked", () => {
+    // Same name, different workspace: the pin is the entry's whole reason to
+    // exist, so moving it quietly would hand a session another corpus under a
+    // name it already trusts.
+    const box = sandbox();
+    expect(install(box, "--workspace", WORKSPACE, "--name", "ablauf").status).toBe(0);
+    const before = read(join(box.cwd, ".mcp.json"));
+
+    const repin = install(box, "--workspace", UNRELATED, "--name", "ablauf");
+    expect(repin.status).toBe(1);
+    expect(repin.stderr).toMatch(/--force/);
+    expect(read(join(box.cwd, ".mcp.json"))).toBe(before);
+  });
+});
+
+describe("two entries, side by side", () => {
+  const PRIMARY = "1e9b7a30-52c4-4d6f-8a13-c7b204e5f981";
+  const PINNED = "8f21c604-3b7d-4a15-9c62-0d5e8b3f7a29";
+
+  /** The environment a spawn wants: strings only, no undefined values. */
+  function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+    const result: Record<string, string> = {};
+    for (const [key, value] of Object.entries(env)) {
+      if (value !== undefined) {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+
+  interface Registered {
+    command: string;
+    args: string[];
+    env?: Record<string, string>;
+  }
+
+  /** A session spawned exactly as the entry in the config says to spawn it. */
+  async function open(entry: Registered, box: Sandbox): Promise<Client> {
+    const client = new Client({ name: "uberblick-install-tests", version: "0.0.0" });
+    await client.connect(
+      new StdioClientTransport({
+        command: entry.command,
+        args: entry.args,
+        cwd: box.cwd,
+        env: stringEnv({ ...box.env, ...entry.env }),
+      }),
+    );
+    return client;
+  }
+
+  /** One tool call, as the JSON the tool answered with. */
+  async function call<T>(
+    client: Client,
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<T> {
+    const result = await client.callTool({ name, arguments: args });
+    const content = result.content as { text: string }[];
+    return JSON.parse((content[0] as { text: string }).text) as T;
+  }
+
+  interface Listing {
+    workspace: string;
+    docs: { title: string }[];
+  }
+
+  it("serve disjoint corpora out of one data directory", async () => {
+    const box = sandbox({ userConfig: { workspace: PRIMARY } });
+    // Both entries have to spawn *this* checkout's `ub`, which is not on any
+    // PATH, so both are installed through the `--` override. Everything else —
+    // the names, the pin, the file — is what `ub mcp install` decided.
+    const spawnLine = [process.execPath, UB_BIN, "mcp", "serve"];
+    expect(
+      runUb(["mcp", "install", "claude", "--project", "--", ...spawnLine], box, NO_VENDOR)
+        .status,
+    ).toBe(0);
+    expect(
+      runUb(
+        [
+          "mcp",
+          "install",
+          "claude",
+          "--project",
+          "--workspace",
+          PINNED,
+          "--name",
+          "other",
+          "--",
+          ...spawnLine,
+        ],
+        box,
+        NO_VENDOR,
+      ).status,
+    ).toBe(0);
+
+    const registered = JSON.parse(read(join(box.cwd, ".mcp.json"))).mcpServers;
+    const primary = await open(registered.uberblick, box);
+    const pinned = await open(registered["uberblick-other"], box);
+    try {
+      await call(primary, "create_doc", { title: "only in the primary" });
+      await call(pinned, "create_doc", { title: "only in the pinned one" });
+
+      const here = await call<Listing>(primary, "list_docs", {});
+      const there = await call<Listing>(pinned, "list_docs", {});
+
+      // Two workspaces, two corpora: the pinned entry ignores the workspace the
+      // directory configures, and neither can see the other's document.
+      expect(here.workspace).toBe(PRIMARY);
+      expect(there.workspace).toBe(PINNED);
+      expect(here.docs.map((doc) => doc.title)).toEqual(["only in the primary"]);
+      expect(there.docs.map((doc) => doc.title)).toEqual(["only in the pinned one"]);
+    } finally {
+      await primary.close();
+      await pinned.close();
+    }
   });
 });

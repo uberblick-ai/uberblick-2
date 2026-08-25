@@ -239,8 +239,12 @@ function listCommand(argv: string[], io: Io): number {
  * resolve against what `list` knows, and the two ways that fails are told apart
  * on purpose: "that is not a uuid" sends you to check what you pasted, "nothing
  * here starts with that" sends you to `ub workspace list`.
+ *
+ * Exported because `ub mcp install --workspace` writes a workspace id into a
+ * client config, and a prefix that meant one thing there and another here would
+ * be a config pinned to a workspace nobody chose.
  */
-function resolveId(
+export function resolveWorkspaceId(
   raw: string,
   known: readonly WorkspaceEntry[],
 ): { id: string } | { error: string } {
@@ -353,7 +357,7 @@ function useCommand(argv: string[], io: Io): number {
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
-  const resolved = resolveId(raw, entries);
+  const resolved = resolveWorkspaceId(raw, entries);
   if ("error" in resolved) {
     io.err(`ub workspace use: ${resolved.error}\n`);
     return 2;

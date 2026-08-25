@@ -60,6 +60,8 @@ mcp install options:
   --user            write the per-user config
   --print           print the snippet to paste; write nothing
   --force           replace an existing "uberblick" entry, backing the file up
+  --workspace <id>  register a second entry pinned to this workspace instead
+  --name <label>    call that entry "uberblick-<label>" (default: its slug)
   -- <command>      register this command instead of uberblick's own
 
 options:
