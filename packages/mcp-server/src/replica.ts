@@ -456,9 +456,27 @@ export class Replicas {
           this.indexRows(replica, meta);
         }
       } catch (error) {
+        // The store refused. Put the uuid back, so the next settle or directory
+        // update tries again: dropping it would leave this replica's index
+        // permanently disagreeing with the directory, with nothing left to
+        // notice — and would let a tool report an index change that never
+        // happened.
+        this.staleStubs.add(uuid);
         log.warn("failed to reconcile a directory entry", error);
       }
     }
+  }
+
+  /**
+   * Whether this replica's index is in line with the directory for one
+   * document.
+   *
+   * False while a reconciliation is still owed for it — either because none has
+   * run yet, or because one ran and the store refused, in which case the uuid
+   * stays queued and a later settle retries it.
+   */
+  indexReconciled(uuid: string): boolean {
+    return !this.staleStubs.has(uuid);
   }
 
   /** Whether this replica holds the document itself, not just its stub. */
@@ -636,6 +654,12 @@ export class Replicas {
   private refresh(): void {
     this.pollAll();
     this.adoptKnownDocs();
+    // Retry whatever the store refused last time. Reconciliation normally rides
+    // directory updates, and a failed entry would otherwise wait for the next
+    // one — which may never come for a document nobody touches again.
+    if (this.staleStubs.size > 0) {
+      this.reconcileDirectory();
+    }
   }
 
   private async runSettle(): Promise<void> {

@@ -620,8 +620,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "This is not erasure and not a delete. Every block, mark and annotation stays exactly where it was: get_doc still " +
         "serves the document by uuid, and list_docs with `include_deleted: true` still lists it, flagged `deleted`. " +
         "restore_doc is the way back. There is no tool that erases content, by design.\n\n" +
-        "`indexed` is always true here: dropping a document from this replica's search index needs no copy of the " +
-        "document, only its uuid.\n\n" +
+        "`indexed` says this replica's search index has dropped the document. Dropping it needs only its uuid, so " +
+        "unlike restore_doc this does not depend on holding the document — it is false only if the index write itself " +
+        "failed, and then the document stays queued and a later call retries it. The archive itself is unaffected " +
+        "either way: `applied` is the durable half.\n\n" +
         ARCHIVE_IS_LAST_WRITE_WINS +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED,
@@ -637,9 +639,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         uuid,
         title,
         archived: true,
-        // Withdrawing a document from the index needs no copy of it, so this is
-        // never the qualified answer that `restore_doc` can give.
-        indexed: true,
+        // Withdrawing a document needs no copy of it, so hydration cannot make
+        // this false — but a store that refused the write can, and then the
+        // uuid stays queued for a later retry rather than being reported done.
+        indexed: replicas.indexReconciled(uuid),
         ...durability(directory),
       });
     }),
@@ -655,9 +658,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "back — a rename or a retag from a replica that has seen the archive deliberately cannot revive a document. " +
         "Restoring one that is not archived does nothing at all.\n\n" +
         "Check `indexed`. It is true when this replica holds the document itself and has just re-derived its search " +
-        "rows — the usual case. It is false when this replica knows the document only from the directory: the restore " +
-        "is real and replicates, `list_docs` shows it immediately, but SEARCH ON THIS REPLICA will not find it until " +
-        "the document's own content arrives, which offline means not until the hub is reachable again.\n\n" +
+        "rows — the usual case. It is false in two: when this replica knows the document only from the directory, and " +
+        "when the index write was refused. Either way the restore is real, replicates, and shows in list_docs " +
+        "immediately, but SEARCH ON THIS REPLICA will not find the document yet — it catches up when the content " +
+        "arrives or on a later call, whichever was missing. Offline, content arriving means the hub coming back.\n\n" +
         ARCHIVE_IS_LAST_WRITE_WINS +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED,
@@ -673,14 +677,15 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       // the directory up here, or the document comes back under the metadata it
       // was archived with while search answers from the newer.
       //
-      // The same condition decides both: only a document this replica actually
-      // holds can republish its stub or re-derive its index rows.
+      // Hydration is what makes re-indexing possible; it is not proof that it
+      // happened. Both have to hold, and the store gets the last word — read
+      // after the republish, whose own directory write reconciles again.
       const hydrated = replicas.republishStub(uuid);
       return json({
         uuid,
         title: titleFor(uuid, stub),
         archived: false,
-        indexed: hydrated,
+        indexed: hydrated && replicas.indexReconciled(uuid),
         ...durability(directory),
       });
     }),

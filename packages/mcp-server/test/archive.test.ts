@@ -20,16 +20,26 @@ import {
   startServer,
   tempDatabasePath,
   testConfig,
+  waitUntil,
 } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 import { MirrorStore } from "../src/store.js";
 import type { IndexedDoc } from "../src/store.js";
 
-/** A real store that also remembers which documents it was asked to re-index. */
+/**
+ * A real store that remembers which documents it was asked to re-index, and can
+ * refuse the next request the way a locked or full database would.
+ */
 class CountingStore extends MirrorStore {
   readonly indexed: string[] = [];
 
+  failNextIndex = false;
+
   override indexDoc(doc: IndexedDoc): void {
+    if (this.failNextIndex) {
+      this.failNextIndex = false;
+      throw new Error("simulated index failure");
+    }
     this.indexed.push(doc.uuid);
     super.indexDoc(doc);
   }
@@ -190,6 +200,41 @@ describe("restore_doc", () => {
 
     const hits = await rig.ok("search", { query: "glossary" });
     expect(hits.hits.map((hit: any) => hit.uuid)).toEqual([doc.uuid]);
+  });
+
+  it("reports a refused index write as not indexed, and retries it", async () => {
+    const store = new CountingStore(tempDatabasePath());
+    const rig = await startServer(testConfig(), store);
+    rigs.push(rig);
+
+    const doc = await seedDoc(rig);
+    await rig.ok("archive_doc", { uuid: doc.uuid });
+
+    // The restore lands in the directory and replicates; only the derived index
+    // write fails. Claiming `indexed: true` here would send an agent looking for
+    // a document its own search cannot return.
+    store.failNextIndex = true;
+    const restored = await rig.ok("restore_doc", { uuid: doc.uuid });
+    expect(restored).toMatchObject({
+      uuid: doc.uuid,
+      archived: false,
+      applied: true,
+      indexed: false,
+    });
+
+    // Not merely reported as missing: still owed. Asserted before any further
+    // tool call, because the settle at the start of one would repair it — which
+    // is exactly the point of keeping the uuid queued.
+    expect(rig.instance.replicas.indexReconciled(doc.uuid)).toBe(false);
+
+    // And that repair happens: the next call settles, retries, and search finds
+    // the document. A refused index write is transient, not a divergence that
+    // outlives it.
+    await waitUntil("the refused index write to be retried", async () => {
+      const hits = await rig.ok("search", { query: "glossary" });
+      return hits.hits.length === 1;
+    });
+    expect(rig.instance.replicas.indexReconciled(doc.uuid)).toBe(true);
   });
 
   it("republishes metadata that changed while the document was archived", async () => {
