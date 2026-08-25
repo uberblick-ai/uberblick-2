@@ -16,7 +16,13 @@ import type { DirectoryEntry } from "@uberblick/schema";
  * than one of them belongs to the first one here — the order is the tie-break,
  * not the document's own tag order, so two replicas group identically.
  */
-export const GROUP_TAGS = ["start-here", "feature", "verify", "reference"] as const;
+export const GROUP_TAGS = [
+  "start-here",
+  "feature",
+  "verify",
+  "implementation-reference",
+  "reference",
+] as const;
 
 export type GroupTag = (typeof GROUP_TAGS)[number];
 
@@ -29,6 +35,7 @@ const LABELS: Record<GroupKey, string> = {
   "start-here": "Start here",
   feature: "Features",
   verify: "Verify",
+  "implementation-reference": "Implementation reference",
   reference: "Reference",
   [UNGROUPED_KEY]: "Other",
 };

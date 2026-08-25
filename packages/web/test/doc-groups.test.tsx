@@ -16,7 +16,7 @@ import * as Y from "yjs";
 import { listDirectory, upsertDirectoryEntry } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { DocList } from "../src/ui/DocList.js";
-import { GROUP_TAGS, groupEntries, groupKeyFor } from "../src/ui/groups.js";
+import { groupEntries, groupKeyFor } from "../src/ui/groups.js";
 
 function entry(uuid: string, title: string, tags: string[] = []): DirectoryEntry {
   return { uuid, title, tags };
@@ -35,8 +35,16 @@ describe("grouping derives from the directory listing", () => {
       entry("c", "Untitled", []),
       entry("b", "Overview", ["start-here"]),
       entry("e", "Editing", ["feature"]),
+      entry("f", "MCP tool contracts", ["implementation-reference"]),
     ];
-    expect(keys(entries)).toEqual([...GROUP_TAGS, "other"]);
+    expect(keys(entries)).toEqual([
+      "start-here",
+      "feature",
+      "verify",
+      "implementation-reference",
+      "reference",
+      "other",
+    ]);
   });
 
   it("places a multi-tagged doc under the first group in canonical order", () => {
