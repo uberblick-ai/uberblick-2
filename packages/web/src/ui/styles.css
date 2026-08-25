@@ -9,6 +9,12 @@
  * Token values are the uberblick brand set (uberblick-ai/uberblick-rails
  * `frontend/src/style.css`), with the rails light/dark default inverted.
  *
+ * Weight works the same way: the product uses two, 400 for text and 500 for
+ * headings and emphasis, and no rule here sets 600 or 700. A heavier face on a
+ * screen-first grotesque reads as shouting rather than as hierarchy, which size
+ * and colour already carry. Keep new rules inside those two — the one known
+ * exception, the browser's own <strong>, is noted at the inline-marks section.
+ *
  * The one place a color literal is allowed in the app is the awareness palette
  * in `src/collab/identity.ts`: y-prosemirror only accepts `#rrggbb` for remote
  * cursors, so those colors cannot be tokens.
@@ -47,6 +53,11 @@
   --status-info: oklch(0.7 0.17 240);
   --status-info-subtle: oklch(0.25 0.03 240);
 
+  /* Running prose, one step back from `--foreground`. A whole column set at
+     the brightest ink in the palette glares; headings keep `--foreground`, so
+     the hierarchy is carried by contrast rather than by size alone. */
+  --prose-text: oklch(0.92 0 0);
+
   /* Remote-cursor label text. Theme-invariant on purpose — it sits on the peer's
      awareness colour, which y-prosemirror writes inline as a `#rrggbb` literal
      (see src/collab/identity.ts), and that palette is picked for white text:
@@ -74,6 +85,10 @@
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   font-family: var(--font-sans);
+  /* Geist is a low-contrast grotesque; subpixel rendering thickens its stems
+     enough that 400 reads as 500 and the two-weight system collapses. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* The two faces ship with the app: variable woff2 files vendored under
@@ -139,6 +154,8 @@
     --status-warning-subtle: oklch(0.95 0.04 75);
     --status-info: oklch(0.65 0.15 240);
     --status-info-subtle: oklch(0.95 0.03 240);
+
+    --prose-text: oklch(0.3 0 0);
   }
 }
 
@@ -171,7 +188,7 @@ body {
 /* The wordmark is Geist like the rest of the UI — the serif display face is
    gone with Fraunces. */
 .ub-brand {
-  font-weight: 700;
+  font-weight: 500;
   color: var(--brand);
 }
 
@@ -284,7 +301,7 @@ body {
 
 .ub-list li button.ub-selected {
   background: var(--brand-subtle);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .ub-empty {
@@ -558,7 +575,7 @@ body {
 }
 
 .ub-thread-author {
-  font-weight: 600;
+  font-weight: 500;
   color: var(--foreground);
 }
 
@@ -697,9 +714,13 @@ body {
   padding: 0.2rem 0.35rem;
 }
 
+/* The doc title is the document's h1 and is set like one — same size, leading
+   and tracking as `h1.ub-heading` below. */
 .ub-title {
-  font-size: 1.4rem;
-  font-weight: 700;
+  font-size: 2.05rem;
+  font-weight: 500;
+  line-height: 1.18;
+  letter-spacing: -0.021em;
   border: 0;
   border-bottom: 1px solid transparent;
   background: none;
@@ -805,20 +826,48 @@ body {
 .ub-editor .tiptap {
   outline: none;
   min-height: 12rem;
-  line-height: 1.55;
+  /* Long-form leading. The measure is capped at `--measure`, and a wide-ish
+     column needs the extra air to keep the return sweep findable. */
+  line-height: 1.7;
   /* ProseMirror warns without this and relies on it for caret placement at
      line ends and around trailing spaces. Set here instead of loading
      prosemirror-view's stylesheet, which brings a pile of unrelated rules. */
   white-space: pre-wrap;
 }
 
+/* Sizes, leading and tracking are the 1a mockup's. Tracking tightens as the
+   size grows — at display sizes the default fit reads loose. Levels 4-6 are
+   reachable from the schema but not from the block palette, so they keep the
+   browser's sizing and only inherit the weight and leading below. */
 .ub-heading {
+  font-weight: 500;
   line-height: 1.2;
   margin: 1.2em 0 0.4em;
 }
 
+h1.ub-heading {
+  font-size: 2.05rem;
+  line-height: 1.18;
+  letter-spacing: -0.021em;
+}
+
+h2.ub-heading {
+  font-size: 1.19rem;
+  line-height: 1.3;
+  letter-spacing: -0.012em;
+}
+
+h3.ub-heading {
+  font-size: 1.05rem;
+  line-height: 1.35;
+  letter-spacing: -0.008em;
+}
+
+/* Prose steps back to `--prose-text`; the headings above stay `--foreground`,
+   and code and mermaid are source text, not prose, so they are untouched. */
 .ub-paragraph {
   margin: 0.5em 0;
+  color: var(--prose-text);
 }
 
 .ub-code,
@@ -927,7 +976,14 @@ body {
 /* Bold, italic and strikethrough render as <strong>, <em> and <s>, and the
    browser's own styling of those is exactly right — Geist covers the weights,
    and italics are the synthetic oblique the @font-face block above settles on.
-   Only the two machine-flavoured marks need rules of their own. */
+   Only the two machine-flavoured marks need rules of their own.
+
+   One exception is already known: <strong> takes the browser's 700, the single
+   place in the app that exceeds the 500 the file header sets. Inside 400
+   prose 600 is the emphasis that belongs to this scale — 700 is a different
+   typeface weight than anything else on the page. Left to #57, which owns the
+   mark rendering; changing it here would land untested styling for a surface
+   that issue is about to rework. */
 .ub-inline-code {
   font-family: var(--font-mono);
   font-size: 0.9em;
@@ -954,6 +1010,12 @@ body {
   border: 2px solid var(--destructive);
   border-radius: var(--radius);
   padding: 0.6rem 0.75rem;
+}
+
+/* Chrome, not prose: the banner's lead sentence is a <strong> for the meaning,
+   and takes the UI weight rather than the browser's 700. */
+.ub-foreign-banner strong {
+  font-weight: 500;
 }
 
 .ub-foreign-list {
@@ -987,7 +1049,7 @@ body {
   left: -1px;
   font-size: 0.65rem;
   font-style: normal;
-  font-weight: 600;
+  font-weight: 500;
   line-height: normal;
   white-space: nowrap;
   color: var(--cursor-label-foreground);
