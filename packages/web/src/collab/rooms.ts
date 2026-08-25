@@ -170,7 +170,10 @@ export interface RoomConnection {
   status: RoomStatus;
   /** Subscribe to status changes. Returns an unsubscribe function. */
   onStatusChange(listener: (status: RoomStatus) => void): () => void;
-  /** Resolves once the IndexedDB replica has been applied. */
+  /**
+   * Resolves once the local read is over: the replica applied, or nothing to
+   * apply. Always settles — see `localReplicaLoaded`, which it moves with.
+   */
   whenLocalReplicaLoaded: Promise<void>;
 }
 
@@ -258,20 +261,33 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   const whenLocalReplicaLoaded = new Promise<void>((resolve) => {
     resolveLocal = resolve;
   });
-  if (typeof indexedDB !== "undefined") {
-    persistence = new IndexeddbPersistence(room, ydoc);
-    persistence.once("synced", () => {
-      status.localReplicaLoaded = true;
-      resolveLocal();
-      emit();
-    });
-  } else {
-    // No IndexedDB, so there is no local replica to wait for and the question is
-    // already settled — which is what `localReplicaLoaded` answers. Leaving it
-    // false would be a promise of a read that is never coming, and readers of
-    // the flag (see `replicaHasAnswered`) would wait for it forever.
+  /**
+   * The local read is over — with content, or with nothing. Terminal and
+   * idempotent, because every reader of `localReplicaLoaded` treats false as
+   * "still reading": a read that can never finish must not be spelled the same
+   * way as one that has not finished yet, or the pane waits on it in silence
+   * instead of showing the waiting screen (`replicaHasAnswered`).
+   */
+  const localReadDone = (): void => {
+    if (status.localReplicaLoaded) return;
     status.localReplicaLoaded = true;
     resolveLocal();
+    emit();
+  };
+  if (typeof indexedDB !== "undefined") {
+    persistence = new IndexeddbPersistence(room, ydoc);
+    persistence.once("synced", localReadDone);
+    // Opening the database can fail outright: a private window, a browser told
+    // to block site data, a quota refusal. `y-indexeddb` has no error event and
+    // never emits `synced` after that — the rejection of its open promise is
+    // the only signal, and leaving it unhandled is also an unhandled rejection.
+    // There is no cache to read, so the honest terminal answer is "read, found
+    // nothing", and the room runs on live sync alone.
+    persistence._db.catch(localReadDone);
+  } else {
+    // No IndexedDB at all (jsdom, some embedded webviews): the same terminal
+    // state, reached without an attempt.
+    localReadDone();
   }
 
   const connection: RoomConnection = {
@@ -315,7 +331,10 @@ export function acquireRoom(
       if (held.refs > 0) return;
       entries.delete(room);
       held.listeners.clear();
-      held.persistence?.destroy();
+      // `destroy` closes the database through the same open promise, so on a
+      // room whose database never opened it rejects. Nothing to repair — the
+      // thing being closed was never there.
+      held.persistence?.destroy().catch(() => {});
       held.connection.provider.destroy();
       held.connection.ydoc.destroy();
       // Nothing left to repair: a deferred drop would reconnect a socket no

@@ -305,6 +305,12 @@ function openingConnection(room: string): {
     localReplicaLoaded: false,
   };
   const listeners = new Set<(next: RoomStatus) => void>();
+  // Deferred, so the promise and the flag say the same thing: both are the
+  // local read, and `load` is the only thing that completes it.
+  let localReplicaLoaded: () => void = () => {};
+  const whenLocalReplicaLoaded = new Promise<void>((resolve) => {
+    localReplicaLoaded = resolve;
+  });
   const connection = {
     room,
     ydoc,
@@ -315,13 +321,14 @@ function openingConnection(room: string): {
       listener({ ...status });
       return () => listeners.delete(listener);
     },
-    whenLocalReplicaLoaded: Promise.resolve(),
+    whenLocalReplicaLoaded,
   } as unknown as RoomConnection;
   return {
     connection,
     load: (from?: Y.Doc) => {
       if (from !== undefined) Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(from));
       status.localReplicaLoaded = true;
+      localReplicaLoaded();
       for (const listener of listeners) listener({ ...status });
     },
   };
