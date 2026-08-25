@@ -14,6 +14,8 @@ import type { ChangedBlocks } from "./changed-blocks.js";
 import { Collaboration } from "./collaboration.js";
 import { BlockInputRules } from "./input-rules.js";
 import { paletteExtensions } from "./nodes.js";
+import { AgentTypingTheater } from "./typing-theater.js";
+import type { AgentTypingOptions } from "./typing-theater.js";
 
 /** The palette without collaboration — the schema, and nothing that needs a Y.Doc. */
 export const paletteOnlyExtensions: Extensions = [...paletteExtensions];
@@ -39,6 +41,14 @@ export interface CreateEditorOptions {
    * changed-block marks — which is what an editor with no reader wants.
    */
   changed?: ChangedBlocks;
+  /**
+   * The injectable parts of the agent typing animation — the motion
+   * preference, the jitter source and the clock — so a test can make playback
+   * deterministic. All default to the real thing.
+   */
+  typing?: Partial<
+    Pick<AgentTypingOptions, "reducedMotion" | "random" | "now">
+  >;
 }
 
 export function createUberblickEditor(options: CreateEditorOptions): Editor {
@@ -57,6 +67,13 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
       awareness: options.awareness ?? null,
     }),
     ChangedBlockMarks.configure({ marks: options.changed ?? null }),
+    // After the changed-block marker, and reading the same tracker: the gutter
+    // line says *that* a block changed the moment it does, whatever the
+    // animation's queue is doing about showing *what* changed (#121).
+    AgentTypingTheater.configure({
+      marks: options.changed ?? null,
+      ...(options.typing ?? {}),
+    }),
   ];
 
   return new Editor({
