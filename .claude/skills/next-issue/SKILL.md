@@ -77,48 +77,75 @@ protocol, scheduling semantics, and lint. This file does not restate it.
      UI-only diff skip the round.
      Mechanism depends on the environment: when running under herdr
      (`test "${HERDR_ENV:-}" = 1`; use the herdr skill and `herdr agent` to
-     find the Codex pane), talk to that Codex session directly and iterate —
-     answer its findings, push fixes, re-request — until both sides are
-     satisfied; otherwise use the codex plugin. Either way the review brief is
+     find the Codex pane), talk to that Codex session directly — answer its
+     findings, push fixes, and re-request within the re-review scoping
+     below, never open-endedly; otherwise use the codex plugin. Either way the review brief is
      the same: be critical, and hunt specifically for overtesting and
      overengineering per this repo's principles (KISS/YAGNI, least code wins,
      tests defend contracts and invariants — not implementation trivia).
-   **Finding disposition — triage before any fix-up brief.** A finding is
-   not a work item by default. The bar is the supported usage model (single
-   user, local-first, one hub, parallel loop-dispatched agents, dev-stage
-   data), not conceivability. Every finding gets exactly one disposition:
-   - **P1 — fix now.** Breaks supported usage, loses data, or violates a
-     CLAUDE.md invariant. Fixed before merge; the only class the external
-     reviewer re-assesses.
-   - **P2 — fix if cheap.** Real within the usage model, edge frequency.
-     Fixed in the current wave when the diff stays small, otherwise
-     extracted to an issue. Never spawns an extra review round on its own.
-   - **Document.** Real only outside the usage model. One code comment or
-     doc line naming the boundary — zero code, zero tests. This is the
-     `edit_block` idiom: document the limit, don't engineer it away.
-   - **Reject.** Not reachable, or cost exceeds stake. Explicit reply on
-     the PR thread — never silent dismissal.
-   Calibration from this loop's own record: skepticism scales with
-   hypotheticality, not with severity labels. A concurrency finding on a
-   human-run command starts at "document"; a startup/shutdown/stdin/spawn
-   lifecycle finding starts at "fix if cheap" — that category has repeatedly
-   proven real here (#102, #154, #161) while speculative concurrency
-   hardening has proven expensive (#127, six review rounds).
-   **One fix-up wave per round.** Collect every open finding — Codex,
-   Copilot, coordinator validation — into one batched brief, one Opus
-   dispatch, one re-gate at the new head. Never dispatch per finding or per
-   reviewer. The brief carries two standing lines: smallest diff that
-   closes the findings; new tests only for the invariant a finding names,
-   never for the mechanism of the fix. The gate check applies to fix-up
-   diffs too: a wave that grew beyond its briefed findings is triaged like
-   any other scope escape.
-   **Re-review scope and exit.** Further external-review rounds happen only
-   while a P1 is open, and each is scoped to the P1 fixes plus the commits
-   since the previous round — P2/P3 fixes are verified by the coordinator
-   (tests plus diff read), never re-submitted for blessing. Exit when no P1
-   remains. Convergence guard rather than a round cap: the open-P1 count
-   must shrink every round; a round surfacing net-new P1s parks the PR as
-   `needs-human` with the finding list instead of looping.
+   **Finding triage — before any fix-up brief.** A finding is not
+   automatically a work item; every finding is triaged explicitly against
+   the supported usage model (single user, local-first, one hub, parallel
+   loop-dispatched agents, dev-stage data). Record three independent
+   decisions per finding — severity does not decide the other two:
+   - **Severity.** P1: supported usage can lose data, expose secrets,
+     violate a CLAUDE.md invariant, or become materially unusable. P2: a
+     real correctness, reliability, accessibility, or maintainability
+     defect within supported usage, without P1 impact. P3: minor, local,
+     or low-impact.
+   - **Disposition.** *Fix now* — the default for P1 and for contained
+     supported-usage P2s. *Defer* — only for a non-blocking P2/P3 whose
+     fix is disproportionate right now: create a linked issue and record
+     the concrete accepted risk on the PR; never defer data loss,
+     auth/security exposure, or a violated invariant. *Document boundary*
+     — reachable only outside the usage model: the smallest useful
+     code/doc statement naming the boundary; no behavior changes, no
+     mechanism tests for an unsupported scenario. *Reject* — not
+     reachable, factually wrong, or cost clearly exceeds stake: reply
+     with evidence on the thread. Never silent dismissal, and no category
+     shortcuts ("human-run commands can't race" is false here — parallel
+     agents, retries and multiple terminals make nominally human-run
+     commands concurrent).
+   - **Verification.** Who confirms the fix: the coordinator (focused
+     diff read, the finding's test failing-then-passing, failure-path
+     probe where stateful) or an external re-review round per the scoping
+     below. A subtle P2 fix may need outside eyes; a tiny P1 correction
+     with a focused proof may not.
+   **One batched fix-up wave per review head.** Collect Codex, Copilot
+   and coordinator findings against the same head and triage them all
+   first; then one decision-complete brief, one Opus dispatch, one
+   re-gate at the new head — never a dispatch per finding or per
+   reviewer. Standing brief constraints: smallest diff that closes the
+   accepted findings; tests only for the contract or invariant a finding
+   names, never for the mechanics of the fix. Fix-up diffs face the same
+   Touches, scope-escape and overtesting checks as feature diffs. Late
+   findings still get an explicit disposition, but reviewer timing must
+   not manufacture extra waves.
+   **Risk-scoped external re-review.** A further Codex round is required
+   while a P1 remains open; and for a P2/P3 fix when it sits at a
+   data-critical boundary (security/auth, persistence, concurrency,
+   schema/CRDT semantics, cross-process lifecycle) **and** is non-local,
+   introduces new state or synchronization, changes the design that
+   answered the original finding, or lacks a focused test proving it — a
+   one-line mechanical fix at such a boundary, proven by its test, is
+   coordinator territory; and whenever reviewer or coordinator names a
+   concrete risk rationale. Re-review briefs are delta-first: the fixes
+   and the invariants they touch, expanding to the whole PR only when a
+   fix invalidates earlier reasoning. After four external rounds, a
+   further full round needs a PR comment naming the concrete unresolved
+   risk. Record every round as a PR comment — `Codex round N (head
+   <sha>): <verdict>` — so round counts stay derivable from the thread.
+   **Exit and convergence.** Review exits only when: no P1 remains;
+   every supported-usage P2 is fixed or explicitly deferred (linked
+   issue, accepted-risk rationale); every remark is fixed, deferred,
+   documented or rejected explicitly; all gate evidence is fresh at the
+   exact merge head; and any earlier external-review reasoning carried
+   across a later local fix is recorded on the PR with scope and
+   rationale. If a confirmation round surfaces a net-new triaged P1, or
+   the open-P1 set fails to shrink after a directed correction wave, park
+   the PR `needs-human` with the finding list instead of looping — but
+   never park for a false positive, an unrelated pre-existing issue, or a
+   finding rejected with evidence.
    **Final gate, immediately before merging:** re-fetch the
    PR's reviews and comment threads (`gh pr view <n> --comments` plus review
    threads via `gh api graphql` — inline review comments don't show in the
@@ -142,7 +169,11 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    naming the PR and the trigger so the owner learns a merge decision awaits
    them, then park it and continue with the next PR or issue. Tier 1 and
    Tier 2 self-merge as specified there (Tier 2 requires the merge-report
-   comment on the PR first).
+   comment on the PR first). Every merge report ends with two
+   machine-readable lines — `findings_p1_p2_p3: <n>/<n>/<n>` and
+   `deferred_findings: <issue refs or none>` — and only these two:
+   timestamps, round counts and run counts stay derivable from the PR
+   thread and are never restated (ISSUE_SPEC's derivability principle).
    **Gate freshness, at merge time:** make the merge itself conditional on the
    recorded gate SHA — `gh pr merge <n> --match-head-commit <gate-sha> …` — so
    a commit landing after the last check fails the merge instead of riding
