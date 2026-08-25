@@ -117,6 +117,17 @@
  * offline replicas can each seed before either sees the other's flag — so it
  * writes with ids of its own choosing rather than generated ones (see
  * {@link createGroup}), and the two runs merge into one sidebar instead of two.
+ *
+ * The boundary of that trick, stated because sharing an id is not the same as
+ * merging: a group is a nested Y.Map stored under its id, and two concurrent
+ * creates of one id are two writes of one key, so one map wins whole and the
+ * loser's `docs` — every pin in it — goes with it. Two runs that wrote the same
+ * pins lose nothing, which is the migration's case: both sides read the same
+ * directory and produce the same groups. Two replicas creating one group from
+ * *different* state do lose one side's pins, silently. Repairing that is a
+ * layout change — {@link https://github.com/uberblick-ai/uberblick-2/issues/210}
+ * — not something a caller can work around, so a caller choosing an id should
+ * be choosing it for content both sides agree on.
  */
 
 import * as Y from "yjs";

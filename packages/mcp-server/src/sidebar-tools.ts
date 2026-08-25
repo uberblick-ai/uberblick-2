@@ -30,6 +30,13 @@
  * the restart that follows rebuilds from the log with the seed unwritten, which
  * is the honest outcome.
  *
+ * It decides *after* the first settle, so it decides from the whole picture
+ * rather than from this machine's log: with a hub configured, the directory that
+ * says what to seed — and any curation made before the flag existed — may still
+ * be on the wire when the process comes up. The wait is the bounded one every
+ * tool call already pays on boot, and there is nothing to wait for offline, so
+ * an unreachable or unconfigured hub decides immediately.
+ *
  * Two things make running it safe without any coordination:
  *
  *   - **A set-once flag in the sidebar doc says it has run** (schema's
@@ -42,6 +49,12 @@
  *     also why the sidebar room is attached from boot in `replica.ts`:
  *     hydrating from the log before the seed decides is what makes a second run
  *     rare in the first place.
+ *
+ * Sharing an id is what makes those two runs merge, and it has a boundary the
+ * schema module's header states in full: concurrent creates of one group id are
+ * two writes of one key, so one nested map wins whole. Identical runs lose
+ * nothing, because both sides wrote the same pins; two replicas seeding from
+ * *different* views of the directory can lose one side's. #210 is the layout fix.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -185,9 +198,9 @@ function seedFromTags(replicas: Replicas, sidebar: Replica): number {
  * Run the one-time migration out of tag grouping, at server start.
  *
  * Called once, from `server.ts`, and never from a tool — see the header for why
- * a read must not write. The replicas are hydrated from the log by then; the
- * hub is deliberately not waited for, because the server serves offline and a
- * second seed elsewhere merges rather than duplicates.
+ * a read must not write. It settles first, so the corpus it groups and the
+ * curation it must not overwrite have both had their bounded chance to arrive
+ * from the hub; with no hub there is nothing to wait for and it decides at once.
  *
  * A sidebar that already holds a group is adopted, not seeded: curation made
  * before this flag existed, or by another client, is exactly what a migration
@@ -197,7 +210,18 @@ function seedFromTags(replicas: Replicas, sidebar: Replica): number {
  * set's sticky persistence failure, which stops every tool; failing server
  * construction on top of that would only take the diagnostics away too.
  */
-export function seedSidebarOnce(replicas: Replicas): void {
+export async function seedSidebarOnce(replicas: Replicas): Promise<void> {
+  try {
+    // Bounded, and a no-op with no hub configured — see the header. Diagnostics
+    // rather than health: a poisoned replica set is checked for below, and a
+    // settle that cannot run is the next tool call's problem to report.
+    await replicas.settle({ requireHealthy: false });
+  } catch (error) {
+    log.warn("the sidebar seed could not settle first, so it did not run", error);
+    return;
+  }
+  if (replicas.persistenceError() !== null) return;
+
   const sidebar = replicas.sidebar();
   if (isSidebarSeeded(sidebar.doc)) return;
 

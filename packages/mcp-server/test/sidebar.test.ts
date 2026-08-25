@@ -14,22 +14,33 @@
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
+  createGroup,
   isSidebarSeeded,
   pinDoc,
   readSidebar,
+  sidebarRoom,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
+import type { Hub } from "@uberblick/hub";
 import {
   FailingStore,
+  hubUrl,
+  peerClient,
   removeTempDirs,
+  startHub,
   startServer,
   tempDatabasePath,
   testConfig,
+  TEST_SECRET,
+  waitUntil,
+  WORKSPACE,
 } from "./helpers.js";
-import type { Rig } from "./helpers.js";
+import type { PeerClient, Rig } from "./helpers.js";
 import type { MirrorStore } from "../src/store.js";
 
 let rig: Rig | null = null;
+const hubs: Hub[] = [];
+const peers: PeerClient[] = [];
 
 async function server(
   databasePath = tempDatabasePath(),
@@ -42,6 +53,8 @@ async function server(
 afterEach(async () => {
   await rig?.close();
   rig = null;
+  for (const peer of peers.splice(0)) peer.destroy();
+  for (const hub of hubs.splice(0)) await hub.stop().catch(() => {});
 });
 
 afterAll(removeTempDirs);
@@ -256,6 +269,10 @@ describe("the one-time seed", () => {
     ["Scratch", []],
   ];
 
+  /** The uuid of the nth corpus document. Stable, so a hub can be primed. */
+  const corpusUuid = (index: number): string =>
+    `0000000${index}-1111-4222-8333-444444444444`;
+
   /** The seeded sidebar, as every test here expects to find it. */
   const SEEDED: [string, (string | null)[]][] = [
     ["Start here", ["Overview", "Install and run"]],
@@ -276,11 +293,7 @@ describe("the one-time seed", () => {
     const rig = await server(databasePath);
     const directory = rig.instance.replicas.directory().doc;
     for (const [index, [title, tags]] of CORPUS.entries()) {
-      upsertDirectoryEntry(directory, {
-        uuid: `0000000${index}-1111-4222-8333-444444444444`,
-        title,
-        tags,
-      });
+      upsertDirectoryEntry(directory, { uuid: corpusUuid(index), title, tags });
     }
     await rig.close();
     return databasePath;
@@ -379,5 +392,42 @@ describe("the one-time seed", () => {
     // migrates for real.
     const healthy = await server(databasePath);
     expect(shape(await healthy.ok("get_sidebar"))).toEqual(SEEDED);
+  });
+
+  it("adopts curation the hub already holds instead of seeding over it", async () => {
+    // The dangerous shape, and the reason the decision waits for a settle: this
+    // machine's log holds the tagged corpus, so from local state alone the
+    // migration has everything it needs to seed — while the curation it must not
+    // write over is still on the hub.
+    const databasePath = await corpusDatabase();
+    const hub = await startHub();
+    hubs.push(hub);
+
+    const curated = await peerClient(hub.port, sidebarRoom(WORKSPACE));
+    peers.push(curated);
+    await curated.synced;
+    pinDoc(curated.doc, createGroup(curated.doc, "Mine"), corpusUuid(3));
+
+    // Witnessed through a third client, so what follows is state the hub can
+    // actually deliver rather than a write that never left the peer.
+    const witness = await peerClient(hub.port, sidebarRoom(WORKSPACE));
+    peers.push(witness);
+    await waitUntil("the hub to hold the hand-made sidebar", () =>
+      readSidebar(witness.doc).length === 1,
+    );
+
+    const fresh = await startServer(
+      testConfig({
+        databasePath,
+        authSecret: TEST_SECRET,
+        hubUrl: hubUrl(hub.port),
+      }),
+    );
+    rig = fresh;
+
+    // One group, not five: the migration settled first, saw the curation, and
+    // adopted it instead of seeding four groups over the top.
+    expect(shape(await fresh.ok("get_sidebar"))).toEqual([["Mine", ["Overview"]]]);
+    expect(isSidebarSeeded(fresh.instance.replicas.sidebar().doc)).toBe(true);
   });
 });
