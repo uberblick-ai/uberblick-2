@@ -223,6 +223,12 @@ per machine — and it is a *menu*, not an authority: switching workspaces is
 navigating to `/<workspace>`, and a link into an unlisted workspace still opens
 it. With none set, the switcher is the plain workspace label it has always been.
 
+Both `WORKSPACE_ID` and `WORKSPACES` are the *dev server's* answer only. A
+deployed client reads its workspaces at runtime from the served
+`/uberblick-config.json`, beside its hub endpoint — see REMOTE.md — so giving a
+deployment its workspaces is an environment variable and a container recreate,
+never a bundle rebuild.
+
 `mise run import-seed` is the one-time import of `docs-seed/` into the system.
 After it, the product docs live in the documents, and are read and written
 through the MCP tools rather than by editing the seed files.
@@ -371,8 +377,9 @@ is committable, and the stored signing secret is deliberately withheld from a
 repository-chosen hub, so clients pointed there would dial it with no credential
 at all.
 
-A deployed web client does not read any of these: it resolves its endpoint at
-runtime from the served `/uberblick-config.json`. A checkout's `mise run web`
+A deployed web client does not read any of these: it resolves its endpoint — and
+its workspaces — at runtime from the served `/uberblick-config.json`. A
+checkout's `mise run web`
 still takes `HUB_URL` from mise's environment, so point a development build at a
 remote hub with `HUB_URL=… mise run web`.
 

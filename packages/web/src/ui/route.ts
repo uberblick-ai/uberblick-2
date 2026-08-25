@@ -4,11 +4,12 @@
  * The first segment *is* the workspace — this client is not configured for one
  * and cannot enumerate them. A link carries the workspace it belongs to, which
  * is what makes a pasted link from somebody else's workspace open that
- * workspace rather than the wrong document in this one. The build-time
- * `WORKSPACE_ID` (mise `[env]` in dev) only answers the one address that names
- * no workspace, `/`. `WORKSPACES` is a menu of places to go (see
- * {@link workspaceList}) and no more: an address outside the list still opens
- * its own workspace, and an address inside it is read exactly like any other.
+ * workspace rather than the wrong document in this one. The configured
+ * workspaces (the served document's, else the build's defines — see
+ * `config.ts`) only answer the one address that names no workspace, `/`, and
+ * are otherwise a menu of places to go (see {@link workspaceList}): an address
+ * outside the list still opens its own workspace, and an address inside it is
+ * read exactly like any other.
  *
  * The segment may be decorated — `uberblick-<uuid>` — and is kept exactly as
  * typed: the slug is display, so nothing here rewrites somebody's spelling of
@@ -44,10 +45,11 @@ export interface Workspace {
  * does not also empty the sidebar.
  *
  * `no-workspace` carries *why* there is none, because the two causes have
- * different fixes: a build with no `WORKSPACE_ID` at all needs one, while a
- * build carrying a value that is not a workspace id — the legacy `main`, say —
- * needs that value replaced. Telling a developer the build "carries none" when
- * it carries a rejected one sends them looking in the wrong place.
+ * different fixes: a client configured with no workspace at all needs one,
+ * while one configured with a value that is not a workspace id — the legacy
+ * `main`, say — needs that value replaced. Telling a developer the client
+ * "carries none" when it carries a rejected one sends them looking in the wrong
+ * place.
  */
 export type Route =
   | { kind: "no-workspace"; reason: "absent" }
@@ -93,10 +95,10 @@ function readWorkspace(segment: string): Workspace | null {
 /**
  * Resolve a pathname.
  *
- * `configured` is the build-time workspace, or null when the build carries
- * none — it answers `/` and nothing else. A value that is not a workspace id is
- * treated as no workspace at all, which is what a misconfigured build has; the
- * route says which of the two it was.
+ * `configured` is the default workspace — the first one this client is
+ * configured with — or null when it has none. It answers `/` and nothing else.
+ * A value that is not a workspace id is treated as no workspace at all, which
+ * is what a misconfigured build has; the route says which of the two it was.
  */
 export function parseRoute(pathname: string, configured: string | null): Route {
   const parts = pathname.split("/");
@@ -168,10 +170,10 @@ export function parseRoute(pathname: string, configured: string | null): Route {
  * The workspaces to offer, in the order they were configured, with the one the
  * address names always among them.
  *
- * `configured` is the raw `WORKSPACES` value — decorated ids separated by
- * commas. An entry that is not a workspace id is dropped rather than shown: a
- * typo in a config list is not somewhere anyone can go, and offering it would
- * put the invalid-link screen behind a menu item.
+ * `configured` is the resolved workspace list — the served document's, else the
+ * build's defines (see `config.ts`). An entry that is not a workspace id is
+ * dropped rather than shown: a typo in a config list is not somewhere anyone
+ * can go, and offering it would put the invalid-link screen behind a menu item.
  *
  * Deduplicated by uuid, because `<slug>-<uuid>` and `<uuid>` are one workspace
  * and a second entry would be another way to sit where you already are.
@@ -182,12 +184,12 @@ export function parseRoute(pathname: string, configured: string | null): Route {
  * arrived by a link can see where they are — and get back to a configured one.
  */
 export function workspaceList(
-  configured: string,
+  configured: readonly string[],
   current: Workspace | null,
 ): Workspace[] {
   const list: Workspace[] = [];
   const seen = new Set<string>();
-  for (const entry of configured.split(",")) {
+  for (const entry of configured) {
     const parsed = readWorkspace(entry.trim());
     if (parsed === null || seen.has(parsed.uuid)) continue;
     seen.add(parsed.uuid);

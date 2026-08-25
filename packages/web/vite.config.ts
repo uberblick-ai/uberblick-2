@@ -10,21 +10,20 @@ import { defineConfig } from "vitest/config";
  * wraps this command in. All three are read here, at config time, from the
  * task's environment — never from a committed `.env`.
  *
- * `__WORKSPACE_ID__` answers one address, `/`, which names no workspace. Every
- * other address carries its own: a bundle is not bound to a workspace, and an
- * empty define means `/` says so rather than guessing. See src/ui/route.ts.
+ * `HUB_URL`, `WORKSPACE_ID` and `WORKSPACES` are *defaults*, not the answer.
+ * The client prefers the hub endpoint
+ * and the workspace list served at `/uberblick-config.json` on its own origin,
+ * and falls back to these values when no such document is deployed — which is
+ * exactly the dev server, where nothing serves that path and `mise run dev`
+ * therefore needs no configuration document. See src/config.ts.
  *
- * `__WORKSPACES__` is `WORKSPACES`, the comma-separated list of workspaces this
- * build offers to switch between — plaintext config like `HUB_URL`, and empty
- * by default because the ids are a uuid per machine. It feeds the switcher and
- * nothing else: switching workspaces is navigating, so the list changes what is
- * on the menu, never which corpus an address opens.
- *
- * `__HUB_URL__` is a *default*, not the answer. The client prefers the hub
- * endpoint served at `/uberblick-config.json` on its own origin and falls back
- * to this value when no such document is deployed — which is exactly the dev
- * server, where nothing serves that path and `mise run dev` therefore needs no
- * configuration document. See src/config.ts.
+ * `__WORKSPACE_ID__` is the first of those workspaces: it answers one address,
+ * `/`, which names no workspace. Every other address carries its own — a bundle
+ * is not bound to a workspace, and no workspace at all means `/` says so rather
+ * than guessing. `__WORKSPACES__` is `WORKSPACES`, the rest of the menu, comma
+ * separated and empty by default because the ids are a uuid per machine.
+ * Switching workspaces is navigating, so the list changes what is on the menu,
+ * never which corpus an address opens. See src/ui/route.ts.
  *
  * ============================ LOUD WARNING ============================
  * Embedding HUB_AUTH_TOKEN in the bundle is a PRIVATE-SPIKE-ONLY shortcut.

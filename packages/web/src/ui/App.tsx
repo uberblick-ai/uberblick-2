@@ -22,7 +22,7 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
-import { CONFIGURED_WORKSPACE, CONFIGURED_WORKSPACES, hubUrl } from "../config.js";
+import { configuredWorkspaces, hubUrl } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
 import { randomIdentity } from "../collab/identity.js";
 import type { RoomConnection } from "../collab/rooms.js";
@@ -73,6 +73,7 @@ const SIDEBAR_COLLAPSED_KEY = "uberblick.sidebar.collapsed";
  */
 export function RoutePane({
   route,
+  configured = true,
   connection,
   meta,
   author,
@@ -82,6 +83,16 @@ export function RoutePane({
   onSelectThread,
 }: {
   route: Route;
+  /**
+   * Whether the client configuration has been read yet.
+   *
+   * Only the no-workspace branch cares. Until the read settles this client
+   * knows of no workspaces, which is indistinguishable from having none — and
+   * "No workspace" is a notice about a *misconfiguration*, so flashing it
+   * across the pane for the length of one same-origin fetch would accuse a
+   * perfectly configured deployment of being broken.
+   */
+  configured?: boolean;
   /**
    * The connection to the room `route` names, or null while there is none —
    * `useRoom` withholds a connection that belongs to a different room, so this
@@ -110,17 +121,20 @@ export function RoutePane({
   const { localReplicaLoaded } = useRoomStatus(connection);
 
   if (route.kind === "no-workspace") {
+    // Nothing is known yet — keep the frame, say nothing, as everywhere else
+    // here that ignorance would otherwise read as an answer.
+    if (!configured) return <PaneNotice>{null}</PaneNotice>;
     return (
       <PaneNotice>
         <p className="ub-notice">
           <strong>No workspace.</strong> This address names none, and{" "}
           {route.reason === "invalid" ? (
             <>
-              this client was built with <code>{route.configured}</code>, which
+              this client is configured with <code>{route.configured}</code>, which
               is not a workspace id.
             </>
           ) : (
-            <>this client was built without one to fall back to.</>
+            <>this client is configured with none to fall back to.</>
           )}{" "}
           Open a document link — they look like{" "}
           <code>/&lt;workspace&gt;/&lt;uuid&gt;</code> — or run{" "}
@@ -186,7 +200,16 @@ export function RoutePane({
 export function App(): ReactElement {
   const identity = useIdentity(randomIdentity);
   const [path, navigate] = useRoutePath();
-  const route = parseRoute(path, CONFIGURED_WORKSPACE);
+  // No room before the client configuration is known (#91): the shared
+  // websocket is built from the first room acquired, so one acquired early
+  // would pin the session to the build-time fallback. The workspaces come out
+  // of that same read, and are empty until it settles — which is also what
+  // re-renders this component with them.
+  const hubReady = useHubEndpoint();
+  const configured = hubReady ? configuredWorkspaces() : [];
+  /** The one that answers `/`, the address that names no workspace. */
+  const defaultWorkspace = configured[0] ?? null;
+  const route = parseRoute(path, defaultWorkspace);
   // The address names the workspace — this client is configured for none and
   // cannot enumerate them. Null only where the address named none it could use,
   // and then there are no rooms to join at all.
@@ -296,10 +319,6 @@ export function App(): ReactElement {
     return () => window.removeEventListener("keydown", close);
   }, [threadsOpen, closeThreads]);
 
-  // No room before the hub endpoint is known (#91): the shared websocket is
-  // built from the first room acquired, so one acquired early would pin the
-  // session to the build-time fallback.
-  const hubReady = useHubEndpoint();
   const directory = useRoom(
     hubReady && workspace !== null ? directoryRoom(workspace.uuid) : null,
     identity,
@@ -360,7 +379,7 @@ export function App(): ReactElement {
 
   /**
    * Normalise the address to the one form the app hands out: `/` becomes the
-   * build's workspace, a trailing slash or a shouted uuid becomes the canonical
+   * default workspace, a trailing slash or a shouted uuid becomes the canonical
    * spelling. The workspace segment itself is left exactly as typed — the slug
    * is display, and rewriting somebody's spelling of their own workspace is a
    * later question (#160 leaves it alone deliberately). `replace`, never
@@ -368,9 +387,9 @@ export function App(): ReactElement {
    * entry that Back bounces off.
    */
   useEffect(() => {
-    const canonical = canonicalPath(parseRoute(path, CONFIGURED_WORKSPACE));
+    const canonical = canonicalPath(parseRoute(path, defaultWorkspace));
     if (canonical !== null && canonical !== path) navigate(canonical, "replace");
-  }, [path, navigate]);
+  }, [path, navigate, defaultWorkspace]);
 
   /**
    * The workspaces on the switcher's menu, and going to one.
@@ -379,7 +398,7 @@ export function App(): ReactElement {
    * `parseRoute` each time anyway, so a memo would be a dependency that always
    * changed — and the work is splitting a short string.
    */
-  const workspaces = workspaceList(CONFIGURED_WORKSPACES, workspace);
+  const workspaces = workspaceList(configured, workspace);
   const onSwitchWorkspace = useCallback(
     // A workspace's list, not a document: two corpora share no uuid, so
     // carrying the open document across would be a link to nowhere.
@@ -504,6 +523,7 @@ export function App(): ReactElement {
         )}
         <RoutePane
           route={route}
+          configured={hubReady}
           connection={doc}
           meta={meta}
           author={identity.name}

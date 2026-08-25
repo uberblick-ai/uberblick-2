@@ -538,22 +538,22 @@ describe("an address that resolves to no document says which one, and why", () =
     expect(paneText({ kind: "doc", workspace, uuid: UUID }, meta(UUID))).toBe("");
   });
 
-  it("says where to find a workspace id when the build carries none", () => {
+  it("says where to find a workspace id when the client is configured with none", () => {
     const text = paneText({ kind: "no-workspace", reason: "absent" }, null);
     expect(text).toContain("No workspace");
     // Web cannot enumerate workspaces, so it names the command that can.
     expect(text).toContain("ub status");
-    expect(text).toContain("built without one to fall back to");
+    expect(text).toContain("configured with none to fall back to");
   });
 
-  it("names the rejected value when the build carries one that is not an id", () => {
-    // The misconfigured build — a stale `WORKSPACE_ID=main`. Saying the build
-    // carries none would send the developer looking for a value that is there.
+  it("names the rejected value when the configured one is not an id", () => {
+    // The misconfigured client — a stale `WORKSPACE_ID=main`. Saying it carries
+    // none would send the developer looking for a value that is there.
     const text = paneText(
       { kind: "no-workspace", reason: "invalid", configured: "main" },
       null,
     );
-    expect(text).toContain("built with main, which is not a workspace id");
+    expect(text).toContain("configured with main, which is not a workspace id");
   });
 
   it("tells a malformed link apart from a missing one", () => {

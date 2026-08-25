@@ -70,7 +70,9 @@ hand:
 4. Writes the host's `.env` — `TAILSCALE_HOST`, `TAILSCALE_IP` and
    `HUB_AUTH_TOKEN` from your local signing secret — **over stdin**. The secret
    is never an argument on either side, never echoed, and never reaches a shell
-   history.
+   history. It does not yet write `WEB_WORKSPACES` (#152), so a host stood up
+   this way opens document links but answers `/` with "no workspace" until that
+   line is added to its `.env` and the Caddy container recreated.
 5. Runs `sh remote-compose.sh up --build --detach`, then verifies from your
    machine: it polls `https://<host>/` for up to 90 seconds — the first request
    is what makes Tailscale issue the certificate, so an immediate check is a
@@ -126,11 +128,27 @@ cp remote.env.example .env
 tailscale ip -4
 ```
 
-Edit `.env` and set the three required values (`WEB_HUB_URL` is optional; see
+Edit `.env` and set the four required values (`WEB_HUB_URL` is optional; see
 [Pointing the client at another hub](#pointing-the-client-at-another-hub)):
 
 - `TAILSCALE_HOST` is the host's full `*.ts.net` MagicDNS name, with no scheme
   or trailing slash.
+- `WEB_WORKSPACES` is the comma-separated list of workspaces the web client
+  offers, and its first entry is what `https://<TAILSCALE_HOST>/` opens. Use the
+  workspace id `ub status` prints on the machine whose documents this hub is
+  for, optionally decorated with a display slug (`<slug>-<uuid>`). Left at the
+  placeholder, the root address has nothing to open and says so — document links
+  still work, and the switcher shows only the workspace the address names. The
+  value may contain only letters, digits, `,` and `-`; `remote-compose.sh`
+  refuses anything else, because the list is substituted into the JSON
+  configuration document and a quote there could inject a second `hubUrl` that
+  retargets every browser. That refusal is the guarantee: no quote and no
+  backslash reaches the document, so no escape can be written into it. The
+  client also refuses a document that plainly names a key twice, but that is
+  best-effort defence in depth — it reads raw JSON spelling, so an escaped key
+  would slip past it, and anyone able to write into the served document could
+  set `hubUrl` outright anyway. A document an attacker controls is outside this
+  deployment's threat model.
 - `TAILSCALE_IP` is the IPv4 address printed by `tailscale ip -4`. Compose binds
   port 443 only to this address, not to the host's public or LAN interfaces.
 - `HUB_AUTH_TOKEN` is the existing shared signing secret used by the local MCP
@@ -157,38 +175,47 @@ sh remote-compose.sh ps
 sh remote-compose.sh logs --tail=100 hub caddy
 ```
 
-Open `https://<TAILSCALE_HOST>` from a second computer on the same tailnet. In
-the browser developer tools, `https://<TAILSCALE_HOST>/uberblick-config.json`
-must return `{"hubUrl":"wss://<TAILSCALE_HOST>/ws"}` and the collaboration
-WebSocket must be that same address; a `ws://localhost` request means the
-document did not arrive and the client fell back to the value compiled into the
-bundle. The directory should hydrate after the socket connects.
+Open `https://<TAILSCALE_HOST>` from a second computer on the same tailnet. It
+opens the first workspace in `WEB_WORKSPACES`. In the browser developer tools,
+`https://<TAILSCALE_HOST>/uberblick-config.json` must return
+`{"hubUrl":"wss://<TAILSCALE_HOST>/ws","workspaces":"<the list from .env>"}` and
+the collaboration WebSocket must be that same address; a `ws://localhost`
+request means the document did not arrive and the client fell back to the values
+compiled into the bundle. The client logs one line naming both sources in force,
+which is the fastest way to tell a served value from a fallback. The directory
+should hydrate after the socket connects.
 
 Do not run `docker compose config` without `--quiet`: the rendered
 configuration contains `HUB_AUTH_TOKEN` in the hub environment.
 
 ### Pointing the client at another hub
 
-The hub endpoint is **not** baked into the bundle. The client fetches
-`/uberblick-config.json` from the origin it was served from and takes `hubUrl`
-from it; the compiled-in value is only the fallback for when no such document
-is deployed. Caddy renders that document from the `HUB_URL` it is given, which
-`docker-compose.yml` fills from `WEB_HUB_URL` in `.env`, defaulting to
-`wss://<TAILSCALE_HOST>/ws`.
+Neither the hub endpoint nor the workspaces are baked into the bundle. The
+client fetches `/uberblick-config.json` from the origin it was served from and
+takes `hubUrl` and `workspaces` from it; the compiled-in values are only the
+fallback for when no such document is deployed. Caddy renders that document from
+the `HUB_URL` and `WORKSPACES` it is given, which `docker-compose.yml` fills
+from `WEB_HUB_URL` and `WEB_WORKSPACES` in `.env` — the first defaulting to
+`wss://<TAILSCALE_HOST>/ws`, the second to empty.
 
-So retargeting the client is an edit to that document, not a rebuild — set
-`WEB_HUB_URL` in `.env` and recreate the Caddy container:
+So retargeting the client, or changing which workspaces it offers, is an edit to
+that document, not a rebuild — set the value in `.env` and recreate the Caddy
+container:
 
 ```sh
 sh remote-compose.sh up --detach caddy
 ```
 
 The document is served with `Cache-Control: no-store`, so the next page load
-picks up the change. It carries the endpoint and nothing else: the client reads
-`hubUrl` and ignores every other key, so there is no field a token could be
-added to. `hubUrl` must be a plain `ws://` or `wss://` address — one carrying
-userinfo, a query string or a fragment is refused, and the client falls back to
-the endpoint compiled into the bundle rather than dialling it.
+picks up the change. It carries configuration and nothing else: the client reads
+`hubUrl` and `workspaces` and ignores every other key, so there is no field a
+token could be added to. `hubUrl` must be a plain `ws://` or `wss://` address —
+one carrying userinfo, a query string or a fragment is refused, and the client
+falls back to the endpoint compiled into the bundle rather than dialling it. An
+entry of `workspaces` that is not a workspace id is dropped rather than offered,
+and a list with nothing usable in it degrades to the bundle's own — which on
+this deployment is empty, so `/` says there is no workspace while document links
+keep working.
 
 `HUB_AUTH_TOKEN` is still compiled into the bundle, so rotating it does need
 `sh remote-compose.sh up --build --detach`. Removing it from the bundle
