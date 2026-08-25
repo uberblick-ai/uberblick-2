@@ -3,7 +3,7 @@
  * loud read-only fallback when the palette gate is closed.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { getBlocksFragment, setTitle } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
@@ -358,8 +358,14 @@ function BoundEditor({
    * ProseMirror's own `editable` is what enforces it: with it off the view
    * ignores every user input path — keys, `beforeinput`, paste, drop — while
    * leaving selection and copy exactly as they were.
+   *
+   * `useLayoutEffect`, because a passive effect runs *after* paint. The render
+   * that draws the banner and takes the chrome away would otherwise leave the
+   * editor itself editable for one committed, painted frame — a frame that
+   * accepts a keystroke, which is the one thing the whole feature is for. This
+   * runs inside the same commit, so the two never disagree on screen.
    */
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (editor === null || editor.isDestroyed) return;
     editor.setEditable(!archived);
   }, [editor, archived]);
