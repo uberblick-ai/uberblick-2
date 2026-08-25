@@ -109,10 +109,19 @@ export function RoutePane({
     return (
       <PaneNotice>
         <p className="ub-notice">
-          <strong>No workspace.</strong> This address names none, and this client
-          was built without one to fall back to. Open a document link — they look
-          like <code>/&lt;workspace&gt;/&lt;uuid&gt;</code> — or run{" "}
-          <code>ub status</code> to find your workspace id.
+          <strong>No workspace.</strong> This address names none, and{" "}
+          {route.reason === "invalid" ? (
+            <>
+              this client was built with <code>{route.configured}</code>, which
+              is not a workspace id.
+            </>
+          ) : (
+            <>this client was built without one to fall back to.</>
+          )}{" "}
+          Open a document link — they look like{" "}
+          <code>/&lt;workspace&gt;/&lt;uuid&gt;</code> — or run{" "}
+          <code>ub status</code> to find your workspace id, and{" "}
+          <code>ub init</code> if this machine has none yet.
         </p>
       </PaneNotice>
     );

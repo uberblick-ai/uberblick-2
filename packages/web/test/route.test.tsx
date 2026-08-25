@@ -101,9 +101,14 @@ describe("an address names a document, the list, or neither", () => {
   it("says so when nothing names a workspace, rather than guessing one", () => {
     // A build with no `WORKSPACE_ID` has no `/`: this client cannot enumerate
     // workspaces, and inventing one would open a corpus nobody chose.
-    expect(parseRoute("/", null)).toEqual({ kind: "no-workspace" });
-    // A build whose value is not a workspace id has none either.
-    expect(parseRoute("/", "main")).toEqual({ kind: "no-workspace" });
+    expect(parseRoute("/", null)).toEqual({ kind: "no-workspace", reason: "absent" });
+    // A build whose value is not a workspace id has none either — and says so,
+    // because "carries none" and "carries a rejected one" have different fixes.
+    expect(parseRoute("/", "main")).toEqual({
+      kind: "no-workspace",
+      reason: "invalid",
+      configured: "main",
+    });
   });
 
   it("calls a first segment that is not a workspace id an invalid link", () => {
@@ -169,7 +174,7 @@ describe("an address names a document, the list, or neither", () => {
     // Rewriting a bad link would erase the evidence the message is about.
     expect(canonicalPath(route("/other/x"))).toBeNull();
     expect(canonicalPath(route(`/${WS}/nope`))).toBeNull();
-    expect(canonicalPath({ kind: "no-workspace" })).toBeNull();
+    expect(canonicalPath({ kind: "no-workspace", reason: "absent" })).toBeNull();
   });
 
   it("builds the same string the room key uses, so a link is the room", () => {
@@ -533,11 +538,22 @@ describe("an address that resolves to no document says which one, and why", () =
     expect(paneText({ kind: "doc", workspace, uuid: UUID }, meta(UUID))).toBe("");
   });
 
-  it("says where to find a workspace id when the address names none", () => {
-    const text = paneText({ kind: "no-workspace" }, null);
+  it("says where to find a workspace id when the build carries none", () => {
+    const text = paneText({ kind: "no-workspace", reason: "absent" }, null);
     expect(text).toContain("No workspace");
     // Web cannot enumerate workspaces, so it names the command that can.
     expect(text).toContain("ub status");
+    expect(text).toContain("built without one to fall back to");
+  });
+
+  it("names the rejected value when the build carries one that is not an id", () => {
+    // The misconfigured build — a stale `WORKSPACE_ID=main`. Saying the build
+    // carries none would send the developer looking for a value that is there.
+    const text = paneText(
+      { kind: "no-workspace", reason: "invalid", configured: "main" },
+      null,
+    );
+    expect(text).toContain("built with main, which is not a workspace id");
   });
 
   it("tells a malformed link apart from a missing one", () => {
