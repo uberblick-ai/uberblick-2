@@ -19,6 +19,7 @@ import {
   roomForDoc,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
+import type { DocMeta } from "@uberblick/schema";
 import { WORKSPACE } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
 import { randomIdentity } from "../collab/identity.js";
@@ -31,7 +32,7 @@ import { focusThread } from "./threads.js";
 import type { ThreadFocus } from "./threads.js";
 import {
   canonicalPath,
-  docIsPresent,
+  docIsHydrated,
   docPath,
   parseRoute,
   useRoutePath,
@@ -59,14 +60,23 @@ const SIDEBAR_COLLAPSED_KEY = "uberblick.sidebar.collapsed";
 export function RoutePane({
   route,
   connection,
-  present,
+  meta,
   author,
   onSelectThread,
 }: {
   route: Route;
+  /**
+   * The connection to the room `route` names, or null while there is none —
+   * `useRoom` withholds a connection that belongs to a different room, so this
+   * is null for one render after the address changes.
+   */
   connection: RoomConnection | null;
-  /** Whether this replica holds the document `route` names — see docIsPresent. */
-  present: boolean;
+  /**
+   * That room's metadata, or null while it has not been read yet. The
+   * difference carries a decision: unread is silence, read-and-not-this-document
+   * is the waiting screen.
+   */
+  meta: DocMeta | null;
   author: string;
   onSelectThread: (threadId: string) => void;
 }): ReactElement {
@@ -92,18 +102,27 @@ export function RoutePane({
     );
   }
 
-  if (route.kind === "doc" && !present) {
-    return (
-      <PaneNotice>
-        {/* The live sync state, so a link that is waiting says what it is
-            waiting on rather than looking stuck. */}
-        {connection !== null && <StatusLine connection={connection} />}
-        <p className="ub-notice">
-          <strong>Waiting for sync.</strong> Document <code>{route.uuid}</code>{" "}
-          has not reached this replica yet. It opens here as soon as it arrives.
-        </p>
-      </PaneNotice>
-    );
+  if (route.kind === "doc") {
+    // Nothing is known about this address yet: the room has not been joined, or
+    // it has but its metadata has not been read. Both last a render or two, and
+    // both keep the frame while saying nothing. Drawing "waiting for sync" from
+    // ignorance would flash those words across the pane every time a reader
+    // moves between two documents they already have.
+    if (connection === null || meta === null) return <PaneNotice>{null}</PaneNotice>;
+
+    if (!docIsHydrated(route.uuid, meta)) {
+      return (
+        <PaneNotice>
+          {/* The live sync state, so a link that is waiting says what it is
+              waiting on rather than looking stuck. */}
+          <StatusLine connection={connection} />
+          <p className="ub-notice">
+            <strong>Waiting for sync.</strong> Document <code>{route.uuid}</code>{" "}
+            has not reached this replica yet. It opens here as soon as it arrives.
+          </p>
+        </PaneNotice>
+      );
+    }
   }
 
   return (
@@ -138,7 +157,6 @@ export function App(): ReactElement {
   );
   const entries = useDirectory(directory);
   const meta = useDocMeta(doc);
-  const present = selected !== null && docIsPresent(selected, meta, entries);
 
   /**
    * Normalise the address to the one form the app hands out: `/` becomes
@@ -244,7 +262,7 @@ export function App(): ReactElement {
         <RoutePane
           route={route}
           connection={doc}
-          present={present}
+          meta={meta}
           author={identity.name}
           onSelectThread={onFocusThread}
         />

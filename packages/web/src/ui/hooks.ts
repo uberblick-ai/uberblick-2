@@ -27,7 +27,17 @@ import type { OutlineEntry } from "./outline.js";
 import { observeThreads } from "./threads.js";
 import type { ThreadView } from "./threads.js";
 
-/** Acquire a shared room connection for as long as the component needs it. */
+/**
+ * Acquire a shared room connection for as long as the component needs it.
+ *
+ * Never returns a connection to a room other than the one asked for. That is
+ * not a nicety: `connection` is state, so it lags `room` by one effect, and on
+ * the render right after the caller changes rooms it still holds the previous
+ * one. Handing that back would let a caller render the document it just
+ * navigated away from — its editor, its outline, its threads — under the new
+ * document's address, and would aim a write at the wrong Y.Doc. Callers see
+ * `null` for that single render and show their own not-ready state instead.
+ */
 export function useRoom(
   room: string | null,
   identity: AwarenessUser,
@@ -45,7 +55,7 @@ export function useRoom(
       handle.release();
     };
   }, [room, identity]);
-  return connection;
+  return connection !== null && connection.room === room ? connection : null;
 }
 
 const OFFLINE: RoomStatus = {
@@ -85,6 +95,21 @@ export function useDirectory(connection: RoomConnection | null): DirectoryEntry[
   return entries;
 }
 
+/**
+ * The open document's metadata, live — or null while none has been *read yet*.
+ *
+ * Null is "not known", never "empty": a room that has genuinely answered with
+ * nothing in it reads as a `DocMeta` whose `uuid` is `""`. Callers depend on
+ * that difference to tell "this replica has not answered about this address
+ * yet" from "it has answered, and the document is not here" — the second earns
+ * a waiting screen, the first earns silence (see `RoutePane`).
+ *
+ * The null is reliable across a change of document because `useRoom` withholds
+ * a connection that belongs to another room: every switch passes through
+ * `connection === null`, which resets this to null before the next document's
+ * metadata is read. That is what keeps the previous document's title from
+ * appearing under the new document's address.
+ */
 export function useDocMeta(connection: RoomConnection | null): DocMeta | null {
   const [meta, setMeta] = useState<DocMeta | null>(null);
   useEffect(() => {

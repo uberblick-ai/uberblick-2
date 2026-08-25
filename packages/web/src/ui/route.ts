@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { roomForDoc } from "@uberblick/schema";
-import type { DirectoryEntry, DocMeta } from "@uberblick/schema";
+import type { DocMeta } from "@uberblick/schema";
 
 /**
  * What an address resolves to.
@@ -31,7 +31,7 @@ export type Route =
   | { kind: "invalid"; reason: string };
 
 /**
- * Canonical UUID shape, case-insensitive.
+ * Canonical UUID shape. Matched case-insensitively — a *shape* check only.
  *
  * Deliberately not `parseRoom`'s validation, which only rejects empty segments
  * and stray slashes: under that rule every typo is a document that might still
@@ -40,7 +40,7 @@ export type Route =
  * document whose uuid came from somewhere other than `crypto.randomUUID` still
  * opens.
  */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * One path segment, percent-decoding tolerated.
@@ -77,13 +77,16 @@ export function parseRoute(pathname: string, workspace: string): Route {
     return { kind: "invalid", reason: "It has more path segments than an address." };
   }
 
-  // Lowercased so a link that arrived shouting still matches a directory key,
-  // and so `canonicalPath` normalises the address bar on the way in.
-  const normalised = uuid.toLowerCase();
-  if (!UUID.test(normalised)) {
+  // Case-preserving on purpose. Only the *shape* is normalised away; the uuid
+  // itself is an opaque identity. Room names, directory keys and `meta.uuid`
+  // are all case-sensitive, and nothing on the way in — the importer included —
+  // lower-cases them, so folding the case here would point an upper-case
+  // document's link at a room that does not exist, where it would wait for a
+  // sync that can never arrive.
+  if (!UUID.test(uuid)) {
     return { kind: "invalid", reason: `“${uuid}” is not a document uuid.` };
   }
-  return { kind: "doc", uuid: normalised };
+  return { kind: "doc", uuid };
 }
 
 /** The path of one document. Same string as its room key, with a leading slash. */
@@ -116,32 +119,28 @@ export function shareUrl(room: string, origin: string): string {
 }
 
 /**
- * Whether this replica can show the document a link names.
+ * Whether this replica actually holds the document a link names — the gate on
+ * mounting a *writable* editor over it.
  *
- * Two independent witnesses, because either can arrive first and either alone
- * is enough: the document's own `meta.uuid`, which `initDoc` writes (so a
- * document restored from IndexedDB opens before the directory has synced), and
- * the directory stub (so a link opens off the directory while the document's
- * own room is still hydrating).
+ * One witness, and it is the document's own `meta.uuid`. A directory stub is
+ * deliberately not enough. The stub is a cache that travels in its own room, so
+ * "the directory knows this uuid, the document's room has not hydrated" is a
+ * real state — and on a fresh deep link it is the *common* state, because the
+ * small directory doc usually syncs before the document does. Unlocking on the
+ * stub would bind the editor to a Y.Doc with no meta and no blocks, where a
+ * keystroke writes blocks and metadata into a replica the real document is
+ * about to merge into.
  *
- * The first witness is checked against `uuid` rather than for mere non-emptiness
- * — the meta on screen belongs to whichever room is currently mounted, and that
- * lags the address by one effect. Reading "some document is loaded" as "this
- * document is loaded" would show the previous document's content under the new
- * document's URL for a frame.
+ * Compared against `uuid` rather than tested for non-emptiness, because the
+ * meta on screen belongs to whichever room is mounted and that can lag the
+ * address by one effect.
  *
- * False is a "not yet", not a "no". It is the honest reading of an empty local
- * replica, and it stops being false of its own accord the moment either witness
- * lands — both are observed, so the waiting screen resolves into the document
- * with nothing to poll and nothing to retry.
+ * False is a "not yet", not a "no": `meta` is observed, so the waiting screen
+ * resolves into the document the moment its content merges — nothing polls and
+ * nothing retries.
  */
-export function docIsPresent(
-  uuid: string,
-  meta: DocMeta | null,
-  entries: DirectoryEntry[],
-): boolean {
-  if (meta !== null && meta.uuid === uuid) return true;
-  return entries.some((entry) => entry.uuid === uuid);
+export function docIsHydrated(uuid: string, meta: DocMeta | null): boolean {
+  return meta !== null && meta.uuid === uuid;
 }
 
 /** Push a new address, or replace the current one without growing the history. */

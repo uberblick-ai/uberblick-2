@@ -100,6 +100,40 @@ async function createDoc(page: Page, title: string): Promise<string> {
   return uuid;
 }
 
+/**
+ * Start recording whether `selector` is ever inserted into the page.
+ *
+ * The mutation records are inspected rather than the live DOM, because the
+ * thing being ruled out is precisely an element that appears and is gone again
+ * before anyone could query for it.
+ */
+async function watchForInsertion(page: Page, selector: string): Promise<void> {
+  await page.evaluate((sel) => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__flashSeen = document.querySelector(sel) !== null;
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (!(node instanceof Element)) continue;
+          if (node.matches(sel) || node.querySelector(sel) !== null) {
+            w.__flashSeen = true;
+          }
+        }
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    w.__flashStop = () => observer.disconnect();
+  }, selector);
+}
+
+async function wasEverInserted(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const w = window as unknown as Record<string, unknown>;
+    (w.__flashStop as (() => void) | undefined)?.();
+    return w.__flashSeen === true;
+  });
+}
+
 /** Set on the window, and gone the moment anything reloads the page. */
 const KEEPALIVE = "__uberblickSameDocument";
 
@@ -133,10 +167,15 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
 
   // ---- the sidebar writes the address, without reloading ----
   await markSession(author);
+  // Moving between two documents this replica already holds must be a quiet
+  // swap. The connection is paired with its room one render after the address
+  // changes, and that render must not put "waiting for sync" on the screen.
+  await watchForInsertion(author, ".ub-notice");
   await docButton(author, firstTitle).click();
   await expect(author).toHaveURL(new RegExp(`/main/${first}$`));
   await expect(author.locator(".ub-title")).toHaveValue(firstTitle);
   expect(await sessionSurvived(author)).toBe(true);
+  expect(await wasEverInserted(author)).toBe(false);
 
   // ---- Back and Forward re-open what was viewed ----
   await author.goBack();

@@ -13,9 +13,10 @@
  *    navigation writes the history, and Back/Forward are read out of it. The
  *    browser fires `popstate` for one direction only, so the two halves are
  *    genuinely separate code and genuinely separate risk.
- * 3. **That waiting resolves.** The unsynced state is derived from two
- *    observed witnesses, so it clears itself when either arrives — no polling,
- *    no retry, no reload.
+ * 3. **That waiting is gated on the document itself, and resolves.** The one
+ *    witness is the document's own metadata — a directory stub is a name, not
+ *    content, and opening on it would hand back a writable empty replica. It is
+ *    observed, so it clears itself when the content merges: no poll, no reload.
  *
  * Deliberately not here: that Vite serves index.html for a deep URL, and that a
  * fresh browser with an empty IndexedDB lands on the right document. Both are
@@ -27,12 +28,19 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { ReactElement } from "react";
 import * as Y from "yjs";
-import type { DirectoryEntry, DocMeta } from "@uberblick/schema";
+import {
+  initDoc,
+  listDirectory,
+  roomForDoc,
+  upsertDirectoryEntry,
+} from "@uberblick/schema";
+import type { DocMeta } from "@uberblick/schema";
 import { RoutePane } from "../src/ui/App.js";
 import { StatusLine } from "../src/ui/EditorPane.js";
+import { useDocMeta } from "../src/ui/hooks.js";
 import {
   canonicalPath,
-  docIsPresent,
+  docIsHydrated,
   docPath,
   parseRoute,
   shareUrl,
@@ -80,11 +88,20 @@ describe("an address names a document, the list, or neither", () => {
     expect(route(`/main/${UUID}/blocks`).kind).toBe("invalid");
   });
 
-  it("normalises a shouted uuid instead of rejecting it", () => {
-    const shouted = `/main/${UUID.toUpperCase()}`;
-    expect(route(shouted)).toEqual({ kind: "doc", uuid: UUID });
-    // Which is what puts the canonical spelling in the address bar.
-    expect(canonicalPath(route(shouted), "main")).toBe(`/main/${UUID}`);
+  it("accepts an upper-case uuid and round-trips it byte for byte", () => {
+    // The shape is checked case-insensitively; the identity is opaque. Folding
+    // the case would aim the link at a room nobody stored under that name —
+    // room keys, directory keys and `meta.uuid` are all case-sensitive, and the
+    // importer does not normalise them — so the document would wait forever.
+    const shouted = UUID.toUpperCase();
+    expect(route(`/main/${shouted}`)).toEqual({ kind: "doc", uuid: shouted });
+    // URL → room → URL, unchanged at every hop.
+    expect(canonicalPath(route(`/main/${shouted}`), "main")).toBe(`/main/${shouted}`);
+    expect(docPath("main", shouted)).toBe(`/main/${shouted}`);
+    expect(roomForDoc("main", shouted)).toBe(`main/${shouted}`);
+    // And it is the same document to the hydration gate, which compares exactly.
+    expect(docIsHydrated(shouted, meta(shouted))).toBe(true);
+    expect(docIsHydrated(shouted, meta(UUID))).toBe(false);
   });
 
   it("leaves an address it cannot resolve exactly as it was opened", () => {
@@ -173,24 +190,83 @@ function meta(uuid: string): DocMeta {
   return { uuid, title: "", tags: [], links: [] };
 }
 
-function stub(uuid: string): DirectoryEntry {
-  return { uuid, title: "Annotations", tags: [] };
+describe("a link whose document has not synced yet is a wait, not a 404", () => {
+  it("waits until the document's own content is here, not merely its name", () => {
+    expect(docIsHydrated(UUID, null)).toBe(false);
+    // An un-hydrated room reads as empty meta. That is not an answer.
+    expect(docIsHydrated(UUID, meta(""))).toBe(false);
+    // Nor is the *previous* document's meta, still on screen for one effect
+    // after the address changes.
+    expect(docIsHydrated(UUID, meta(OTHER))).toBe(false);
+    // Only the document itself.
+    expect(docIsHydrated(UUID, meta(UUID))).toBe(true);
+  });
+});
+
+/** A connection whose Y.Doc is real, so a merge into it drives the UI. */
+function liveConnection(ydoc: Y.Doc, room: string): RoomConnection {
+  const base = stubConnection(room) as unknown as Record<string, unknown>;
+  return { ...base, ydoc } as unknown as RoomConnection;
 }
 
-describe("a link whose document has not synced yet is a wait, not a 404", () => {
-  it("resolves as soon as either witness lands — the stub or the document", () => {
-    expect(docIsPresent(UUID, null, [])).toBe(false);
-    // Empty meta is what an un-hydrated room reads as; it is not an answer.
-    expect(docIsPresent(UUID, meta(""), [])).toBe(false);
-    expect(docIsPresent(UUID, meta(""), [stub(OTHER)])).toBe(false);
-    // Nor is the *previous* document's meta, which is still on screen for one
-    // effect after the address changes.
-    expect(docIsPresent(UUID, meta(OTHER), [])).toBe(false);
+/** App's wiring for one document: observe its meta, gate the pane on it. */
+function LinkedPane({
+  connection,
+  uuid,
+}: {
+  connection: RoomConnection;
+  uuid: string;
+}): ReactElement {
+  const docMeta = useDocMeta(connection);
+  return (
+    <RoutePane
+      route={{ kind: "doc", uuid }}
+      connection={connection}
+      meta={docMeta}
+      author="tester"
+      onSelectThread={() => {}}
+    />
+  );
+}
 
-    // The directory stub arrives over sync…
-    expect(docIsPresent(UUID, meta(""), [stub(UUID)])).toBe(true);
-    // …or the document's own room hydrates first, directory or no directory.
-    expect(docIsPresent(UUID, meta(UUID), [])).toBe(true);
+describe("a fresh deep link does not open a writable empty replica", () => {
+  it("keeps waiting while only the directory knows the uuid, and opens on the merge", () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+
+    // The ordering a fresh link actually hits: the directory doc is small and
+    // syncs first, so the workspace knows this uuid before the document's own
+    // room has delivered a single byte.
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Annotations" });
+    expect(listDirectory(directory).map((entry) => entry.uuid)).toEqual([UUID]);
+
+    const local = new Y.Doc();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() =>
+      root.render(<LinkedPane connection={liveConnection(local, `main/${UUID}`)} uuid={UUID} />),
+    );
+
+    // The stub is not a licence to edit: binding here would put blocks and
+    // metadata into a replica the real document is about to merge into.
+    expect(host.querySelector(".ub-notice")?.textContent).toContain("Waiting for sync");
+    expect(host.querySelector(".ub-editor")).toBeNull();
+
+    // Now the document's own room delivers, exactly as sync would.
+    const remote = new Y.Doc();
+    initDoc(remote, { uuid: UUID, title: "Annotations" });
+    act(() => {
+      Y.applyUpdate(local, Y.encodeStateAsUpdate(remote));
+    });
+
+    // Resolved live, with nothing polled and nothing reloaded.
+    expect(host.querySelector(".ub-notice")).toBeNull();
+    expect(host.querySelector(".ub-editor")).not.toBeNull();
+
+    act(() => root.unmount());
+    host.remove();
   });
 });
 
@@ -220,8 +296,14 @@ function stubConnection(room: string): RoomConnection {
   } as unknown as RoomConnection;
 }
 
-/** The text `RoutePane` shows for a route, whitespace collapsed. */
-function paneText(target: Route, present: boolean): string {
+/**
+ * The text `RoutePane` shows for a route, whitespace collapsed.
+ *
+ * `docMeta` is the replica's answer about the routed room: `null` for "has not
+ * answered yet", a `DocMeta` for an answer — whose `uuid` is `""` when the room
+ * is genuinely empty.
+ */
+function paneText(target: Route, docMeta: DocMeta | null): string {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   const host = document.createElement("div");
@@ -232,7 +314,7 @@ function paneText(target: Route, present: boolean): string {
       <RoutePane
         route={target}
         connection={target.kind === "doc" ? stubConnection(`main/${UUID}`) : null}
-        present={present}
+        meta={docMeta}
         author="tester"
         onSelectThread={() => {}}
       />,
@@ -246,27 +328,33 @@ function paneText(target: Route, present: boolean): string {
 
 describe("an address that resolves to no document says which one, and why", () => {
   it("waits on a document it does not have, naming the id", () => {
-    const text = paneText({ kind: "doc", uuid: UUID }, false);
+    const text = paneText({ kind: "doc", uuid: UUID }, meta(""));
     expect(text).toContain("Waiting for sync");
     expect(text).toContain(UUID);
     // Never the word for a document that does not exist: it may yet arrive.
     expect(text).not.toContain("not found");
   });
 
+  it("says nothing at all until the replica has answered", () => {
+    // The quiet render between a navigation and the room's first read. Drawing
+    // the waiting screen from ignorance is what makes switching documents flash.
+    expect(paneText({ kind: "doc", uuid: UUID }, null)).toBe("");
+  });
+
   it("stops waiting once the document is here", () => {
     // The editor pane takes over, so the notice is gone entirely.
-    expect(paneText({ kind: "doc", uuid: UUID }, true)).toBe("");
+    expect(paneText({ kind: "doc", uuid: UUID }, meta(UUID))).toBe("");
   });
 
   it("names an unknown workspace explicitly, and the one it is configured for", () => {
-    const text = paneText({ kind: "unknown-workspace", workspaceId: "elsewhere" }, false);
+    const text = paneText({ kind: "unknown-workspace", workspaceId: "elsewhere" }, null);
     expect(text).toContain("Unknown workspace");
     expect(text).toContain("elsewhere");
     expect(text).toContain("main");
   });
 
   it("tells a malformed link apart from a missing one", () => {
-    const text = paneText({ kind: "invalid", reason: "“nope” is not a document uuid." }, false);
+    const text = paneText({ kind: "invalid", reason: "“nope” is not a document uuid." }, null);
     expect(text).toContain("Not a document link");
     expect(text).toContain("nope");
   });
