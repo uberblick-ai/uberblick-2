@@ -94,7 +94,7 @@ export async function runCli(
     return await doctorCommand(rest, io);
   }
   if (command === "workspace") {
-    return workspaceCommand(rest, io);
+    return await workspaceCommand(rest, io);
   }
   if (command === "remote") {
     return await remoteCommand(rest, io);
