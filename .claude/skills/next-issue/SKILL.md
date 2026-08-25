@@ -34,7 +34,15 @@ protocol, scheduling semantics, and lint. This file does not restate it.
 
 ## Iteration
 
-1. **Observe.** `gh issue list --state open`, `gh pr list --state open`, and
+1. **Observe.** First, self-update the checkout: when it is on `main`,
+   `git fetch origin main` and `git merge --ff-only origin/main` before
+   anything else, so this session's next skill read, the issue spec, and the
+   review-runner files all track current `main`. A refused fast-forward
+   (conflicting local state, diverged history) is reported and skipped, never
+   forced — continue the iteration as-is. Note the built-in lag: this
+   invocation loaded its instructions before the pull, so a protocol change
+   on `main` governs from the next invocation onward.
+   Then `gh issue list --state open`, `gh pr list --state open`, and
    for each open PR its checks and reviews. Reconcile claims: apply the spec's
    stale-claim recovery rule.
 
