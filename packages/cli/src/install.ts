@@ -374,25 +374,36 @@ type VendorRun =
   | { kind: "ok" }
   /** The program is not installed — the caller falls back to editing the file. */
   | { kind: "absent" }
-  | { kind: "failed"; detail: string };
+  | { kind: "failed"; because: string };
 
+/**
+ * Run a vendor's installer, and learn nothing from it but whether it worked.
+ *
+ * Its output is discarded rather than captured, because a client's own
+ * diagnostics quote the config it just read — `claude mcp add` naming a
+ * conflicting server, a loader complaining about a value it could not parse —
+ * and relaying that would walk straight past the masking every report here does.
+ * The same rule as everywhere else in this command: when in doubt, omit. What is
+ * left is enough to act on — which program ran and how it exited — and the
+ * caller says how to see the rest, which is to run the vendor's command yourself.
+ */
 function runVendor(program: string, args: string[]): VendorRun {
-  const result = spawnSync(program, args, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const result = spawnSync(program, args, { stdio: "ignore" });
   if (result.error !== undefined) {
-    return (result.error as NodeJS.ErrnoException).code === "ENOENT"
+    const code = (result.error as NodeJS.ErrnoException).code;
+    return code === "ENOENT"
       ? { kind: "absent" }
-      : { kind: "failed", detail: result.error.message };
+      : { kind: "failed", because: `it could not be started (${code ?? "unknown"})` };
   }
   if (result.status === 0) {
     return { kind: "ok" };
   }
-  const said = `${result.stderr ?? ""}${result.stdout ?? ""}`.trim();
   return {
     kind: "failed",
-    detail: said === "" ? `it exited ${result.status}` : said,
+    because:
+      result.status === null
+        ? `it was killed by ${result.signal ?? "a signal"}`
+        : `it exited ${result.status}`,
   };
 }
 
@@ -428,7 +439,11 @@ export async function installCommand(
   const where = `${flags.target} (${flags.scope})`;
 
   if (flags.print) {
-    io.err(`ub mcp install: ${where} reads ${file.path}\n`);
+    // "config path is", not "reads": `--print` opens nothing, and saying
+    // otherwise would describe a file this run never touched.
+    io.err(
+      `ub mcp install: ${where} config path is ${file.path} — paste this into it\n`,
+    );
     io.out(snippet(file.format, flags.entry));
     return 0;
   }
@@ -518,7 +533,9 @@ export async function installCommand(
         }
         if (ran.kind === "failed") {
           io.err(
-            `ub mcp install: \`${vendor.program} mcp add\` failed: ${ran.detail}\n` +
+            `ub mcp install: \`${vendor.program} mcp add\` failed — ${ran.because}. ` +
+              "Its output is not repeated here because a client's diagnostics can " +
+              `quote the config; run \`${vendor.program} mcp add\` yourself to see it\n` +
               (backup === null ? "" : `The previous file is at ${backup}\n`),
           );
           return 1;

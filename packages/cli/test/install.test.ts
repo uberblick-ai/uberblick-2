@@ -55,11 +55,20 @@ const SECRET = "tok-must-never-be-printed-4a1f";
  */
 const SHORT_SECRET = "tok-4a1f";
 
-function stubVendor(box: Sandbox, program: string): { path: string; record: string } {
+function stubVendor(
+  box: Sandbox,
+  program: string,
+  /** Appended after the stub records its arguments. */
+  body = "",
+): { path: string; record: string } {
   const dir = join(box.cwd, "..", `stub-${program}`);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, program);
-  writeFileSync(path, `#!/bin/sh\nprintf '%s\\n' "$@" > "$${RECORD}"\n`, "utf8");
+  writeFileSync(
+    path,
+    `#!/bin/sh\nprintf '%s\\n' "$@" > "$${RECORD}"\n${body}`,
+    "utf8",
+  );
   chmodSync(path, 0o755);
   return { path: dir, record: join(dir, "record") };
 }
@@ -831,6 +840,27 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     ]);
     // The vendor writes the file; `ub` must not also write one behind its back.
     expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
+  });
+
+  it("reports that it failed without repeating what it said", () => {
+    // A client's own diagnostics quote the config it just read, so relaying
+    // them would walk straight past the masking every other report here does.
+    const box = sandbox();
+    const stub = stubVendor(
+      box,
+      "claude",
+      `echo "conflict in config: API_TOKEN=${SECRET}" >&2\necho "${SECRET}"\nexit 1\n`,
+    );
+
+    const run = runUb(["mcp", "install", "claude", "--project"], box, {
+      PATH: stub.path,
+      [RECORD]: stub.record,
+    });
+    expect(run.status).toBe(1);
+    expect(run.output).not.toContain(SECRET);
+    // Enough to act on: which program, how it ended, and where to look.
+    expect(run.stderr).toMatch(/claude mcp add/);
+    expect(run.stderr).toMatch(/exited 1/);
   });
 
   it("falls back to editing the file when it is not installed, and says so", () => {
