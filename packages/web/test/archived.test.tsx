@@ -29,6 +29,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
+import type { ReactNode } from "react";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -44,6 +45,8 @@ import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 const WORKSPACE = "main";
 const UUID = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
+/** A second, live document — the "switched away from" half of the route test. */
+const OTHER = "1f77c0d9-6b42-4a18-9e35-2c8d0f6a1b73";
 
 const OFFLINE: RoomStatus = {
   connected: false,
@@ -81,6 +84,7 @@ vi.mock("../src/collab/rooms.js", () => ({
 }));
 
 const { App } = await import("../src/ui/App.js");
+const { useArchived } = await import("../src/ui/hooks.js");
 
 /** A second client holding the same directory: updates flow both ways. */
 function peerDirectory(local: Y.Doc): Y.Doc {
@@ -103,16 +107,20 @@ afterEach(() => {
   rooms.clear();
 });
 
-function openApp(path: string): HTMLElement {
+function mount(node: ReactNode): { host: HTMLElement; root: Root } {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
-  window.history.replaceState(null, "", path);
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
   mounted = { root, host };
-  act(() => root.render(<App />));
-  return host;
+  act(() => root.render(node));
+  return { host, root };
+}
+
+function openApp(path: string): HTMLElement {
+  window.history.replaceState(null, "", path);
+  return mount(<App />).host;
 }
 
 /** The bound editor's own element, or null when nothing is bound. */
@@ -172,5 +180,44 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(prose(host)).toBe(bound);
     expect(bound?.getAttribute("contenteditable")).toBe("false");
     expect(host.querySelector(".ub-gutter-add")).toBeNull();
+  });
+
+  /**
+   * The flag has to be right on the *first* render, not one effect later.
+   *
+   * Read into state, `useArchived` would report "not archived" until a passive
+   * effect corrected it — and a passive effect can run after paint, so a deep
+   * link to an archived document, and every switch from a live one, would put
+   * an editable title and an editable editor on screen first and take them
+   * away afterwards. A frame that accepts a keystroke is not a cosmetic slip.
+   *
+   * Asserted over every render rather than at the end, because the offending
+   * render is the one in the middle: `act` flushes effects, so a check after it
+   * is exactly the check that cannot see the bug.
+   */
+  it("reports the tombstone from its first render, never a frame late", () => {
+    const directory = room(directoryRoom(WORKSPACE));
+    upsertDirectoryEntry(directory.ydoc, { uuid: OTHER, title: "Still live" });
+    upsertDirectoryEntry(directory.ydoc, { uuid: UUID, title: "Retired protocol" });
+    tombstoneDirectoryEntry(directory.ydoc, UUID);
+
+    const seen: boolean[] = [];
+    function Probe({ uuid }: { uuid: string }): null {
+      seen.push(useArchived(directory, uuid));
+      return null;
+    }
+
+    // A deep link straight to the archived document: the very first value.
+    const { root } = mount(<Probe uuid={UUID} />);
+    expect(seen[0]).toBe(true);
+    expect(seen).not.toContain(false);
+
+    // And the route switch from a live document to an archived one, which is
+    // the same hazard with a stale previous value in place of the initial one.
+    act(() => root.render(<Probe uuid={OTHER} />));
+    expect(seen.at(-1)).toBe(false);
+    const switched = seen.length;
+    act(() => root.render(<Probe uuid={UUID} />));
+    expect(seen.slice(switched)).not.toContain(false);
   });
 });

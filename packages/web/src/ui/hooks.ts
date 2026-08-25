@@ -4,7 +4,12 @@
  * take the same path to the screen.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import * as Y from "yjs";
 import {
   getBlocksFragment,
@@ -136,26 +141,34 @@ export function useDirectory(connection: RoomConnection | null): DirectoryEntry[
  * tombstone: an unsynced deep link resolves into itself when it arrives, and
  * calling it archived in the meantime would offer Restore for a document
  * nobody deleted.
+ *
+ * `useSyncExternalStore` rather than the state-and-effect shape the hooks
+ * around it use, and the difference is the whole point: those hold values that
+ * may lag by a render harmlessly, while this one gates whether the pane will
+ * take a write. Read into state, the first render of a deep link to an archived
+ * document — and every route switch from a live one — would say "not archived"
+ * until a passive effect corrected it, which is a committed, painted frame with
+ * an editable title and an editable editor on screen. The snapshot is read
+ * during render instead, so read-only is true from the first one.
  */
 export function useArchived(
   directory: RoomConnection | null,
   uuid: string | null,
 ): boolean {
-  const [archived, setArchived] = useState(false);
-  useEffect(() => {
-    if (directory === null || uuid === null) {
-      setArchived(false);
-      return;
-    }
-    const { ydoc } = directory;
-    const map = getDirectoryMap(ydoc);
-    const read = (): void =>
-      setArchived(getDirectoryEntry(ydoc, uuid)?.deleted === true);
-    read();
-    map.observe(read);
-    return () => map.unobserve(read);
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      if (directory === null) return () => {};
+      const map = getDirectoryMap(directory.ydoc);
+      map.observe(onChange);
+      return () => map.unobserve(onChange);
+    },
+    [directory],
+  );
+  const read = useCallback(() => {
+    if (directory === null || uuid === null) return false;
+    return getDirectoryEntry(directory.ydoc, uuid)?.deleted === true;
   }, [directory, uuid]);
-  return archived;
+  return useSyncExternalStore(subscribe, read);
 }
 
 /**

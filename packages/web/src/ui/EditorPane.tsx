@@ -291,6 +291,15 @@ function BoundEditor({
   // The only names anyone can mention are the peers publishing awareness right
   // now — there is no registry, and a mention is plain text.
   const peers = usePeers(connection);
+  /**
+   * The current value, readable from the binding effect without making it a
+   * dependency of it. An archived document must be bound read-only from the
+   * start — never editable-then-corrected — while a *change* of the flag must
+   * not rebind (see the effect below), and those two are only compatible if the
+   * effect can read the flag without re-running when it moves.
+   */
+  const archivedNow = useRef(archived);
+  archivedNow.current = archived;
 
   useEffect(() => {
     const element = host.current;
@@ -306,6 +315,7 @@ function BoundEditor({
       // Session-local and ephemeral: the marks are held against this Y.Doc and
       // nothing else, so a reload starts clean (see editor/changed-blocks.ts).
       changed: changedBlocks(connection),
+      editable: !archivedNow.current,
     });
     // A comment highlight is a plain span ProseMirror renders from the `comment`
     // mark, so the click that focuses its thread is read by delegation on the
