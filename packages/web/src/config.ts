@@ -264,3 +264,14 @@ export const HUB_AUTH_TOKEN: string = injected(
 
 /** The single workspace the spike runs in. Tenancy already lives in room keys. */
 export const WORKSPACE: string = DEFAULT_WORKSPACE;
+
+/**
+ * The repository whose issue and PR links render as a bare `#62` — every other
+ * repository reads `org/repo#62`. Display only; see editor/github-refs.ts.
+ *
+ * A plain constant, flagged as such: the spike has one repository and one
+ * workspace, and the honest place for this once a hosted hub has many is a
+ * per-workspace setting, not a build-time value. Compared case-insensitively,
+ * because GitHub's own slugs are.
+ */
+export const GITHUB_REPO = "uberblick-ai/uberblick-2";
