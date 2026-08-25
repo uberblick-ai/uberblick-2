@@ -94,6 +94,7 @@ mise run lint         # Biome lint across the workspace (no formatter)
 mise run typecheck    # tsc --noEmit across all packages
 mise run test         # all test suites
 mise run e2e          # browser proof points (Playwright, Chromium, on demand)
+mise run fue          # the documented install path, executed on a clean machine
 REVIEW_SHA=<commit> mise run review  # immutable Docker review of one commit
 ```
 
@@ -399,6 +400,41 @@ the server keeps its environment-only contract — no flags, no config file — 
 a client's spawn line never has to change again when internals move. This
 checkout's `.mcp.json` is the one place that still names a spawn of its own,
 for the reasons given above, and `ub mcp install` generates it.
+
+## The first-user proof
+
+`mise run fue` is the install section above, executed. It builds
+`Dockerfile.fue` — Debian with git and mise on it and nothing else, no Node, no
+pnpm, no age key, no secrets — copies the working tree in, and runs
+`mise trust && mise run setup -- --yes` verbatim. Then, in a container started
+with `--network none`, `scripts/fue-assert.mjs` checks what a new user was
+promised:
+
+- `ub status` exits 0, names the workspace `ub init` just generated, and reports
+  a signing secret — the `fnox --if-missing warn` path, which is every
+  contributor's path.
+- `list_docs` answers over `ub mcp serve`, spoken as a real client speaks it:
+  newline-delimited JSON-RPC on stdio. An empty corpus passes; so does one with
+  starter documents in it.
+- `mise run hub` binds its port **and** accepts this machine's own credential —
+  the port alone would pass with a secret nothing can authenticate with.
+- `mise run web` answers `/` with the app, is served the workspace that `/`
+  redirects into, and answers the workspace address itself rather than a 404.
+
+Two properties make it worth its runtime, about 70 seconds cold. The install
+half is the only thing with network, so everything asserted is asserted offline:
+local-first is tested by taking the wire away. And nothing is stubbed — delete a
+step from `mise run setup` and the build fails at it, which is exactly what
+should happen when the documented path and the real one drift apart. Failure
+prints one line naming the first broken step.
+
+It runs on demand, like `mise run e2e`, and never in per-PR CI. Same standing
+rule as the review image: no secrets, no host mounts, no privileged mode, no
+Docker socket. The build context is the working tree filtered by
+`Dockerfile.fue.dockerignore`, which is stricter than the review runner's
+`.dockerignore` — `mise.local.toml`, `uberblick.json` and every local database
+are excluded, because a proof that runs on state `ub init` was supposed to
+create proves nothing.
 
 ## Review isolation
 

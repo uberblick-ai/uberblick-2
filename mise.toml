@@ -127,6 +127,41 @@ pnpm --filter @uberblick/web exec playwright install chromium
 pnpm --filter @uberblick/web run e2e
 """
 
+[tasks.fue]
+description = "First-user experience: run the documented install path on a clean machine, then assert what it promised"
+# On demand like `mise run e2e`, and for the same reason: it is heavy, and it
+# proves something no unit test can. What it proves is the *documentation* —
+# `Dockerfile.fue` runs the README's install path verbatim on a machine that has
+# only git and mise on it, so deleting a documented step is what makes this fail.
+#
+# Two halves, and the split is the test. The build installs, with network. The
+# run asserts, with `--network none`: the offline-first promise is not a claim
+# about a good day on a fast connection.
+#
+# The context is the working tree — this is a proof of the install path in front
+# of you, not of one on a server — filtered by `Dockerfile.fue.dockerignore`,
+# which is stricter than the review runner's: nothing `ub init` is supposed to
+# create may reach the image, `mise.local.toml` above all.
+#
+# No `fnox exec`: a new user has no age key, and the whole point is that
+# `--if-missing warn` carries them through to a generated development secret.
+# Standing rule, as everywhere: no secrets, no host mounts, no privileged mode,
+# no Docker socket.
+run = """
+set -eu
+
+root="$(git rev-parse --show-toplevel)"
+tag="uberblick-fue:latest"
+
+if ! docker build --file "$root/Dockerfile.fue" --tag "$tag" "$root"; then
+  printf 'fue: FAILED at the documented install path — `mise trust && mise run setup -- --yes` did not complete on a clean machine; the failing step is the last command above.\\n' >&2
+  exit 1
+fi
+
+docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges "$tag"
+printf 'fue image retained for probes: %s\\n' "$tag"
+"""
+
 [tasks.review]
 description = "Build and verify an immutable commit in Docker (REVIEW_SHA defaults to HEAD)"
 # Trust boundary (README, "Review isolation"): the reviewed commit supplies file
