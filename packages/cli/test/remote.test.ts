@@ -18,8 +18,18 @@
  * ever reaches either stream.
  */
 
-import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import type { Server } from "node:http";
+import { createServer } from "node:http";
+import type { Socket } from "node:net";
 import { join } from "node:path";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -43,7 +53,6 @@ import type { Sandbox } from "./helpers.js";
 import { setRemote } from "../src/remote.js";
 import {
   DEAD_HUB_URL,
-  REPO_ROOT,
   removeTempDirs,
   runUb,
   runUbAsync,
@@ -62,6 +71,12 @@ const hubs: Hub[] = [];
 afterEach(async () => {
   for (const hub of hubs.splice(0)) {
     await hub.stop();
+  }
+  for (const { server, sockets } of silentServers.splice(0)) {
+    // The sockets are deliberately never closed by the peer, so `close` would
+    // wait for them forever.
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
   removeTempDirs();
 });
@@ -86,6 +101,44 @@ async function startHub(authSecret = SECRET): Promise<Hub> {
 
 function url(hub: Hub): string {
   return `ws://127.0.0.1:${hub.port}`;
+}
+
+const silentServers: { server: Server; sockets: Socket[] }[] = [];
+
+/**
+ * A server that completes the websocket handshake and then says nothing.
+ *
+ * The failure worth having a fixture for: the far side is up, accepts the
+ * connection and authenticates nothing, so the room never goes quiet.
+ * `waitForQuiet` returns on its deadline exactly as it does on success, which is
+ * why the bridge has to tell the two apart by itself.
+ */
+async function silentServer(): Promise<{ url: string }> {
+  const sockets: Socket[] = [];
+  const server = createServer();
+  server.on("upgrade", (request, socket: Socket) => {
+    sockets.push(socket);
+    const key = request.headers["sec-websocket-key"] ?? "";
+    const accept = createHash("sha1")
+      .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest("base64");
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\n" +
+        "Upgrade: websocket\r\n" +
+        "Connection: Upgrade\r\n" +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+    // …and not one frame after that.
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  silentServers.push({ server, sockets });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("the silent server did not bind a port");
+  }
+  return { url: `ws://127.0.0.1:${address.port}` };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -290,8 +343,9 @@ describe("ub remote", () => {
     expect(run.stdout).toContain("wss://hub.example.ts.net");
     expect(run.stdout).toContain("served bundle");
     expect(run.stdout).toContain("private network");
-    // #92, not #79: there is no invite flow to offer.
-    expect(run.stdout).not.toMatch(/\bub remote invite\b/);
+    // The endpoint AND where it came from — a source is what makes the value
+    // actionable when something else outranks it.
+    expect(run.stdout).toContain("user config");
     expect(persistedHubUrl(box)).toBe("wss://hub.example.ts.net");
   });
 
@@ -316,31 +370,51 @@ describe("ub remote", () => {
     expect(run.output).not.toContain("hunter2");
   });
 
-  it("points the mise tasks at the endpoint too, not just ub", () => {
-    // Without this the browser keeps building against mise.toml's localhost
-    // default while `ub` talks to the remote — one workspace, two hubs.
-    const box = sandbox({ checkout: true, credentials: { signingSecret: SECRET } });
-    const run = runUb(["remote", "set", "wss://hub.example.ts.net"], box);
-    expect(run.status).toBe(0);
+  it("preserves the other fields in config.json", () => {
+    const box = sandbox({
+      userConfig: { workspace: "main", displayName: "Someone", color: "#0e8085" },
+    });
+    expect(runUb(["remote", "set", "wss://hub.example.ts.net"], box).status).toBe(0);
 
-    const derived = readFileSync(join(box.cwd, "mise.local.toml"), "utf8");
-    expect(derived).toContain('HUB_URL = "wss://hub.example.ts.net"');
-    expect(derived).toContain(`HUB_AUTH_TOKEN = "${SECRET}"`);
-    expect(run.stdout).toContain("mise.local.toml");
-    // Committed configuration keeps the localhost default for everybody else.
-    expect(readFileSync(join(REPO_ROOT, "mise.toml"), "utf8")).toContain(
-      'HUB_URL = "ws://localhost:1234"',
-    );
+    const config = readConfigFile(box, "config.json");
+    expect(config.displayName).toBe("Someone");
+    expect(config.color).toBe("#0e8085");
+    expect(config.hubUrl).toBe("wss://hub.example.ts.net");
   });
 
-  it("keeps the endpoint when ub init rewrites the derived config", () => {
-    const box = sandbox({ checkout: true, credentials: { signingSecret: SECRET } });
+  it("never writes ./uberblick.json", () => {
+    // It is committable, and `secretAppliesTo` withholds the stored secret from
+    // a repository-chosen hub — so an endpoint written there would be dialled
+    // with no credential at all.
+    const box = sandbox();
     expect(runUb(["remote", "set", "wss://hub.example.ts.net"], box).status).toBe(0);
-    expect(runUb(["init", "--yes"], box).status).toBe(0);
+    expect(existsSync(join(box.cwd, "uberblick.json"))).toBe(false);
+  });
 
-    expect(readFileSync(join(box.cwd, "mise.local.toml"), "utf8")).toContain(
-      'HUB_URL = "wss://hub.example.ts.net"',
-    );
+  it("says when ./uberblick.json outranks what it just wrote", () => {
+    // A committable file pins the endpoint, and `secretAppliesTo` withholds the
+    // stored secret from a repository-chosen hub — so writing the endpoint
+    // *there* is not the fix, and printing the new one without saying this
+    // would be printing a value that does not take effect.
+    const box = sandbox({ directoryFile: { hubUrl: "ws://127.0.0.1:9999" } });
+
+    const run = runUb(["remote", "set", "wss://hub.example.ts.net"], box);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("./uberblick.json");
+    expect(run.stderr).toContain("ws://127.0.0.1:9999");
+    expect(run.stderr).toContain("outranks");
+    // It still wrote the file it was asked to write.
+    expect(persistedHubUrl(box)).toBe("wss://hub.example.ts.net");
+  });
+
+  it("says when HUB_URL in the environment outranks what it just wrote", () => {
+    const box = sandbox();
+    const run = runUb(["remote", "set", "wss://hub.example.ts.net"], box, {
+      HUB_URL: "ws://127.0.0.1:9999",
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("HUB_URL in the environment");
+    expect(run.stderr).toContain("outranks");
   });
 
   it("never leaves the stored credential naming a different hub", () => {
@@ -423,10 +497,10 @@ describe("ub remote promote", () => {
     expect((await readHub(remote)).size).toBe(1);
   });
 
-  // A remote holding a strict subset is an interrupted promotion to finish.
-  // A remote holding the same uuid with different content is two histories
-  // under one identity, and finishing it would merge them.
-  it("refuses a remote that has the same document with other contents", async () => {
+  // A shared uuid is one document's lineage on two hubs, which Yjs merges —
+  // the resumability the two verbs are built on. Only a uuid this workspace has
+  // never heard of is a second workspace.
+  it("finishes rather than refuses when the remote shares a document", async () => {
     const local = await startHub();
     const remote = await startHub();
     const box = machine(local);
@@ -435,12 +509,49 @@ describe("ub remote promote", () => {
     await webDoc(remote, "Shared", SECRET, { uuid: shared, body: "theirs" });
 
     const run = await runUbAsync(["remote", "promote", url(remote)], box);
-    expect(run.status).toBe(1);
-    expect(run.stderr).toContain("with different contents");
-    expect(run.stderr).toContain("two histories under one identity");
-    expect(run.stderr).toContain(shared);
-    expect(persistedHubUrl(box)).toBe(url(local));
+    expect(run.status).toBe(0);
+    expect(persistedHubUrl(box)).toBe(url(remote));
+    expect([...(await readHub(remote)).keys()]).toEqual([shared]);
   });
+
+  // Attaching the populated mirror to the target *is* a merge, so the refusal
+  // has to be decided by a throwaway client before that ever happens.
+  it("leaves the remote untouched when it refuses", async () => {
+    const local = await startHub();
+    const remote = await startHub();
+    const box = machine(local);
+    await webDoc(local, "Mine");
+    await webDoc(remote, "Theirs");
+    const before = await readHub(remote);
+
+    expect((await runUbAsync(["remote", "promote", url(remote)], box)).status).toBe(
+      1,
+    );
+
+    const after = await readHub(remote);
+    expect([...after.keys()].sort()).toEqual([...before.keys()].sort());
+    for (const [uuid, blocks] of before) {
+      expect(after.get(uuid)).toEqual(blocks);
+    }
+  });
+
+  // "Read it and it holds nothing" and "could not finish reading it" are
+  // different answers. Treating the second as the first is how a bridge decides
+  // a populated hub is safe to promote into.
+  it("refuses a hub it connected to but could not finish reading", async () => {
+    const local = await startHub();
+    const silent = await silentServer();
+    const box = machine(local);
+    await webDoc(local, "Mine");
+
+    const run = await runUbAsync(["remote", "promote", silent.url], box, {}, 55_000);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("never finished serving its directory");
+    expect(run.stderr).toContain("not the same as holding nothing");
+    // The failure it must never become: an empty reading treated as an empty hub.
+    expect(run.stderr).not.toContain("already holds 0 documents");
+    expect(persistedHubUrl(box)).toBe(url(local));
+  }, 60_000);
 
   it("refuses a remote holding nothing but archived documents", async () => {
     const local = await startHub();
@@ -497,14 +608,20 @@ describe("ub remote join", () => {
     chmodSync(secretFile, 0o600);
 
     const run = await runUbAsync(
-      ["remote", "join", url(remote), "--fresh", "--secret-file", secretFile],
+      ["remote", "join", url(remote), "--secret-file", secretFile],
       box,
     );
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("joined 2 documents");
     expect(persistedHubUrl(box)).toBe(url(remote));
-    // The credential that reached the remote is now this machine's.
+    // The credential that reached the remote is now this machine's, replacing
+    // the random one `ub init` generated here — without which a second machine
+    // could never authenticate. Still owner-only afterwards.
     expect(storedSecret(box)).toBe(OTHER_SECRET);
+    expect(run.stdout).toContain("signing secret in credentials.json was replaced");
+    const mode =
+      statSync(join(box.configHome, "uberblick", "credentials.json")).mode & 0o777;
+    expect(mode).toBe(0o600);
 
     // The corpus is in the local update log: read back with the hub stopped and
     // no secret configured, so nothing can have come off the wire.
@@ -519,9 +636,10 @@ describe("ub remote join", () => {
     expect(run.output).not.toMatch(TOKEN_SHAPE);
   });
 
-  // An empty mirror and a hub that is merely switched off are the same picture
-  // from here, and one of them means a corpus is about to be left behind.
-  it("refuses a stopped local hub unless told the checkout has none", async () => {
+  // The fresh-checkout flow has no local hub, so join must work without one —
+  // and must say what it therefore could not see, rather than implying it
+  // checked.
+  it("joins without a local hub, and says what it could not account for", async () => {
     const remote = await startHub();
     await webDoc(remote, "Theirs");
     const box = sandbox({
@@ -530,14 +648,13 @@ describe("ub remote join", () => {
     });
 
     const run = await runUbAsync(["remote", "join", url(remote)], box);
-    expect(run.status).toBe(1);
-    expect(run.stderr).toContain("--fresh");
-    expect(run.stderr).toContain("switched off");
-    expect(persistedHubUrl(box)).toBe(DEAD_HUB_URL);
-
-    // …and with the flag, the same command goes through.
-    const fresh = await runUbAsync(["remote", "join", url(remote), "--fresh"], box);
-    expect(fresh.status).toBe(0);
+    expect(run.status).toBe(0);
+    // The check that decides "is this workspace empty" is itself what could not
+    // see everything — saying only "some documents are unaccounted for" would
+    // understate it.
+    expect(run.stderr).toContain('"is this workspace empty" check');
+    expect(run.stderr).toContain("saw only the local update log");
+    expect(run.stderr).toContain("leave those documents behind");
     expect(persistedHubUrl(box)).toBe(url(remote));
   });
 
@@ -577,7 +694,7 @@ describe("ub remote join", () => {
       credentials: { signingSecret: SECRET },
     });
 
-    const run = await runUbAsync(["remote", "join", DEAD_HUB_URL, "--fresh"], box);
+    const run = await runUbAsync(["remote", "join", DEAD_HUB_URL], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("did not answer");
     expect(persistedHubUrl(box)).toBe("ws://127.0.0.1:2");
@@ -590,10 +707,7 @@ describe("ub remote join", () => {
       credentials: { signingSecret: SECRET },
     });
 
-    const run = await runUbAsync(
-      ["remote", "join", url(remote), "--fresh"],
-      box,
-    );
+    const run = await runUbAsync(["remote", "join", url(remote)], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("rejected the credential");
     expect(run.stderr).toContain("--secret-file");

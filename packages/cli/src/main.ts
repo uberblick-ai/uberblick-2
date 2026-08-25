@@ -22,6 +22,36 @@ function fail(error: unknown): void {
 // also means a command must close what it opened — `ub status` closes its server
 // instance, `ub mcp serve` drops its signal handlers — or the process would now
 // hang instead of being cut short.
+/**
+ * Stop waiting for handles that will never close, without truncating output.
+ *
+ * A hub that accepts a connection and then says nothing leaves a websocket
+ * whose close handshake no one will ever answer, so the event loop does not run
+ * dry and the rule above turns "exit cleanly" into "hang". The command has
+ * already said everything it is going to say by the time this is scheduled, so
+ * the remaining handles get a grace period and then stop being waited for.
+ *
+ * The timer is unref'd, so a process that *can* exit on its own still exits
+ * immediately and never waits out the grace. And stdout is drained first — the
+ * whole reason this file does not call `process.exit` directly is that a pipe
+ * write is asynchronous, and that is as true here as it is anywhere.
+ */
+function stopWaiting(): void {
+  let attempts = 0;
+  const check = (): void => {
+    const draining =
+      process.stdout.writableLength > 0 || process.stderr.writableLength > 0;
+    if (draining && attempts < 20) {
+      attempts += 1;
+      setTimeout(check, 50).unref();
+      return;
+    }
+    process.exit(process.exitCode ?? 0);
+  };
+  setTimeout(check, 500).unref();
+}
+
 runCli(process.argv.slice(2)).then((code) => {
   process.exitCode = code;
+  stopWaiting();
 }, fail);

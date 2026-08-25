@@ -81,7 +81,13 @@ import { HubSync } from "./sync.js";
  */
 export const BRIDGE_CONNECT_TIMEOUT_MS = 5_000;
 
-export const BRIDGE_SYNC_TIMEOUT_MS = 30_000;
+/**
+ * Generous, but finite and short enough to be *reached* rather than endured. A
+ * hub that connects and then never finishes syncing is a real failure mode —
+ * the far side is up but not serving this room — and it is only distinguishable
+ * from success because this budget runs out and says so.
+ */
+export const BRIDGE_SYNC_TIMEOUT_MS = 15_000;
 
 /** The same configuration, pointed at another hub with a bridge's patience. */
 export function bridgeConfig(
@@ -129,6 +135,20 @@ export interface Corpus {
    * from success.
    */
   unsettled: string[];
+  /**
+   * Whether this reading finished. **A corpus that is not complete says nothing
+   * about what the hub holds**, and in particular an empty `entries` on an
+   * incomplete reading is not an empty hub.
+   *
+   * This is the third answer, and it exists because the other two are not
+   * enough. `waitForQuiet` returns identically when the directory went quiet
+   * and when the clock ran out, and in the second case the connection is still
+   * up — so `hub.status` says `connected` and `entries` is empty, which reads
+   * exactly like a blank hub ready to be promoted into. Deciding a refusal from
+   * that would attach a populated mirror to a hub whose contents were never
+   * read, and attaching is a merge.
+   */
+  complete: boolean;
 }
 
 /** The live documents of a corpus — what a bridge actually moves. */
@@ -236,7 +256,8 @@ function sameDoc(a: CorpusDoc, b: CorpusDoc): boolean {
 }
 
 function emptyCorpus(hub: HubState): Corpus {
-  return { hub, entries: [], missing: [], unsettled: [] };
+  // Never `complete`: nothing was read, so nothing is known.
+  return { hub, entries: [], missing: [], unsettled: [], complete: false };
 }
 
 function tombstone(entry: { uuid: string; title: string }): CorpusDoc {
@@ -258,9 +279,9 @@ function tombstone(entry: { uuid: string; title: string }): CorpusDoc {
  * UI as a ghost collaborator.
  *
  * @param options.documents Open every live document the directory names and
- * fingerprint it. Off only where the caller genuinely needs nothing but the
- * directory; every *decision* a bridge makes needs content, because a far side
- * holding the same uuids with different contents is divergence, not progress.
+ * fingerprint it. Off where the caller needs nothing but the set of uuids — a
+ * refusal is decided on those alone. On for read-back, where the question is
+ * whether what this machine holds actually arrived.
  */
 export async function inspectRemote(
   config: McpConfig,
@@ -287,8 +308,22 @@ export async function inspectRemote(
     const dirRoom = directoryRoom(config.workspaceId);
     const dirDoc = open(dirRoom);
     await sync.waitForQuiet();
-    if (sync.state().status !== "connected" || !sync.isRoomQuiet(dirRoom)) {
+    if (sync.state().status !== "connected") {
       return emptyCorpus(sync.state());
+    }
+    // "Read it and it holds nothing" and "could not finish reading it" are
+    // different answers, and only one of them means the hub is empty. A
+    // directory room that connected but never went quiet inside the sync budget
+    // is the second, and reporting it as a corpus of zero documents is how a
+    // bridge would decide a populated hub was safe to promote into.
+    if (!sync.isRoomQuiet(dirRoom)) {
+      return {
+        hub: sync.state(),
+        entries: [],
+        missing: [],
+        unsettled: [dirRoom],
+        complete: false,
+      };
     }
 
     const all = listDirectory(dirDoc, { includeDeleted: true });
@@ -310,6 +345,7 @@ export async function inspectRemote(
         ],
         missing: [],
         unsettled: [],
+        complete: true,
       };
     }
 
@@ -344,11 +380,15 @@ export async function inspectRemote(
         stateVector: Y.encodeStateVector(held.doc),
       });
     }
+    // Complete: the directory was read in full. An individual document that did
+    // not arrive lands in `missing`, which every caller already refuses on —
+    // only the directory read can fail in a way that looks like emptiness.
     return {
       hub: sync.state(),
       entries: [...entries, ...dead],
       missing,
       unsettled,
+      complete: true,
     };
   } finally {
     sync.destroy();
@@ -392,7 +432,7 @@ function readCorpus(replicas: Replicas): Corpus {
       stateVector: Y.encodeStateVector(replica.doc),
     });
   }
-  return { hub: replicas.sync.state(), entries, missing, unsettled };
+  return { hub: replicas.sync.state(), entries, missing, unsettled, complete: true };
 }
 
 /**
@@ -460,16 +500,17 @@ export function isIdentical(difference: CorpusDifference): boolean {
  * other side empty" is also what lets a rerun finish — a promotion interrupted
  * halfway leaves a remote that holds a subset.
  *
- * That resumability is only ever safe when the overlap is **identical**, which
- * is why `differing` exists and why every caller treats it exactly like
- * `extra`. A far side holding the same uuid with different content has diverged
- * from this workspace, and continuing would merge two histories under one
- * identity — the thing the two-verb split exists to prevent, arrived at through
- * a subset rather than through a superset.
+ * **A refusal is decided on uuids alone; `differing` is for verification.** An
+ * overlapping uuid is the same document, and the same document on two hubs is
+ * one lineage that Yjs merges — re-promoting it converges its own history,
+ * which is exactly the rerun the two verbs are meant to support. Content only
+ * decides anything at read-back time, where the question is not "may this
+ * proceed" but "did what just happened actually land".
  *
- * Tombstoned entries take part in all of it. They carry no content to compare,
- * but their presence is content: a hub holding nothing but tombstones has been
- * used, and disagreeing about whether a document is archived is a difference.
+ * Tombstoned entries take part in the set difference. They carry no content to
+ * compare, but their presence is content: a hub whose directory names documents
+ * this workspace has never heard of has been used by somebody else, whether or
+ * not those documents are still live.
  */
 export function compareCorpus(
   expected: readonly CorpusDoc[],
