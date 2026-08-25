@@ -416,10 +416,13 @@ promised:
 - `list_docs` answers over `ub mcp serve`, spoken as a real client speaks it:
   newline-delimited JSON-RPC on stdio. An empty corpus passes; so does one with
   starter documents in it.
-- `mise run hub` binds its port **and** accepts this machine's own credential —
-  the port alone would pass with a secret nothing can authenticate with.
-- `mise run web` answers `/` with the app, is served the workspace that `/`
-  redirects into, and answers the workspace address itself rather than a 404.
+- `mise run dev` — the command a new user is actually given, not the two halves
+  it is made of — brings up a hub that accepts this machine's own credential (the
+  port alone would pass with a secret nothing can authenticate with) and a web
+  server that answers `/` with the app, is served the workspace `/` redirects
+  into, and answers the workspace address itself rather than a 404.
+- Ctrl-C then stops everything it started: `dev` exits 130 and both ports come
+  free, which is what its `trap 'kill 0'` is there for.
 
 Two properties make it worth its runtime, about 70 seconds cold. The install
 half is the only thing with network, so everything asserted is asserted offline:

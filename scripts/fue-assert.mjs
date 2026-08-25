@@ -23,7 +23,8 @@ import { createConnection } from "node:net";
 
 /** Where the documented `mise run dev` puts the two servers. */
 const HUB_PORT = 1234;
-const WEB_ORIGIN = "http://localhost:5173";
+const WEB_PORT = 5173;
+const WEB_ORIGIN = `http://localhost:${WEB_PORT}`;
 
 /** The step in progress, so a failure anywhere can name it. */
 let step = "startup";
@@ -116,17 +117,21 @@ function background(label, command, args) {
   child.once("error", (error) => {
     stopped = `would not start: ${error.message}`;
   });
+  const signalGroup = (signal) => {
+    try {
+      process.kill(-child.pid, signal);
+    } catch {
+      // Already gone, or never started. Nothing left to do either way.
+    }
+  };
   const service = {
     label,
     output: () => chunks.join(""),
     stopped: () => stopped,
-    stop() {
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch {
-        // Already gone, or never started. Nothing left to do either way.
-      }
-    },
+    /** What Ctrl-C sends, to the group a terminal would send it to. */
+    interrupt: () => signalGroup("SIGINT"),
+    /** The safety net at exit: nothing gets to decline this one. */
+    stop: () => signalGroup("SIGKILL"),
   };
   services.push(service);
   return service;
@@ -166,6 +171,21 @@ async function waitFor(what, probe, { timeoutMs, service = null }) {
     }
     await sleep(500);
   }
+}
+
+/** The opposite of {@link tcpOpen}, and never an error: refusal is the answer. */
+function tcpRefused(port) {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once("error", () => {
+      socket.destroy();
+      resolve(true);
+    });
+  });
 }
 
 function tcpOpen(port) {
@@ -378,13 +398,19 @@ async function main() {
     );
   });
 
-  // 3. `mise run dev`, one half at a time so a failure names which half.
-  const hub = background("`mise run hub`", "mise", ["run", "hub"]);
-  await assert("`mise run hub` binds its port", () =>
+  // 3. `mise run dev` — the command the README actually hands a new user, not
+  //    the two halves it happens to be made of. Starting the hub and the web
+  //    server separately here would test two tasks nobody was told to run and
+  //    leave the orchestration itself unproven: `dev` fans out explicitly
+  //    because `depends` serializes two long-running tasks under MISE_JOBS=1,
+  //    and a regression back to `depends` is a dev loop where the web server
+  //    never starts — invisible to a proof that starts it by hand.
+  const dev = background("`mise run dev`", "mise", ["run", "dev"]);
+  await assert("`mise run dev` starts the hub", () =>
     waitFor(
       `the hub to accept connections on ${HUB_PORT}`,
       () => tcpOpen(HUB_PORT),
-      { timeoutMs: 90_000, service: hub },
+      { timeoutMs: 90_000, service: dev },
     ),
   );
 
@@ -401,11 +427,10 @@ async function main() {
         }
         return json.hub?.status === "connected";
       },
-      { timeoutMs: 90_000, service: hub },
+      { timeoutMs: 90_000, service: dev },
     ),
   );
 
-  const web = background("`mise run web`", "mise", ["run", "web"]);
   await assert("the web client answers on / and carries the workspace", async () => {
     const root = await waitFor(
       `the web dev server to answer on ${WEB_ORIGIN}/`,
@@ -413,7 +438,7 @@ async function main() {
         const response = await get("/", "text/html");
         return response.status === 200 ? response : false;
       },
-      { timeoutMs: 120_000, service: web },
+      { timeoutMs: 120_000, service: dev },
     );
     if (!root.body.includes('id="root"')) {
       throw new Error(
@@ -449,6 +474,30 @@ async function main() {
         `the workspace address /${report.workspace} answered HTTP ${deep.status} instead of the app`,
       );
     }
+  });
+
+  // Ctrl-C, which is how everyone ends a dev session. `dev` installs
+  // `trap 'kill 0'` precisely so the interrupt takes the whole group down; a
+  // regression there leaves a hub bound to 1234 after the terminal is gone, and
+  // the next `mise run dev` fails on a port nobody can explain.
+  await assert("Ctrl-C stops everything `mise run dev` started", async () => {
+    dev.interrupt();
+    // No `service:` on any of these — the exit IS the expected outcome here,
+    // and waitFor treats a stopped service as a failure everywhere else.
+    await waitFor("`mise run dev` to exit", () => dev.stopped() !== null, {
+      timeoutMs: 30_000,
+    });
+    await waitFor(
+      `the hub to release port ${HUB_PORT}`,
+      () => tcpRefused(HUB_PORT),
+      { timeoutMs: 30_000 },
+    );
+    await waitFor(
+      `the web dev server to release port ${WEB_PORT}`,
+      () => tcpRefused(WEB_PORT),
+      { timeoutMs: 30_000 },
+    );
+    process.stdout.write(`fue:   \`mise run dev\` ${dev.stopped()}, both ports free\n`);
   });
 }
 
