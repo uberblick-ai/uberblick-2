@@ -59,8 +59,12 @@
  *   - `unpinLevel(uuid)` is the **maximum** over every `<uuid>#<clientID>`
  *     entry, 0 when there are none.
  *   - A pin is visible iff `pin.since >= unpinLevel(pin.uuid)`.
- *   - `unpinDoc` writes `unpinLevel + 1` **to its own client's key**, so a pin
- *     made before it (`since <= level`) is hidden.
+ *   - `unpinDoc` writes **to its own client's key** one more than the highest
+ *     stamp it can actually see — the unpin level, or a visible pin's `since`
+ *     if that is higher — so every pin this replica can see is hidden. Counting
+ *     from the level alone is not enough: updates from different clients arrive
+ *     in no guaranteed order, so a replica can hold a pin stamped above its own
+ *     level and would otherwise write a number that pin already clears.
  *   - `pinDoc` stamps the new pin with the level it can see, so the pin is
  *     visible again — a deliberate re-pin beats the unpins it has seen.
  *   - `moveDoc` carries the existing pin's `since` across unchanged. Moving is
@@ -245,6 +249,31 @@ function visiblePin(sidebarDoc: Y.Doc, uuid: string): Pin | null {
   return null;
 }
 
+/**
+ * The level an unpin of `uuid` has to clear: the document's unpin level, and
+ * the stamp of every pin that currently reads as visible.
+ *
+ * The two can disagree. Updates from different clients arrive in no guaranteed
+ * order, so a replica can hold a pin stamped `since: 2` while the counter that
+ * justified it — written by some third client — has not arrived, leaving the
+ * level at 0. Counting from the level alone would write 1, which that pin
+ * already clears, and the unpin would be silently lost the moment the pin was
+ * moved or the missing counter turned up. Counting from what is actually
+ * visible cannot be fooled that way: whatever a replica can see, it can hide.
+ */
+function unpinCeiling(sidebarDoc: Y.Doc, uuid: string): number {
+  const level = unpinLevel(sidebarDoc, uuid);
+  let ceiling = level;
+  for (const pins of allPinLists(sidebarDoc)) {
+    for (const item of pins.toArray()) {
+      const pin = readPin(item);
+      if (pin === null || pin.uuid !== uuid) continue;
+      if (pin.since >= level && pin.since > ceiling) ceiling = pin.since;
+    }
+  }
+  return ceiling;
+}
+
 /** Add an empty group at `index` (default: last) and return its generated id. */
 export function createGroup(
   sidebarDoc: Y.Doc,
@@ -317,11 +346,12 @@ export function pinDoc(
  *
  * Removing the pins is not enough on its own — a move made concurrently on
  * another replica would reinstate one — so this also raises this client's unpin
- * counter past the level any surviving pin was made under. See the header.
+ * counter past every pin this replica can currently see, which is a stronger
+ * bar than the unpin level alone. See {@link unpinCeiling} and the header.
  */
 export function unpinDoc(sidebarDoc: Y.Doc, uuid: string): void {
   if (visiblePin(sidebarDoc, uuid) === null) return;
-  const next = unpinLevel(sidebarDoc, uuid) + 1;
+  const next = unpinCeiling(sidebarDoc, uuid) + 1;
   const key = `${uuid}${CLIENT_SEPARATOR}${sidebarDoc.clientID}`;
   sidebarDoc.transact(() => {
     removePinEverywhere(sidebarDoc, uuid);

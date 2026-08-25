@@ -294,6 +294,60 @@ describe("sidebar doc", () => {
     },
   );
 
+  it.each(CLIENT_ORDERS)(
+    "unpins a pin stamped above the counters it has received (clients %i, %i)",
+    (first, second) => {
+      // Partial delivery. Updates from different clients arrive in no
+      // guaranteed order, so B can hold a pin stamped `since: 1` while the
+      // counter that justified it — written by a third client — has not
+      // arrived, leaving B's level at 0. An unpin counting from the level
+      // alone would write 1, which that pin already clears, and A's concurrent
+      // move would carry it straight back. It takes a third writer to build:
+      // Yjs keeps one client's own updates in order, so a pin can only outrun
+      // the counter that justified it when someone else wrote that counter.
+      const { a, b, work, reading } = seededPair([first, second]);
+      pinDoc(a, work, ALPHA);
+      syncDocs(a, b);
+
+      const c = new Y.Doc();
+      c.clientID = 3;
+      syncDocs(a, c);
+      unpinDoc(c, ALPHA);
+      syncDocs(a, c);
+
+      // A re-pins at the level C established: the pin carries `since: 1`.
+      let pinUpdate: Uint8Array | null = null;
+      const capture = (update: Uint8Array) => {
+        pinUpdate = update;
+      };
+      a.on("update", capture);
+      pinDoc(a, work, ALPHA);
+      a.off("update", capture);
+      expect(pinUpdate).not.toBeNull();
+
+      // B receives that pin and nothing else — never C's counter.
+      Y.applyUpdate(b, pinUpdate as unknown as Uint8Array);
+      expect(readSidebar(b).flatMap((group) => group.docs)).toEqual([ALPHA]);
+
+      // B unpins what it can see, while A moves the same pin elsewhere. The
+      // move carries `since: 1` into an item B has never had a chance to
+      // delete, so only B's counter can hide it.
+      unpinDoc(b, ALPHA);
+      moveDoc(a, ALPHA, reading, 0);
+
+      syncDocs(a, c);
+      syncDocs(a, b);
+      syncDocs(a, c);
+      syncDocs(a, b);
+
+      expect(readSidebar(a)).toEqual(readSidebar(b));
+      expect(readSidebar(a)).toEqual([
+        { id: work, name: "Work", docs: [] },
+        { id: reading, name: "Reading", docs: [] },
+      ]);
+    },
+  );
+
   it("drops the pins of a group deleted concurrently with a pin into it", () => {
     const { a, b, work, reading } = seededPair();
 
