@@ -17,7 +17,7 @@ import type { DocMeta } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
 import { groupKeyForTags, groupLabel } from "./groups.js";
-import { useAgentActivity, useDocRev, useRoomStatus } from "./hooks.js";
+import { useDocRev, useRemoteActivity, useRoomStatus } from "./hooks.js";
 
 /** What an untitled document is called wherever its name is shown. */
 const UNTITLED = "Untitled";
@@ -68,7 +68,7 @@ export function DocChrome({
   /** The open document's metadata, or null when none is open or read yet. */
   meta: DocMeta | null;
 }): ReactElement {
-  const activity = useAgentActivity(connection);
+  const activity = useRemoteActivity(connection);
   const state = useCalmSyncState(rawSyncState(useRoomStatus(connection)));
   const label = state === "syncing" ? "syncing…" : state;
   // `meta.uuid === ""` is a room that answered with nothing in it — see

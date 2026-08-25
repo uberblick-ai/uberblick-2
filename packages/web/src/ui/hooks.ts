@@ -29,7 +29,7 @@ import { changedBlocks } from "../editor/changed-blocks.js";
 import { findForeignBlocks } from "../editor/palette.js";
 import type { ForeignBlock } from "../editor/palette.js";
 import { blockText, plainText } from "../editor/ytext.js";
-import { docRev, readActivity, sameActivity } from "./doc-chrome.js";
+import { observeDocRev, readActivity, sameActivity } from "./doc-chrome.js";
 import type { RemoteActivity } from "./doc-chrome.js";
 import { observeOutline } from "./outline.js";
 import type { OutlineEntry } from "./outline.js";
@@ -273,20 +273,21 @@ export function usePeers(connection: RoomConnection | null): Peer[] {
 
 /**
  * The remote session the chrome names, live — see `readActivity` for which one
- * that is and why it is not called an agent in the code.
+ * that is and why it is not called an agent here or anywhere else in the code.
  *
  * The reading is compared before it is stored, and that is the point rather
  * than an optimisation: awareness fires `change` on every caret movement, so a
  * peer typing a sentence produces dozens of readings that all say the same
  * thing. Storing them by identity would redraw the pill once per keystroke.
  *
- * Awareness is the only subscription: the pill names a block *number*, which
- * moves when blocks are inserted above it, but a caret that stays put while the
- * document reflows is a stale number for as long as its session is idle — a
- * second observer over the fragment would buy a rarely-wrong number at the cost
- * of re-reading every awareness state on every keystroke in the document.
+ * Two subscriptions, because the pill names a block *number* and there are two
+ * ways for that number to become wrong: the caret moves, or blocks are inserted
+ * or removed above a caret that has not moved at all. The second observer is
+ * shallow on purpose — it is the fragment's *shape* that renumbers blocks, and
+ * a deep one would re-read every awareness state on every keystroke in the
+ * document to learn nothing.
  */
-export function useAgentActivity(
+export function useRemoteActivity(
   connection: RoomConnection | null,
 ): RemoteActivity | null {
   const [activity, setActivity] = useState<RemoteActivity | null>(null);
@@ -296,13 +297,18 @@ export function useAgentActivity(
       setActivity(null);
       return;
     }
+    const fragment = getBlocksFragment(connection.ydoc);
     const read = (): void => {
       const next = readActivity(connection.ydoc, awareness);
       setActivity((previous) => (sameActivity(previous, next) ? previous : next));
     };
     read();
     awareness.on("change", read);
-    return () => awareness.off("change", read);
+    fragment.observe(read);
+    return () => {
+      awareness.off("change", read);
+      fragment.unobserve(read);
+    };
   }, [connection]);
   return activity;
 }
@@ -310,9 +316,9 @@ export function useAgentActivity(
 /**
  * The open document's rev, live — or null while there is no document.
  *
- * Deep, like every other content view here: a rev that only tracked the shape
- * of the fragment would sit still through every edit inside a block, which is
- * most of them.
+ * The derivation keeps its own per-block cache (`observeDocRev`), so this is a
+ * subscription rather than a read-on-every-change: eight characters of chrome
+ * must not cost a re-read of the document per keystroke.
  */
 export function useDocRev(connection: RoomConnection | null): string | null {
   const [rev, setRev] = useState<string | null>(null);
@@ -321,12 +327,7 @@ export function useDocRev(connection: RoomConnection | null): string | null {
       setRev(null);
       return;
     }
-    const { ydoc } = connection;
-    const fragment = getBlocksFragment(ydoc);
-    const read = (): void => setRev(docRev(ydoc));
-    read();
-    fragment.observeDeep(read);
-    return () => fragment.unobserveDeep(read);
+    return observeDocRev(connection.ydoc, setRev);
   }, [connection]);
   return rev;
 }

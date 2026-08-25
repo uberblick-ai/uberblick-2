@@ -8,7 +8,7 @@
 
 import * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
-import { blockRev, getBlocks, getBlocksFragment } from "@uberblick/schema";
+import { blockRev, getBlock, getBlocks, getBlocksFragment } from "@uberblick/schema";
 import { AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
 
 /** A remote session with a caret in this document, and the block it sits in. */
@@ -108,9 +108,16 @@ export function sameActivity(
 /** How much of the document rev the meta line shows. */
 const REV_LENGTH = 8;
 
+/** The block element an event happened in, or null when it happened above one. */
+function blockElementOf(target: Y.AbstractType<unknown>): Y.XmlElement | null {
+  if (target instanceof Y.XmlElement) return target;
+  const parent = target.parent;
+  return parent instanceof Y.XmlElement ? parent : null;
+}
+
 /**
- * The document's rev: the fold of its block revs through the same hash the
- * blocks use, so "changed" means one thing at both levels.
+ * The document's rev, live: the fold of its block revs through the same hash
+ * the blocks use, so "changed" means one thing at both levels.
  *
  * A change detector, not a version counter — exactly what a block `rev` is.
  * Block ids go into the fold as well as block revs, so reordering two blocks or
@@ -119,10 +126,51 @@ const REV_LENGTH = 8;
  * `blockRev` is that hash's only exported entry point, and a document rev is
  * chrome rather than a schema concern, so it is folded here rather than added
  * to `@uberblick/schema`.
+ *
+ * **Why this is an observer and not a function of the document.** The obvious
+ * shape — read `getBlocks(ydoc)` whenever anything changes — reads and rehashes
+ * every character of every block on every keystroke, which is the whole
+ * document's worth of work for eight characters of chrome. So the revs are
+ * cached per block id and only the block an event landed in is re-read:
+ * `getBlocks` runs once, to seed, and each later edit costs one `getBlock` plus
+ * the fold. The fold itself walks the fragment reading `id` attributes — no
+ * text — so the recurring cost is in blocks, never in characters.
+ *
+ * The cache is rebuilt by the fold rather than pruned, so a block that leaves
+ * the document takes its entry with it.
  */
-export function docRev(ydoc: Y.Doc): string {
-  const fold = getBlocks(ydoc)
-    .map((block) => `${block.id} ${block.rev}`)
-    .join("\n");
-  return blockRev({ type: "paragraph", text: fold }).slice(0, REV_LENGTH);
+export function observeDocRev(ydoc: Y.Doc, emit: (rev: string) => void): () => void {
+  const fragment = getBlocksFragment(ydoc);
+  let revs = new Map<string, string>();
+  // One whole-document pass, and the only one.
+  for (const block of getBlocks(ydoc)) revs.set(block.id, block.rev);
+
+  const fold = (): string => {
+    const next = new Map<string, string>();
+    const lines: string[] = [];
+    for (const child of fragment.toArray()) {
+      if (!(child instanceof Y.XmlElement)) continue;
+      const id = child.getAttribute("id") ?? "";
+      // A miss is a block this fold has not seen yet — a new one, or one an
+      // event just invalidated. `getBlock` is the schema's own read, so the
+      // shadowing rule for duplicate ids stays in the one place it lives.
+      const rev = revs.get(id) ?? getBlock(ydoc, id)?.rev ?? "";
+      next.set(id, rev);
+      lines.push(`${id} ${rev}`);
+    }
+    revs = next;
+    return blockRev({ type: "paragraph", text: lines.join("\n") }).slice(0, REV_LENGTH);
+  };
+
+  const onChange = (events: Array<Y.YEvent<Y.AbstractType<unknown>>>): void => {
+    for (const event of events) {
+      const element = blockElementOf(event.target);
+      if (element !== null) revs.delete(element.getAttribute("id") ?? "");
+    }
+    emit(fold());
+  };
+
+  emit(fold());
+  fragment.observeDeep(onChange);
+  return () => fragment.unobserveDeep(onChange);
 }

@@ -24,6 +24,7 @@ import {
   getBlocksFragment,
   getMeta,
   initDoc,
+  insertBlock,
   setTags,
 } from "@uberblick/schema";
 import { DocChrome, DocMetaLine } from "../src/ui/DocChrome.js";
@@ -155,6 +156,30 @@ describe("the doc chrome reads the document, the awareness and the status", () =
       expect(text(host, ".ub-badge")).toBe("Features");
       expect(text(host, ".ub-doc-ids")).toMatch(
         /^uuid 9f3c1a2b · rev [0-9a-f]{8}$/,
+      );
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("renumbers the caret's block when the document moves under it", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    publishAgentCursor(fix, 1);
+    const { host, root } = mount(fix);
+    try {
+      expect(text(host, ".ub-pill-agent")).toBe(
+        "Claude · demo agent editing block 2",
+      );
+      // A block inserted above an idle caret: the caret did not move, its
+      // *number* did. Awareness is silent about this, so the pill would go on
+      // naming a block the reader is no longer looking at.
+      act(() => {
+        insertBlock(fix.ydoc, null, { type: "paragraph", text: "a new first" });
+      });
+      expect(text(host, ".ub-pill-agent")).toBe(
+        "Claude · demo agent editing block 3",
       );
     } finally {
       act(() => root.unmount());

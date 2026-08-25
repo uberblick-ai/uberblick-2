@@ -253,8 +253,13 @@ body {
   flex: none;
 }
 
+/* `min-width: 0` is what makes the ellipsis possible at all: a flex item's
+   automatic minimum size is its content, so without it a long title refuses to
+   shrink and pushes the pills off the end of a narrow window instead of
+   truncating. */
 .ub-crumb-title {
   font-weight: 500;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
