@@ -297,13 +297,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
    * The document's own title where this replica holds it, the stub's cached one
    * otherwise — `meta.title` wins whenever there is a document to ask.
    */
-  const titleFor = (uuid: string, stub: DirectoryEntry): string => {
-    if (!replicas.known(uuid)) {
-      return stub.title;
-    }
-    const meta = getMeta(replicas.replica(uuid).doc);
-    return meta.uuid === "" ? stub.title : meta.title;
-  };
+  const titleFor = (uuid: string, stub: DirectoryEntry): string =>
+    replicas.hydrated(uuid)
+      ? getMeta(replicas.replica(uuid).doc).title
+      : stub.title;
 
   /**
    * What a mutating tool owes its caller: the write landed locally, and whether
@@ -623,6 +620,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "This is not erasure and not a delete. Every block, mark and annotation stays exactly where it was: get_doc still " +
         "serves the document by uuid, and list_docs with `include_deleted: true` still lists it, flagged `deleted`. " +
         "restore_doc is the way back. There is no tool that erases content, by design.\n\n" +
+        "`indexed` is always true here: dropping a document from this replica's search index needs no copy of the " +
+        "document, only its uuid.\n\n" +
         ARCHIVE_IS_LAST_WRITE_WINS +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED,
@@ -634,7 +633,15 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const directory = replicas.directory();
       const title = titleFor(uuid, stub);
       tombstoneDirectoryEntry(directory.doc, uuid);
-      return json({ uuid, title, archived: true, ...durability(directory) });
+      return json({
+        uuid,
+        title,
+        archived: true,
+        // Withdrawing a document from the index needs no copy of it, so this is
+        // never the qualified answer that `restore_doc` can give.
+        indexed: true,
+        ...durability(directory),
+      });
     }),
   );
 
@@ -647,6 +654,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "the title and tags the directory recorded for it. The counterpart to archive_doc, and the sanctioned way " +
         "back — a rename or a retag from a replica that has seen the archive deliberately cannot revive a document. " +
         "Restoring one that is not archived does nothing at all.\n\n" +
+        "Check `indexed`. It is true when this replica holds the document itself and has just re-derived its search " +
+        "rows — the usual case. It is false when this replica knows the document only from the directory: the restore " +
+        "is real and replicates, `list_docs` shows it immediately, but SEARCH ON THIS REPLICA will not find it until " +
+        "the document's own content arrives, which offline means not until the hub is reachable again.\n\n" +
         ARCHIVE_IS_LAST_WRITE_WINS +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED,
@@ -657,10 +668,19 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const stub = requireStub(uuid);
       const directory = replicas.directory();
       restoreDirectoryEntry(directory.doc, uuid);
+      // A rename or a retag that landed while the document was archived never
+      // reached its stub, because stub repair skips tombstoned entries. Catch
+      // the directory up here, or the document comes back under the metadata it
+      // was archived with while search answers from the newer.
+      //
+      // The same condition decides both: only a document this replica actually
+      // holds can republish its stub or re-derive its index rows.
+      const hydrated = replicas.republishStub(uuid);
       return json({
         uuid,
         title: titleFor(uuid, stub),
         archived: false,
+        indexed: hydrated,
         ...durability(directory),
       });
     }),

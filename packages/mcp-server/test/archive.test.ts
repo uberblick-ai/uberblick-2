@@ -15,8 +15,25 @@ import {
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
-import { removeTempDirs, startServer, testConfig } from "./helpers.js";
+import {
+  removeTempDirs,
+  startServer,
+  tempDatabasePath,
+  testConfig,
+} from "./helpers.js";
 import type { Rig } from "./helpers.js";
+import { MirrorStore } from "../src/store.js";
+import type { IndexedDoc } from "../src/store.js";
+
+/** A real store that also remembers which documents it was asked to re-index. */
+class CountingStore extends MirrorStore {
+  readonly indexed: string[] = [];
+
+  override indexDoc(doc: IndexedDoc): void {
+    this.indexed.push(doc.uuid);
+    super.indexDoc(doc);
+  }
+}
 
 const rigs: Rig[] = [];
 
@@ -86,6 +103,27 @@ describe("archive_doc", () => {
     expect(read.blocks.map((block: any) => block.text)).toEqual([BODY]);
   });
 
+  // Every title keystroke in the web editor writes the directory. Re-deriving
+  // the whole corpus on each one would put a SQLite write per document behind
+  // every character typed, on every MCP server that observes it.
+  it("reconciles only the entries a directory update changed", async () => {
+    const store = new CountingStore(tempDatabasePath());
+    const rig = await startServer(testConfig(), store);
+    rigs.push(rig);
+
+    const renamed = await seedDoc(rig);
+    const bystander = await rig.ok("create_doc", { title: "Untouched" });
+
+    store.indexed.length = 0;
+    upsertDirectoryEntry(rig.instance.replicas.directory().doc, {
+      uuid: renamed.uuid,
+      title: "Concepts, renamed",
+    });
+
+    expect(store.indexed).toEqual([renamed.uuid]);
+    expect(store.indexed).not.toContain(bystander.uuid);
+  });
+
   it("refuses a uuid the workspace has never heard of", async () => {
     const rig = await localRig();
 
@@ -118,6 +156,10 @@ describe("restore_doc", () => {
       title: "Archived elsewhere",
       archived: false,
       applied: true,
+      // The honest half: the restore is real and replicates, but this replica
+      // has no content to index, so its own search cannot answer for the
+      // document until the room arrives.
+      indexed: false,
     });
 
     const listed = await rig.ok("list_docs");
@@ -135,6 +177,7 @@ describe("restore_doc", () => {
       title: "Concepts",
       archived: false,
       applied: true,
+      indexed: true,
     });
     expect(restored.synced).toBe(false);
 
@@ -147,5 +190,25 @@ describe("restore_doc", () => {
 
     const hits = await rig.ok("search", { query: "glossary" });
     expect(hits.hits.map((hit: any) => hit.uuid)).toEqual([doc.uuid]);
+  });
+
+  it("republishes metadata that changed while the document was archived", async () => {
+    const rig = await localRig();
+    const doc = await seedDoc(rig);
+    await rig.ok("archive_doc", { uuid: doc.uuid });
+
+    // Editing an archived document is allowed, and its stub does not follow:
+    // stub repair rides document updates, and those stop at the tombstone. The
+    // directory would otherwise keep serving the tags it was archived with
+    // while search answers from the new ones — divergence with no way back.
+    await rig.ok("set_tags", { uuid: doc.uuid, tags: ["retired"] });
+    await rig.ok("restore_doc", { uuid: doc.uuid });
+
+    const listed = await rig.ok("list_docs");
+    expect(listed.docs.find((entry: any) => entry.uuid === doc.uuid)).toEqual({
+      uuid: doc.uuid,
+      title: "Concepts",
+      tags: ["retired"],
+    });
   });
 });

@@ -31,6 +31,7 @@ import {
   getBlocks,
   getBlocksFragment,
   getDirectoryEntry,
+  getDirectoryMap,
   getMeta,
   listDirectory,
   repairDuplicateBlocks,
@@ -113,6 +114,18 @@ export class Replicas {
   private readonly replicas = new Map<string, Replica>();
 
   private readonly cursorTimers = new Map<string, NodeJS.Timeout>();
+
+  /**
+   * Directory uuids whose stub changed and whose index rows have not caught up.
+   *
+   * Filled by the directory map's own observer, which Yjs runs before the
+   * document's `update` listener, and drained by {@link reconcileDirectory}
+   * once that listener has the update safely in the log. The two-step exists so
+   * reconciliation stays *after* the append — a failed append must not leave
+   * the index describing a write the log refused — while still knowing which
+   * handful of entries actually changed.
+   */
+  private readonly staleStubs = new Set<string>();
 
   /** Display name published in awareness. Refined once the client identifies. */
   private agentName: string;
@@ -235,6 +248,18 @@ export class Replicas {
       awareness,
       lastSeq: 0,
     };
+
+    // Which stubs changed is knowable only here: the update payload says a
+    // directory update happened, not which handful of entries it touched, and
+    // re-deriving the whole corpus per update would put a SQLite write per
+    // document behind every keystroke in a title.
+    if (replica.isDirectory) {
+      getDirectoryMap(doc).observe((event) => {
+        for (const uuid of event.keysChanged) {
+          this.staleStubs.add(uuid);
+        }
+      });
+    }
 
     // Observe before hydrating. Replayed updates carry LOG_ORIGIN and are
     // skipped, so hydration cannot double-log, and any update that arrives
@@ -396,29 +421,36 @@ export class Replicas {
    * it.
    *
    * Runs from the same observer that logs the directory update, so it fires for
-   * local and remote origins alike, and only after that update is durable.
+   * local and remote origins alike, and only after that update is durable. Only
+   * the entries that update actually changed are touched — see
+   * {@link staleStubs} — because the common directory write by far is a title
+   * being typed, not a document being archived.
    *
    * Deliberately does not repair stubs: that would write to the directory from
    * inside the directory's own update handler. Titles are cached data, repaired
-   * from the document on the document's own updates.
+   * from the document on the document's own updates, and on restore.
    */
   private reconcileDirectory(): void {
-    for (const entry of listDirectory(this.directory().doc, {
-      includeDeleted: true,
-    })) {
+    const changed = [...this.staleStubs];
+    this.staleStubs.clear();
+    for (const uuid of changed) {
       try {
+        const entry = getDirectoryEntry(this.directory().doc, uuid);
+        if (entry === null) {
+          continue;
+        }
         if (entry.deleted === true) {
-          this.store.unindexDoc(entry.uuid);
+          this.store.unindexDoc(uuid);
           continue;
         }
         // A live entry for a document this replica has never attached is left
         // to `adoptKnownDocs`, which attaches and indexes it on the next
         // settle. Attaching from in here would join rooms as a side effect of
         // an observer.
-        if (!this.known(entry.uuid)) {
+        if (!this.known(uuid)) {
           continue;
         }
-        const replica = this.replica(entry.uuid);
+        const replica = this.replica(uuid);
         const meta = getMeta(replica.doc);
         if (meta.uuid !== "") {
           this.indexRows(replica, meta);
@@ -427,6 +459,30 @@ export class Replicas {
         log.warn("failed to reconcile a directory entry", error);
       }
     }
+  }
+
+  /** Whether this replica holds the document itself, not just its stub. */
+  hydrated(uuid: string): boolean {
+    return this.known(uuid) && getMeta(this.replica(uuid).doc).uuid !== "";
+  }
+
+  /**
+   * Republish one document's stub from its own metadata, where this replica
+   * holds the document. Returns whether it could — i.e. whether the document is
+   * hydrated here.
+   *
+   * Stub repair otherwise rides document updates, and those skip tombstoned
+   * entries: a rename or a retag applied while a document was archived never
+   * reaches the directory. Restoring is the moment to catch up, or the document
+   * comes back under the title it was archived with while search answers from
+   * the newer one. Writes only when the stub and the document actually differ.
+   */
+  republishStub(uuid: string): boolean {
+    if (!this.hydrated(uuid)) {
+      return false;
+    }
+    this.repairStub(getMeta(this.replica(uuid).doc));
+    return true;
   }
 
   /**
