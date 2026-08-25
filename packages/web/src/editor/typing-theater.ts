@@ -91,12 +91,19 @@
  * ## Why the clock lives in the view
  *
  * `apply` is a pure function of the transaction it is given, so the passing of
- * time has to reach it as a transaction: the plugin's view runs an animation
- * frame loop for as long as anything is pending and dispatches an empty
- * transaction carrying `now`. This is the same redraw trick changed-marks.ts
- * uses for the clearing timer, and it is safe for the same reason — a timer
- * callback is nowhere near a Yjs observer, so there is no half-rendered
- * ProseMirror document for y-prosemirror to diff stale content back over.
+ * time has to reach it as a transaction: the plugin's view sleeps until the
+ * next moment the drawing changes and then dispatches an empty transaction
+ * carrying `now`. This is the same redraw trick changed-marks.ts uses for the
+ * clearing timer, and it is safe for the same reason — a timer callback is
+ * nowhere near a Yjs observer, so there is no half-rendered ProseMirror
+ * document for y-prosemirror to diff stale content back over.
+ *
+ * It sleeps to the *next character*, not to the next frame — see
+ * {@link nextDueAt}. A redraw here is a dispatched transaction, which wakes
+ * every other transaction listener in the editor as well as rebuilding these
+ * decorations, so the difference between 33 and 60 of them a second is worth
+ * having. The document is walked only when it actually changes; a tick reuses
+ * the block positions it already had.
  */
 
 import { Extension } from "@tiptap/core";
@@ -168,6 +175,11 @@ export interface Splice {
   inserted: string;
 }
 
+const isHighSurrogate = (code: number): boolean =>
+  code >= 0xd800 && code <= 0xdbff;
+const isLowSurrogate = (code: number): boolean =>
+  code >= 0xdc00 && code <= 0xdfff;
+
 /**
  * The one splice that turns `before` into `after`, or `null` if they are equal.
  *
@@ -175,18 +187,40 @@ export interface Splice {
  * change. The two scans are bounded so they cannot cross: `"aa" → "aaa"` peels
  * a prefix of two and then no suffix at all, which describes an insertion at
  * the end rather than a nonsensical overlapping one.
+ *
+ * ## Why the boundaries back off surrogates
+ *
+ * The scans compare UTF-16 code units, because a ProseMirror position counts
+ * code units and the offsets here become positions. But two emoji from the same
+ * block share a high surrogate — 😀 and 😃 are `D83D DE00` and `D83D DE03` —
+ * so a naive prefix scan peels the `D83D` as "unchanged" and leaves each side
+ * holding half a character. The veil and the removed-text widget would then
+ * render a replacement glyph rather than an emoji.
+ *
+ * So a boundary that lands inside a pair steps back out of it. Doing so can
+ * make the splice one character larger than strictly minimal, which is a
+ * trade worth making: the animation is about what the reader sees, and half an
+ * emoji is not something they should ever see.
  */
 export function spliceBetween(before: string, after: string): Splice | null {
   if (before === after) return null;
   const shorter = Math.min(before.length, after.length);
   let at = 0;
   while (at < shorter && before[at] === after[at]) at += 1;
+  // A matched high surrogate immediately before the boundary means the
+  // character it starts continues into the changed region.
+  if (at > 0 && isHighSurrogate(before.charCodeAt(at - 1))) at -= 1;
   let tail = 0;
   while (
     tail < shorter - at &&
     before[before.length - 1 - tail] === after[after.length - 1 - tail]
   ) {
     tail += 1;
+  }
+  // ...and a low surrogate at the head of the common suffix means the character
+  // it ends began in the changed region. Shrinking the suffix pulls it back in.
+  if (tail > 0 && isLowSurrogate(before.charCodeAt(before.length - tail))) {
+    tail -= 1;
   }
   return {
     at,
@@ -276,6 +310,17 @@ interface TheaterState {
   engaged: boolean;
   clock: number;
   decorations: DecorationSet;
+  /**
+   * Where the blocks are, cached between ticks.
+   *
+   * A tick carries no steps, so the document it describes is the document this
+   * was built from and every position in it still stands. Rebuilding it per
+   * tick would make each of the ~33 redraws a second walk every top-level node
+   * in the document — the cost of drawing one block scaling with how long the
+   * rest of the document is. It is rebuilt when the document actually changes,
+   * and emptied when nothing is playing so no node is held alive for nothing.
+   */
+  index: BlockIndex;
 }
 
 function idleState(now: number): TheaterState {
@@ -286,6 +331,7 @@ function idleState(now: number): TheaterState {
     engaged: false,
     clock: now,
     decorations: DecorationSet.empty,
+    index: new Map(),
   };
 }
 
@@ -307,7 +353,7 @@ export interface AgentTypingOptions {
   /** Injectable for tests, so a schedule can be made deterministic. */
   random: () => number;
   /**
-   * The clock the animation frame loop stamps on its ticks. Injectable so a
+   * The clock the redraw loop stamps on its ticks. Injectable so a
    * test can hold time still: the loop keeps running under jsdom, and a test
    * driving playback by hand would otherwise be racing the wall clock.
    */
@@ -395,25 +441,107 @@ function takesFrom(
     // A block with no `before` entry is one that has just arrived, prose or
     // re-typed into prose. Either way it reads as text being written from
     // nothing, which is exactly what a pure insertion plays as.
-    const splice = spliceBetween(before.get(id) ?? "", text);
-    if (splice === null) continue;
-    const times = typeSchedule(splice.inserted, random);
-    const typing = times.length === 0 ? 0 : (times[times.length - 1] ?? 0);
-    takes.push({
-      ...splice,
-      id,
-      text,
-      times,
-      duration: (splice.removed.length > 0 ? STRIKE_MS : 0) + typing,
-    });
+    const take = buildTake(id, before.get(id) ?? "", text, random);
+    if (take !== null) takes.push(take);
   }
   return takes;
 }
 
-/** Is this take still describing the block it was built from? */
+/** One take for one block, or `null` when the text did not actually change. */
+function buildTake(
+  id: string,
+  before: string,
+  after: string,
+  random: () => number,
+): Take | null {
+  const splice = spliceBetween(before, after);
+  if (splice === null) return null;
+  const times = typeSchedule(splice.inserted, random);
+  const typing = times.length === 0 ? 0 : (times[times.length - 1] ?? 0);
+  return {
+    ...splice,
+    id,
+    text: after,
+    times,
+    duration: (splice.removed.length > 0 ? STRIKE_MS : 0) + typing,
+  };
+}
+
+/**
+ * The text a take starts from — what the block said before its edit, and so
+ * what the reader is still being shown while the take waits its turn.
+ *
+ * Derived rather than stored, because a take already carries every piece of it:
+ * the final text with the inserted run swapped back out for the removed one.
+ */
+function textBefore(take: Take): string {
+  return (
+    take.text.slice(0, take.at) +
+    take.removed +
+    take.text.slice(take.at + take.inserted.length)
+  );
+}
+
+/**
+ * Put a take in the queue — replacing any entry for the same block **in place**.
+ *
+ * Both halves of that matter, and neither is free.
+ *
+ * *In place*, because the queue is an order of arrival and the block's place in
+ * it was settled by its first edit. Appending the new take and dropping the old
+ * one moves the block to the back, so a queue of `[B, C]` becomes `[C, B]` and
+ * the reader watches the page get rewritten out of order.
+ *
+ * *Re-spliced from where the reader still is*, because the arriving take was
+ * built against the text the previous edit produced — an intermediate state
+ * that was queued, never played, and therefore never seen. Playing it would
+ * strike through a sentence that was never on screen. So the replacement is
+ * built from the waiting take's own starting text straight to the final text:
+ * one splice, from what the reader is looking at to what the document now says,
+ * played once.
+ *
+ * A second edit that puts the block back exactly as it started leaves nothing
+ * to play, and the entry goes.
+ */
+function enqueue(
+  queue: readonly Take[],
+  arrival: Take,
+  random: () => number,
+): readonly Take[] {
+  const index = queue.findIndex((queued) => queued.id === arrival.id);
+  if (index === -1) return [...queue, arrival];
+  const waiting = queue[index];
+  if (waiting === undefined) return [...queue, arrival];
+  const merged = buildTake(
+    arrival.id,
+    textBefore(waiting),
+    arrival.text,
+    random,
+  );
+  if (merged === null) {
+    return [...queue.slice(0, index), ...queue.slice(index + 1)];
+  }
+  return queue.map((queued, at) => (at === index ? merged : queued));
+}
+
+/**
+ * Is this take still describing the block it was built from?
+ *
+ * Three things have to hold, and the third is the one that is easy to miss.
+ * The block must still be there, must still say what the take was built
+ * against — and must still be **prose**.
+ *
+ * `setBlockType` preserves both the block id and the text delta, by design (see
+ * CLAUDE.md), so a paragraph re-typed to `code` mid-take passes an id-and-text
+ * check unchanged. The take would go on veiling the tail of a source block —
+ * which is exactly the block type the decided treatment says must never
+ * animate, and which owns its own DOM through a NodeView besides.
+ */
 function stillApplies(take: Take, index: BlockIndex): boolean {
   const found = index.get(take.id);
-  return found !== undefined && found.node.textContent === take.text;
+  if (found === undefined) return false;
+  if (!PROSE_BLOCKS.has(found.node.type.name)) return false;
+  return found.node.textContent === take.text;
 }
 
 function withPulse(
@@ -445,8 +573,11 @@ function makeCaretDom(): HTMLElement {
   return span;
 }
 
-function decorate(doc: ProseMirrorNode, state: TheaterState): DecorationSet {
-  const index = indexBlocks(doc);
+function decorate(
+  doc: ProseMirrorNode,
+  state: TheaterState,
+  index: BlockIndex,
+): DecorationSet {
   const decorations: Decoration[] = [];
 
   for (const id of state.pulses.keys()) {
@@ -556,8 +687,18 @@ function reduce(
   // typing both set one; nothing at load does. A local *edit* needs no such
   // signal, because a take whose block the reader has changed is dropped by the
   // validity check below whatever this says.
+  //
+  // Focus is the second signal, and it is not the same one. A reader can arrive
+  // in the editor without setting any selection at all — tabbing in, a
+  // programmatic `focus()`, or a click that lands exactly on the selection
+  // ProseMirror already had. Tiptap's core `FocusEvents` extension announces
+  // that with a `focus` meta, and without reading it there is a real, blinking
+  // caret in a block while an agent's edit animates underneath it.
   const readersOwn = transaction.getMeta(ySyncPluginKey) === undefined;
-  const engaged = previous.engaged || (readersOwn && transaction.selectionSet);
+  const engaged =
+    previous.engaged ||
+    (readersOwn &&
+      (transaction.selectionSet || transaction.getMeta("focus") !== undefined));
 
   let playing = previous.playing;
   let queue = previous.queue;
@@ -566,7 +707,18 @@ function reduce(
   const arrived = marks?.recording() ?? false;
   const enabled = arrived && !options.reducedMotion();
   if (enabled) {
-    queue = [...queue, ...takesFrom(transaction, after, options.random)];
+    for (const arrival of takesFrom(transaction, after, options.random)) {
+      // A block whose take is already on screen keeps its turn rather than
+      // going to the back of the queue: the reader is watching that block, and
+      // the newest text belongs where their eyes already are. What they have
+      // seen of the first edit stands as its fast-forward, so this take is used
+      // as it arrived — spliced from the intermediate text, not re-derived.
+      if (playing?.take.id === arrival.id) {
+        playing = { take: arrival, startedAt: now };
+        continue;
+      }
+      queue = enqueue(queue, arrival, options.random);
+    }
   } else {
     playing = null;
     queue = [];
@@ -585,17 +737,18 @@ function reduce(
 
   // A take whose block has moved on describes a document that is gone: its
   // offsets would veil the wrong characters and its removed text would be a
-  // sentence nobody deleted.
+  // sentence nobody deleted. A block deleted outright, edited by the reader, or
+  // re-typed to `code` all land here.
   //
-  // This is also the whole of the replace-on-second-edit rule, which is why
-  // there is no code above that looks for a take with the same block id. A
-  // second edit to a block arrives *after* the first take was built, so that
-  // take's `text` is no longer what the block says and it is dropped right
-  // here — leaving the new take alone in the queue, and the block playing once
-  // to its final state. Deleting a take by id as well would be a second way to
-  // say the same thing, and a second way to get it wrong.
+  // A second *remote* edit to the same block never gets this far: `enqueue`
+  // above has already folded it into the entry that was waiting. This is the
+  // net under everything else.
+  // The one place the document is walked, and only when it changed. Every tick
+  // in between reuses it — see `TheaterState.index`.
+  const index = transaction.docChanged
+    ? indexBlocks(after.doc)
+    : previous.index;
   if (transaction.docChanged && (playing !== null || queue.length > 0)) {
-    const index = indexBlocks(after.doc);
     queue = queue.filter((take) => stillApplies(take, index));
     if (playing !== null && !stillApplies(playing.take, index)) playing = null;
   }
@@ -637,24 +790,72 @@ function reduce(
     engaged,
     clock: now,
     decorations: DecorationSet.empty,
+    // Nothing to draw means nothing to remember: an idle state holds no
+    // reference to any node of a document that may be about to be replaced.
+    index: new Map(),
   };
   if (isIdle(state)) return state;
-  return { ...state, decorations: decorate(after.doc, state) };
+  return {
+    ...state,
+    index,
+    decorations: decorate(after.doc, state, index),
+  };
 }
 
-/** requestAnimationFrame where there is one — a background tab should not act. */
-function frames(): {
-  request: (callback: () => void) => number;
+/**
+ * When this state next looks different, or `null` if it never will.
+ *
+ * This is what stops the animation from being a frame loop. A redraw is a
+ * dispatched transaction, and a dispatched transaction is not cheap: it rebuilds
+ * this plugin's decorations and it wakes every other transaction listener in the
+ * editor — the block menu recomputing its trigger, the comment composer
+ * measuring, the language field re-rendering. Doing that 60 times a second for
+ * the whole of an uncapped animation is a great deal of work to show, on
+ * average, half a new character.
+ *
+ * So the loop asks for the next moment something actually changes and sleeps
+ * until then. At 400wpm that is roughly 33 wake-ups a second while text is
+ * typing, one at the end of a strike, and none at all while a take merely waits
+ * its turn — and the count follows the number of characters revealed rather
+ * than the number of frames elapsed.
+ */
+export function nextDueAt(state: TheaterState): number | null {
+  let due: number | null = null;
+  const soonest = (at: number): void => {
+    if (due === null || at < due) due = at;
+  };
+
+  for (const until of state.pulses.values()) soonest(until);
+
+  const playing = state.playing;
+  if (playing === null) {
+    // Something waiting with nothing on screen is due to start immediately.
+    return state.queue.length > 0 ? state.clock : due;
+  }
+
+  const { take, startedAt } = playing;
+  const strikeFor = take.removed.length > 0 ? STRIKE_MS : 0;
+  const elapsed = state.clock - startedAt;
+  if (elapsed < strikeFor) {
+    // Nothing moves during the strike itself: it is one CSS animation, and the
+    // next thing this plugin has to draw is the first typed character.
+    soonest(startedAt + strikeFor);
+    return due;
+  }
+  const revealed = revealedBy(take.times, elapsed - strikeFor);
+  const next = take.times[revealed];
+  soonest(next === undefined ? startedAt + take.duration : startedAt + strikeFor + next);
+  return due;
+}
+
+/** A timer that fires at a given clock reading, or as soon after as it can. */
+function timers(): {
+  request: (callback: () => void, delay: number) => number;
   cancel: (handle: number) => void;
 } {
-  if (typeof requestAnimationFrame === "function") {
-    return {
-      request: (callback) => requestAnimationFrame(() => callback()),
-      cancel: (handle) => cancelAnimationFrame(handle),
-    };
-  }
   return {
-    request: (callback) => setTimeout(callback, 16) as unknown as number,
+    request: (callback, delay) =>
+      setTimeout(callback, Math.max(0, delay)) as unknown as number,
     cancel: (handle) => clearTimeout(handle),
   };
 }
@@ -694,7 +895,7 @@ export const AgentTypingTheater = Extension.create<AgentTypingOptions>({
             typingTheaterPluginKey.getState(state)?.decorations ?? null,
         },
         view: (view) => {
-          const clock = frames();
+          const clock = timers();
           let handle: number | null = null;
 
           const tick = (): void => {
@@ -710,14 +911,27 @@ export const AgentTypingTheater = Extension.create<AgentTypingOptions>({
             );
           };
 
-          const schedule = (): void => {
-            if (handle === null) handle = clock.request(tick);
+          const schedule = (state: TheaterState): void => {
+            if (handle !== null) {
+              clock.cancel(handle);
+              handle = null;
+            }
+            const due = nextDueAt(state);
+            if (due === null) return;
+            handle = clock.request(tick, due - options.now());
           };
 
           return {
             update: (updated) => {
               const state = typingTheaterPluginKey.getState(updated.state);
-              if (state !== undefined && !isIdle(state)) schedule();
+              // Re-armed against the state as it now is, every time: the state
+              // that decides when the next redraw is due is the one that has
+              // just been drawn.
+              if (state !== undefined && !isIdle(state)) schedule(state);
+              else if (handle !== null) {
+                clock.cancel(handle);
+                handle = null;
+              }
             },
             destroy: () => {
               if (handle !== null) clock.cancel(handle);
