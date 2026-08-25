@@ -458,12 +458,21 @@ describe("ub init", () => {
     const declined = runUb(["init", "--yes", "--no-mcp"], box, WITHOUT_MISE);
     expect(declined.status).toBe(0);
     expect(declined.stdout).not.toMatch(/ub mcp install/);
+    expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
 
-    // Asked for outright, it says plainly that #88 has not landed rather than
-    // pretending it wrote an MCP client config.
-    const asked = runUb(["init", "--yes", "--mcp"], box, WITHOUT_MISE);
+    // Asked for outright, it delegates to `ub mcp install` — with no vendor CLI
+    // reachable, so this is the file-editing path, in the sandbox's own
+    // directory rather than anywhere on the developer's machine.
+    const asked = runUb(["init", "--yes", "--mcp"], box, {
+      ...WITHOUT_MISE,
+      PATH: "/nonexistent-for-tests",
+    });
     expect(asked.status).toBe(0);
-    expect(asked.stderr).toMatch(/not available yet \(#88\)/);
+    expect(asked.stdout).toMatch(/uberblick registered with claude/);
+    const registered = JSON.parse(
+      readFileSync(join(box.cwd, ".mcp.json"), "utf8"),
+    );
+    expect(registered.mcpServers.uberblick.args).toEqual(["mcp", "serve"]);
   });
 
   it("writes no derived config outside a checkout", () => {

@@ -199,10 +199,11 @@ describe("ub status", () => {
 });
 
 describe("ub mcp", () => {
-  it("rejects anything but `serve`", () => {
+  it("rejects anything but `install` and `serve`", () => {
     const run = runUb(["mcp", "bogus"], sandbox());
     expect(run.status).not.toBe(0);
     expect(run.stdout).toBe("");
+    expect(run.stderr).toMatch(/install/);
     expect(run.stderr).toMatch(/serve/);
   });
 });

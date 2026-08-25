@@ -11,9 +11,10 @@
  */
 
 import { initCommand } from "./init.js";
+import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
-import { mcpCommand } from "./serve.js";
+import { serveCommand } from "./serve.js";
 import { statusCommand } from "./status.js";
 import { cliVersion } from "./version.js";
 
@@ -22,15 +23,24 @@ export const HELP = `uberblick — local-first, CRDT-backed collaborative docume
 usage: ub <command> [options]
 
 commands:
-  init [options]    identity, workspace and a local development signing secret
-  status [--json]   workspace, hub, credential, database and sync state
+  init [options]         identity, workspace and a local development signing secret
+  status [--json]        workspace, hub, credential, database and sync state
+  mcp install [target]   register uberblick with an MCP client
 
 init options:
   -y, --yes         take every default; never prompt (also the default with no TTY)
   --name <name>     awareness display name
   --color <#rrggbb> awareness cursor colour
   --workspace <id>  workspace to work in
-  --mcp, --no-mcp   whether to wire up an MCP client (--mcp arrives with #88)
+  --mcp, --no-mcp   whether to wire up an MCP client
+
+mcp install options:
+  target            claude, codex or cursor (default claude)
+  --project         write this directory's config (the default)
+  --user            write the per-user config
+  --print           print the snippet to paste; write nothing
+  --force           replace an existing "uberblick" entry, backing the file up
+  -- <command>      register this command instead of uberblick's own
 
 options:
   -h, --help        show this help
@@ -59,7 +69,18 @@ export async function runCli(
     return await statusCommand(rest, io);
   }
   if (command === "mcp") {
-    return await mcpCommand(rest, io.err);
+    const [subcommand, ...args] = rest;
+    // `serve` is missing from the help on purpose; `install` is not, because a
+    // person runs it and a machine runs the other one.
+    if (subcommand === "serve") {
+      return await serveCommand(args, io.err);
+    }
+    if (subcommand === "install") {
+      return await installCommand(args, io);
+    }
+    const named = subcommand === undefined ? " nothing" : ` ${JSON.stringify(subcommand)}`;
+    io.err(`ub mcp: expected "install" or "serve", got${named}\n`);
+    return 2;
   }
 
   // The help goes to stderr here, so a pipe reading stdout sees nothing at all.

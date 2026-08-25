@@ -43,6 +43,7 @@ import {
 } from "./config.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
+import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import {
@@ -412,14 +413,6 @@ export async function initCommand(
   for (const warning of warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }
-  if (flags.mcp === true) {
-    // Asked for explicitly, so say plainly that it did not happen. `ub init`
-    // itself did succeed, so this is not a failure.
-    io.err(
-      "ub init: `ub mcp install` is not available yet (#88) — no MCP client " +
-        "configuration was written\n",
-    );
-  }
 
   let report = "uberblick initialised\n\n";
   report += field("identity", `${name} ${color}`);
@@ -447,14 +440,26 @@ export async function initCommand(
       "  mise run dev          the hub and the web app on http://localhost:5173\n";
     report += "  mise run import-seed  import the product documents\n";
   }
-  if (flags.mcp !== false) {
+  // Only when the question was left open: `--mcp` does it below instead, and
+  // `--no-mcp` is somebody saying they do not want to be told about it.
+  if (flags.mcp === undefined) {
     report +=
-      "  ub mcp install        wire up an agent's MCP client — arrives with #88.\n";
-    report +=
-      "                        Until then, .mcp.json already registers this\n";
-    report +=
-      "                        server for MCP clients that read it.\n";
+      "  ub mcp install        wire up an agent's MCP client (claude, codex, cursor)\n";
   }
   io.out(report);
+
+  if (flags.mcp === true) {
+    // The wiring itself lives in `ub mcp install`; this only delegates to it
+    // with its defaults. A refusal there — an entry somebody else owns, a file
+    // that will not parse — is reported by that command and stays a warning
+    // here: everything `ub init` was asked to settle has been settled already,
+    // and failing a bootstrap over an unrelated config file would be wrong.
+    if ((await installCommand([], io)) !== 0) {
+      io.err(
+        "ub init: no MCP client configuration was written — see above, or run " +
+          "`ub mcp install --print` for the snippet to paste\n",
+      );
+    }
+  }
   return 0;
 }
