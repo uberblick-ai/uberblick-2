@@ -129,6 +129,63 @@ Two paths, and they do not fight:
 The secret is never printed by any command, including error paths. The most any
 of them reports is where it came from.
 
+## Going remote, and onto a second computer
+
+The normal journey is local first, remote later. `ub remote` is the bridge, and
+it exists because simply changing `HUB_URL` strands whatever the local hub holds
+that the update log does not.
+
+**On the remote host** — a Linux box in your tailnet — bring the hub and web
+client up with Docker Compose as `Remote server setup` describes. That host runs
+`sh remote-compose.sh up --build --detach` and nothing else. The hub it starts
+is empty. Every command below runs on one of *your* computers.
+
+**On the computer that holds the documents**, with `mise run hub` still running
+so the browser-created ones can be collected:
+
+```
+node packages/cli/bin/ub.mjs remote promote wss://<host>.ts.net/ws
+```
+
+It hydrates the local directory and every live document into the update log,
+reads the target with a throwaway client that writes nothing, uploads, then
+opens the target again as a fresh client and compares what it finds against what
+this machine holds. The endpoint is persisted only after that read-back
+succeeds, so a failed run leaves you pointed at the hub that still works.
+Rerunning finishes an interrupted promotion. It exits non-zero without writing
+anything when the local hub is unreachable, when the target never finishes
+serving its directory, or when the target holds documents this workspace has
+never heard of.
+
+**On a second computer**, from a fresh clone:
+
+```
+mise trust && mise run setup -- --yes
+node packages/cli/bin/ub.mjs remote join wss://<host>.ts.net/ws \
+  --secret-file ~/uberblick-remote-secret
+mise run web
+```
+
+`ub init` imports no documents, so that workspace is empty and there is nothing
+to duplicate — do not run `mise run import-seed` on it; the product documents
+arrive over the wire. `join` does not require a local hub, and says so rather
+than pretending it checked one. The secret that reached the remote replaces the
+random one `ub init` generated here, at mode 0600, because the remote verifies
+with the first machine's.
+
+A remote credential is never a command-line argument: `--secret-file <path>`
+points at a file only you can read, and without it a terminal is prompted with
+the input hidden. Neither the secret nor a token signed with it is printed.
+
+The endpoint lands in `config.json`, which is the third resolution layer —
+`HUB_URL` and a committable `./uberblick.json` both outrank it, and these
+commands name whichever wins instead of claiming a switch that did not take
+effect.
+
+Sharing boundary: everyone who can reach the endpoint and load the web app
+receives the shared signing secret, because it is compiled into the served
+bundle. The network is the whole of the access control until accounts land.
+
 ## Verify
 
 - Open `http://localhost:5173` in two browser windows.

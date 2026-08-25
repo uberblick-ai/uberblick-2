@@ -378,7 +378,8 @@ export async function initCommand(
     // that disagrees with its authority is the one outcome this must not
     // produce. Same for the workspace, whose authority is `config.json`.
     const persisted = readCredentials();
-    persistedWorkspace = readUserConfig().config.workspace ?? workspace;
+    const persistedConfig = readUserConfig().config;
+    persistedWorkspace = persistedConfig.workspace ?? workspace;
     if (secret !== null && persisted.signingSecret !== null) {
       secret = persisted.signingSecret;
     }
@@ -387,6 +388,10 @@ export async function initCommand(
       const outcome = writeLocalConfig(root, {
         signingSecret: secret,
         workspace: persistedWorkspace,
+        // Carried, not chosen: an endpoint `ub remote` put in `config.json` is
+        // part of the authority this file is derived from, and dropping it here
+        // would point the mise tasks back at localhost on the next `ub init`.
+        hubUrl: persistedConfig.hubUrl,
         authorityPath: stored.path,
       });
       if (outcome.written) {
