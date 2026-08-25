@@ -7,7 +7,9 @@
  * deliberately no whole-document write — every content change names one block
  * — no markdown-import tool, because markdown is an export format, and no hard
  * delete: archive_doc tombstones the directory stub and leaves every byte of
- * the document where it was.
+ * the document where it was. An archived document is read-only rather than
+ * gone — every mutator goes through `requireWritableDoc`, which refuses one
+ * and names restore_doc.
  *
  * Every handler starts with `replicas.settle()`: replay the log tail (another
  * MCP instance may have written since the last call) and, on boot or after a
@@ -195,6 +197,22 @@ const ARCHIVE_IS_LAST_WRITE_WINS =
   "seen it, which is not the same as holding against every concurrent one. When it matters which way it went, re-read " +
   "with list_docs and `include_deleted: true`.";
 
+/**
+ * What an archive costs a writer, in the words an agent reads.
+ *
+ * Every mutator carries this, because "archived" is otherwise indistinguishable
+ * from "gone" — and the honest half matters as much as the refusal: this is a
+ * check against one replica's directory stub, not a lock over the corpus.
+ */
+const ARCHIVED_IS_READ_ONLY =
+  "Archived documents are read-only. While a document's directory stub is tombstoned this tool refuses with " +
+  "`doc_archived` and changes nothing; restore_doc is the only mutation an archived document accepts, and the only " +
+  "way back. Reading is unaffected — get_doc, export_markdown, backlinks and `list_docs` with `include_deleted: true` " +
+  "all still answer for it.\n\n" +
+  "The honest scope, the same discipline `rev` has: the check runs against THIS replica's directory stub at the " +
+  "moment of the call. It is refusal-at-call, not a cross-replica lock — an edit made on a replica that has not seen " +
+  "the archive yet is an ordinary CRDT write and merges normally when the two replicas meet.";
+
 /** The same narrowing for the mutators that do not restate it in full. */
 const SYNCED_IS_ACKNOWLEDGED =
   "`synced` here means hub-acknowledged, not hub-stored — see sync_status for the exact claim and its crash window.";
@@ -291,6 +309,34 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       );
     }
     return stub;
+  };
+
+  /**
+   * Resolve a document for a write. The one choke point every mutator that
+   * touches a document goes through — archived means read-only, and saying so
+   * in one place is what keeps that true of tools written later.
+   *
+   * The archive check comes before {@link requireDoc} on purpose: an archived
+   * room is not one `adoptKnownDocs` attaches, so a replica that knows the
+   * document only from the directory would otherwise answer `doc_not_hydrated`
+   * — technically true, and useless. The caller needs to hear `restore_doc`.
+   *
+   * Scope, stated the way {@link ARCHIVED_IS_READ_ONLY} states it to agents:
+   * this reads THIS replica's stub at call time. There is no cross-replica
+   * lock, so an edit racing an archive that has not arrived yet is an ordinary
+   * CRDT write and merges. Enforcement is refusal-at-call — a client
+   * convention, which is all the spike has; real enforcement belongs to the
+   * hosted-auth era.
+   */
+  const requireWritableDoc = (uuid: string): Replica => {
+    if (getDirectoryEntry(replicas.directory().doc, uuid)?.deleted === true) {
+      throw new ToolError(
+        "doc_archived",
+        `Document ${uuid} is archived — restore_doc to edit`,
+        { uuid, archived: true, applied: false, synced: false },
+      );
+    }
+    return requireDoc(uuid);
   };
 
   /**
@@ -486,6 +532,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Scope of that guarantee, stated plainly: it is a check against THIS replica at the moment of the call. " +
         "There is no cross-replica compare-and-swap — an edit made elsewhere that has not reached this replica yet " +
         "cannot be detected, and the window widens the longer this server stays offline.\n\n" +
+        ARCHIVED_IS_READ_ONLY +
+        "\n\n" +
         SYNCED_MEANS,
       inputSchema: {
         uuid: uuidArg,
@@ -501,7 +549,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     },
     guarded(async ({ uuid, block_id, old_text, new_text, rev }) => {
       await replicas.settle();
-      const replica = requireDoc(uuid);
+      const replica = requireWritableDoc(uuid);
       editBlock(replica.doc, block_id, old_text, new_text, {
         ...(rev === undefined ? {} : { rev }),
       });
@@ -521,6 +569,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       description:
         "Insert one block after `after_block_id`, or at the top of the document when it is omitted. " +
         "Block types are paragraph, heading, code and mermaid — the editor's whole palette.\n\n" +
+        ARCHIVED_IS_READ_ONLY +
+        "\n\n" +
         SYNCED_IS_ACKNOWLEDGED,
       inputSchema: {
         uuid: uuidArg,
@@ -534,7 +584,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     },
     guarded(async ({ uuid, after_block_id, type, text, level, language }) => {
       await replicas.settle();
-      const replica = requireDoc(uuid);
+      const replica = requireWritableDoc(uuid);
       const blockId = insertBlock(
         replica.doc,
         after_block_id ?? null,
@@ -556,12 +606,14 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       description:
         "Delete one block. Deleting is never how a block changes type — use insert_block plus edit_block only for new content, " +
         "and never delete-and-reinsert to re-type, which churns the block id and orphans its annotations.\n\n" +
+        ARCHIVED_IS_READ_ONLY +
+        "\n\n" +
         SYNCED_IS_ACKNOWLEDGED,
       inputSchema: { uuid: uuidArg, block_id: z.string().min(1) },
     },
     guarded(async ({ uuid, block_id }) => {
       await replicas.settle();
-      const replica = requireDoc(uuid);
+      const replica = requireWritableDoc(uuid);
       deleteBlock(replica.doc, block_id);
       return json({ uuid, blockId: block_id, ...durability(replica) });
     }),
@@ -573,12 +625,14 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       title: "Set a document's tags",
       description:
         "Replace the document's tag set. The directory stub is updated to match, so list_docs and tag filters follow.\n\n" +
+        ARCHIVED_IS_READ_ONLY +
+        "\n\n" +
         SYNCED_IS_ACKNOWLEDGED,
       inputSchema: { uuid: uuidArg, tags: z.array(z.string().min(1)) },
     },
     guarded(async ({ uuid, tags }) => {
       await replicas.settle();
-      const replica = requireDoc(uuid);
+      const replica = requireWritableDoc(uuid);
       setTags(replica.doc, tags);
       return json({ uuid, tags, ...durability(replica) });
     }),
@@ -591,12 +645,14 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       description:
         "Replace the document's outbound link set. Values are target document UUIDs — never paths, never titles. " +
         "The backlinks index follows immediately.\n\n" +
+        ARCHIVED_IS_READ_ONLY +
+        "\n\n" +
         SYNCED_IS_ACKNOWLEDGED,
       inputSchema: { uuid: uuidArg, links: z.array(linkArg) },
     },
     guarded(async ({ uuid, links }) => {
       await replicas.settle();
-      const replica = requireDoc(uuid);
+      const replica = requireWritableDoc(uuid);
       setLinks(replica.doc, links);
       return json({ uuid, links, ...durability(replica) });
     }),
@@ -619,7 +675,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Hide a document: tombstones its directory stub, so it leaves list_docs, the web sidebar and the search index. " +
         "This is not erasure and not a delete. Every block, mark and annotation stays exactly where it was: get_doc still " +
         "serves the document by uuid, and list_docs with `include_deleted: true` still lists it, flagged `deleted`. " +
-        "restore_doc is the way back. There is no tool that erases content, by design.\n\n" +
+        "There is no tool that erases content, by design.\n\n" +
+        "What the tombstone does cost is writing: while it stands the document is read-only, and every mutating tool " +
+        "refuses it with `doc_archived`. restore_doc is the way back, and the only mutation an archived document " +
+        "accepts.\n\n" +
         "`indexed` says this replica's search index has dropped the document. Dropping it needs only its uuid, so " +
         "unlike restore_doc this does not depend on holding the document — it is false only if the index write itself " +
         "failed, and then the document stays queued and a later call retries it. The archive itself is unaffected " +
@@ -700,6 +759,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       description:
         "Open an annotation thread over a range of a block's text, or — with `thread_id` — add a comment to an existing thread. " +
         "The range is anchored by a formatting mark on the text itself, so it survives edits, splits and re-types.\n\n" +
+        ARCHIVED_IS_READ_ONLY +
+        "\n\n" +
         SYNCED_IS_ACKNOWLEDGED,
       inputSchema: {
         uuid: uuidArg,
@@ -717,7 +778,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     },
     guarded(async ({ uuid, text, thread_id, block_id, start, end, author }) => {
       await replicas.settle();
-      const replica = requireDoc(uuid);
+      const replica = requireWritableDoc(uuid);
       const who = author ?? replicas.name;
 
       if (thread_id !== undefined) {
