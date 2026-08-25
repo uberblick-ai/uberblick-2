@@ -27,7 +27,9 @@ import {
   insertBlock,
   setTags,
 } from "@uberblick/schema";
+import type { ReactElement } from "react";
 import { DocChrome, DocMetaLine } from "../src/ui/DocChrome.js";
+import { usePresence } from "../src/ui/hooks.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 /** The workspace these stub room keys sit in. A workspace id is a uuid. */
@@ -105,33 +107,44 @@ function publishAgentCursor(fix: Fixture, blockIndex: number): void {
   );
 }
 
+/**
+ * What the app does around the chrome, in miniature: read the room's presence
+ * once and hand it down. The subscription lives above the component rather than
+ * inside it (#72), so the test supplies it the way `App` does — and every
+ * assertion below still exercises the live path, because this reading is the
+ * same observer over the same awareness map.
+ */
+function Chrome({ fix }: { fix: Fixture }): ReactElement {
+  const presence = usePresence(fix.connection);
+  return (
+    <>
+      <DocChrome
+        connection={fix.connection}
+        presence={presence}
+        meta={getMeta(fix.ydoc)}
+        threads={[]}
+        threadsOpen={false}
+        onToggleThreads={() => {}}
+        syncOpen={false}
+        onToggleSync={() => {}}
+      />
+      <DocMetaLine
+        connection={fix.connection}
+        meta={getMeta(fix.ydoc)}
+        knownTags={["reference"]}
+        archived={false}
+      />
+    </>
+  );
+}
+
 function mount(fix: Fixture): { host: HTMLElement; root: Root } {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  act(() =>
-    root.render(
-      <>
-        <DocChrome
-          connection={fix.connection}
-          meta={getMeta(fix.ydoc)}
-          threads={[]}
-          threadsOpen={false}
-          onToggleThreads={() => {}}
-          syncOpen={false}
-          onToggleSync={() => {}}
-        />
-        <DocMetaLine
-          connection={fix.connection}
-          meta={getMeta(fix.ydoc)}
-          knownTags={["reference"]}
-          archived={false}
-        />
-      </>,
-    ),
-  );
+  act(() => root.render(<Chrome fix={fix} />));
   // Past every settle window, so the connection pill shows what a reader sees
   // rather than the "offline" every mount starts from.
   act(() => void vi.advanceTimersByTime(5_000));

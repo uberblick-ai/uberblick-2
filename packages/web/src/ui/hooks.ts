@@ -30,7 +30,7 @@ import { findForeignBlocks } from "../editor/palette.js";
 import type { ForeignBlock } from "../editor/palette.js";
 import { blockText, plainText } from "../editor/ytext.js";
 import { observeDocRev, readPresence, samePresence } from "./doc-chrome.js";
-import type { RemoteActivity, RemotePresence } from "./doc-chrome.js";
+import type { RemotePresence } from "./doc-chrome.js";
 import { observeOutline } from "./outline.js";
 import type { OutlineEntry } from "./outline.js";
 import { observeThreads } from "./threads.js";
@@ -275,8 +275,11 @@ export function usePeers(connection: RoomConnection | null): Peer[] {
 const NOBODY: readonly RemotePresence[] = [];
 
 /**
- * Every remote session in the room, live — the sync panel's present-now list,
- * and the chrome's activity pill below.
+ * Every remote session in the room, live.
+ *
+ * Read once by the shell and handed down: the sync panel's present-now list and
+ * the chrome's activity pill (`activeSession`) are two views of this one
+ * snapshot, so there is one subscription rather than one per reader.
  *
  * The reading is compared before it is stored, and that is the point rather
  * than an optimisation: awareness fires `change` on every caret movement, so a
@@ -314,30 +317,6 @@ export function usePresence(
     };
   }, [connection]);
   return presence;
-}
-
-/**
- * The remote session the chrome names: the lowest client id whose caret is in a
- * block this document can name, or null when nobody's is.
- *
- * Lowest client id, so two carets do not swap the pill back and forth between
- * them; the sync panel's present-now list is where everyone appears. In the
- * spike that session is the agent — awareness carries no "this is an agent"
- * marker, so the name is what says who it is (see `readPresence`).
- *
- * Derived from {@link usePresence} rather than observed separately: the pill
- * and the panel are two readings of one awareness map, and one observer is what
- * keeps them from disagreeing about who is where.
- */
-export function useRemoteActivity(
-  connection: RoomConnection | null,
-): RemoteActivity | null {
-  const presence = usePresence(connection);
-  return (
-    presence.find(
-      (session): session is RemoteActivity => session.block !== null,
-    ) ?? null
-  );
 }
 
 /**

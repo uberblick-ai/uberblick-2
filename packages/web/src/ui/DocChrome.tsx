@@ -22,7 +22,9 @@ import type { DocMeta } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
 import { GROUP_TAGS, groupKeyForTags, groupLabel } from "./groups.js";
-import { useDocRev, useRemoteActivity, useRoomStatus } from "./hooks.js";
+import { activeSession } from "./doc-chrome.js";
+import type { RemotePresence } from "./doc-chrome.js";
+import { useDocRev, useRoomStatus } from "./hooks.js";
 import { distinctTags, withTag, withoutTag } from "./tags.js";
 import type { ThreadView } from "./threads.js";
 
@@ -69,6 +71,7 @@ function Breadcrumb({ meta }: { meta: DocMeta }): ReactElement {
  */
 export function DocChrome({
   connection,
+  presence,
   meta,
   threads,
   threadsOpen,
@@ -77,6 +80,12 @@ export function DocChrome({
   onToggleSync,
 }: {
   connection: RoomConnection | null;
+  /**
+   * Every remote session in that room, read once by the shell. The pill names
+   * one of them (`activeSession`) and the sync panel lists them all, from this
+   * same snapshot — one subscription, and no way for the two to disagree.
+   */
+  presence: readonly RemotePresence[];
   /** The open document's metadata, or null when none is open or read yet. */
   meta: DocMeta | null;
   /**
@@ -92,7 +101,7 @@ export function DocChrome({
   syncOpen: boolean;
   onToggleSync: () => void;
 }): ReactElement {
-  const activity = useRemoteActivity(connection);
+  const activity = activeSession(presence);
   // The count is the open threads, the way the rail counts them. It is *not*
   // what decides whether the handle is drawn: a document whose conversations are
   // all resolved still has a rail full of them, and a reader who cannot reach it

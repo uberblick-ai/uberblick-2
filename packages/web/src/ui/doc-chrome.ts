@@ -135,6 +135,29 @@ export function readPresence(ydoc: Y.Doc, awareness: Awareness): RemotePresence[
   return found;
 }
 
+/**
+ * The one session the chrome names: the lowest client id whose caret is in a
+ * block this document can name, or null when nobody's is.
+ *
+ * Lowest client id, so two carets do not swap the pill back and forth between
+ * them; the sync panel's present-now list is where everyone appears. In the
+ * spike that session is the agent — awareness carries no "this is an agent"
+ * marker, so the name is what says who it is (see {@link readPresence}).
+ *
+ * A projection of the reading rather than a second walk of the awareness map:
+ * the pill and the list are two views of one snapshot, which is what stops them
+ * disagreeing about who is where.
+ */
+export function activeSession(
+  presence: readonly RemotePresence[],
+): RemoteActivity | null {
+  return (
+    presence.find(
+      (session): session is RemoteActivity => session.block !== null,
+    ) ?? null
+  );
+}
+
 /** Whether two readings would draw the same chip. */
 function sameSession(a: RemotePresence | null, b: RemotePresence | null): boolean {
   if (a === null || b === null) return a === b;

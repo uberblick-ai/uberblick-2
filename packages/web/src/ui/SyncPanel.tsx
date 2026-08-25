@@ -13,10 +13,12 @@
  * source here. An omitted row says less than an invented one.
  */
 
+import { useEffect } from "react";
 import type { ReactElement } from "react";
 import type { RoomConnection } from "../collab/rooms.js";
 import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
-import { usePresence, useRoomStatus } from "./hooks.js";
+import type { RemotePresence } from "./doc-chrome.js";
+import { useRoomStatus } from "./hooks.js";
 
 /** What a fact reads as before this client knows it. */
 const UNKNOWN = "—";
@@ -44,20 +46,47 @@ function Fact({ label, value }: { label: string; value: string }): ReactElement 
  */
 export function SyncPanel({
   connection,
+  presence,
   endpoint,
   onClose,
 }: {
   connection: RoomConnection | null;
+  /** Every remote session in that room, read once by the shell — see `DocChrome`. */
+  presence: readonly RemotePresence[];
   /** The endpoint the provider was constructed with, or null until resolved. */
   endpoint: string | null;
   onClose: () => void;
 }): ReactElement {
   const status = useRoomStatus(connection);
-  const presence = usePresence(connection);
   // The same settled word the pill this panel opens from shows. Calm is a
   // cadence, never a quieter version of the truth (see calm.ts) — and two
   // different words in one corner of the screen would be worse than either.
   const state = useCalmSyncState(rawSyncState(status));
+
+  /**
+   * Escape closes the panel, and the panel alone.
+   *
+   * Registered in the *capture* phase on `window`, which runs before every
+   * bubble-phase listener there — the threads drawer's (#101) is one — and the
+   * event is then consumed. This panel is the topmost layer while it is open,
+   * so one keypress must dismiss one thing: without this, an Escape with both
+   * open reached both listeners and closed both. `preventDefault` is what the
+   * drawer's own rule reads; stopping propagation as well is what keeps a
+   * control *underneath* the panel from acting on a key aimed at the panel.
+   *
+   * An Escape somebody else already handled is left alone, for the same reason
+   * the drawer leaves one alone: two gestures, and the reader made one.
+   */
+  useEffect(() => {
+    const close = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", close, true);
+    return () => window.removeEventListener("keydown", close, true);
+  }, [onClose]);
 
   return (
     <aside

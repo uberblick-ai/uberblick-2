@@ -15,12 +15,14 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
+import type { ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import * as Y from "yjs";
 import { Awareness, removeAwarenessStates } from "y-protocols/awareness";
 import { appendBlock, getBlocksFragment, initDoc } from "@uberblick/schema";
 import { SyncPanel } from "../src/ui/SyncPanel.js";
+import { usePresence } from "../src/ui/hooks.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 /** A workspace id is a uuid. */
@@ -107,21 +109,39 @@ function publish(
   );
 }
 
+/**
+ * What the app does around the panel, in miniature: read the room's presence
+ * once and hand it down. The subscription lives in the shell rather than in the
+ * panel, so the pill and this list are two views of one snapshot — the test
+ * supplies it the way `App` does, and the list still follows awareness live.
+ */
+function Panel({
+  fix,
+  endpoint = ENDPOINT,
+  onClose = () => {},
+}: {
+  fix: Fixture;
+  endpoint?: string | null;
+  onClose?: () => void;
+}): ReactElement {
+  const presence = usePresence(fix.connection);
+  return (
+    <SyncPanel
+      connection={fix.connection}
+      presence={presence}
+      endpoint={endpoint}
+      onClose={onClose}
+    />
+  );
+}
+
 function mount(fix: Fixture): { host: HTMLElement; root: Root } {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  act(() =>
-    root.render(
-      <SyncPanel
-        connection={fix.connection}
-        endpoint={ENDPOINT}
-        onClose={() => {}}
-      />,
-    ),
-  );
+  act(() => root.render(<Panel fix={fix} />));
   // Past every settle window, so the state word is what a reader sees rather
   // than the "offline" every mount starts from.
   act(() => void vi.advanceTimersByTime(5_000));
@@ -237,6 +257,46 @@ describe("the sync panel renders the state this client holds", () => {
     }
   });
 
+  it("consumes the Escape that closes it, so one keypress closes one thing", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    // The threads drawer's listener, as `App` registers it (#101): bubble phase
+    // on window, skipping an Escape somebody else has already handled. It is
+    // registered *first*, the way it would be with the drawer opened first —
+    // which is exactly the order that used to close both panels at once.
+    let drawerClosed = false;
+    const drawer = (event: KeyboardEvent): void => {
+      if (event.key === "Escape" && !event.defaultPrevented) drawerClosed = true;
+    };
+    window.addEventListener("keydown", drawer);
+    const closed = vi.fn();
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() => root.render(<Panel fix={fix} onClose={closed} />));
+    try {
+      act(() => {
+        document.body.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      expect(closed).toHaveBeenCalledTimes(1);
+      // The panel is the topmost layer, so the drawer under it keeps its state:
+      // the reader made one gesture and dismissed one thing.
+      expect(drawerClosed).toBe(false);
+    } finally {
+      window.removeEventListener("keydown", drawer);
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
   it("says so rather than guessing while the endpoint is still resolving", () => {
     vi.useFakeTimers();
     const fix = fixture();
@@ -245,11 +305,7 @@ describe("the sync panel renders the state this client holds", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
-    act(() =>
-      root.render(
-        <SyncPanel connection={fix.connection} endpoint={null} onClose={() => {}} />,
-      ),
-    );
+    act(() => root.render(<Panel fix={fix} endpoint={null} />));
     try {
       // Never a fallback address: the panel exists to say which hub this client
       // dialled, and a plausible guess is the one answer it must not give.

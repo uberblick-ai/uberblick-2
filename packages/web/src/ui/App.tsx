@@ -51,6 +51,7 @@ import {
   useDocMeta,
   useHubEndpoint,
   useIdentity,
+  usePresence,
   useRoom,
   useRoomStatus,
   useStoredFlag,
@@ -247,16 +248,6 @@ export function App(): ReactElement {
     document.querySelector<HTMLElement>(".ub-sync-toggle")?.focus();
   }, []);
 
-  /** Escape closes the panel — the way out of an overlay. */
-  useEffect(() => {
-    if (!syncOpen) return;
-    const close = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && !event.defaultPrevented) closeSync();
-    };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [syncOpen, closeSync]);
-
   const onFocusThread = useCallback<SelectThread>((threadId, viaKeyboard) => {
     setFocusedThread((previous) =>
       focusThread(previous, threadId, viaKeyboard === true),
@@ -327,6 +318,18 @@ export function App(): ReactElement {
    * allowed to be open at all.
    */
   const threads = useThreads(doc);
+  /**
+   * The room the connection pill reports on and the sync panel details: the
+   * open document's, or the directory's when none is open. The socket is
+   * shared, so it is the same truth about the same hub either way.
+   */
+  const chromeRoom = doc ?? directory;
+  /**
+   * Who else is in that room, read *here* and handed to both readers. The pill
+   * names one session and the panel lists them all; one subscription over the
+   * awareness map is what keeps those two views of the same fact identical.
+   */
+  const presence = usePresence(chromeRoom);
 
   /**
    * A drawer over an empty rail is a panel of nothing. The rail can empty out
@@ -464,7 +467,8 @@ export function App(): ReactElement {
             there is not: one shared socket, so it is the same truth about the
             same hub either way. */}
         <DocChrome
-          connection={doc ?? directory}
+          connection={chromeRoom}
+          presence={presence}
           meta={meta}
           threads={threads}
           threadsOpen={threadsOpen}
@@ -515,13 +519,14 @@ export function App(): ReactElement {
           />
         </aside>
         {/* The sync detail panel (#72), over the panes rather than beside them:
-            it is opened to answer a question and closed again. The same room
-            the pill reports on — the open document's, or the directory's when
-            none is open — and the endpoint the socket was built from, which is
-            null only in the moment before that read settles. */}
+            it is opened to answer a question and closed again. The room the
+            pill reports on, the sessions the pill names one of, and the
+            endpoint the socket was built from — null only in the moment before
+            that read settles. */}
         {syncOpen && (
           <SyncPanel
-            connection={doc ?? directory}
+            connection={chromeRoom}
+            presence={presence}
             endpoint={hubReady ? hubUrl() : null}
             onClose={closeSync}
           />
