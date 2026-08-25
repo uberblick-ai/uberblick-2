@@ -28,8 +28,8 @@ export {
   syncWorkspace,
 } from "./remote.js";
 export type { Corpus, CorpusDifference, CorpusDoc } from "./remote.js";
-export { importSeedDir } from "./seed.js";
-export type { SeedImport } from "./seed.js";
+export { importSeedDir, readSeedDocs } from "./seed.js";
+export type { SeedDoc, SeedImport } from "./seed.js";
 export { createMcpServer } from "./server.js";
 export type { UberblickMcpServer } from "./server.js";
 export type { HubState, HubStatus } from "./sync.js";

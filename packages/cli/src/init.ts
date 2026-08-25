@@ -12,11 +12,14 @@
  * run changes nothing. Nothing guesses a workspace anywhere else — the MCP
  * server refuses to start without one.
  *
- * **The starter documents.** A workspace generated here — never one re-confirmed
- * on a second run, and never one `--workspace` names because somebody is joining
- * it — is seeded with the two documents in `templates/`, through the same seed
- * importer `mise run import-seed` uses. See `starter.ts`. They are ordinary
- * documents afterwards.
+ * **The starter documents.** A workspace holding nothing but the two documents
+ * in `templates/` is topped up with whatever of them is missing, through the
+ * same seed importer `mise run import-seed` uses — so a fresh workspace gets
+ * both, an interrupted seed is finished by the next run, and a workspace that
+ * holds anything else is never written into. `--workspace` opts out entirely:
+ * naming an id is joining a workspace that exists elsewhere, and its emptiness
+ * here means only that it has not been hydrated yet. See `starter.ts`. They are
+ * ordinary documents from the moment they land.
  *
  * It is convenience, never a precondition. Every other command works without it
  * — absent configuration is a default, not an error (see `config.ts`) — so
@@ -257,11 +260,12 @@ export async function initCommand(
   const existing = readUserConfig();
   // The same problem is reported by each reader; the set keeps it said once.
   const warnings = new Set([...resolved.warnings, ...existing.warnings]);
-  // A workspace that did not exist anywhere and is about to be generated here —
-  // as opposed to one being re-confirmed, or one whose id `--workspace` names
-  // because somebody is joining it. Only that case gets the starter documents:
-  // a workspace somebody else already filled must not be written into.
-  const creating = inForceWorkspace === null && flags.workspace === undefined;
+  // `--workspace` is somebody naming a workspace that already exists somewhere —
+  // joining it, usually before `ub remote join` hydrates it. Whatever that
+  // workspace holds is not this machine's to add to, and it may hold nothing
+  // *yet*, so the emptiness `starter.ts` reads would be the wrong answer. The
+  // rest of the decision is read from the workspace itself, not from this run.
+  const maySeed = flags.workspace === undefined;
 
   // A pipe is not a person: it gets the defaults rather than a blocked prompt.
   const interactive = !flags.yes && process.stdin.isTTY === true;
@@ -484,16 +488,18 @@ export async function initCommand(
   // The starter documents, outside the lock: they are written through the
   // update log, which has its own durability, and holding a machine-wide lock
   // across a hub connection would block every other `ub init` on the network.
-  // A failure here is a warning, not an exit code — everything `ub init` was
-  // asked to settle is settled, and the seed is repeatable by hand.
+  // A failure here is a warning rather than an exit code because everything
+  // `ub init` was asked to settle is settled by now — and because the seed is
+  // not lost with the run: it is decided by what the workspace is missing, so
+  // the next `ub init` writes whatever this one did not.
   let starter: string[] = [];
-  if (creating) {
+  if (maySeed) {
     try {
       starter = await seedStarterDocs(mcpEnv);
     } catch (error) {
       warnings.add(
-        "the starter documents could not be written: " +
-          `${error instanceof Error ? error.message : String(error)}`,
+        `${error instanceof Error ? error.message : String(error)} — the ` +
+          "starter documents are incomplete; run `ub init` again to finish them",
       );
     }
   }
