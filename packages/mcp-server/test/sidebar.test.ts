@@ -376,7 +376,7 @@ describe("the one-time seed", () => {
 
   it("reports a seed the update log refused, and does not keep it", async () => {
     const databasePath = await corpusDatabase();
-    const refusing = new FailingStore(databasePath);
+    const refusing = new FailingStore(databasePath, WORKSPACE);
     refusing.failing = true;
     const failed = await server(databasePath, refusing);
 
