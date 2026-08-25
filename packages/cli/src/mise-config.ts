@@ -149,29 +149,86 @@ function inspect(path: string): Inspection {
 }
 
 /**
- * The signing secret the derived file currently carries, or null.
+ * The `[env]` keys this module owns, and therefore the only ones it rewrites.
+ * Everything else in the file belongs to whoever put it there.
+ */
+export const DERIVED_KEYS = ["WORKSPACE_ID", "HUB_AUTH_TOKEN", "HUB_URL"] as const;
+
+export type DerivedKey = (typeof DERIVED_KEYS)[number];
+
+/** `KEY = "value"`, as {@link toml} writes it. */
+const ASSIGNMENT = /^([A-Za-z0-9_-]+) = ("(?:[^"\\\n]|\\.)*")$/;
+
+function isDerivedKey(key: string): key is DerivedKey {
+  return (DERIVED_KEYS as readonly string[]).includes(key);
+}
+
+/**
+ * A derived file split into the values this module owns and the lines it does
+ * not.
  *
- * Deliberately a match rather than a TOML parse: this module writes the file, so
- * its shape is known, and anything that does not match is treated as absent and
- * rewritten. A TOML parser would be a new dependency to read four lines we
- * generated ourselves. The quoted literal goes back through `JSON.parse`, which
+ * Line-wise rather than a TOML parse, and deliberately so twice over: this
+ * module writes the lines it owns, so their shape is known, and a parser would
+ * mean a *round trip* — reprinting somebody's `[env]` addition through it is how
+ * a comment, a spelling or an ordering gets quietly lost. Anything that is not
+ * one of our assignments comes back as the bytes it was found as, so a rewrite
+ * costs it nothing. The quoted literal goes back through `JSON.parse`, which
  * exactly undoes the {@link toml} that wrote it.
  */
-export function derivedSecret(root: string): string | null {
+function parseDerived(text: string): {
+  owned: Partial<Record<DerivedKey, string>>;
+  extra: string[];
+} {
+  const owned: Partial<Record<DerivedKey, string>> = {};
+  const extra: string[] = [];
+  const lines = text.split("\n");
+  const start = lines.indexOf("[env]");
+  if (start === -1) {
+    return { owned, extra };
+  }
+
+  for (const line of lines.slice(start + 1)) {
+    const match = ASSIGNMENT.exec(line);
+    const key = match?.[1];
+    const literal = match?.[2];
+    if (key !== undefined && literal !== undefined && isDerivedKey(key)) {
+      try {
+        const value: unknown = JSON.parse(literal);
+        if (typeof value === "string" && value !== "") {
+          owned[key] = value;
+        }
+      } catch {
+        // Unreadable is the same as absent: the rewrite supplies it afresh.
+      }
+      continue;
+    }
+    extra.push(line);
+  }
+  // The file's final newline arrives here as an empty last line, and keeping it
+  // would add a blank line per rewrite — rewriting an unchanged file has to
+  // produce an unchanged file.
+  while (extra.length > 0 && extra[extra.length - 1]?.trim() === "") {
+    extra.pop();
+  }
+  return { owned, extra };
+}
+
+/**
+ * What the derived file currently supplies, or nothing when none of ours is
+ * there.
+ *
+ * `ub workspace use` needs it to tell this file's own echo — inside an activated
+ * checkout mise exports these three *from* it — from a value somebody genuinely
+ * set in their shell.
+ */
+export function derivedValues(root: string): Partial<Record<DerivedKey, string>> {
   const found = inspect(localConfigPath(root));
-  if (found.kind !== "ours") {
-    return null;
-  }
-  const literal = /^HUB_AUTH_TOKEN = ("(?:[^"\\\n]|\\.)*")$/m.exec(found.text)?.[1];
-  if (literal === undefined) {
-    return null;
-  }
-  try {
-    const value: unknown = JSON.parse(literal);
-    return typeof value === "string" && value !== "" ? value : null;
-  } catch {
-    return null;
-  }
+  return found.kind === "ours" ? parseDerived(found.text).owned : {};
+}
+
+/** The signing secret the derived file currently carries, or null. */
+export function derivedSecret(root: string): string | null {
+  return derivedValues(root).HUB_AUTH_TOKEN ?? null;
 }
 
 export interface DerivedEnvironment {
@@ -253,13 +310,23 @@ export function tomlUnsafeReason(value: string): string | null {
   return null;
 }
 
-function render(env: DerivedEnvironment): string {
+/**
+ * The file's text: the three values this module owns, then every other line the
+ * file already had, verbatim.
+ *
+ * The pass-through is what makes this safe to run on a file somebody has added
+ * to — `WORKSPACES`, say, which the README asks for in exactly this `[env]`.
+ * Rendering a fixed shape instead deletes such a line on the next `ub init` or
+ * `ub workspace use`, silently.
+ */
+function render(env: DerivedEnvironment, extra: readonly string[]): string {
   return `${MARKER}
 #
 # Derived from the config \`ub\` resolves — $XDG_CONFIG_HOME/uberblick/
 # {credentials,config}.json and ./uberblick.json — same values, one owner. Do
-# not edit: \`ub init\` writes it and \`ub workspace use\` rewrites it, and no
-# other command does. \`ub remote\` changes the authority files without
+# not edit the three values below: \`ub init\` writes them and \`ub workspace
+# use\` rewrites them, and no other command does. Anything else you add to
+# [env] is kept. \`ub remote\` changes the authority files without
 # regenerating this — rerun \`ub init\` to pick the new endpoint and secret up.
 # Delete it and rerun \`ub init\` and it comes back the same.
 #
@@ -274,7 +341,7 @@ WORKSPACE_ID = ${toml(env.workspace)}
 HUB_AUTH_TOKEN = ${toml(env.signingSecret)}${
     env.hubUrl === undefined ? "" : `\nHUB_URL = ${toml(env.hubUrl)}`
   }
-`;
+${extra.length === 0 ? "" : `${extra.join("\n")}\n`}`;
 }
 
 export type WriteOutcome =
@@ -360,7 +427,12 @@ export function writeLocalConfig(
   // that appeared since; `rename` for one of ours, because it must. Neither
   // writes *through* a symlink even if one is swapped in after the check: they
   // replace the name, they do not follow it.
-  const staged = writeTempBeside(path, render(env));
+  const staged = writeTempBeside(
+    path,
+    // Carried over from the file being replaced: a rewrite must lose nothing its
+    // author put there, and `inspect` has already read it once.
+    render(env, found.kind === "ours" ? parseDerived(found.text).extra : []),
+  );
   let published: boolean;
   try {
     if (found.kind === "absent") {

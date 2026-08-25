@@ -46,7 +46,10 @@ import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
+import type { DerivedKey } from "./mise-config.js";
 import {
+  DERIVED_KEYS,
+  derivedValues,
   findCheckoutRoot,
   localConfigPath,
   trustLocalConfig,
@@ -342,32 +345,51 @@ function serialize(value: unknown): string {
 }
 
 /**
- * The variables mise sets *from* the derived file, dropped before resolving what
- * belongs in it.
+ * The environment with the derived file's own echo taken out of it.
  *
- * Inside an activated checkout these three are in the environment because
- * `mise.local.toml` put them there. Resolving with them in place would make the
- * file its own highest-precedence input — a fixed point at the value being
- * replaced, so the switch could never reach mise at all. `ub init` discounts its
- * own derived file for the same reason (see its signing-secret branch).
+ * Inside an activated checkout mise exports these three *from* `mise.local.toml`,
+ * so resolving with them in place would make that file its own
+ * highest-precedence input — a fixed point at the workspace being replaced, and
+ * a switch that can never reach mise at all. `ub init` discounts its own derived
+ * file for the same reason (see its signing-secret branch).
  *
- * Dropping them is right for a hand-exported `WORKSPACE_ID` too: the derived
- * file mirrors the config *files*, and one shell that outranks it is exactly
- * what the precedence warning is for.
+ * Only the echo, though, compared value by value. A variable that differs from
+ * what the file supplies is somebody's deliberate act — `HUB_AUTH_TOKEN` from
+ * fnox, the documented way to authorise a repository-chosen hub, or an endpoint
+ * exported for one shell — and discarding it would derive a file that is stale
+ * or, worse, credential-less. What this cannot do is tell an echo from an
+ * identical value set by hand, which is a distinction without a difference: both
+ * agree with the file already.
  */
-const DERIVED_VARIABLES = ["WORKSPACE_ID", "HUB_URL", "HUB_AUTH_TOKEN"] as const;
-
-function withoutDerivedVariables(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function withoutOwnEcho(
+  env: NodeJS.ProcessEnv,
+  supplied: Partial<Record<DerivedKey, string>>,
+): NodeJS.ProcessEnv {
   const stripped = { ...env };
-  for (const key of DERIVED_VARIABLES) {
-    delete stripped[key];
+  for (const key of DERIVED_KEYS) {
+    if (stripped[key] !== undefined && stripped[key] === supplied[key]) {
+      delete stripped[key];
+    }
   }
   return stripped;
 }
 
 /**
- * Rewrite this checkout's derived mise config, and return the path — or null
- * when there was nothing to rewrite.
+ * What became of this checkout's derived mise config.
+ *
+ * `refused` is a failure, not a note: the binding has been written by then, so a
+ * derived file that did not follow it means `ub` and every mise task in the
+ * directory now name different workspaces — the split-brain the lock exists to
+ * prevent, arrived by another road.
+ */
+type Regeneration =
+  | { kind: "none" }
+  | { kind: "written"; path: string }
+  | { kind: "refused"; path: string; reason: string };
+
+/**
+ * Rewrite this checkout's derived mise config from the configuration as it now
+ * resolves.
  *
  * Only ever a *re*write: a checkout without one gets nothing, because creating
  * that file is `ub init`'s job. It carries the signing secret, and a fresh one
@@ -376,27 +398,32 @@ function withoutDerivedVariables(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  * this exists to fix. A file that is there is trusted again after the rewrite,
  * because mise's paranoid mode binds trust to a config file's contents.
  *
- * With no secret in force there is nothing honest to write: the derived file
- * would lose its `HUB_AUTH_TOKEN` and the hub would refuse to start. That is a
- * warning and an untouched file, never a half-derived one.
+ * With no workspace or no secret in force there is nothing honest to write: the
+ * file would lose its `HUB_AUTH_TOKEN` and the hub would refuse to start. It is
+ * left as it was and the command fails; a half-derived file is not an option.
  */
-function regenerateLocalConfig(cwd: string, warnings: string[]): string | null {
+function regenerateLocalConfig(cwd: string): Regeneration {
   const root = findCheckoutRoot(cwd);
   if (root === null || !existsSync(localConfigPath(root))) {
-    return null;
+    return { kind: "none" };
   }
+  const path = localConfigPath(root);
 
-  const resolved = resolveConfig({ cwd, env: withoutDerivedVariables(process.env) });
+  const resolved = resolveConfig({
+    cwd,
+    env: withoutOwnEcho(process.env, derivedValues(root)),
+  });
   const workspace = resolved.env.WORKSPACE_ID;
   const signingSecret = resolved.env.HUB_AUTH_TOKEN;
   if (workspace === undefined || signingSecret === undefined) {
-    warnings.push(
-      `${localConfigPath(root)} was left alone: no ${
-        workspace === undefined ? "workspace" : "signing secret"
-      } is configured for it to be derived from, and a partial one would take ` +
-        "the mise tasks down. Run `ub init`.",
-    );
-    return null;
+    return {
+      kind: "refused",
+      path,
+      reason:
+        `no ${workspace === undefined ? "workspace" : "signing secret"} is ` +
+        "configured for it to be derived from, and a file missing one takes " +
+        "every mise task in this directory down. Run `ub init`.",
+    };
   }
 
   const outcome = writeLocalConfig(root, {
@@ -405,11 +432,9 @@ function regenerateLocalConfig(cwd: string, warnings: string[]): string | null {
     hubUrl: resolved.env.HUB_URL,
     authorityPath: resolved.paths.credentials,
   });
-  if (!outcome.written) {
-    warnings.push(outcome.reason);
-    return null;
-  }
-  return outcome.path;
+  return outcome.written
+    ? { kind: "written", path: outcome.path }
+    : { kind: "refused", path: outcome.path, reason: outcome.reason };
 }
 
 async function useCommand(argv: string[], io: Io): Promise<number> {
@@ -467,8 +492,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     return 1;
   }
 
-  const warnings: string[] = [];
-  let localConfig: string | null = null;
+  let regenerated: Regeneration = { kind: "none" };
   try {
     if (user) {
       // Merged over what is on disk: identity and the endpoint are not this
@@ -488,7 +512,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     // Derived from what is on disk now — the binding above included — rather
     // than from what this process decided, which is what makes the pair agree
     // however the two writes are interleaved with another run's.
-    localConfig = regenerateLocalConfig(cwd, warnings);
+    regenerated = regenerateLocalConfig(cwd);
   } catch (error) {
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
@@ -496,15 +520,14 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     lock.release();
   }
 
-  if (localConfig !== null) {
+  if (regenerated.kind === "written") {
     // Outside the lock: trusting is a `mise` subprocess, and it reads the file
     // rather than writing it.
-    const trust = trustLocalConfig(localConfig);
+    const trust = trustLocalConfig(regenerated.path);
     if (!trust.trusted) {
-      warnings.push(trust.hint);
+      warn(io, [trust.hint]);
     }
   }
-  warn(io, warnings);
 
   const { uuid } = parseWorkspaceId(id);
   let text = field("workspace", id);
@@ -512,8 +535,10 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     text += field("uuid", uuid);
   }
   text += field("config", path);
-  if (localConfig !== null) {
-    text += field("mise config", `${localConfig} (derived, gitignored)`);
+  // Named only when it was actually written: a report that lists a file this run
+  // could not update is a report claiming an agreement that is not there.
+  if (regenerated.kind === "written") {
+    text += field("mise config", `${regenerated.path} (derived, gitignored)`);
   }
   io.out(text);
 
@@ -527,6 +552,20 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
         after.configured ?? "no workspace"
       }, which takes precedence over ${path}\n`,
     );
+  }
+
+  // Written, and only half of it: the binding moved and the file the mise tasks
+  // read did not, so this directory now answers one way to `ub` and another to
+  // `mise run web`. Exiting 0 on that would make a script's next step run
+  // against the workspace this command was asked to leave.
+  if (regenerated.kind === "refused") {
+    io.err(
+      `ub workspace use: ${path} now binds this directory to ${id}, but ` +
+        `${regenerated.path} could not be updated to match: ${regenerated.reason} ` +
+        "Until it is, every mise task here still serves the workspace that file " +
+        "names.\n",
+    );
+    return 1;
   }
   return 0;
 }

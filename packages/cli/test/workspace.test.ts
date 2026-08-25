@@ -12,7 +12,14 @@
  * actually read, follows the binding without losing the secret in it.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
@@ -271,6 +278,13 @@ describe("ub workspace use and the derived mise config", () => {
     // `./uberblick.json` leaves `mise run web` and `mise run import-seed` serving
     // the workspace this directory used to be bound to — silently.
     const box = initialisedCheckout(OTHER);
+    // A line README tells people to add to exactly this `[env]`. It is not one
+    // of the three values `ub` owns, so a rewrite must leave it where it is.
+    appendFileSync(
+      localConfigPath(box),
+      `WORKSPACES = "docs-${OTHER},docs-${WORKSPACE}"\n`,
+      "utf8",
+    );
     const before = localConfig(box);
     expect(before).toContain(`WORKSPACE_ID = "${OTHER}"`);
 
@@ -279,9 +293,11 @@ describe("ub workspace use and the derived mise config", () => {
 
     const after = localConfig(box);
     expect(after).toContain(`WORKSPACE_ID = "${WORKSPACE}"`);
+    expect(after).toContain(`WORKSPACES = "docs-${OTHER},docs-${WORKSPACE}"`);
     // Byte for byte apart from that one line: the signing secret above all, but
-    // the endpoint and the header the file is recognised by too. Rewriting a
-    // file that holds the secret is only acceptable if it cannot lose it.
+    // the endpoint, the header the file is recognised by, and the line somebody
+    // added themselves. Rewriting a file that holds the secret is only
+    // acceptable if it cannot lose anything in it.
     expect(apartFromWorkspace(after)).toBe(apartFromWorkspace(before));
     expect(after).toContain(`HUB_URL = "${DEAD_HUB_URL}"`);
 
@@ -322,6 +338,42 @@ describe("ub workspace use and the derived mise config", () => {
     expect(run.status, run.output).toBe(0);
     expect(run.stderr).toMatch(/environment sets .*takes precedence over/);
     expect(localConfig(box)).toContain(`WORKSPACE_ID = "${WORKSPACE}"`);
+  });
+
+  it("keeps a secret the shell genuinely supplies, rather than discarding it as an echo", () => {
+    // Only the derived file's *own* echo is discounted. A `HUB_AUTH_TOKEN` that
+    // differs from what the file supplies is somebody's deliberate act — fnox,
+    // the documented way to authorise a repository-chosen hub — and dropping it
+    // would derive a file for a secret nobody is using.
+    const box = initialisedCheckout(OTHER);
+    const external = "an-externally-supplied-signing-secret";
+
+    const run = runUb(["workspace", "use", WORKSPACE], box, {
+      ...WITHOUT_MISE,
+      HUB_AUTH_TOKEN: external,
+    });
+    expect(run.status, run.output).toBe(0);
+    expect(localConfig(box)).toContain(`HUB_AUTH_TOKEN = "${external}"`);
+  });
+
+  it("fails, naming both files, when the binding moved and the derived file could not", () => {
+    // The split-brain the lock exists to prevent, arrived by another road: the
+    // binding is written, the file every mise task reads is not, and exiting 0
+    // would send a script's next step at the workspace this command was asked to
+    // leave. A `mise.local.toml` nobody derived is left alone, as it always was.
+    const box = initialisedCheckout(OTHER);
+    const foreign = '[env]\nWORKSPACE_ID = "mine"\n';
+    writeFileSync(localConfigPath(box), foreign, "utf8");
+
+    const run = runUb(["workspace", "use", WORKSPACE], box, WITHOUT_MISE);
+    expect(run.status, run.output).toBe(1);
+    expect(run.stderr).toContain(join(box.cwd, "uberblick.json"));
+    expect(run.stderr).toContain(localConfigPath(box));
+    expect(localConfig(box)).toBe(foreign);
+    // The binding did move, and the report says so without claiming the pair
+    // agrees.
+    expect(directoryFile(box).workspace).toBe(WORKSPACE);
+    expect(run.stdout).not.toContain("mise config");
   });
 
   it("writes no mise config outside a checkout, and creates none in a checkout without one", () => {
