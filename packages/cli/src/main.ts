@@ -8,16 +8,7 @@
  */
 
 import { runCli } from "./cli.js";
-
-function fail(error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`ub: ${message}\n`);
-  process.exitCode = 1;
-  // Through the same stop as the success path: an exception thrown while a
-  // websocket is open leaves exactly the handle {@link stopWaiting} exists for,
-  // and a command that failed is no more entitled to hang than one that worked.
-  stopWaiting();
-}
+import { stopWhenDrained } from "./exit.js";
 
 // `process.exitCode`, never `process.exit`: exit() tears the process down at
 // once, and a write to a pipe is asynchronous, so `ub status --json | …` would
@@ -26,46 +17,25 @@ function fail(error: unknown): void {
 // also means a command must close what it opened — `ub status` closes its server
 // instance, `ub mcp serve` drops its signal handlers — or the process would now
 // hang instead of being cut short.
-/**
- * How long a reader may keep this process alive by not reading. Reached only
- * when a pipe is full and nobody is draining it — at which point the reader has
- * gone away, and there is nobody left for the output to be truncated *for*.
- */
-const DRAIN_LIMIT_MS = 60_000;
-
-/**
- * Stop waiting for handles that will never close, without truncating output.
- *
- * A hub that accepts a connection and then says nothing leaves a websocket
- * whose close handshake no one will ever answer, so the event loop does not run
- * dry and the rule above turns "exit cleanly" into "hang". The command has
- * already said everything it is going to say by the time this is scheduled, so
- * the remaining handles are given up on.
- *
- * **Buffered output is never given up on with them.** The whole reason this
- * file does not call `process.exit` directly is that a pipe write is
- * asynchronous, and exiting on a fixed timer would break that promise for
- * exactly the case it was made for: a large `ub status --json` into a reader
- * that is slow. So this exits only once both streams report nothing buffered,
- * however long that takes, up to {@link DRAIN_LIMIT_MS}.
- *
- * Every timer is unref'd, so a process that *can* exit on its own still exits
- * immediately and none of this is ever reached.
- */
+//
+// One class of command cannot hold up its end: a hub that accepts a websocket
+// and then never answers leaves a connection nobody can close. `stopWhenDrained`
+// gives up on those handles without ever giving up on buffered output — see
+// ./exit.ts, which owns that ordering and the reasoning for it.
 function stopWaiting(): void {
-  const deadline = Date.now() + DRAIN_LIMIT_MS;
-  const check = (): void => {
-    const buffered =
-      process.stdout.writableLength + process.stderr.writableLength;
-    if (buffered > 0 && Date.now() < deadline) {
-      setTimeout(check, 25).unref();
-      return;
-    }
+  stopWhenDrained([process.stdout, process.stderr], () => {
     process.exit(process.exitCode ?? 0);
-  };
-  // A short delay before the first look, so an ordinary command still exits
-  // through the event loop running dry rather than through this.
-  setTimeout(check, 250).unref();
+  });
+}
+
+function fail(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`ub: ${message}\n`);
+  process.exitCode = 1;
+  // Through the same stop as the success path: an exception thrown while a
+  // websocket is open leaves exactly the handle this exists for, and a command
+  // that failed is no more entitled to hang than one that worked.
+  stopWaiting();
 }
 
 runCli(process.argv.slice(2)).then((code) => {
