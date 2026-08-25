@@ -171,6 +171,14 @@ export interface AnnotationRange {
 }
 
 /** An entry in the directory doc: a discovery stub for one document. */
+/** One sidebar group: a stable id, a name, and its pinned document uuids. */
+export interface SidebarGroup {
+  id: string;
+  name: string;
+  /** Pinned document uuids, in stored order. */
+  docs: string[];
+}
+
 export interface DirectoryEntry {
   uuid: string;
   title: string;

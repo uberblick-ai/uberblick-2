@@ -12,7 +12,8 @@
  *                   marks on the block's text
  *
  * …plus room names (`<workspaceId>/<uuid>`), the directory doc that makes
- * discovery a synced doc, and one-way markdown export.
+ * discovery a synced doc, the sidebar doc that makes curation one, and one-way
+ * markdown export.
  *
  * Runtime dependencies are limited to `yjs` and `fast-diff`.
  *
@@ -83,11 +84,28 @@ export type {
 export {
   DEFAULT_WORKSPACE,
   DIRECTORY_SUFFIX,
+  SIDEBAR_SUFFIX,
   directoryRoom,
   parseRoom,
   roomForDoc,
+  sidebarRoom,
 } from "./rooms.js";
 export type { ParsedRoom } from "./rooms.js";
+
+export {
+  SIDEBAR_GROUPS_KEY,
+  SIDEBAR_ORDER_KEY,
+  createGroup,
+  deleteGroup,
+  getSidebarGroups,
+  getSidebarOrder,
+  moveDoc,
+  moveGroup,
+  pinDoc,
+  readSidebar,
+  renameGroup,
+  unpinDoc,
+} from "./sidebar.js";
 
 export {
   DIRECTORY_DOCS_KEY,
@@ -129,4 +147,5 @@ export type {
   InlineMarkName,
   InlineMarkSet,
   InlineRun,
+  SidebarGroup,
 } from "./types.js";

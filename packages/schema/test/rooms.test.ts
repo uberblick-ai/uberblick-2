@@ -4,9 +4,11 @@ import {
   DIRECTORY_ROOM,
   DIRECTORY_SUFFIX,
   InvalidRoomError,
+  SIDEBAR_SUFFIX,
   directoryRoom,
   parseRoom,
   roomForDoc,
+  sidebarRoom,
 } from "../src/index.js";
 
 const UUID = "77777777-7777-4777-8777-777777777777";
@@ -18,6 +20,9 @@ describe("room names", () => {
     expect(roomForDoc("acme", UUID)).toBe(`acme/${UUID}`);
     expect(directoryRoom("acme")).toBe("acme/_directory");
     expect(directoryRoom()).toBe("main/_directory");
+    expect(SIDEBAR_SUFFIX).toBe("_sidebar");
+    expect(sidebarRoom("acme")).toBe("acme/_sidebar");
+    expect(sidebarRoom()).toBe("main/_sidebar");
   });
 
   it("keeps the bare directory constant as the document-id suffix", () => {

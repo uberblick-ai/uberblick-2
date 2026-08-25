@@ -1,8 +1,9 @@
 /**
  * Room names.
  *
- * A room name is `<workspaceId>/<docUuid>`, and the directory doc of a
- * workspace lives at `<workspaceId>/_directory`. Tenancy sits in the room key
+ * A room name is `<workspaceId>/<docUuid>`. A workspace's two well-known docs
+ * take reserved document-id slots: the directory at `<workspaceId>/_directory`
+ * and the sidebar at `<workspaceId>/_sidebar`. Tenancy sits in the room key
  * from day one so a hosted hub never needs a room migration; the spike runs one
  * configured workspace (`WORKSPACE_ID`, default `main`).
  */
@@ -14,6 +15,9 @@ export const DEFAULT_WORKSPACE = "main";
 
 /** The document-id slot the directory doc occupies inside a workspace. */
 export const DIRECTORY_SUFFIX = "_directory";
+
+/** The document-id slot the sidebar doc occupies inside a workspace. */
+export const SIDEBAR_SUFFIX = "_sidebar";
 
 const SEPARATOR = "/";
 
@@ -37,6 +41,11 @@ export function roomForDoc(workspaceId: string, uuid: string): string {
 /** The room name of a workspace's directory doc. */
 export function directoryRoom(workspaceId: string = DEFAULT_WORKSPACE): string {
   return roomForDoc(workspaceId, DIRECTORY_SUFFIX);
+}
+
+/** The room name of a workspace's sidebar doc. */
+export function sidebarRoom(workspaceId: string = DEFAULT_WORKSPACE): string {
+  return roomForDoc(workspaceId, SIDEBAR_SUFFIX);
 }
 
 export interface ParsedRoom {
