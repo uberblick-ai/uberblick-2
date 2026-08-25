@@ -24,6 +24,8 @@ export {
   compareCorpus,
   docFingerprint,
   inspectRemote,
+  isIdentical,
+  liveDocs,
   syncWorkspace,
 } from "./remote.js";
 export type { Corpus, CorpusDifference, CorpusDoc } from "./remote.js";

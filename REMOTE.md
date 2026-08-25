@@ -143,18 +143,20 @@ node packages/cli/bin/ub.mjs remote promote wss://<TAILSCALE_HOST>/ws
 
 It hydrates the local directory and every live document into the update log,
 uploads them, then opens the remote as a fresh client and compares what it finds
-against what you hold, document by document. The endpoint in
-`$XDG_CONFIG_HOME/uberblick/config.json` is rewritten only after that comparison
+against what you hold — in both directions, tombstones included, and by content
+rather than by name. The endpoint is rewritten only after that comparison
 succeeds, so a failed or partial run leaves you pointed at the hub that still
-works. Rerunning it finishes rather than collides. It exits non-zero without
-writing anything if the local hub is unreachable, or if the remote already holds
-documents this workspace does not.
+works. Rerunning it finishes an interrupted run. It exits non-zero without
+writing anything if the local hub is unreachable, if the remote already holds
+documents this workspace does not, or if the remote holds one of this
+workspace's documents with different contents — that last one is divergence, not
+an interrupted run, and finishing it would merge two histories.
 
 On a second computer, from a fresh clone:
 
 ```sh
 mise trust && mise run setup -- --yes
-node packages/cli/bin/ub.mjs remote join wss://<TAILSCALE_HOST>/ws \
+node packages/cli/bin/ub.mjs remote join wss://<TAILSCALE_HOST>/ws --fresh \
   --secret-file ~/uberblick-remote-secret
 mise run web
 ```
@@ -165,6 +167,17 @@ remote directory and every live document into the local update log, verifies it
 the same way, and only then persists the endpoint; `mise run web` then starts the
 web client alone, against the remote hub. An unreachable or auth-rejecting
 remote writes nothing at all.
+
+`--fresh` states that this checkout has never had a local hub. Without it `join`
+requires one, exactly as `promote` does: an empty workspace and a stopped hub
+are indistinguishable from the outside, and joining the second one would strand
+whatever that hub holds.
+
+Persisting the endpoint rewrites two things: `$XDG_CONFIG_HOME/uberblick/`
+`config.json`, which `ub` and its MCP server read, and the checkout's gitignored
+`mise.local.toml`, which is where `mise run web` gets the `HUB_URL` it compiles
+into the bundle. Both, because otherwise the browser would keep building against
+`mise.toml`'s committed localhost default while `ub` talked to the remote.
 
 The `--secret-file` argument is a path, never the secret: it must be a file only
 you can read (mode 0600), holding either the bare value from the host's `.env`

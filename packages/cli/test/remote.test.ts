@@ -19,7 +19,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -34,13 +34,16 @@ import {
   initDoc,
   listDirectory,
   roomForDoc,
+  tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Sandbox } from "./helpers.js";
+import { setRemote } from "../src/remote.js";
 import {
   DEAD_HUB_URL,
+  REPO_ROOT,
   removeTempDirs,
   runUb,
   runUbAsync,
@@ -143,11 +146,17 @@ async function webDoc(
   hub: Hub,
   title: string,
   secret: string = SECRET,
+  // Given explicitly when a test needs the *same* document to exist on two
+  // hubs with different contents — identity is the uuid, so that is divergence.
+  options: { uuid?: string; body?: string } = {},
 ): Promise<string> {
-  const uuid = randomUUID();
+  const uuid = options.uuid ?? randomUUID();
   const room = await openRoom(hub, roomForDoc(WORKSPACE, uuid), secret);
   initDoc(room.doc, { uuid, title });
-  appendBlock(room.doc, { type: "paragraph", text: `${title} body` });
+  appendBlock(room.doc, {
+    type: "paragraph",
+    text: options.body ?? `${title} body`,
+  });
   await room.done();
 
   const directory = await openRoom(hub, directoryRoom(WORKSPACE), secret);
@@ -291,6 +300,64 @@ describe("ub remote", () => {
     expect(run.status).toBe(2);
     expect(run.stderr).toContain('unknown command "invite"');
   });
+
+  // A credential in the URL would be persisted into two files and echoed on
+  // stdout. The hub takes its secret in the connection's auth message only.
+  it.each([
+    ["wss://user:hunter2@hub.example.ts.net/ws", "username or password"],
+    ["wss://hub.example.ts.net/ws?token=hunter2", "query string"],
+    ["wss://hub.example.ts.net/ws#hunter2", "fragment"],
+  ])("refuses %s", (endpoint, because) => {
+    const box = sandbox();
+    const run = runUb(["remote", "set", endpoint], box);
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain(because);
+    // The refusal must not echo back the credential it is refusing.
+    expect(run.output).not.toContain("hunter2");
+  });
+
+  it("points the mise tasks at the endpoint too, not just ub", () => {
+    // Without this the browser keeps building against mise.toml's localhost
+    // default while `ub` talks to the remote — one workspace, two hubs.
+    const box = sandbox({ checkout: true, credentials: { signingSecret: SECRET } });
+    const run = runUb(["remote", "set", "wss://hub.example.ts.net"], box);
+    expect(run.status).toBe(0);
+
+    const derived = readFileSync(join(box.cwd, "mise.local.toml"), "utf8");
+    expect(derived).toContain('HUB_URL = "wss://hub.example.ts.net"');
+    expect(derived).toContain(`HUB_AUTH_TOKEN = "${SECRET}"`);
+    expect(run.stdout).toContain("mise.local.toml");
+    // Committed configuration keeps the localhost default for everybody else.
+    expect(readFileSync(join(REPO_ROOT, "mise.toml"), "utf8")).toContain(
+      'HUB_URL = "ws://localhost:1234"',
+    );
+  });
+
+  it("keeps the endpoint when ub init rewrites the derived config", () => {
+    const box = sandbox({ checkout: true, credentials: { signingSecret: SECRET } });
+    expect(runUb(["remote", "set", "wss://hub.example.ts.net"], box).status).toBe(0);
+    expect(runUb(["init", "--yes"], box).status).toBe(0);
+
+    expect(readFileSync(join(box.cwd, "mise.local.toml"), "utf8")).toContain(
+      'HUB_URL = "wss://hub.example.ts.net"',
+    );
+  });
+
+  it("never leaves the stored credential naming a different hub", () => {
+    // The endpoint cannot be written — `config.json` is a directory — after the
+    // credential already has been. The credential must go back.
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    mkdirSync(join(box.configHome, "uberblick", "config.json"), { recursive: true });
+
+    expect(() =>
+      setRemote("wss://hub.example.ts.net", {
+        secret: OTHER_SECRET,
+        env: box.env,
+        cwd: box.cwd,
+      }),
+    ).toThrow();
+    expect(storedSecret(box)).toBe(SECRET);
+  });
 });
 
 describe("ub remote promote", () => {
@@ -346,13 +413,53 @@ describe("ub remote promote", () => {
     const run = await runUbAsync(["remote", "promote", url(remote)], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("already holds 1 document");
-    expect(run.stderr).toContain("this workspace does not");
+    expect(run.stderr).toContain("are not in this workspace");
     expect(run.stderr).toContain("Merging two populated workspaces is unsupported");
-    expect(run.stderr).toContain("nothing was written");
+    expect(run.stderr).toContain("Nothing was written, and");
+    expect(run.stderr).toContain("was not touched");
 
     // Nothing moved, and the endpoint is still the one that works.
     expect(persistedHubUrl(box)).toBe(url(local));
     expect((await readHub(remote)).size).toBe(1);
+  });
+
+  // A remote holding a strict subset is an interrupted promotion to finish.
+  // A remote holding the same uuid with different content is two histories
+  // under one identity, and finishing it would merge them.
+  it("refuses a remote that has the same document with other contents", async () => {
+    const local = await startHub();
+    const remote = await startHub();
+    const box = machine(local);
+    const shared = randomUUID();
+    await webDoc(local, "Shared", SECRET, { uuid: shared, body: "mine" });
+    await webDoc(remote, "Shared", SECRET, { uuid: shared, body: "theirs" });
+
+    const run = await runUbAsync(["remote", "promote", url(remote)], box);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("with different contents");
+    expect(run.stderr).toContain("two histories under one identity");
+    expect(run.stderr).toContain(shared);
+    expect(persistedHubUrl(box)).toBe(url(local));
+  });
+
+  it("refuses a remote holding nothing but archived documents", async () => {
+    const local = await startHub();
+    const remote = await startHub();
+    const box = machine(local);
+    await webDoc(local, "Mine");
+
+    // A hub somebody used and then emptied is not an empty hub: its directory
+    // still carries the tombstones, and they are sticky.
+    const gone = await webDoc(remote, "Deleted over there");
+    const directory = await openRoom(remote, directoryRoom(WORKSPACE));
+    tombstoneDirectoryEntry(directory.doc, gone);
+    await directory.done();
+
+    const run = await runUbAsync(["remote", "promote", url(remote)], box);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("Merging two populated workspaces is unsupported");
+    expect(run.stderr).toContain(gone);
+    expect(persistedHubUrl(box)).toBe(url(local));
   });
 
   it("refuses when the local hub cannot be reached, so nothing is stranded", async () => {
@@ -365,7 +472,7 @@ describe("ub remote promote", () => {
     const run = await runUbAsync(["remote", "promote", url(remote)], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("did not answer");
-    expect(run.stderr).toContain("Nothing was written");
+    expect(run.stderr).toContain("nothing was written");
     expect(persistedHubUrl(box)).toBe(DEAD_HUB_URL);
   });
 });
@@ -390,7 +497,7 @@ describe("ub remote join", () => {
     chmodSync(secretFile, 0o600);
 
     const run = await runUbAsync(
-      ["remote", "join", url(remote), "--secret-file", secretFile],
+      ["remote", "join", url(remote), "--fresh", "--secret-file", secretFile],
       box,
     );
     expect(run.status).toBe(0);
@@ -410,6 +517,28 @@ describe("ub remote join", () => {
 
     expect(run.output).not.toContain(OTHER_SECRET);
     expect(run.output).not.toMatch(TOKEN_SHAPE);
+  });
+
+  // An empty mirror and a hub that is merely switched off are the same picture
+  // from here, and one of them means a corpus is about to be left behind.
+  it("refuses a stopped local hub unless told the checkout has none", async () => {
+    const remote = await startHub();
+    await webDoc(remote, "Theirs");
+    const box = sandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      credentials: { signingSecret: SECRET },
+    });
+
+    const run = await runUbAsync(["remote", "join", url(remote)], box);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("--fresh");
+    expect(run.stderr).toContain("switched off");
+    expect(persistedHubUrl(box)).toBe(DEAD_HUB_URL);
+
+    // …and with the flag, the same command goes through.
+    const fresh = await runUbAsync(["remote", "join", url(remote), "--fresh"], box);
+    expect(fresh.status).toBe(0);
+    expect(persistedHubUrl(box)).toBe(url(remote));
   });
 
   it("refuses a secret file other users can read", async () => {
@@ -448,7 +577,7 @@ describe("ub remote join", () => {
       credentials: { signingSecret: SECRET },
     });
 
-    const run = await runUbAsync(["remote", "join", DEAD_HUB_URL], box);
+    const run = await runUbAsync(["remote", "join", DEAD_HUB_URL, "--fresh"], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("did not answer");
     expect(persistedHubUrl(box)).toBe("ws://127.0.0.1:2");
@@ -461,7 +590,10 @@ describe("ub remote join", () => {
       credentials: { signingSecret: SECRET },
     });
 
-    const run = await runUbAsync(["remote", "join", url(remote)], box);
+    const run = await runUbAsync(
+      ["remote", "join", url(remote), "--fresh"],
+      box,
+    );
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("rejected the credential");
     expect(run.stderr).toContain("--secret-file");

@@ -21,20 +21,43 @@
  * tell those apart from the outside. A bridge that persisted a new endpoint on
  * the strength of a timer would, on a slow link, tell somebody their documents
  * are on a machine that has never seen them. So completion is established by
- * asking the far side: {@link inspectRemote} downloads the directory and every
- * document it names into empty documents and fingerprints them, and the caller
- * compares those fingerprints with the ones it holds. That is the second
- * computer's experience, verified before anything is persisted.
+ * asking the far side, and by three separate facts, all of which must hold:
+ *
+ * 1. Every room is *quiet* — {@link Corpus.unsettled} is empty. A bounded wait
+ *    that expired is a failure, not a result.
+ * 2. Every document the directory names actually arrived — {@link
+ *    Corpus.missing} is empty.
+ * 3. The two corpora agree in **both directions**, tombstones included. Not
+ *    "the far side has everything we have": also "the far side has nothing we
+ *    do not", because a document that appeared over there mid-bridge means the
+ *    snapshot this was verified against is already stale.
+ *
+ * **What counts as agreement.** {@link docFingerprint} covers the whole
+ * schema-owned surface — meta, blocks, the inline marks on them, and the
+ * annotations map — because `Block.rev` alone covers type, text and attributes
+ * and would let a remote missing every bold run and every comment thread pass.
+ * Alongside it, state vectors are compared directly, which catches any struct
+ * one side holds and the other does not, whatever it belongs to.
+ *
+ * A hash of `encodeStateAsUpdate` is deliberately *not* what is compared: those
+ * bytes depend on how items happened to be split and merged during
+ * integration, so two replicas that have genuinely converged can encode
+ * differently and a byte comparison would fail a promotion that worked. State
+ * vectors and schema-level content are both representation-independent.
  *
  * Neither function moves a tombstoned document. The directory doc travels
  * wholesale, so tombstones replicate as directory state and an archived
  * document stays archived on the far side; its *room* is not uploaded, because
- * "every live document" is what a bridge is for.
+ * "every live document" is what a bridge is for. A tombstone is still content
+ * for every *decision* here: a hub holding nothing but tombstones is a hub
+ * somebody has used, not an empty one.
  */
 
 import { createHash } from "node:crypto";
 import {
   directoryRoom,
+  getAnnotationsMap,
+  getBlockInline,
   getBlocks,
   getMeta,
   listDirectory,
@@ -78,58 +101,152 @@ export function bridgeConfig(
 export interface CorpusDoc {
   uuid: string;
   title: string;
+  /** Tombstoned in the directory. Its room is never opened, and never moved. */
+  deleted: boolean;
   /**
-   * A content hash of the document, or null when the corpus was read without
-   * opening documents — {@link inspectRemote} takes the directory alone unless
-   * asked for more, because counting what a hub holds does not require
-   * downloading it.
+   * Content hash of the whole document, or null when it was not opened — a
+   * tombstoned entry, or a reading that took the directory alone.
    */
   fingerprint: string | null;
+  /** The document's Yjs state vector, or null as above. */
+  stateVector: Uint8Array | null;
 }
 
 export interface Corpus {
   /** Where this reading came from, and whether it can be believed. */
   hub: HubState;
-  /** Live documents, in directory order. */
-  docs: CorpusDoc[];
+  /** Every directory entry, live and tombstoned alike, in directory order. */
+  entries: CorpusDoc[];
   /**
    * Live directory entries whose document did not arrive. Never empty-and-fine:
    * a directory naming a document nothing can produce is an incomplete sync,
    * and every caller here treats it as a failure.
    */
   missing: { uuid: string; title: string }[];
-  /** Tombstoned directory entries. They replicate; their rooms do not move. */
-  tombstones: number;
+  /**
+   * Rooms the hub has not acknowledged. A bounded wait that ran out leaves
+   * entries here, which is exactly the case a quiet timer cannot distinguish
+   * from success.
+   */
+  unsettled: string[];
+}
+
+/** The live documents of a corpus — what a bridge actually moves. */
+export function liveDocs(corpus: Corpus): CorpusDoc[] {
+  return corpus.entries.filter((entry) => !entry.deleted);
 }
 
 /**
- * A content hash of one document: its title, tags, links, and the ordered list
- * of its blocks' own content revisions.
+ * A value with every object key sorted, recursively.
  *
- * Built from `Block.rev` rather than from the text, because that hash is
- * already the schema's answer to "has this block's content changed" — type,
- * text and attributes — and reusing it keeps one definition of block identity.
- * Yjs internals are deliberately not part of it: two replicas that converged on
- * the same document through different update orders must fingerprint the same.
+ * Annotation threads are stored as JSON and reach two replicas through
+ * different update orders; nothing guarantees the two decodings enumerate their
+ * keys identically. A fingerprint that depends on key order would report
+ * divergence between documents that are in fact the same, and this bridge fails
+ * closed — so a false difference is a promotion that refuses to finish.
+ */
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonical);
+  }
+  if (typeof value !== "object" || value === null) {
+    return value;
+  }
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    out[key] = canonical((value as Record<string, unknown>)[key]);
+  }
+  return out;
+}
+
+/**
+ * A content hash of one document, over everything the schema puts in it.
+ *
+ * Meta, the ordered blocks, the inline marks on those blocks, and the
+ * annotations map — which is the whole documented layout (`meta`, `blocks`,
+ * `annotations`), so nothing a document can carry is outside this.
+ *
+ * `Block.rev` supplies the per-block part because it is already the schema's
+ * answer to "has this block's content changed" — type, text and attributes. It
+ * deliberately does **not** cover inline marks, so the marks are hashed here
+ * beside it rather than assumed; a remote that received the text of every block
+ * and none of its formatting, or none of its comment threads, must not be able
+ * to pass verification.
  */
 export function docFingerprint(doc: Y.Doc): string {
   const meta = getMeta(doc);
-  const parts = [
-    meta.title,
-    [...meta.tags].sort().join(","),
-    [...meta.links].sort().join(","),
-    ...getBlocks(doc).map((block) => `${block.id}:${block.rev}`),
-  ];
-  // JSON, not a separator character: a title may contain anything, and a
-  // fingerprint that two different documents can share is not one.
+  const annotations = getAnnotationsMap(doc);
+  const state = {
+    uuid: meta.uuid,
+    title: meta.title,
+    tags: [...meta.tags].sort(),
+    links: [...meta.links].sort(),
+    blocks: getBlocks(doc).map((block) => ({
+      id: block.id,
+      rev: block.rev,
+      inline: getBlockInline(doc, block.id).map((run) => ({
+        text: run.text,
+        marks: canonical(run.marks),
+      })),
+    })),
+    annotations: [...annotations.keys()]
+      .sort()
+      .map((key) => [key, canonical(annotations.get(key))]),
+  };
   return createHash("sha256")
-    .update(JSON.stringify(parts))
+    .update(JSON.stringify(state))
     .digest("hex")
     .slice(0, 16);
 }
 
+/** Whether `target` holds every struct `source` does. */
+function coversClocks(source: Uint8Array, target: Uint8Array): boolean {
+  const want = Y.decodeStateVector(source);
+  const have = Y.decodeStateVector(target);
+  for (const [client, clock] of want) {
+    if ((have.get(client) ?? 0) < clock) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Whether two readings of the same document agree.
+ *
+ * Both tests, not either: the fingerprint is schema-level and would miss a
+ * struct belonging to nothing the schema reads, and the state vectors are
+ * structural and would miss a difference that is only in the delete set. A
+ * side that was not opened contributes nothing to its half of the comparison —
+ * a directory-only reading is not evidence of agreement, and callers that need
+ * evidence open the documents.
+ */
+function sameDoc(a: CorpusDoc, b: CorpusDoc): boolean {
+  if (a.deleted !== b.deleted) {
+    return false;
+  }
+  if (a.fingerprint !== null && b.fingerprint !== null && a.fingerprint !== b.fingerprint) {
+    return false;
+  }
+  if (a.stateVector !== null && b.stateVector !== null) {
+    if (!coversClocks(a.stateVector, b.stateVector)) return false;
+    if (!coversClocks(b.stateVector, a.stateVector)) return false;
+  }
+  return true;
+}
+
 function emptyCorpus(hub: HubState): Corpus {
-  return { hub, docs: [], missing: [], tombstones: 0 };
+  return { hub, entries: [], missing: [], unsettled: [] };
+}
+
+function tombstone(entry: { uuid: string; title: string }): CorpusDoc {
+  return {
+    uuid: entry.uuid,
+    title: entry.title,
+    deleted: true,
+    fingerprint: null,
+    stateVector: null,
+  };
 }
 
 /**
@@ -140,9 +257,10 @@ function emptyCorpus(hub: HubState): Corpus {
  * awareness state is left unset as well — a probe must not appear in the web
  * UI as a ghost collaborator.
  *
- * @param options.documents Open every document the directory names and
- * fingerprint it. Off by default: deciding whether a hub is empty needs the
- * directory alone.
+ * @param options.documents Open every live document the directory names and
+ * fingerprint it. Off only where the caller genuinely needs nothing but the
+ * directory; every *decision* a bridge makes needs content, because a far side
+ * holding the same uuids with different contents is divergence, not progress.
  */
 export async function inspectRemote(
   config: McpConfig,
@@ -173,20 +291,25 @@ export async function inspectRemote(
       return emptyCorpus(sync.state());
     }
 
-    const entries = listDirectory(dirDoc, { includeDeleted: true });
-    const live = entries.filter((entry) => entry.deleted !== true);
-    const tombstones = entries.length - live.length;
+    const all = listDirectory(dirDoc, { includeDeleted: true });
+    const live = all.filter((entry) => entry.deleted !== true);
+    const dead = all.filter((entry) => entry.deleted === true).map(tombstone);
 
     if (options.documents !== true) {
       return {
         hub: sync.state(),
-        docs: live.map((entry) => ({
-          uuid: entry.uuid,
-          title: entry.title,
-          fingerprint: null,
-        })),
+        entries: [
+          ...live.map((entry) => ({
+            uuid: entry.uuid,
+            title: entry.title,
+            deleted: false,
+            fingerprint: null,
+            stateVector: null,
+          })),
+          ...dead,
+        ],
         missing: [],
-        tombstones,
+        unsettled: [],
       };
     }
 
@@ -198,28 +321,35 @@ export async function inspectRemote(
       return emptyCorpus(sync.state());
     }
 
-    const docs: CorpusDoc[] = [];
+    const entries: CorpusDoc[] = [];
     const missing: { uuid: string; title: string }[] = [];
+    const unsettled: string[] = [];
     for (const entry of live) {
       const room = roomForDoc(config.workspaceId, entry.uuid);
       const held = opened.get(room);
+      if (!sync.isRoomQuiet(room)) {
+        unsettled.push(room);
+      }
       // An empty `meta.uuid` is the one reliable "this document has not
       // arrived": the room is named after the uuid, so its name proves nothing.
-      if (
-        held === undefined ||
-        !sync.isRoomQuiet(room) ||
-        getMeta(held.doc).uuid === ""
-      ) {
+      if (held === undefined || getMeta(held.doc).uuid === "") {
         missing.push({ uuid: entry.uuid, title: entry.title });
         continue;
       }
-      docs.push({
+      entries.push({
         uuid: entry.uuid,
         title: getMeta(held.doc).title,
+        deleted: false,
         fingerprint: docFingerprint(held.doc),
+        stateVector: Y.encodeStateVector(held.doc),
       });
     }
-    return { hub: sync.state(), docs, missing, tombstones };
+    return {
+      hub: sync.state(),
+      entries: [...entries, ...dead],
+      missing,
+      unsettled,
+    };
   } finally {
     sync.destroy();
     for (const { doc, awareness } of opened.values()) {
@@ -229,36 +359,40 @@ export async function inspectRemote(
   }
 }
 
-/** The live corpus a hydrated replica set holds, read out of its documents. */
+/** The corpus a hydrated replica set holds, read out of its documents. */
 function readCorpus(replicas: Replicas): Corpus {
-  const entries = listDirectory(replicas.directory().doc, {
-    includeDeleted: true,
-  });
-  const live = entries.filter((entry) => entry.deleted !== true);
+  const all = listDirectory(replicas.directory().doc, { includeDeleted: true });
   const attached = new Map(
     replicas.attachedReplicas().map((replica) => [replica.id, replica]),
   );
 
-  const docs: CorpusDoc[] = [];
+  const entries: CorpusDoc[] = [];
   const missing: { uuid: string; title: string }[] = [];
-  for (const entry of live) {
+  const unsettled: string[] = [];
+  for (const replica of replicas.attachedReplicas()) {
+    if (!replicas.isRoomQuiet(replica.room)) {
+      unsettled.push(replica.room);
+    }
+  }
+  for (const entry of all) {
+    if (entry.deleted === true) {
+      entries.push(tombstone(entry));
+      continue;
+    }
     const replica = attached.get(entry.uuid);
     if (replica === undefined || getMeta(replica.doc).uuid === "") {
       missing.push({ uuid: entry.uuid, title: entry.title });
       continue;
     }
-    docs.push({
+    entries.push({
       uuid: entry.uuid,
       title: getMeta(replica.doc).title,
+      deleted: false,
       fingerprint: docFingerprint(replica.doc),
+      stateVector: Y.encodeStateVector(replica.doc),
     });
   }
-  return {
-    hub: replicas.sync.state(),
-    docs,
-    missing,
-    tombstones: entries.length - live.length,
-  };
+  return { hub: replicas.sync.state(), entries, missing, unsettled };
 }
 
 /**
@@ -302,21 +436,40 @@ export async function syncWorkspace(config: McpConfig): Promise<Corpus> {
 export interface CorpusDifference {
   /** In `expected`, absent from `found`. */
   missing: CorpusDoc[];
-  /** In both, with different content. */
+  /** In both, disagreeing about content, marks, annotations or tombstoning. */
   differing: CorpusDoc[];
   /** In `found`, absent from `expected`. */
   extra: CorpusDoc[];
 }
 
+export function isIdentical(difference: CorpusDifference): boolean {
+  return (
+    difference.missing.length === 0 &&
+    difference.differing.length === 0 &&
+    difference.extra.length === 0
+  );
+}
+
 /**
- * Compare two corpora by uuid, and by fingerprint where both sides have one.
+ * Compare two corpora by uuid, and by content wherever both sides opened the
+ * document.
  *
  * `extra` is what makes the refusals precise: a hub holding documents this
  * workspace has never heard of is a *second populated workspace*, and merging
  * those is out of scope. Reading it as a set difference rather than as "is the
- * other side empty" is also what makes a rerun idempotent — a promotion
- * interrupted halfway leaves a remote that holds a subset, which is a promotion
- * to finish, not a collision to refuse.
+ * other side empty" is also what lets a rerun finish — a promotion interrupted
+ * halfway leaves a remote that holds a subset.
+ *
+ * That resumability is only ever safe when the overlap is **identical**, which
+ * is why `differing` exists and why every caller treats it exactly like
+ * `extra`. A far side holding the same uuid with different content has diverged
+ * from this workspace, and continuing would merge two histories under one
+ * identity — the thing the two-verb split exists to prevent, arrived at through
+ * a subset rather than through a superset.
+ *
+ * Tombstoned entries take part in all of it. They carry no content to compare,
+ * but their presence is content: a hub holding nothing but tombstones has been
+ * used, and disagreeing about whether a document is archived is a difference.
  */
 export function compareCorpus(
   expected: readonly CorpusDoc[],
@@ -329,11 +482,7 @@ export function compareCorpus(
     const other = byUuid.get(doc.uuid);
     if (other === undefined) {
       missing.push(doc);
-    } else if (
-      doc.fingerprint !== null &&
-      other.fingerprint !== null &&
-      doc.fingerprint !== other.fingerprint
-    ) {
+    } else if (!sameDoc(doc, other)) {
       differing.push(doc);
     }
   }

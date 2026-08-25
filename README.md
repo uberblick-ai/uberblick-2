@@ -251,19 +251,20 @@ node packages/cli/bin/ub.mjs remote promote wss://<host>.ts.net/ws
 
 That reads the whole local workspace through the local hub into the update log,
 uploads it to the remote, then opens the remote as a *fresh* client and compares
-what it finds with what you hold, document by document. Only if that matches is
-the endpoint written to `config.json`. It refuses if the local hub is not
-running (documents held only there would be left behind), and refuses without
-writing anything if the remote already holds documents that are not yours,
-naming both counts — merging two populated workspaces is not something it will
-guess at. Rerunning it finishes an interrupted promotion rather than colliding
-with it.
+what it finds with what you hold — in both directions, tombstones included, and
+by content rather than by name. Only if that matches is the endpoint persisted.
+It refuses if the local hub is not running (documents held only there would be
+left behind), and refuses without writing anything if the remote already holds
+documents that are not yours, or holds one of yours with *different* contents,
+naming both counts. Rerunning it finishes an interrupted promotion — but only
+while the overlap is identical, because a divergent overlap is two histories
+under one identity, not progress.
 
 **On a second computer**, from a fresh clone with nothing in its workspace:
 
 ```
 mise trust && mise run setup -- --yes
-node packages/cli/bin/ub.mjs remote join wss://<host>.ts.net/ws \
+node packages/cli/bin/ub.mjs remote join wss://<host>.ts.net/ws --fresh \
   --secret-file ~/uberblick-remote-secret
 mise run web            # the web client alone; the hub is the remote one
 ```
@@ -276,6 +277,24 @@ log, verifies it the same way, and only then persists the endpoint. An
 unreachable or auth-rejecting remote leaves your configuration exactly as it
 was. It refuses a local workspace that already holds documents the remote does
 not, naming both counts.
+
+`--fresh` is what says "this checkout has never had a local hub". Without it,
+`join` insists on reaching your local hub for the same reason `promote` does: an
+empty workspace and a hub that is merely switched off look identical from the
+outside, and joining the second one strands whatever it holds. On a second
+computer there is genuinely nothing to collect, so the flag is the honest answer
+rather than a way round the check.
+
+**What "persisted" covers.** `ub` and its MCP server read the endpoint from
+`config.json`; nothing else in a checkout does. `mise run web` compiles
+`HUB_URL` into the bundle from *mise's* environment, and the committed
+`mise.toml` says `ws://localhost:1234`. So every one of these commands also
+regenerates the gitignored `mise.local.toml` — the same derived file `ub init`
+writes, read by mise after `mise.toml` so its `[env]` wins. Without that the
+browser would keep talking to a hub on your machine while `ub` talked to the
+remote: one workspace split across two hubs, which is the stranding this is
+supposed to prevent. The committed default stays localhost, because a
+contributor who never set a remote must still get a working checkout.
 
 Archived documents travel as directory state — a tombstone replicates and stays
 a tombstone — but their content is not moved: "every live document" is what a
