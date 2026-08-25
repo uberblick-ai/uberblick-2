@@ -141,7 +141,9 @@ function highlight(host: HTMLElement, threadId: string): HTMLElement {
 
 function press(target: HTMLElement, key: string): void {
   act(() => {
-    target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    target.dispatchEvent(
+      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+    );
   });
 }
 
@@ -252,6 +254,14 @@ describe("the threads rail can be opened where the layout hides it", () => {
 
     act(() => toggle(host).click());
     expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
+    expect(rail(host).classList.contains("ub-rail-open")).toBe(true);
+
+    // An Escape a control in the rail already handled — a reply form cancelling
+    // — is that form's dismissal, not the drawer's.
+    const consume = (event: Event): void => event.preventDefault();
+    rail(host).addEventListener("keydown", consume);
+    press(rail(host), "Escape");
+    rail(host).removeEventListener("keydown", consume);
     expect(rail(host).classList.contains("ub-rail-open")).toBe(true);
 
     press(document.body, "Escape");

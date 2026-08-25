@@ -41,7 +41,6 @@ import type { ReactElement } from "react";
 import { addComment, getAnnotation, setAnnotationResolved } from "@uberblick/schema";
 import type { AnnotationComment } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
-import { useThreads } from "./hooks.js";
 import { CommentForm } from "./CommentForm.js";
 import {
   commentTimestamp,
@@ -175,12 +174,20 @@ function ThreadCard({
 
 export function ThreadsPane({
   connection,
+  threads,
   focused,
   author,
   readOnly = false,
   onFocus,
 }: {
   connection: RoomConnection | null;
+  /**
+   * Every thread in the open document, in reading order. Observed by the app
+   * shell rather than here: the topbar's handle and the drawer's own open/closed
+   * state are read off the same list, and three observers over one Y.Doc would
+   * recompute the same rail three times on every keystroke.
+   */
+  threads: readonly ThreadView[];
   focused: ThreadFocus | null;
   /** The awareness name this client publishes — the author of its replies. */
   author: string;
@@ -191,7 +198,6 @@ export function ThreadsPane({
   readOnly?: boolean;
   onFocus: (threadId: string) => void;
 }): ReactElement | null {
-  const threads = useThreads(connection);
   const [replyTo, setReplyTo] = useState<string | null>(null);
   /**
    * The one resolved thread the reader has opened back up. One at a time: the

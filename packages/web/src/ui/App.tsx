@@ -232,7 +232,11 @@ export function App(): ReactElement {
   useEffect(() => {
     if (!threadsOpen) return;
     const close = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") closeThreads();
+      // A control inside the rail may have handled this Escape already — a
+      // reply form cancelling, say, which preventDefaults it. Dismissing the
+      // form and closing the drawer out from under it are two gestures, and the
+      // reader made one.
+      if (event.key === "Escape" && !event.defaultPrevented) closeThreads();
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
@@ -408,6 +412,7 @@ export function App(): ReactElement {
           <OutlinePane connection={doc} />
           <ThreadsPane
             connection={doc}
+            threads={threads}
             focused={focusedThread}
             author={identity.name}
             readOnly={archived}
