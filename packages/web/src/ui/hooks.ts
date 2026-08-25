@@ -96,6 +96,7 @@ const OFFLINE: RoomStatus = {
   synced: false,
   unsyncedChanges: 0,
   localReplicaLoaded: false,
+  hasLocalCache: false,
 };
 
 export function useRoomStatus(connection: RoomConnection | null): RoomStatus {

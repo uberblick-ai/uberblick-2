@@ -151,6 +151,30 @@ export function docIsHydrated(uuid: string, meta: DocMeta | null): boolean {
   return meta !== null && meta.uuid === uuid;
 }
 
+/**
+ * Whether the replica has *answered* about the routed room yet.
+ *
+ * `meta` being null is one kind of silence — nothing has been read. An empty
+ * `meta` is a second kind, and it looks identical: `getMeta` on a Y.Doc that
+ * holds nothing returns `uuid: ""`, and a room that has just been opened holds
+ * nothing until its IndexedDB replica is applied. Reading that as "answered,
+ * and not this document" is what put "waiting for sync" on screen for a frame
+ * when a reader navigates away from a document and back (#161) — the room is
+ * released and re-opened from nothing, and the local read can slip past a
+ * React commit.
+ *
+ * So the empty answer only counts once `localReplicaLoaded` says the local read
+ * is done. After that an empty room *is* an answer: a deep link to a uuid this
+ * replica does not hold keeps its waiting screen, which is the whole point of
+ * that screen.
+ */
+export function replicaHasAnswered(
+  meta: DocMeta | null,
+  localReplicaLoaded: boolean,
+): boolean {
+  return meta !== null && (meta.uuid !== "" || localReplicaLoaded);
+}
+
 /** Push a new address, or replace the current one without growing the history. */
 export type Navigate = (path: string, mode?: "push" | "replace") => void;
 

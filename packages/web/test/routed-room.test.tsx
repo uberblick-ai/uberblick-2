@@ -31,6 +31,7 @@ const OFFLINE: RoomStatus = {
   synced: false,
   unsyncedChanges: 0,
   localReplicaLoaded: false,
+  hasLocalCache: false,
 };
 
 /** Rooms open instantly and never talk to anything. */

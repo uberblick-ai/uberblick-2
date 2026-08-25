@@ -36,6 +36,7 @@ import {
   docIsHydrated,
   docPath,
   parseRoute,
+  replicaHasAnswered,
   useRoutePath,
 } from "./route.js";
 import type { Route } from "./route.js";
@@ -46,6 +47,7 @@ import {
   useHubEndpoint,
   useIdentity,
   useRoom,
+  useRoomStatus,
   useStoredFlag,
 } from "./hooks.js";
 
@@ -79,7 +81,8 @@ export function RoutePane({
   /**
    * That room's metadata, or null while it has not been read yet. The
    * difference carries a decision: unread is silence, read-and-not-this-document
-   * is the waiting screen.
+   * is the waiting screen — and an *empty* meta is only the second of those once
+   * the room's local replica has been applied. See {@link replicaHasAnswered}.
    */
   meta: DocMeta | null;
   author: string;
@@ -89,6 +92,11 @@ export function RoutePane({
   onRestore: () => void;
   onSelectThread: (threadId: string) => void;
 }): ReactElement {
+  // Before the branches: a hook may not sit behind an early return. Only
+  // `localReplicaLoaded` is read here — it is what tells the empty document a
+  // freshly opened room holds apart from an answer that the document is absent.
+  const { localReplicaLoaded } = useRoomStatus(connection);
+
   if (route.kind === "unknown-workspace") {
     return (
       <PaneNotice>
@@ -113,11 +121,14 @@ export function RoutePane({
 
   if (route.kind === "doc") {
     // Nothing is known about this address yet: the room has not been joined, or
-    // it has but its metadata has not been read. Both last a render or two, and
-    // both keep the frame while saying nothing. Drawing "waiting for sync" from
-    // ignorance would flash those words across the pane every time a reader
-    // moves between two documents they already have.
-    if (connection === null || meta === null) return <PaneNotice>{null}</PaneNotice>;
+    // it has but nothing has been read out of it — no metadata at all, or the
+    // empty metadata of a replica that is still being loaded. All of those last
+    // a render or two, and all keep the frame while saying nothing. Drawing
+    // "waiting for sync" from ignorance would flash those words across the pane
+    // every time a reader moves between two documents they already have.
+    if (connection === null || !replicaHasAnswered(meta, localReplicaLoaded)) {
+      return <PaneNotice>{null}</PaneNotice>;
+    }
 
     if (!docIsHydrated(route.uuid, meta)) {
       return (

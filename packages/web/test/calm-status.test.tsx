@@ -33,6 +33,7 @@ function room(patch: Partial<RoomStatus> = {}): RoomStatus {
     synced: true,
     unsyncedChanges: 0,
     localReplicaLoaded: true,
+    hasLocalCache: false,
     ...patch,
   };
 }

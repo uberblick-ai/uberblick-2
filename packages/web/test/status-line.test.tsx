@@ -24,6 +24,7 @@ function stubConnection(
     synced: false,
     unsyncedChanges,
     localReplicaLoaded: false,
+    hasLocalCache: false,
     ...patch,
   };
   return {
@@ -65,6 +66,31 @@ describe("the status line names the unit of its backlog count", () => {
     expect(label(0)).toBeNull();
   });
 
+});
+
+/** Whether the line claims a local cache, for a room in the given state. */
+function claimsCache(patch: Partial<RoomStatus>): boolean {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+    true;
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  act(() => root.render(<StatusLine connection={stubConnection(0, patch)} />));
+  const claimed = host.querySelector(".ub-status .ub-muted")?.textContent === "local cache";
+  act(() => root.unmount());
+  host.remove();
+  return claimed;
+}
+
+describe("the line promises a local cache only where one exists", () => {
+  it("does not read the promise off the end of the local read", () => {
+    // `localReplicaLoaded` means the read is *over*, and it is over instantly
+    // where there is no IndexedDB to read or it refused to open — environments
+    // with no cache at all. Telling a reader their document survives a reload
+    // there would be a promise the browser cannot keep.
+    expect(claimsCache({ localReplicaLoaded: true, hasLocalCache: false })).toBe(false);
+    expect(claimsCache({ localReplicaLoaded: true, hasLocalCache: true })).toBe(true);
+  });
 });
 
 /**
