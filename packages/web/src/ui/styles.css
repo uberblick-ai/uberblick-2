@@ -616,11 +616,12 @@ body {
 
 /* ---- local settings (#176) ---- */
 
-/* The scrim. Over everything in `.ub-body`, including the sync panel and the
-   threads drawer, because a modal is the layer that owns the screen while it
-   is open — which is the same reason it takes Escape. */
+/* The scrim. `fixed`, over the viewport rather than over `.ub-body` — the
+   header is not part of the body, and a scrim that stopped short of it would
+   leave live controls above a dialog that is supposed to own the screen. The
+   dialog is portalled to `document.body` for the same reason. */
 .ub-modal {
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 20;
   display: flex;

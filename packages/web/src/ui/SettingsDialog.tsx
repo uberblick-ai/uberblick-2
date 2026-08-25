@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from "react";
+import type { ReactElement } from "react";
 import { setSetting } from "../settings.js";
 import { useSetting } from "./hooks.js";
 
@@ -211,20 +211,34 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): ReactEleme
     };
   }, []);
 
-  /** Tab wraps inside the dialog: while it is open there is nowhere else. */
-  const trap = useCallback((event: ReactKeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== "Tab") return;
-    const panel = dialog.current;
-    if (panel === null) return;
-    const items = focusable(panel);
-    const first = items[0];
-    const last = items[items.length - 1];
-    if (first === undefined || last === undefined) return;
-    const active = document.activeElement;
-    const leaving = event.shiftKey ? active === first : active === last;
-    if (!leaving) return;
-    event.preventDefault();
-    (event.shiftKey ? last : first).focus();
+  /**
+   * Tab wraps inside the dialog: while it is open there is nowhere else.
+   *
+   * On `window`, in the capture phase, rather than on the dialog element — a
+   * handler that only fires for keys pressed *inside* the dialog is no trap at
+   * all, because it never runs for the case that needs it. The shell is
+   * `inert` while this is open, so focus should not be out there; if it is
+   * anyway (a browser that ignores `inert`, a click that landed before the
+   * attribute did), the next Tab brings it back rather than walking away.
+   */
+  useEffect(() => {
+    const trap = (event: KeyboardEvent): void => {
+      if (event.key !== "Tab") return;
+      const panel = dialog.current;
+      if (panel === null) return;
+      const items = focusable(panel);
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (first === undefined || last === undefined) return;
+      const active = document.activeElement;
+      const outside = !(active instanceof Node) || !panel.contains(active);
+      const leaving = outside || (event.shiftKey ? active === first : active === last);
+      if (!leaving) return;
+      event.preventDefault();
+      (!outside && event.shiftKey ? last : first).focus();
+    };
+    window.addEventListener("keydown", trap, true);
+    return () => window.removeEventListener("keydown", trap, true);
   }, []);
 
   return (
@@ -239,7 +253,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): ReactEleme
         role="dialog"
         aria-modal="true"
         aria-labelledby="ub-settings-title"
-        onKeyDown={trap}
       >
         <div className="ub-settings-head">
           <h2 id="ub-settings-title" className="ub-rail-head">

@@ -224,6 +224,18 @@ describe("the settings dialog", () => {
     expect(document.activeElement).toBe(first);
     tab(first!, true);
     expect(document.activeElement).toBe(last);
+
+    // Focus that got out anyway — the app shell is `inert` while the dialog is
+    // up, but a browser that ignores the attribute, or a click that landed
+    // before it applied, would leave the reader on a control behind the scrim.
+    // The next Tab brings them back rather than walking off through the header.
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    act(() => outside.focus());
+    expect(document.activeElement).toBe(outside);
+    tab(outside, false);
+    expect(document.activeElement).toBe(first);
+    outside.remove();
     view.unmount();
   });
 });
