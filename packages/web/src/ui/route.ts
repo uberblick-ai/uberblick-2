@@ -6,7 +6,9 @@
  * is what makes a pasted link from somebody else's workspace open that
  * workspace rather than the wrong document in this one. The build-time
  * `WORKSPACE_ID` (mise `[env]` in dev) only answers the one address that names
- * no workspace, `/`.
+ * no workspace, `/`. `WORKSPACES` is a menu of places to go (see
+ * {@link workspaceList}) and no more: an address outside the list still opens
+ * its own workspace, and an address inside it is read exactly like any other.
  *
  * The segment may be decorated — `uberblick-<uuid>` — and is kept exactly as
  * typed: the slug is display, so nothing here rewrites somebody's spelling of
@@ -149,6 +151,39 @@ export function parseRoute(pathname: string, configured: string | null): Route {
     };
   }
   return { kind: "doc", workspace, uuid };
+}
+
+/**
+ * The workspaces to offer, in the order they were configured, with the one the
+ * address names always among them.
+ *
+ * `configured` is the raw `WORKSPACES` value — decorated ids separated by
+ * commas. An entry that is not a workspace id is dropped rather than shown: a
+ * typo in a config list is not somewhere anyone can go, and offering it would
+ * put the invalid-link screen behind a menu item.
+ *
+ * Deduplicated by uuid, because `<slug>-<uuid>` and `<uuid>` are one workspace
+ * and a second entry would be another way to sit where you already are.
+ * `current` wins that tie: the switcher shows the address bar's own spelling,
+ * not a config file's opinion of it.
+ *
+ * A workspace the address names but the list omits is appended, so a reader who
+ * arrived by a link can see where they are — and get back to a configured one.
+ */
+export function workspaceList(
+  configured: string,
+  current: Workspace | null,
+): Workspace[] {
+  const list: Workspace[] = [];
+  const seen = new Set<string>();
+  for (const entry of configured.split(",")) {
+    const parsed = readWorkspace(entry.trim());
+    if (parsed === null || seen.has(parsed.uuid)) continue;
+    seen.add(parsed.uuid);
+    list.push(current !== null && current.uuid === parsed.uuid ? current : parsed);
+  }
+  if (current !== null && !seen.has(current.uuid)) list.push(current);
+  return list;
 }
 
 /**

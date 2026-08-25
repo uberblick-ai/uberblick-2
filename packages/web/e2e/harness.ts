@@ -53,6 +53,16 @@ const SECRET = "uberblick-e2e-hub-secret";
 const WORKSPACE_UUID = randomUUID();
 const WORKSPACE = `uberblick-${WORKSPACE_UUID}`;
 
+/**
+ * A second workspace for the run, so the bundle has a list to switch between.
+ *
+ * Nothing creates it: a workspace is a uuid, and its rooms exist the moment
+ * somebody opens one. That is the whole of "light multi-workspace" (#151), and
+ * it is what makes an empty second workspace a real state rather than an error.
+ */
+const SECOND_UUID = randomUUID();
+const SECOND = `ablauf-${SECOND_UUID}`;
+
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export interface Harness {
@@ -62,6 +72,8 @@ export interface Harness {
   readonly workspace: string;
   /** The same workspace, bare. Room keys and token claims carry only this. */
   readonly workspaceUuid: string;
+  /** The other workspace on the switcher's menu. Empty until something writes. */
+  readonly secondWorkspace: string;
   /** Start the hub again — same port, same database. */
   startHub(): Promise<void>;
   /** Flush and stop the hub, leaving the dev server and the browser alone. */
@@ -102,6 +114,10 @@ export async function startHarness(): Promise<Harness> {
     // The one address that names no workspace, `/`, resolves through this — the
     // same define `mise run web` supplies from mise `[env]`.
     process.env.WORKSPACE_ID = WORKSPACE;
+    // The switcher's menu — plaintext config like HUB_URL, and the same define
+    // `mise run web` supplies. It lists places to go; the address still names
+    // the workspace.
+    process.env.WORKSPACES = `${WORKSPACE},${SECOND}`;
 
     vite = await createServer({
       configFile: join(packageRoot, "vite.config.ts"),
@@ -128,6 +144,7 @@ export async function startHarness(): Promise<Harness> {
       appUrl,
       workspace: WORKSPACE,
       workspaceUuid: WORKSPACE_UUID,
+      secondWorkspace: SECOND,
       async startHub() {
         if (hub !== null) return;
         hub = await createHub({ ...config, port });

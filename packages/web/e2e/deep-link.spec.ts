@@ -16,6 +16,10 @@
  * Everything else the feature does — what an address parses to, an unknown
  * workspace, a malformed link, the waiting-state copy — is pinned in
  * `test/route.test.tsx` against no browser at all, and is not repeated here.
+ *
+ * The switcher (#151) is here for the same reason: that two configured
+ * workspaces are two corpora is a claim about rooms and a hub, and jsdom has
+ * neither. What the list *means* is pinned in `test/workspaces.test.tsx`.
  */
 
 import { expect, test } from "@playwright/test";
@@ -237,4 +241,31 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
   expect(openPath(reader)).toBe(`/${ws()}/${first}`);
   // The link the author would have copied is the one that just worked.
   expect(reader.url()).toBe(shareable);
+});
+
+test("the switcher moves between two workspaces, and their corpora do not mix", async ({
+  browser,
+}) => {
+  // Switching is navigating: the control writes an address, and the app joins
+  // that workspace's rooms. Nothing carries across, because two workspaces are
+  // two corpora on one hub — separated by the room key and nothing else.
+  const page = await openApp(browser);
+  const title = docTitle("uberblick-only");
+  await createDoc(page, title);
+
+  const switcher = page.locator(".ub-workspace");
+  await expect(switcher.locator("option")).toHaveCount(2);
+
+  await switcher.selectOption(harness().secondWorkspace);
+  await expect(page).toHaveURL(new RegExp(`/${harness().secondWorkspace}$`));
+  // Synced *and* empty — the difference between a corpus this hub kept to
+  // itself and a directory that simply had not arrived yet.
+  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+  await expect(page.locator(".ub-empty")).toHaveText("No documents yet.");
+  await expect(docButton(page, title)).toHaveCount(0);
+
+  // And back: the first workspace is exactly where it was left.
+  await switcher.selectOption(ws());
+  await expect(page).toHaveURL(new RegExp(`/${ws()}$`));
+  await expect(docButton(page, title)).toBeVisible();
 });

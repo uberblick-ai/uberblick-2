@@ -35,6 +35,7 @@
 declare const __HUB_URL__: string;
 declare const __HUB_AUTH_TOKEN__: string;
 declare const __WORKSPACE_ID__: string;
+declare const __WORKSPACES__: string;
 
 /** Fallback used only when this module is loaded outside a Vite build. */
 const FALLBACK_HUB_URL = "ws://localhost:1234";
@@ -278,6 +279,25 @@ export const CONFIGURED_WORKSPACE: string | null =
   typeof __WORKSPACE_ID__ === "string" && __WORKSPACE_ID__ !== ""
     ? __WORKSPACE_ID__
     : null;
+
+/**
+ * The workspaces this build offers to switch between, as configured — decorated
+ * ids separated by commas, or the empty string when none were.
+ *
+ * Raw on purpose: this module owns reading the define, and `workspaceList` in
+ * ui/route.ts owns what a workspace id is. The list is a *menu*, never an
+ * authority — the address still names the workspace, so an id missing from here
+ * still opens, and an id in it that this hub has never heard of is simply an
+ * empty corpus. Switching is navigating, and that is the whole feature (#151).
+ *
+ * Plaintext config like `HUB_URL`: mise `[env]` supplies it, and since the ids
+ * are a uuid per machine the value belongs in the local config, not in a
+ * committed default.
+ */
+export const CONFIGURED_WORKSPACES: string = injected(
+  typeof __WORKSPACES__ === "string" ? __WORKSPACES__ : undefined,
+  "",
+);
 
 /**
  * The repository whose issue and PR links render as a bare `#62` — every other

@@ -223,6 +223,18 @@ body {
   font-family: var(--font-mono);
 }
 
+/* The workspace switcher (#151). It replaces the workspace label when there is
+   more than one workspace configured, so it inherits that label's muted mono
+   line (`.ub-header .ub-muted`) and adds only what makes it look operable. The
+   segment can be a bare uuid, so it truncates rather than eating the topbar. */
+.ub-workspace {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1rem 0.25rem;
+  max-width: 24ch;
+}
+
 /* Presence names are words, not identifiers, so the pills stay Geist wherever
    they sit — including inside the mono status line. */
 .ub-me,

@@ -100,7 +100,9 @@ test("typing / on an empty block filters, and Enter converts it", async ({
   // A second block, empty, the way a reader gets one.
   await page.keyboard.press("Enter");
   await page.keyboard.type("/he", { delay: 15 });
-  await expect(page.getByRole("option")).toHaveCount(3);
+  // Scoped to the menu: the topbar's workspace switcher is a `<select>`, and
+  // its options carry the same role.
+  await expect(page.locator(".ub-blockmenu").getByRole("option")).toHaveCount(3);
 
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
