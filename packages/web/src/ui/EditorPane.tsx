@@ -423,6 +423,7 @@ function BoundEditor({
 export function EditorPane({
   connection,
   author,
+  knownTags,
   archived,
   onRestore,
   onSelectThread,
@@ -430,6 +431,11 @@ export function EditorPane({
   connection: RoomConnection | null;
   /** The awareness name this client publishes — the author of its comments. */
   author: string;
+  /**
+   * Every tag the workspace already uses, read from the directory stubs by the
+   * shell. The identity line's add field suggests from it (#122).
+   */
+  knownTags: readonly string[];
   /**
    * Whether the directory tombstones this document. Live in both directions:
    * the value changes under an open pane when anyone archives or restores.
@@ -461,6 +467,14 @@ export function EditorPane({
     <section className="ub-pane">
       <div className="ub-column">
         {archived && <ArchivedBanner onRestore={onRestore} />}
+        {/* The eyebrow: what this document is, what it is tagged, and which
+            version of it is on screen — above the title, as design 1a has it. */}
+        <DocMetaLine
+          connection={connection}
+          meta={meta}
+          knownTags={knownTags}
+          archived={archived}
+        />
         <input
           className="ub-title"
           value={meta?.title ?? ""}
@@ -479,8 +493,6 @@ export function EditorPane({
           }}
         />
         <StatusLine connection={connection} />
-        {/* What this document is, and which version of it is on screen. */}
-        <DocMetaLine connection={connection} meta={meta} />
         {foreign.length > 0 ? (
           <ForeignFallback
             connection={connection}
