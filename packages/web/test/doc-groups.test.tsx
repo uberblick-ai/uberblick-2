@@ -117,6 +117,7 @@ describe("group collapse is a stored preference", () => {
           selected={null}
           onSelect={() => {}}
           onCreate={() => {}}
+          onOpenSettings={() => {}}
         />,
       );
     });

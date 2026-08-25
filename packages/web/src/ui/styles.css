@@ -378,6 +378,9 @@ body {
 .ub-list {
   width: var(--sidebar-width);
   flex: none;
+  /* A column, so the footer below can take the space the documents leave. */
+  display: flex;
+  flex-direction: column;
   background: var(--card);
   color: var(--card-foreground);
   border-right: 1px solid var(--border);
@@ -439,6 +442,41 @@ body {
 
 .ub-empty {
   padding: 0.4rem;
+}
+
+/* The sidebar's footer (#176). `margin-top: auto` in the column pushes it to
+   the bottom while the list is short, and lets it follow the list down once
+   there are more documents than fit — a footer pinned over scrolling content
+   would need a second scroll container for no gain. Nothing above it may
+   shrink: the groups animate their own height (see `.ub-group-body`), and a
+   flex column is otherwise free to squeeze them to make room. */
+.ub-list > * {
+  flex: none;
+}
+
+.ub-list-foot {
+  margin-top: auto;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.ub-settings-open {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ub-settings-open:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 
 /* ---- doc list groups ---- */
@@ -574,6 +612,116 @@ body {
   .ub-rail-open .ub-outline {
     display: none;
   }
+}
+
+/* ---- local settings (#176) ---- */
+
+/* The scrim. Over everything in `.ub-body`, including the sync panel and the
+   threads drawer, because a modal is the layer that owns the screen while it
+   is open — which is the same reason it takes Escape. */
+.ub-modal {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 0.45);
+}
+
+.ub-settings {
+  width: min(32rem, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+  font-size: 0.85rem;
+}
+
+.ub-settings-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ub-settings-scope {
+  margin: 0 0 1rem;
+}
+
+.ub-settings-section + .ub-settings-section {
+  margin-top: 1.25rem;
+}
+
+.ub-settings-section-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
+
+/* One entry in a section. A bordered card, so the next connection is a sibling
+   and needs no new layout. */
+.ub-setting {
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.ub-setting + .ub-setting {
+  margin-top: 0.5rem;
+}
+
+.ub-setting-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ub-setting-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.ub-setting-state {
+  color: var(--status-success);
+}
+
+.ub-setting-copy {
+  margin: 0.4rem 0 0;
+  line-height: 1.45;
+}
+
+.ub-setting-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.ub-setting-input {
+  flex: 1;
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.ub-setting-error {
+  margin: 0.5rem 0 0;
+  color: var(--destructive);
 }
 
 /* ---- the sync detail panel (#72, design surface 1e's right column) ---- */

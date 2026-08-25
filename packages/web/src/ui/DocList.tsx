@@ -26,12 +26,15 @@ export function DocList({
   selected,
   onSelect,
   onCreate,
+  onOpenSettings,
 }: {
   connection: RoomConnection | null;
   entries: DirectoryEntry[];
   selected: string | null;
   onSelect: (uuid: string) => void;
   onCreate: () => void;
+  /** Open the local settings dialog (#176) — what the footer's gear does. */
+  onOpenSettings: () => void;
 }): ReactElement {
   const status = useRoomStatus(connection);
   return (
@@ -58,6 +61,19 @@ export function DocList({
           />
         ))
       )}
+      {/* The sidebar's footer. Settings are machine-local and rarely opened, so
+          they sit at the bottom of the one column that is always about this
+          client rather than about the open document. */}
+      <div className="ub-list-foot">
+        <button
+          type="button"
+          className="ub-settings-open"
+          aria-label="Settings"
+          onClick={onOpenSettings}
+        >
+          <span aria-hidden="true">⚙</span> Settings
+        </button>
+      </div>
     </nav>
   );
 }

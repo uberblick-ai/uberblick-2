@@ -30,6 +30,7 @@ import { DocList } from "./DocList.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
+import { SettingsDialog } from "./SettingsDialog.js";
 import { SyncPanel } from "./SyncPanel.js";
 import { ThreadsPane } from "./ThreadsPane.js";
 import { workspaceTags } from "./tags.js";
@@ -205,6 +206,12 @@ export function App(): ReactElement {
   const [threadsOpen, setThreadsOpen] = useState(false);
   /** Whether the sync detail panel is open (#72) — the connection pill's state. */
   const [syncOpen, setSyncOpen] = useState(false);
+  /**
+   * Whether the local settings dialog is open (#176). A dialog rather than an
+   * address: settings are a detour, and the reader comes back to the document
+   * they left with Back still meaning what it meant.
+   */
+  const [settingsOpen, setSettingsOpen] = useState(false);
   /**
    * What opened the drawer, so closing it can hand focus back there. Closing
    * *hides* the rail below 1100px, and focus inside a hidden panel is focus
@@ -488,6 +495,7 @@ export function App(): ReactElement {
             selected={selected}
             onSelect={onSelect}
             onCreate={onCreate}
+            onOpenSettings={() => setSettingsOpen(true)}
           />
         )}
         <RoutePane
@@ -531,6 +539,9 @@ export function App(): ReactElement {
             onClose={closeSync}
           />
         )}
+        {/* Local settings (#176). Mounted only while open, and owning nothing
+            but its own dismissal — everything it edits lives in settings.ts. */}
+        {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       </div>
     </main>
   );
