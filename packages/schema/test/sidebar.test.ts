@@ -118,9 +118,13 @@ describe("sidebar doc", () => {
     pinDoc(b, reading, ALPHA);
     syncDocs(a, b);
 
+    // One pin, in one named place: dedupe keeps the first occurrence in stored
+    // traversal order, and "Work" precedes "Reading" in the group order.
     expect(readSidebar(a)).toEqual(readSidebar(b));
-    const pins = readSidebar(a).flatMap((group) => group.docs);
-    expect(pins).toEqual([ALPHA]);
+    expect(readSidebar(a)).toEqual([
+      { id: work, name: "Work", docs: [ALPHA] },
+      { id: reading, name: "Reading", docs: [] },
+    ]);
 
     // The shadowed duplicate is storage, not state: the next write clears it.
     moveDoc(a, ALPHA, reading);
@@ -149,7 +153,7 @@ describe("sidebar doc", () => {
     ]);
   });
 
-  it("converges on the last-integrated position when both replicas move the same document", () => {
+  it("converges on the first occurrence in stored order when both replicas move the same document", () => {
     const { a, b, work, reading } = seededPair();
     pinDoc(a, work, ALPHA);
     pinDoc(a, work, BETA);
@@ -159,11 +163,50 @@ describe("sidebar doc", () => {
     moveDoc(b, ALPHA, work, 0);
     syncDocs(a, b);
 
+    // One place, never both, and a named place: both inserts survive, so dedupe
+    // decides, and it keeps the earlier position in traversal order — "Work"
+    // precedes "Reading".
     expect(readSidebar(a)).toEqual(readSidebar(b));
-    const pins = readSidebar(a).flatMap((group) => group.docs);
-    // One place, never both: the loser's pin is shadowed, not duplicated.
-    expect(pins.filter((uuid) => uuid === ALPHA)).toEqual([ALPHA]);
-    expect(pins).toContain(BETA);
+    expect(readSidebar(a)).toEqual([
+      { id: work, name: "Work", docs: [ALPHA, BETA] },
+      { id: reading, name: "Reading", docs: [] },
+    ]);
+
+    // The shadowed copy clears on the next write touching that uuid.
+    moveDoc(a, ALPHA, reading, 0);
+    syncDocs(a, b);
+    expect(readSidebar(b)).toEqual([
+      { id: work, name: "Work", docs: [BETA] },
+      { id: reading, name: "Reading", docs: [ALPHA] },
+    ]);
+  });
+
+  it("picks the same destination whichever concurrent move is made first", () => {
+    // The winner above is a position, not a timestamp. Running the same race
+    // with the two moves swapped must therefore land the document in the same
+    // group — otherwise "first occurrence in stored order" would be recency in
+    // disguise, and the two replicas could disagree.
+    const destinations = [false, true].map((swapped) => {
+      const { a, b, work, reading } = seededPair();
+      pinDoc(a, work, ALPHA);
+      syncDocs(a, b);
+
+      if (swapped) {
+        moveDoc(b, ALPHA, work, 0);
+        moveDoc(a, ALPHA, reading, 0);
+      } else {
+        moveDoc(a, ALPHA, reading, 0);
+        moveDoc(b, ALPHA, work, 0);
+      }
+      syncDocs(a, b);
+
+      expect(readSidebar(a)).toEqual(readSidebar(b));
+      const holder = readSidebar(a).find((group) => group.docs.includes(ALPHA));
+      expect(holder?.id).toBe(work);
+      expect(reading).not.toBe(work);
+      return holder?.name;
+    });
+    expect(destinations).toEqual(["Work", "Work"]);
   });
 
   it("keeps a document pinned when a move races an unpin", () => {

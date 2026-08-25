@@ -33,10 +33,15 @@
  *     *all* occurrences of a uuid before inserting, so the duplicate clears on
  *     the next move or unpin; there is nothing to repair in the meantime.
  *
- *   - **A document moved by two replicas lands in one place: the
- *     last-integrated position wins, never both.** A move is a delete plus an
- *     insert; the deletes commute, both inserts survive, and read-side dedupe
- *     picks one — so the loser's pin is shadowed, not duplicated.
+ *   - **A document moved by two replicas lands in one place: the first
+ *     occurrence in stored traversal order wins, never both.** A move is a
+ *     delete plus an insert; the deletes commute and both inserts survive, so
+ *     storage does hold the uuid twice. Read-side dedupe then keeps the earlier
+ *     of the two — groups in sidebar order, pins in group order — and that is
+ *     the same one on every replica. Nothing here is a recency rule: the winner
+ *     is a position, not a timestamp, so the destination a replica sees does
+ *     not depend on which move it made or integrated last. The shadowed copy
+ *     clears on the next write touching that uuid.
  *
  *   - **A move concurrent with an unpin keeps the document pinned.** The unpin
  *     deletes the pin its replica could see; the move inserted one it never
