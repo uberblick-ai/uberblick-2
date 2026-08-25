@@ -60,6 +60,7 @@ import {
   getBlockInline,
   getBlocks,
   getMeta,
+  listAnnotationRanges,
   listDirectory,
   roomForDoc,
 } from "@uberblick/schema";
@@ -106,7 +107,17 @@ export function bridgeConfig(
 
 export interface CorpusDoc {
   uuid: string;
+  /**
+   * The directory stub's title and tags — not the document's own meta.
+   *
+   * The stub is the only thing a tombstone retains: its room is never opened
+   * and never moved, so if these are not compared, an archived document whose
+   * title or tags differ between the two hubs passes verification with nothing
+   * left to catch it. For a live document {@link docFingerprint} covers `meta`
+   * as well, and the two agreeing is itself worth knowing.
+   */
   title: string;
+  tags: string[];
   /** Tombstoned in the directory. Its room is never opened, and never moved. */
   deleted: boolean;
   /**
@@ -192,6 +203,13 @@ function canonical(value: unknown): unknown {
  * beside it rather than assumed; a remote that received the text of every block
  * and none of its formatting, or none of its comment threads, must not be able
  * to pass verification.
+ *
+ * **Anchors are content too, and nothing else here sees them.**
+ * `getBlockInline` strips the `comment` mark, the annotations map holds no
+ * positions, and a state vector says nothing about a delete set — so an undo
+ * that removes an anchor leaves the text, the state vector and the thread JSON
+ * all identical while the range a reader sees has moved or vanished. The
+ * anchored runs are therefore hashed per block, which is where they live.
  */
 export function docFingerprint(doc: Y.Doc): string {
   const meta = getMeta(doc);
@@ -207,6 +225,11 @@ export function docFingerprint(doc: Y.Doc): string {
       inline: getBlockInline(doc, block.id).map((run) => ({
         text: run.text,
         marks: canonical(run.marks),
+      })),
+      anchors: listAnnotationRanges(doc, block.id).map((run) => ({
+        threadId: run.threadId,
+        start: run.start,
+        end: run.end,
       })),
     })),
     annotations: [...annotations.keys()]
@@ -245,6 +268,11 @@ function sameDoc(a: CorpusDoc, b: CorpusDoc): boolean {
   if (a.deleted !== b.deleted) {
     return false;
   }
+  // The directory stub, compared semantically: it is all a tombstone keeps, and
+  // tag order is not meaningful.
+  if (a.title !== b.title || !sameTags(a.tags, b.tags)) {
+    return false;
+  }
   if (a.fingerprint !== null && b.fingerprint !== null && a.fingerprint !== b.fingerprint) {
     return false;
   }
@@ -255,15 +283,29 @@ function sameDoc(a: CorpusDoc, b: CorpusDoc): boolean {
   return true;
 }
 
+function sameTags(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = new Set(a);
+  for (const tag of b) {
+    if (!left.has(tag)) return false;
+  }
+  return true;
+}
+
 function emptyCorpus(hub: HubState): Corpus {
   // Never `complete`: nothing was read, so nothing is known.
   return { hub, entries: [], missing: [], unsettled: [], complete: false };
 }
 
-function tombstone(entry: { uuid: string; title: string }): CorpusDoc {
+function tombstone(entry: {
+  uuid: string;
+  title: string;
+  tags: string[];
+}): CorpusDoc {
   return {
     uuid: entry.uuid,
     title: entry.title,
+    tags: entry.tags,
     deleted: true,
     fingerprint: null,
     stateVector: null,
@@ -337,6 +379,7 @@ export async function inspectRemote(
           ...live.map((entry) => ({
             uuid: entry.uuid,
             title: entry.title,
+            tags: entry.tags,
             deleted: false,
             fingerprint: null,
             stateVector: null,
@@ -374,7 +417,8 @@ export async function inspectRemote(
       }
       entries.push({
         uuid: entry.uuid,
-        title: getMeta(held.doc).title,
+        title: entry.title,
+        tags: entry.tags,
         deleted: false,
         fingerprint: docFingerprint(held.doc),
         stateVector: Y.encodeStateVector(held.doc),
@@ -426,7 +470,8 @@ function readCorpus(replicas: Replicas): Corpus {
     }
     entries.push({
       uuid: entry.uuid,
-      title: getMeta(replica.doc).title,
+      title: entry.title,
+      tags: entry.tags,
       deleted: false,
       fingerprint: docFingerprint(replica.doc),
       stateVector: Y.encodeStateVector(replica.doc),

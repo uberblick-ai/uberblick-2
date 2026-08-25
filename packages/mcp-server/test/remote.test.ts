@@ -15,7 +15,16 @@
  * ones; replication is also what the bridge is actually comparing.
  */
 
-import { appendBlock, createAnnotation, initDoc, setTitle } from "@uberblick/schema";
+import {
+  COMMENT_MARK,
+  appendBlock,
+  createAnnotation,
+  getBlocks,
+  initDoc,
+  listAnnotationRanges,
+  listAnnotations,
+  setTitle,
+} from "@uberblick/schema";
 import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
 import { compareCorpus, docFingerprint, isIdentical } from "../src/remote.js";
@@ -52,6 +61,7 @@ function entry(ydoc: Y.Doc, overrides: Partial<CorpusDoc> = {}): CorpusDoc {
   return {
     uuid: UUID,
     title: "A note",
+    tags: ["one"],
     deleted: false,
     fingerprint: docFingerprint(ydoc),
     stateVector: Y.encodeStateVector(ydoc),
@@ -85,6 +95,28 @@ describe("docFingerprint", () => {
     const doc = source();
     const copy = replicate(doc);
     createAnnotation(doc, firstBlock(doc).id, 0, 5, "someone", "is this right?");
+    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+  });
+
+  // The case nothing else here can see: `getBlockInline` strips the comment
+  // mark, the annotations map holds no positions, and a state vector says
+  // nothing about a delete set. Undo the anchor and the text, the state vector
+  // and the thread JSON are all still identical.
+  it("changes when only an annotation's anchor is removed", () => {
+    const doc = source();
+    const { id } = firstBlock(doc);
+    createAnnotation(doc, id, 0, 5, "someone", "is this right?");
+
+    const copy = replicate(doc);
+    // The thread survives in the annotations map; only its anchoring mark goes.
+    firstBlock(doc).text.format(0, 5, { [COMMENT_MARK]: null });
+
+    expect(listAnnotationRanges(doc, id)).toHaveLength(0);
+    expect(listAnnotationRanges(copy, firstBlock(copy).id)).toHaveLength(1);
+    // The things that would have had to catch it, and do not:
+    expect(getBlocks(doc)[0]?.text).toBe(getBlocks(copy)[0]?.text);
+    expect(listAnnotations(doc)).toEqual(listAnnotations(copy));
+
     expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
   });
 
@@ -123,6 +155,7 @@ describe("compareCorpus", () => {
         {
           uuid: UUID,
           title: "A note",
+          tags: ["one"],
           deleted: true,
           fingerprint: null,
           stateVector: null,
@@ -138,5 +171,24 @@ describe("compareCorpus", () => {
     expect(
       compareCorpus([entry(doc)], [entry(doc, { deleted: true })]).differing,
     ).toHaveLength(1);
+  });
+
+  // For a tombstone the stub is the only metadata left — its room is never
+  // opened and never moved, so nothing else can catch a stale title or tag.
+  it("compares the directory stub of an archived document", () => {
+    const archived = entry(source(), {
+      deleted: true,
+      fingerprint: null,
+      stateVector: null,
+    });
+    expect(
+      compareCorpus([archived], [{ ...archived, title: "Renamed" }]).differing,
+    ).toHaveLength(1);
+    expect(
+      compareCorpus([archived], [{ ...archived, tags: ["other"] }]).differing,
+    ).toHaveLength(1);
+    expect(
+      isIdentical(compareCorpus([archived], [{ ...archived, tags: ["one"] }])),
+    ).toBe(true);
   });
 });

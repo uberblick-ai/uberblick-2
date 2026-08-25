@@ -481,6 +481,8 @@ function report(
   target: string,
   corpus: Corpus,
   persistence: RemotePersistence,
+  /** When the snapshot this verified was taken. See the note it prints. */
+  takenAt: string,
 ): string {
   const live = liveDocs(corpus);
   const tombstones = corpus.entries.length - live.length;
@@ -509,7 +511,9 @@ function report(
     "HUB_URL, so point a development build at it with `HUB_URL=… mise run web`.\n";
   text +=
     "\nVerified here means the hub acknowledged the writes and a fresh client read\n" +
-    "them back — not that the hub has flushed them to disk.\n";
+    `them back — not that the hub has flushed them to disk. The snapshot this\n` +
+    `verified was taken at ${takenAt}; anything written to the old hub after\n` +
+    "that is not part of it, so close the other clients before relying on this.\n";
   if (persistence.outrankedBy !== null) {
     text +=
       `\nThe documents are on ${target}, but ` +
@@ -659,11 +663,29 @@ async function readLocal(base: McpConfig, io: Io): Promise<Corpus> {
 /**
  * Why a corpus reading cannot be trusted, or null when it can.
  *
- * The three facts a bounded wait cannot establish on its own, in one place:
- * the hub answered, every room is acknowledged, and every document the
- * directory names actually arrived.
+ * The facts a bounded wait cannot establish on its own, in one place: the hub
+ * answered, its directory was read in full, every room is acknowledged, and
+ * every document the directory names actually arrived.
+ *
+ * `pending` exempts rooms from the last two. **A document this machine already
+ * holds is not a document the far side has to be able to produce** — it is one
+ * the far side is about to receive. A promotion that uploaded a directory stub
+ * and died before its room arrived leaves exactly that shape, and treating it
+ * as unreadable would make the rerun refuse forever, when attaching the local
+ * replica is precisely what repairs it.
+ *
+ * The exemption is deliberately narrow. It never applies to the directory read
+ * itself, which stays fail-closed: an unknown directory is not a small
+ * directory. It never applies to a uuid only the far side knows, because that
+ * is the one case where the content cannot be verified *and* cannot be
+ * supplied. And callers verifying a finished bridge pass no exemption at all —
+ * at read-back, missing is missing.
  */
-function corpusProblem(url: string, corpus: Corpus): string | null {
+function corpusProblem(
+  url: string,
+  corpus: Corpus,
+  pending: ReadonlySet<string> = new Set(),
+): string | null {
   if (corpus.hub.status !== "connected") {
     return `${hubProblem(url, corpus.hub)}.\n`;
   }
@@ -677,21 +699,34 @@ function corpusProblem(url: string, corpus: Corpus): string | null {
       "holding nothing.\n"
     );
   }
-  if (corpus.unsettled.length > 0) {
+  const unsettled = corpus.unsettled.filter((room) => !isPendingRoom(room, pending));
+  if (unsettled.length > 0) {
     return (
-      `${url} has not acknowledged ${plural(corpus.unsettled.length, "room")}, ` +
+      `${url} has not acknowledged ${plural(unsettled.length, "room")}, ` +
       "so this sync did not finish inside its time limit:\n" +
-      corpus.unsettled.map((room) => `  ${room}\n`).join("")
+      unsettled.map((room) => `  ${room}\n`).join("")
     );
   }
-  if (corpus.missing.length > 0) {
+  const missing = corpus.missing.filter((doc) => !pending.has(doc.uuid));
+  if (missing.length > 0) {
     return (
-      `${plural(corpus.missing.length, "document")} named by the directory at ` +
-      `${url} did not arrive:\n` +
-      listDocs(corpus.missing)
+      `${plural(missing.length, "document")} named by the directory at ` +
+      `${url} did not arrive, and this machine does not hold them either:\n` +
+      listDocs(missing)
     );
   }
   return null;
+}
+
+/** Whether a room name belongs to a document the local side already holds. */
+function isPendingRoom(room: string, pending: ReadonlySet<string>): boolean {
+  const uuid = room.slice(room.indexOf("/") + 1);
+  return pending.has(uuid);
+}
+
+/** The uuids a corpus holds, for use as {@link corpusProblem}'s exemption. */
+function uuidsIn(corpus: Corpus): Set<string> {
+  return new Set(corpus.entries.map((entry) => entry.uuid));
 }
 
 /**
@@ -745,16 +780,26 @@ function startingCredential(
 }
 
 /**
- * How a refusal names the documents the far side has and this workspace does
- * not.
+ * How a refusal names the documents one side has and the other has never heard
+ * of.
  *
- * Only uuids it has never heard of. A uuid they share is one document's
- * lineage, which is a rerun to finish rather than a collision — see the note on
- * `compareCorpus`.
+ * `where` is not decoration: `promote` compares the target against this
+ * workspace and `join` compares this workspace against the target, so the same
+ * set difference means "documents on the remote" in one and "documents here" in
+ * the other. Naming the wrong side would send somebody looking for their
+ * documents on a machine that does not have them.
+ *
+ * Only uuids the other side has never heard of appear here. A shared uuid is
+ * one document's lineage, which is a rerun to finish rather than a collision —
+ * see the note on `compareCorpus`.
  */
-function foreignDocs(target: string, extra: readonly CorpusDoc[]): string {
+function foreignDocs(
+  target: string,
+  extra: readonly CorpusDoc[],
+  where: string,
+): string {
   return (
-    `  ${plural(extra.length, "document")} there are not in this workspace\n` +
+    `  ${plural(extra.length, "document")} ${where}\n` +
     listDocs(extra) +
     `Nothing was written, and ${target} was not touched.\n`
   );
@@ -808,7 +853,9 @@ async function promoteCommand(argv: string[], io: Io): Promise<number> {
   // Phase two: the target, read in full as a fresh client — writes nothing
   // either way, which is what lets the refusals below leave it untouched.
   const remote = await openRemote(bridge, flags.secretFile !== undefined);
-  const remoteProblem = corpusProblem(bridge.target, remote);
+  // Exempting what this machine holds: a half-finished earlier promotion left
+  // stubs whose rooms never arrived, and this run is what completes them.
+  const remoteProblem = corpusProblem(bridge.target, remote, uuidsIn(local));
   if (remoteProblem !== null) {
     io.err(
       `ub remote promote: ${remoteProblem}Nothing was written.\n` +
@@ -827,44 +874,85 @@ async function promoteCommand(argv: string[], io: Io): Promise<number> {
         `${plural(liveDocs(remote).length, "document")}; this workspace holds ` +
         `${plural(liveDocs(local).length, "document")}. Merging two populated ` +
         "workspaces is unsupported.\n" +
-        foreignDocs(bridge.target, before.extra),
+        foreignDocs(
+          bridge.target,
+          before.extra,
+          "on it are not in this workspace",
+        ),
     );
     return 1;
   }
 
-  // Phase three: the same mirror, attached to the target. Run even when the
-  // target already holds everything — it is what re-reads the source at
-  // verification time, so the thing being verified is the workspace as it is
-  // now and not a snapshot taken before the upload.
+  // Phase three: push, then re-read the source, and keep going until the source
+  // stops moving.
+  //
+  // One `HubSync` binds one endpoint, so a phase attached to the target cannot
+  // also be reading the source — which means an upload alone verifies against
+  // whatever the mirror held when it *started*. A browser writing to the local
+  // hub after phase one would be absent from the upload, absent from that
+  // snapshot, and absent from the read-back that compares the two: verification
+  // passes, the endpoint switches, and the change is stranded on the old hub.
+  // So each push is followed by a fresh read of the source, and a source that
+  // moved is pushed again.
+  //
+  // Bounded at two passes. A workspace somebody is actively typing into is not
+  // one this can migrate, and saying so is better than looping until they stop.
   io.err(
     before.missing.length > 0
       ? `ub remote: uploading ${plural(before.missing.length, "document")} to ${bridge.target}…\n`
       : `ub remote: ${bridge.target} already holds this workspace; re-checking…\n`,
   );
-  const uploaded = await syncWorkspace(remoteConfig(bridge));
-  const uploadProblem = corpusProblem(bridge.target, uploaded);
-  if (uploadProblem !== null) {
-    io.err(
-      `ub remote promote: ${uploadProblem}The local workspace is unchanged and ` +
-        `still configured for ${base.hubUrl}. Nothing was written.\n`,
-    );
-    return 1;
+
+  let snapshot = local;
+  let sourceMoved = true;
+  for (let pass = 0; sourceMoved && pass < 2; pass += 1) {
+    const uploaded = await syncWorkspace(remoteConfig(bridge));
+    const uploadProblem = corpusProblem(bridge.target, uploaded);
+    if (uploadProblem !== null) {
+      io.err(
+        `ub remote promote: ${uploadProblem}The local workspace is unchanged and ` +
+          `still configured for ${base.hubUrl}. Nothing was written.\n`,
+      );
+      return 1;
+    }
+    // Nothing foreign may have joined the mirror while it was attached. This is
+    // the window between the probe above and this attachment; the probe is what
+    // guards it, and this is what proves the guard held.
+    const joinedMidFlight = compareCorpus(snapshot.entries, uploaded.entries).extra;
+    if (joinedMidFlight.length > 0) {
+      io.err(
+        `ub remote promote: ${plural(joinedMidFlight.length, "document")} appeared ` +
+          `on ${bridge.target} while this was running, so it is no longer the ` +
+          "empty hub this started against. Nothing was written.\n" +
+          listDocs(joinedMidFlight),
+      );
+      return 1;
+    }
+
+    io.err(`ub remote: re-reading ${base.hubUrl} for anything written since…\n`);
+    const resurveyed = await readLocal(base, io);
+    const sourceProblem = corpusProblem(base.hubUrl, resurveyed);
+    if (sourceProblem !== null) {
+      io.err(
+        `ub remote promote: ${sourceProblem}The endpoint was left at ` +
+          `${base.hubUrl}. Nothing was written.\n`,
+      );
+      return 1;
+    }
+    sourceMoved = !isIdentical(compareCorpus(snapshot.entries, resurveyed.entries));
+    snapshot = resurveyed;
   }
-  // Nothing foreign may have joined the mirror while it was attached. This is
-  // the window between the probe above and this attachment; the probe is what
-  // guards it, and this is what proves the guard held.
-  const joinedMidFlight = compareCorpus(local.entries, uploaded.entries).extra;
-  if (joinedMidFlight.length > 0) {
+  if (sourceMoved) {
     io.err(
-      `ub remote promote: ${plural(joinedMidFlight.length, "document")} appeared ` +
-        `on ${bridge.target} while this was running, so it is no longer the ` +
-        "empty hub this started against. Nothing was written.\n" +
-        listDocs(joinedMidFlight),
+      `ub remote promote: ${base.hubUrl} kept changing while this ran, so no ` +
+        "snapshot of it could be uploaded and verified as a whole. Stop editing " +
+        "this workspace and rerun. Nothing was written.\n",
     );
     return 1;
   }
 
-  const checked = await verify(bridge, uploaded.entries);
+  const takenAt = new Date().toISOString();
+  const checked = await verify(bridge, snapshot.entries);
   if (checked.problem !== null) {
     io.err(
       `ub remote promote: ${checked.problem}The endpoint was left at ` +
@@ -883,7 +971,9 @@ async function promoteCommand(argv: string[], io: Io): Promise<number> {
     return 1;
   }
   warn(io, persistence.warnings);
-  io.out(report("promoted", bridge.target, checked.corpus, persistence));
+  io.out(
+    report("promoted", bridge.target, checked.corpus, persistence, takenAt),
+  );
   return 0;
 }
 
@@ -938,7 +1028,7 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   }
 
   const remote = await openRemote(bridge, flags.secretFile !== undefined);
-  const remoteProblem = corpusProblem(bridge.target, remote);
+  const remoteProblem = corpusProblem(bridge.target, remote, uuidsIn(local));
   if (remoteProblem !== null) {
     io.err(
       `ub remote join: ${remoteProblem}Nothing was written.\n` +
@@ -957,7 +1047,11 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
         `${plural(liveDocs(local).length, "document")}; the remote holds ` +
         `${plural(liveDocs(remote).length, "document")}. Merging two populated ` +
         "workspaces is unsupported.\n" +
-        foreignDocs(bridge.target, before.extra),
+        foreignDocs(
+          bridge.target,
+          before.extra,
+          `in this workspace are not on ${bridge.target}`,
+        ),
     );
     return 1;
   }
@@ -975,6 +1069,7 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     return 1;
   }
 
+  const takenAt = new Date().toISOString();
   const checked = await verify(bridge, joined.entries);
   if (checked.problem !== null) {
     io.err(
@@ -994,7 +1089,7 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     return 1;
   }
   warn(io, persistence.warnings);
-  io.out(report("joined", bridge.target, checked.corpus, persistence));
+  io.out(report("joined", bridge.target, checked.corpus, persistence, takenAt));
   return 0;
 }
 

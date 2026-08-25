@@ -164,7 +164,11 @@ async function openRoom(
   hub: Hub,
   room: string,
   secret: string = SECRET,
-): Promise<{ doc: Y.Doc; done: () => Promise<void> }> {
+): Promise<{
+  doc: Y.Doc;
+  provider: HocuspocusProvider;
+  done: () => Promise<void>;
+}> {
   const doc = new Y.Doc();
   const provider = new HocuspocusProvider({
     url: url(hub),
@@ -179,6 +183,7 @@ async function openRoom(
   await waitUntil(`${room} to sync`, () => provider.isSynced);
   return {
     doc,
+    provider,
     async done() {
       // Destroying before the hub has acknowledged would drop the very writes
       // the rest of the test is about.
@@ -497,6 +502,48 @@ describe("ub remote promote", () => {
     expect((await readHub(remote)).size).toBe(1);
   });
 
+  // The source is read once before the upload and again after it. Without the
+  // second read a browser edit landing on the local hub mid-run is absent from
+  // the upload, absent from the snapshot, and absent from the read-back that
+  // compares the two — so verification passes and the change is stranded.
+  it("carries a change written to the source hub while it runs", async () => {
+    const local = await startHub();
+    const remote = await startHub();
+    const box = machine(local);
+    const uuid = await webDoc(local, "Edited late");
+
+    // A browser that stays on the local hub throughout and writes at exactly
+    // the moment that matters: after the bridge has finished reading the source
+    // and detached from it. A stopwatch cannot find that boundary, but the
+    // bridge's own awareness can — it publishes a user on every room it
+    // attaches, so the write goes out when that user disappears again.
+    const room = await openRoom(local, roomForDoc(WORKSPACE, uuid));
+    let bridgeArrived = false;
+    const wroteLate = new Promise<void>((resolve) => {
+      const watch = setInterval(() => {
+        const present = room.provider.awareness?.getStates().size ?? 0;
+        if (present > 1) {
+          bridgeArrived = true;
+          return;
+        }
+        if (bridgeArrived) {
+          clearInterval(watch);
+          appendBlock(room.doc, { type: "paragraph", text: "written late" });
+          resolve();
+        }
+      }, 20);
+    });
+
+    const run = await runUbAsync(["remote", "promote", url(remote)], box);
+    await wroteLate;
+    await room.done();
+
+    expect(run.status).toBe(0);
+    // Without the second read of the source this is absent from the upload,
+    // absent from the snapshot, and absent from the read-back comparing them.
+    expect((await readHub(remote)).get(uuid)).toContain("written late");
+  }, 90_000);
+
   // A shared uuid is one document's lineage on two hubs, which Yjs merges —
   // the resumability the two verbs are built on. Only a uuid this workspace has
   // never heard of is a second workspace.
@@ -512,6 +559,31 @@ describe("ub remote promote", () => {
     expect(run.status).toBe(0);
     expect(persistedHubUrl(box)).toBe(url(remote));
     expect([...(await readHub(remote)).keys()]).toEqual([shared]);
+  });
+
+  // A previous run that uploaded the directory stub and died before the room
+  // arrived leaves a target naming a document it cannot serve. Attaching the
+  // local replica is exactly what repairs that, so it must not be a refusal.
+  it("finishes a promotion whose earlier run left a stub without its room", async () => {
+    const local = await startHub();
+    const remote = await startHub();
+    const box = machine(local);
+    const uuid = await webDoc(local, "Half uploaded");
+
+    // The shape an interrupted promotion leaves: the stub is there, the room
+    // never arrived.
+    const directory = await openRoom(remote, directoryRoom(WORKSPACE));
+    upsertDirectoryEntry(directory.doc, {
+      uuid,
+      title: "Half uploaded",
+      tags: [],
+    });
+    await directory.done();
+
+    const run = await runUbAsync(["remote", "promote", url(remote)], box);
+    expect(run.status).toBe(0);
+    expect(persistedHubUrl(box)).toBe(url(remote));
+    expect((await readHub(remote)).get(uuid)).toEqual(["Half uploaded body"]);
   });
 
   // Attaching the populated mirror to the target *is* a merge, so the refusal
@@ -685,6 +757,9 @@ describe("ub remote join", () => {
     expect(run.stderr).toContain("this workspace already holds 1 document");
     expect(run.stderr).toContain("the remote holds 1 document");
     expect(run.stderr).toContain("Merging two populated workspaces is unsupported");
+    // The documents named are the LOCAL ones. Saying they are on the remote
+    // would send somebody looking for them on a machine that lacks them.
+    expect(run.stderr).toContain(`in this workspace are not on ${url(remote)}`);
     expect(persistedHubUrl(box)).toBe(url(local));
   });
 
