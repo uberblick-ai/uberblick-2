@@ -46,9 +46,25 @@ export interface DocGroup {
   entries: DirectoryEntry[];
 }
 
+/** The group a set of tags belongs to: the first known tag, in canonical order. */
+export function groupKeyForTags(tags: readonly string[]): GroupKey {
+  return GROUP_TAGS.find((tag) => tags.includes(tag)) ?? UNGROUPED_KEY;
+}
+
 /** The group a single entry belongs to. */
 export function groupKeyFor(entry: DirectoryEntry): GroupKey {
-  return GROUP_TAGS.find((tag) => entry.tags.includes(tag)) ?? UNGROUPED_KEY;
+  return groupKeyForTags(entry.tags);
+}
+
+/**
+ * The label the sidebar header shows for a group — and, through
+ * `groupKeyForTags`, the one the open document's breadcrumb shows. The
+ * breadcrumb reads the document's own `meta.tags` rather than its directory
+ * stub, because the stub is a cache of them: a retag reaches the breadcrumb on
+ * the write itself instead of waiting for the repair that follows it.
+ */
+export function groupLabel(key: GroupKey): string {
+  return LABELS[key];
 }
 
 /**
