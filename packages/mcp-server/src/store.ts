@@ -14,6 +14,11 @@
  *    see {@link MirrorStore.clearDerived}. It is never authoritative, and no
  *    document state exists only here.
  *
+ * Alongside both, one row of `meta` records which workspace this replica
+ * holds. Nothing derives from it: it exists so that a file opened against a
+ * different `WORKSPACE_ID` is refused instead of serving two corpora as one —
+ * see `claimWorkspace`.
+ *
  * Encoding is Yjs v1 everywhere (`Y.encodeStateAsUpdate` / `Y.applyUpdate`),
  * matching the hub's persistence and the schema package. Never v2.
  *
@@ -42,6 +47,7 @@ import type {
   SQLOutputValue,
   StatementResultingChanges,
 } from "node:sqlite";
+import { log } from "./log.js";
 
 /** Where an update came from. Both are logged; the distinction is diagnostic. */
 export type UpdateOrigin = "local" | "remote";
@@ -111,6 +117,22 @@ function parseTags(packed: string | null): string[] {
     ? parsed.filter((tag): tag is string => typeof tag === "string")
     : [];
 }
+
+/**
+ * What this file is, as opposed to what is in it. One row so far:
+ * \`workspace\`, the uuid whose corpus this replica holds. The index tables
+ * carry no workspace column, so the file itself is the boundary.
+ *
+ * Its own script, run before {@link SCHEMA}: it is everything the store is
+ * allowed to write to a file it has not yet established is its own. See
+ * \`claimWorkspace\`.
+ */
+const META_SCHEMA = `
+CREATE TABLE IF NOT EXISTS meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+`;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS updates (
@@ -276,7 +298,7 @@ export class MirrorStore {
 
   private readonly unindexTx: (uuid: string) => void;
 
-  constructor(databasePath: string) {
+  constructor(databasePath: string, workspaceId: string) {
     this.databasePath = databasePath;
     if (databasePath !== ":memory:") {
       mkdirSync(dirname(databasePath), { recursive: true });
@@ -288,6 +310,20 @@ export class MirrorStore {
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA busy_timeout = 5000");
     this.db.exec("PRAGMA foreign_keys = ON");
+    // Whether this file already held a corpus, asked before anything creates
+    // the table it asks about: it is what tells adopting an existing database
+    // apart from stamping a new one.
+    const preexisting =
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'updates'",
+        )
+        .get() !== undefined;
+    // Ownership first, and on its own table: a file belonging to another
+    // workspace is left exactly as it was found — no tables created, no index
+    // built, no migration run.
+    this.db.exec(META_SCHEMA);
+    this.claimWorkspace(workspaceId, preexisting);
     this.db.exec(SCHEMA);
     // After the schema, so the backfill can read `updates` and `snapshots`.
     this.migratePendingRooms();
@@ -598,6 +634,57 @@ export class MirrorStore {
       uuid: string;
       title: string;
     }[];
+  }
+
+  /**
+   * Bind this file to one workspace, or refuse to open it.
+   *
+   * The derived index has no workspace column and room keys are opaque to the
+   * store, so the file is the only thing separating two corpora — and
+   * `UBERBLICK_DB` outranks the per-workspace default path silently. Two
+   * servers pinned to different workspaces at one database would union their
+   * corpora in `search` and `backlinks`. Recording the workspace makes the file
+   * self-describing, so the second one to open says so and stops.
+   *
+   * It runs before the rest of the schema, on the one table it needs, so that
+   * a refused open leaves the other workspace's file byte-identical.
+   *
+   * The insert is `DO NOTHING` and the recorded value is read back after it:
+   * two processes creating one database at once both try, one wins, and the
+   * loser refuses rather than overwriting the claim.
+   *
+   * A database from before this row existed is adopted rather than refused —
+   * there is exactly one workspace it can belong to, the one whose server is
+   * opening it, and refusing would strand a corpus that is not in fact
+   * ambiguous. It is stamped once and is an ordinary file afterwards.
+   */
+  private claimWorkspace(workspaceId: string, preexisting: boolean): void {
+    const claimed = this.db
+      .prepare(
+        "INSERT INTO meta (key, value) VALUES ('workspace', ?) " +
+          "ON CONFLICT (key) DO NOTHING",
+      )
+      .run(workspaceId).changes;
+    const row = this.db
+      .prepare("SELECT value FROM meta WHERE key = 'workspace'")
+      .get() as { value: string } | undefined;
+    const recorded = row?.value;
+
+    if (recorded !== workspaceId) {
+      this.close();
+      throw new Error(
+        `${this.databasePath} is the replica of workspace ${recorded ?? "unknown"}, ` +
+          `but this server is configured for workspace ${workspaceId}. One ` +
+          "database holds one workspace: unset UBERBLICK_DB to use the " +
+          "per-workspace default file, or point it at a different path.",
+      );
+    }
+    if (claimed > 0 && preexisting) {
+      log.info("adopted a database that recorded no workspace", {
+        database: this.databasePath,
+        workspace: workspaceId,
+      });
+    }
   }
 
   /**

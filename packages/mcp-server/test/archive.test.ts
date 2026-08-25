@@ -17,6 +17,7 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import {
+  WORKSPACE,
   removeTempDirs,
   startServer,
   tempDatabasePath,
@@ -136,7 +137,7 @@ describe("archive_doc", () => {
   // the whole corpus on each one would put a SQLite write per document behind
   // every character typed, on every MCP server that observes it.
   it("reconciles only the entries a directory update changed", async () => {
-    const store = new CountingStore(tempDatabasePath());
+    const store = new CountingStore(tempDatabasePath(), WORKSPACE);
     const rig = await startServer(testConfig(), store);
     rigs.push(rig);
 
@@ -294,7 +295,7 @@ describe("restore_doc", () => {
   });
 
   it("reports a refused index write as not indexed, and retries it", async () => {
-    const store = new CountingStore(tempDatabasePath());
+    const store = new CountingStore(tempDatabasePath(), WORKSPACE);
     const rig = await startServer(testConfig(), store);
     rigs.push(rig);
 
@@ -332,7 +333,7 @@ describe("restore_doc", () => {
   // server: each failed attempt spends SQLite's busy timeout, so retrying the
   // whole backlog on every tool call would charge that wait to every caller.
   it("paces a persistently refused entry instead of retrying it every call", async () => {
-    const store = new CountingStore(tempDatabasePath());
+    const store = new CountingStore(tempDatabasePath(), WORKSPACE);
     const rig = await startServer(
       testConfig({ reconcileRetryMs: 60_000 }),
       store,
@@ -364,7 +365,7 @@ describe("restore_doc", () => {
   // already gone is the common case by far, and each pointless delete would
   // still queue behind a write lock for its busy timeout.
   it("does not touch the store for tombstones whose rows are already gone", async () => {
-    const store = new CountingStore(tempDatabasePath());
+    const store = new CountingStore(tempDatabasePath(), WORKSPACE);
     const rig = await startServer(testConfig(), store);
     rigs.push(rig);
 
@@ -385,7 +386,7 @@ describe("restore_doc", () => {
   // a tombstone learned by replaying the log — the backlog is drained a piece
   // at a time rather than landing whole on whichever call arrives first.
   it("drains a stale mirror one delete per call", async () => {
-    const store = new CountingStore(tempDatabasePath());
+    const store = new CountingStore(tempDatabasePath(), WORKSPACE);
     const rig = await startServer(testConfig(), store);
     rigs.push(rig);
 
@@ -421,7 +422,7 @@ describe("restore_doc", () => {
   // unguarded, a store refusing it turned a stale row into an error from every
   // unrelated tool.
   it("survives a refused unindex during adoption", async () => {
-    const store = new CountingStore(tempDatabasePath());
+    const store = new CountingStore(tempDatabasePath(), WORKSPACE);
     const rig = await startServer(testConfig(), store);
     rigs.push(rig);
 
