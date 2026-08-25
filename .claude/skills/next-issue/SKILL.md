@@ -149,13 +149,28 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    `Claimed: feat/<slug>` (or `fix/`). **Announce the work to the user** in
    your visible output: one or two plain sentences on what the issue is and
    why it's next, plus the direct GitHub URL (from
-   `gh issue view <n> --json url`). Then spawn an Opus sub-agent whose
-   brief is decision-complete: the full issue body; the Pointers resolved
-   (read them yourself first, pass the relevant excerpts — the agent starts
-   with zero session memory); the applicable CLAUDE.md invariants; and the
-   contract: branch from fresh `main`, implement, `mise run test` +
+   `gh issue view <n> --json url`). Then spawn an Opus sub-agent whose brief
+   is decision-complete but pulled, not pushed: pass the full issue body and
+   the applicable CLAUDE.md invariants, and instruct the agent to START by
+   reading the product docs its Pointers cite through the uberblick MCP tools
+   — `get_doc` on each cited uuid, `search` for what the issue did not
+   anticipate — before it writes anything. You inline only what those tools
+   cannot serve: PR diffs, review threads, decisions taken in this session.
+   Excerpts you paste start aging the moment you paste them; the live doc
+   does not. Where this session has the uberblick MCP server registered as
+   tools the sub-agent inherits it; where it does not, the agent reaches the
+   same tools through a throwaway stdio client script spawning the
+   `.mcp.json` command
+   (`fnox exec --if-missing warn -- pnpm --silent --filter @uberblick/mcp-server start`),
+   the pattern #77 and #134 use — the brief says which of the two applies.
+   Then the contract: branch from fresh `main`, implement, `mise run test` +
    `mise run typecheck` green, push, open a PR with `Closes #N` and a body
-   stating what changed and how it was verified. Sub-agents never merge.
+   stating what changed and how it was verified; and any live doc the agent
+   finds contradicting the code it read is named as a discrepancy in that PR
+   body — the read side of the dogfooding contract, mirroring the post-merge
+   doc update. Until #130 lands, the brief also asks the agent to close its
+   report with an uberblick-usage summary: MCP used or not, which docs by
+   title and uuid, helpful yes/no and one line why. Sub-agents never merge.
    Several individually-trivial issues with the same `Touches` set may go to
    one agent as one batch: claim each issue separately, brief all their
    bodies, and have the single PR close them all (`Closes #a, #b`) with a
@@ -166,7 +181,9 @@ protocol, scheduling semantics, and lint. This file does not restate it.
 7. **Report.** End with a short status a human can skim: PRs advanced (which
    gate), issues dispatched / bounced / parked, what the loop is waiting on.
    Every issue or PR named in the status carries its direct GitHub URL —
-   the reader clicks through, never hunts.
+   the reader clicks through, never hunts. Until #130 lands, print each
+   returning agent's uberblick-usage summary verbatim, so the owner watches
+   the docs earn their keep from the console.
 
 ## Pacing under /loop (dynamic mode)
 
