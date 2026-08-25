@@ -154,15 +154,17 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    the applicable CLAUDE.md invariants, and instruct the agent to START by
    reading the product docs its Pointers cite through the uberblick MCP tools
    — `get_doc` on each cited uuid, `search` for what the issue did not
-   anticipate — before it writes anything. You inline only what those tools
-   cannot serve: PR diffs, review threads, decisions taken in this session.
-   Excerpts you paste start aging the moment you paste them; the live doc
-   does not. Where this session has the uberblick MCP server registered as
-   tools the sub-agent inherits it; where it does not, the agent reaches the
-   same tools through a throwaway stdio client script spawning the
-   `.mcp.json` command
+   anticipate — before any implementation or repository changes. You inline
+   only what those tools cannot serve: PR diffs, review threads, decisions
+   taken in this session. Excerpts you paste start aging the moment you paste
+   them; the live doc does not. Where this session has the uberblick MCP
+   server registered as tools the sub-agent inherits it; where it does not,
+   the agent reaches the same tools through a throwaway stdio client script
+   spawning the `.mcp.json` command
    (`fnox exec --if-missing warn -- pnpm --silent --filter @uberblick/mcp-server start`),
-   the pattern #77 and #134 use — the brief says which of the two applies.
+   the pattern #77 and #134 use; that script is a temporary file in a scratch
+   directory outside the committed worktree, never part of the diff. The
+   brief says which of the two applies.
    Then the contract: branch from fresh `main`, implement, `mise run test` +
    `mise run typecheck` green, push, open a PR with `Closes #N` and a body
    stating what changed and how it was verified; and any live doc the agent
