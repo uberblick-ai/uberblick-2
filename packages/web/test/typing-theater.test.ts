@@ -62,6 +62,15 @@ interface Scene {
   tick: (ms: number) => void;
   /** ...or move it to an exact reading, which is what the loop itself does. */
   tickTo: (at: number) => void;
+  /**
+   * Let real time pass with the plugin hearing nothing about it.
+   *
+   * This is what being idle *is*: the loop only runs while there is something
+   * to draw, so between animations no tick reaches the plugin and its own clock
+   * stops. Advancing the injected clock without dispatching reproduces that
+   * exactly.
+   */
+  idle: (ms: number) => void;
   dispose: () => void;
 }
 
@@ -117,6 +126,9 @@ function scene(
       editor.view.dispatch(
         editor.state.tr.setMeta(typingTheaterPluginKey, { now: clock }),
       );
+    },
+    idle: (ms) => {
+      clock += ms;
     },
     dispose: () => editor.destroy(),
   };
@@ -235,6 +247,46 @@ describe("the state is true the moment it arrives, however slowly it is shown", 
   });
 });
 
+describe("an edit is timed from when it arrives", () => {
+  /**
+   * The theater's clock only advances when the loop ticks, and the loop only
+   * runs while there is something to draw. So between animations the plugin's
+   * clock stands still, and however long the reader sits reading, that is how
+   * far behind it falls.
+   *
+   * A take stamped with that stale reading is born already expired: the next
+   * tick carries the real time, measures the whole idle period as elapsed, and
+   * finishes a take that lasts a fraction of a second before one character of
+   * it has been drawn. The quieter the session, the more certainly the next
+   * edit is silent — and a short edit is exactly the kind this is worst for.
+   */
+  it("animates a short edit that lands after a long quiet spell", () => {
+    const scene = start({ paragraphs: ["seed"] });
+    const { local, remote, blocks, editor, idle, tick } = scene;
+    const id = blocks[0]!;
+
+    // Nobody touches anything for five seconds. No ticks, so nothing tells the
+    // plugin — which is the whole point.
+    idle(5_000);
+
+    // Then a short edit: four characters, about 120ms of typing.
+    editBlock(remote, id, "seed", "seed one");
+
+    // The loop's first wake-up carries the real clock. A take timed from when
+    // it arrived is barely started; one timed from the last tick is five
+    // seconds past its own end.
+    tick(0);
+
+    expect(theater(editor).playing?.take.id).toBe(id);
+    expect(visibleText(id)).not.toBe(documentText(local, id));
+
+    // ...and it still finishes normally.
+    playOut(scene);
+    expect(visibleText(id)).toBe("seed one");
+    expect(documentText(local, id)).toBe("seed one");
+  });
+});
+
 describe("the editor is bound before the document arrives", () => {
   /**
    * The load order the app actually has, which every other test in this file
@@ -267,6 +319,7 @@ describe("the editor is bound before the document arrives", () => {
       editor,
       tick: () => {},
       tickTo: () => {},
+      idle: () => {},
       dispose: () => editor.destroy(),
     };
 

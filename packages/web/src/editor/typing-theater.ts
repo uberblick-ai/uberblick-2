@@ -71,9 +71,10 @@
  *   state with a brief pulse. The newest survive, however long they are — the
  *   bound is on how much the reader is made to wait, not on how long an honest
  *   edit takes to draw.
- * - **A second edit to a block replaces the first**, so the block plays once,
- *   to its final state. See the validity check in `reduce`, which is where that
- *   falls out.
+ * - **A second edit to a block replaces the first**, in the queue position the
+ *   block already had and re-spliced from the text the reader is still being
+ *   shown — so the block plays once, to its final state, and never through an
+ *   intermediate that was queued but never played. See {@link enqueue}.
  * - **The reader wins.** A block the local caret or selection is in never
  *   animates, and touching a block that is waiting or playing fast-forwards it
  *   on the spot. Correctness over show: nothing is ever hidden underneath
@@ -663,7 +664,19 @@ function reduce(
   const meta: unknown = transaction.getMeta(typingTheaterPluginKey);
   const tick =
     meta !== null && typeof meta === "object" ? (meta as { now?: unknown }) : {};
-  const now = typeof tick.now === "number" ? tick.now : previous.clock;
+  // A tick carries the reading the loop woke up with. Anything else — a remote
+  // edit arriving, a keystroke — has to ask, because `previous.clock` is only
+  // as fresh as the last tick and the loop does not run while there is nothing
+  // to draw.
+  //
+  // Reading the stale one is what made the first edit after a quiet minute
+  // never animate. The take was stamped `startedAt` a minute in the past, so
+  // the very next tick — carrying the real time — measured an elapsed minute
+  // against a take lasting a fraction of a second, called it finished, and
+  // dropped it before a single character had been drawn. The longer the reader
+  // had been sitting still, the more certainly the next edit was silent.
+  const now =
+    typeof tick.now === "number" ? tick.now : options.now();
 
   // Once the reader has aimed a caret in here, their selection is a real
   // selection and a block under it is theirs. Before that it is ProseMirror's
