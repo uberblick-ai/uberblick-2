@@ -355,12 +355,27 @@ describe("restore_doc", () => {
     const doc = await seedDoc(rig);
     await rig.ok("archive_doc", { uuid: doc.uuid });
 
-    // The tombstone is already reconciled and off the queue, so the next
-    // settle's adoption pass is what meets the refusal.
+    // Give adoption something to actually do. The archive above already removed
+    // the rows, and the read guard means a tombstone with no rows is never
+    // deleted at all — so without this the refusal below would never be reached
+    // and this test would pass no matter what escaped.
+    store.indexDoc({
+      uuid: doc.uuid,
+      title: "stale",
+      tags: [],
+      links: [],
+      body: "",
+    });
     store.failUnindex = true;
+
+    const before = store.unindexAttempts;
     const listed = await rig.call("list_docs", {});
     expect(listed.isError).toBe(false);
     expect(listed.payload.docs).toEqual([]);
+
+    // The delete really was attempted, and the refusal stayed inside the index
+    // instead of coming back as this tool's answer.
+    expect(store.unindexAttempts).toBeGreaterThan(before);
 
     const searched = await rig.call("search", { query: "glossary" });
     expect(searched.isError).toBe(false);
