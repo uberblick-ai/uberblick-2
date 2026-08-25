@@ -90,6 +90,8 @@ function LinkedPane({ connection }: { connection: RoomConnection }): ReactElemen
       connection={connection}
       meta={useDocMeta(connection)}
       author="tester"
+      archived={false}
+      onRestore={() => {}}
       onSelectThread={() => {}}
     />
   );
