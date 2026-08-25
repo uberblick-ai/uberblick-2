@@ -138,9 +138,12 @@ function clientStdin(path: string): { childEnd: number; writer: number } {
   }
 }
 
+/** The workspace these sandboxes are configured for. Ids are uuids. */
+const WORKSPACE = "1e9b7a30-52c4-4d6f-8a13-c7b204e5f981";
+
 describe("ub mcp serve", () => {
   it("serves the shipped tool set to a client that spawns it", async () => {
-    const session = await connect(sandbox());
+    const session = await connect(sandbox({ userConfig: { workspace: WORKSPACE } }));
     try {
       const names = (await session.client.listTools()).tools.map(
         (tool) => tool.name,
@@ -176,7 +179,7 @@ describe("ub mcp serve", () => {
     // choice rather than the directory file's.
     const box = sandbox({
       directoryFile: {
-        workspace: "cli-serve-test",
+        workspace: `serve-${WORKSPACE}`,
         hubUrl: "ws://ignored:1",
         signingSecret: "cli-serve-misplaced-secret",
       },
@@ -194,9 +197,11 @@ describe("ub mcp serve", () => {
       const content = result.content as { text: string }[];
       const status = JSON.parse(content[0]!.text);
 
-      expect(status.workspace).toBe("cli-serve-test");
+      // The claim and the file are keyed by the uuid, never by the slug the
+      // directory file spelled it with.
+      expect(status.workspace).toBe(WORKSPACE);
       expect(status.hub.url).toBe(DEAD_HUB_URL);
-      expect(status.database).toMatch(/cli-serve-test\.sqlite$/);
+      expect(status.database).toMatch(new RegExp(`${WORKSPACE}\\.sqlite$`));
 
       expect(session.stderr()).toMatch(/belongs in credentials\.json/);
       expect(session.stderr()).not.toContain("cli-serve-signing-secret");
@@ -213,7 +218,7 @@ describe("ub mcp serve", () => {
   it.each(["SIGHUP", "SIGQUIT"] as const)(
     "forwards %s to the server, takes it down, and dies of it too",
     async (signal) => {
-      const box = sandbox();
+      const box = sandbox({ userConfig: { workspace: WORKSPACE } });
       const { childEnd, writer } = clientStdin(join(box.cwd, "client-stdin"));
       // Its own process group, so teardown can take a survivor down by group
       // even after the wrapper — the group's leader — is gone. `child.kill`

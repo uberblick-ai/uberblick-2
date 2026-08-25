@@ -21,6 +21,7 @@ import { MirrorStore } from "../src/store.js";
 import {
   mainTsProcess,
   PACKAGE_ROOT,
+  WORKSPACE,
   removeTempDirs,
   startServer,
   tempDatabasePath,
@@ -45,11 +46,11 @@ describe("the update log", () => {
       // A second handle on the same file sees only committed data.
       const reader = new MirrorStore(databasePath);
       try {
-        const room = `main/${doc.uuid}`;
+        const room = `${WORKSPACE}/${doc.uuid}`;
         const logged = reader.updatesAfter(room, 0);
         expect(logged.length).toBeGreaterThan(0);
         // Enough to rebuild the document, with nothing but the log.
-        expect(reader.updatesAfter("main/_directory", 0).length).toBeGreaterThan(
+        expect(reader.updatesAfter(`${WORKSPACE}/_directory`, 0).length).toBeGreaterThan(
           0,
         );
       } finally {
@@ -108,7 +109,11 @@ describe("the update log", () => {
       ...mainTsProcess(),
       cwd: PACKAGE_ROOT,
       // No HUB_AUTH_TOKEN: the child runs local-only, which is the point.
-      env: { ...getDefaultEnvironment(), UBERBLICK_DB: databasePath },
+      env: {
+        ...getDefaultEnvironment(),
+        WORKSPACE_ID: WORKSPACE,
+        UBERBLICK_DB: databasePath,
+      },
       stderr: "ignore",
     });
     const client = new Client({ name: "uberblick-tests", version: "0.0.0" });
@@ -186,7 +191,7 @@ describe("the update log", () => {
       // One more tool call so the settle that follows the last write runs.
       await rig.ok("sync_status", {});
 
-      const room = `main/${uuid}`;
+      const room = `${WORKSPACE}/${uuid}`;
       const snapshot = rig.instance.store.snapshot(room);
       expect(snapshot).not.toBeNull();
       expect(rig.instance.store.updateCount(room)).toBeLessThan(4);

@@ -14,6 +14,9 @@ import { createRoot } from "react-dom/client";
 import { StatusLine } from "../src/ui/EditorPane.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
+/** The workspace these stub room keys sit in. A workspace id is a uuid. */
+const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
+
 /** A connection that only reports status — no socket, no awareness, no peers. */
 function stubConnection(
   unsyncedChanges: number,
@@ -28,7 +31,7 @@ function stubConnection(
     ...patch,
   };
   return {
-    room: "main/doc",
+    room: `${WORKSPACE}/doc`,
     provider: { awareness: null },
     status,
     onStatusChange: (listener: (next: RoomStatus) => void) => {
@@ -48,7 +51,12 @@ function label(
   document.body.appendChild(host);
   const root = createRoot(host);
   act(() =>
-    root.render(<StatusLine connection={stubConnection(unsyncedChanges, patch)} />),
+    root.render(
+      <StatusLine
+        connection={stubConnection(unsyncedChanges, patch)}
+        segment={WORKSPACE}
+      />,
+    ),
   );
   const text = host.querySelector(".ub-pending")?.textContent ?? null;
   act(() => root.unmount());
@@ -75,7 +83,11 @@ function claimsCache(patch: Partial<RoomStatus>): boolean {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  act(() => root.render(<StatusLine connection={stubConnection(0, patch)} />));
+  act(() =>
+    root.render(
+      <StatusLine connection={stubConnection(0, patch)} segment={WORKSPACE} />,
+    ),
+  );
   const claimed = host.querySelector(".ub-status .ub-muted")?.textContent === "local cache";
   act(() => root.unmount());
   host.remove();
@@ -122,7 +134,9 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
     document.body.appendChild(host);
     const root = createRoot(host);
     act(() =>
-      root.render(<StatusLine connection={stubConnection(4, status)} />),
+      root.render(
+        <StatusLine connection={stubConnection(4, status)} segment={WORKSPACE} />,
+      ),
     );
     // Past every settle window, so what is on screen is what the reader sees.
     act(() => void vi.advanceTimersByTime(5_000));
@@ -155,6 +169,7 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
       root.render(
         <StatusLine
           connection={stubConnection(0, { connected: true, synced: true })}
+          segment={WORKSPACE}
         />,
       ),
     );

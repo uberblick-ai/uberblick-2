@@ -12,7 +12,6 @@
 
 export {
   DEFAULT_HUB_URL,
-  assertWorkspaceSegment,
   defaultDatabasePath,
   resolveMcpConfig,
 } from "./config.js";

@@ -25,7 +25,10 @@ import { mintToken } from "../src/token.js";
 
 /** The hub's HMAC secret in tests. Never a valid token itself. */
 export const TEST_SECRET = "test-hmac-secret-for-the-hub";
-export const WORKSPACE = "main";
+/** The workspace under test. A uuid, like every real workspace id. */
+export const WORKSPACE = "3f6a1c20-9d84-4b1e-8a77-2c5e9b0d4411";
+/** A second workspace, for the tests that prove one token cannot open another. */
+export const OTHER_WORKSPACE = "5b2d7e10-4c33-4f92-9e08-71a6d3c85220";
 
 /** The Y.Text every test edits. */
 export const TEXT_KEY = "body";
@@ -44,7 +47,7 @@ export function removeTempDatabases(): void {
   }
 }
 
-/** A room in the test workspace: `main/<uuid>`, like the real thing. */
+/** A room in the test workspace: `<workspaceUuid>/<docUuid>`, like the real thing. */
 export function testRoom(workspace: string = WORKSPACE): string {
   return `${workspace}/${randomUUID()}`;
 }

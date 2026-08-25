@@ -62,6 +62,9 @@ afterEach(() => {
 describe("a database written by the better-sqlite3 build", () => {
   it("opens under node:sqlite with its log, snapshot and index intact", () => {
     const opened = store(legacyDatabase());
+    // The room key as the old binding wrote it into this fixture, back when a
+    // workspace id was a name. Room keys are opaque to the store, and the
+    // fixture is a byte-for-byte historical artefact: it is not re-keyed.
     const room = `main/${LEGACY.uuid}`;
 
     // The log: a snapshot the old binding compacted, plus the tail it appended
@@ -105,8 +108,8 @@ describe("a payload that is a view into a larger buffer", () => {
     const backing = new Uint8Array([0xff, 0xff, 1, 2, 3, 0xff]);
     const payload = backing.subarray(2, 5);
 
-    const seq = opened.appendUpdate("main/views", payload, "remote");
-    const [logged] = opened.updatesAfter("main/views", seq - 1);
+    const seq = opened.appendUpdate("a-room", payload, "remote");
+    const [logged] = opened.updatesAfter("a-room", seq - 1);
     expect(logged?.payload).toBeInstanceOf(Uint8Array);
     expect(Array.from(logged?.payload ?? [])).toEqual([1, 2, 3]);
   });

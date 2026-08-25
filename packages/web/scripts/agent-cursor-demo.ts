@@ -73,17 +73,33 @@
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import * as Y from "yjs";
 import {
-  DEFAULT_WORKSPACE,
   directoryRoom,
   getBlocksFragment,
   listDirectory,
+  parseWorkspaceId,
   roomForDoc,
 } from "@uberblick/schema";
 import { mintToken } from "../src/collab/token.js";
 
 const HUB_URL = process.env.HUB_URL ?? "ws://localhost:1234";
 const HUB_AUTH_TOKEN = process.env.HUB_AUTH_TOKEN ?? "";
-const WORKSPACE = process.env.WORKSPACE_ID ?? DEFAULT_WORKSPACE;
+/**
+ * The workspace to park a cursor in. Required: there is no default workspace,
+ * and a demo that guessed one would connect to a corpus nobody chose. `mise run
+ * agent-cursor` inherits it from the same mise `[env]` every other task reads.
+ */
+const WORKSPACE = ((): string => {
+  const configured = process.env.WORKSPACE_ID?.trim();
+  if (configured === undefined || configured === "") {
+    console.error(
+      "agent-cursor: WORKSPACE_ID is not set — run `ub init`, or `ub status` " +
+        "to see the workspace in force",
+    );
+    process.exit(1);
+  }
+  // Decorated or bare, only the uuid names a room or signs a claim.
+  return parseWorkspaceId(configured).uuid;
+})();
 
 const AGENT_NAME = "Claude · demo agent";
 /** 6-digit hex only — y-prosemirror rejects every other colour notation. */

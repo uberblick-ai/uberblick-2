@@ -21,7 +21,12 @@ const acquireRoom = vi.hoisted(() => vi.fn());
 vi.mock("../src/collab/rooms.js", () => ({ acquireRoom }));
 
 const { App } = await import("../src/ui/App.js");
-const { WORKSPACE } = await import("../src/config.js");
+
+/**
+ * The address names the workspace, so the test opens one. `/` would render the
+ * no-workspace state and acquire nothing, which is a different claim.
+ */
+const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 
 /** Enough of a connection for the panes that render against the directory. */
 function fakeHandle(room: string): unknown {
@@ -53,6 +58,7 @@ it("holds the first connect until the endpoint resolves, without holding the ren
   );
   acquireRoom.mockImplementation((room: string) => fakeHandle(room));
 
+  window.history.replaceState(null, "", `/${WORKSPACE}`);
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);

@@ -61,7 +61,7 @@ import {
 
 const SECRET = "test-signing-secret-for-the-remote-bridge";
 const OTHER_SECRET = "a-different-secret-the-remote-was-deployed-with";
-const WORKSPACE = "main";
+const WORKSPACE = "b7c3d914-5a20-4e6f-8d13-9f04a2c68e75";
 
 /** A JWT-ish token: base64url of `{"sub"…` always starts `eyJ`. */
 const TOKEN_SHAPE = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/;
@@ -334,13 +334,15 @@ function machine(hub: Hub): Sandbox {
 
 describe("ub remote", () => {
   it("says so when no remote is configured, and exits 0", () => {
-    const run = runUb(["remote"], sandbox());
+    // A workspace but no remote: `ub remote` reads which workspace it is
+    // reporting on, and there is no default workspace to fall back to.
+    const run = runUb(["remote"], sandbox({ userConfig: { workspace: WORKSPACE } }));
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("no remote configured");
   });
 
   it("names the endpoint and the sharing boundary once one is set", () => {
-    const box = sandbox();
+    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
     expect(runUb(["remote", "set", "wss://hub.example.ts.net"], box).status).toBe(0);
 
     const run = runUb(["remote"], box);
@@ -377,7 +379,7 @@ describe("ub remote", () => {
 
   it("preserves the other fields in config.json", () => {
     const box = sandbox({
-      userConfig: { workspace: "main", displayName: "Someone", color: "#0e8085" },
+      userConfig: { workspace: WORKSPACE, displayName: "Someone", color: "#0e8085" },
     });
     expect(runUb(["remote", "set", "wss://hub.example.ts.net"], box).status).toBe(0);
 
@@ -726,7 +728,9 @@ describe("ub remote join", () => {
     // genuinely empty. The dead endpoint stands in for the hub that is not
     // running on a machine which has never had one.
     const box = sandbox({ userConfig: { hubUrl: DEAD_HUB_URL } });
-    expect((await runUbAsync(["init", "--yes"], box)).status).toBe(0);
+    expect(
+      (await runUbAsync(["init", "--yes", "--workspace", WORKSPACE], box)).status,
+    ).toBe(0);
 
     // The remote was deployed with its own secret, so this is also the
     // credential path: a file only its owner can read, never an argument.
@@ -786,7 +790,7 @@ describe("ub remote join", () => {
   });
 
   it("refuses a secret file other users can read", async () => {
-    const box = sandbox();
+    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
     const secretFile = join(box.cwd, "remote-secret");
     writeFileSync(secretFile, `${OTHER_SECRET}\n`);
     chmodSync(secretFile, 0o644);

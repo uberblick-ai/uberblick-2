@@ -50,7 +50,8 @@ export class FailingStore extends MirrorStore {
 
 /** The hub's HMAC secret in tests. Never a valid token itself. */
 export const TEST_SECRET = "test-hmac-secret-for-the-mcp-server";
-export const WORKSPACE = "main";
+/** The workspace under test. A uuid, like every real workspace id. */
+export const WORKSPACE = "9c1f0b4a-6d27-4e83-9b5a-1f2e3d4c5b6a";
 
 /** The package root, so a test can spawn `src/main.ts` the way a client would. */
 export const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));

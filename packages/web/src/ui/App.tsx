@@ -21,7 +21,7 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
-import { WORKSPACE } from "../config.js";
+import { CONFIGURED_WORKSPACE } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
 import { randomIdentity } from "../collab/identity.js";
 import type { RoomConnection } from "../collab/rooms.js";
@@ -103,12 +103,14 @@ export function RoutePane({
   // freshly opened room holds apart from an answer that the document is absent.
   const { localReplicaLoaded } = useRoomStatus(connection);
 
-  if (route.kind === "unknown-workspace") {
+  if (route.kind === "no-workspace") {
     return (
       <PaneNotice>
         <p className="ub-notice">
-          <strong>Unknown workspace.</strong> This client is configured for{" "}
-          <code>{WORKSPACE}</code>; the link names <code>{route.workspaceId}</code>.
+          <strong>No workspace.</strong> This address names none, and this client
+          was built without one to fall back to. Open a document link — they look
+          like <code>/&lt;workspace&gt;/&lt;uuid&gt;</code> — or run{" "}
+          <code>ub status</code> to find your workspace id.
         </p>
       </PaneNotice>
     );
@@ -119,7 +121,7 @@ export function RoutePane({
       <PaneNotice>
         <p className="ub-notice">
           <strong>Not a document link.</strong> {route.reason} A document link
-          looks like <code>/{WORKSPACE}/&lt;uuid&gt;</code>.
+          looks like <code>/&lt;workspace&gt;/&lt;uuid&gt;</code>.
         </p>
       </PaneNotice>
     );
@@ -141,7 +143,7 @@ export function RoutePane({
         <PaneNotice>
           {/* The live sync state, so a link that is waiting says what it is
               waiting on rather than looking stuck. */}
-          <StatusLine connection={connection} />
+          <StatusLine connection={connection} segment={route.workspace.segment} />
           <p className="ub-notice">
             <strong>Waiting for sync.</strong> Document <code>{route.uuid}</code>{" "}
             has not reached this replica yet. It opens here as soon as it arrives.
@@ -154,6 +156,9 @@ export function RoutePane({
   return (
     <EditorPane
       connection={connection}
+      // Only `list` and `doc` reach here; both carry the workspace the address
+      // spelled, which is what a copied link has to keep.
+      segment={route.workspace.segment}
       author={author}
       knownTags={knownTags}
       archived={archived}
@@ -166,7 +171,11 @@ export function RoutePane({
 export function App(): ReactElement {
   const identity = useIdentity(randomIdentity);
   const [path, navigate] = useRoutePath();
-  const route = parseRoute(path, WORKSPACE);
+  const route = parseRoute(path, CONFIGURED_WORKSPACE);
+  // The address names the workspace — this client is configured for none and
+  // cannot enumerate them. Null only where the address named none it could use,
+  // and then there are no rooms to join at all.
+  const workspace = route.kind === "no-workspace" ? null : route.workspace;
   const selected = route.kind === "doc" ? route.uuid : null;
   const [collapsed, setCollapsed] = useStoredFlag(SIDEBAR_COLLAPSED_KEY, false);
   /**
@@ -251,9 +260,14 @@ export function App(): ReactElement {
   // built from the first room acquired, so one acquired early would pin the
   // session to the build-time fallback.
   const hubReady = useHubEndpoint();
-  const directory = useRoom(hubReady ? directoryRoom(WORKSPACE) : null, identity);
+  const directory = useRoom(
+    hubReady && workspace !== null ? directoryRoom(workspace.uuid) : null,
+    identity,
+  );
   const doc = useRoom(
-    hubReady && selected !== null ? roomForDoc(WORKSPACE, selected) : null,
+    hubReady && workspace !== null && selected !== null
+      ? roomForDoc(workspace.uuid, selected)
+      : null,
     identity,
   );
   const entries = useDirectory(directory);
@@ -293,20 +307,26 @@ export function App(): ReactElement {
   }, [directory, selected]);
 
   /**
-   * Normalise the address to the one form the app hands out: `/` becomes
-   * `/<workspace>`, a trailing slash or a shouted uuid becomes the canonical
-   * spelling. `replace`, never `push` — a redirect the reader did not ask for
-   * must not become a history entry that Back bounces off.
+   * Normalise the address to the one form the app hands out: `/` becomes the
+   * build's workspace, a trailing slash or a shouted uuid becomes the canonical
+   * spelling. The workspace segment itself is left exactly as typed — the slug
+   * is display, and rewriting somebody's spelling of their own workspace is a
+   * later question (#160 leaves it alone deliberately). `replace`, never
+   * `push` — a redirect the reader did not ask for must not become a history
+   * entry that Back bounces off.
    */
   useEffect(() => {
-    const canonical = canonicalPath(parseRoute(path, WORKSPACE), WORKSPACE);
+    const canonical = canonicalPath(parseRoute(path, CONFIGURED_WORKSPACE));
     if (canonical !== null && canonical !== path) navigate(canonical, "replace");
   }, [path, navigate]);
 
   /** Opening a document is navigating to it. There is nothing else to update. */
+  const segment = workspace?.segment ?? null;
   const onSelect = useCallback(
-    (uuid: string) => navigate(docPath(WORKSPACE, uuid)),
-    [navigate],
+    (uuid: string) => {
+      if (segment !== null) navigate(docPath(segment, uuid));
+    },
+    [navigate, segment],
   );
 
   /**
@@ -328,9 +348,9 @@ export function App(): ReactElement {
   }, [doc]);
 
   const onCreate = useCallback(() => {
-    if (directory === null) return;
+    if (directory === null || workspace === null) return;
     const uuid = crypto.randomUUID();
-    const room = roomForDoc(WORKSPACE, uuid);
+    const room = roomForDoc(workspace.uuid, uuid);
     const handle = acquireRoom(room, identity);
     initDoc(handle.connection.ydoc, { uuid, title: "" });
     // A document with no blocks has nowhere to put the caret, so seed one.
@@ -339,7 +359,7 @@ export function App(): ReactElement {
     pending.current?.release();
     pending.current = { room, release: handle.release };
     onSelect(uuid);
-  }, [directory, identity, onSelect]);
+  }, [directory, identity, onSelect, workspace]);
 
   /**
    * The directory stub is a cache; `meta.title` in the document is
@@ -378,7 +398,10 @@ export function App(): ReactElement {
           {collapsed ? "»" : "«"}
         </button>
         <span className="ub-brand">uberblick</span>
-        <span className="ub-muted">workspace {WORKSPACE}</span>
+        {/* As the address spells it: the slug is what a person reads. */}
+        <span className="ub-muted">
+          {workspace === null ? "no workspace" : `workspace ${workspace.segment}`}
+        </span>
         {/* The open document's breadcrumb, and the activity and connection
             pills. The document's room when there is one, the directory's when
             there is not: one shared socket, so it is the same truth about the

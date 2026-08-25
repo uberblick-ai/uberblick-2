@@ -5,6 +5,13 @@
  * display name and a colour), the workspace this user works in, and a
  * development signing secret for the local hub when nobody else supplies one.
  *
+ * **The workspace.** A workspace id is a uuid, and this is where one comes
+ * from: with none in force, `ub init` generates it and asks only for an
+ * optional display slug, storing `<slug>-<uuid>` (or the bare uuid when the
+ * answer is empty). With one in force it is offered as the default, so a second
+ * run changes nothing. Nothing guesses a workspace anywhere else — the MCP
+ * server refuses to start without one.
+ *
  * It is convenience, never a precondition. Every other command works without it
  * — absent configuration is a default, not an error (see `config.ts`) — so
  * nothing here is the thing that makes `ub status` or `ub mcp serve` possible.
@@ -28,11 +35,12 @@
  * is what makes `mise run setup -- --yes` an unattended bootstrap.
  */
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { userInfo } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
-import { assertWorkspaceSegment, resolveMcpConfig } from "@uberblick/mcp-server";
+import { resolveMcpConfig } from "@uberblick/mcp-server";
+import { parseWorkspaceId } from "@uberblick/schema";
 import {
   claimSigningSecret,
   readCredentials,
@@ -188,6 +196,36 @@ function field(name: string, value: string): string {
   return `${name.padEnd(12)}${value}\n`;
 }
 
+/**
+ * A workspace for a machine that has none: a fresh uuid, plus an optional slug
+ * to read it by.
+ *
+ * The uuid is generated, never asked for — it is an identity, and there is
+ * nothing for a person to decide about it. The slug is the only question, it is
+ * cosmetic, and an empty answer is a real answer: the id is then the bare uuid.
+ * `--workspace` skips the question and is taken as given (and validated with
+ * everything else below), because somebody joining an existing workspace
+ * already has its id.
+ */
+async function newWorkspace(
+  rl: ReturnType<typeof createInterface> | null,
+  flag: string | undefined,
+): Promise<string> {
+  if (flag !== undefined) {
+    return flag;
+  }
+  const uuid = randomUUID();
+  if (rl === null) {
+    return uuid;
+  }
+  const slug = trimmed(
+    await rl.question(
+      `workspace name (optional, for display; the id is ${uuid}): `,
+    ),
+  );
+  return slug === null ? uuid : `${slug}-${uuid}`;
+}
+
 export async function initCommand(
   argv: string[],
   io: Io = processIo,
@@ -201,10 +239,14 @@ export async function initCommand(
   }
 
   // What is in force right now. This is also the validation pass over the
-  // existing files: a workspace that is not a path segment throws here, and
+  // existing files: a workspace that is not a workspace id throws here, and
   // there is nothing `ub init` can do about a file it was not asked to fix.
   const resolved = resolveConfig();
-  const inForce = resolveMcpConfig(resolved.env);
+  // As typed, not parsed: what gets stored and shown is the spelling its owner
+  // chose. Null means no workspace anywhere — the case this command exists to
+  // end, and the reason the MCP config below is resolved only once one is
+  // settled, since resolving it without a workspace is an error by design.
+  const inForceWorkspace = trimmed(resolved.env.WORKSPACE_ID);
   const existing = readUserConfig();
   // The same problem is reported by each reader; the set keeps it said once.
   const warnings = new Set([...resolved.warnings, ...existing.warnings]);
@@ -230,9 +272,11 @@ export async function initCommand(
       flags.color,
       existing.config.color ?? colorFor(name),
     );
-    // The workspace in force, so the offered default is what doing nothing would
-    // give — including the built-in one, whose owner is the schema package.
-    workspace = await ask(rl, "workspace", flags.workspace, inForce.workspaceId);
+    workspace =
+      inForceWorkspace === null
+        ? await newWorkspace(rl, flags.workspace)
+        : // One in force is the offered default, so a second run changes nothing.
+          await ask(rl, "workspace", flags.workspace, inForceWorkspace);
   } finally {
     rl?.close();
   }
@@ -261,7 +305,7 @@ export async function initCommand(
   // `ub status` accepts must not be one `ub init` refuses. The label names where
   // the value came from, and the rule's own message states the constraints.
   try {
-    assertWorkspaceSegment(
+    parseWorkspaceId(
       workspace,
       flags.workspace === undefined ? "the workspace" : "--workspace",
     );
@@ -424,7 +468,11 @@ export async function initCommand(
   // What is on disk, which under a concurrent run is not always what this
   // process asked for. The report describes the machine, not the intention.
   report += field("workspace", persistedWorkspace);
-  report += field("hub", inForce.hubUrl);
+  report += field(
+    "hub",
+    resolveMcpConfig({ ...resolved.env, WORKSPACE_ID: persistedWorkspace })
+      .hubUrl,
+  );
   // "credential", not "token": the value is the secret tokens are signed with,
   // and it is not in this report — only where it came from.
   report += field("credential", credentialNote);

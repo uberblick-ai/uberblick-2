@@ -35,7 +35,7 @@ import {
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
-const WORKSPACE = "main";
+const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const UUID = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
 /** Two other documents, so the workspace has tags to suggest. */
 const REF = "1f77c0d9-6b42-4a18-9e35-2c8d0f6a1b73";

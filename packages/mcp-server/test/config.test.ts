@@ -1,55 +1,106 @@
 /**
  * Configuration comes from the environment, and one value there is
- * load-bearing twice: `WORKSPACE_ID` is both a room segment and the name of the
- * SQLite file. Anything that can escape a path segment can therefore put the
- * database outside the data directory.
+ * load-bearing three times: `WORKSPACE_ID` names the rooms this server opens,
+ * the workspace claim in its hub token, and the SQLite file it hydrates from.
+ * There is no default — a guess would silently open somebody else's corpus or
+ * start an empty one — and a workspace id is a uuid, so the path-segment
+ * question the old string workspaces raised is answered by construction.
  */
 
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { InvalidWorkspaceIdError } from "@uberblick/schema";
 import { DEFAULT_HUB_URL, resolveMcpConfig } from "../src/config.js";
+import { PACKAGE_ROOT, mainTsProcess } from "./helpers.js";
+
+const WORKSPACE = "9c1f0b4a-6d27-4e83-9b5a-1f2e3d4c5b6a";
+const DATA_HOME = "/tmp/uberblick-config-test";
 
 /** A minimal environment: no HUB_AUTH_TOKEN, so the server is local-only. */
 function env(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
-  return { XDG_DATA_HOME: "/tmp/uberblick-config-test", ...overrides };
+  return { XDG_DATA_HOME: DATA_HOME, WORKSPACE_ID: WORKSPACE, ...overrides };
+}
+
+/** Run `src/main.ts` to completion and collect what it said and returned. */
+function runServer(
+  overrides: Record<string, string>,
+): Promise<{ code: number | null; stderr: string }> {
+  const { command, args } = mainTsProcess();
+  const child = spawn(command, args, {
+    cwd: PACKAGE_ROOT,
+    env: { PATH: process.env.PATH ?? "", ...overrides },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+  return new Promise((resolve) => {
+    child.on("exit", (code) => resolve({ code, stderr }));
+  });
 }
 
 describe("resolveMcpConfig", () => {
-  it("defaults to the documented workspace, hub and database path", () => {
+  it("keys the rooms and the database by the workspace uuid", () => {
     const config = resolveMcpConfig(env());
-    expect(config.workspaceId).toBe("main");
+    expect(config.workspaceId).toBe(WORKSPACE);
     expect(config.hubUrl).toBe(DEFAULT_HUB_URL);
     expect(config.authSecret).toBeNull();
     expect(config.databasePath).toBe(
-      join("/tmp/uberblick-config-test", "uberblick", "main.sqlite"),
+      join(DATA_HOME, "uberblick", `${WORKSPACE}.sqlite`),
     );
-
-    // A configured workspace names the file, and it stays inside the data
-    // directory.
-    expect(
-      resolveMcpConfig(env({ WORKSPACE_ID: "team-b" })).databasePath,
-    ).toBe(join("/tmp/uberblick-config-test", "uberblick", "team-b.sqlite"));
   });
 
-  it("rejects a workspace that is not a single path segment", () => {
-    // `path.join` follows every one of these out of the data directory — the
-    // backslash cases on Windows, where it is also a separator.
+  it("resolves a decorated and a bare spelling to one workspace", () => {
+    // The slug is display only. Two spellings that hydrated two databases
+    // would be two local replicas of one corpus, converging with neither.
+    const decorated = resolveMcpConfig(
+      env({ WORKSPACE_ID: `uberblick-${WORKSPACE}` }),
+    );
+    const bare = resolveMcpConfig(env());
+    expect(decorated.workspaceId).toBe(bare.workspaceId);
+    expect(decorated.databasePath).toBe(bare.databasePath);
+  });
+
+  it("refuses a value that is not a workspace id", () => {
     for (const workspaceId of [
+      "main",
       "a/b",
       "..",
       "../outside",
       "..\\outside",
-      "a\\b",
       ".",
+      `uberblick-${WORKSPACE.toUpperCase()}`,
     ]) {
       expect(() => resolveMcpConfig(env({ WORKSPACE_ID: workspaceId }))).toThrow(
+        InvalidWorkspaceIdError,
+      );
+    }
+  });
+
+  it("refuses to start with no workspace at all", () => {
+    // Blank and unset are the same thing, and neither has a default.
+    for (const value of ["", "   "]) {
+      expect(() => resolveMcpConfig(env({ WORKSPACE_ID: value }))).toThrow(
         /WORKSPACE_ID/,
       );
     }
-
-    // Blank is the one non-segment that is not an error: it means unset.
-    expect(resolveMcpConfig(env({ WORKSPACE_ID: "   " })).workspaceId).toBe(
-      "main",
-    );
+    const { WORKSPACE_ID: _omitted, ...withoutWorkspace } = env();
+    expect(() => resolveMcpConfig(withoutWorkspace)).toThrow(/ub init/);
   });
+});
+
+describe("the server process", () => {
+  it("exits non-zero and names `ub init` when WORKSPACE_ID is unset", async () => {
+    // The whole interface is the environment an MCP client hands the process,
+    // so "it refuses" has to be true of the process, not only of the function.
+    // stdout is the JSON-RPC transport: the complaint goes to stderr.
+    const run = await runServer({});
+
+    expect(run.code).not.toBe(0);
+    expect(run.stderr).toMatch(/WORKSPACE_ID/);
+    expect(run.stderr).toMatch(/ub init/);
+  }, 30_000);
 });

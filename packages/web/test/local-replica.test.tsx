@@ -70,10 +70,11 @@ vi.mock("@hocuspocus/provider", () => {
   };
 });
 
+// No workspace here: `rooms.ts` reads the workspace out of the room name it is
+// asked to open, not out of the configuration.
 vi.mock("../src/config.js", () => ({
   hubUrl: () => "ws://127.0.0.1:1",
   HUB_AUTH_TOKEN: "test-secret",
-  WORKSPACE: "main",
 }));
 
 const { acquireRoom } = await import("../src/collab/rooms.js");
@@ -81,12 +82,15 @@ const { RoutePane } = await import("../src/ui/App.js");
 const { useDocMeta } = await import("../src/ui/hooks.js");
 
 const UUID = "3231bff4-2f1c-4a49-9f0a-6f8b2c1d7e55";
+/** The workspace these rooms sit in. A workspace id is a uuid. */
+const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
+const workspace = { uuid: WORKSPACE, segment: WORKSPACE };
 
 /** App's wiring for one document: observe its meta, gate the pane on it. */
 function LinkedPane({ connection }: { connection: RoomConnection }): ReactElement {
   return (
     <RoutePane
-      route={{ kind: "doc", uuid: UUID }}
+      route={{ kind: "doc", workspace, uuid: UUID }}
       connection={connection}
       meta={useDocMeta(connection)}
       author="tester"
@@ -105,7 +109,7 @@ it("settles the local read when IndexedDB refuses to open, and still says it is 
   // does. The persistence itself is the mock above.
   Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: {} });
 
-  const { connection, release } = acquireRoom(`main/${UUID}`, {
+  const { connection, release } = acquireRoom(`${WORKSPACE}/${UUID}`, {
     name: "tester",
     color: "#888888",
   });

@@ -30,6 +30,9 @@ import {
 import { DocChrome, DocMetaLine } from "../src/ui/DocChrome.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
+/** The workspace these stub room keys sit in. A workspace id is a uuid. */
+const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
+
 const DOC_UUID = "9f3c1a2b-0000-4000-8000-0123456789ab";
 
 /** The foreign client id standing in for an agent session. */
@@ -62,7 +65,7 @@ function fixture(status: Partial<RoomStatus> = {}): Fixture {
     ...status,
   };
   const connection = {
-    room: `main/${DOC_UUID}`,
+    room: `${WORKSPACE}/${DOC_UUID}`,
     ydoc,
     provider: { awareness },
     status: full,

@@ -16,16 +16,7 @@
  */
 
 import type * as Y from "yjs";
-import { DIRECTORY_SUFFIX } from "./rooms.js";
 import type { DirectoryEntry } from "./types.js";
-
-/**
- * The bare directory room name, without a workspace.
- *
- * @deprecated Rooms carry a workspace: use `directoryRoom(workspaceId)` from
- * `rooms.ts`. Kept as the document-id suffix for pre-tenancy callers.
- */
-export const DIRECTORY_ROOM = DIRECTORY_SUFFIX;
 
 /** The key of the directory Y.Map inside the directory doc. */
 export const DIRECTORY_DOCS_KEY = "docs";

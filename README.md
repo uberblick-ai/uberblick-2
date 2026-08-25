@@ -32,7 +32,8 @@ mise run dev                          # hub + web on http://localhost:5173
 
 `mise run setup` installs the pinned toolchain and the frozen lockfile, then runs
 `ub init` — which settles your awareness identity (display name and cursor
-colour), the workspace, and a development signing secret for the local hub.
+colour), the workspace (a fresh uuid, optionally given a display slug), and a
+development signing secret for the local hub.
 `--yes` takes every default and never prompts, so it is safe unattended; drop it
 to be asked. Run it again any time: it is idempotent, and it will not replace a
 secret that already exists. `mise run init` re-runs just the `ub init` step.
@@ -213,16 +214,21 @@ a refusal there is a warning rather than a failed bootstrap, because everything
 `ub init` was asked to settle has been settled by then.
 
 Configuration is JSON and every layer is optional — absent configuration is a
-default, never an error, and no command requires `ub init` to have run.
+default, never an error — with one exception: the **workspace** has no default.
+A workspace id is a uuid, optionally decorated for display as `<slug>-<uuid>`
+(the slug is cosmetic; only the uuid names a room, a token claim or the local
+database). Nothing invents one, because a guessed workspace would open a corpus
+nobody chose, so `ub init` is what creates one and `ub status`, `ub mcp serve`
+and the MCP server all refuse to run without it — naming `ub init` when they do.
 Precedence, highest first:
 
 | Layer | Holds |
 | --- | --- |
 | environment (`WORKSPACE_ID`, `HUB_URL`, `HUB_AUTH_TOKEN`) | wins, so `HUB_URL=… ub mcp serve` keeps working |
 | `./uberblick.json` | binds one checkout to one workspace. Committable, so never secrets — and never the hub the stored secret is sent to |
-| `$XDG_CONFIG_HOME/uberblick/config.json` | per-user identity (display name, cursor colour), default workspace and hub endpoint — what `ub init` writes |
+| `$XDG_CONFIG_HOME/uberblick/config.json` | per-user identity (display name, cursor colour), the workspace and the hub endpoint — what `ub init` writes |
 | `$XDG_CONFIG_HOME/uberblick/credentials.json`, mode 0600 | the hub signing secret. Never printed by any command, and refused outright — not merely warned about — if anyone but its owner can read it |
-| built-in defaults | workspace `main`, hub `ws://localhost:1234` |
+| built-in defaults | hub `ws://localhost:1234`. No workspace: there is no default one |
 
 The stored signing secret is scoped to hubs *you* chose: if the hub URL in force
 came from a committable `./uberblick.json`, the secret in `credentials.json` is
@@ -269,11 +275,16 @@ promotion rather than colliding with it.
 **On a second computer**, from a fresh clone with nothing in its workspace:
 
 ```
-mise trust && mise run setup -- --yes
+mise trust && mise run setup -- --yes --workspace <workspace id>
 node packages/cli/bin/ub.mjs remote join wss://<host>.ts.net/ws \
   --secret-file ~/uberblick-remote-secret
 mise run web            # the web client alone; the hub is the remote one
 ```
+
+The workspace id is the one the first machine's `ub status` prints, decorated or
+bare. Give it: a workspace id is a uuid and `ub init` with none in force
+generates a *new* one, so a machine that invented its own would join the remote
+hub and find nothing of yours on it — the rooms are keyed by a different id.
 
 `ub init` writes configuration and imports no documents, so a fresh checkout's
 workspace really is empty and `join` has nothing to duplicate — do not run
@@ -443,6 +454,7 @@ generates one when fnox cannot supply it. The hub refuses to start without it �
 a hub that cannot verify a token would accept anything.
 The MCP server treats it as optional and runs local-only without it: its update
 log is the authoritative replica, so no secret means no sync, not no service
-(`sync_status` reports `hub.status: "disabled"`). It also reads `WORKSPACE_ID`
-(default `main`) and `UBERBLICK_DB` (default
-`$XDG_DATA_HOME/uberblick/<workspace>.sqlite`).
+(`sync_status` reports `hub.status: "disabled"`). `WORKSPACE_ID` it does
+require — with none set it exits non-zero, naming `ub init` — and it reads
+`UBERBLICK_DB` (default `$XDG_DATA_HOME/uberblick/<workspaceUuid>.sqlite`, keyed
+by the bare uuid so both spellings of a workspace hydrate one file).

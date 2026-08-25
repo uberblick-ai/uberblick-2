@@ -5,7 +5,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { getBlocksFragment, setTitle } from "@uberblick/schema";
+import { getBlocksFragment, parseRoom, setTitle } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { bindGuardedEditor } from "../editor/guarded-binding.js";
 import { changedBlocks } from "../editor/changed-blocks.js";
@@ -33,7 +33,7 @@ import type { SelectThread } from "./threads.js";
  * The pane frame with a message in it instead of a document.
  *
  * Every "there is nothing to edit here" screen renders through this — no
- * document picked, an unknown workspace, a malformed link, a link whose
+ * document picked, no workspace at all, a malformed link, a link whose
  * document has not synced yet. One frame for all of them means resolving a link
  * swaps the words inside the column rather than moving the column.
  */
@@ -77,11 +77,22 @@ type CopyResult = "idle" | "copied" | "failed";
  * The room key, doubling as the document's shareable link (#68).
  *
  * The line that already identified the document becomes the copy affordance
- * rather than growing a button beside it — the path and the room key are the
- * same string, so there was never anything else to show. The confirmation is
- * positioned out of flow for the reason the rest of this line is built the way
- * it is (#76): nothing here may move sideways, and a word appearing in the row
- * would move everything after it.
+ * rather than growing a button beside it — there was never anything else to
+ * show. The confirmation is positioned out of flow for the reason the rest of
+ * this line is built the way it is (#76): nothing here may move sideways, and a
+ * word appearing in the row would move everything after it.
+ *
+ * The link is built from `segment` — the workspace as the *address* spells it —
+ * rather than from the room key, which carries the bare uuid. The two are the
+ * same string for an undecorated workspace and differ for `<slug>-<uuid>`, and
+ * a copy that quietly handed back the undecorated form would rewrite somebody's
+ * link on its way out of their own address bar. What is copied is the address
+ * this document is open at.
+ *
+ * The visible label stays the room key, because that is what the rest of this
+ * line is about: the sync state of a room, named the way the hub and the update
+ * log name it. The accessible name goes the other way and announces the
+ * address, because that is the thing the click produces.
  *
  * The copy goes through `writeToClipboard`, not `navigator.clipboard`: that API
  * exists only in a secure context, and serving this client over plain http on a
@@ -89,7 +100,13 @@ type CopyResult = "idle" | "copied" | "failed";
  * back to `execCommand`, and reports whether either worked — so a failure is
  * said out loud rather than swallowed into a button that quietly does nothing.
  */
-function CopyLink({ room }: { room: string }): ReactElement {
+function CopyLink({
+  room,
+  segment,
+}: {
+  room: string;
+  segment: string;
+}): ReactElement {
   const [result, setResult] = useState<CopyResult>("idle");
 
   useEffect(() => {
@@ -98,8 +115,12 @@ function CopyLink({ room }: { room: string }): ReactElement {
     return () => clearTimeout(timer);
   }, [result]);
 
+  // The one address this button is about: what it copies, and what it says it
+  // copies. Two derivations of that would be two chances for them to disagree.
+  const address = `${segment}/${parseRoom(room).uuid}`;
+
   const copy = async (): Promise<void> => {
-    const ok = await writeToClipboard(shareUrl(room, window.location.origin));
+    const ok = await writeToClipboard(shareUrl(address, window.location.origin));
     setResult(ok ? "copied" : "failed");
   };
 
@@ -110,9 +131,11 @@ function CopyLink({ room }: { room: string }): ReactElement {
         className="ub-room"
         // The visible label is the room key, which names the document but not
         // the action. `title` is not reliably announced, so the accessible name
-        // is set explicitly and carries both.
-        aria-label={`Copy link to ${room}`}
-        title={`Copy link to ${room}`}
+        // is set explicitly and carries both — and it names the address that is
+        // actually copied, not the room key beside it, so what a screen reader
+        // announces is what lands on the clipboard.
+        aria-label={`Copy link to ${address}`}
+        title={`Copy link to ${address}`}
         onClick={() => void copy()}
       >
         {room}
@@ -158,8 +181,11 @@ function CopyLink({ room }: { room: string }): ReactElement {
  */
 export function StatusLine({
   connection,
+  segment,
 }: {
   connection: RoomConnection;
+  /** The workspace as the address spells it — what a copied link carries. */
+  segment: string;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const peers = usePeers(connection);
@@ -182,7 +208,7 @@ export function StatusLine({
           local read is over, and it is over immediately where there is no
           IndexedDB to read. */}
       {status.hasLocalCache && <span className="ub-muted">local cache</span>}
-      <CopyLink room={connection.room} />
+      <CopyLink room={connection.room} segment={segment} />
       {state !== "synced" && status.unsyncedChanges > 0 && (
         <span className="ub-pending">
           {status.unsyncedChanges} sync message
@@ -422,6 +448,7 @@ function BoundEditor({
 
 export function EditorPane({
   connection,
+  segment,
   author,
   knownTags,
   archived,
@@ -429,6 +456,8 @@ export function EditorPane({
   onSelectThread,
 }: {
   connection: RoomConnection | null;
+  /** The workspace as the address spells it — see {@link StatusLine}. */
+  segment: string;
   /** The awareness name this client publishes — the author of its comments. */
   author: string;
   /**
@@ -492,7 +521,7 @@ export function EditorPane({
             setTitle(connection.ydoc, event.target.value);
           }}
         />
-        <StatusLine connection={connection} />
+        <StatusLine connection={connection} segment={segment} />
         {foreign.length > 0 ? (
           <ForeignFallback
             connection={connection}

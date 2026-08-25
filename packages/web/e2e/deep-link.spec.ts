@@ -5,7 +5,7 @@
  * and both are in the same story:
  *
  * - **A fresh browser opens a link.** Empty IndexedDB, no prior visit, straight
- *   to `/main/<uuid>`. That exercises the server's SPA fallback (a deep path has
+ *   to `/<workspace>/<uuid>`. That exercises the server's SPA fallback (a deep path has
  *   no file behind it, so something has to answer with index.html), the
  *   hydration of a replica that starts with nothing, and the waiting state
  *   resolving into the document — none of which a stubbed connection can show.
@@ -73,6 +73,11 @@ function docButton(page: Page, title: string) {
 
 function openPath(page: Page): string {
   return new URL(page.url()).pathname;
+}
+
+/** The workspace segment the bundle was built with — what `/` redirects to. */
+function ws(): string {
+  return harness().workspace;
 }
 
 /**
@@ -150,20 +155,47 @@ async function sessionSurvived(page: Page): Promise<boolean> {
   );
 }
 
+test("a workspace answers to both its spellings, and to neither of somebody else's", async ({
+  browser,
+}) => {
+  // The slug is display: `<slug>-<uuid>` and `<uuid>` are one workspace, so
+  // both addresses open one document — from a browser that has never seen
+  // either, over the real transport.
+  const author = await openApp(browser);
+  const title = docTitle("both-spellings");
+  const uuid = await createDoc(author, title);
+
+  const bare = await openApp(browser, `/${harness().workspaceUuid}/${uuid}`);
+  await expect(bare.locator(".ub-title")).toHaveValue(title);
+  await expect(editor(bare)).toBeVisible();
+  // Kept as typed — a link travels with the spelling it was written with.
+  expect(openPath(bare)).toBe(`/${harness().workspaceUuid}/${uuid}`);
+
+  const decorated = await openApp(browser, `/${ws()}/${uuid}`);
+  await expect(decorated.locator(".ub-title")).toHaveValue(title);
+  expect(openPath(decorated)).toBe(`/${ws()}/${uuid}`);
+
+  // And a first segment that is no workspace id opens nothing at all.
+  const wrong = await openApp(browser, `/main/${uuid}`);
+  await expect(wrong.locator(".ub-notice")).toContainText("Not a document link");
+  expect(openPath(wrong)).toBe(`/main/${uuid}`);
+});
+
 test("a document's URL is its address: the sidebar writes it, history walks it, a fresh browser opens it", async ({
   browser,
 }) => {
   const author = await openApp(browser);
   await expect(author.locator(".ub-list-head")).toBeVisible();
 
-  // `/` is not an address; the workspace is.
-  await expect(author).toHaveURL(/\/main$/);
+  // `/` is not an address; the workspace is. The redirect comes from the
+  // build-time `WORKSPACE_ID`, which is the only thing that answers `/`.
+  await expect(author).toHaveURL(new RegExp(`/${ws()}$`));
 
   const firstTitle = docTitle("first");
   const secondTitle = docTitle("second");
   const first = await createDoc(author, firstTitle);
   const second = await createDoc(author, secondTitle);
-  expect(openPath(author)).toBe(`/main/${second}`);
+  expect(openPath(author)).toBe(`/${ws()}/${second}`);
 
   // ---- the sidebar writes the address, without reloading ----
   await markSession(author);
@@ -172,7 +204,7 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
   // changes, and that render must not put "waiting for sync" on the screen.
   await watchForInsertion(author, ".ub-notice");
   await docButton(author, firstTitle).click();
-  await expect(author).toHaveURL(new RegExp(`/main/${first}$`));
+  await expect(author).toHaveURL(new RegExp(`/${ws()}/${first}$`));
   await expect(author.locator(".ub-title")).toHaveValue(firstTitle);
   expect(await sessionSurvived(author)).toBe(true);
   expect(await wasEverInserted(author)).toBe(false);
@@ -180,29 +212,29 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
   // ---- Back and Forward re-open what was viewed ----
   await author.goBack();
   await expect(author.locator(".ub-title")).toHaveValue(secondTitle);
-  expect(openPath(author)).toBe(`/main/${second}`);
+  expect(openPath(author)).toBe(`/${ws()}/${second}`);
 
   await author.goForward();
   await expect(author.locator(".ub-title")).toHaveValue(firstTitle);
-  expect(openPath(author)).toBe(`/main/${first}`);
+  expect(openPath(author)).toBe(`/${ws()}/${first}`);
   // Still the same document instance: pushState navigation all the way.
   expect(await sessionSurvived(author)).toBe(true);
 
   // ---- reload restores the same document ----
   await author.reload();
   await expect(author.locator(".ub-title")).toHaveValue(firstTitle);
-  expect(openPath(author)).toBe(`/main/${first}`);
+  expect(openPath(author)).toBe(`/${ws()}/${first}`);
 
-  const shareable = new URL(`/main/${first}`, harness().appUrl).href;
+  const shareable = new URL(`/${ws()}/${first}`, harness().appUrl).href;
 
   // ---- a fresh browser session opens the link, with no navigation of its own ----
   // Its own context, so: empty IndexedDB, no history, nothing cached. The
   // server has no file at this path — only the SPA fallback answers it — and
   // the replica knows no documents until the directory and the room sync in.
-  const reader = await openApp(browser, `/main/${first}`);
+  const reader = await openApp(browser, `/${ws()}/${first}`);
   await expect(reader.locator(".ub-title")).toHaveValue(firstTitle);
   await expect(editor(reader)).toBeVisible();
-  expect(openPath(reader)).toBe(`/main/${first}`);
+  expect(openPath(reader)).toBe(`/${ws()}/${first}`);
   // The link the author would have copied is the one that just worked.
   expect(reader.url()).toBe(shareable);
 });

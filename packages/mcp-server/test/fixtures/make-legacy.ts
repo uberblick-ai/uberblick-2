@@ -29,6 +29,10 @@ rmSync(target, { force: true });
 
 const UUID = "3f2b0a6c-8b1e-4a55-9c47-0d5d1e6b7a90";
 const OTHER = "9a1c7d2e-4f60-4b18-8f3a-2c5e9b0d6c11";
+// The room key exactly as the old binding wrote it, back when a workspace id
+// was a name. The store treats room keys as opaque, and the committed fixture
+// is a historical artefact: this string must not be modernised, or it would
+// stop reproducing the file it exists to reproduce.
 const ROOM = `main/${UUID}`;
 
 const store = new MirrorStore(target);

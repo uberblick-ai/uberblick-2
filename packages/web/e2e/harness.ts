@@ -14,7 +14,8 @@
  *   is read back before the dev server starts, because the bundle needs it.
  *
  * - **The bundle is configured the way `mise run web` configures it.**
- *   `vite.config.ts` reads `HUB_URL` and `HUB_AUTH_TOKEN` from the environment
+ *   `vite.config.ts` reads `HUB_URL`, `HUB_AUTH_TOKEN` and `WORKSPACE_ID` from
+ *   the environment
  *   at config time (fnox supplies them in the real task), so setting them here
  *   before `createServer` is what points the browser at *this* hub with a token
  *   it accepts. No committed `.env`, no second copy of that wiring. The dev
@@ -26,6 +27,7 @@
  * database afterwards — a restart, not a fresh hub.
  */
 
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -41,11 +43,25 @@ import type { ViteDevServer } from "vite";
  */
 const SECRET = "uberblick-e2e-hub-secret";
 
+/**
+ * The workspace for the run: a fresh uuid, decorated with a display slug.
+ *
+ * Fresh per run, so nothing shares a corpus with a previous one; decorated,
+ * because the bundle's `WORKSPACE_ID` is what `/` redirects to, and a run
+ * should exercise the spelling a person would actually configure.
+ */
+const WORKSPACE_UUID = randomUUID();
+const WORKSPACE = `uberblick-${WORKSPACE_UUID}`;
+
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export interface Harness {
   /** Where the browser goes. The dev server's real, ephemeral address. */
   readonly appUrl: string;
+  /** The workspace as the bundle spells it — what `/` redirects to. */
+  readonly workspace: string;
+  /** The same workspace, bare. Room keys and token claims carry only this. */
+  readonly workspaceUuid: string;
   /** Start the hub again — same port, same database. */
   startHub(): Promise<void>;
   /** Flush and stop the hub, leaving the dev server and the browser alone. */
@@ -83,6 +99,9 @@ export async function startHarness(): Promise<Harness> {
 
     process.env.HUB_URL = `ws://127.0.0.1:${port}`;
     process.env.HUB_AUTH_TOKEN = SECRET;
+    // The one address that names no workspace, `/`, resolves through this — the
+    // same define `mise run web` supplies from mise `[env]`.
+    process.env.WORKSPACE_ID = WORKSPACE;
 
     vite = await createServer({
       configFile: join(packageRoot, "vite.config.ts"),
@@ -107,6 +126,8 @@ export async function startHarness(): Promise<Harness> {
 
     return {
       appUrl,
+      workspace: WORKSPACE,
+      workspaceUuid: WORKSPACE_UUID,
       async startHub() {
         if (hub !== null) return;
         hub = await createHub({ ...config, port });

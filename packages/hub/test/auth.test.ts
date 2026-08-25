@@ -10,6 +10,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import * as Y from "yjs";
 import type { Hub } from "../src/server.js";
 import {
+  OTHER_WORKSPACE,
   TEST_SECRET,
   TEXT_KEY,
   createClient,
@@ -75,23 +76,34 @@ describe("token auth", () => {
 
   it("rejects a valid token from another workspace", async () => {
     const foreign = await token("read-write", {
-      workspace: "other",
+      workspace: OTHER_WORKSPACE,
       sub: "intruder",
     });
-    const rejected = client(testRoom("main"), foreign);
+    const rejected = client(testRoom(), foreign);
 
     await expect(rejected.denied).resolves.toBe("workspace-mismatch");
   });
 
   it("lets a token open its own workspace's rooms", async () => {
-    const other = await token("read-write", { workspace: "other" });
-    const connected = client(testRoom("other"), other);
+    const other = await token("read-write", { workspace: OTHER_WORKSPACE });
+    const connected = client(testRoom(OTHER_WORKSPACE), other);
 
     await expect(connected.synced).resolves.toBeUndefined();
   });
 
   it("rejects a room name that is not <workspace>/<uuid>", async () => {
     const rejected = client("bare-room-name", await token("read-write"));
+
+    await expect(rejected.denied).resolves.toBe("workspace-mismatch");
+  });
+
+  it("rejects a room whose workspace segment is not a workspace id", async () => {
+    // A slug-decorated spelling names no room: the identity is the uuid, and
+    // the token claim the hub compares against carries only that.
+    const rejected = client(
+      `uberblick-${testRoom()}`,
+      await token("read-write"),
+    );
 
     await expect(rejected.denied).resolves.toBe("workspace-mismatch");
   });

@@ -35,7 +35,7 @@ import {
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { threadCardId } from "../src/ui/threads.js";
 
-const WORKSPACE = "main";
+const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 /** The annotated paragraph. "quick brown" — [4, 15) — is the marked range. */
 const PARAGRAPH = "The quick brown fox jumps.";
 const UUID = "5c2f8a41-7b93-4d6e-a018-3f9c2b7e5d04";

@@ -1,9 +1,16 @@
 /**
  * Deep links: every document is addressable at `/<workspaceId>/<docUuid>`.
  *
- * The path *is* the room key. `roomForDoc` already builds `main/<uuid>`, so a
- * link is that string with a slash in front of it and there is no second naming
- * scheme to keep in step — which is also why {@link shareUrl} can be one line.
+ * The first segment *is* the workspace — this client is not configured for one
+ * and cannot enumerate them. A link carries the workspace it belongs to, which
+ * is what makes a pasted link from somebody else's workspace open that
+ * workspace rather than the wrong document in this one. The build-time
+ * `WORKSPACE_ID` (mise `[env]` in dev) only answers the one address that names
+ * no workspace, `/`.
+ *
+ * The segment may be decorated — `uberblick-<uuid>` — and is kept exactly as
+ * typed: the slug is display, so nothing here rewrites somebody's spelling of
+ * their own workspace. Only {@link Workspace.uuid} reaches a room key.
  *
  * Hand-rolled on purpose (#68). There are two routes; a router library would be
  * a new runtime dependency buying nothing but indirection.
@@ -14,40 +21,48 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { roomForDoc } from "@uberblick/schema";
+import { parseWorkspaceId } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
+
+/** The workspace an address names: the identity, and how the URL spells it. */
+export interface Workspace {
+  /** The bare uuid. Room keys and token claims are built from this alone. */
+  uuid: string;
+  /** The first path segment, as typed — decorated or not. */
+  segment: string;
+}
 
 /**
  * What an address resolves to.
  *
  * `invalid` is a statement about the *link*, never about the corpus: a
  * well-formed uuid this replica has not heard of is a `doc` route that has not
- * arrived yet, not a 404. See {@link docIsPresent}.
+ * arrived yet, not a 404. See {@link docIsHydrated}. It still carries the
+ * workspace when the address named a usable one, so a mistyped document uuid
+ * does not also empty the sidebar.
  */
 export type Route =
-  | { kind: "list" }
-  | { kind: "doc"; uuid: string }
-  | { kind: "unknown-workspace"; workspaceId: string }
-  | { kind: "invalid"; reason: string };
+  | { kind: "no-workspace" }
+  | { kind: "list"; workspace: Workspace }
+  | { kind: "doc"; workspace: Workspace; uuid: string }
+  | { kind: "invalid"; reason: string; workspace: Workspace | null };
 
 /**
  * Canonical UUID shape. Matched case-insensitively — a *shape* check only.
  *
- * Deliberately not `parseRoom`'s validation, which only rejects empty segments
- * and stray slashes: under that rule every typo is a document that might still
- * sync, and the "waiting for sync" state could never be told apart from a
- * mistyped link. The version and variant nibbles are left unconstrained so a
- * document whose uuid came from somewhere other than `crypto.randomUUID` still
- * opens.
+ * The version and variant nibbles are left unconstrained so a document whose
+ * uuid came from somewhere other than `crypto.randomUUID` still opens. This is
+ * the *document* segment; the workspace segment has its own rule, and schema
+ * owns it.
  */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * One path segment, percent-decoding tolerated.
  *
- * A malformed escape (`/main/%zz`) makes `decodeURIComponent` throw, and an
- * uncaught throw here would blank the app instead of showing the invalid-link
- * state that such a URL has earned.
+ * A malformed escape (`/<workspace>/%zz`) makes `decodeURIComponent` throw, and
+ * an uncaught throw here would blank the app instead of showing the
+ * invalid-link state that such a URL has earned.
  */
 function decodeSegment(segment: string): string {
   try {
@@ -57,32 +72,67 @@ function decodeSegment(segment: string): string {
   }
 }
 
-/** Resolve a pathname against the workspace this client is configured for. */
-export function parseRoute(pathname: string, workspace: string): Route {
+/** The workspace a segment names, or null when it names none. */
+function readWorkspace(segment: string): Workspace | null {
+  try {
+    return { uuid: parseWorkspaceId(segment).uuid, segment };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a pathname.
+ *
+ * `configured` is the build-time workspace, or null when the build carries
+ * none — it answers `/` and nothing else. A value that is not a workspace id is
+ * treated as no workspace at all, which is what a misconfigured build has.
+ */
+export function parseRoute(pathname: string, configured: string | null): Route {
   const parts = pathname.split("/");
   // A pathname always starts with "/", so the head is always an empty string;
   // one trailing slash is a benign spelling of the same address and is dropped
   // (`canonicalPath` then takes it out of the address bar). Every *other* empty
-  // segment is a malformed link — `/main//<uuid>` names no room, and
+  // segment is a malformed link — `/<workspace>//<uuid>` names no room, and
   // `parseRoom` rejects empty segments too, so the two agree about what a
   // well-formed `<workspace>/<uuid>` is.
   if (parts.length > 1 && parts[parts.length - 1] === "") parts.pop();
   const segments = parts.slice(1).map(decodeSegment);
   if (segments.some((segment) => segment === "")) {
-    return { kind: "invalid", reason: "It has an empty path segment." };
+    return {
+      kind: "invalid",
+      reason: "It has an empty path segment.",
+      workspace: null,
+    };
   }
 
-  // `/` — the app with nothing open. Canonicalised to `/<workspace>` by
-  // `canonicalPath`, so the doc list has an address of its own.
-  if (segments.length === 0) return { kind: "list" };
+  // `/` — the app with no workspace named. Canonicalised to the build's
+  // workspace by `canonicalPath`, so the doc list has an address of its own;
+  // with no build-time workspace there is nothing to open, and saying so is the
+  // whole answer.
+  if (segments.length === 0) {
+    const workspace = configured === null ? null : readWorkspace(configured);
+    return workspace === null ? { kind: "no-workspace" } : { kind: "list", workspace };
+  }
 
-  const workspaceId = segments[0] ?? "";
-  if (workspaceId !== workspace) return { kind: "unknown-workspace", workspaceId };
+  const first = segments[0] ?? "";
+  const workspace = readWorkspace(first);
+  if (workspace === null) {
+    return {
+      kind: "invalid",
+      reason: `“${first}” is not a workspace id.`,
+      workspace: null,
+    };
+  }
 
   const uuid = segments[1];
-  if (uuid === undefined) return { kind: "list" };
+  if (uuid === undefined) return { kind: "list", workspace };
   if (segments.length > 2) {
-    return { kind: "invalid", reason: "It has more path segments than an address." };
+    return {
+      kind: "invalid",
+      reason: "It has more path segments than an address.",
+      workspace,
+    };
   }
 
   // Case-preserving on purpose. Only the *shape* is normalised away; the uuid
@@ -92,38 +142,54 @@ export function parseRoute(pathname: string, workspace: string): Route {
   // document's link at a room that does not exist, where it would wait for a
   // sync that can never arrive.
   if (!UUID.test(uuid)) {
-    return { kind: "invalid", reason: `“${uuid}” is not a document uuid.` };
+    return {
+      kind: "invalid",
+      reason: `“${uuid}” is not a document uuid.`,
+      workspace,
+    };
   }
-  return { kind: "doc", uuid };
+  return { kind: "doc", workspace, uuid };
 }
 
-/** The path of one document. Same string as its room key, with a leading slash. */
-export function docPath(workspaceId: string, uuid: string): string {
-  return `/${roomForDoc(workspaceId, uuid)}`;
+/**
+ * The path of one document, under the workspace as the address spells it.
+ *
+ * Not `roomForDoc`: the room key carries the bare uuid, while a link keeps the
+ * decorated spelling it was written with. For an undecorated workspace the two
+ * strings are the same, which is why {@link shareUrl} can take a room key.
+ */
+export function docPath(segment: string, uuid: string): string {
+  return `/${segment}/${uuid}`;
 }
 
 /**
  * The address `route` should be shown at, or `null` to leave the URL alone.
  *
  * Only routes that resolve get rewritten. A bad link keeps the address it was
- * opened with: correcting `/typo/x` to `/main` would erase the evidence the
- * error message is about, and would put a working address behind a screen that
- * says something is wrong.
+ * opened with: correcting it would erase the evidence the error message is
+ * about, and would put a working address behind a screen that says something is
+ * wrong.
  */
-export function canonicalPath(route: Route, workspace: string): string | null {
+export function canonicalPath(route: Route): string | null {
   switch (route.kind) {
     case "list":
-      return `/${workspace}`;
+      return `/${route.workspace.segment}`;
     case "doc":
-      return docPath(workspace, route.uuid);
+      return docPath(route.workspace.segment, route.uuid);
     default:
       return null;
   }
 }
 
-/** The absolute link to a room, for sharing. */
-export function shareUrl(room: string, origin: string): string {
-  return `${origin}/${room}`;
+/**
+ * The absolute link to an address, for sharing.
+ *
+ * `address` is the path without its leading slash — `<workspace>/<uuid>`, with
+ * the workspace spelled the way the address bar spells it. For an undecorated
+ * workspace that is also the room key, which is why one function serves both.
+ */
+export function shareUrl(address: string, origin: string): string {
+  return `${origin}/${address}`;
 }
 
 /**

@@ -12,7 +12,9 @@
  * resolution ends by naming `WORKSPACE_ID`, `HUB_URL` and `HUB_AUTH_TOKEN`, and
  * both consumers read them back through `resolveMcpConfig` — one definition of
  * the defaults, of the database path, and of the workspace rule, for the server
- * and for `ub status` alike. Environment beats every file for the same reason:
+ * and for `ub status` alike. A workspace id is a uuid (optionally
+ * slug-decorated); schema owns that parse and this module applies it to every
+ * layer, environment and files alike. Environment beats every file for the same reason:
  * `HUB_URL=… ub mcp serve` has to keep working.
  *
  * Absent files are a default, never an error: nothing here requires `ub init` to
@@ -31,7 +33,7 @@
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { assertWorkspaceSegment } from "@uberblick/mcp-server";
+import { parseWorkspaceId } from "@uberblick/schema";
 import {
   publishOwnerOnly,
   publishStaged,
@@ -402,9 +404,11 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
     },
   ]);
   if (workspace.value !== null) {
-    // The same rule the MCP server applies, applied to file-sourced values too:
-    // the workspace names the SQLite file as well as the room.
-    assertWorkspaceSegment(workspace.value, workspace.label);
+    // The same rule the MCP server applies, applied to file-sourced values too.
+    // The value is kept as typed — a `<slug>-<uuid>` spelling is stored and
+    // shown the way its owner wrote it; only what reaches a room, a token or
+    // the database is the bare uuid, and that parse happens where it is used.
+    parseWorkspaceId(workspace.value, workspace.label);
   }
 
   const hubUrl = pick([

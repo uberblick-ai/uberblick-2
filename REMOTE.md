@@ -185,11 +185,17 @@ documents this workspace has never heard of.
 On a second computer, from a fresh clone:
 
 ```sh
-mise trust && mise run setup -- --yes
+mise trust && mise run setup -- --yes --workspace <WORKSPACE_ID>
 node packages/cli/bin/ub.mjs remote join wss://<TAILSCALE_HOST>/ws \
   --secret-file ~/uberblick-remote-secret
 mise run web
 ```
+
+`<WORKSPACE_ID>` is the workspace this second machine is joining — the value the
+first machine's `ub status` prints. It has to be given, because a workspace id
+is a uuid and `ub init` with none in force generates a *new* one: a machine that
+invented its own workspace would join a hub and find nothing of yours there, the
+rooms being keyed by a different id. Either spelling works, decorated or bare.
 
 `ub init` imports no documents, so that workspace is empty and there is nothing
 to duplicate — do not run `mise run import-seed` on it. `join` pulls the whole

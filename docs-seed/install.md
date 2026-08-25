@@ -46,13 +46,18 @@ not a warning.
 
 - Settles your **awareness identity**: the display name and cursor colour other
   clients see. Written to `$XDG_CONFIG_HOME/uberblick/config.json`.
-- Settles the **workspace** (default `main`), which is the first segment of every
-  room key and the name of the local SQLite file.
+- Settles the **workspace**, which is the first segment of every room key and
+  the name of the local SQLite file. A workspace id is a uuid, generated here
+  when this machine has none; it may be decorated for display as
+  `<slug>-<uuid>`, and the slug is parsed off before the id reaches a room, a
+  token claim or the database filename.
 - Makes sure there is a **hub signing secret**. `HUB_AUTH_TOKEN` is the HMAC
   secret hub tokens are signed with, not a token.
 
-It is convenience, never a precondition: every other command works without it,
-falling back to workspace `main` and hub `ws://localhost:1234`.
+It is convenience for everything except the workspace, which has no default:
+other commands fall back to hub `ws://localhost:1234`, but a command that opens
+the corpus — `ub status`, `ub remote`, `ub mcp serve`, the MCP server itself —
+exits non-zero and names `ub init` until a workspace is configured.
 
 Run it again whenever you like. It is idempotent, and it never replaces a secret
 that already exists.
