@@ -42,9 +42,16 @@ export interface Workspace {
  * arrived yet, not a 404. See {@link docIsHydrated}. It still carries the
  * workspace when the address named a usable one, so a mistyped document uuid
  * does not also empty the sidebar.
+ *
+ * `no-workspace` carries *why* there is none, because the two causes have
+ * different fixes: a build with no `WORKSPACE_ID` at all needs one, while a
+ * build carrying a value that is not a workspace id — the legacy `main`, say —
+ * needs that value replaced. Telling a developer the build "carries none" when
+ * it carries a rejected one sends them looking in the wrong place.
  */
 export type Route =
-  | { kind: "no-workspace" }
+  | { kind: "no-workspace"; reason: "absent" }
+  | { kind: "no-workspace"; reason: "invalid"; configured: string }
   | { kind: "list"; workspace: Workspace }
   | { kind: "doc"; workspace: Workspace; uuid: string }
   | { kind: "invalid"; reason: string; workspace: Workspace | null };
@@ -88,7 +95,8 @@ function readWorkspace(segment: string): Workspace | null {
  *
  * `configured` is the build-time workspace, or null when the build carries
  * none — it answers `/` and nothing else. A value that is not a workspace id is
- * treated as no workspace at all, which is what a misconfigured build has.
+ * treated as no workspace at all, which is what a misconfigured build has; the
+ * route says which of the two it was.
  */
 export function parseRoute(pathname: string, configured: string | null): Route {
   const parts = pathname.split("/");
@@ -113,8 +121,11 @@ export function parseRoute(pathname: string, configured: string | null): Route {
   // with no build-time workspace there is nothing to open, and saying so is the
   // whole answer.
   if (segments.length === 0) {
-    const workspace = configured === null ? null : readWorkspace(configured);
-    return workspace === null ? { kind: "no-workspace" } : { kind: "list", workspace };
+    if (configured === null) return { kind: "no-workspace", reason: "absent" };
+    const workspace = readWorkspace(configured);
+    return workspace === null
+      ? { kind: "no-workspace", reason: "invalid", configured }
+      : { kind: "list", workspace };
   }
 
   const first = segments[0] ?? "";
