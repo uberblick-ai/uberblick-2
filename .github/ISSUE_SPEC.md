@@ -104,9 +104,14 @@ doesn't answer? Then the issue is not `ready`.**
   is the "least code wins" principle made enforceable: it is what scope
   creep gets rejected against.
 - **Pointers** — where a fresh agent should look before writing anything:
-  relevant files/modules, prior PRs and issues, CLAUDE.md sections, doc UUIDs
-  (once the MCP server is live), and known gotchas (e.g. "y-prosemirror
-  deletes unknown elements — see #14"). `None.` only when CLAUDE.md genuinely
+  relevant files/modules, prior PRs and issues, CLAUDE.md sections, product
+  docs, and known gotchas (e.g. "y-prosemirror deletes unknown elements —
+  see #14"). Cite a product doc as `title (uuid)` — e.g. "Editing and blocks
+  (b1d5d904-c8b6-46a1-a4df-22251875bcdb)"; uuids come from `list_docs`
+  (authoritative) and from the seed files' frontmatter under `docs-seed/`,
+  with a convenience table in `docs-seed/README.md` once #139 lands. Cite,
+  never restate: the agent reads the doc itself at dispatch, so a pointer
+  that copies its content only ages. `None.` only when CLAUDE.md genuinely
   covers it. Every implementing agent starts with zero session memory; this
   section is what makes that cheap instead of expensive.
 
