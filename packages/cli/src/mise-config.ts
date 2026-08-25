@@ -250,8 +250,10 @@ function render(env: DerivedEnvironment): string {
   return `${MARKER}
 #
 # Derived from $XDG_CONFIG_HOME/uberblick/{credentials,config}.json — same
-# values, one owner. Do not edit: \`ub init\` and \`ub remote\` rewrite it from
-# those files. Delete it and rerun \`ub init\` and it comes back the same.
+# values, one owner. Do not edit: \`ub init\` writes it from those files, and it
+# is the only command that does. \`ub remote\` changes the authority files
+# without regenerating this — rerun \`ub init\` to pick the new endpoint and
+# secret up. Delete it and rerun \`ub init\` and it comes back the same.
 #
 # It exists because mise tasks and \`.mcp.json\` inherit their environment from
 # mise rather than from \`ub\`. \`fnox exec\` overrides it, so a decryptable
