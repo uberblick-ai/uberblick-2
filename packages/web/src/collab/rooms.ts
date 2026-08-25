@@ -34,7 +34,7 @@ import {
 } from "@hocuspocus/provider";
 import { IndexeddbPersistence } from "y-indexeddb";
 import * as Y from "yjs";
-import { HUB_AUTH_TOKEN, HUB_URL, WORKSPACE } from "../config.js";
+import { HUB_AUTH_TOKEN, WORKSPACE, hubUrl } from "../config.js";
 import { mintToken } from "./token.js";
 import type { AwarenessUser } from "./identity.js";
 
@@ -59,7 +59,9 @@ function cancelPendingDrop(): void {
 function sharedSocket(): HocuspocusProviderWebsocket {
   if (socket !== null) return socket;
   const created = new HocuspocusProviderWebsocket({
-    url: HUB_URL,
+    // Resolved before the first render (see main.tsx), so it is a plain read
+    // here — the socket is created by a React effect, long after startup.
+    url: hubUrl(),
     // A hub restart should be picked up in seconds, not half a minute: the
     // default backoff climbs to 30s. Deterministic, like the MCP server's —
     // one tab dialling a local hub has nothing to spread out.

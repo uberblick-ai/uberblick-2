@@ -54,7 +54,7 @@ description = "Start the Vite dev server"
 run = "fnox exec --if-missing warn -- pnpm --filter @uberblick/web dev"
 
 [tasks.build-web]
-description = "Build the web client with HUB_URL and HUB_AUTH_TOKEN baked into packages/web/dist"
+description = "Build the web client into packages/web/dist (HUB_AUTH_TOKEN baked in; HUB_URL only as the fallback)"
 run = "fnox exec --if-missing error -- pnpm --filter @uberblick/web build"
 
 # hub + web only. The MCP server is a stdio process spawned by its client

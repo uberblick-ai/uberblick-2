@@ -41,6 +41,7 @@ import type { Route } from "./route.js";
 import {
   useDirectory,
   useDocMeta,
+  useHubEndpoint,
   useIdentity,
   useRoom,
   useStoredFlag,
@@ -150,9 +151,13 @@ export function App(): ReactElement {
     setFocusedThread((previous) => focusThread(previous, threadId));
   }, []);
 
-  const directory = useRoom(directoryRoom(WORKSPACE), identity);
+  // No room before the hub endpoint is known (#91): the shared websocket is
+  // built from the first room acquired, so one acquired early would pin the
+  // session to the build-time fallback.
+  const hubReady = useHubEndpoint();
+  const directory = useRoom(hubReady ? directoryRoom(WORKSPACE) : null, identity);
   const doc = useRoom(
-    selected === null ? null : roomForDoc(WORKSPACE, selected),
+    hubReady && selected !== null ? roomForDoc(WORKSPACE, selected) : null,
     identity,
   );
   const entries = useDirectory(directory);

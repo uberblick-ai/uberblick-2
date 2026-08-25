@@ -21,6 +21,9 @@ COPY . .
 
 FROM workspace AS web-build
 
+# HUB_URL is only the bundle's fallback: the client prefers the hub endpoint
+# Caddy serves at /uberblick-config.json (see the Caddyfile), so retargeting a
+# deployment does not need this image rebuilt.
 ARG HUB_URL
 ARG HUB_AUTH_TOKEN_DIGEST
 RUN --mount=type=secret,id=hub-auth-token \

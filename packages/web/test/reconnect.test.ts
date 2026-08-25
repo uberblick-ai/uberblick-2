@@ -31,14 +31,14 @@ const SECRET = "reconnect-test-secret";
 
 /**
  * `rooms.ts` reads the hub address and the signing secret from the config
- * module at import time, and the hub's port is only known once it is listening
- * — so the config is mocked and the module imported after the hub is up.
+ * module, and the hub's port is only known once it is listening — so the config
+ * is mocked and the module imported after the hub is up. The mock stands in for
+ * a completed `resolveHubUrl()`; resolution itself is covered by
+ * `hub-config.test.ts`.
  */
 const injected = vi.hoisted(() => ({ url: "", secret: "" }));
 vi.mock("../src/config.js", () => ({
-  get HUB_URL() {
-    return injected.url;
-  },
+  hubUrl: () => injected.url,
   get HUB_AUTH_TOKEN() {
     return injected.secret;
   },

@@ -16,6 +16,7 @@ import {
 import type { DirectoryEntry, DocMeta } from "@uberblick/schema";
 import { acquireRoom } from "../collab/rooms.js";
 import type { RoomConnection, RoomStatus } from "../collab/rooms.js";
+import { resolveHubUrl } from "../config.js";
 import { AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
 import type { AwarenessUser } from "../collab/identity.js";
 import { changedBlocks } from "../editor/changed-blocks.js";
@@ -26,6 +27,32 @@ import { observeOutline } from "./outline.js";
 import type { OutlineEntry } from "./outline.js";
 import { observeThreads } from "./threads.js";
 import type { ThreadView } from "./threads.js";
+
+/**
+ * Whether the hub endpoint is known yet.
+ *
+ * The gate every `useRoom` call sits behind. Resolution is one same-origin
+ * `fetch`, so it does not hold up the render — but it must hold up the first
+ * *connect*: a room acquired before it settles dials whatever the fallback is
+ * and stays there for the session, since the shared socket is built once.
+ *
+ * Never false forever: `resolveHubUrl` always resolves, falling back rather
+ * than rejecting, so a deployment with no config document simply becomes ready
+ * one tick later.
+ */
+export function useHubEndpoint(): boolean {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void resolveHubUrl().then(() => {
+      if (live) setReady(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  return ready;
+}
 
 /**
  * Acquire a shared room connection for as long as the component needs it.

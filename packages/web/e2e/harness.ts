@@ -17,7 +17,9 @@
  *   `vite.config.ts` reads `HUB_URL` and `HUB_AUTH_TOKEN` from the environment
  *   at config time (fnox supplies them in the real task), so setting them here
  *   before `createServer` is what points the browser at *this* hub with a token
- *   it accepts. No committed `.env`, no second copy of that wiring.
+ *   it accepts. No committed `.env`, no second copy of that wiring. The dev
+ *   server serves no `/uberblick-config.json`, so the client falls back to that
+ *   injected value — the same path `mise run dev` takes.
  *
  * The hub is startable and stoppable on its own: the offline proof point needs
  * the hub gone while the browser stays up, and back on the same port and
