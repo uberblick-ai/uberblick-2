@@ -21,10 +21,31 @@
  * it and left alone unless `--force` says otherwise; a file that cannot be
  * edited without guessing is named and left untouched. Nothing here prompts, so
  * the whole command runs unattended.
+ *
+ * **One file, start to finish.** The config is opened once, without following
+ * symlinks, and that descriptor stays open until the write is done. Everything
+ * after — what is already installed, what the backup holds, what gets published
+ * — is decided from the bytes read through it, and the file's identity is
+ * checked again immediately before anything is written. Reading by name, then
+ * writing by name some milliseconds later, is how a backup ends up holding a
+ * version that was already replaced, and how a symlink dropped in between the
+ * two ends up receiving the write. A residual window remains between the last
+ * check and the rename, which no amount of care in one process closes; what this
+ * rules out is the wide one.
  */
 
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import type { BigIntStats } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+} from "node:fs";
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
 import type { Io } from "./io.js";
@@ -40,13 +61,24 @@ import {
   targetFile,
   withEntry,
 } from "./mcp-config.js";
-import { classify, publishStaged, writeTempBeside } from "./safe-write.js";
+import {
+  describeFsError,
+  isSymlinkRefusal,
+  publishStaged,
+  removeQuietly,
+  writeTempBeside,
+} from "./safe-write.js";
 
 /** The default when `ub mcp install` is run with no target named. */
 const DEFAULT_TARGET: TargetName = "claude";
 
 interface Flags {
   target: TargetName;
+  /**
+   * A client this command does not know, named anyway. Only reachable with
+   * `--print`, which is the answer for one: it gets the generic stdio snippet.
+   */
+  unlisted: string | null;
   scope: Scope;
   print: boolean;
   force: boolean;
@@ -88,10 +120,11 @@ function parseFlags(argv: string[]): Flags {
     throw new Error(`unexpected argument ${JSON.stringify(positionals[1])}`);
   }
   const named = positionals[0];
-  if (named !== undefined && !TARGETS.includes(named as TargetName)) {
+  const known = named !== undefined && TARGETS.includes(named as TargetName);
+  if (named !== undefined && !known && values.print !== true) {
     throw new Error(
       `unknown target ${JSON.stringify(named)} — expected one of ${TARGETS.join(", ")}. ` +
-        "For any other client, `--print` emits the snippet to paste",
+        "Add --print for the snippet to paste into any other client",
     );
   }
   if (values.project === true && values.user === true) {
@@ -102,7 +135,8 @@ function parseFlags(argv: string[]): Flags {
   }
 
   return {
-    target: (named as TargetName | undefined) ?? DEFAULT_TARGET,
+    target: known ? (named as TargetName) : DEFAULT_TARGET,
+    unlisted: known || named === undefined ? null : (named as string),
     // Project scope is the default because it is the one that travels with the
     // work; the report always names the absolute file, so it is never a guess.
     scope: values.user === true ? "user" : "project",
@@ -118,6 +152,166 @@ function parseFlags(argv: string[]): Flags {
 /** The command as somebody would type it, for the report. */
 function commandLine(entry: Entry): string {
   return [entry.command, ...entry.args].join(" ");
+}
+
+// --- the file, held open ----------------------------------------------------
+
+/**
+ * A config file, open, with everything needed to tell later whether it is still
+ * the same file holding the same bytes.
+ */
+export interface OpenConfig {
+  fd: number;
+  dev: bigint;
+  ino: bigint;
+  size: bigint;
+  mtimeNs: bigint;
+  ctimeNs: bigint;
+  mode: bigint;
+  text: string;
+}
+
+export type Opened =
+  | { kind: "absent" }
+  | { kind: "open"; config: OpenConfig }
+  | { kind: "refused"; because: string };
+
+/**
+ * Open the config without following symlinks, and read it through that same
+ * descriptor — so what gets inspected is an inode, not a name somebody could
+ * point somewhere else a moment later.
+ *
+ * Exported for the tests: the window this and {@link verifyUnchanged} close is
+ * not reachable from outside a single run, so the only way to hold them to their
+ * contract is to call them.
+ */
+export function openConfig(path: string): Opened {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "absent" };
+    }
+    if (isSymlinkRefusal(error)) {
+      return { kind: "refused", because: "it is a symbolic link" };
+    }
+    return { kind: "refused", because: describeFsError(error) };
+  }
+  try {
+    const stat = fstatSync(fd, { bigint: true });
+    if (!stat.isFile()) {
+      closeSync(fd);
+      return { kind: "refused", because: "it is not a regular file" };
+    }
+    return {
+      kind: "open",
+      config: {
+        fd,
+        dev: stat.dev,
+        ino: stat.ino,
+        size: stat.size,
+        mtimeNs: stat.mtimeNs,
+        ctimeNs: stat.ctimeNs,
+        mode: stat.mode,
+        text: readFileSync(fd, "utf8"),
+      },
+    };
+  } catch (error) {
+    closeSync(fd);
+    return { kind: "refused", because: describeFsError(error) };
+  }
+}
+
+/**
+ * Refuse unless the name still leads to the inode that was read, and that inode
+ * still holds what it held. Called immediately before the first write.
+ */
+export function verifyUnchanged(path: string, config: OpenConfig): void {
+  const changed = `${path} changed while it was being installed into — run again`;
+  let named: BigIntStats;
+  try {
+    named = statSync(path, { bigint: true });
+  } catch {
+    throw new Error(changed);
+  }
+  const now = fstatSync(config.fd, { bigint: true });
+  if (
+    named.dev !== config.dev ||
+    named.ino !== config.ino ||
+    now.size !== config.size ||
+    now.mtimeNs !== config.mtimeNs ||
+    now.ctimeNs !== config.ctimeNs
+  ) {
+    throw new Error(changed);
+  }
+}
+
+// --- writing ----------------------------------------------------------------
+
+/** `<file>.<timestamp>.bak`, beside the file, in the sortable compact form. */
+function backupPath(path: string): string {
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  return `${path}.${stamp}.bak`;
+}
+
+/**
+ * Move a staged file into place, and make sure it never survives a failure.
+ *
+ * `writeTempBeside` returns a complete file under a name only this call knows;
+ * anything that goes wrong between there and publication would otherwise leave
+ * it on disk with nobody aware of it.
+ */
+function stageInto(
+  path: string,
+  contents: string,
+  onto: "absent" | "regular",
+  mode: number | null,
+): boolean {
+  const staged = writeTempBeside(path, contents);
+  let published = false;
+  try {
+    if (mode !== null) {
+      chmodSync(staged, mode);
+    }
+    published = publishStaged(staged, path, onto);
+  } finally {
+    // A successful publication consumed the name; every other path leaves it.
+    if (!published) {
+      removeQuietly(staged);
+    }
+  }
+  return published;
+}
+
+/**
+ * Publish `contents` at `path` atomically.
+ *
+ * An existing file keeps the mode it had: `~/.claude.json` and a project's
+ * committed `.mcp.json` are not this command's files to tighten or loosen. A new
+ * one keeps the owner-only mode `safe-write` stages with, which is the right
+ * default for a per-user config on a shared machine — and for a `.mcp.json` that
+ * later gets committed the mode is not what travels anyway.
+ */
+function publish(path: string, contents: string, existing: OpenConfig | null): void {
+  const onto = existing === null ? "absent" : "regular";
+  const mode = existing === null ? null : Number(existing.mode & 0o777n);
+  if (!stageInto(path, contents, onto, mode)) {
+    throw new Error(`${path} appeared while it was being written — run again`);
+  }
+}
+
+/** Copy the bytes that were read aside, before anything replaces them. */
+function backUp(path: string, config: OpenConfig): string {
+  const backup = backupPath(path);
+  if (!stageInto(backup, config.text, "absent", Number(config.mode & 0o777n))) {
+    throw new Error(`a backup already exists at ${backup} — run again`);
+  }
+  return backup;
+}
+
+function field(name: string, value: string): string {
+  return `${name.padEnd(12)}${value}\n`;
 }
 
 // --- the vendor CLIs --------------------------------------------------------
@@ -185,48 +379,6 @@ function runVendor(program: string, args: string[]): VendorRun {
   };
 }
 
-// --- writing ----------------------------------------------------------------
-
-/** `<file>.<timestamp>.bak`, beside the file, in the sortable compact form. */
-function backupPath(path: string): string {
-  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-  return `${path}.${stamp}.bak`;
-}
-
-/**
- * Publish `contents` at `path` atomically.
- *
- * An existing file keeps the mode it had: `~/.claude.json` and a project's
- * committed `.mcp.json` are not this command's files to tighten or loosen. A new
- * one keeps the owner-only mode `safe-write` stages with, which is the right
- * default for a per-user config on a shared machine — and for a `.mcp.json` that
- * later gets committed the mode is not what travels anyway.
- */
-function publish(path: string, contents: string, replacing: boolean): void {
-  const staged = writeTempBeside(path, contents);
-  if (replacing) {
-    chmodSync(staged, statSync(path).mode & 0o777);
-  }
-  if (!publishStaged(staged, path, replacing ? "regular" : "absent")) {
-    throw new Error(`${path} appeared while it was being written — run again`);
-  }
-}
-
-/** Copy the current file aside before anything changes it. */
-function backUp(path: string, text: string): string {
-  const backup = backupPath(path);
-  const staged = writeTempBeside(backup, text);
-  chmodSync(staged, statSync(path).mode & 0o777);
-  if (!publishStaged(staged, backup, "absent")) {
-    throw new Error(`a backup already exists at ${backup} — run again`);
-  }
-  return backup;
-}
-
-function field(name: string, value: string): string {
-  return `${name.padEnd(12)}${value}\n`;
-}
-
 // --- the command ------------------------------------------------------------
 
 export async function installCommand(
@@ -243,135 +395,149 @@ export async function installCommand(
     return 2;
   }
 
+  // A client this command does not know is exactly what `--print` is for, and
+  // it is answered before anything looks at the filesystem: there is no file of
+  // ours to look at.
+  if (flags.unlisted !== null) {
+    io.err(
+      `ub mcp install: ${JSON.stringify(flags.unlisted)} is not a client \`ub\` ` +
+        "knows — this is the generic stdio form to paste into its own config\n",
+    );
+    io.out(snippet("json", flags.entry));
+    return 0;
+  }
+
   const file = targetFile(flags.target, flags.scope, process.cwd());
   const where = `${flags.target} (${flags.scope})`;
 
-  // `--print` is the answer for a client this command does not know, so it is
-  // decided before anything touches the filesystem.
   if (flags.print) {
     io.err(`ub mcp install: ${where} reads ${file.path}\n`);
     io.out(snippet(file.format, flags.entry));
     return 0;
   }
 
-  const found = classify(file.path);
-  if (found.kind === "refused") {
+  const opened = openConfig(file.path);
+  if (opened.kind === "refused") {
     io.err(
-      `ub mcp install: refusing to write ${file.path}: ${found.because}. ` +
+      `ub mcp install: refusing to write ${file.path}: ${opened.because}. ` +
         "Move it aside and run again\n",
     );
     return 1;
   }
+  const existingFile = opened.kind === "open" ? opened.config : null;
 
-  const exists = found.kind === "regular";
-  let text: string | null = null;
-  if (exists) {
-    try {
-      text = readFileSync(file.path, "utf8");
-    } catch (error) {
-      io.err(
-        `ub mcp install: ${file.path} could not be read (${
-          (error as NodeJS.ErrnoException).code ?? "unknown"
-        })\n`,
-      );
-      return 1;
-    }
-  }
-
-  let existing: string | null = null;
-  let matches = false;
-  if (text !== null) {
-    try {
-      const state = inspect(file.format, text, flags.entry);
-      existing = state.existing;
-      matches = state.matches;
-    } catch (error) {
-      if (!(error instanceof UnusableConfig)) {
-        throw error;
-      }
-      // Named, non-zero, and not written to. There is no safe repair for a file
-      // whose shape this command cannot read.
-      io.err(`ub mcp install: ${file.path} was left alone: ${error.message}\n`);
-      return 1;
-    }
-  }
-
-  if (matches) {
-    let report = `already installed\n\n`;
-    report += field("target", where);
-    report += field("file", file.path);
-    report += field("command", commandLine(flags.entry));
-    io.out(report);
-    return 0;
-  }
-
-  if (existing !== null && !flags.force) {
-    io.err(
-      `ub mcp install: ${file.path} already registers "${SERVER_NAME}" as ` +
-        "something else, so it was left alone.\n\n" +
-        `existing\n${existing}\n\n` +
-        `proposed\n${snippet(file.format, flags.entry).trimEnd()}\n\n` +
-        "Re-run with --force to replace it. The file is backed up first.\n",
-    );
-    return 1;
-  }
-
-  // --- everything that writes ---------------------------------------------
-
-  let backup: string | null = null;
-  let via: string;
   try {
-    if (text !== null) {
-      backup = backUp(file.path, text);
-    }
-
-    const vendor = vendorCli(flags.target, flags.scope, flags.entry);
-    let ran: VendorRun = { kind: "absent" };
-    if (vendor !== null) {
-      // A vendor CLI that will not overwrite has to be told to remove first;
-      // the file was copied aside a moment ago, so this is recoverable.
-      ran =
-        existing === null
-          ? { kind: "ok" }
-          : runVendor(vendor.program, vendor.remove);
-      if (ran.kind === "ok") {
-        ran = runVendor(vendor.program, vendor.add);
-      }
-      if (ran.kind === "failed") {
+    let existing: string | null = null;
+    let matches = false;
+    if (existingFile !== null) {
+      try {
+        const state = inspect(file.format, existingFile.text, flags.entry);
+        existing = state.existing;
+        matches = state.matches;
+      } catch (error) {
+        if (!(error instanceof UnusableConfig)) {
+          throw error;
+        }
+        // Named, non-zero, and not written to. There is no safe repair for a
+        // file whose shape this command cannot read.
         io.err(
-          `ub mcp install: \`${vendor.program} mcp add\` failed: ${ran.detail}\n` +
-            (backup === null ? "" : `The previous file is at ${backup}\n`),
+          `ub mcp install: ${file.path} was left alone: ${error.message}. ` +
+            `\`ub mcp install ${flags.target} --print\` writes the snippet to ` +
+            "add by hand\n",
         );
         return 1;
       }
     }
 
-    if (ran.kind === "ok" && vendor !== null) {
-      via = `${vendor.program} mcp add`;
-    } else {
-      // Either there is no vendor CLI for this target and scope, or it is not
-      // installed. Same fallback, and the report says which file was edited.
-      mkdirSync(dirname(file.path), { recursive: true });
-      publish(file.path, withEntry(file.format, text, flags.entry), text !== null);
-      via = `edited ${file.path}`;
+    if (matches) {
+      let report = "already installed\n\n";
+      report += field("target", where);
+      report += field("file", file.path);
+      report += field("command", commandLine(flags.entry));
+      io.out(report);
+      return 0;
     }
-  } catch (error) {
-    io.err(
-      `ub mcp install: ${error instanceof Error ? error.message : String(error)}\n` +
-        (backup === null ? "" : `The previous file is at ${backup}\n`),
-    );
-    return 1;
-  }
 
-  let report = `uberblick registered with ${flags.target}\n\n`;
-  report += field("target", where);
-  report += field("file", file.path);
-  report += field("command", commandLine(flags.entry));
-  report += field("via", via);
-  if (backup !== null) {
-    report += field("backup", backup);
+    if (existing !== null && !flags.force) {
+      io.err(
+        `ub mcp install: ${file.path} already registers "${SERVER_NAME}" as ` +
+          "something else, so it was left alone.\n\n" +
+          `existing\n${existing}\n\n` +
+          `proposed\n${snippet(file.format, flags.entry).trimEnd()}\n\n` +
+          "Values other than the command are hidden. Re-run with --force to " +
+          "replace it; the file is backed up first.\n",
+      );
+      return 1;
+    }
+
+    // --- everything that writes ---------------------------------------------
+
+    let backup: string | null = null;
+    let via: string;
+    try {
+      if (existingFile !== null) {
+        // The last look before the first write: still the same file, still
+        // holding the bytes every decision above was made from.
+        verifyUnchanged(file.path, existingFile);
+        backup = backUp(file.path, existingFile);
+      }
+
+      const vendor = vendorCli(flags.target, flags.scope, flags.entry);
+      let ran: VendorRun = { kind: "absent" };
+      if (vendor !== null) {
+        // A vendor CLI that will not overwrite has to be told to remove first;
+        // the file was copied aside a moment ago, so this is recoverable.
+        ran =
+          existing === null
+            ? { kind: "ok" }
+            : runVendor(vendor.program, vendor.remove);
+        if (ran.kind === "ok") {
+          ran = runVendor(vendor.program, vendor.add);
+        }
+        if (ran.kind === "failed") {
+          io.err(
+            `ub mcp install: \`${vendor.program} mcp add\` failed: ${ran.detail}\n` +
+              (backup === null ? "" : `The previous file is at ${backup}\n`),
+          );
+          return 1;
+        }
+      }
+
+      if (ran.kind === "ok" && vendor !== null) {
+        via = `${vendor.program} mcp add`;
+      } else {
+        // Either there is no vendor CLI for this target and scope, or it is not
+        // installed. Same fallback, and the report says which file was edited.
+        mkdirSync(dirname(file.path), { recursive: true });
+        publish(
+          file.path,
+          withEntry(file.format, existingFile?.text ?? null, flags.entry),
+          existingFile,
+        );
+        via = `edited ${file.path}`;
+      }
+    } catch (error) {
+      io.err(
+        `ub mcp install: ${error instanceof Error ? error.message : String(error)}\n` +
+          (backup === null ? "" : `The previous file is at ${backup}\n`),
+      );
+      return 1;
+    }
+
+    let report = `uberblick registered with ${flags.target}\n\n`;
+    report += field("target", where);
+    report += field("file", file.path);
+    report += field("command", commandLine(flags.entry));
+    report += field("via", via);
+    if (backup !== null) {
+      report += field("backup", backup);
+    }
+    report += "\nRestart the client, or reload its MCP servers, to pick this up.\n";
+    io.out(report);
+    return 0;
+  } finally {
+    if (existingFile !== null) {
+      closeSync(existingFile.fd);
+    }
   }
-  report += "\nRestart the client, or reload its MCP servers, to pick this up.\n";
-  io.out(report);
-  return 0;
 }

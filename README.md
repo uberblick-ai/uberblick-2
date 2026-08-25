@@ -139,11 +139,19 @@ Where the vendor ships its own installer — `claude mcp add`, `codex mcp add` f
 its global config — that is what runs, because the vendor knows its own file
 best; otherwise the documented config file is edited directly. The report names
 which of the two happened. Either way the command reads the file first, so an
-unrelated server in it is left alone, a second run is a no-op that says "already
-installed", and an `uberblick` entry it did not write is reported next to what
-would replace it and left in place unless `--force` says otherwise. A file it
-changes is copied to a timestamped `.bak` beside it first. Nothing prompts, so
-the whole command runs unattended.
+unrelated server in it is left alone — byte for byte, since both formats are
+spliced as text rather than reparsed and re-emitted — a second run is a no-op
+that says "already installed", and an `uberblick` entry it did not write is
+reported next to what would replace it and left in place unless `--force` says
+otherwise. A file it changes is copied to a timestamped `.bak` beside it first,
+and it is read and written through one descriptor so the copy cannot be of a
+version that has already been replaced. Nothing prompts, so the whole command
+runs unattended.
+
+Reports name files, never their contents: a conflicting entry is shown with its
+command and the *names* of anything else it sets, with the values masked, and a
+file that will not parse is reported by path alone. Config files are where API
+tokens live.
 
 The installed line is always `ub mcp serve`, with no arguments and no
 environment. Which workspace, which hub and which credential apply is resolved

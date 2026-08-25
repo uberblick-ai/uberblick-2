@@ -74,10 +74,11 @@ ub mcp install cursor --project     # .cursor/mcp.json
 ```
 
 `--project` writes the current directory's config; `--user` writes the per-user
-one. For any client not on that list, `ub mcp install <target> --print` writes
-the snippet to stdout and touches nothing — paste it wherever that client keeps
-its servers. The snippet is not reproduced here on purpose: the command is the
-one place it is defined, and a copy in a document is a copy that goes stale.
+one. For any client not on that list, add `--print`: `ub mcp install zed --print`
+writes the snippet to stdout and touches nothing, whatever name you give it, so
+you can paste it wherever that client keeps its servers. The snippet is not
+reproduced here on purpose: the command is the one place it is defined, and a
+copy in a document is a copy that goes stale.
 
 The command is safe to run against a file you care about:
 
@@ -91,6 +92,10 @@ The command is safe to run against a file you care about:
 - **It backs up first.** Any file it changes is copied to a timestamped `.bak`
   beside it before anything is written.
 - **It never prompts.** Every decision has a flag, so it runs unattended.
+- **It never prints what it read.** When it reports a conflict it shows the
+  command and arguments already registered, and the *names* of anything else set
+  — never the values. A config file is where an API token lives, and a file that
+  will not parse is reported by path alone.
 
 Where a client ships its own installer — `claude mcp add`, and `codex mcp add`
 for its global config — that is what runs. Otherwise the config file is edited

@@ -2,20 +2,33 @@
  * What `ub mcp install` promises about somebody else's file.
  *
  * The contracts under test are the ones a user would be hurt by if they broke:
- * an unrelated server in the same file survives untouched, a second run changes
- * nothing, an entry this command did not write is never replaced without being
- * asked, a replacement is recoverable from a backup, and a file that cannot be
- * read is left exactly as it was. Nothing here prompts — every one of these runs
- * with no terminal attached, which is the point of the flags.
+ * an unrelated server in the same file survives untouched — *byte for byte*, not
+ * merely in value — a second run changes nothing, an entry this command did not
+ * write is never replaced without being asked, a replacement is recoverable from
+ * a backup, a file that cannot be read is left exactly as it was, and no value
+ * out of a config file is ever echoed onto a terminal. Nothing here prompts:
+ * every one of these runs with no terminal attached, which is the point of the
+ * flags.
  *
  * The vendor CLIs are stubbed rather than invoked. What `ub` owes is the right
  * delegation — the right program, with the right arguments — and asserting that
  * against a real `claude` would make the suite depend on the machine it runs on.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { openConfig, verifyUnchanged } from "../src/install.js";
 import { REPO_ROOT, type Sandbox, removeTempDirs, runUb, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -27,9 +40,21 @@ const NO_VENDOR = { PATH: "/nonexistent-for-tests" };
 const RECORD = "UB_TEST_VENDOR_RECORD";
 
 /**
- * A directory holding one executable that records its arguments and succeeds —
- * a vendor CLI that is installed, without being the vendor's real one.
+ * A value that must never reach a terminal. Config files are where people keep
+ * tokens, and every path that reports on one has to be safe for that.
  */
+const SECRET = "tok-must-never-be-printed-4a1f";
+
+/**
+ * The same, short.
+ *
+ * V8's JSON parse errors quote a *window* of about ten characters around the
+ * offending byte, so a long token would be truncated inside the message and a
+ * test looking for the whole of it would pass while a fragment leaked. This one
+ * fits in the window, which is what makes the assertion real.
+ */
+const SHORT_SECRET = "tok-4a1f";
+
 function stubVendor(box: Sandbox, program: string): { path: string; record: string } {
   const dir = join(box.cwd, "..", `stub-${program}`);
   mkdirSync(dir, { recursive: true });
@@ -48,6 +73,56 @@ function backupsOf(dir: string, name: string): string[] {
   return readdirSync(dir)
     .filter((entry) => entry.startsWith(`${name}.`) && entry.endsWith(".bak"))
     .map((entry) => join(dir, entry));
+}
+
+/**
+ * The one contiguous run of bytes `after` adds to `before`, or null when the
+ * difference is not a single insertion.
+ *
+ * This is "every other byte survived" written as something a test can check.
+ * Comparing parsed values instead would pass for a file that had been reflowed,
+ * re-escaped and stripped of its blank lines — which is exactly the failure this
+ * is here to catch.
+ */
+function soleInsertion(before: string, after: string): string | null {
+  if (after.length <= before.length) {
+    return null;
+  }
+  let head = 0;
+  while (head < before.length && before[head] === after[head]) {
+    head += 1;
+  }
+  let tail = 0;
+  while (
+    tail < before.length - head &&
+    before[before.length - 1 - tail] === after[after.length - 1 - tail]
+  ) {
+    tail += 1;
+  }
+  return head + tail === before.length ? after.slice(head, after.length - tail) : null;
+}
+
+/** The single span that differs between two texts, as {removed, added}. */
+function soleChange(
+  before: string,
+  after: string,
+): { removed: string; added: string } {
+  const shortest = Math.min(before.length, after.length);
+  let head = 0;
+  while (head < shortest && before[head] === after[head]) {
+    head += 1;
+  }
+  let tail = 0;
+  while (
+    tail < shortest - head &&
+    before[before.length - 1 - tail] === after[after.length - 1 - tail]
+  ) {
+    tail += 1;
+  }
+  return {
+    removed: before.slice(head, before.length - tail),
+    added: after.slice(head, after.length - tail),
+  };
 }
 
 describe("ub mcp install --print", () => {
@@ -71,6 +146,21 @@ describe("ub mcp install --print", () => {
     expect(codex.stdout).toBe(
       '[mcp_servers.uberblick]\ncommand = "ub"\nargs = ["mcp", "serve"]\n',
     );
+  });
+
+  it("answers for a client it does not know, and writes nothing", () => {
+    // `--print` is the documented answer for any client not on the list, so it
+    // has to work *without* a known target rather than rejecting the name.
+    const box = sandbox();
+    const run = runUb(["mcp", "install", "zed", "--print"], box);
+    expect(run.status).toBe(0);
+    expect(JSON.parse(run.stdout).mcpServers.uberblick).toEqual({
+      type: "stdio",
+      command: "ub",
+      args: ["mcp", "serve"],
+    });
+    expect(run.stderr).toMatch(/not a client/);
+    expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
   });
 
   it("names the targets, and points an unlisted client at --print", () => {
@@ -98,41 +188,59 @@ describe("ub mcp install (JSON targets)", () => {
     expect(read(path)).not.toMatch(/"env"/);
   });
 
+  it("adds its member and changes no other byte of the file", () => {
+    // Deliberately not the shape this command would have written: a compact
+    // nested object, a non-ASCII escape, an odd blank line, a key after
+    // mcpServers. Re-serialising would quietly normalise every one of them.
+    const box = sandbox();
+    const path = join(box.cwd, ".mcp.json");
+    const before =
+      '{\n  "note": "kept \\u00e9 verbatim",\n' +
+      '  "mcpServers": {"other":{"command":"other-server","args":["--port","7"]}},\n' +
+      "\n" +
+      '  "trailing": [1, 2, 3]\n}\n';
+    writeFileSync(path, before, "utf8");
+
+    const run = runUb(["mcp", "install", "claude", "--project"], box, NO_VENDOR);
+    expect(run.status).toBe(0);
+
+    const after = read(path);
+    const inserted = soleInsertion(before, after);
+    // One contiguous insertion, and it is ours. Everything else is the original
+    // bytes, in their original places.
+    expect(inserted).not.toBeNull();
+    expect(inserted).toContain('"uberblick"');
+    expect(inserted).toContain('"mcp"');
+    // It matched the compact style of the object it went into.
+    expect(inserted).not.toContain("\n");
+    expect(JSON.parse(after).mcpServers.uberblick.command).toBe("ub");
+  });
+
   it("leaves an unrelated server byte-for-byte, and is a no-op the second time", () => {
     const box = sandbox();
     const path = join(box.cwd, ".mcp.json");
-    const unrelated = `      "command": "other-server",\n      "args": ["--port", "7"]`;
-    writeFileSync(
-      path,
-      `{\n  "note": "hand written",\n  "mcpServers": {\n    "other": {\n${unrelated}\n    }\n  }\n}\n`,
-      "utf8",
-    );
+    const before =
+      '{\n  "note": "hand written",\n  "mcpServers": {\n    "other": {\n' +
+      '      "command": "other-server",\n      "args": ["--port", "7"]\n' +
+      "    }\n  }\n}\n";
+    writeFileSync(path, before, "utf8");
 
-    const first = runUb(["mcp", "install", "cursor", "--project"], box, NO_VENDOR);
+    const first = runUb(["mcp", "install", "claude", "--project"], box, NO_VENDOR);
     expect(first.status).toBe(0);
 
-    // Cursor's project file is its own, so the seeded one must be untouched and
-    // the new one must exist beside it.
-    expect(read(path)).toContain(unrelated);
-
-    // And the same seeded shape as a Claude project file, which IS the file
-    // being edited: the unrelated entry survives the rewrite.
-    const claude = runUb(["mcp", "install", "claude", "--project"], box, NO_VENDOR);
-    expect(claude.status).toBe(0);
     const after = read(path);
-    const doc = JSON.parse(after);
-    expect(doc.note).toBe("hand written");
-    expect(doc.mcpServers.other).toEqual({
-      command: "other-server",
-      args: ["--port", "7"],
-    });
-    expect(doc.mcpServers.uberblick.command).toBe("ub");
-    // Key order is preserved, so the unrelated server is still written first.
+    const inserted = soleInsertion(before, after);
+    expect(inserted).not.toBeNull();
+    expect(inserted).toContain('"uberblick"');
+    // The unrelated server is untouched, and still written first.
+    expect(after).toContain('      "command": "other-server",\n      "args": ["--port", "7"]');
     expect(after.indexOf('"other"')).toBeLessThan(after.indexOf('"uberblick"'));
+    expect(JSON.parse(after).note).toBe("hand written");
 
     // The edit that added us backed the file up first; the no-op must not.
     const backups = backupsOf(box.cwd, ".mcp.json");
     expect(backups).toHaveLength(1);
+    expect(read(backups[0] as string)).toBe(before);
 
     const second = runUb(["mcp", "install", "claude", "--project"], box, NO_VENDOR);
     expect(second.status).toBe(0);
@@ -173,14 +281,13 @@ describe("ub mcp install (JSON targets)", () => {
     expect(read(path)).toBe(before);
   });
 
-  it("refuses a different uberblick entry, and replaces it only with --force", () => {
+  it("refuses a different uberblick entry, and replaces only its own bytes with --force", () => {
     const box = sandbox();
     const path = join(box.cwd, ".mcp.json");
-    const before = `${JSON.stringify(
-      { mcpServers: { uberblick: { command: "somebody-elses", args: ["serve"] } } },
-      null,
-      2,
-    )}\n`;
+    const before =
+      '{\n  "mcpServers": {\n    "other": {"command": "other-server"},\n' +
+      '    "uberblick": {\n      "command": "somebody-elses",\n' +
+      '      "args": ["serve"]\n    }\n  }\n}\n';
     writeFileSync(path, before, "utf8");
 
     const refused = runUb(["mcp", "install", "claude", "--project"], box, NO_VENDOR);
@@ -198,7 +305,16 @@ describe("ub mcp install (JSON targets)", () => {
       NO_VENDOR,
     );
     expect(forced.status).toBe(0);
-    expect(JSON.parse(read(path)).mcpServers.uberblick.command).toBe("ub");
+
+    const after = read(path);
+    const change = soleChange(before, after);
+    // Only the old entry went, and only the new one arrived: the unrelated
+    // server is nowhere near the span that changed.
+    expect(change.removed).toContain("somebody-elses");
+    expect(change.removed).not.toContain("other-server");
+    expect(change.added).not.toContain("other-server");
+    expect(after).toContain('"other": {"command": "other-server"}');
+    expect(JSON.parse(after).mcpServers.uberblick.command).toBe("ub");
 
     // The replaced file is recoverable, and the backup is the bytes that were
     // there — not a re-serialisation of them.
@@ -221,6 +337,91 @@ describe("ub mcp install (JSON targets)", () => {
     expect(read(path)).toBe(before);
     expect(backupsOf(box.cwd, ".mcp.json")).toEqual([]);
   });
+
+  it("refuses a symlink rather than writing through it", () => {
+    const box = sandbox();
+    const target = join(box.cwd, "elsewhere.json");
+    writeFileSync(target, "{}\n", "utf8");
+    symlinkSync(target, join(box.cwd, ".mcp.json"));
+
+    const run = runUb(["mcp", "install", "claude", "--project"], box, NO_VENDOR);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toMatch(/symbolic link/);
+    // The thing it pointed at never received anything.
+    expect(read(target)).toBe("{}\n");
+  });
+});
+
+describe("ub mcp install, and what it will not print", () => {
+  it("does not quote a malformed file back, only its path", () => {
+    const box = sandbox();
+    const path = join(box.cwd, ".mcp.json");
+    // Broken JSON with a credential right where the parser will stumble: Node's
+    // own message quotes the fragment it choked on, so it must not be relayed.
+    writeFileSync(
+      path,
+      `{"mcpServers":{"uberblick":{"command":${SHORT_SECRET}}}}\n`,
+      "utf8",
+    );
+
+    const run = runUb(["mcp", "install", "claude", "--project"], box, NO_VENDOR);
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain(path);
+    expect(run.stderr).toMatch(/not valid JSON/);
+    expect(run.output).not.toContain(SHORT_SECRET);
+  });
+
+  it("masks the values of a conflicting entry, keeping its shape", () => {
+    const box = sandbox();
+    const path = join(box.cwd, ".mcp.json");
+    writeFileSync(
+      path,
+      `${JSON.stringify(
+        {
+          mcpServers: {
+            uberblick: {
+              command: "somebody-elses",
+              args: ["serve"],
+              env: { API_TOKEN: SECRET },
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const run = runUb(["mcp", "install", "claude", "--project"], box, NO_VENDOR);
+    expect(run.status).toBe(1);
+    // Enough to compare against the proposal…
+    expect(run.stderr).toContain("somebody-elses");
+    // …including which variables are set, but never what they are set to.
+    expect(run.stderr).toContain("API_TOKEN");
+    expect(run.output).not.toContain(SECRET);
+  });
+
+  it("masks the values in a conflicting Codex env table too", () => {
+    const box = sandbox();
+    const home = join(box.cwd, "codex-home");
+    mkdirSync(home, { recursive: true });
+    const path = join(home, "config.toml");
+    writeFileSync(
+      path,
+      '[mcp_servers.uberblick]\ncommand = "somebody-elses"\nargs = []\n\n' +
+        `[mcp_servers.uberblick.env]\nAPI_TOKEN = "${SECRET}"\n`,
+      "utf8",
+    );
+
+    const run = runUb(["mcp", "install", "codex", "--user"], box, {
+      ...NO_VENDOR,
+      CODEX_HOME: home,
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("somebody-elses");
+    expect(run.stderr).toContain("API_TOKEN");
+    expect(run.output).not.toContain(SECRET);
+  });
 });
 
 describe("ub mcp install codex", () => {
@@ -233,13 +434,16 @@ describe("ub mcp install codex", () => {
     return { home, path: join(home, "config.toml") };
   }
 
+  function env(home: string): NodeJS.ProcessEnv {
+    return { ...NO_VENDOR, CODEX_HOME: home };
+  }
+
   it("appends its table and leaves every other setting byte-for-byte", () => {
     const box = sandbox();
     const { home, path } = codexHome(box);
     writeFileSync(path, seeded, "utf8");
 
-    const env = { ...NO_VENDOR, CODEX_HOME: home };
-    const run = runUb(["mcp", "install", "codex", "--user"], box, env);
+    const run = runUb(["mcp", "install", "codex", "--user"], box, env(home));
     expect(run.status).toBe(0);
     expect(run.stdout).toContain(path);
 
@@ -250,7 +454,7 @@ describe("ub mcp install codex", () => {
       '[mcp_servers.uberblick]\ncommand = "ub"\nargs = ["mcp", "serve"]\n',
     );
 
-    const second = runUb(["mcp", "install", "codex", "--user"], box, env);
+    const second = runUb(["mcp", "install", "codex", "--user"], box, env(home));
     expect(second.status).toBe(0);
     expect(second.stdout).toMatch(/already installed/);
     expect(read(path)).toBe(after);
@@ -264,14 +468,17 @@ describe("ub mcp install codex", () => {
       '[mcp_servers.uberblick]\ncommand = "somebody-elses"\nargs = []\n\n' +
       '[sandbox]\nmode = "workspace-write"\n';
     writeFileSync(path, before, "utf8");
-    const env = { ...NO_VENDOR, CODEX_HOME: home };
 
-    const refused = runUb(["mcp", "install", "codex", "--user"], box, env);
+    const refused = runUb(["mcp", "install", "codex", "--user"], box, env(home));
     expect(refused.status).toBe(1);
     expect(refused.stderr).toMatch(/somebody-elses/);
     expect(read(path)).toBe(before);
 
-    const forced = runUb(["mcp", "install", "codex", "--user", "--force"], box, env);
+    const forced = runUb(
+      ["mcp", "install", "codex", "--user", "--force"],
+      box,
+      env(home),
+    );
     expect(forced.status).toBe(0);
     const after = read(path);
     expect(after).toContain('command = "ub"');
@@ -288,23 +495,148 @@ describe("ub mcp install codex", () => {
     expect(read(backups[0] as string)).toBe(before);
   });
 
-  it("refuses a config whose shape it cannot edit without guessing", () => {
-    // An inline `uberblick` under [mcp_servers] cannot be spliced as a table:
-    // appending one would give Codex a duplicate key and take down its whole
-    // configuration, so this is a refusal rather than a repair.
+  it("finds its table even with a comment after the header", () => {
+    // Missing this header would append a second [mcp_servers.uberblick] — a
+    // duplicate table, which is not valid TOML, reported as a success.
     const box = sandbox();
     const { home, path } = codexHome(box);
-    const before = '[mcp_servers]\nuberblick = { command = "ub" }\n';
+    const before =
+      '[mcp_servers.uberblick] # added by hand\ncommand = "somebody-elses"\nargs = []\n';
+    writeFileSync(path, before, "utf8");
+
+    const refused = runUb(["mcp", "install", "codex", "--user"], box, env(home));
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/somebody-elses/);
+    expect(read(path)).toBe(before);
+
+    const forced = runUb(
+      ["mcp", "install", "codex", "--user", "--force"],
+      box,
+      env(home),
+    );
+    expect(forced.status).toBe(0);
+    const after = read(path);
+    expect(after.match(/\[mcp_servers\.uberblick\]/g)).toHaveLength(1);
+    expect(after).toContain('command = "ub"');
+  });
+
+  it("does not mistake a differently-named server for its own", () => {
+    // `[mcp_servers."uber blick"]` is a *different* key. Flattening the quotes
+    // away would make --force delete somebody else's server.
+    const box = sandbox();
+    const { home, path } = codexHome(box);
+    const before =
+      '[mcp_servers."uber blick"]\ncommand = "somebody-elses"\nargs = []\n';
     writeFileSync(path, before, "utf8");
 
     const run = runUb(
       ["mcp", "install", "codex", "--user", "--force"],
       box,
-      { ...NO_VENDOR, CODEX_HOME: home },
+      env(home),
     );
-    expect(run.status).not.toBe(0);
-    expect(run.stderr).toContain(path);
-    expect(read(path)).toBe(before);
+    expect(run.status).toBe(0);
+    const after = read(path);
+    expect(after.startsWith(before)).toBe(true);
+    expect(after).toContain("somebody-elses");
+    expect(after).toContain('[mcp_servers.uberblick]\ncommand = "ub"');
+  });
+
+  it("is not fooled by a bracket inside a multi-line array", () => {
+    const box = sandbox();
+    const { home, path } = codexHome(box);
+    const before =
+      '[sandbox]\nwritable_roots = [\n  ["/tmp", "rw"],\n]\n\n' +
+      '[mcp_servers.uberblick]\ncommand = "somebody-elses"\nargs = []\n';
+    writeFileSync(path, before, "utf8");
+
+    const run = runUb(
+      ["mcp", "install", "codex", "--user", "--force"],
+      box,
+      env(home),
+    );
+    expect(run.status).toBe(0);
+    const after = read(path);
+    // The array survived intact, and our table — found past it — was replaced
+    // rather than appended a second time.
+    expect(after).toContain('writable_roots = [\n  ["/tmp", "rw"],\n]');
+    expect(after.match(/\[mcp_servers\.uberblick\]/g)).toHaveLength(1);
+    expect(after).toContain('command = "ub"');
+    expect(after).not.toContain("somebody-elses");
+  });
+
+  it("refuses a config whose shape it cannot edit without guessing", () => {
+    // Three ways of defining the same thing that cannot be spliced as a table:
+    // appending one would give Codex a duplicate key and take down its whole
+    // configuration, so each is a refusal rather than a repair.
+    for (const before of [
+      '[mcp_servers]\nuberblick = { command = "ub" }\n',
+      'mcp_servers.uberblick.command = "somebody-elses"\n',
+      'mcp_servers = { uberblick = { command = "ub" } }\n',
+    ]) {
+      const box = sandbox();
+      const { home, path } = codexHome(box);
+      writeFileSync(path, before, "utf8");
+
+      const run = runUb(
+        ["mcp", "install", "codex", "--user", "--force"],
+        box,
+        env(home),
+      );
+      expect(run.status, before).not.toBe(0);
+      expect(run.stderr).toContain(path);
+      // And it says how to proceed by hand rather than just refusing.
+      expect(run.stderr).toMatch(/--print/);
+      expect(read(path)).toBe(before);
+    }
+  });
+});
+
+describe("the file it read is the file it writes", () => {
+  it("refuses when the config changed underneath it", () => {
+    // The window between reading a config and replacing it is where a backup
+    // ends up holding a version that was already gone. It is not reachable from
+    // outside a single run, so the check itself is what gets held to account.
+    const box = sandbox();
+    const path = join(box.cwd, ".mcp.json");
+    writeFileSync(path, '{"mcpServers":{}}\n', "utf8");
+
+    const opened = openConfig(path);
+    expect(opened.kind).toBe("open");
+    if (opened.kind !== "open") {
+      return;
+    }
+    try {
+      // Unchanged: no complaint.
+      expect(() => verifyUnchanged(path, opened.config)).not.toThrow();
+
+      // Somebody else rewrites it.
+      writeFileSync(path, '{"mcpServers":{"other":{"command":"x"}}}\n', "utf8");
+      expect(() => verifyUnchanged(path, opened.config)).toThrow(/changed while/);
+    } finally {
+      closeSync(opened.config.fd);
+    }
+  });
+
+  it("refuses when the name was pointed at a different file", () => {
+    const box = sandbox();
+    const path = join(box.cwd, ".mcp.json");
+    writeFileSync(path, '{"mcpServers":{}}\n', "utf8");
+
+    const opened = openConfig(path);
+    expect(opened.kind).toBe("open");
+    if (opened.kind !== "open") {
+      return;
+    }
+    try {
+      // Same bytes, different inode: a swap the size and mtime would not show.
+      const other = join(box.cwd, "other.json");
+      writeFileSync(other, '{"mcpServers":{}}\n', "utf8");
+      renameSync(other, path);
+
+      expect(() => verifyUnchanged(path, opened.config)).toThrow(/changed while/);
+    } finally {
+      closeSync(opened.config.fd);
+    }
   });
 });
 
@@ -351,25 +683,41 @@ describe("ub mcp install, and the vendor's own CLI", () => {
 });
 
 describe("the checkout's own .mcp.json", () => {
+  /**
+   * The spawn the committed file has to carry, stated here independently.
+   *
+   * This is the whole point of the test: with the expectation written out, the
+   * committed file and the generator have to agree with *it*, so changing
+   * either one alone fails. Reading the arguments out of the file and feeding
+   * them back in would only ever prove the generator agrees with itself.
+   */
+  const CHECKOUT_SPAWN = [
+    "mise",
+    "exec",
+    "--",
+    "fnox",
+    "exec",
+    "--if-missing",
+    "warn",
+    "--",
+    "pnpm",
+    "--silent",
+    "--filter",
+    "@uberblick/mcp-server",
+    "start",
+  ];
+
   it("is what this command generates, rather than hand-maintained", () => {
-    // The one file in the repository this command owns. It does not run
-    // `ub mcp serve` — a fresh checkout has no installed `ub` — so it is
-    // generated with the `--` override, and this asserts that the bytes
-    // committed are the bytes the command produces for that same command.
+    // It does not run `ub mcp serve` — a fresh checkout has no installed `ub`,
+    // and the owner's secret only reaches it through `fnox exec` — so it is
+    // generated with the `--` override instead.
     const committed = read(join(REPO_ROOT, ".mcp.json"));
     const entry = JSON.parse(committed).mcpServers.uberblick;
+    expect([entry.command, ...entry.args]).toEqual(CHECKOUT_SPAWN);
 
     const box = sandbox();
     const run = runUb(
-      [
-        "mcp",
-        "install",
-        "claude",
-        "--project",
-        "--",
-        entry.command,
-        ...entry.args,
-      ],
+      ["mcp", "install", "claude", "--project", "--", ...CHECKOUT_SPAWN],
       box,
       NO_VENDOR,
     );
