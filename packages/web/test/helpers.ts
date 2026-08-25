@@ -54,6 +54,15 @@ export function snapshotFragment(ydoc: Y.Doc): FragmentSnapshot[] {
  *
  * Callers are free to move the returned element somewhere more specific — the
  * changed-block tests re-parent it into a stubbed scrolling pane.
+ *
+ * Being in the document is also why destroying the editor takes the element
+ * out of it again. One jsdom document is shared by every test in a file, and
+ * block ids are stable per fixture — so a document left behind by an earlier
+ * test holds blocks with the very ids a later test looks up, and
+ * `getElementById` returns the first match in the document, not the one in the
+ * editor that test just mounted. The teardown rides on the editor's own
+ * `destroy` event so no call site has to remember it, and `remove()` does not
+ * care which parent the element ended up under.
  */
 export function mountEditor(
   ydoc: Y.Doc,
@@ -70,6 +79,7 @@ export function mountEditor(
       : { newBlockId: options.newBlockId }),
     ...(options.changed === undefined ? {} : { changed: options.changed }),
   });
+  editor.on("destroy", () => element.remove());
   return { editor, element };
 }
 
