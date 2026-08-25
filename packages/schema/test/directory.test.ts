@@ -4,6 +4,7 @@ import {
   getDirectoryEntry,
   getDirectoryMap,
   listDirectory,
+  restoreDirectoryEntry,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "../src/index.js";
@@ -72,6 +73,86 @@ describe("directory doc", () => {
       tags: [],
       deleted: true,
     });
+  });
+
+  it("restores a tombstoned entry, keeping its title and tags", () => {
+    const dir = new Y.Doc();
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha", tags: ["x"] });
+    tombstoneDirectoryEntry(dir, ALPHA);
+    restoreDirectoryEntry(dir, ALPHA);
+
+    // Restoring is the sanctioned exception to the sticky tombstone — and it
+    // brings the entry back as it was, not as a blank one.
+    expect(listDirectory(dir)).toEqual([
+      { uuid: ALPHA, title: "Alpha", tags: ["x"] },
+    ]);
+    expect(getDirectoryEntry(dir, ALPHA)).toEqual({
+      uuid: ALPHA,
+      title: "Alpha",
+      tags: ["x"],
+    });
+
+    // And the stickiness it suspended is not disabled: a later tombstone still
+    // holds against a later upsert.
+    tombstoneDirectoryEntry(dir, ALPHA);
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha, renamed late" });
+    expect(listDirectory(dir)).toEqual([]);
+  });
+
+  it("writes nothing when there is no tombstone to lift", () => {
+    const dir = new Y.Doc();
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha" });
+
+    let updates = 0;
+    dir.on("update", () => {
+      updates += 1;
+    });
+
+    // A live entry and an unknown uuid are both nothing-to-do. Rewriting them
+    // would publish a directory update saying precisely nothing.
+    restoreDirectoryEntry(dir, ALPHA);
+    restoreDirectoryEntry(dir, GAMMA);
+
+    expect(updates).toBe(0);
+    expect(getDirectoryEntry(dir, ALPHA)).toEqual({
+      uuid: ALPHA,
+      title: "Alpha",
+      tags: [],
+    });
+    // Unlike a tombstone, a restore does not invent an entry for an unseen uuid.
+    expect(getDirectoryEntry(dir, GAMMA)).toBeNull();
+  });
+
+  // The limit of the sticky tombstone, pinned because it is the contract rather
+  // than the preference. Stickiness is observed state: `upsertDirectoryEntry`
+  // can only preserve a `deleted` flag it can see. A replica that never saw the
+  // tombstone writes an ordinary whole-entry update, and whole-entry updates
+  // converge by update order — so an offline rename can outlive an archive and
+  // bring the document back with nobody calling restoreDirectoryEntry.
+  it("does not hold against a concurrent upsert that never saw the tombstone", () => {
+    const archiver = new Y.Doc();
+    const renamer = new Y.Doc();
+    // Concurrent writes to one key converge by client id, so pin the ids rather
+    // than leaving the winner to whichever random id Yjs handed out.
+    archiver.clientID = 1;
+    renamer.clientID = 2;
+
+    upsertDirectoryEntry(archiver, { uuid: ALPHA, title: "Alpha" });
+    syncDocs(archiver, renamer);
+
+    // Neither sees the other: one archives, one renames.
+    tombstoneDirectoryEntry(archiver, ALPHA);
+    upsertDirectoryEntry(renamer, { uuid: ALPHA, title: "Alpha, renamed offline" });
+    syncDocs(archiver, renamer);
+
+    const resurrected = {
+      uuid: ALPHA,
+      title: "Alpha, renamed offline",
+      tags: [],
+    };
+    expect(getDirectoryEntry(archiver, ALPHA)).toEqual(resurrected);
+    expect(getDirectoryEntry(renamer, ALPHA)).toEqual(resurrected);
+    expect(listDirectory(archiver)).toEqual([resurrected]);
   });
 
   it("tombstones a uuid it has never seen", () => {

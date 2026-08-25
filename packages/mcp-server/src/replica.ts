@@ -31,6 +31,7 @@ import {
   getBlocks,
   getBlocksFragment,
   getDirectoryEntry,
+  getDirectoryMap,
   getMeta,
   listDirectory,
   repairDuplicateBlocks,
@@ -113,6 +114,33 @@ export class Replicas {
   private readonly replicas = new Map<string, Replica>();
 
   private readonly cursorTimers = new Map<string, NodeJS.Timeout>();
+
+  /**
+   * Directory uuids whose stub changed and whose index rows have not caught up.
+   *
+   * Filled by the directory map's own observer, which Yjs runs before the
+   * document's `update` listener, and drained by {@link reconcileDirectory}
+   * once that listener has the update safely in the log. The two-step exists so
+   * reconciliation stays *after* the append — a failed append must not leave
+   * the index describing a write the log refused — while still knowing which
+   * handful of entries actually changed.
+   */
+  private readonly staleStubs = new Set<string>();
+
+  /**
+   * Entries owed a reconciliation that is paced, and the moment each is due.
+   *
+   * Separate from {@link staleStubs} because the two deserve opposite
+   * treatment: a stub that just changed is reconciled at once, while work that
+   * lands here is rationed to one entry per drain. Two things arrive here — a
+   * reconciliation the store refused, due again after `reconcileRetryMs`, and a
+   * tombstone found still holding index rows at adoption time, due immediately.
+   *
+   * Insertion order is the queue order, and re-queuing deletes before setting,
+   * so an entry the store keeps refusing rotates to the back instead of
+   * monopolising the single slot.
+   */
+  private readonly pacedStubs = new Map<string, number>();
 
   /** Display name published in awareness. Refined once the client identifies. */
   private agentName: string;
@@ -236,6 +264,18 @@ export class Replicas {
       lastSeq: 0,
     };
 
+    // Which stubs changed is knowable only here: the update payload says a
+    // directory update happened, not which handful of entries it touched, and
+    // re-deriving the whole corpus per update would put a SQLite write per
+    // document behind every keystroke in a title.
+    if (replica.isDirectory) {
+      getDirectoryMap(doc).observe((event) => {
+        for (const uuid of event.keysChanged) {
+          this.staleStubs.add(uuid);
+        }
+      });
+    }
+
     // Observe before hydrating. Replayed updates carry LOG_ORIGIN and are
     // skipped, so hydration cannot double-log, and any update that arrives
     // mid-hydration is still recorded.
@@ -349,6 +389,7 @@ export class Replicas {
    */
   private afterChange(replica: Replica): void {
     if (replica.isDirectory) {
+      this.reconcileDirectory();
       return;
     }
     this.repairDuplicates(replica);
@@ -364,18 +405,168 @@ export class Replicas {
         return;
       }
       this.repairStub(meta);
-      this.store.indexDoc({
-        uuid: meta.uuid,
-        title: meta.title,
-        tags: meta.tags,
-        links: meta.links,
-        body: getBlocks(replica.doc)
-          .map((block) => block.text)
-          .join("\n"),
-      });
+      this.indexRows(replica, meta);
     } catch (error) {
       log.warn("failed to mirror a document change", error);
     }
+  }
+
+  /** One document's derived rows, read off the document itself. */
+  private indexRows(replica: Replica, meta: DocMeta): void {
+    this.store.indexDoc({
+      uuid: meta.uuid,
+      title: meta.title,
+      tags: meta.tags,
+      links: meta.links,
+      body: getBlocks(replica.doc)
+        .map((block) => block.text)
+        .join("\n"),
+    });
+  }
+
+  /**
+   * Bring the derived index in line with the directory.
+   *
+   * A directory update changes which documents are supposed to be findable
+   * without changing any document, and nothing else notices: `afterChange`
+   * reacts to *document* updates, and `adoptKnownDocs` only ever attaches
+   * documents it has not attached before. Without this, an archive or a restore
+   * performed on another replica leaves this one's index as it was — and a
+   * restored document stays unsearchable here until somebody happens to edit
+   * it.
+   *
+   * Runs from the same observer that logs the directory update, so it fires for
+   * local and remote origins alike, and only after that update is durable. Only
+   * the entries that update actually changed are touched — see
+   * {@link staleStubs} — because the common directory write by far is a title
+   * being typed, not a document being archived.
+   *
+   * Deliberately does not repair stubs: that would write to the directory from
+   * inside the directory's own update handler. Titles are cached data, repaired
+   * from the document on the document's own updates, and on restore.
+   */
+  private reconcileDirectory(): void {
+    const fresh = [...this.staleStubs];
+    this.staleStubs.clear();
+    const retry = this.stubDueForRetry(new Set(fresh));
+    for (const uuid of retry === null ? fresh : [...fresh, retry]) {
+      this.reconcileStub(uuid);
+    }
+  }
+
+  /**
+   * The one previously-failed entry due another attempt, if any.
+   *
+   * One, not all: a persistent refusal is usually a locked database, where each
+   * attempt spends SQLite's busy timeout before failing again. Retrying every
+   * queued entry on every settle would multiply that wait by the backlog and
+   * charge it to whichever tool call happened to arrive — a slow database would
+   * become a stalled server. Taking one per drain keeps any single call's cost
+   * flat while still draining the backlog, since every call takes the next one.
+   */
+  private stubDueForRetry(fresh: Set<string>): string | null {
+    const now = Date.now();
+    for (const [uuid, dueAt] of this.pacedStubs) {
+      if (fresh.has(uuid)) {
+        continue;
+      }
+      if (now >= dueAt) {
+        return uuid;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Bring one document's index rows in line with its directory entry.
+   *
+   * Clears the entry's failure record first, so a stub that changed again is
+   * treated as fresh work rather than as a pending retry.
+   */
+  private reconcileStub(uuid: string): void {
+    this.pacedStubs.delete(uuid);
+    try {
+      const entry = getDirectoryEntry(this.directory().doc, uuid);
+      if (entry === null) {
+        return;
+      }
+      if (entry.deleted === true) {
+        // Ask before deleting: the usual tombstone has no rows left, and a
+        // delete that finds nothing still queues behind a write lock.
+        if (this.store.isIndexed(uuid)) {
+          this.store.unindexDoc(uuid);
+        }
+        return;
+      }
+      // A live entry for a document this replica has never attached is left
+      // to `adoptKnownDocs`, which attaches and indexes it on the next
+      // settle. Attaching from in here would join rooms as a side effect of
+      // an observer.
+      if (!this.known(uuid)) {
+        return;
+      }
+      const replica = this.replica(uuid);
+      const meta = getMeta(replica.doc);
+      if (meta.uuid !== "") {
+        this.indexRows(replica, meta);
+      }
+    } catch (error) {
+      this.recordStubFailure(uuid, error);
+    }
+  }
+
+  /**
+   * Remember that an entry's reconciliation was refused.
+   *
+   * Never a give-up: the entry stays queued and a later drain takes it. Deleting
+   * before setting moves it to the back of the retry order, so one entry the
+   * store keeps refusing cannot starve the rest.
+   */
+  private recordStubFailure(uuid: string, error: unknown): void {
+    this.pace(uuid, Date.now() + this.config.reconcileRetryMs);
+    log.warn("failed to reconcile a directory entry", error);
+  }
+
+  /** Queue an entry for a paced reconciliation, at the back of the line. */
+  private pace(uuid: string, dueAt: number): void {
+    this.pacedStubs.delete(uuid);
+    this.pacedStubs.set(uuid, dueAt);
+  }
+
+  /**
+   * Whether this replica's index is in line with the directory for one
+   * document.
+   *
+   * False while a reconciliation is still owed for it — either because none has
+   * run yet, or because one ran and the store refused, in which case the uuid
+   * stays queued and a later settle retries it.
+   */
+  indexReconciled(uuid: string): boolean {
+    return !this.staleStubs.has(uuid) && !this.pacedStubs.has(uuid);
+  }
+
+  /** Whether this replica holds the document itself, not just its stub. */
+  hydrated(uuid: string): boolean {
+    return this.known(uuid) && getMeta(this.replica(uuid).doc).uuid !== "";
+  }
+
+  /**
+   * Republish one document's stub from its own metadata, where this replica
+   * holds the document. Returns whether it could — i.e. whether the document is
+   * hydrated here.
+   *
+   * Stub repair otherwise rides document updates, and those skip tombstoned
+   * entries: a rename or a retag applied while a document was archived never
+   * reaches the directory. Restoring is the moment to catch up, or the document
+   * comes back under the title it was archived with while search answers from
+   * the newer one. Writes only when the stub and the document actually differ.
+   */
+  republishStub(uuid: string): boolean {
+    if (!this.hydrated(uuid)) {
+      return false;
+    }
+    this.repairStub(getMeta(this.replica(uuid).doc));
+    return true;
   }
 
   /**
@@ -446,8 +637,19 @@ export class Replicas {
     })) {
       if (entry.deleted === true) {
         // A doc deleted elsewhere leaves the derived index; `list_docs` reads
-        // the directory, and search must not surface a tombstoned doc.
-        this.store.unindexDoc(entry.uuid);
+        // the directory, and search must not surface a tombstoned doc. This is
+        // the safety net for rows the observer never saw go stale — a mirror
+        // rebuilt from an older corpus, or a tombstone learned by replaying the
+        // log, where hydration is not an observed update.
+        //
+        // It asks rather than deletes, and hands any real work to the paced
+        // queue rather than doing it here. In steady state the rows are long
+        // gone, so this costs one indexed read and no write at all; when they
+        // are not, a whole backlog of deletes must not land on whichever tool
+        // call happens to arrive while the database is locked.
+        if (!this.pacedStubs.has(entry.uuid) && this.store.isIndexed(entry.uuid)) {
+          this.pace(entry.uuid, 0);
+        }
         continue;
       }
       if (!this.known(entry.uuid)) {
@@ -529,6 +731,13 @@ export class Replicas {
   private refresh(): void {
     this.pollAll();
     this.adoptKnownDocs();
+    // Retry whatever the store refused last time. Reconciliation normally rides
+    // directory updates, and a failed entry would otherwise wait for the next
+    // one — which may never come for a document nobody touches again. At most
+    // one previously-failed entry is retried per call; see stubDueForRetry.
+    if (this.staleStubs.size > 0 || this.pacedStubs.size > 0) {
+      this.reconcileDirectory();
+    }
   }
 
   private async runSettle(): Promise<void> {

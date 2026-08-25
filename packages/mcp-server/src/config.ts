@@ -62,6 +62,15 @@ export interface McpConfig {
   cursorTtlMs: number;
   /** Log entries per room that trigger a snapshot-and-prune. */
   compactAfter: number;
+  /**
+   * How long to leave a directory entry alone after its index write failed (ms).
+   *
+   * A refused write is usually a locked database, and retrying it on every tool
+   * call would spend one SQLite busy timeout per attempt while the lock is
+   * exactly what it is waiting on. The entry stays queued either way — this only
+   * paces how often it is tried.
+   */
+  reconcileRetryMs: number;
 }
 
 function hashToIndex(value: string, buckets: number): number {
@@ -151,5 +160,6 @@ export function resolveMcpConfig(
     reconnectMaxDelayMs: 2_000,
     cursorTtlMs: 30_000,
     compactAfter: 500,
+    reconcileRetryMs: 5_000,
   };
 }

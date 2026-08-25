@@ -64,6 +64,15 @@ export interface DirectoryUpsert {
  *
  * A tombstone is sticky: upserting an entry that is already tombstoned keeps
  * `deleted: true`, so a late-arriving rename cannot resurrect a deleted doc.
+ * Lifting one is deliberate and explicit — see `restoreDirectoryEntry`.
+ *
+ * That stickiness is observed state, not a merge rule, and the difference
+ * matters. It holds against a writer that has seen the tombstone. An upsert
+ * made *concurrently* on a replica that has not seen it — an offline rename
+ * racing an archive — is an ordinary whole-entry write, converges by update
+ * order like any other, and can therefore bring the document back with nobody
+ * calling `restoreDirectoryEntry`. `directory.test.ts` pins that outcome:
+ * it is the contract, not the preference.
  */
 export function upsertDirectoryEntry(
   dirDoc: Y.Doc,
@@ -92,6 +101,40 @@ export function tombstoneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
       title: existing?.title ?? "",
       tags: existing?.tags ?? [],
       deleted: true,
+    } satisfies StoredEntry);
+  });
+}
+
+/**
+ * Lift a tombstone: clears `deleted` and keeps title and tags as they stand.
+ *
+ * This is the one sanctioned way back. `upsertDirectoryEntry` deliberately
+ * cannot do it — a rename that raced a delete must not resurrect the document —
+ * so restoring has to be an act of its own, never a side effect of a write that
+ * meant something else.
+ *
+ * Nothing happens unless there is a tombstone to lift. An entry that is already
+ * live is left alone rather than rewritten, so restoring twice does not publish
+ * a second, identical update; and a uuid the directory has never seen stays
+ * unknown, because there is nothing to bring back and inventing a live stub
+ * would announce a document that does not exist. (`tombstoneDirectoryEntry`
+ * does create an entry for an unseen uuid — it has to, since a delete must
+ * replicate even when it overtakes the create it deletes.)
+ *
+ * Entries are whole-object writes, so a restore concurrent with a tombstone
+ * converges on whichever update Yjs orders last — not on whichever human meant
+ * it more recently.
+ */
+export function restoreDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
+  const docs = getDirectoryMap(dirDoc);
+  const existing = readStored(docs.get(uuid));
+  if (existing?.deleted !== true) {
+    return;
+  }
+  dirDoc.transact(() => {
+    docs.set(uuid, {
+      title: existing.title,
+      tags: existing.tags,
     } satisfies StoredEntry);
   });
 }

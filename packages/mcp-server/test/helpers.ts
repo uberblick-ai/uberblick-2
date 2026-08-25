@@ -116,6 +116,7 @@ export interface TestConfigOptions {
   hubUrl?: string;
   workspaceId?: string;
   compactAfter?: number;
+  reconcileRetryMs?: number;
   cursorTtlMs?: number;
 }
 
@@ -141,6 +142,10 @@ export function testConfig(options: TestConfigOptions = {}): McpConfig {
     reconnectMaxDelayMs: 250,
     cursorTtlMs: options.cursorTtlMs ?? 30_000,
     compactAfter: options.compactAfter ?? 500,
+    // No cooldown by default: a suite that wants to watch a retry happen should
+    // not wait out a production pause for it. Tests about the pacing itself set
+    // this deliberately.
+    reconcileRetryMs: options.reconcileRetryMs ?? 0,
   };
 }
 

@@ -47,6 +47,7 @@ describe("with the hub stopped", () => {
     // whole-document write must never appear here.
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       "annotate",
+      "archive_doc",
       "backlinks",
       "create_doc",
       "delete_block",
@@ -55,6 +56,7 @@ describe("with the hub stopped", () => {
       "get_doc",
       "insert_block",
       "list_docs",
+      "restore_doc",
       "search",
       "set_links",
       "set_tags",
@@ -185,6 +187,16 @@ describe("with the hub stopped", () => {
       expect(payload.applied).toBe(true);
       expect(payload.synced).toBe(false);
     }
+
+    // These two write the directory rather than the document, so they report
+    // durability for a different room — offline is still offline.
+    const archived = await rig.ok("archive_doc", { uuid: created.uuid });
+    expect(archived.applied).toBe(true);
+    expect(archived.synced).toBe(false);
+
+    const restored = await rig.ok("restore_doc", { uuid: created.uuid });
+    expect(restored.applied).toBe(true);
+    expect(restored.synced).toBe(false);
   });
 
   // `hub.status` is what an agent reads to know whether its work has left the

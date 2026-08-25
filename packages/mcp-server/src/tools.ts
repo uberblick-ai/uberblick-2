@@ -1,11 +1,13 @@
 /**
  * The v0 MCP tool set.
  *
- * Thirteen tools and no more: create_doc, get_doc, list_docs, search,
+ * Fifteen tools and no more: create_doc, get_doc, list_docs, search,
  * backlinks, edit_block, insert_block, delete_block, set_tags, set_links,
- * annotate, export_markdown, sync_status. There is deliberately no
- * whole-document write — every content change names one block — and no
- * markdown-import tool, because markdown is an export format.
+ * archive_doc, restore_doc, annotate, export_markdown, sync_status. There is
+ * deliberately no whole-document write — every content change names one block
+ * — no markdown-import tool, because markdown is an export format, and no hard
+ * delete: archive_doc tombstones the directory stub and leaves every byte of
+ * the document where it was.
  *
  * Every handler starts with `replicas.settle()`: replay the log tail (another
  * MCP instance may have written since the last call) and, on boot or after a
@@ -43,11 +45,18 @@ import {
   listAnnotations,
   listDirectory,
   resolveAnnotationRange,
+  restoreDirectoryEntry,
   setLinks,
   setTags,
+  tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
-import type { Annotation, BlockInput, HeadingLevel } from "@uberblick/schema";
+import type {
+  Annotation,
+  BlockInput,
+  DirectoryEntry,
+  HeadingLevel,
+} from "@uberblick/schema";
 import { z } from "zod";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
@@ -171,6 +180,21 @@ const SYNCED_MEANS =
   "this server's append-only update log holds the write before the tool returns and re-sends it on reconnect — " +
   "so losing it for good takes the crash plus no replica holding that update ever coming back.";
 
+/**
+ * What concurrency does to an archive, in the words an agent reads.
+ *
+ * A directory stub is written whole, so two replicas disagreeing about one
+ * document's fate converge on an update order rather than on an intent. Saying
+ * so is cheaper than an agent inferring a guarantee that is not there.
+ */
+const ARCHIVE_IS_LAST_WRITE_WINS =
+  "Concurrency: a directory entry is written as a whole object, so an archive_doc racing a restore_doc on another " +
+  "replica converges on whichever update Yjs orders last — not on whichever call happened later by the clock. The same " +
+  "applies to a plain rename or retag made on a replica that had not yet seen the archive: it is a whole-entry write " +
+  "too, so it can bring the document back with nobody calling restore_doc. An archive holds against writers that have " +
+  "seen it, which is not the same as holding against every concurrent one. When it matters which way it went, re-read " +
+  "with list_docs and `include_deleted: true`.";
+
 /** The same narrowing for the mutators that do not restate it in full. */
 const SYNCED_IS_ACKNOWLEDGED =
   "`synced` here means hub-acknowledged, not hub-stored — see sync_status for the exact claim and its crash window.";
@@ -242,6 +266,41 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       { uuid, inDirectory: stub !== null, hub: replicas.sync.state() },
     );
   };
+
+  /**
+   * Resolve a document for an operation that writes only its directory stub.
+   *
+   * Deliberately weaker than {@link requireDoc}: archiving and restoring change
+   * the directory, not the document, so demanding that the document itself have
+   * reached this replica would strand exactly the case that needs the tool — a
+   * fresh server that knows an archived document only from the directory could
+   * never restore it, because an archived room is not one `adoptKnownDocs`
+   * attaches.
+   *
+   * A uuid the directory has never seen is still refused. Tombstoning a typo
+   * would publish an entry for a document that never existed, and a tombstone
+   * is sticky.
+   */
+  const requireStub = (uuid: string): DirectoryEntry => {
+    const stub = getDirectoryEntry(replicas.directory().doc, uuid);
+    if (stub === null) {
+      throw new ToolError(
+        "doc_not_found",
+        `No document ${uuid} in the directory of workspace ${replicas.config.workspaceId}`,
+        { uuid, inDirectory: false, hub: replicas.sync.state() },
+      );
+    }
+    return stub;
+  };
+
+  /**
+   * The document's own title where this replica holds it, the stub's cached one
+   * otherwise — `meta.title` wins whenever there is a document to ask.
+   */
+  const titleFor = (uuid: string, stub: DirectoryEntry): string =>
+    replicas.hydrated(uuid)
+      ? getMeta(replicas.replica(uuid).doc).title
+      : stub.title;
 
   /**
    * What a mutating tool owes its caller: the write landed locally, and whether
@@ -540,6 +599,97 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const replica = requireDoc(uuid);
       setLinks(replica.doc, links);
       return json({ uuid, links, ...durability(replica) });
+    }),
+  );
+
+  /**
+   * Archiving and restoring both write the *directory*, not the document.
+   *
+   * Two consequences. They report durability for the directory room, because
+   * that is the room whose update has to reach the hub. And they do not touch
+   * the derived index themselves: `Replicas` reconciles it from the directory
+   * update, which means the index follows an archive on every replica that
+   * observes it, not only on the one that called the tool.
+   */
+  server.registerTool(
+    "archive_doc",
+    {
+      title: "Archive a document",
+      description:
+        "Hide a document: tombstones its directory stub, so it leaves list_docs, the web sidebar and the search index. " +
+        "This is not erasure and not a delete. Every block, mark and annotation stays exactly where it was: get_doc still " +
+        "serves the document by uuid, and list_docs with `include_deleted: true` still lists it, flagged `deleted`. " +
+        "restore_doc is the way back. There is no tool that erases content, by design.\n\n" +
+        "`indexed` says this replica's search index has dropped the document. Dropping it needs only its uuid, so " +
+        "unlike restore_doc this does not depend on holding the document — it is false only if the index write itself " +
+        "failed, and then the document stays queued and a later call retries it. The archive itself is unaffected " +
+        "either way: `applied` is the durable half.\n\n" +
+        ARCHIVE_IS_LAST_WRITE_WINS +
+        "\n\n" +
+        SYNCED_IS_ACKNOWLEDGED,
+      inputSchema: { uuid: uuidArg },
+    },
+    guarded(async ({ uuid }) => {
+      await replicas.settle();
+      const stub = requireStub(uuid);
+      const directory = replicas.directory();
+      const title = titleFor(uuid, stub);
+      tombstoneDirectoryEntry(directory.doc, uuid);
+      return json({
+        uuid,
+        title,
+        archived: true,
+        // Withdrawing a document needs no copy of it, so hydration cannot make
+        // this false — but a store that refused the write can, and then the
+        // uuid stays queued for a later retry rather than being reported done.
+        indexed: replicas.indexReconciled(uuid),
+        ...durability(directory),
+      });
+    }),
+  );
+
+  server.registerTool(
+    "restore_doc",
+    {
+      title: "Restore an archived document",
+      description:
+        "Lift a document's archive tombstone: it returns to list_docs, to the web sidebar and to the search index, with " +
+        "the title and tags the directory recorded for it. The counterpart to archive_doc, and the sanctioned way " +
+        "back — a rename or a retag from a replica that has seen the archive deliberately cannot revive a document. " +
+        "Restoring one that is not archived leaves its archive state alone, but is not quite a no-op: the directory " +
+        "entry is a cache of the document's own metadata, and this trues it up, so a stub that had drifted is " +
+        "repaired in passing.\n\n" +
+        "Check `indexed`. It is true when this replica holds the document itself and has just re-derived its search " +
+        "rows — the usual case. It is false in two: when this replica knows the document only from the directory, and " +
+        "when the index write was refused. Either way the restore is real, replicates, and shows in list_docs " +
+        "immediately, but SEARCH ON THIS REPLICA will not find the document yet — it catches up when the content " +
+        "arrives or on a later call, whichever was missing. Offline, content arriving means the hub coming back.\n\n" +
+        ARCHIVE_IS_LAST_WRITE_WINS +
+        "\n\n" +
+        SYNCED_IS_ACKNOWLEDGED,
+      inputSchema: { uuid: uuidArg },
+    },
+    guarded(async ({ uuid }) => {
+      await replicas.settle();
+      const stub = requireStub(uuid);
+      const directory = replicas.directory();
+      restoreDirectoryEntry(directory.doc, uuid);
+      // A rename or a retag that landed while the document was archived never
+      // reached its stub, because stub repair skips tombstoned entries. Catch
+      // the directory up here, or the document comes back under the metadata it
+      // was archived with while search answers from the newer.
+      //
+      // Hydration is what makes re-indexing possible; it is not proof that it
+      // happened. Both have to hold, and the store gets the last word — read
+      // after the republish, whose own directory write reconciles again.
+      const hydrated = replicas.republishStub(uuid);
+      return json({
+        uuid,
+        title: titleFor(uuid, stub),
+        archived: false,
+        indexed: hydrated && replicas.indexReconciled(uuid),
+        ...durability(directory),
+      });
     }),
   );
 

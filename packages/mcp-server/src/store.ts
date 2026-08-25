@@ -246,6 +246,7 @@ export class MirrorStore {
     clearPending: Prepared<[string, number]>;
     listPending: Prepared<[]>;
     putDoc: Prepared<[string, string]>;
+    hasDoc: Prepared<[string]>;
     dropDoc: Prepared<[string]>;
     dropTags: Prepared<[string]>;
     putTag: Prepared<[string, string]>;
@@ -334,6 +335,7 @@ export class MirrorStore {
         "INSERT INTO doc_index (uuid, title) VALUES (?, ?) " +
           "ON CONFLICT (uuid) DO UPDATE SET title = excluded.title",
       ),
+      hasDoc: prepare("SELECT 1 AS present FROM doc_index WHERE uuid = ?"),
       dropDoc: prepare("DELETE FROM doc_index WHERE uuid = ?"),
       dropTags: prepare("DELETE FROM doc_tags WHERE uuid = ?"),
       putTag: prepare(
@@ -537,6 +539,18 @@ export class MirrorStore {
   /** Upsert one document's derived rows. Idempotent. */
   indexDoc(doc: IndexedDoc): void {
     this.indexTx(doc);
+  }
+
+  /**
+   * Whether the derived index holds anything for this document.
+   *
+   * A primary-key lookup, and a read: in WAL a reader never waits on a writer,
+   * so asking is free even while the database is locked for writing. That is
+   * what makes it worth asking before attempting a delete that would otherwise
+   * sit out the busy timeout only to find nothing to remove.
+   */
+  isIndexed(uuid: string): boolean {
+    return this.statements.hasDoc.get(uuid) !== undefined;
   }
 
   /**
