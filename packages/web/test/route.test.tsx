@@ -413,7 +413,7 @@ describe("an unread replica is not a different document (#161)", () => {
     // from nothing, so `getMeta` answers `uuid: ""` for a document this replica
     // fully holds — and reading that as "answered, and not this document" is
     // what flashed the waiting screen across the pane for a frame.
-    const { connection, load } = openingConnection(`main/${UUID}`);
+    const { connection, load } = openingConnection(`${WS}/${UUID}`);
     const { host, done } = mountLinked(connection, UUID);
 
     expect(host.querySelector(".ub-notice")).toBeNull();
@@ -433,7 +433,7 @@ describe("an unread replica is not a different document (#161)", () => {
     // The other half, and the reason the gate is `localReplicaLoaded` rather
     // than "empty means unknown": a deep link to a uuid this replica does not
     // hold must keep its waiting screen.
-    const { connection, load } = openingConnection(`main/${UUID}`);
+    const { connection, load } = openingConnection(`${WS}/${UUID}`);
     const { host, done } = mountLinked(connection, UUID);
 
     expect(host.querySelector(".ub-notice")).toBeNull();
@@ -635,10 +635,13 @@ describe("the room key copies the document's canonical link", () => {
       },
     });
 
-    const { label } = await clickCopy(DECORATED);
+    const { label, ariaLabel } = await clickCopy(DECORATED);
 
     expect(written).toEqual([`${window.location.origin}/${DECORATED}/${UUID}`]);
     expect(label).toBe(`${WS}/${UUID}`);
+    // The accessible name announces what the click actually produces, so it
+    // follows the address rather than the room key beside it.
+    expect(ariaLabel).toBe(`Copy link to ${DECORATED}/${UUID}`);
     // And it is a link that resolves back to this document.
     expect(route(new URL(written[0] as string).pathname)).toEqual({
       kind: "doc",

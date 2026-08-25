@@ -87,9 +87,10 @@ type CopyResult = "idle" | "copied" | "failed";
  * link on its way out of their own address bar. What is copied is the address
  * this document is open at.
  *
- * The label stays the room key, because that is what the rest of this line is
- * about: the sync state of a room, named the way the hub and the update log
- * name it.
+ * The visible label stays the room key, because that is what the rest of this
+ * line is about: the sync state of a room, named the way the hub and the update
+ * log name it. The accessible name goes the other way and announces the
+ * address, because that is the thing the click produces.
  *
  * The copy goes through `writeToClipboard`, not `navigator.clipboard`: that API
  * exists only in a secure context, and serving this client over plain http on a
@@ -112,8 +113,11 @@ function CopyLink({
     return () => clearTimeout(timer);
   }, [result]);
 
+  // The one address this button is about: what it copies, and what it says it
+  // copies. Two derivations of that would be two chances for them to disagree.
+  const address = `${segment}/${parseRoom(room).uuid}`;
+
   const copy = async (): Promise<void> => {
-    const address = `${segment}/${parseRoom(room).uuid}`;
     const ok = await writeToClipboard(shareUrl(address, window.location.origin));
     setResult(ok ? "copied" : "failed");
   };
@@ -125,9 +129,11 @@ function CopyLink({
         className="ub-room"
         // The visible label is the room key, which names the document but not
         // the action. `title` is not reliably announced, so the accessible name
-        // is set explicitly and carries both.
-        aria-label={`Copy link to ${room}`}
-        title={`Copy link to ${room}`}
+        // is set explicitly and carries both — and it names the address that is
+        // actually copied, not the room key beside it, so what a screen reader
+        // announces is what lands on the clipboard.
+        aria-label={`Copy link to ${address}`}
+        title={`Copy link to ${address}`}
         onClick={() => void copy()}
       >
         {room}
