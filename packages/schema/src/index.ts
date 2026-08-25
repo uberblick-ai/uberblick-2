@@ -11,9 +11,10 @@
  *   - `annotations` Y.Map of thread JSON, anchored by `comment` formatting
  *                   marks on the block's text
  *
- * …plus room names (`<workspaceId>/<uuid>`), the directory doc that makes
- * discovery a synced doc, the sidebar doc that makes curation one, and one-way
- * markdown export.
+ * …plus workspace ids (a uuid, optionally slug-decorated for display), room
+ * names (`<workspaceId>/<uuid>`), the directory doc that makes discovery a
+ * synced doc, the sidebar doc that makes curation one, and one-way markdown
+ * export.
  *
  * Runtime dependencies are limited to `yjs` and `fast-diff`.
  *
@@ -82,7 +83,6 @@ export type {
 } from "./markdown.js";
 
 export {
-  DEFAULT_WORKSPACE,
   DIRECTORY_SUFFIX,
   SIDEBAR_SUFFIX,
   directoryRoom,
@@ -91,6 +91,9 @@ export {
   sidebarRoom,
 } from "./rooms.js";
 export type { ParsedRoom } from "./rooms.js";
+
+export { parseWorkspaceId } from "./workspace.js";
+export type { WorkspaceId } from "./workspace.js";
 
 export {
   SIDEBAR_GROUPS_KEY,
@@ -109,7 +112,6 @@ export {
 
 export {
   DIRECTORY_DOCS_KEY,
-  DIRECTORY_ROOM,
   getDirectoryEntry,
   getDirectoryMap,
   listDirectory,
@@ -124,6 +126,7 @@ export {
   BlockNotFoundError,
   InvalidLinkHrefError,
   InvalidRoomError,
+  InvalidWorkspaceIdError,
   MarksNotAllowedError,
   StaleBlockError,
 } from "./errors.js";

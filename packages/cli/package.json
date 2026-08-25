@@ -14,11 +14,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@uberblick/mcp-server": "workspace:*"
+    "@uberblick/mcp-server": "workspace:*",
+    "@uberblick/schema": "workspace:*"
   },
   "devDependencies": {
+    "@hocuspocus/provider": "^4.6.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/node": "^26.2.0",
+    "@uberblick/hub": "workspace:*",
+    "yjs": "catalog:",
     "tsx": "^4.23.12",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"

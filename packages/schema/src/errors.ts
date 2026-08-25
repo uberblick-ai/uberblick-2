@@ -160,3 +160,27 @@ export class InvalidRoomError extends Error {
     this.room = room;
   }
 }
+
+/**
+ * Thrown when a value is not a workspace id.
+ *
+ * `label` names the source — `WORKSPACE_ID`, a config key, a URL segment — so
+ * the message points at the thing to fix. The rejected value is never included:
+ * see `parseWorkspaceId`.
+ */
+export class InvalidWorkspaceIdError extends Error {
+  /** Where the value came from, as named by the caller. */
+  readonly label: string;
+
+  constructor(label: string) {
+    super(
+      `${label} must be a workspace id: a lowercase uuid, optionally prefixed ` +
+        "for display as <slug>-<uuid>, where the slug is made of lowercase " +
+        "letters, digits and hyphens, starts and ends with a letter or digit, " +
+        "and is joined to the uuid by a single hyphen. Run `ub init` to " +
+        "create one.",
+    );
+    this.name = "InvalidWorkspaceIdError";
+    this.label = label;
+  }
+}

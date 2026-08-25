@@ -12,7 +12,9 @@
  * resolution ends by naming `WORKSPACE_ID`, `HUB_URL` and `HUB_AUTH_TOKEN`, and
  * both consumers read them back through `resolveMcpConfig` — one definition of
  * the defaults, of the database path, and of the workspace rule, for the server
- * and for `ub status` alike. Environment beats every file for the same reason:
+ * and for `ub status` alike. A workspace id is a uuid (optionally
+ * slug-decorated); schema owns that parse and this module applies it to every
+ * layer, environment and files alike. Environment beats every file for the same reason:
  * `HUB_URL=… ub mcp serve` has to keep working.
  *
  * Absent files are a default, never an error: nothing here requires `ub init` to
@@ -31,7 +33,7 @@
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { assertWorkspaceSegment } from "@uberblick/mcp-server";
+import { parseWorkspaceId } from "@uberblick/schema";
 import {
   publishOwnerOnly,
   publishStaged,
@@ -346,6 +348,23 @@ export function readCredentials(env: NodeJS.ProcessEnv = process.env): {
   };
 }
 
+/**
+ * The endpoint `./uberblick.json` pins, or null.
+ *
+ * Its own function because it answers a question resolution cannot: not "what
+ * is in force" but "will anything I write to `config.json` take effect". The
+ * directory file outranks the user config, so a command that persists an
+ * endpoint has to say so rather than print a value that will be ignored — and
+ * it cannot simply write *there* instead, because {@link secretAppliesTo}
+ * withholds the stored secret from a repository-chosen hub, so an endpoint in
+ * that file would authenticate against nothing.
+ */
+export function directoryHubUrl(cwd: string = process.cwd()): string | null {
+  const path = join(cwd, DIRECTORY_FILE);
+  const warnings: string[] = [];
+  return stringField(readJsonObject(path, warnings), "hubUrl", path, warnings);
+}
+
 export interface ResolveOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
@@ -385,9 +404,11 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
     },
   ]);
   if (workspace.value !== null) {
-    // The same rule the MCP server applies, applied to file-sourced values too:
-    // the workspace names the SQLite file as well as the room.
-    assertWorkspaceSegment(workspace.value, workspace.label);
+    // The same rule the MCP server applies, applied to file-sourced values too.
+    // The value is kept as typed — a `<slug>-<uuid>` spelling is stored and
+    // shown the way its owner wrote it; only what reaches a room, a token or
+    // the database is the bare uuid, and that parse happens where it is used.
+    parseWorkspaceId(workspace.value, workspace.label);
   }
 
   const hubUrl = pick([

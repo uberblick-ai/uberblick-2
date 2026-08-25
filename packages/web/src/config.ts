@@ -31,11 +31,10 @@
  * =====================================================================
  */
 
-import { DEFAULT_WORKSPACE } from "@uberblick/schema";
-
 // Injected as string literals at build time. Declared, never imported.
 declare const __HUB_URL__: string;
 declare const __HUB_AUTH_TOKEN__: string;
+declare const __WORKSPACE_ID__: string;
 
 /** Fallback used only when this module is loaded outside a Vite build. */
 const FALLBACK_HUB_URL = "ws://localhost:1234";
@@ -262,5 +261,31 @@ export const HUB_AUTH_TOKEN: string = injected(
   "",
 );
 
-/** The single workspace the spike runs in. Tenancy already lives in room keys. */
-export const WORKSPACE: string = DEFAULT_WORKSPACE;
+/**
+ * The workspace this build was configured with, or null when it was built
+ * without one.
+ *
+ * It answers exactly one address — `/`, which names no workspace — by
+ * redirecting to it. Every other address carries its own workspace in the first
+ * path segment, because this client cannot enumerate workspaces and must never
+ * guess which corpus a link belongs to.
+ *
+ * Injected from `WORKSPACE_ID` at build time, the way `__HUB_URL__` is: mise
+ * `[env]` supplies it in dev (`ub init` writes it into the derived
+ * `mise.local.toml`), and a bundle built without one simply has no `/`.
+ */
+export const CONFIGURED_WORKSPACE: string | null =
+  typeof __WORKSPACE_ID__ === "string" && __WORKSPACE_ID__ !== ""
+    ? __WORKSPACE_ID__
+    : null;
+
+/**
+ * The repository whose issue and PR links render as a bare `#62` — every other
+ * repository reads `org/repo#62`. Display only; see editor/github-refs.ts.
+ *
+ * A plain constant, flagged as such: the spike has one repository and one
+ * workspace, and the honest place for this once a hosted hub has many is a
+ * per-workspace setting, not a build-time value. Compared case-insensitively,
+ * because GitHub's own slugs are.
+ */
+export const GITHUB_REPO = "uberblick-ai/uberblick-2";

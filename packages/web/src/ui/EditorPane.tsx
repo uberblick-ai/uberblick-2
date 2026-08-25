@@ -3,9 +3,9 @@
  * loud read-only fallback when the palette gate is closed.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { getBlocksFragment, setTitle } from "@uberblick/schema";
+import { getBlocksFragment, parseRoom, setTitle } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { bindGuardedEditor } from "../editor/guarded-binding.js";
 import { changedBlocks } from "../editor/changed-blocks.js";
@@ -24,14 +24,16 @@ import {
   useRoomStatus,
 } from "./hooks.js";
 import { CommentComposer } from "./CommentComposer.js";
+import { DocMetaLine } from "./DocChrome.js";
 import { shareUrl } from "./route.js";
-import { threadIdFromTarget } from "./threads.js";
+import { threadIdFromActivation, threadIdFromTarget } from "./threads.js";
+import type { SelectThread } from "./threads.js";
 
 /**
  * The pane frame with a message in it instead of a document.
  *
  * Every "there is nothing to edit here" screen renders through this — no
- * document picked, an unknown workspace, a malformed link, a link whose
+ * document picked, no workspace at all, a malformed link, a link whose
  * document has not synced yet. One frame for all of them means resolving a link
  * swaps the words inside the column rather than moving the column.
  */
@@ -40,6 +42,29 @@ export function PaneNotice({ children }: { children: ReactNode }): ReactElement 
     <section className="ub-pane">
       <div className="ub-column">{children}</div>
     </section>
+  );
+}
+
+/**
+ * The archive banner: what an archived document says about itself, and the one
+ * action it offers.
+ *
+ * Deliberately the *only* action. Archiving is a tombstone on the directory
+ * stub, not a deletion — every byte of the document is still here, which is
+ * why the pane below still renders it, still scrolls, still copies. What it
+ * does not do is take an edit: restoring is the way back, and there is no
+ * second path that quietly writes to a document someone archived.
+ */
+function ArchivedBanner({ onRestore }: { onRestore: () => void }): ReactElement {
+  return (
+    <p className="ub-archived-banner">
+      <strong>Archived.</strong> This document is tombstoned in the directory:
+      it is read-only here and hidden from the document list. Restore it to edit
+      it again.
+      <button type="button" className="ub-tool" onClick={onRestore}>
+        Restore
+      </button>
+    </p>
   );
 }
 
@@ -52,11 +77,22 @@ type CopyResult = "idle" | "copied" | "failed";
  * The room key, doubling as the document's shareable link (#68).
  *
  * The line that already identified the document becomes the copy affordance
- * rather than growing a button beside it — the path and the room key are the
- * same string, so there was never anything else to show. The confirmation is
- * positioned out of flow for the reason the rest of this line is built the way
- * it is (#76): nothing here may move sideways, and a word appearing in the row
- * would move everything after it.
+ * rather than growing a button beside it — there was never anything else to
+ * show. The confirmation is positioned out of flow for the reason the rest of
+ * this line is built the way it is (#76): nothing here may move sideways, and a
+ * word appearing in the row would move everything after it.
+ *
+ * The link is built from `segment` — the workspace as the *address* spells it —
+ * rather than from the room key, which carries the bare uuid. The two are the
+ * same string for an undecorated workspace and differ for `<slug>-<uuid>`, and
+ * a copy that quietly handed back the undecorated form would rewrite somebody's
+ * link on its way out of their own address bar. What is copied is the address
+ * this document is open at.
+ *
+ * The visible label stays the room key, because that is what the rest of this
+ * line is about: the sync state of a room, named the way the hub and the update
+ * log name it. The accessible name goes the other way and announces the
+ * address, because that is the thing the click produces.
  *
  * The copy goes through `writeToClipboard`, not `navigator.clipboard`: that API
  * exists only in a secure context, and serving this client over plain http on a
@@ -64,7 +100,13 @@ type CopyResult = "idle" | "copied" | "failed";
  * back to `execCommand`, and reports whether either worked — so a failure is
  * said out loud rather than swallowed into a button that quietly does nothing.
  */
-function CopyLink({ room }: { room: string }): ReactElement {
+function CopyLink({
+  room,
+  segment,
+}: {
+  room: string;
+  segment: string;
+}): ReactElement {
   const [result, setResult] = useState<CopyResult>("idle");
 
   useEffect(() => {
@@ -73,8 +115,12 @@ function CopyLink({ room }: { room: string }): ReactElement {
     return () => clearTimeout(timer);
   }, [result]);
 
+  // The one address this button is about: what it copies, and what it says it
+  // copies. Two derivations of that would be two chances for them to disagree.
+  const address = `${segment}/${parseRoom(room).uuid}`;
+
   const copy = async (): Promise<void> => {
-    const ok = await writeToClipboard(shareUrl(room, window.location.origin));
+    const ok = await writeToClipboard(shareUrl(address, window.location.origin));
     setResult(ok ? "copied" : "failed");
   };
 
@@ -85,9 +131,11 @@ function CopyLink({ room }: { room: string }): ReactElement {
         className="ub-room"
         // The visible label is the room key, which names the document but not
         // the action. `title` is not reliably announced, so the accessible name
-        // is set explicitly and carries both.
-        aria-label={`Copy link to ${room}`}
-        title={`Copy link to ${room}`}
+        // is set explicitly and carries both — and it names the address that is
+        // actually copied, not the room key beside it, so what a screen reader
+        // announces is what lands on the clipboard.
+        aria-label={`Copy link to ${address}`}
+        title={`Copy link to ${address}`}
         onClick={() => void copy()}
       >
         {room}
@@ -133,8 +181,11 @@ function CopyLink({ room }: { room: string }): ReactElement {
  */
 export function StatusLine({
   connection,
+  segment,
 }: {
   connection: RoomConnection;
+  /** The workspace as the address spells it — what a copied link carries. */
+  segment: string;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const peers = usePeers(connection);
@@ -153,8 +204,11 @@ export function StatusLine({
         )}
       </span>
       <span className="ub-status-word">{label}</span>
-      {status.localReplicaLoaded && <span className="ub-muted">local cache</span>}
-      <CopyLink room={connection.room} />
+      {/* `hasLocalCache`, not `localReplicaLoaded`: the second only says the
+          local read is over, and it is over immediately where there is no
+          IndexedDB to read. */}
+      {status.hasLocalCache && <span className="ub-muted">local cache</span>}
+      <CopyLink room={connection.room} segment={segment} />
       {state !== "synced" && status.unsyncedChanges > 0 && (
         <span className="ub-pending">
           {status.unsyncedChanges} sync message
@@ -253,11 +307,14 @@ function CodeLanguageField({ editor }: { editor: Editor }): ReactElement | null 
 function BoundEditor({
   connection,
   author,
+  archived,
   onSelectThread,
 }: {
   connection: RoomConnection;
   author: string;
-  onSelectThread: (threadId: string) => void;
+  /** Read-only, and none of the chrome that writes. */
+  archived: boolean;
+  onSelectThread: SelectThread;
 }): ReactElement {
   const host = useRef<HTMLDivElement | null>(null);
   const frame = useRef<HTMLDivElement | null>(null);
@@ -265,6 +322,15 @@ function BoundEditor({
   // The only names anyone can mention are the peers publishing awareness right
   // now — there is no registry, and a mention is plain text.
   const peers = usePeers(connection);
+  /**
+   * The current value, readable from the binding effect without making it a
+   * dependency of it. An archived document must be bound read-only from the
+   * start — never editable-then-corrected — while a *change* of the flag must
+   * not rebind (see the effect below), and those two are only compatible if the
+   * effect can read the flag without re-running when it moves.
+   */
+  const archivedNow = useRef(archived);
+  archivedNow.current = archived;
 
   useEffect(() => {
     const element = host.current;
@@ -280,6 +346,7 @@ function BoundEditor({
       // Session-local and ephemeral: the marks are held against this Y.Doc and
       // nothing else, so a reload starts clean (see editor/changed-blocks.ts).
       changed: changedBlocks(connection),
+      editable: !archivedNow.current,
     });
     // A comment highlight is a plain span ProseMirror renders from the `comment`
     // mark, so the click that focuses its thread is read by delegation on the
@@ -288,10 +355,28 @@ function BoundEditor({
       const threadId = threadIdFromTarget(event.target);
       if (threadId !== null) onSelectThread(threadId);
     };
+    // And the keyboard's version of that click (#101): the span is a
+    // `role="button"` tab stop, so Enter and Space on a *focused* highlight
+    // select its thread and send focus after it.
+    //
+    // Capture, and it stops there: ProseMirror binds keydown on the
+    // contenteditable inside this element, and an Enter that reached it would
+    // split a block. Nothing else is intercepted — a key press with the caret
+    // in the prose targets the contenteditable, which is no highlight's
+    // descendant, so `threadIdFromActivation` reads it as null.
+    const activateThread = (event: KeyboardEvent): void => {
+      const threadId = threadIdFromActivation(event);
+      if (threadId === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onSelectThread(threadId, true);
+    };
     element.addEventListener("click", focusThread);
+    element.addEventListener("keydown", activateThread, true);
     setEditor(binding.editor);
     return () => {
       element.removeEventListener("click", focusThread);
+      element.removeEventListener("keydown", activateThread, true);
       setEditor(null);
       binding.destroy();
     };
@@ -313,16 +398,40 @@ function BoundEditor({
     return clearWhenSeen(changedBlocks(connection), editor);
   }, [connection, editor]);
 
+  /**
+   * Read-only is a *setting* on the live editor, never a reason to rebind.
+   * Archiving a document someone is reading has to flip it in place — a rebind
+   * would throw away their caret, their scroll position and the changed-block
+   * marks they have not read yet, on a change that touched no content at all.
+   *
+   * ProseMirror's own `editable` is what enforces it: with it off the view
+   * ignores every user input path — keys, `beforeinput`, paste, drop — while
+   * leaving selection and copy exactly as they were.
+   *
+   * `useLayoutEffect`, because a passive effect runs *after* paint. The render
+   * that draws the banner and takes the chrome away would otherwise leave the
+   * editor itself editable for one committed, painted frame — a frame that
+   * accepts a keystroke, which is the one thing the whole feature is for. This
+   * runs inside the same commit, so the two never disagree on screen.
+   */
+  useLayoutEffect(() => {
+    if (editor === null || editor.isDestroyed) return;
+    editor.setEditable(!archived);
+  }, [editor, archived]);
+
   return (
     <>
-      {editor !== null && <CodeLanguageField editor={editor} />}
+      {editor !== null && !archived && <CodeLanguageField editor={editor} />}
       {/* The composer and the block menu are positioned against this frame, not
           against the editor itself: ProseMirror owns every child of
           `.ub-editor`. */}
       <div className="ub-editor-frame" ref={frame}>
         <div className="ub-editor" ref={host} />
-        {editor !== null && <BlockMenu editor={editor} host={frame} />}
-        {editor !== null && (
+        {/* Both are ways of writing to the document, so an archived document
+            offers neither: the insertion menu and the comment composer are
+            gone, not merely inert. */}
+        {editor !== null && !archived && <BlockMenu editor={editor} host={frame} />}
+        {editor !== null && !archived && (
           <CommentComposer
             editor={editor}
             ydoc={connection.ydoc}
@@ -339,18 +448,36 @@ function BoundEditor({
 
 export function EditorPane({
   connection,
+  segment,
   author,
+  knownTags,
+  archived,
+  onRestore,
   onSelectThread,
 }: {
   connection: RoomConnection | null;
+  /** The workspace as the address spells it — see {@link StatusLine}. */
+  segment: string;
   /** The awareness name this client publishes — the author of its comments. */
   author: string;
+  /**
+   * Every tag the workspace already uses, read from the directory stubs by the
+   * shell. The identity line's add field suggests from it (#122).
+   */
+  knownTags: readonly string[];
+  /**
+   * Whether the directory tombstones this document. Live in both directions:
+   * the value changes under an open pane when anyone archives or restores.
+   */
+  archived: boolean;
+  /** Lift the tombstone. */
+  onRestore: () => void;
   /**
    * Called when a click lands inside a comment highlight, so the rail can focus
    * that thread. Must be referentially stable — it is an effect dependency.
    * Also called with a thread this client has just started.
    */
-  onSelectThread: (threadId: string) => void;
+  onSelectThread: SelectThread;
 }): ReactElement {
   const meta = useDocMeta(connection);
   const foreign = useForeignBlocks(connection);
@@ -368,13 +495,33 @@ export function EditorPane({
   return (
     <section className="ub-pane">
       <div className="ub-column">
+        {archived && <ArchivedBanner onRestore={onRestore} />}
+        {/* The eyebrow: what this document is, what it is tagged, and which
+            version of it is on screen — above the title, as design 1a has it. */}
+        <DocMetaLine
+          connection={connection}
+          meta={meta}
+          knownTags={knownTags}
+          archived={archived}
+        />
         <input
           className="ub-title"
           value={meta?.title ?? ""}
           placeholder="Untitled"
-          onChange={(event) => setTitle(connection.ydoc, event.target.value)}
+          // `readOnly`, not `disabled`: the title is still the document's name
+          // and still worth selecting and copying — it just cannot be retyped.
+          readOnly={archived}
+          // And the write is guarded as well as the field. `readOnly` is a
+          // statement to the browser about typing; the rule is that an archived
+          // document takes no write from here, and a rule worth having is worth
+          // enforcing where the write happens rather than trusting the one
+          // attribute that happens to sit in front of it today.
+          onChange={(event) => {
+            if (archived) return;
+            setTitle(connection.ydoc, event.target.value);
+          }}
         />
-        <StatusLine connection={connection} />
+        <StatusLine connection={connection} segment={segment} />
         {foreign.length > 0 ? (
           <ForeignFallback
             connection={connection}
@@ -384,6 +531,7 @@ export function EditorPane({
           <BoundEditor
             connection={connection}
             author={author}
+            archived={archived}
             onSelectThread={onSelectThread}
           />
         )}

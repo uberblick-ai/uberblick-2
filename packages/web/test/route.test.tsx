@@ -52,56 +52,97 @@ import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 const UUID = "3231bff4-2f1c-4a49-9f0a-6f8b2c1d7e55";
 const OTHER = "8c9a1b20-77de-4d31-bd2e-1f0f3a5c6b90";
 
+/** The workspace the addresses below name. A workspace id is a uuid. */
+const WS = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
+/** The same workspace, spelled with a display slug. */
+const DECORATED = `uberblick-${WS}`;
+/** What the build's `WORKSPACE_ID` supplies, for the one address without one. */
+const CONFIGURED = DECORATED;
+
+const workspace = { uuid: WS, segment: WS };
+
 function route(pathname: string): Route {
-  return parseRoute(pathname, "main");
+  return parseRoute(pathname, CONFIGURED);
 }
 
 describe("an address names a document, the list, or neither", () => {
   it("reads /<workspace>/<uuid> as that document", () => {
-    expect(route(`/main/${UUID}`)).toEqual({ kind: "doc", uuid: UUID });
+    expect(route(`/${WS}/${UUID}`)).toEqual({ kind: "doc", workspace, uuid: UUID });
   });
 
-  it("reads / and /<workspace> as the list, and canonicalises / to the workspace", () => {
-    expect(route("/")).toEqual({ kind: "list" });
-    expect(route("/main")).toEqual({ kind: "list" });
-    expect(route("/main/")).toEqual({ kind: "list" });
-    expect(canonicalPath(route("/"), "main")).toBe("/main");
+  it("opens the same document whether or not the workspace carries a slug", () => {
+    // The slug is display. Both addresses name one workspace, so both name one
+    // room — and the URL keeps the spelling it was written with.
+    const decorated = route(`/${DECORATED}/${UUID}`);
+    expect(decorated).toEqual({
+      kind: "doc",
+      workspace: { uuid: WS, segment: DECORATED },
+      uuid: UUID,
+    });
+    expect(decorated.kind === "doc" && decorated.workspace.uuid).toBe(
+      route(`/${WS}/${UUID}`).kind === "doc" ? WS : null,
+    );
+    expect(roomForDoc(DECORATED, UUID)).toBe(roomForDoc(WS, UUID));
+    // Kept as typed: canonicalisation against a workspace's own name is a
+    // later question, and rewriting it here would break a shared link.
+    expect(canonicalPath(decorated)).toBe(`/${DECORATED}/${UUID}`);
   });
 
-  it("names a workspace it is not configured for, rather than guessing", () => {
-    expect(route(`/other/${UUID}`)).toEqual({
-      kind: "unknown-workspace",
-      workspaceId: "other",
+  it("reads / as the build's workspace, and /<workspace> as its list", () => {
+    expect(route("/")).toEqual({
+      kind: "list",
+      workspace: { uuid: WS, segment: CONFIGURED },
     });
-    expect(route("/other")).toEqual({
-      kind: "unknown-workspace",
-      workspaceId: "other",
-    });
+    expect(route(`/${WS}`)).toEqual({ kind: "list", workspace });
+    expect(route(`/${WS}/`)).toEqual({ kind: "list", workspace });
+    expect(canonicalPath(route("/"))).toBe(`/${CONFIGURED}`);
+  });
+
+  it("says so when nothing names a workspace, rather than guessing one", () => {
+    // A build with no `WORKSPACE_ID` has no `/`: this client cannot enumerate
+    // workspaces, and inventing one would open a corpus nobody chose.
+    expect(parseRoute("/", null)).toEqual({ kind: "no-workspace" });
+    // A build whose value is not a workspace id has none either.
+    expect(parseRoute("/", "main")).toEqual({ kind: "no-workspace" });
+  });
+
+  it("calls a first segment that is not a workspace id an invalid link", () => {
+    for (const bad of ["other", "main", `${WS}x`, `foo--${WS}`]) {
+      const parsed = parseRoute(`/${bad}/${UUID}`, CONFIGURED);
+      expect(parsed.kind).toBe("invalid");
+      expect(parsed.kind === "invalid" && parsed.reason).toContain(bad);
+      // No workspace to fall back on: the link named one, and it is not one.
+      expect(parsed.kind === "invalid" && parsed.workspace).toBeNull();
+    }
   });
 
   it("calls a malformed uuid an invalid link — the one case that is not a document", () => {
     // The distinction the whole feature turns on: these can never arrive by
     // sync, so waiting for them would be waiting forever.
     for (const bad of ["not-a-uuid", "1234", `${UUID}x`, "%zz"]) {
-      expect(route(`/main/${bad}`).kind).toBe("invalid");
+      const parsed = route(`/${WS}/${bad}`);
+      expect(parsed.kind).toBe("invalid");
+      // The workspace survives a mistyped document, so the sidebar does not
+      // empty itself over a bad link.
+      expect(parsed.kind === "invalid" && parsed.workspace).toEqual(workspace);
     }
-    expect(route(`/main/${UUID}/blocks`).kind).toBe("invalid");
+    expect(route(`/${WS}/${UUID}/blocks`).kind).toBe("invalid");
   });
 
   it("rejects an empty path segment rather than quietly closing the gap", () => {
-    // `/main//<uuid>` names no room. Skipping the hole would make a link that
+    // `/<workspace>//<uuid>` names no room. Skipping the hole would make a link that
     // is wrong look like one that works, and `parseRoom` rejects empty segments
     // too — the two agree on what a well-formed address is.
-    expect(route(`/main//${UUID}`).kind).toBe("invalid");
-    expect(route("/main//").kind).toBe("invalid");
-    expect(route(`//main/${UUID}`).kind).toBe("invalid");
-    expect(route(`/main/${UUID}//`).kind).toBe("invalid");
+    expect(route(`/${WS}//${UUID}`).kind).toBe("invalid");
+    expect(route(`/${WS}//`).kind).toBe("invalid");
+    expect(route(`//${WS}/${UUID}`).kind).toBe("invalid");
+    expect(route(`/${WS}/${UUID}//`).kind).toBe("invalid");
 
     // One trailing slash is the same address, not a malformed one, and is
     // normalised out of the address bar.
-    expect(route(`/main/${UUID}/`)).toEqual({ kind: "doc", uuid: UUID });
-    expect(canonicalPath(route(`/main/${UUID}/`), "main")).toBe(`/main/${UUID}`);
-    expect(route("/main/")).toEqual({ kind: "list" });
+    expect(route(`/${WS}/${UUID}/`)).toEqual({ kind: "doc", workspace, uuid: UUID });
+    expect(canonicalPath(route(`/${WS}/${UUID}/`))).toBe(`/${WS}/${UUID}`);
+    expect(route(`/${WS}/`)).toEqual({ kind: "list", workspace });
   });
 
   it("accepts an upper-case uuid and round-trips it byte for byte", () => {
@@ -110,11 +151,15 @@ describe("an address names a document, the list, or neither", () => {
     // room keys, directory keys and `meta.uuid` are all case-sensitive, and the
     // importer does not normalise them — so the document would wait forever.
     const shouted = UUID.toUpperCase();
-    expect(route(`/main/${shouted}`)).toEqual({ kind: "doc", uuid: shouted });
+    expect(route(`/${WS}/${shouted}`)).toEqual({
+      kind: "doc",
+      workspace,
+      uuid: shouted,
+    });
     // URL → room → URL, unchanged at every hop.
-    expect(canonicalPath(route(`/main/${shouted}`), "main")).toBe(`/main/${shouted}`);
-    expect(docPath("main", shouted)).toBe(`/main/${shouted}`);
-    expect(roomForDoc("main", shouted)).toBe(`main/${shouted}`);
+    expect(canonicalPath(route(`/${WS}/${shouted}`))).toBe(`/${WS}/${shouted}`);
+    expect(docPath(WS, shouted)).toBe(`/${WS}/${shouted}`);
+    expect(roomForDoc(WS, shouted)).toBe(`${WS}/${shouted}`);
     // And it is the same document to the hydration gate, which compares exactly.
     expect(docIsHydrated(shouted, meta(shouted))).toBe(true);
     expect(docIsHydrated(shouted, meta(UUID))).toBe(false);
@@ -122,14 +167,15 @@ describe("an address names a document, the list, or neither", () => {
 
   it("leaves an address it cannot resolve exactly as it was opened", () => {
     // Rewriting a bad link would erase the evidence the message is about.
-    expect(canonicalPath(route("/other/x"), "main")).toBeNull();
-    expect(canonicalPath(route("/main/nope"), "main")).toBeNull();
+    expect(canonicalPath(route("/other/x"))).toBeNull();
+    expect(canonicalPath(route(`/${WS}/nope`))).toBeNull();
+    expect(canonicalPath({ kind: "no-workspace" })).toBeNull();
   });
 
   it("builds the same string the room key uses, so a link is the room", () => {
-    expect(docPath("main", UUID)).toBe(`/main/${UUID}`);
-    expect(shareUrl(`main/${UUID}`, "https://uberblick.test")).toBe(
-      `https://uberblick.test/main/${UUID}`,
+    expect(docPath(WS, UUID)).toBe(`/${WS}/${UUID}`);
+    expect(shareUrl(`${WS}/${UUID}`, "https://uberblick.test")).toBe(
+      `https://uberblick.test/${WS}/${UUID}`,
     );
   });
 });
@@ -151,7 +197,7 @@ describe("the URL and the app are two-way bound", () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
       true;
-    window.history.replaceState(null, "", "/main");
+    window.history.replaceState(null, "", `/${WS}`);
   });
 
   it("pushes on navigation, and follows Back and Forward out of the history", async () => {
@@ -162,18 +208,18 @@ describe("the URL and the app are two-way bound", () => {
       host.querySelector<HTMLButtonElement>(".probe") as HTMLButtonElement;
     const shown = (): string => probe().textContent ?? "";
 
-    act(() => root.render(<Probe to={`/main/${UUID}`} />));
-    expect(shown()).toBe("/main");
+    act(() => root.render(<Probe to={`/${WS}/${UUID}`} />));
+    expect(shown()).toBe(`/${WS}`);
 
     // Our own navigation. The browser does not announce a pushState, so the
     // hook has to write both the history and its own state.
     act(() => probe().click());
-    expect(window.location.pathname).toBe(`/main/${UUID}`);
-    expect(shown()).toBe(`/main/${UUID}`);
+    expect(window.location.pathname).toBe(`/${WS}/${UUID}`);
+    expect(shown()).toBe(`/${WS}/${UUID}`);
 
-    act(() => root.render(<Probe to={`/main/${OTHER}`} />));
+    act(() => root.render(<Probe to={`/${WS}/${OTHER}`} />));
     act(() => probe().click());
-    expect(shown()).toBe(`/main/${OTHER}`);
+    expect(shown()).toBe(`/${WS}/${OTHER}`);
 
     // Back and Forward: the browser announces these, and the hook reads the
     // answer out of `location` rather than trusting a remembered stack.
@@ -181,14 +227,14 @@ describe("the URL and the app are two-way bound", () => {
       window.history.back();
       await waitForPop();
     });
-    expect(shown()).toBe(`/main/${UUID}`);
-    expect(route(shown())).toEqual({ kind: "doc", uuid: UUID });
+    expect(shown()).toBe(`/${WS}/${UUID}`);
+    expect(route(shown())).toEqual({ kind: "doc", workspace, uuid: UUID });
 
     await act(async () => {
       window.history.forward();
       await waitForPop();
     });
-    expect(shown()).toBe(`/main/${OTHER}`);
+    expect(shown()).toBe(`/${WS}/${OTHER}`);
 
     act(() => root.unmount());
     host.remove();
@@ -236,10 +282,13 @@ function LinkedPane({
   const docMeta = useDocMeta(connection);
   return (
     <RoutePane
-      route={{ kind: "doc", uuid }}
+      route={{ kind: "doc", workspace, uuid }}
       connection={connection}
       meta={docMeta}
       author="tester"
+      knownTags={[]}
+      archived={false}
+      onRestore={() => {}}
       onSelectThread={() => {}}
     />
   );
@@ -262,7 +311,7 @@ describe("a fresh deep link does not open a writable empty replica", () => {
     document.body.appendChild(host);
     const root = createRoot(host);
     act(() =>
-      root.render(<LinkedPane connection={liveConnection(local, `main/${UUID}`)} uuid={UUID} />),
+      root.render(<LinkedPane connection={liveConnection(local, `${WS}/${UUID}`)} uuid={UUID} />),
     );
 
     // The stub is not a licence to edit: binding here would put blocks and
@@ -287,17 +336,136 @@ describe("a fresh deep link does not open a writable empty replica", () => {
 });
 
 /**
- * An offline connection to an empty document. A real Y.Doc, because the
- * resolved branch mounts the editor against it — the point of that assertion is
- * that the waiting screen gets out of the way, which is only worth checking if
- * what replaces it actually renders.
+ * A room that has just been opened: an empty Y.Doc, and an IndexedDB replica
+ * that has not been read yet. `load` is that read arriving — content first,
+ * then the announcement, which is the order `IndexeddbPersistence` uses.
+ */
+function openingConnection(room: string): {
+  connection: RoomConnection;
+  load: (from?: Y.Doc) => void;
+} {
+  const ydoc = new Y.Doc();
+  const status: RoomStatus = {
+    connected: false,
+    synced: false,
+    unsyncedChanges: 0,
+    localReplicaLoaded: false,
+    hasLocalCache: false,
+  };
+  const listeners = new Set<(next: RoomStatus) => void>();
+  // Deferred, so the promise and the flag say the same thing: both are the
+  // local read, and `load` is the only thing that completes it.
+  let localReplicaLoaded: () => void = () => {};
+  const whenLocalReplicaLoaded = new Promise<void>((resolve) => {
+    localReplicaLoaded = resolve;
+  });
+  const connection = {
+    room,
+    ydoc,
+    provider: { awareness: null },
+    status,
+    onStatusChange: (listener: (next: RoomStatus) => void) => {
+      listeners.add(listener);
+      listener({ ...status });
+      return () => listeners.delete(listener);
+    },
+    whenLocalReplicaLoaded,
+  } as unknown as RoomConnection;
+  return {
+    connection,
+    load: (from?: Y.Doc) => {
+      // Content means there was a cache to read; `load()` with none means the
+      // read finished and found nothing. Both end the read.
+      if (from !== undefined) {
+        Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(from));
+        status.hasLocalCache = true;
+      }
+      status.localReplicaLoaded = true;
+      localReplicaLoaded();
+      for (const listener of listeners) listener({ ...status });
+    },
+  };
+}
+
+/** Mount `LinkedPane` on `connection` and return the host plus a teardown. */
+function mountLinked(
+  connection: RoomConnection,
+  uuid: string,
+): { host: HTMLElement; done: () => void } {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+    true;
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  act(() => root.render(<LinkedPane connection={connection} uuid={uuid} />));
+  return {
+    host,
+    done: () => {
+      act(() => root.unmount());
+      host.remove();
+    },
+  };
+}
+
+describe("an unread replica is not a different document (#161)", () => {
+  it("says nothing while the room it just re-opened is still reading its replica", () => {
+    // Navigating away releases the room: the provider, the IndexedDB
+    // persistence and the Y.Doc are all destroyed. Navigating back re-opens
+    // from nothing, so `getMeta` answers `uuid: ""` for a document this replica
+    // fully holds — and reading that as "answered, and not this document" is
+    // what flashed the waiting screen across the pane for a frame.
+    const { connection, load } = openingConnection(`${WS}/${UUID}`);
+    const { host, done } = mountLinked(connection, UUID);
+
+    expect(host.querySelector(".ub-notice")).toBeNull();
+    expect(host.querySelector(".ub-editor")).toBeNull();
+
+    // IndexedDB answers with the document that was there all along.
+    const stored = new Y.Doc();
+    initDoc(stored, { uuid: UUID, title: "Annotations" });
+    act(() => load(stored));
+
+    expect(host.querySelector(".ub-notice")).toBeNull();
+    expect(host.querySelector(".ub-editor")).not.toBeNull();
+    done();
+  });
+
+  it("still waits once the replica has answered and the document is not in it", () => {
+    // The other half, and the reason the gate is `localReplicaLoaded` rather
+    // than "empty means unknown": a deep link to a uuid this replica does not
+    // hold must keep its waiting screen.
+    const { connection, load } = openingConnection(`${WS}/${UUID}`);
+    const { host, done } = mountLinked(connection, UUID);
+
+    expect(host.querySelector(".ub-notice")).toBeNull();
+
+    act(() => load());
+
+    expect(host.querySelector(".ub-notice")?.textContent).toContain(
+      "Waiting for sync",
+    );
+    expect(host.querySelector(".ub-editor")).toBeNull();
+    done();
+  });
+});
+
+/**
+ * An offline connection to an empty document, whose local replica has already
+ * been read. A real Y.Doc, because the resolved branch mounts the editor against
+ * it — the point of that assertion is that the waiting screen gets out of the
+ * way, which is only worth checking if what replaces it actually renders.
+ *
+ * `localReplicaLoaded: true` is the load-bearing half: it is what makes the
+ * empty document an *answer*. A room still reading its replica says nothing —
+ * see the re-opened-room tests below.
  */
 function stubConnection(room: string): RoomConnection {
   const status: RoomStatus = {
     connected: false,
     synced: false,
     unsyncedChanges: 0,
-    localReplicaLoaded: false,
+    localReplicaLoaded: true,
+    hasLocalCache: false,
   };
   return {
     room,
@@ -329,9 +497,12 @@ function paneText(target: Route, docMeta: DocMeta | null): string {
     root.render(
       <RoutePane
         route={target}
-        connection={target.kind === "doc" ? stubConnection(`main/${UUID}`) : null}
+        connection={target.kind === "doc" ? stubConnection(`${WS}/${UUID}`) : null}
         meta={docMeta}
         author="tester"
+        knownTags={[]}
+        archived={false}
+        onRestore={() => {}}
         onSelectThread={() => {}}
       />,
     ),
@@ -344,7 +515,7 @@ function paneText(target: Route, docMeta: DocMeta | null): string {
 
 describe("an address that resolves to no document says which one, and why", () => {
   it("waits on a document it does not have, naming the id", () => {
-    const text = paneText({ kind: "doc", uuid: UUID }, meta(""));
+    const text = paneText({ kind: "doc", workspace, uuid: UUID }, meta(""));
     expect(text).toContain("Waiting for sync");
     expect(text).toContain(UUID);
     // Never the word for a document that does not exist: it may yet arrive.
@@ -354,36 +525,50 @@ describe("an address that resolves to no document says which one, and why", () =
   it("says nothing at all until the replica has answered", () => {
     // The quiet render between a navigation and the room's first read. Drawing
     // the waiting screen from ignorance is what makes switching documents flash.
-    expect(paneText({ kind: "doc", uuid: UUID }, null)).toBe("");
+    expect(paneText({ kind: "doc", workspace, uuid: UUID }, null)).toBe("");
   });
 
   it("stops waiting once the document is here", () => {
     // The editor pane takes over, so the notice is gone entirely.
-    expect(paneText({ kind: "doc", uuid: UUID }, meta(UUID))).toBe("");
+    expect(paneText({ kind: "doc", workspace, uuid: UUID }, meta(UUID))).toBe("");
   });
 
-  it("names an unknown workspace explicitly, and the one it is configured for", () => {
-    const text = paneText({ kind: "unknown-workspace", workspaceId: "elsewhere" }, null);
-    expect(text).toContain("Unknown workspace");
-    expect(text).toContain("elsewhere");
-    expect(text).toContain("main");
+  it("says where to find a workspace id when the address names none", () => {
+    const text = paneText({ kind: "no-workspace" }, null);
+    expect(text).toContain("No workspace");
+    // Web cannot enumerate workspaces, so it names the command that can.
+    expect(text).toContain("ub status");
   });
 
   it("tells a malformed link apart from a missing one", () => {
-    const text = paneText({ kind: "invalid", reason: "“nope” is not a document uuid." }, null);
+    const text = paneText(
+      { kind: "invalid", reason: "“nope” is not a document uuid.", workspace },
+      null,
+    );
     expect(text).toContain("Not a document link");
     expect(text).toContain("nope");
   });
 });
 
-/** Click the room key on a mounted status line and return what it then says. */
-async function clickCopy(): Promise<{ label: string; ariaLabel: string; said: string }> {
+/**
+ * Click the room key on a mounted status line and return what it then says.
+ *
+ * `segment` is the workspace as the address spells it, which is what the app
+ * hands the line — the room key is always the bare uuid.
+ */
+async function clickCopy(
+  segment = WS,
+): Promise<{ label: string; ariaLabel: string; said: string }> {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  act(() => root.render(<StatusLine connection={stubConnection(`main/${UUID}`)} />));
+  act(() =>
+    root.render(
+      <StatusLine connection={stubConnection(`${WS}/${UUID}`)} segment={segment} />,
+    ),
+  );
 
   const button = host.querySelector<HTMLButtonElement>(".ub-room");
   const label = button?.textContent ?? "";
@@ -421,18 +606,50 @@ describe("the room key copies the document's canonical link", () => {
     const { label, ariaLabel, said } = await clickCopy();
 
     // The affordance is the line that already named the document — no new chrome.
-    expect(label).toBe(`main/${UUID}`);
+    expect(label).toBe(`${WS}/${UUID}`);
     // …but the visible label names the document, not the action, so the
     // accessible name has to carry both. `title` is not reliably announced.
-    expect(ariaLabel).toBe(`Copy link to main/${UUID}`);
+    expect(ariaLabel).toBe(`Copy link to ${WS}/${UUID}`);
 
     // Exactly what `parseRoute` resolves back to this document.
-    expect(written).toEqual([`${window.location.origin}/main/${UUID}`]);
+    expect(written).toEqual([`${window.location.origin}/${WS}/${UUID}`]);
     expect(route(new URL(written[0] as string).pathname)).toEqual({
       kind: "doc",
+      workspace,
       uuid: UUID,
     });
     expect(said).toBe("link copied");
+  });
+
+  it("copies the workspace as the address spells it, slug and all", async () => {
+    // Opened at `/<slug>-<uuid>/<doc>`, the copy has to hand back that link.
+    // Building it from the room key would silently undecorate somebody's URL on
+    // its way out of their own address bar — and the room key, which is what
+    // the line is labelled with, keeps carrying the bare uuid either way.
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (text: string) => {
+          written.push(text);
+          return Promise.resolve();
+        },
+      },
+    });
+
+    const { label, ariaLabel } = await clickCopy(DECORATED);
+
+    expect(written).toEqual([`${window.location.origin}/${DECORATED}/${UUID}`]);
+    expect(label).toBe(`${WS}/${UUID}`);
+    // The accessible name announces what the click actually produces, so it
+    // follows the address rather than the room key beside it.
+    expect(ariaLabel).toBe(`Copy link to ${DECORATED}/${UUID}`);
+    // And it is a link that resolves back to this document.
+    expect(route(new URL(written[0] as string).pathname)).toEqual({
+      kind: "doc",
+      workspace: { uuid: WS, segment: DECORATED },
+      uuid: UUID,
+    });
   });
 
   it("still copies where navigator.clipboard does not exist", async () => {
@@ -458,7 +675,7 @@ describe("the room key copies the document's canonical link", () => {
 
     const { said } = await clickCopy();
 
-    expect(copied).toEqual([`${window.location.origin}/main/${UUID}`]);
+    expect(copied).toEqual([`${window.location.origin}/${WS}/${UUID}`]);
     expect(said).toBe("link copied");
   });
 

@@ -234,10 +234,116 @@ body {
   font-family: var(--font-sans);
 }
 
+/* ---- doc chrome in the topbar (#69) ---- */
+
+/* `<group> / <title>`. It takes whatever width is left and gives it back: the
+   title truncates rather than pushing the pills off the end of a narrow
+   window. */
+.ub-crumb {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+  font-size: 0.8rem;
+}
+
+.ub-crumb-group,
+.ub-crumb-sep {
+  color: var(--muted-foreground);
+  flex: none;
+}
+
+/* `min-width: 0` is what makes the ellipsis possible at all: a flex item's
+   automatic minimum size is its content, so without it a long title refuses to
+   shrink and pushes the pills off the end of a narrow window instead of
+   truncating. */
+.ub-crumb-title {
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Right-anchored, and the pills grow leftwards into the gap: the activity pill
+   is first in the group, so a session arriving or leaving never moves the
+   connection pill or the presence chip beside it. */
+.ub-chrome-pills {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.ub-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  color: var(--muted-foreground);
+}
+
+/* A name is a word, not an identifier — the same reason the presence chips
+   stay in Geist. The colour is the session's own, written inline.
+
+   `inline-block` rather than the flex box above: a session may call itself
+   anything, and a long name has to end in an ellipsis rather than in a letter
+   sliced down the middle. */
+.ub-pill-agent {
+  display: inline-block;
+  font-family: var(--font-sans);
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ub-pill-synced {
+  border-color: var(--status-success-subtle);
+}
+
+.ub-pill-syncing {
+  border-color: var(--status-warning-subtle);
+  background: var(--status-warning-subtle);
+  color: var(--foreground);
+}
+
+.ub-pill-offline {
+  border-color: var(--destructive);
+  background: var(--destructive-subtle);
+  color: var(--foreground);
+}
+
+/* The threads drawer's handle (#101). `display: none` here and `inline-flex`
+   inside the narrow media query below: above 1100px the rail is a column beside
+   the prose, and a button that opens what is already open says nothing. */
+.ub-threads-toggle {
+  display: none;
+  align-items: center;
+  gap: 0.35rem;
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
 .ub-body {
   display: flex;
   flex: 1;
   min-height: 0;
+  /* The containing block for the threads drawer, which overlays the panes at
+     narrow widths rather than taking a column from them. */
+  position: relative;
 }
 
 /* ---- doc list ---- */
@@ -409,9 +515,36 @@ body {
   display: none;
 }
 
-/* Below this the three panes stop fitting; the rail is the one that goes. */
+/* Below this the three panes stop fitting; the rail is the one that goes — and
+   with it the only way to read a thread, which is what the drawer is for (#101).
+   The toggle appears, and opening it brings the rail back *over* the prose
+   instead of taking a column the window does not have. */
 @media (max-width: 1100px) {
   .ub-rail {
+    display: none;
+  }
+
+  .ub-threads-toggle {
+    display: inline-flex;
+  }
+
+  .ub-rail.ub-rail-open {
+    display: flex;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    z-index: 5;
+    width: min(20rem, 85vw);
+    background: var(--card);
+    color: var(--card-foreground);
+    box-shadow: -8px 0 24px rgb(0 0 0 / 0.18);
+  }
+
+  /* The drawer is the threads. The outline stays hidden: it is the section the
+     narrow layout gave up first, and a reader who opened "Threads" asked for
+     one thing. */
+  .ub-rail-open .ub-outline {
     display: none;
   }
 }
@@ -828,6 +961,114 @@ body {
   margin-left: auto;
 }
 
+/* ---- the document's identity line, above the prose (#69) ---- */
+
+/* The eyebrow above the H1 (design surface 1a): what kind of document this is,
+   what it is tagged, and which version of it is on screen.
+
+   One row, fixed height, never wrapping. That is what lets the tag chips live
+   here without the title moving: the add field is always drawn, so the height
+   with no chips is the height with six, and the chips scroll sideways inside
+   their own box instead of taking a second line. */
+.ub-doc-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  min-height: 1.55rem;
+  margin: 0 0 0.15rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+/* Outlined, in the brand amber: what kind of document this is, said once. */
+.ub-badge {
+  border: 1px solid var(--brand);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  color: var(--brand);
+}
+
+/* The document's tags, in the row's flexible middle (#122). The scroll is the
+   promise the row makes to the title: a workspace that tags heavily gets a
+   sideways overflow, never a second line. The scrollbar is hidden because the
+   chips are a handful of words, not a pane. */
+.ub-tags {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ub-tags::-webkit-scrollbar {
+  display: none;
+}
+
+.ub-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.05rem 0.15rem 0.05rem 0.5rem;
+  white-space: nowrap;
+}
+
+/* No remove affordance on an archived document, so the chip closes up. */
+.ub-tag:not(:has(.ub-tag-x)) {
+  padding-right: 0.5rem;
+}
+
+.ub-tag-x {
+  border: 0;
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  line-height: 1;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.ub-tag-x:hover {
+  color: var(--foreground);
+}
+
+.ub-tag-x:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* A field, not a box: it is one of the row's words until it is focused. Its
+   width is fixed for the same reason everything else here is — a field that
+   grew as the reader typed would drag the row around them. */
+.ub-tag-add {
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: inherit;
+  font: inherit;
+  width: 9ch;
+  flex: none;
+  padding: 0.05rem 0.1rem;
+}
+
+.ub-tag-add:focus {
+  outline: none;
+  border-bottom-color: var(--ring);
+}
+
+/* Machine facts, in the machine face — and monospaced for the other reason
+   too: the rev changes on every edit, and a proportional one would breathe in
+   and out under the title while somebody types. */
+.ub-doc-ids {
+  font-family: var(--font-mono);
+  flex: none;
+}
+
 /* ---- editor chrome above the prose ---- */
 
 /* The row that used to hold the block-type buttons. Block types now come from
@@ -991,6 +1232,14 @@ h3.ub-heading {
   cursor: pointer;
 }
 
+/* The highlight is a tab stop (#101), so it has to look like one when the
+   keyboard is on it. An explicit ring rather than the platform default, which
+   is a hairline drawn over an amber ground. */
+.ub-comment:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
 /* Clicking a card flashes its range: a ring in the brand amber, pulsed and then
    gone. The ring rather than the ground, because full-strength amber under the
    prose fails contrast in one theme or the other whatever the text colour —
@@ -1050,6 +1299,18 @@ h3.ub-heading {
   text-underline-offset: 0.15em;
 }
 
+/* A pasted GitHub issue/PR link, shown as GitHub shows it (#58). Two
+   decorations: the URL text is hidden and the reference is drawn in its place —
+   display only, the document still holds the full URL. The caret stepping into
+   the link drops both, so the text is there to edit. */
+.ub-gh-url {
+  display: none;
+}
+
+.ub-gh-ref {
+  white-space: nowrap;
+}
+
 /* ---- foreign-content fallback ---- */
 
 /* Loud comes from the ground and the 2px border; the prose stays
@@ -1071,6 +1332,36 @@ h3.ub-heading {
 
 .ub-foreign-list {
   font-size: 0.85rem;
+}
+
+/* ---- the archive banner (#146) ---- */
+
+/* A state, not an error, so the warning ground rather than the destructive one
+   — and built like the unsupported-content banner otherwise, since both say
+   "this pane will not take an edit". The prose stays `--foreground` for the
+   same contrast reason given there. */
+.ub-archived-banner {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  background: var(--status-warning-subtle);
+  color: var(--foreground);
+  border: 1px solid var(--status-warning);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.75rem;
+  line-height: 1.5;
+}
+
+.ub-archived-banner strong {
+  font-weight: 500;
+}
+
+/* The action pushed to the end of the row, so it reads as the banner's answer
+   rather than as a word inside its sentence. */
+.ub-archived-banner .ub-tool {
+  margin-left: auto;
 }
 
 /* ---- what an address resolved to, when it was not a document (#68) ---- */

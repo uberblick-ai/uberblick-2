@@ -14,6 +14,7 @@ import { initCommand } from "./init.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
+import { remoteCommand } from "./remote.js";
 import { serveCommand } from "./serve.js";
 import { statusCommand } from "./status.js";
 import { cliVersion } from "./version.js";
@@ -25,7 +26,14 @@ usage: ub <command> [options]
 commands:
   init [options]         identity, workspace and a local development signing secret
   status [--json]        workspace, hub, credential, database and sync state
+  remote [command]       the endpoint documents sync with, and the one-time bridges
   mcp install [target]   register uberblick with an MCP client
+
+remote commands:
+  remote                 the endpoint in force and what sharing it buys
+  remote set <url>       point the clients at an endpoint; moves nothing
+  remote promote <url>   move this populated workspace onto an empty remote hub
+  remote join <url>      pull a populated remote workspace into this empty one
 
 init options:
   -y, --yes         take every default; never prompt (also the default with no TTY)
@@ -67,6 +75,9 @@ export async function runCli(
   }
   if (command === "status") {
     return await statusCommand(rest, io);
+  }
+  if (command === "remote") {
+    return await remoteCommand(rest, io);
   }
   if (command === "mcp") {
     const [subcommand, ...args] = rest;

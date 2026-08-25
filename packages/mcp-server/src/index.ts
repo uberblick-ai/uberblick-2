@@ -12,13 +12,25 @@
 
 export {
   DEFAULT_HUB_URL,
-  assertWorkspaceSegment,
   defaultDatabasePath,
   resolveMcpConfig,
 } from "./config.js";
 export type { McpConfig } from "./config.js";
+export {
+  BRIDGE_CONNECT_TIMEOUT_MS,
+  BRIDGE_SYNC_TIMEOUT_MS,
+  bridgeConfig,
+  compareCorpus,
+  docFingerprint,
+  inspectRemote,
+  isIdentical,
+  liveDocs,
+  syncWorkspace,
+} from "./remote.js";
+export type { Corpus, CorpusDifference, CorpusDoc } from "./remote.js";
 export { createMcpServer } from "./server.js";
 export type { UberblickMcpServer } from "./server.js";
+export type { HubState, HubStatus } from "./sync.js";
 export { collectSyncStatus } from "./status.js";
 export type { RoomSyncStatus, SyncStatus } from "./status.js";
 export { log, logAt } from "./log.js";

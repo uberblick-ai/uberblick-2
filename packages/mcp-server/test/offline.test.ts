@@ -14,6 +14,7 @@ import {
   tempDatabasePath,
   testConfig,
   TEST_SECRET,
+  WORKSPACE,
 } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
@@ -216,7 +217,7 @@ describe("with the hub stopped", () => {
     // each with the log sequence it is waiting on.
     const pending = status.pendingRooms as { room: string; seq: number }[];
     expect(pending.map((entry) => entry.room)).toEqual(
-      expect.arrayContaining([`main/${created.uuid}`, "main/_directory"]),
+      expect.arrayContaining([`${WORKSPACE}/${created.uuid}`, `${WORKSPACE}/_directory`]),
     );
     for (const entry of pending) {
       expect(entry.seq).toBeGreaterThan(0);
@@ -258,7 +259,7 @@ describe("with the hub stopped", () => {
     expect(after.unsyncedChanges).toBeGreaterThan(0);
     expect(
       (after.pendingRooms as { room: string }[]).map((entry) => entry.room),
-    ).toContain(`main/${created.uuid}`);
+    ).toContain(`${WORKSPACE}/${created.uuid}`);
   });
 
   it("does not open a room for a document nobody has heard of", async () => {
@@ -273,7 +274,7 @@ describe("with the hub stopped", () => {
     const status = await rig.ok("sync_status", {});
     expect(
       status.rooms.map((room: { room: string }) => room.room),
-    ).toEqual(["main/_directory"]);
+    ).toEqual([`${WORKSPACE}/_directory`]);
   });
 
 });

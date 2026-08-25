@@ -33,10 +33,11 @@ import {
   testConfig,
   TEST_SECRET,
   waitUntil,
+  WORKSPACE,
 } from "./helpers.js";
 import type { PeerClient, Rig } from "./helpers.js";
 
-const ROOM = "main/durability";
+const ROOM = `${WORKSPACE}/durability`;
 const TEXT = "body";
 
 const stores: MirrorStore[] = [];
@@ -263,7 +264,7 @@ describe("a failed append", () => {
     // Diagnostics still answer — that is when they are needed most.
     const status = await rig.ok("sync_status", {});
     expect(status.persistence).not.toBeNull();
-    expect(status.persistence.room).toBe(`main/${created.uuid}`);
+    expect(status.persistence.room).toBe(`${WORKSPACE}/${created.uuid}`);
 
     // A restart rebuilds from the log, so the unlogged edit is simply gone —
     // never half-applied, and never reported as applied.
@@ -302,7 +303,7 @@ describe("a failed append", () => {
       title: "Quarantine",
       blocks: [{ type: "paragraph", text: "one" }],
     });
-    const room = `main/${created.uuid}`;
+    const room = `${WORKSPACE}/${created.uuid}`;
     const peer = await peerClient(running.port, room);
     peers.push(peer);
 
@@ -346,7 +347,7 @@ describe("a failed append", () => {
       title: "No snapshots while broken",
       blocks: [{ type: "paragraph", text: "original" }],
     });
-    const room = `main/${created.uuid}`;
+    const room = `${WORKSPACE}/${created.uuid}`;
 
     faulty.failing = true;
     const refused = await rig.call("edit_block", {
@@ -460,7 +461,7 @@ describe("the pending watermark", () => {
     rigs.push(rig);
 
     const created = await rig.ok("create_doc", { title: "Watermarks" });
-    const room = `main/${created.uuid}`;
+    const room = `${WORKSPACE}/${created.uuid}`;
     await waitUntil("the room to be acknowledged", async () => {
       const status = await rig.ok("sync_status", {});
       return (
@@ -499,7 +500,7 @@ describe("the pending watermark", () => {
     // attach its room, and it could never be discovered or pushed.
     const databasePath = tempDatabasePath();
     const uuid = randomUUID();
-    const room = `main/${uuid}`;
+    const room = `${WORKSPACE}/${uuid}`;
 
     const seeded = new MirrorStore(databasePath);
     const doc = new Y.Doc();

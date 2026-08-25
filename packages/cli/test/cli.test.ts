@@ -13,6 +13,9 @@ import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
+/** The workspace these sandboxes are configured for. Ids are uuids. */
+const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
+
 describe("ub", () => {
   it("prints the subcommands with no arguments, and exits 0", () => {
     const run = runUb([], sandbox());
@@ -39,29 +42,63 @@ describe("ub", () => {
 });
 
 describe("ub status", () => {
-  it("succeeds with no configuration anywhere, reporting the defaults", () => {
-    // Absent configuration is a default, never an error: nothing here requires
-    // `ub init` to have run.
-    const run = runUb(["status"], sandbox());
+  it("reports the defaults for everything a workspace does not decide", () => {
+    // Absent configuration is a default for the endpoint and the credential:
+    // nothing here requires `ub init` to have set those.
+    const run = runUb(["status"], sandbox({ userConfig: { workspace: WORKSPACE } }));
     expect(run.status).toBe(0);
-    expect(run.stdout).toMatch(/main/);
+    expect(run.stdout).toMatch(WORKSPACE);
     expect(run.stdout).toMatch(/ws:\/\/localhost:1234/);
   });
 
+  it("fails with no workspace anywhere, and names `ub init`", () => {
+    // The one value with no default. A guessed workspace would open a corpus
+    // nobody chose, so the answer is the command that creates one.
+    const run = runUb(["status"], sandbox());
+    expect(run.status).not.toBe(0);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toMatch(/WORKSPACE_ID/);
+    expect(run.stderr).toMatch(/ub init/);
+  });
+
+  it("shows a decorated workspace as typed, and the uuid it resolves to", () => {
+    // The slug is display; the uuid is what rooms, the token claim and the
+    // database are keyed by — and what you quote to somebody else.
+    const decorated = `uberblick-${WORKSPACE}`;
+    const box = sandbox({ userConfig: { workspace: decorated, hubUrl: DEAD_HUB_URL } });
+
+    const human = runUb(["status"], box);
+    expect(human.status).toBe(0);
+    expect(human.stdout).toMatch(new RegExp(`workspace\\s+${decorated}`));
+    expect(human.stdout).toMatch(new RegExp(`uuid\\s+${WORKSPACE}`));
+
+    const report = JSON.parse(runUb(["status", "--json"], box).stdout);
+    expect(report.workspace).toBe(decorated);
+    expect(report.workspaceUuid).toBe(WORKSPACE);
+    // Both spellings key one database, or the corpus would have two replicas.
+    expect(report.databasePath).toBe(
+      join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`),
+    );
+    expect(report.rooms[0].room).toBe(`${WORKSPACE}/_directory`);
+  });
+
   it("emits one parseable object with --json, and nothing else on stdout", () => {
-    const box = sandbox({ userConfig: { hubUrl: DEAD_HUB_URL } });
+    const box = sandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+    });
     const run = runUb(["status", "--json"], box);
     expect(run.status).toBe(0);
 
     const report = JSON.parse(run.stdout);
-    expect(report.workspace).toBe("main");
+    expect(report.workspace).toBe(WORKSPACE);
+    expect(report.workspaceUuid).toBe(WORKSPACE);
     expect(report.hubUrl).toBe(DEAD_HUB_URL);
     expect(report.sources).toEqual({
-      workspace: "default",
+      workspace: "user config",
       hubUrl: "user config",
     });
     expect(report.databasePath).toBe(
-      join(box.dataHome, "uberblick", "main.sqlite"),
+      join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`),
     );
     expect(report.credentialPresent).toBe(false);
     expect(report.credentialSource).toBeNull();
@@ -69,7 +106,7 @@ describe("ub status", () => {
     expect(report.version).toMatch(/^\d+\.\d+\.\d+/);
     // Sync state per attached room. The directory doc exists from boot.
     expect(Array.isArray(report.rooms)).toBe(true);
-    expect(report.rooms[0].room).toBe("main/_directory");
+    expect(report.rooms[0].room).toBe(`${WORKSPACE}/_directory`);
     expect(report.rooms[0]).toHaveProperty("synced");
     // The rooms behind `unsyncedChanges`, not just the count: durable local work
     // the hub has not acknowledged is the one thing this report must not hide.
@@ -82,7 +119,7 @@ describe("ub status", () => {
     const box = sandbox({
       credentials: { signingSecret: secret },
       // A dead hub, so this test never touches a hub the developer is running.
-      userConfig: { hubUrl: DEAD_HUB_URL },
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
     });
 
     const human = runUb(["status"], box);
@@ -110,7 +147,7 @@ describe("ub status", () => {
     const secret = "cli-test-signing-secret-9d2e07";
     const box = sandbox({
       credentials: { signingSecret: secret },
-      userConfig: { hubUrl: DEAD_HUB_URL },
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
       // A file every user on the machine can read: the secret must go unused.
       credentialsMode: 0o644,
     });
@@ -135,6 +172,7 @@ describe("ub status", () => {
     const secret = "cli-test-signing-secret-c40b8a";
     const box = sandbox({
       directoryFile: { hubUrl: DEAD_HUB_URL },
+      userConfig: { workspace: WORKSPACE },
       credentials: { signingSecret: secret },
     });
 
@@ -162,7 +200,7 @@ describe("ub status", () => {
     const secret = "cli-test-signing-secret-2e6f41";
     const box = sandbox({
       raw: { credentials: `${secret}\n` },
-      userConfig: { hubUrl: DEAD_HUB_URL },
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
     });
 
     const run = runUb(["status", "--json"], box);
@@ -175,7 +213,10 @@ describe("ub status", () => {
     // mistake `ub` warns about — a file that does not parse never gets that far,
     // so the parser message must not carry it out either.
     const misplaced = "cli-test-misplaced-secret-a70c93";
-    const committable = sandbox({ raw: { directoryFile: `${misplaced}\n` } });
+    const committable = sandbox({
+      raw: { directoryFile: `${misplaced}\n` },
+      userConfig: { workspace: WORKSPACE },
+    });
     const second = runUb(["status", "--json"], committable, {
       HUB_URL: DEAD_HUB_URL,
     });
@@ -184,7 +225,7 @@ describe("ub status", () => {
     expect(second.output).not.toContain(misplaced);
   });
 
-  it("fails with the offending file named when a workspace is not a segment", () => {
+  it("fails with the offending file named when a workspace is not an id", () => {
     const secret = "cli-test-signing-secret-71b4de";
     const box = sandbox({
       credentials: { signingSecret: secret },

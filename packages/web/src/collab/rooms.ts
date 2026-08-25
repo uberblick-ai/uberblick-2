@@ -34,7 +34,8 @@ import {
 } from "@hocuspocus/provider";
 import { IndexeddbPersistence } from "y-indexeddb";
 import * as Y from "yjs";
-import { HUB_AUTH_TOKEN, WORKSPACE, hubUrl } from "../config.js";
+import { parseRoom } from "@uberblick/schema";
+import { HUB_AUTH_TOKEN, hubUrl } from "../config.js";
 import { mintToken } from "./token.js";
 import type { AwarenessUser } from "./identity.js";
 
@@ -128,8 +129,16 @@ function dropSocket(): void {
   current.disconnect();
 }
 
-/** Mint a fresh hub token. Called by Hocuspocus before every connect. */
-async function hubToken(identity: AwarenessUser): Promise<string> {
+/**
+ * Mint a fresh hub token for one room. Called by Hocuspocus before every
+ * connect.
+ *
+ * The workspace claim comes from the room name rather than from configuration:
+ * the hub compares the two as strings, so reading them out of one place is what
+ * keeps them equal. A room name carries the bare uuid by construction
+ * (`roomForDoc` parses any slug off), which is exactly what the claim must be.
+ */
+async function hubToken(room: string, identity: AwarenessUser): Promise<string> {
   if (HUB_AUTH_TOKEN === "") {
     // `fnox exec --if-missing warn` leaves the secret unset for contributors
     // without the age key. Fail loudly here rather than sending garbage.
@@ -139,7 +148,7 @@ async function hubToken(identity: AwarenessUser): Promise<string> {
   }
   return mintToken(HUB_AUTH_TOKEN, {
     sub: identity.name,
-    workspace: WORKSPACE,
+    workspace: parseRoom(room).workspaceId,
     scope: "read-write",
   });
 }
@@ -154,8 +163,30 @@ export interface RoomStatus {
    * where the number is labelled.
    */
   unsyncedChanges: number;
-  /** True once the IndexedDB replica has been loaded into the Y.Doc. */
+  /**
+   * True once the local read is done: the IndexedDB replica has been applied to
+   * the Y.Doc — or there is no IndexedDB, or it refused to open, so there was
+   * never anything to apply. Either way the Y.Doc now holds everything this
+   * replica has offline, so an empty document is an answer rather than a
+   * not-yet.
+   *
+   * A question about *time*, not about storage: it says the read is over, never
+   * that anything was read. For "is this document actually cached here",
+   * which is a different claim and the one worth showing a reader, see
+   * {@link RoomStatus.hasLocalCache}.
+   */
   localReplicaLoaded: boolean;
+  /**
+   * True only where IndexedDB actually opened and applied its replica — the
+   * document survives a reload of this browser with the hub down.
+   *
+   * Split from `localReplicaLoaded` because the status line says the words
+   * "local cache" to the reader, and a browser with no IndexedDB (or one that
+   * refused to open it) reaches the end of its local read with no cache at all.
+   * Sharing one flag between the two would put that promise on screen in
+   * exactly the environments that cannot keep it.
+   */
+  hasLocalCache: boolean;
 }
 
 export interface RoomConnection {
@@ -165,7 +196,10 @@ export interface RoomConnection {
   status: RoomStatus;
   /** Subscribe to status changes. Returns an unsubscribe function. */
   onStatusChange(listener: (status: RoomStatus) => void): () => void;
-  /** Resolves once the IndexedDB replica has been applied. */
+  /**
+   * Resolves once the local read is over: the replica applied, or nothing to
+   * apply. Always settles — see `localReplicaLoaded`, which it moves with.
+   */
   whenLocalReplicaLoaded: Promise<void>;
 }
 
@@ -186,7 +220,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     document: ydoc,
     websocketProvider: socket,
     // Async callable form: re-minted on every (re)connect.
-    token: () => hubToken(identity),
+    token: () => hubToken(room, identity),
   });
 
   // Required when the socket is shared. `HocuspocusProvider` only attaches
@@ -208,6 +242,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     synced: provider.isSynced,
     unsyncedChanges: provider.unsyncedChanges,
     localReplicaLoaded: false,
+    hasLocalCache: false,
   };
   const listeners = new Set<(status: RoomStatus) => void>();
   const emit = (): void => {
@@ -253,15 +288,45 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   const whenLocalReplicaLoaded = new Promise<void>((resolve) => {
     resolveLocal = resolve;
   });
+  /**
+   * The local read is over — with content, or with nothing. Terminal and
+   * idempotent, because every reader of `localReplicaLoaded` treats false as
+   * "still reading": a read that can never finish must not be spelled the same
+   * way as one that has not finished yet, or the pane waits on it in silence
+   * instead of showing the waiting screen (`replicaHasAnswered`).
+   */
+  const localReadDone = (): void => {
+    if (status.localReplicaLoaded) return;
+    status.localReplicaLoaded = true;
+    resolveLocal();
+    emit();
+  };
   if (typeof indexedDB !== "undefined") {
     persistence = new IndexeddbPersistence(room, ydoc);
     persistence.once("synced", () => {
-      status.localReplicaLoaded = true;
-      resolveLocal();
-      emit();
+      // The only path where a cache genuinely exists: the database opened and
+      // its updates are in the Y.Doc.
+      status.hasLocalCache = true;
+      localReadDone();
     });
+    // Opening the database can fail outright: a private window, a browser told
+    // to block site data, a quota refusal. `y-indexeddb` has no error event and
+    // never emits `synced` after that — the rejection of its open promise is
+    // the only signal, and leaving it unhandled is also an unhandled rejection.
+    // There is no cache to read, so the honest terminal answer is "read, found
+    // nothing", and the room runs on live sync alone.
+    //
+    // Read defensively, because `_db` is the library's own field and not part
+    // of what it promises to keep: a version that renames it should cost us
+    // this one signal, not every room. Without it a blocked database falls back
+    // to the pre-existing behaviour — the read never finishes — rather than
+    // throwing where the room is opened.
+    const opening = (persistence as { _db?: Promise<IDBDatabase> })._db;
+    opening?.catch(localReadDone);
   } else {
-    resolveLocal();
+    // No IndexedDB at all (jsdom, some embedded webviews): the same terminal
+    // state, reached without an attempt.
+    localReadDone();
   }
 
   const connection: RoomConnection = {
@@ -305,7 +370,10 @@ export function acquireRoom(
       if (held.refs > 0) return;
       entries.delete(room);
       held.listeners.clear();
-      held.persistence?.destroy();
+      // `destroy` closes the database through the same open promise, so on a
+      // room whose database never opened it rejects. Nothing to repair — the
+      // thing being closed was never there.
+      held.persistence?.destroy().catch(() => {});
       held.connection.provider.destroy();
       held.connection.ydoc.destroy();
       // Nothing left to repair: a deferred drop would reconnect a socket no

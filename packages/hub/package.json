@@ -19,6 +19,7 @@
   "dependencies": {
     "@hocuspocus/extension-sqlite": "^4.6.0",
     "@hocuspocus/server": "^4.6.0",
+    "@uberblick/schema": "workspace:*",
     "y-protocols": "catalog:",
     "yjs": "catalog:"
   },

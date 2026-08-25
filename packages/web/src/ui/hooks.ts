@@ -4,10 +4,16 @@
  * take the same path to the screen.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import * as Y from "yjs";
 import {
   getBlocksFragment,
+  getDirectoryEntry,
   getDirectoryMap,
   getMeta,
   getMetaMap,
@@ -23,6 +29,8 @@ import { changedBlocks } from "../editor/changed-blocks.js";
 import { findForeignBlocks } from "../editor/palette.js";
 import type { ForeignBlock } from "../editor/palette.js";
 import { blockText, plainText } from "../editor/ytext.js";
+import { observeDocRev, readActivity, sameActivity } from "./doc-chrome.js";
+import type { RemoteActivity } from "./doc-chrome.js";
 import { observeOutline } from "./outline.js";
 import type { OutlineEntry } from "./outline.js";
 import { observeThreads } from "./threads.js";
@@ -90,6 +98,7 @@ const OFFLINE: RoomStatus = {
   synced: false,
   unsyncedChanges: 0,
   localReplicaLoaded: false,
+  hasLocalCache: false,
 };
 
 export function useRoomStatus(connection: RoomConnection | null): RoomStatus {
@@ -120,6 +129,49 @@ export function useDirectory(connection: RoomConnection | null): DirectoryEntry[
     return () => map.unobserve(read);
   }, [connection]);
   return entries;
+}
+
+/**
+ * Whether the directory tombstones this document, live.
+ *
+ * The directory stub is the source of the archived flag — the document itself
+ * holds no such state — so this reads the same entry `list_docs` and
+ * `archive_doc` read, over the same observer every other view here uses. That
+ * is what makes the transition live in both directions: a doc archived from an
+ * agent or from another tab flips this without a reload, and so does a restore.
+ *
+ * A uuid the directory has never seen is not archived. Silence is not a
+ * tombstone: an unsynced deep link resolves into itself when it arrives, and
+ * calling it archived in the meantime would offer Restore for a document
+ * nobody deleted.
+ *
+ * `useSyncExternalStore` rather than the state-and-effect shape the hooks
+ * around it use, and the difference is the whole point: those hold values that
+ * may lag by a render harmlessly, while this one gates whether the pane will
+ * take a write. Read into state, the first render of a deep link to an archived
+ * document — and every route switch from a live one — would say "not archived"
+ * until a passive effect corrected it, which is a committed, painted frame with
+ * an editable title and an editable editor on screen. The snapshot is read
+ * during render instead, so read-only is true from the first one.
+ */
+export function useArchived(
+  directory: RoomConnection | null,
+  uuid: string | null,
+): boolean {
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      if (directory === null) return () => {};
+      const map = getDirectoryMap(directory.ydoc);
+      map.observe(onChange);
+      return () => map.unobserve(onChange);
+    },
+    [directory],
+  );
+  const read = useCallback(() => {
+    if (directory === null || uuid === null) return false;
+    return getDirectoryEntry(directory.ydoc, uuid)?.deleted === true;
+  }, [directory, uuid]);
+  return useSyncExternalStore(subscribe, read);
 }
 
 /**
@@ -217,6 +269,67 @@ export function usePeers(connection: RoomConnection | null): Peer[] {
     return () => awareness.off("change", read);
   }, [connection]);
   return peers;
+}
+
+/**
+ * The remote session the chrome names, live — see `readActivity` for which one
+ * that is and why it is not called an agent here or anywhere else in the code.
+ *
+ * The reading is compared before it is stored, and that is the point rather
+ * than an optimisation: awareness fires `change` on every caret movement, so a
+ * peer typing a sentence produces dozens of readings that all say the same
+ * thing. Storing them by identity would redraw the pill once per keystroke.
+ *
+ * Two subscriptions, because the pill names a block *number* and there are two
+ * ways for that number to become wrong: the caret moves, or blocks are inserted
+ * or removed above a caret that has not moved at all. The second observer is
+ * shallow on purpose — it is the fragment's *shape* that renumbers blocks, and
+ * a deep one would re-read every awareness state on every keystroke in the
+ * document to learn nothing.
+ */
+export function useRemoteActivity(
+  connection: RoomConnection | null,
+): RemoteActivity | null {
+  const [activity, setActivity] = useState<RemoteActivity | null>(null);
+  useEffect(() => {
+    const awareness = connection?.provider.awareness ?? null;
+    if (connection === null || awareness === null) {
+      setActivity(null);
+      return;
+    }
+    const fragment = getBlocksFragment(connection.ydoc);
+    const read = (): void => {
+      const next = readActivity(connection.ydoc, awareness);
+      setActivity((previous) => (sameActivity(previous, next) ? previous : next));
+    };
+    read();
+    awareness.on("change", read);
+    fragment.observe(read);
+    return () => {
+      awareness.off("change", read);
+      fragment.unobserve(read);
+    };
+  }, [connection]);
+  return activity;
+}
+
+/**
+ * The open document's rev, live — or null while there is no document.
+ *
+ * The derivation keeps its own per-block cache (`observeDocRev`), so this is a
+ * subscription rather than a read-on-every-change: eight characters of chrome
+ * must not cost a re-read of the document per keystroke.
+ */
+export function useDocRev(connection: RoomConnection | null): string | null {
+  const [rev, setRev] = useState<string | null>(null);
+  useEffect(() => {
+    if (connection === null) {
+      setRev(null);
+      return;
+    }
+    return observeDocRev(connection.ydoc, setRev);
+  }, [connection]);
+  return rev;
 }
 
 /**

@@ -150,6 +150,86 @@ sh remote-compose.sh up --detach
 
 The hub handles Compose's `SIGTERM` by flushing pending document updates before
 it exits. SQLite is `/data/hub.sqlite` in the `hub-data` named volume, so normal
-container replacement and `sh remote-compose.sh down` preserve it. Backups and
-moving an existing local workspace into this deployment are separate
-follow-ups.
+container replacement and `sh remote-compose.sh down` preserve it. Backups are a
+separate follow-up (#85).
+
+## Moving an existing local workspace onto this hub
+
+The hub this deployment starts is empty. `ub remote` moves a workspace onto it,
+and onto a second computer afterwards. Which process runs where matters:
+everything in this section runs on **your** computers, not on the remote host,
+which only ever runs `sh remote-compose.sh`.
+
+On the computer that holds the documents, with the local hub still running —
+`mise run hub` — because documents a browser created live only there until an
+MCP session has pulled them down:
+
+```sh
+node packages/cli/bin/ub.mjs remote promote wss://<TAILSCALE_HOST>/ws
+```
+
+It hydrates the local directory and every live document into the update log,
+reads the target with a throwaway client that writes nothing, uploads, then
+opens the target again as a fresh client and compares what it finds against what
+you hold — in both directions, tombstones included, and by content rather than
+by name. The endpoint is rewritten only after that comparison succeeds, so a
+failed or partial run leaves you pointed at the hub that still works. Rerunning
+finishes an interrupted run: a shared uuid is one document's lineage on two
+hubs, which Yjs merges.
+
+It exits non-zero without writing anything if the local hub is unreachable, if
+the target accepted the connection but never finished serving its directory (a
+hub whose contents are unknown is not an empty hub), or if the target holds
+documents this workspace has never heard of.
+
+On a second computer, from a fresh clone:
+
+```sh
+mise trust && mise run setup -- --yes --workspace <WORKSPACE_ID>
+node packages/cli/bin/ub.mjs remote join wss://<TAILSCALE_HOST>/ws \
+  --secret-file ~/uberblick-remote-secret
+mise run web
+```
+
+`<WORKSPACE_ID>` is the workspace this second machine is joining — the value the
+first machine's `ub status` prints. It has to be given, because a workspace id
+is a uuid and `ub init` with none in force generates a *new* one: a machine that
+invented its own workspace would join a hub and find nothing of yours there, the
+rooms being keyed by a different id. Either spelling works, decorated or bare.
+
+`ub init` imports no documents, so that workspace is empty and there is nothing
+to duplicate — do not run `mise run import-seed` on it. `join` pulls the whole
+remote directory and every live document into the local update log, verifies it
+the same way, and only then persists the endpoint; `mise run web` then starts the
+web client alone, against the remote hub. An unreachable or auth-rejecting
+remote writes nothing at all.
+
+Unlike `promote`, `join` does not require a local hub — a second computer has
+none. It says so, and says that the check deciding whether this workspace is
+empty could therefore see only the update log: a checkout whose documents only
+ever reached a local hub that is switched off reads as empty, joins anyway, and
+leaves that work on a hub nothing points at any more. If this machine has one,
+start it and rerun instead.
+
+The secret that reached the remote replaces whatever `ub init` generated on this
+machine, at mode 0600, and the command says so — on a second machine that is the
+point, since `ub init` invents a random secret and the remote verifies with the
+first machine's.
+
+Persisting the endpoint writes `$XDG_CONFIG_HOME/uberblick/config.json`, which
+is where `ub`, `ub mcp serve` and the MCP server it spawns resolve it. `HUB_URL`
+in the environment and a `hubUrl` in a committable `./uberblick.json` both
+outrank that file; when either does, these commands name the one that wins
+instead of claiming a switch that did not take effect. The deployed web client
+here reads its endpoint at runtime from the served `/uberblick-config.json`, not
+from any of them.
+
+The `--secret-file` argument is a path, never the secret: it must be a file only
+you can read (mode 0600), holding either the bare value from the host's `.env`
+or a `credentials.json` carrying it. Without the flag, the secret already
+configured is tried first and a terminal is prompted with the input hidden.
+Nothing here prints the secret or a token signed with it.
+
+Archived documents replicate as directory state and stay archived; their content
+is not moved. Merging two independently populated workspaces is not supported —
+both bridges refuse it explicitly, naming both document counts.

@@ -47,6 +47,7 @@ import { dirname } from "node:path";
 import { SQLite } from "@hocuspocus/extension-sqlite";
 import type { Hocuspocus, onStoreDocumentPayload } from "@hocuspocus/server";
 import { Server } from "@hocuspocus/server";
+import { parseRoom } from "@uberblick/schema";
 import type { HubConfig } from "./config.js";
 import { DEFAULT_HOST, DEFAULT_PORT, defaultDatabasePath } from "./config.js";
 import type { HubLogger } from "./log.js";
@@ -88,7 +89,6 @@ export interface Hub {
 /** Query parameters that would carry a token. Their presence is a rejection. */
 const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
-const SEPARATOR = "/";
 
 class AuthError extends Error {
   /** Hocuspocus sends this to the client as the permission-denied reason. */
@@ -104,26 +104,19 @@ class AuthError extends Error {
 /**
  * The workspace a room belongs to, or `null` when the name is not a room.
  *
- * A room is exactly two non-empty segments — `<workspaceId>/<docUuid>` — so a
- * bare name (pre-tenancy) or a name with extra segments is not a room here.
- * Room names are also SQLite keys, so the strictness is worth having.
- *
- * Duplicated rather than imported from `@uberblick/schema` on purpose: the hub
- * needs a stricter reading than the schema's tolerant `parseRoom` (which maps a
- * bare name onto the default workspace), and the hub's dependency list stays
- * limited to the transport.
+ * Schema owns what a room name is — exactly two segments, the first a workspace
+ * uuid — and this is the one place the hub asks. A name that is not a room has
+ * no workspace to match a token claim against, so it fails authentication with
+ * the workspace mismatch rather than opening a document keyed by a name nobody
+ * can name again. Room names are also SQLite keys, so the strictness earns its
+ * keep twice.
  */
 function roomWorkspace(room: string): string | null {
-  const separator = room.indexOf(SEPARATOR);
-  if (separator <= 0) {
+  try {
+    return parseRoom(room).workspaceId;
+  } catch {
     return null;
   }
-  const workspace = room.slice(0, separator);
-  const document = room.slice(separator + 1);
-  if (document === "" || document.includes(SEPARATOR)) {
-    return null;
-  }
-  return workspace;
 }
 
 /**

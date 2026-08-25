@@ -30,7 +30,15 @@ import { cliVersion } from "./version.js";
 
 export interface StatusReport {
   version: string;
+  /** The workspace id as configured — the spelling its owner typed. */
   workspace: string;
+  /**
+   * The identity behind that spelling. Equal to `workspace` unless it carries a
+   * display slug, and the only half that names a room, a token claim or the
+   * database file — so it is what you quote when you tell somebody which
+   * workspace this is.
+   */
+  workspaceUuid: string;
   /**
    * The endpoint that would be dialled. Reported whether or not sync is on —
    * `hub.url` is null when no signing secret makes it local-only.
@@ -71,6 +79,9 @@ export async function statusReport(
   options: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
 ): Promise<{ report: StatusReport; warnings: string[] }> {
   const resolved = resolveConfig(options);
+  // Throws when nothing configures a workspace, which `ub` reports as the
+  // error it is: there is no default to fall back to, and `ub init` is named in
+  // the message.
   const config = resolveMcpConfig(resolved.env);
   const instance = createMcpServer(config);
   try {
@@ -79,7 +90,8 @@ export async function statusReport(
       warnings: resolved.warnings,
       report: {
         version: cliVersion(),
-        workspace: config.workspaceId,
+        workspace: resolved.env.WORKSPACE_ID ?? config.workspaceId,
+        workspaceUuid: config.workspaceId,
         hubUrl: config.hubUrl,
         databasePath: config.databasePath,
         credentialPresent: config.authSecret !== null,
@@ -122,6 +134,12 @@ export function renderStatus(report: StatusReport): string {
     "workspace",
     `${report.workspace} (${ORIGIN_LABELS[report.sources.workspace]})`,
   );
+  // Only when the spelling hides it. The slug is display; the uuid is what
+  // rooms, tokens and the database are keyed by, and what to quote to somebody
+  // else.
+  if (report.workspaceUuid !== report.workspace) {
+    text += field("uuid", report.workspaceUuid);
+  }
   text += field(
     "hub",
     `${report.hubUrl} (${ORIGIN_LABELS[report.sources.hubUrl]})`,

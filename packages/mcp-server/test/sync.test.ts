@@ -22,6 +22,7 @@ import {
   testConfig,
   TEST_SECRET,
   waitUntil,
+  WORKSPACE,
 } from "./helpers.js";
 import type { PeerClient, Rig } from "./helpers.js";
 
@@ -103,13 +104,13 @@ describe("hub sync", () => {
     expect(offline.hub.status).toBe("hub-down");
     expect(
       (offline.pendingRooms as { room: string }[]).map((entry) => entry.room),
-    ).toContain(`main/${created.uuid}`);
+    ).toContain(`${WORKSPACE}/${created.uuid}`);
 
     // The hub comes up on the same address.
     const started = await hub({ port, databasePath: hubDatabase });
     expect(started.port).toBe(port);
 
-    const docPeer = await peer(port, `main/${created.uuid}`);
+    const docPeer = await peer(port, `${WORKSPACE}/${created.uuid}`);
     await waitUntil("the offline-created document to reach a second client", () => {
       return getMeta(docPeer.doc).title === "Created offline";
     });
@@ -118,7 +119,7 @@ describe("hub sync", () => {
     ]);
 
     // Discovery travels the same way, so the doc is findable, not just present.
-    const directoryPeer = await peer(port, "main/_directory");
+    const directoryPeer = await peer(port, `${WORKSPACE}/_directory`);
     await waitUntil("the directory stub to reach a second client", () =>
       listDirectory(directoryPeer.doc).some(
         (entry) => entry.uuid === created.uuid,
@@ -170,7 +171,7 @@ describe("hub sync", () => {
 
     // Hydration went through the log, so a restart with the hub gone still has
     // the corpus.
-    const room = `main/${first.uuid}`;
+    const room = `${WORKSPACE}/${first.uuid}`;
     expect(
       fresh.instance.store.updatesAfter(room, 0).length,
     ).toBeGreaterThan(0);
@@ -265,7 +266,7 @@ describe("hub sync", () => {
     await waitForQuiet(rig);
 
     // The web UI's side of the story: a second client appends a block.
-    const room = `main/${created.uuid}`;
+    const room = `${WORKSPACE}/${created.uuid}`;
     const other = await peer(running.port, room);
     await other.synced;
     await waitUntil("the second client to see the agent's block", () =>

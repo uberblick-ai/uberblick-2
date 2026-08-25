@@ -74,8 +74,11 @@ before moving on.
      the PR's reviews and comment threads (human and bot alike, including
      remarks that arrived after the other gates passed); merge only when
      every remark is fixed or explicitly answered.
-   Findings are triaged: real ones are fixed on the branch; rejected ones get
-   an explicit reply on the PR thread, never silent dismissal.
+   Findings are triaged into an explicit disposition: fixed on the branch;
+   deferred to a linked issue with the accepted risk recorded on the PR
+   (never for data loss, auth/security exposure, or a violated invariant);
+   documented as an out-of-usage-model boundary; or rejected with an
+   explicit reply on the PR thread — never silent dismissal.
    Reviewing a commit is one command, `REVIEW_SHA=<head-sha> mise run review`,
    run from a checkout at freshly fetched `origin/main` with `mise.toml`,
    `Dockerfile.review` and `.dockerignore` unmodified — the task refuses
@@ -103,7 +106,10 @@ before moving on.
   (while updating the product docs); audit findings become issues, not
   reverts, unless critical.
 - **Tier 3 — `needs-human`, pre-merge.** Label the PR `needs-human`, park it,
-  continue with other eligible issues. Triggers: any diff touching `schema`;
+  continue with other eligible issues. The owner authorizes by swapping
+  `needs-human` for `human-approved` (owner-set only); the loop then executes
+  that merge as tier 2 — merge report, fresh gate evidence at the merge head,
+  zero unaddressed remarks all still required. Triggers: any diff touching `schema`;
   changes to this file's decided-architecture or invariants sections; new
   *runtime* dependencies; auth/token semantics; overruling a major
   Copilot/Codex finding; and any change to the process itself — `.github/`
@@ -139,9 +145,12 @@ the fallback, which is exactly why CI is high priority.
 
 - TypeScript everywhere; single pnpm monorepo.
 - One Y.Doc per document; room name = `<workspaceId>/<docUuid>`, directory at
-  `<workspaceId>/_directory`. One configured workspace for now (`WORKSPACE_ID`,
-  default `main`) — tenancy lives in the room key from day one so a hosted hub
-  never needs a room migration.
+  `<workspaceId>/_directory`. A workspace id is a **uuid** — globally unique,
+  assigned by `ub init`, never guessable, no default. For display it may be
+  decorated as `<slug>-<uuid>`; the slug is cosmetic, parsed off (schema owns
+  the parse) before the id reaches rooms, token claims, or the database
+  filename — nothing two machines compare ever carries a slug. Tenancy lives in
+  the room key from day one so a hosted hub never needs a room migration.
 - Doc layout: `meta` (Y.Map: uuid, title, tags, links-by-UUID), `blocks`
   (Y.XmlFragment, one element per block with stable `id` attrs; types:
   paragraph, heading, code, mermaid), `annotations` (Y.Map of thread JSON;

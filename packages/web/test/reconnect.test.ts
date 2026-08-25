@@ -28,6 +28,8 @@ import * as Y from "yjs";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 const SECRET = "reconnect-test-secret";
+/** The workspace these rooms live in. A workspace id is a uuid. */
+const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 
 /**
  * `rooms.ts` reads the hub address and the signing secret from the config
@@ -42,7 +44,6 @@ vi.mock("../src/config.js", () => ({
   get HUB_AUTH_TOKEN() {
     return injected.secret;
   },
-  WORKSPACE: "main",
 }));
 
 const hubs: Hub[] = [];
@@ -102,7 +103,11 @@ function peer(port: number, room: string): { doc: Y.Doc; destroy(): void } {
     name: room,
     document: doc,
     token: () =>
-      mintToken(SECRET, { sub: "peer", workspace: "main", scope: "read-write" }),
+      mintToken(SECRET, {
+        sub: "peer",
+        workspace: WORKSPACE,
+        scope: "read-write",
+      }),
   });
   return { doc, destroy: () => provider.destroy() };
 }
@@ -186,7 +191,7 @@ it("resumes live sync after a hub restart, and never claims to be synced while i
   const first = await startHub(0, path);
   const port = first.port;
   const uuid = randomUUID();
-  const room = `main/${uuid}`;
+  const room = `${WORKSPACE}/${uuid}`;
 
   const tab = await openTab(room, port);
   teardown.push(() => sharedSocket(tab.connection).destroy());
@@ -219,7 +224,7 @@ it("repairs a document close that arrives during the forced-drop cooldown", asyn
   const path = databasePath();
   const hub = await startHub(0, path);
   const uuid = randomUUID();
-  const room = `main/${uuid}`;
+  const room = `${WORKSPACE}/${uuid}`;
 
   const tab = await openTab(room, hub.port);
   teardown.push(() => sharedSocket(tab.connection).destroy());
@@ -258,7 +263,7 @@ it("leaves the socket alone when it is the client that leaves a room", async () 
   const path = databasePath();
   const hub = await startHub(0, path);
   const uuid = randomUUID();
-  const room = `main/${uuid}`;
+  const room = `${WORKSPACE}/${uuid}`;
 
   const first = await openTab(room, hub.port);
   const socket = sharedSocket(first.connection);
