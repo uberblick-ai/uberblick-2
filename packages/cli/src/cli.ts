@@ -31,6 +31,8 @@ commands:
 
 remote commands:
   remote                 the endpoint in force and what sharing it buys
+  remote init <target>   stand up the remote hub + web stack on a tailnet host
+  remote update <target> deploy origin/main onto that host now
   remote set <url>       point the clients at an endpoint; moves nothing
   remote promote <url>   move this populated workspace onto an empty remote hub
   remote join <url>      pull a populated remote workspace into this empty one

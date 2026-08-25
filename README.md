@@ -243,10 +243,13 @@ that keeps a corpus from being left behind when the endpoint changes. Documents
 a browser created live only in the local hub until an MCP session pulls them
 down, so simply changing `HUB_URL` strands them.
 
-**On the remote host** — a Linux box in your tailnet — bring the hub and the web
-client up from a plain checkout, as [REMOTE.md](REMOTE.md) describes. That host
-runs `sh remote-compose.sh up --build --detach` and nothing else; every command
-below runs on one of *your* computers, not there. The hub it starts is empty.
+**On the remote host** — a Linux box in your tailnet — one command from your own
+machine stands the hub and the web client up:
+`ub remote init <ssh-target>`, which [REMOTE.md](REMOTE.md) describes in full. It
+clones `main` onto the host and installs a timer that keeps it there, so **anyone
+who can merge to `main` can run code on that host within five minutes**
+(`--no-auto-update` opts out). Every command below runs on one of *your*
+computers, not there. The hub it starts is empty.
 
 **On the computer that already has your documents**, with `mise run hub` still
 running so the browser-created ones can be collected:

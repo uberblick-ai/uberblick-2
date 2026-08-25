@@ -79,15 +79,24 @@ import {
 import type { ResolvedConfig } from "./config.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
+import { remoteInitCommand, remoteUpdateCommand } from "./remote-init.js";
 import { publishOwnerOnly, removeQuietly } from "./safe-write.js";
 
 export const REMOTE_HELP = `usage: ub remote [command]
 
 commands:
   (none)                 the endpoint in force and what sharing it buys
+  init <ssh-target>      stand up the remote hub + web stack on a tailnet host
+  update <ssh-target>    deploy origin/main onto that host now
   set <url>              point the clients at an endpoint; moves nothing
   promote <url> [opts]   move this populated workspace onto an empty remote hub
   join <url> [opts]      pull a populated remote workspace into this empty one
+
+options for init:
+  --dir <path>           checkout directory on the host (default ~/uberblick-remote)
+  --host <fqdn>          the host's MagicDNS name, when detection cannot see it
+  --ip <v4>              the host's Tailscale IPv4, likewise
+  --no-auto-update       install the stack without the five-minute update timer
 
 options for promote and join:
   --secret-file <path>   read the remote's signing secret from a file only you
@@ -1172,6 +1181,12 @@ export async function remoteCommand(
   if (sub === "--help" || sub === "-h" || sub === "help") {
     io.out(REMOTE_HELP);
     return 0;
+  }
+  if (sub === "init") {
+    return await remoteInitCommand(rest, io);
+  }
+  if (sub === "update") {
+    return await remoteUpdateCommand(rest, io);
   }
   if (sub === "set") {
     return setCommand(rest, io);
