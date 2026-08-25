@@ -118,14 +118,22 @@ describe("two workspaces on one hub", () => {
     await waitForQuiet(uberblick);
     await waitForQuiet(ablauf);
 
-    // The hub holds both corpora — read by a client that is neither server. So
-    // what follows is a corpus this hub could have delivered and did not,
-    // rather than a write that never arrived.
-    const onTheHub = await peerClient(running.port, directoryRoom(ABLAUF_UUID));
-    peers.push(onTheHub);
-    await waitUntil("ablauf's directory to reach a second client", () =>
-      listDirectory(onTheHub.doc).some((entry) => entry.uuid === kickoff.uuid),
-    );
+    // The hub holds *both* corpora — read by a client that is neither server,
+    // once per workspace. So what follows is a corpus this hub could have
+    // delivered to the other server and did not, rather than a write that never
+    // arrived: witnessing only one side would let an undelivered update on the
+    // other side pass as isolation.
+    for (const [workspaceUuid, expected] of [
+      [UBERBLICK_UUID, [roadmap.uuid]],
+      [ABLAUF_UUID, [kickoff.uuid, backlog.uuid]],
+    ] as const) {
+      const onTheHub = await peerClient(running.port, directoryRoom(workspaceUuid));
+      peers.push(onTheHub);
+      await waitUntil(`${workspaceUuid}'s directory to reach a second client`, () => {
+        const stubs = listDirectory(onTheHub.doc).map((entry) => entry.uuid);
+        return expected.every((uuid) => stubs.includes(uuid));
+      });
+    }
 
     // ---- the directory ----
     const here = await uberblick.ok("list_docs", {});

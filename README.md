@@ -195,11 +195,17 @@ one. What it is *not* is tenancy: one shared secret still mints a token for any
 workspace, so this separates corpora, not people.
 
 Give a second project its own workspace by pinning it in that checkout, which is
-what `./uberblick.json` is for — committable, and never secrets:
+what `./uberblick.json` is for — committable, and never secrets. Once #162 lands
+that is one command:
 
 ```
-echo "{\"workspace\": \"ablauf-$(uuidgen | tr A-Z a-z)\"}" > uberblick.json
+ub workspace use ablauf-$(uuidgen | tr A-Z a-z)
 ```
+
+Until then, edit the `workspace` field of `./uberblick.json` in place (creating
+the file with that one field if it does not exist). Write the field, never the
+file: a `hubUrl` beside it — or a field a later version of `ub` writes — is not
+this change's to drop.
 
 `ub mcp install` then registers the plain `ub mcp serve`, which resolves that
 workspace from the directory it runs in. Where a client config spawns the server
