@@ -145,7 +145,12 @@ export function Sidebar({
   const ydoc = sidebar?.ydoc ?? null;
   const [drag, setDrag] = useState<Drag | null>(null);
   const [over, setOver] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<string | null>(null);
+  /**
+   * The group whose name is being edited, and whether it exists only because
+   * that field was opened — `+ group` makes the group first, so cancelling has
+   * something to take back.
+   */
+  const [renaming, setRenaming] = useState<{ id: string; fresh: boolean } | null>(null);
   const titles = useMemo(
     () => new Map(entries.map((entry) => [entry.uuid, entry.title])),
     [entries],
@@ -189,7 +194,24 @@ export function Sidebar({
     if (ydoc === null) return;
     // Straight into its rename field: a group is named by the person making it,
     // and "New group" is a placeholder, not a decision.
-    setRenaming(createGroup(ydoc, NEW_GROUP_NAME));
+    setRenaming({ id: createGroup(ydoc, NEW_GROUP_NAME), fresh: true });
+  };
+
+  const commitRename = (groupId: string, name: string): void => {
+    setRenaming(null);
+    // An empty name is a slip, not a rename: the group keeps the one it has.
+    if (ydoc !== null && name.trim() !== "") renameGroup(ydoc, groupId, name.trim());
+  };
+
+  /**
+   * Escape out of the name field. A group that exists only because the field
+   * was opened goes with it: cancelling means "never mind", and leaving "New
+   * group" behind would be the field making a decision the reader declined.
+   */
+  const cancelRename = (): void => {
+    const open = renaming;
+    setRenaming(null);
+    if (ydoc !== null && open?.fresh === true) deleteGroup(ydoc, open.id);
   };
 
   return (
@@ -222,8 +244,10 @@ export function Sidebar({
             selected={selected}
             onSelect={onSelect}
             dnd={dnd}
-            renaming={renaming}
-            onRenaming={setRenaming}
+            editing={renaming?.id === group.id}
+            onEdit={() => setRenaming({ id: group.id, fresh: false })}
+            onCancel={cancelRename}
+            onCommit={(name) => commitRename(group.id, name)}
           />
         </Fragment>
       ))}
@@ -340,8 +364,10 @@ function GroupSection({
   selected,
   onSelect,
   dnd,
-  renaming,
-  onRenaming,
+  editing,
+  onEdit,
+  onCancel,
+  onCommit,
 }: {
   group: SidebarGroup;
   /** The sidebar's Y.Doc, or null when there is no sidebar room to write to. */
@@ -350,18 +376,28 @@ function GroupSection({
   selected: string | null;
   onSelect: (uuid: string) => void;
   dnd: Dnd;
-  /** The group being renamed, if any — one field is open at a time. */
-  renaming: string | null;
-  onRenaming: (groupId: string | null) => void;
+  /** Whether this group's name is the one being edited — one field at a time. */
+  editing: boolean;
+  onEdit: () => void;
+  /** Escape: the name stands, and a group the field itself made goes away. */
+  onCancel: () => void;
+  onCommit: (name: string) => void;
 }): ReactElement {
   const [collapsed, setCollapsed] = useStoredFlag(groupCollapsedKey(group.id), false);
-  const editing = renaming === group.id;
-
-  const commitName = (name: string): void => {
-    onRenaming(null);
-    // An empty name is a slip, not a rename: the group keeps the one it has.
-    if (ydoc !== null && name.trim() !== "") renameGroup(ydoc, group.id, name.trim());
-  };
+  /**
+   * Focus and select the name, once — when the field appears.
+   *
+   * The identity is stable, which is the whole point: React calls a callback
+   * ref again whenever the callback itself changes, so an inline arrow would
+   * re-run on every render of this group. A sidebar that re-renders while
+   * somebody is typing — an agent pinning, a peer dragging, anything at all —
+   * would then reselect the draft under the caret, and the next keystroke would
+   * replace what they had typed.
+   */
+  const openField = useCallback((element: HTMLInputElement | null) => {
+    element?.focus();
+    element?.select();
+  }, []);
 
   return (
     <section className="ub-group">
@@ -374,11 +410,8 @@ function GroupSection({
             // Focused *and* selected: the field is opened to replace the name
             // far more often than to edit it, and `select()` alone leaves the
             // caret somewhere the keyboard is not.
-            ref={(element) => {
-              element?.focus();
-              element?.select();
-            }}
-            onBlur={(event) => commitName(event.currentTarget.value)}
+            ref={openField}
+            onBlur={(event) => onCommit(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
@@ -386,7 +419,7 @@ function GroupSection({
                 event.currentTarget.blur();
               } else if (event.key === "Escape") {
                 event.preventDefault();
-                onRenaming(null);
+                onCancel();
               }
             }}
           />
@@ -422,7 +455,7 @@ function GroupSection({
               className="ub-group-act"
               aria-label={`Rename group ${group.name}`}
               title="Rename group"
-              onClick={() => onRenaming(group.id)}
+              onClick={onEdit}
             >
               <span aria-hidden="true">✎</span>
             </button>

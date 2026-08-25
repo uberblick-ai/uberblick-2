@@ -365,16 +365,38 @@ describe("the sidebar is the _sidebar document", () => {
     act(() => {
       if (field !== null) field.value = "Reading";
     });
+
+    // A sidebar update while somebody is typing must not touch the draft. The
+    // field's focus-and-select runs once, when the field appears — re-running it
+    // on a re-render would reselect the draft under the caret, and the next
+    // keystroke would replace what had been typed.
+    act(() => {
+      createGroup(peer, "Elsewhere");
+    });
+    expect(field?.selectionStart).toBe("Reading".length);
+
     act(() => press(field, "Enter"));
-    expect(groupNames(host)).toEqual(["Reading"]);
-    expect(stored(peer)).toEqual([["Reading", []]]);
+    expect(groupNames(host)).toEqual(["Reading", "Elsewhere"]);
+    expect(stored(peer)).toEqual([
+      ["Reading", []],
+      ["Elsewhere", []],
+    ]);
+
+    // Escape takes back the group the field itself made: cancelling is not a
+    // decision to keep a group called "New group".
+    act(() => host.querySelector<HTMLButtonElement>(".ub-group-add")?.click());
+    act(() => press(host.querySelector(".ub-group-rename"), "Escape"));
+    expect(stored(peer)).toEqual([
+      ["Reading", []],
+      ["Elsewhere", []],
+    ]);
 
     // Deleting takes the group and its pins — never the documents, which the
     // sidebar only ever held the uuids of.
     const remove = host.querySelector<HTMLButtonElement>('[aria-label="Delete group Reading"]');
     act(() => remove?.click());
-    expect(groupNames(host)).toEqual([]);
-    expect(stored(peer)).toEqual([]);
+    expect(groupNames(host)).toEqual(["Elsewhere"]);
+    expect(stored(peer)).toEqual([["Elsewhere", []]]);
   });
 
   it("collapses a group, and remembers it", async () => {
