@@ -5,7 +5,7 @@
  * database for, and the binding verb.
  *
  * Nothing here opens a hub connection or a Y.Doc. `list` reads a directory
- * listing, `use` writes one JSON file — the whole command is local bookkeeping,
+ * listing, `use` writes config files — the whole command is local bookkeeping,
  * the way `git remote` is, and it stays fast and offline for the same reason.
  *
  * **`use` writes `./uberblick.json`, not the user config.** That is the missing
@@ -19,9 +19,18 @@
  * because the slug is what makes a config file readable, and only what reaches a
  * room, a token or the database is the bare uuid. A *prefix* is resolved to the
  * uuid it names, because a prefix is a way of typing an id, not an id.
+ *
+ * **`use` also regenerates this checkout's derived `mise.local.toml`.** Nothing
+ * in the repository reads `ub`'s configuration: `mise run web`, `mise run
+ * import-seed` and the hub take their environment from mise, which takes it from
+ * that derived file. A binding nobody derived from would leave every mise task
+ * serving the workspace this directory used to be bound to, silently. So the
+ * binding and the file derived from it are written together, under the same lock
+ * `ub init` holds — see {@link regenerateLocalConfig} for what "derived from"
+ * means when the environment is itself one of the layers.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { defaultDatabasePath } from "@uberblick/mcp-server";
@@ -33,8 +42,16 @@ import {
   userConfigPath,
   writeUserConfig,
 } from "./config.js";
+import type { InitLock } from "./init-lock.js";
+import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
+import {
+  findCheckoutRoot,
+  localConfigPath,
+  trustLocalConfig,
+  writeLocalConfig,
+} from "./mise-config.js";
 import { describeFsError, publishOwnerOnly } from "./safe-write.js";
 import { ORIGIN_LABELS } from "./status.js";
 
@@ -324,7 +341,78 @@ function serialize(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-function useCommand(argv: string[], io: Io): number {
+/**
+ * The variables mise sets *from* the derived file, dropped before resolving what
+ * belongs in it.
+ *
+ * Inside an activated checkout these three are in the environment because
+ * `mise.local.toml` put them there. Resolving with them in place would make the
+ * file its own highest-precedence input — a fixed point at the value being
+ * replaced, so the switch could never reach mise at all. `ub init` discounts its
+ * own derived file for the same reason (see its signing-secret branch).
+ *
+ * Dropping them is right for a hand-exported `WORKSPACE_ID` too: the derived
+ * file mirrors the config *files*, and one shell that outranks it is exactly
+ * what the precedence warning is for.
+ */
+const DERIVED_VARIABLES = ["WORKSPACE_ID", "HUB_URL", "HUB_AUTH_TOKEN"] as const;
+
+function withoutDerivedVariables(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const stripped = { ...env };
+  for (const key of DERIVED_VARIABLES) {
+    delete stripped[key];
+  }
+  return stripped;
+}
+
+/**
+ * Rewrite this checkout's derived mise config, and return the path — or null
+ * when there was nothing to rewrite.
+ *
+ * Only ever a *re*write: a checkout without one gets nothing, because creating
+ * that file is `ub init`'s job. It carries the signing secret, and a fresh one
+ * would also be untrusted — and a config file mise does not trust takes down
+ * every task in the directory, which is a worse state than the stale workspace
+ * this exists to fix. A file that is there is trusted again after the rewrite,
+ * because mise's paranoid mode binds trust to a config file's contents.
+ *
+ * With no secret in force there is nothing honest to write: the derived file
+ * would lose its `HUB_AUTH_TOKEN` and the hub would refuse to start. That is a
+ * warning and an untouched file, never a half-derived one.
+ */
+function regenerateLocalConfig(cwd: string, warnings: string[]): string | null {
+  const root = findCheckoutRoot(cwd);
+  if (root === null || !existsSync(localConfigPath(root))) {
+    return null;
+  }
+
+  const resolved = resolveConfig({ cwd, env: withoutDerivedVariables(process.env) });
+  const workspace = resolved.env.WORKSPACE_ID;
+  const signingSecret = resolved.env.HUB_AUTH_TOKEN;
+  if (workspace === undefined || signingSecret === undefined) {
+    warnings.push(
+      `${localConfigPath(root)} was left alone: no ${
+        workspace === undefined ? "workspace" : "signing secret"
+      } is configured for it to be derived from, and a partial one would take ` +
+        "the mise tasks down. Run `ub init`.",
+    );
+    return null;
+  }
+
+  const outcome = writeLocalConfig(root, {
+    signingSecret,
+    workspace,
+    hubUrl: resolved.env.HUB_URL,
+    authorityPath: resolved.paths.credentials,
+  });
+  if (!outcome.written) {
+    warnings.push(outcome.reason);
+    return null;
+  }
+  return outcome.path;
+}
+
+async function useCommand(argv: string[], io: Io): Promise<number> {
   let user = false;
   let raw: string | undefined;
   try {
@@ -366,6 +454,21 @@ function useCommand(argv: string[], io: Io): number {
 
   const cwd = process.cwd();
   const path = user ? userConfigPath() : join(cwd, DIRECTORY_FILE);
+
+  // The binding and the file derived from it are two writes that have to agree
+  // when this returns, so they happen under the lock `ub init` holds for the
+  // same reason — otherwise two `use` runs can interleave into a derived file
+  // naming one run's workspace over the other run's binding.
+  let lock: InitLock;
+  try {
+    lock = await acquireInitLock();
+  } catch (error) {
+    io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+
+  const warnings: string[] = [];
+  let localConfig: string | null = null;
   try {
     if (user) {
       // Merged over what is on disk: identity and the endpoint are not this
@@ -382,10 +485,26 @@ function useCommand(argv: string[], io: Io): number {
         "ub workspace use",
       );
     }
+    // Derived from what is on disk now — the binding above included — rather
+    // than from what this process decided, which is what makes the pair agree
+    // however the two writes are interleaved with another run's.
+    localConfig = regenerateLocalConfig(cwd, warnings);
   } catch (error) {
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
+  } finally {
+    lock.release();
   }
+
+  if (localConfig !== null) {
+    // Outside the lock: trusting is a `mise` subprocess, and it reads the file
+    // rather than writing it.
+    const trust = trustLocalConfig(localConfig);
+    if (!trust.trusted) {
+      warnings.push(trust.hint);
+    }
+  }
+  warn(io, warnings);
 
   const { uuid } = parseWorkspaceId(id);
   let text = field("workspace", id);
@@ -393,6 +512,9 @@ function useCommand(argv: string[], io: Io): number {
     text += field("uuid", uuid);
   }
   text += field("config", path);
+  if (localConfig !== null) {
+    text += field("mise config", `${localConfig} (derived, gitignored)`);
+  }
   io.out(text);
 
   // Written, and possibly overruled: a higher layer means this file changed
@@ -409,7 +531,10 @@ function useCommand(argv: string[], io: Io): number {
   return 0;
 }
 
-export function workspaceCommand(argv: string[], io: Io = processIo): number {
+export async function workspaceCommand(
+  argv: string[],
+  io: Io = processIo,
+): Promise<number> {
   const [sub, ...rest] = argv;
   if (sub === undefined) {
     return showWorkspace(io);
@@ -422,7 +547,7 @@ export function workspaceCommand(argv: string[], io: Io = processIo): number {
     return listCommand(rest, io);
   }
   if (sub === "use") {
-    return useCommand(rest, io);
+    return await useCommand(rest, io);
   }
   io.err(`ub workspace: unknown command ${JSON.stringify(sub)}\n\n${WORKSPACE_HELP}`);
   return 2;

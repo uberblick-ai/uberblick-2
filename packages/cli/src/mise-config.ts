@@ -12,6 +12,11 @@
  * rerun `ub init` and it comes back with the same value; it is regenerated, not
  * re-randomised, because the authority is elsewhere.
  *
+ * `ub init` is what *creates* it, and `ub workspace use` rewrites the one it
+ * created — a binding the mise tasks never saw would leave them serving the
+ * workspace the directory used to be bound to. Both write under the same lock,
+ * and both derive from the files rather than from what they just decided.
+ *
  * Two mise behaviours shape this module, both verified against mise 2026.7:
  *
  * - A config file mise does not trust is a hard error, not a warning, for every
@@ -251,11 +256,12 @@ export function tomlUnsafeReason(value: string): string | null {
 function render(env: DerivedEnvironment): string {
   return `${MARKER}
 #
-# Derived from $XDG_CONFIG_HOME/uberblick/{credentials,config}.json — same
-# values, one owner. Do not edit: \`ub init\` writes it from those files, and it
-# is the only command that does. \`ub remote\` changes the authority files
-# without regenerating this — rerun \`ub init\` to pick the new endpoint and
-# secret up. Delete it and rerun \`ub init\` and it comes back the same.
+# Derived from the config \`ub\` resolves — $XDG_CONFIG_HOME/uberblick/
+# {credentials,config}.json and ./uberblick.json — same values, one owner. Do
+# not edit: \`ub init\` writes it and \`ub workspace use\` rewrites it, and no
+# other command does. \`ub remote\` changes the authority files without
+# regenerating this — rerun \`ub init\` to pick the new endpoint and secret up.
+# Delete it and rerun \`ub init\` and it comes back the same.
 #
 # It exists because mise tasks and \`.mcp.json\` inherit their environment from
 # mise rather than from \`ub\`. \`fnox exec\` overrides it, so a decryptable
