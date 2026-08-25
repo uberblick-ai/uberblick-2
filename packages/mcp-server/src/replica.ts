@@ -128,15 +128,19 @@ export class Replicas {
   private readonly staleStubs = new Set<string>();
 
   /**
-   * Entries whose reconciliation was refused, and when.
+   * Entries owed a reconciliation that is paced, and the moment each is due.
    *
    * Separate from {@link staleStubs} because the two deserve opposite
-   * treatment: a stub that just changed is reconciled at once, while one the
-   * store already refused is paced. Insertion order is the retry order, and
-   * re-queuing deletes before setting, so a failing entry rotates to the back
-   * instead of monopolising the one retry slot each drain allows.
+   * treatment: a stub that just changed is reconciled at once, while work that
+   * lands here is rationed to one entry per drain. Two things arrive here — a
+   * reconciliation the store refused, due again after `reconcileRetryMs`, and a
+   * tombstone found still holding index rows at adoption time, due immediately.
+   *
+   * Insertion order is the queue order, and re-queuing deletes before setting,
+   * so an entry the store keeps refusing rotates to the back instead of
+   * monopolising the single slot.
    */
-  private readonly failedStubs = new Map<string, number>();
+  private readonly pacedStubs = new Map<string, number>();
 
   /** Display name published in awareness. Refined once the client identifies. */
   private agentName: string;
@@ -462,11 +466,11 @@ export class Replicas {
    */
   private stubDueForRetry(fresh: Set<string>): string | null {
     const now = Date.now();
-    for (const [uuid, failedAt] of this.failedStubs) {
+    for (const [uuid, dueAt] of this.pacedStubs) {
       if (fresh.has(uuid)) {
         continue;
       }
-      if (now - failedAt >= this.config.reconcileRetryMs) {
+      if (now >= dueAt) {
         return uuid;
       }
     }
@@ -480,14 +484,18 @@ export class Replicas {
    * treated as fresh work rather than as a pending retry.
    */
   private reconcileStub(uuid: string): void {
-    this.failedStubs.delete(uuid);
+    this.pacedStubs.delete(uuid);
     try {
       const entry = getDirectoryEntry(this.directory().doc, uuid);
       if (entry === null) {
         return;
       }
       if (entry.deleted === true) {
-        this.store.unindexDoc(uuid);
+        // Ask before deleting: the usual tombstone has no rows left, and a
+        // delete that finds nothing still queues behind a write lock.
+        if (this.store.isIndexed(uuid)) {
+          this.store.unindexDoc(uuid);
+        }
         return;
       }
       // A live entry for a document this replica has never attached is left
@@ -515,9 +523,14 @@ export class Replicas {
    * store keeps refusing cannot starve the rest.
    */
   private recordStubFailure(uuid: string, error: unknown): void {
-    this.failedStubs.delete(uuid);
-    this.failedStubs.set(uuid, Date.now());
+    this.pace(uuid, Date.now() + this.config.reconcileRetryMs);
     log.warn("failed to reconcile a directory entry", error);
+  }
+
+  /** Queue an entry for a paced reconciliation, at the back of the line. */
+  private pace(uuid: string, dueAt: number): void {
+    this.pacedStubs.delete(uuid);
+    this.pacedStubs.set(uuid, dueAt);
   }
 
   /**
@@ -529,7 +542,7 @@ export class Replicas {
    * stays queued and a later settle retries it.
    */
   indexReconciled(uuid: string): boolean {
-    return !this.staleStubs.has(uuid) && !this.failedStubs.has(uuid);
+    return !this.staleStubs.has(uuid) && !this.pacedStubs.has(uuid);
   }
 
   /** Whether this replica holds the document itself, not just its stub. */
@@ -624,19 +637,18 @@ export class Replicas {
     })) {
       if (entry.deleted === true) {
         // A doc deleted elsewhere leaves the derived index; `list_docs` reads
-        // the directory, and search must not surface a tombstoned doc.
+        // the directory, and search must not surface a tombstoned doc. This is
+        // the safety net for rows the observer never saw go stale — a mirror
+        // rebuilt from an older corpus, or a tombstone learned by replaying the
+        // log, where hydration is not an observed update.
         //
-        // Guarded and paced like every other reconciliation. Unguarded, a store
-        // that keeps refusing this one write would throw here on every settle —
-        // turning a stale index row into an error from every unrelated tool.
-        // Once it has failed, the entry belongs to the retry queue, and this
-        // loop leaves it alone.
-        if (!this.failedStubs.has(entry.uuid)) {
-          try {
-            this.store.unindexDoc(entry.uuid);
-          } catch (error) {
-            this.recordStubFailure(entry.uuid, error);
-          }
+        // It asks rather than deletes, and hands any real work to the paced
+        // queue rather than doing it here. In steady state the rows are long
+        // gone, so this costs one indexed read and no write at all; when they
+        // are not, a whole backlog of deletes must not land on whichever tool
+        // call happens to arrive while the database is locked.
+        if (!this.pacedStubs.has(entry.uuid) && this.store.isIndexed(entry.uuid)) {
+          this.pace(entry.uuid, 0);
         }
         continue;
       }
@@ -723,7 +735,7 @@ export class Replicas {
     // directory updates, and a failed entry would otherwise wait for the next
     // one — which may never come for a document nobody touches again. At most
     // one previously-failed entry is retried per call; see stubDueForRetry.
-    if (this.staleStubs.size > 0 || this.failedStubs.size > 0) {
+    if (this.staleStubs.size > 0 || this.pacedStubs.size > 0) {
       this.reconcileDirectory();
     }
   }

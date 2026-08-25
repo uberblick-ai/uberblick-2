@@ -52,7 +52,10 @@ class CountingStore extends MirrorStore {
     super.indexDoc(doc);
   }
 
+  unindexAttempts = 0;
+
   override unindexDoc(uuid: string): void {
+    this.unindexAttempts += 1;
     if (this.failUnindex) {
       throw new Error("simulated unindex failure");
     }
@@ -282,6 +285,63 @@ describe("restore_doc", () => {
     // not asked again.
     expect(store.indexAttempts).toBe(afterFirstFailure);
     expect(rig.instance.replicas.indexReconciled(doc.uuid)).toBe(false);
+  });
+
+  // Adoption walks every tombstone on every settle. Deleting rows that are
+  // already gone is the common case by far, and each pointless delete would
+  // still queue behind a write lock for its busy timeout.
+  it("does not touch the store for tombstones whose rows are already gone", async () => {
+    const store = new CountingStore(tempDatabasePath());
+    const rig = await startServer(testConfig(), store);
+    rigs.push(rig);
+
+    for (const title of ["One", "Two", "Three"]) {
+      const doc = await rig.ok("create_doc", { title });
+      await rig.ok("archive_doc", { uuid: doc.uuid });
+    }
+
+    const afterArchiving = store.unindexAttempts;
+    for (let call = 0; call < 3; call += 1) {
+      await rig.ok("list_docs", {});
+    }
+
+    expect(store.unindexAttempts).toBe(afterArchiving);
+  });
+
+  // And when rows really are stale — a mirror rebuilt from an older corpus, or
+  // a tombstone learned by replaying the log — the backlog is drained a piece
+  // at a time rather than landing whole on whichever call arrives first.
+  it("drains a stale mirror one delete per call", async () => {
+    const store = new CountingStore(tempDatabasePath());
+    const rig = await startServer(testConfig(), store);
+    rigs.push(rig);
+
+    const uuids: string[] = [];
+    for (const title of ["One", "Two", "Three"]) {
+      const doc = await rig.ok("create_doc", { title });
+      await rig.ok("archive_doc", { uuid: doc.uuid });
+      uuids.push(doc.uuid);
+    }
+
+    // Rows for tombstoned documents, with nothing queued — what a rebuilt
+    // mirror looks like before anything has noticed.
+    for (const uuid of uuids) {
+      store.indexDoc({ uuid, title: "stale", tags: [], links: [], body: "" });
+      expect(store.isIndexed(uuid)).toBe(true);
+    }
+    const before = store.unindexAttempts;
+
+    await rig.ok("list_docs", {});
+    expect(store.unindexAttempts).toBe(before + 1);
+
+    await rig.ok("list_docs", {});
+    expect(store.unindexAttempts).toBe(before + 2);
+
+    // It does finish: no entry is abandoned, it is only rationed.
+    await waitUntil("the stale mirror to drain", async () => {
+      await rig.ok("list_docs", {});
+      return uuids.every((uuid) => !store.isIndexed(uuid));
+    });
   });
 
   // The unindex in adoptKnownDocs runs on every settle, outside the drain. Left
