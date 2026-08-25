@@ -8,6 +8,8 @@ import type { ReactElement } from "react";
 import { getBlocksFragment, setTitle } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { bindGuardedEditor } from "../editor/guarded-binding.js";
+import { changedBlocks } from "../editor/changed-blocks.js";
+import { clearWhenSeen } from "../editor/changed-marks.js";
 import { describeForeignBlocks } from "../editor/palette.js";
 import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
 import type { RoomConnection } from "../collab/rooms.js";
@@ -199,6 +201,9 @@ function BoundEditor({
       element,
       fragment: getBlocksFragment(connection.ydoc),
       awareness: connection.provider.awareness,
+      // Session-local and ephemeral: the marks are held against this Y.Doc and
+      // nothing else, so a reload starts clean (see editor/changed-blocks.ts).
+      changed: changedBlocks(connection),
     });
     // A comment highlight is a plain span ProseMirror renders from the `comment`
     // mark, so the click that focuses its thread is read by delegation on the
@@ -215,6 +220,14 @@ function BoundEditor({
       binding.destroy();
     };
   }, [connection, onSelectThread]);
+
+  // Reading a block clears its mark. Separate from the binding above because it
+  // needs the editor that binding produced, and because it is the one part of
+  // the feature that depends on the viewport rather than on the document.
+  useEffect(() => {
+    if (editor === null) return;
+    return clearWhenSeen(changedBlocks(connection), editor);
+  }, [connection, editor]);
 
   return (
     <>

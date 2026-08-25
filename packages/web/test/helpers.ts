@@ -7,6 +7,7 @@ import * as Y from "yjs";
 import { getBlocksFragment } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
+import type { ChangedBlocks } from "../src/editor/changed-blocks.js";
 import { plainText } from "../src/editor/ytext.js";
 
 /** Every top-level child of the `blocks` fragment, as a comparable snapshot. */
@@ -40,12 +41,32 @@ export function snapshotFragment(ydoc: Y.Doc): FragmentSnapshot[] {
 }
 
 /**
- * Mount an editor on a detached element. jsdom is enough for ProseMirror; the
- * element is not attached to the document because we never need layout.
+ * Mount an editor on a fresh element **inside `document.body`**. jsdom is
+ * enough for ProseMirror, which needs no layout — but attachment is not about
+ * layout, and the editor is not the only thing reading this DOM.
+ *
+ * Anything that finds a block by its id needs the block to be in the document
+ * to find it: `document.getElementById` (the outline's scroll-to, and the
+ * changed-block watcher) returns nothing for a detached tree, and
+ * IntersectionObserver's root is discovered by walking up to a scrolling
+ * ancestor, which a detached element does not have. A test mounting into a
+ * detached div would pass by exercising the fallbacks rather than the rules.
+ *
+ * Callers are free to move the returned element somewhere more specific — the
+ * changed-block tests re-parent it into a stubbed scrolling pane.
+ *
+ * Being in the document is also why destroying the editor takes the element
+ * out of it again. One jsdom document is shared by every test in a file, and
+ * block ids are stable per fixture — so a document left behind by an earlier
+ * test holds blocks with the very ids a later test looks up, and
+ * `getElementById` returns the first match in the document, not the one in the
+ * editor that test just mounted. The teardown rides on the editor's own
+ * `destroy` event so no call site has to remember it, and `remove()` does not
+ * care which parent the element ended up under.
  */
 export function mountEditor(
   ydoc: Y.Doc,
-  options: { newBlockId?: () => string } = {},
+  options: { newBlockId?: () => string; changed?: ChangedBlocks } = {},
 ): { editor: Editor; element: HTMLElement } {
   const element = document.createElement("div");
   document.body.appendChild(element);
@@ -56,7 +77,9 @@ export function mountEditor(
     ...(options.newBlockId === undefined
       ? {}
       : { newBlockId: options.newBlockId }),
+    ...(options.changed === undefined ? {} : { changed: options.changed }),
   });
+  editor.on("destroy", () => element.remove());
   return { editor, element };
 }
 
