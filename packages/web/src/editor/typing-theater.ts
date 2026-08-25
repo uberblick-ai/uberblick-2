@@ -324,11 +324,17 @@ interface TheaterState {
   index: BlockIndex;
 }
 
+/**
+ * Shared, because a pulse map is only ever replaced, never written to — see
+ * {@link withPulse} and the expiry pass in `reduce`.
+ */
+const EMPTY_PULSES: ReadonlyMap<string, number> = new Map();
+
 function idleState(now: number): TheaterState {
   return {
     playing: null,
     queue: [],
-    pulses: new Map<string, number>(),
+    pulses: EMPTY_PULSES,
     engaged: false,
     clock: now,
     decorations: DecorationSet.empty,
@@ -733,8 +739,14 @@ function reduce(
       queue = enqueue(queue, arrival, options.random);
     }
   } else {
+    // Everything the theater is drawing goes, the pulse included. A pulse is a
+    // brief highlight on a block that was fast-forwarded rather than played,
+    // and it is as much an animation as the typing is — leaving it behind when
+    // the reader turns motion off mid-session would answer the preference with
+    // the one piece of movement still on screen.
     playing = null;
     queue = [];
+    pulses = EMPTY_PULSES;
   }
 
   // The reader wins: nothing is hidden under their cursor, and touching a block

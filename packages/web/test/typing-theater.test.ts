@@ -24,6 +24,9 @@
  * test driving playback by hand would otherwise be racing the wall clock.
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
@@ -38,6 +41,7 @@ import { trackChangedBlocks } from "../src/editor/changed-blocks.js";
 import {
   BACKLOG_MS,
   CARET_CLASS,
+  PULSE_CLASS,
   REMOVED_CLASS,
   STRIKE_MS,
   VEIL_CLASS,
@@ -71,6 +75,8 @@ interface Scene {
    * exactly.
    */
   idle: (ms: number) => void;
+  /** Turn the reader's motion preference on or off mid-session. */
+  setReducedMotion: (reduce: boolean) => void;
   dispose: () => void;
 }
 
@@ -95,12 +101,16 @@ function scene(
   const marks = trackChangedBlocks(local);
 
   let clock = 1_000;
+  // Read on every transaction, exactly as the real one is: `matchMedia`'s
+  // `matches` is live, so a reader who turns the preference on mid-session is
+  // answered by the next thing that happens.
+  let reduceMotion = options.reducedMotion === true;
   const { editor } = mountEditor(local, {
     changed: marks,
     typing: {
       random: STEADY,
       now: () => clock,
-      reducedMotion: () => options.reducedMotion === true,
+      reducedMotion: () => reduceMotion,
     },
   });
   // Started *after* the editor has rendered the document, which is the order
@@ -129,6 +139,9 @@ function scene(
     },
     idle: (ms) => {
       clock += ms;
+    },
+    setReducedMotion: (reduce) => {
+      reduceMotion = reduce;
     },
     dispose: () => editor.destroy(),
   };
@@ -320,6 +333,7 @@ describe("the editor is bound before the document arrives", () => {
       tick: () => {},
       tickTo: () => {},
       idle: () => {},
+      setReducedMotion: () => {},
       dispose: () => editor.destroy(),
     };
 
@@ -509,6 +523,57 @@ describe("prefers-reduced-motion is an off-switch, not a shorter animation", () 
     expect(theater(editor).playing).toBeNull();
     expect(theater(editor).queue).toHaveLength(0);
     expect(document.querySelectorAll(`.${VEIL_CLASS}`)).toHaveLength(0);
+  });
+
+  it("takes the pulse with it when the preference is turned on mid-session", () => {
+    // A pulse is the one piece of the theater that outlives the take that
+    // caused it: a brief highlight on a block fast-forwarded rather than
+    // played. Clearing the queue and leaving that behind would answer a request
+    // for less motion with the only thing still moving.
+    const scene = start({ paragraphs: ["one", "two", "three", "four"] });
+    const { remote, blocks, editor, tick } = scene;
+    const long = "word ".repeat(40).trim();
+    remote.transact(() => {
+      editBlock(remote, blocks[0]!, "one", `one ${long}`);
+      editBlock(remote, blocks[1]!, "two", `two ${long}`);
+      editBlock(remote, blocks[2]!, "three", `three ${long}`);
+      editBlock(remote, blocks[3]!, "four", `four ${long}`);
+    });
+    expect(theater(editor).pulses.size).toBeGreaterThan(0);
+
+    scene.setReducedMotion(true);
+    tick(0);
+
+    expect(theater(editor).playing).toBeNull();
+    expect(theater(editor).queue).toHaveLength(0);
+    expect(theater(editor).pulses.size).toBe(0);
+    expect(document.querySelectorAll(`.${PULSE_CLASS}`)).toHaveLength(0);
+    expect(document.querySelectorAll(`.${VEIL_CLASS}`)).toHaveLength(0);
+  });
+});
+
+describe("the reduced-motion guard on the pulse is not dead CSS", () => {
+  /**
+   * A media query contributes nothing to specificity. `.ub-typed-pulse` inside
+   * `@media (prefers-reduced-motion: reduce)` and `.ub-typed-pulse` outside it
+   * are both one class, so whichever comes last in the file wins — and the
+   * guard put in the obvious place, up with `.ub-changed`, sits *above* the rule
+   * it is meant to turn off and quietly does nothing.
+   *
+   * Nothing else would catch that. jsdom applies no stylesheet, the plugin
+   * clears the pulse on the next transaction anyway, and the animation it fails
+   * to suppress is 600ms long. So the file is read as text and the order
+   * asserted directly — the one thing that has to be true for the guard to
+   * mean anything.
+   */
+  it("declares the guard after the rule it turns off", () => {
+    const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+    const css = readFileSync(resolve(webRoot, "src/ui/styles.css"), "utf8");
+    const animates = css.indexOf(`animation: ub-typed-pulse`);
+    const guard = css.indexOf(`.${PULSE_CLASS} {\n    animation: none;\n  }`);
+    expect(animates).toBeGreaterThan(-1);
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeGreaterThan(animates);
   });
 });
 

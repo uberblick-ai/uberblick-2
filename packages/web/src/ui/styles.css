@@ -1413,11 +1413,15 @@ h3.ub-heading {
 /* ---------------------------------------------------------------------------
  * Agent typing theater (#121)
  *
- * Four classes, all applied by ProseMirror decorations over text that is
- * already correct — see `src/editor/typing-theater.ts`. There is no
- * `prefers-reduced-motion` block down here on purpose: the plugin itself is the
- * off-switch, so under that preference none of these classes is ever applied
- * and a rule turning off animations that are not running would be dead CSS.
+ * Five classes, all applied by ProseMirror decorations over text that is
+ * already correct — see `src/editor/typing-theater.ts`.
+ *
+ * The plugin is the off-switch for `prefers-reduced-motion`: under that
+ * preference it builds no takes, so four of these five are never applied at
+ * all and need no rule of their own. The fifth is `.ub-typed-pulse`, and it
+ * gets a guard at the foot of this section — see the note there for why it
+ * needs one, and why it has to be *there* rather than in the reduced-motion
+ * block further up the file.
  * ------------------------------------------------------------------------- */
 
 /* Text the agent removed, drawn back in as a widget so it can be seen leaving.
@@ -1480,5 +1484,26 @@ h3.ub-heading {
 @keyframes ub-typed-pulse {
   from {
     background: color-mix(in oklch, var(--brand) 20%, transparent);
+  }
+}
+
+/* The pulse is the one part of the theater that can still be on screen when the
+   plugin stops drawing, so it is the one part that needs a CSS guard.
+   `prefers-reduced-motion` can be turned on *during* a pulse, and the plugin's
+   own answer — clearing everything in the disabled branch of `reduce` — only
+   reaches the screen on the next transaction. This settles it immediately, and
+   settles it for any path that puts the class on a block while the preference
+   is true, including ones nobody has thought of.
+
+   It has to live **here, after the rule it turns off**, not up in the
+   reduced-motion block with `.ub-changed`. A media query contributes nothing to
+   specificity: both rules are one class, so the later one in the file wins. Up
+   there it would be overridden by `.ub-typed-pulse` below it and quietly do
+   nothing at all — which is a hard thing to notice, since the plugin usually
+   clears the pulse anyway and the animation is 600ms long. The ordering is
+   pinned by a test in `test/typing-theater.test.ts` for that reason. */
+@media (prefers-reduced-motion: reduce) {
+  .ub-typed-pulse {
+    animation: none;
   }
 }
