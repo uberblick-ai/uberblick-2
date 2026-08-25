@@ -8,6 +8,11 @@
     "ub": "./bin/ub.mjs",
     "uberblick": "./bin/ub.mjs"
   },
+  "files": [
+    "bin",
+    "src",
+    "templates"
+  ],
   "scripts": {
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",

@@ -52,8 +52,10 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { BlockInput, ImportedBlock, ImportedDoc } from "@uberblick/schema";
+import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
-import type { Replicas } from "./replica.js";
+import { Replicas } from "./replica.js";
+import { MirrorStore } from "./store.js";
 
 /** `docs-seed/` at the repo root — the only import source there is. */
 export const SEED_DIR = join(
@@ -279,4 +281,29 @@ export async function importSeedDocs(
     ...result,
     synced: replicas.isRoomQuiet(result.room),
   }));
+}
+
+/**
+ * The whole import as one call: open a replica set for `config`, import every
+ * markdown file in `dir`, close both handles again.
+ *
+ * The lifecycle is the reason this exists — a caller that is not a process
+ * dedicated to importing (`ub init` seeding a new workspace's starter
+ * documents) must not leave a SQLite handle and a hub connection open behind
+ * it. `hub` is the sync layer's status at the end, reported after the replicas
+ * are gone.
+ */
+export async function importSeedDir(
+  dir: string,
+  config: McpConfig,
+): Promise<{ results: SeedImport[]; hub: string }> {
+  const store = new MirrorStore(config.databasePath);
+  const replicas = new Replicas(config, store);
+  try {
+    const results = await importSeedDocs(replicas, readSeedDocs(dir));
+    return { results, hub: replicas.sync.state().status };
+  } finally {
+    replicas.destroy();
+    store.close();
+  }
 }

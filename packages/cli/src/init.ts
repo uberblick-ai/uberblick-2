@@ -12,6 +12,12 @@
  * run changes nothing. Nothing guesses a workspace anywhere else — the MCP
  * server refuses to start without one.
  *
+ * **The starter documents.** A workspace generated here — never one re-confirmed
+ * on a second run, and never one `--workspace` names because somebody is joining
+ * it — is seeded with the two documents in `templates/`, through the same seed
+ * importer `mise run import-seed` uses. See `starter.ts`. They are ordinary
+ * documents afterwards.
+ *
  * It is convenience, never a precondition. Every other command works without it
  * — absent configuration is a default, not an error (see `config.ts`) — so
  * nothing here is the thing that makes `ub status` or `ub mcp serve` possible.
@@ -62,6 +68,7 @@ import {
   trustLocalConfig,
   writeLocalConfig,
 } from "./mise-config.js";
+import { seedStarterDocs } from "./starter.js";
 
 /**
  * Awareness colours to default to.
@@ -250,6 +257,11 @@ export async function initCommand(
   const existing = readUserConfig();
   // The same problem is reported by each reader; the set keeps it said once.
   const warnings = new Set([...resolved.warnings, ...existing.warnings]);
+  // A workspace that did not exist anywhere and is about to be generated here —
+  // as opposed to one being re-confirmed, or one whose id `--workspace` names
+  // because somebody is joining it. Only that case gets the starter documents:
+  // a workspace somebody else already filled must not be written into.
+  const creating = inForceWorkspace === null && flags.workspace === undefined;
 
   // A pipe is not a person: it gets the defaults rather than a blocked prompt.
   const interactive = !flags.yes && process.stdin.isTTY === true;
@@ -459,6 +471,33 @@ export async function initCommand(
     }
   }
 
+  // What the MCP server would resolve for the workspace that is now on disk.
+  // `secret` is added explicitly because it may have been generated moments ago,
+  // after `resolved` was read — and a seed written without it stays local
+  // instead of reaching a hub that is up.
+  const mcpEnv: NodeJS.ProcessEnv = {
+    ...resolved.env,
+    WORKSPACE_ID: persistedWorkspace,
+    ...(secret === null ? {} : { HUB_AUTH_TOKEN: secret }),
+  };
+
+  // The starter documents, outside the lock: they are written through the
+  // update log, which has its own durability, and holding a machine-wide lock
+  // across a hub connection would block every other `ub init` on the network.
+  // A failure here is a warning, not an exit code — everything `ub init` was
+  // asked to settle is settled, and the seed is repeatable by hand.
+  let starter: string[] = [];
+  if (creating) {
+    try {
+      starter = await seedStarterDocs(mcpEnv);
+    } catch (error) {
+      warnings.add(
+        "the starter documents could not be written: " +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   for (const warning of warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }
@@ -468,11 +507,10 @@ export async function initCommand(
   // What is on disk, which under a concurrent run is not always what this
   // process asked for. The report describes the machine, not the intention.
   report += field("workspace", persistedWorkspace);
-  report += field(
-    "hub",
-    resolveMcpConfig({ ...resolved.env, WORKSPACE_ID: persistedWorkspace })
-      .hubUrl,
-  );
+  report += field("hub", resolveMcpConfig(mcpEnv).hubUrl);
+  if (starter.length > 0) {
+    report += field("documents", starter.join(", "));
+  }
   // "credential", not "token": the value is the secret tokens are signed with,
   // and it is not in this report — only where it came from.
   report += field("credential", credentialNote);
