@@ -136,6 +136,7 @@ describe("setBlockType", () => {
       "mermaid",
       "list-item",
       "quote",
+      "table",
     ] as const;
     for (const from of types) {
       for (const to of types) {

@@ -178,6 +178,17 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     attrs: {},
   },
   {
+    // No trigger: a table is two lines before it is a table, so the shortcut is
+    // typing the header row and the delimiter row under it — see table.ts.
+    id: "table",
+    label: "Table",
+    group: "Source",
+    trigger: null,
+    keywords: ["grid", "gfm", "rows", "columns"],
+    type: "table",
+    attrs: {},
+  },
+  {
     id: "mermaid",
     label: "Mermaid",
     group: "Source",

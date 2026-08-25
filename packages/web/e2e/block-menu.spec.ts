@@ -183,3 +183,39 @@ test("typing - starts a list, and Tab indents the item rather than leaving it", 
   await page.keyboard.type("!", { delay: 15 });
   await expect(items.nth(1)).toHaveText("b!");
 });
+
+/**
+ * The table block's two faces. Which one is shown is CSS keyed off the caret's
+ * block, so "the reader sees a table until they click it, and then they see its
+ * source" is a claim about rendering that only a browser can settle — jsdom
+ * applies no stylesheet, and `test/table.test.ts` can therefore only assert the
+ * class and the document.
+ */
+test("a typed table draws as a table, and clicking it opens the source", async ({
+  page,
+}) => {
+  await openDoc(page, "first");
+  await page.keyboard.press("Enter");
+
+  await page.keyboard.type("| name | count |", { delay: 10 });
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("| --- | ---: |", { delay: 10 });
+
+  const table = page.locator(".ub-table");
+  await expect(table).toHaveCount(1);
+  // Two paragraphs became one block: the delimiter row was syntax.
+  await expect(blocks(page)).toHaveCount(2);
+  // The caret is in it, so the source is what is on screen.
+  await expect(table.locator(".ub-table-source")).toBeVisible();
+
+  // Click away, and the reader sees a table.
+  await blocks(page).first().click();
+  await expect(table.locator(".ub-table-render table")).toBeVisible();
+  await expect(table.locator(".ub-table-source")).toBeHidden();
+  await expect(table.locator("th").first()).toHaveText("name");
+
+  // Click the table, and the source is back — that is the editing gesture.
+  await table.locator(".ub-table-render").click();
+  await expect(table.locator(".ub-table-source")).toBeVisible();
+  await expect(table.locator(".ub-table-render")).toBeHidden();
+});

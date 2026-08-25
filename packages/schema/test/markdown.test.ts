@@ -7,6 +7,7 @@ import {
   importMarkdown,
   initDoc,
   listNumbers,
+  parseGfmTable,
   setTags,
 } from "../src/index.js";
 
@@ -452,6 +453,57 @@ describe("lists and quotes", () => {
       { type: "paragraph", text: "Prose." },
       { type: "list-item", text: "c", list: "bullet", indent: 0 },
     ]);
+  });
+
+  it("reads a table's source as one block, and writes it back verbatim", () => {
+    const source = [
+      "| name | count |",
+      "| :--- | ----: |",
+      "| alpha | 1 |",
+      "| beta  | 2 |",
+      "",
+      "After the table.",
+      "",
+    ].join("\n");
+
+    const imported = importMarkdown(source);
+    expect(imported.blocks).toEqual([
+      {
+        type: "table",
+        text: [
+          "| name | count |",
+          "| :--- | ----: |",
+          "| alpha | 1 |",
+          "| beta  | 2 |",
+        ].join("\n"),
+      },
+      { type: "paragraph", text: "After the table." },
+    ]);
+
+    // Verbatim, down to the spacing someone lined the pipes up with: the block
+    // stores GFM source, so the export has nothing to decide.
+    expect(exportMarkdown(docFrom(source), { frontmatter: false })).toBe(source);
+  });
+
+  /**
+   * A table is a header row *and* a delimiter row. Pipes alone are prose — a
+   * paragraph mentioning `a | b` must not become a table, or an agent's
+   * `edit_block` would silently change a block's type on the next import.
+   */
+  it("takes pipes without a delimiter row as the prose they are", () => {
+    expect(importMarkdown("a | b\nc | d").blocks).toEqual([
+      { type: "paragraph", text: "a | b\nc | d" },
+    ]);
+    expect(parseGfmTable("| a | b |\n| --- |")).toBeNull();
+    expect(parseGfmTable("| a | b |")).toBeNull();
+
+    // …and the cells a reader would expect, escaped pipes included.
+    expect(parseGfmTable("| a | b |\n| --- | :-: |\n| 1 \\| 2 |")).toEqual({
+      header: ["a", "b"],
+      align: [null, "center"],
+      // Short rows are padded to the header, which is GFM's own rule.
+      rows: [["1 | 2", ""]],
+    });
   });
 
   it("reads an empty item and an empty quote line without losing the block", () => {

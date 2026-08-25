@@ -44,6 +44,7 @@ describe("the palette is exactly the schema's block types", () => {
       "mermaid",
       "paragraph",
       "quote",
+      "table",
       "text",
     ]);
     expect(BLOCK_NODE_NAMES).toEqual([
@@ -53,6 +54,7 @@ describe("the palette is exactly the schema's block types", () => {
       "mermaid",
       "list-item",
       "quote",
+      "table",
     ]);
     // The closed mark set: the schema package's five inline marks, plus the
     // annotation anchor.
@@ -61,9 +63,11 @@ describe("the palette is exactly the schema's block types", () => {
     );
 
     // Stated the other way round, because a node or mark that quietly exists is
-    // one the editor could normalise foreign content into. The list nodes are
-    // the pointed ones: the palette's list is a *run of blocks* (#59), so the
-    // wrapper-and-tree spelling stock Tiptap ships must not exist here.
+    // one the editor could normalise foreign content into. The list and table
+    // nodes are the pointed ones: a list here is a *run of blocks* and a table
+    // is *source text* (#59), so the wrapper-and-tree spellings stock Tiptap
+    // ships — including the cell nodes its table extension brings — must not
+    // exist here.
     for (const absent of [
       "bulletList",
       "orderedList",
@@ -73,7 +77,9 @@ describe("the palette is exactly the schema's block types", () => {
       "horizontalRule",
       "hardBreak",
       "image",
-      "table",
+      "tableRow",
+      "tableCell",
+      "tableHeader",
     ]) {
       expect(uberblickSchema.nodes[absent]).toBeUndefined();
     }

@@ -48,6 +48,7 @@ import {
   sameInlineMarks,
 } from "./marks.js";
 import { listNumbers } from "./lists.js";
+import { parseGfmTable } from "./table.js";
 import { MAX_LIST_INDENT } from "./types.js";
 import type {
   Block,
@@ -644,6 +645,10 @@ function renderBlock(
         .split("\n")
         .map((line) => `> ${line}`.trimEnd())
         .join("\n");
+    case "table":
+      // The source *is* the markdown: a table goes out exactly as it is stored,
+      // down to the spacing someone lined its pipes up with.
+      return block.text;
     case "paragraph":
       return renderInline(inline);
   }
@@ -665,7 +670,8 @@ function renderAnnotationComment(
  *
  * headings → `#`×level, paragraphs → their text, code → a fenced block tagged
  * with its language, mermaid → a ```mermaid fence, list items → a `- `/`1. `
- * line indented by their level, quotes → `> ` on every line.
+ * line indented by their level, quotes → `> ` on every line, tables → their
+ * source verbatim.
  *
  * Blocks are separated by a blank line, except two adjacent list items: a blank
  * line between them is what makes a reader render the list *loose*, so a run of
@@ -1474,8 +1480,9 @@ const QUOTE_LINE = /^ {0,3}>[ \t]?(.*)$/;
 /**
  * Parse markdown into the pieces needed to build a document: title, tags, links
  * and a flat block list. Handles frontmatter, ATX headings, fenced code (with
- * language), mermaid fences, list items and block quotes; everything else
- * becomes a paragraph, with its inline formatting read into `inline`.
+ * language), mermaid fences, list items, block quotes and GFM tables;
+ * everything else becomes a paragraph, with its inline formatting read into
+ * `inline`.
  *
  * Title precedence: frontmatter `title`, else a leading level-1 heading — which
  * is then *consumed*, so the title is not duplicated as a block. Any other
@@ -1540,6 +1547,30 @@ export function importMarkdown(markdown: string): ImportedDoc {
       // A blank line ends a paragraph but not a list: a blank line between
       // items is a loose list, still one list.
       flush();
+      continue;
+    }
+
+    // A table is two lines before it is anything — a header row and a delimiter
+    // row — so it is recognised with a lookahead, by the same parser that draws
+    // one. Its lines are then taken verbatim: the block stores GFM source.
+    if (
+      line.includes("|") &&
+      parseGfmTable(`${line}\n${lines[i + 1] ?? ""}`) !== null
+    ) {
+      flush();
+      openItems = [];
+      const table = [line, lines[i + 1] ?? ""];
+      let j = i + 2;
+      while (
+        j < lines.length &&
+        (lines[j] ?? "").trim() !== "" &&
+        (lines[j] ?? "").includes("|")
+      ) {
+        table.push(lines[j] ?? "");
+        j += 1;
+      }
+      i = j - 1;
+      blocks.push({ type: "table", text: table.join("\n") });
       continue;
     }
 

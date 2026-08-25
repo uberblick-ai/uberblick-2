@@ -38,6 +38,7 @@ interface Built {
     mermaid: string;
     item: string;
     quote: string;
+    table: string;
   };
   threadId: string;
 }
@@ -84,13 +85,17 @@ function buildDocument(): Built {
     indent: 2,
   });
   const quote = appendBlock(ydoc, { type: "quote", text: "as someone said" });
+  const table = appendBlock(ydoc, {
+    type: "table",
+    text: "| name | count |\n| --- | ---: |\n| alpha | 1 |",
+  });
 
   // "quick" in the paragraph.
   const annotation = createAnnotation(ydoc, paragraph, 4, 9, "tester", "why quick?");
 
   return {
     ydoc,
-    ids: { heading, paragraph, code, mermaid, item, quote },
+    ids: { heading, paragraph, code, mermaid, item, quote, table },
     threadId: annotation.id,
   };
 }
@@ -159,8 +164,8 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     const editor = mount(ydoc);
 
     const doc = editor.state.doc;
-    const indexes = [0, 1, 2, 3, 4, 5];
-    expect(doc.childCount).toBe(6);
+    const indexes = [0, 1, 2, 3, 4, 5, 6];
+    expect(doc.childCount).toBe(7);
     expect(indexes.map((i) => doc.child(i).type.name)).toEqual([
       "heading",
       "paragraph",
@@ -168,6 +173,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       "mermaid",
       "list-item",
       "quote",
+      "table",
     ]);
     expect(indexes.map((i) => doc.child(i).attrs.id)).toEqual([
       ids.heading,
@@ -176,6 +182,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       ids.mermaid,
       ids.item,
       ids.quote,
+      ids.table,
     ]);
 
     // Attributes arrive verbatim, as the strings the schema wrote.
@@ -237,7 +244,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     expect(after.map((block) => block.nodeName)).toEqual(
       before.map((block) => block.nodeName),
     );
-    expect(after).toHaveLength(6);
+    expect(after).toHaveLength(7);
 
     // Identity and attributes: byte-identical, including value *types*.
     expect(after.map((block) => block.attributes)).toEqual(
@@ -253,9 +260,10 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       indent: "2",
     });
     expect(after[5]?.attributes).toEqual({ id: ids.quote });
+    expect(after[6]?.attributes).toEqual({ id: ids.table });
 
     // Only the edited block's text changed.
-    for (const index of [0, 2, 3, 4, 5]) {
+    for (const index of [0, 2, 3, 4, 5, 6]) {
       expect(after[index]?.text).toBe(before[index]?.text);
     }
     expect(after[1]?.text).toBe("The quick brown fox jumps. Then it stopped.");
@@ -303,6 +311,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       [ids.mermaid, "mermaid"],
       [ids.item, "list-item"],
       [ids.quote, "quote"],
+      [ids.table, "table"],
     ]);
     expect(blocks[0]?.level).toBe(3);
     expect(blocks[2]?.language).toBe("ts");
@@ -310,6 +319,10 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     expect(blocks[3]?.text).toBe("graph TD;\n  A-->B;");
     expect(blocks[4]).toMatchObject({ list: "ordered", indent: 2, text: "one point" });
     expect(blocks[5]?.text).toBe("as someone said");
+    // The table's newlines are its rows: a source block keeps them exactly.
+    expect(blocks[6]?.text).toBe(
+      "| name | count |\n| --- | ---: |\n| alpha | 1 |",
+    );
   });
 
   it("splits a paragraph on Enter into two valid blocks with a fresh id", () => {
@@ -331,6 +344,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       "mermaid",
       "list-item",
       "quote",
+      "table",
     ]);
 
     // First half keeps the original id; the second half is a new block.
@@ -379,6 +393,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       "mermaid",
       "list-item",
       "quote",
+      "table",
     ]);
   });
 });

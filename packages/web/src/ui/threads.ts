@@ -62,6 +62,7 @@ const BLOCK_LABELS: Record<BlockType, string> = {
   mermaid: "Mermaid block",
   "list-item": "List item",
   quote: "Quote",
+  table: "Table",
 };
 
 /**
