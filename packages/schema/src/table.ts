@@ -52,21 +52,39 @@ interface Row {
 /**
  * One row's cells. Pipes separate; a backslash escapes one into the cell text;
  * a pipe at either end of the line is decoration rather than an empty cell.
+ *
+ * Backslashes escape in pairs, and the **parity of the run** is what decides
+ * the pipe after it: `\|` is a pipe inside a cell, while `\\|` is a literal
+ * backslash followed by a real separator. Reading only the character in front
+ * of the pipe gets that backwards and joins two cells into one.
+ *
+ * Only the pipe escape is resolved. Every other backslash stays in the cell,
+ * because the block stores source text and this is not an inline reader — a
+ * `\*` in a cell is a backslash and an asterisk, on screen as in the document.
  */
 function scanRow(line: string): Row {
   const trimmed = line.trim();
   const cells: string[] = [];
   let pipes = 0;
+  let firstPipe = -1;
+  let lastPipe = -1;
   let current = "";
   for (let i = 0; i < trimmed.length; i += 1) {
     const char = trimmed[i];
-    if (char === "\\" && trimmed[i + 1] === "|") {
-      current += "|";
-      i += 1;
+    if (char === "\\") {
+      let run = 0;
+      while (trimmed[i + run] === "\\") run += 1;
+      const escapesPipe = run % 2 === 1 && trimmed[i + run] === "|";
+      // The backslash that does the escaping is the only one consumed.
+      current += "\\".repeat(escapesPipe ? run - 1 : run);
+      if (escapesPipe) current += "|";
+      i += escapesPipe ? run : run - 1;
       continue;
     }
     if (char === "|") {
       pipes += 1;
+      if (firstPipe === -1) firstPipe = i;
+      lastPipe = i;
       cells.push(current);
       current = "";
       continue;
@@ -74,8 +92,10 @@ function scanRow(line: string): Row {
     current += char;
   }
   cells.push(current);
-  if (trimmed.startsWith("|")) cells.shift();
-  if (trimmed.endsWith("|") && !trimmed.endsWith("\\|")) cells.pop();
+  // Decoration is a *structural* pipe at either end, which is why the ends are
+  // read off the scan rather than off the string.
+  if (firstPipe === 0) cells.shift();
+  if (lastPipe === trimmed.length - 1) cells.pop();
   return { cells: cells.map((cell) => cell.trim()), pipes };
 }
 

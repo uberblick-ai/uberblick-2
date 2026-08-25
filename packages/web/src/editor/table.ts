@@ -303,10 +303,6 @@ export function tableFromTextPlugin(): Plugin {
         const header = view.state.doc.child(index - 1);
         if (header.type.name !== "paragraph") return false;
         if (!opensTable(header.textContent, delimiter)) return false;
-        // Nothing anchored or formatted is silently rewritten away — see
-        // {@link carriesMarks}. The keystroke is then plain typing, which is
-        // what returning false leaves it as.
-        if (carriesMarks(header) || carriesMarks(block)) return false;
 
         const headerId = header.attrs.id;
         const delimiterId = block.attrs.id;
@@ -315,11 +311,25 @@ export function tableFromTextPlugin(): Plugin {
 
         // The typed character first, so undo has something to give back.
         view.dispatch(defaultTransaction());
+
+        // Marks are read from the state the reader has actually produced, and
+        // only from it: a stored mark — bold left switched on — lands *on the
+        // character just typed*, so it does not exist in any state older than
+        // this dispatch. Nothing anchored or formatted is rewritten away, so a
+        // marked paragraph keeps what it is; see {@link carriesMarks}. The
+        // keystroke stands either way, which is what the `true` is for.
+        const typed = findBlockById(view.state.doc, headerId);
+        const typedDelimiter = findBlockById(view.state.doc, delimiterId);
+        if (typed === null || typedDelimiter === null) return true;
+        if (carriesMarks(typed.node) || carriesMarks(typedDelimiter.node)) {
+          return true;
+        }
+
         convertToTable(
           view,
           headerId,
           delimiterId,
-          `${header.textContent}\n${delimiter}`,
+          `${typed.node.textContent}\n${typedDelimiter.node.textContent}`,
         );
         return true;
       },

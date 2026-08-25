@@ -529,6 +529,36 @@ describe("lists and quotes", () => {
   });
 
   /**
+   * Backslashes escape in pairs, so the parity of the run in front of a pipe is
+   * what decides it: one backslash escapes the pipe into the cell, two are an
+   * escaped backslash and the pipe after them separates. Reading only the
+   * character in front of the pipe joins two cells into one and loses a column.
+   */
+  it("reads an escaped backslash before a pipe as a separator, not an escape", () => {
+    // `| a\\| b |` — a cell ending in a backslash, then a real separator.
+    expect(parseGfmTable("| a\\\\| b |\n| --- | --- |")).toEqual({
+      header: ["a\\\\", "b"],
+      align: [null, null],
+      rows: [],
+    });
+
+    // Three backslashes: a pair, then one that escapes the pipe — one cell.
+    expect(parseGfmTable("| a\\\\\\| b |\n| --- |")).toEqual({
+      header: ["a\\\\| b"],
+      align: [null],
+      rows: [],
+    });
+
+    // …and a row *ending* in an escaped backslash still ends with structure,
+    // so the trailing pipe is decoration rather than an empty cell.
+    expect(parseGfmTable("| a | b\\\\|\n| --- | --- |")).toEqual({
+      header: ["a", "b\\\\"],
+      align: [null, null],
+      rows: [],
+    });
+  });
+
+  /**
    * `- | -` is both a legal one-hyphen delimiter row (GFM's own example writes
    * `:-: | -----------:`) and a list item, and a table read swallows the
    * paragraph above it into a block nobody wrote. The list read costs nothing,

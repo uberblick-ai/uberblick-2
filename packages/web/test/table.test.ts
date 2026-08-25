@@ -26,6 +26,7 @@ import {
   createAnnotation,
   editBlock,
   exportMarkdown,
+  getBlockInline,
   getBlocks,
   importMarkdown,
   initDoc,
@@ -221,6 +222,41 @@ describe("the table block", () => {
       // …and the thread is still anchored to the characters it was about.
       expect(listAnnotationRanges(ydoc, ids[0] ?? "")).toEqual([
         { threadId: thread.id, start: 2, end: 6 },
+      ]);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  /**
+   * A stored mark — bold left switched on — lands on the character being typed
+   * *now*, so it exists only in the state after that character is dispatched.
+   * Asking an older state whether the paragraph is marked answers about a
+   * document the reader has already moved past, and the conversion would then
+   * insert the marked character and wipe it in the same gesture.
+   */
+  it("refuses when the character completing the row carries a stored mark", () => {
+    const { ydoc, ids } = docWith([HEADER, ""]);
+    const { editor } = mountEditor(ydoc);
+    try {
+      caret(editor, 1, 0);
+      // Not a delimiter row yet: one cell against the header's two.
+      type(editor, "| --- | ");
+      expect(getBlocks(ydoc)[1]?.type).toBe("paragraph");
+
+      // Bold switched on with nothing selected is a stored mark: it applies to
+      // the next character, which is the one that completes the row.
+      expect(editor.commands.toggleMark("bold")).toBe(true);
+      type(editor, "-");
+
+      expect(getBlocks(ydoc).map((block) => [block.type, block.text])).toEqual([
+        ["paragraph", HEADER],
+        ["paragraph", "| --- | -"],
+      ]);
+      // The mark the reader asked for is still on the character they typed.
+      expect(getBlockInline(ydoc, ids[1] ?? "")).toEqual([
+        { text: "| --- | ", marks: {} },
+        { text: "-", marks: { bold: true } },
       ]);
     } finally {
       editor.destroy();
