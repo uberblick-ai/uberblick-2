@@ -18,8 +18,9 @@ import {
   getMeta,
   getMetaMap,
   listDirectory,
+  readSidebar,
 } from "@uberblick/schema";
-import type { DirectoryEntry, DocMeta } from "@uberblick/schema";
+import type { DirectoryEntry, DocMeta, SidebarGroup } from "@uberblick/schema";
 import { acquireRoom } from "../collab/rooms.js";
 import type { RoomConnection, RoomStatus } from "../collab/rooms.js";
 import { resolveClientConfig } from "../config.js";
@@ -134,6 +135,34 @@ export function useDirectory(connection: RoomConnection | null): DirectoryEntry[
     return () => map.unobserve(read);
   }, [connection]);
   return entries;
+}
+
+/**
+ * The sidebar's groups and their pinned uuids, live — the `_sidebar` doc as
+ * `readSidebar` reports it (#115).
+ *
+ * Subscribed on the *document* rather than on a type, which is the one place
+ * here that does that. The sidebar's state is spread over three top-level types
+ * and one nested array per group (see `packages/schema/src/sidebar.ts`), so a
+ * per-type observer would have to be torn down and rebuilt every time a group
+ * was created — and a group created remotely would arrive with nobody watching
+ * its pins. The doc's `update` event covers all of it, local and remote alike,
+ * and the read behind it is a walk over a handful of uuids.
+ */
+export function useSidebar(connection: RoomConnection | null): SidebarGroup[] {
+  const [groups, setGroups] = useState<SidebarGroup[]>([]);
+  useEffect(() => {
+    if (connection === null) {
+      setGroups([]);
+      return;
+    }
+    const { ydoc } = connection;
+    const read = (): void => setGroups(readSidebar(ydoc));
+    read();
+    ydoc.on("update", read);
+    return () => ydoc.off("update", read);
+  }, [connection]);
+  return groups;
 }
 
 /**

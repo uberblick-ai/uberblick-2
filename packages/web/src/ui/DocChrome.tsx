@@ -73,6 +73,8 @@ export function DocChrome({
   connection,
   presence,
   meta,
+  pinned,
+  onTogglePin,
   threads,
   threadsOpen,
   onToggleThreads,
@@ -88,6 +90,14 @@ export function DocChrome({
   presence: readonly RemotePresence[];
   /** The open document's metadata, or null when none is open or read yet. */
   meta: DocMeta | null;
+  /** Whether the open document is pinned to the sidebar (#115). */
+  pinned: boolean;
+  /**
+   * Pin it, or unpin it — null while there is no sidebar room to write to, or
+   * no document to pin. The control is not drawn then: an affordance that
+   * cannot act is worse than none.
+   */
+  onTogglePin: (() => void) | null;
   /**
    * The open document's threads — what the rail would show. Passed rather than
    * read here, because the app shell decides on the same value whether the
@@ -116,6 +126,24 @@ export function DocChrome({
   return (
     <>
       {named && <Breadcrumb meta={meta} />}
+      {/* The document's own context is where pinning belongs, and this is the
+          least of it: one control, both directions, in the tab order — so the
+          sidebar can be curated without a pointer, let alone a drag. Where in
+          the sidebar the document lands is the drag's business (#115). */}
+      {named && onTogglePin !== null && (
+        <button
+          type="button"
+          className="ub-pin-toggle"
+          aria-pressed={pinned}
+          aria-label={pinned ? "Unpin from the sidebar" : "Pin to the sidebar"}
+          title={pinned ? "Unpin from the sidebar" : "Pin to the sidebar"}
+          onClick={onTogglePin}
+        >
+          {/* The word never changes and the mark carries the state, so the
+              header does not move when a document is pinned. */}
+          <span aria-hidden="true">{pinned ? "◆" : "◇"}</span> Pin
+        </button>
+      )}
       <span className="ub-chrome-pills">
         {/* The drawer's handle (#101). Below 1100px there is no room for the
             rail beside the prose, so it is hidden and this opens it as an

@@ -112,6 +112,9 @@ async function createDoc(page: Page, title: string): Promise<string> {
   }
 
   await page.locator(".ub-title").fill(title);
+  // Pinned, because the sidebar lists what is pinned and nothing else (#115) —
+  // and this is how the *other* context navigates to it.
+  await page.locator(".ub-pin-toggle").click();
   await expect(docButton(page, title)).toBeVisible();
   return uuid;
 }
@@ -268,7 +271,9 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
   // Synced *and* empty — the difference between a corpus this hub kept to
   // itself and a directory that simply had not arrived yet.
   await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
-  await expect(page.locator(".ub-empty")).toHaveText("No documents yet.");
+  // The sidebar is per workspace like every other room, so the second one has
+  // nothing pinned in it — not even the document just made in the first.
+  await expect(page.locator(".ub-empty")).toContainText("Nothing pinned yet");
   await expect(docButton(page, title)).toHaveCount(0);
 
   // And back: the first workspace is exactly where it was left.
