@@ -1,0 +1,262 @@
+/**
+ * The sync detail panel (#72): what a reader is told when they ask about sync.
+ *
+ * Everything the panel draws is client-held state, so the test supplies exactly
+ * that and nothing else — a Y.Doc with blocks, a real Awareness carrying two
+ * foreign sessions, a connection that only reports status, and the endpoint the
+ * shell resolved. No hub, no provider, no socket: a panel that needed one to
+ * say whether it was connected would have nothing to show in the outage it
+ * exists for.
+ *
+ * What is worth pinning is the truthfulness: the endpoint and the room it
+ * actually names, the backlog in the unit the status line uses, and a
+ * present-now list that follows awareness in both directions.
+ */
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import type { Root } from "react-dom/client";
+import * as Y from "yjs";
+import { Awareness, removeAwarenessStates } from "y-protocols/awareness";
+import { appendBlock, getBlocksFragment, initDoc } from "@uberblick/schema";
+import { SyncPanel } from "../src/ui/SyncPanel.js";
+import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
+
+/** A workspace id is a uuid. */
+const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
+const DOC_UUID = "9f3c1a2b-0000-4000-8000-0123456789ab";
+const ROOM = `${WORKSPACE}/${DOC_UUID}`;
+
+/** The endpoint the shell resolved — never a hardcoded address in the panel. */
+const ENDPOINT = "ws://hub.example:1234";
+
+/** The foreign client ids standing in for an agent and a second browser tab. */
+const AGENT_CLIENT = 424_242;
+const HUMAN_CLIENT = 515_151;
+
+interface Fixture {
+  ydoc: Y.Doc;
+  awareness: Awareness;
+  connection: RoomConnection;
+}
+
+function fixture(status: Partial<RoomStatus> = {}): Fixture {
+  const ydoc = new Y.Doc();
+  initDoc(ydoc, { uuid: DOC_UUID, title: "Sync and offline" });
+  appendBlock(ydoc, { type: "paragraph", text: "first block" });
+  appendBlock(ydoc, { type: "paragraph", text: "second block" });
+  const awareness = new Awareness(ydoc);
+  const full: RoomStatus = {
+    connected: true,
+    synced: true,
+    unsyncedChanges: 0,
+    localReplicaLoaded: true,
+    hasLocalCache: false,
+    ...status,
+  };
+  const connection = {
+    room: ROOM,
+    ydoc,
+    provider: { awareness },
+    status: full,
+    onStatusChange: (listener: (next: RoomStatus) => void) => {
+      listener(full);
+      return () => {};
+    },
+  } as unknown as RoomConnection;
+  return { ydoc, awareness, connection };
+}
+
+/** The Y.XmlText of one block — what a caret is anchored in. */
+function blockText(ydoc: Y.Doc, index: number): Y.XmlText {
+  const element = getBlocksFragment(ydoc).get(index);
+  if (!(element instanceof Y.XmlElement)) throw new Error("no such block");
+  const text = element.firstChild;
+  if (!(text instanceof Y.XmlText)) throw new Error("block has no text");
+  return text;
+}
+
+/**
+ * Publish a foreign session, in the wire format an MCP session uses:
+ * relative-position JSON under `cursor`, `user` beside it. `blockIndex` null is
+ * a session publishing presence with no caret — a tab that has not been clicked
+ * into, which the list still has to name.
+ */
+function publish(
+  fix: Fixture,
+  clientId: number,
+  user: { name: string; color: string },
+  blockIndex: number | null,
+): void {
+  const cursor =
+    blockIndex === null
+      ? null
+      : (() => {
+          const anchor = Y.relativePositionToJSON(
+            Y.createRelativePositionFromTypeIndex(
+              blockText(fix.ydoc, blockIndex),
+              3,
+            ),
+          );
+          return { anchor, head: anchor };
+        })();
+  fix.awareness.states.set(
+    clientId,
+    JSON.parse(JSON.stringify({ user, cursor })) as Record<string, unknown>,
+  );
+}
+
+function mount(fix: Fixture): { host: HTMLElement; root: Root } {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+    true;
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  act(() =>
+    root.render(
+      <SyncPanel
+        connection={fix.connection}
+        endpoint={ENDPOINT}
+        onClose={() => {}}
+      />,
+    ),
+  );
+  // Past every settle window, so the state word is what a reader sees rather
+  // than the "offline" every mount starts from.
+  act(() => void vi.advanceTimersByTime(5_000));
+  return { host, root };
+}
+
+/** The panel's facts, label → value. */
+function facts(host: HTMLElement): Record<string, string> {
+  const read: Record<string, string> = {};
+  for (const row of host.querySelectorAll(".ub-sync-fact")) {
+    const label = row.querySelector("dt")?.textContent ?? "";
+    read[label] = (row.querySelector("dd")?.textContent ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  return read;
+}
+
+/**
+ * The present-now list, one line per session: the name, and where the caret is
+ * when the row says. The two spans are read separately because the gap between
+ * them is CSS — `textContent` alone would run them together.
+ */
+function presentNow(host: HTMLElement): string[] {
+  return [...host.querySelectorAll(".ub-presence-row")].map((row) =>
+    [".ub-presence-name", ".ub-muted"]
+      .map((selector) => row.querySelector(selector)?.textContent ?? "")
+      .filter((part) => part !== "")
+      .join(" "),
+  );
+}
+
+describe("the sync panel renders the state this client holds", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("names the endpoint, the room, the state and the backlog's unit", () => {
+    vi.useFakeTimers();
+    const fix = fixture({ connected: true, synced: true, unsyncedChanges: 4 });
+    const { host, root } = mount(fix);
+    try {
+      expect(facts(host)).toEqual({
+        Hub: ENDPOINT,
+        Room: ROOM,
+        // A backlog is what stops the state being `synced` — the provider's own
+        // flag never comes back down once the handshake raised it.
+        State: "syncing…",
+        // The status line's wording, from the one place both read it.
+        Backlog: "4 sync messages unacked",
+      });
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("says offline the moment the hub goes away, with the backlog still named", () => {
+    vi.useFakeTimers();
+    const fix = fixture({ connected: false, synced: false, unsyncedChanges: 1 });
+    const { host, root } = mount(fix);
+    try {
+      expect(facts(host).State).toBe("offline");
+      expect(facts(host).Backlog).toBe("1 sync message unacked");
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("lists both sessions, with the caret's block only where there is one", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    publish(fix, AGENT_CLIENT, { name: "Claude · demo agent", color: "#7b5ec7" }, 1);
+    publish(fix, HUMAN_CLIENT, { name: "loitering otter", color: "#0c853d" }, null);
+    const { host, root } = mount(fix);
+    try {
+      // Sorted by client id, so the list does not reorder itself under a reader.
+      expect(presentNow(host)).toEqual([
+        "Claude · demo agent block 2",
+        // No cursor published: the row is still drawn, and says nothing about
+        // where — a block number nobody could point at would be an invention.
+        "loitering otter",
+      ]);
+      // Each session in its own presence colour, the one its cursor carries in
+      // the prose.
+      const dots = [...host.querySelectorAll<HTMLElement>(".ub-presence-dot")];
+      expect(dots.map((dot) => dot.style.background)).toEqual([
+        "rgb(123, 94, 199)",
+        "rgb(12, 133, 61)",
+      ]);
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("drops a session when its awareness state goes away", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    publish(fix, AGENT_CLIENT, { name: "Claude · demo agent", color: "#7b5ec7" }, 0);
+    const { host, root } = mount(fix);
+    try {
+      expect(presentNow(host)).toEqual(["Claude · demo agent block 1"]);
+      act(() => {
+        removeAwarenessStates(fix.awareness, [AGENT_CLIENT], "test");
+      });
+      expect(presentNow(host)).toEqual([]);
+      expect(host.querySelector(".ub-presence")).toBeNull();
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("says so rather than guessing while the endpoint is still resolving", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() =>
+      root.render(
+        <SyncPanel connection={fix.connection} endpoint={null} onClose={() => {}} />,
+      ),
+    );
+    try {
+      // Never a fallback address: the panel exists to say which hub this client
+      // dialled, and a plausible guess is the one answer it must not give.
+      expect(facts(host).Hub).toBe("—");
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+});

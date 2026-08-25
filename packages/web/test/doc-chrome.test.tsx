@@ -120,6 +120,8 @@ function mount(fix: Fixture): { host: HTMLElement; root: Root } {
           threads={[]}
           threadsOpen={false}
           onToggleThreads={() => {}}
+          syncOpen={false}
+          onToggleSync={() => {}}
         />
         <DocMetaLine
           connection={fix.connection}

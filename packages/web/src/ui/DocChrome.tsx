@@ -73,6 +73,8 @@ export function DocChrome({
   threads,
   threadsOpen,
   onToggleThreads,
+  syncOpen,
+  onToggleSync,
 }: {
   connection: RoomConnection | null;
   /** The open document's metadata, or null when none is open or read yet. */
@@ -86,6 +88,9 @@ export function DocChrome({
   /** Whether the threads rail is open as a drawer — see `.ub-rail-open`. */
   threadsOpen: boolean;
   onToggleThreads: () => void;
+  /** Whether the sync detail panel is open — the connection pill opens it. */
+  syncOpen: boolean;
+  onToggleSync: () => void;
 }): ReactElement {
   const activity = useRemoteActivity(connection);
   // The count is the open threads, the way the rail counts them. It is *not*
@@ -129,7 +134,22 @@ export function DocChrome({
             {activity.name} editing block {activity.block}
           </span>
         )}
-        <span className={`ub-pill ub-pill-${state}`}>
+        {/* The pill is the panel's handle (#72): the indicator someone looks at
+            when they wonder about sync is the thing to press for the detail.
+            It stays a pill — same slots, same widths — so nothing beside it
+            moves when it becomes operable. */}
+        <button
+          type="button"
+          className={`ub-pill ub-pill-${state} ub-sync-toggle`}
+          aria-expanded={syncOpen}
+          aria-controls="ub-sync-panel"
+          // The visible label is one word about the state, not about the
+          // action, and `title` is not reliably announced — so the accessible
+          // name carries both, keeping the visible word inside it.
+          aria-label={`Sync details — ${label}`}
+          title="Sync details"
+          onClick={onToggleSync}
+        >
           <span className="ub-status-mark" aria-hidden="true">
             {state === "syncing" ? (
               <span className="ub-spinner" />
@@ -143,7 +163,7 @@ export function DocChrome({
               longest of the three words, so the pill never changes size and
               nothing beside it moves. */}
           <span className="ub-status-word">{label}</span>
-        </span>
+        </button>
       </span>
     </>
   );

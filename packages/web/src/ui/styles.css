@@ -314,6 +314,21 @@ body {
   text-overflow: ellipsis;
 }
 
+/* The connection pill, made operable (#72): it is the handle for the sync
+   panel. Every `.ub-pill` rule still applies — the slots and widths are what
+   keep the topbar still — so only what a button needs is added here, and this
+   sits *before* the state rules so their tints still win over `background`. */
+.ub-sync-toggle {
+  background: none;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.ub-sync-toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
 .ub-pill-synced {
   border-color: var(--status-success-subtle);
 }
@@ -559,6 +574,101 @@ body {
   .ub-rail-open .ub-outline {
     display: none;
   }
+}
+
+/* ---- the sync detail panel (#72, design surface 1e's right column) ---- */
+
+/* An overlay, not a fourth column: it is opened to answer a question and closed
+   again, so it must not reflow the prose to appear. `.ub-body` is its
+   containing block — the same one the threads drawer overlays — and it sits
+   above that drawer, because the pill that opens it is always reachable. */
+.ub-sync-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 6;
+  width: min(22rem, 90vw);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 0.75rem;
+  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-bottom-left-radius: var(--radius);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: -8px 8px 24px rgb(0 0 0 / 0.18);
+  font-size: 0.85rem;
+}
+
+.ub-sync-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ub-sync-facts {
+  margin: 0 0 1.25rem;
+}
+
+.ub-sync-fact {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+}
+
+.ub-sync-fact dt {
+  flex: none;
+  width: 4.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+/* The values are identifiers — an endpoint, a room key — so they are mono, and
+   they wrap: both are long unbreakable words, and a panel that scrolled
+   sideways would hide the end of the very address it exists to show. */
+.ub-sync-fact dd {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.ub-presence {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.ub-presence-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+/* The session's awareness colour, written inline by the component: the palette
+   is `#rrggbb` literals rather than tokens (see src/collab/identity.ts). */
+.ub-presence-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  flex: none;
+  align-self: center;
+}
+
+/* A session may call itself anything, and a long name has to end in an ellipsis
+   rather than push the block number out of the panel. */
+.ub-presence-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ub-rail-head {

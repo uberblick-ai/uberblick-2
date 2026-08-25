@@ -21,7 +21,7 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
-import { CONFIGURED_WORKSPACE, CONFIGURED_WORKSPACES } from "../config.js";
+import { CONFIGURED_WORKSPACE, CONFIGURED_WORKSPACES, hubUrl } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
 import { randomIdentity } from "../collab/identity.js";
 import type { RoomConnection } from "../collab/rooms.js";
@@ -30,6 +30,7 @@ import { DocList } from "./DocList.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
+import { SyncPanel } from "./SyncPanel.js";
 import { ThreadsPane } from "./ThreadsPane.js";
 import { workspaceTags } from "./tags.js";
 import { focusThread } from "./threads.js";
@@ -201,6 +202,8 @@ export function App(): ReactElement {
    * rail is a column and `.ub-rail-open` declares nothing.
    */
   const [threadsOpen, setThreadsOpen] = useState(false);
+  /** Whether the sync detail panel is open (#72) — the connection pill's state. */
+  const [syncOpen, setSyncOpen] = useState(false);
   /**
    * What opened the drawer, so closing it can hand focus back there. Closing
    * *hides* the rail below 1100px, and focus inside a hidden panel is focus
@@ -226,6 +229,33 @@ export function App(): ReactElement {
         : document.querySelector<HTMLElement>(".ub-threads-toggle");
     back?.focus();
   }, []);
+
+  const onToggleSync = useCallback(() => setSyncOpen((open) => !open), []);
+
+  /**
+   * Close the panel, and give focus back to the pill that opened it.
+   *
+   * Only when the focus is inside the panel that is about to go — its own ×,
+   * usually — because focus on a detached element is focus nobody has, and the
+   * reader would be returned to the top of the page. A click on the pill needs
+   * no repair: focus is already there.
+   */
+  const closeSync = useCallback(() => {
+    setSyncOpen(false);
+    const inPanel = document.activeElement?.closest(".ub-sync-panel") ?? null;
+    if (inPanel === null) return;
+    document.querySelector<HTMLElement>(".ub-sync-toggle")?.focus();
+  }, []);
+
+  /** Escape closes the panel — the way out of an overlay. */
+  useEffect(() => {
+    if (!syncOpen) return;
+    const close = (event: KeyboardEvent): void => {
+      if (event.key === "Escape" && !event.defaultPrevented) closeSync();
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [syncOpen, closeSync]);
 
   const onFocusThread = useCallback<SelectThread>((threadId, viaKeyboard) => {
     setFocusedThread((previous) =>
@@ -439,6 +469,8 @@ export function App(): ReactElement {
           threads={threads}
           threadsOpen={threadsOpen}
           onToggleThreads={onToggleThreads}
+          syncOpen={syncOpen}
+          onToggleSync={onToggleSync}
         />
         <span className="ub-me" style={{ borderColor: identity.color }}>
           {identity.name}
@@ -482,6 +514,18 @@ export function App(): ReactElement {
             onFocus={onFocusThread}
           />
         </aside>
+        {/* The sync detail panel (#72), over the panes rather than beside them:
+            it is opened to answer a question and closed again. The same room
+            the pill reports on — the open document's, or the directory's when
+            none is open — and the endpoint the socket was built from, which is
+            null only in the moment before that read settles. */}
+        {syncOpen && (
+          <SyncPanel
+            connection={doc ?? directory}
+            endpoint={hubReady ? hubUrl() : null}
+            onClose={closeSync}
+          />
+        )}
       </div>
     </main>
   );

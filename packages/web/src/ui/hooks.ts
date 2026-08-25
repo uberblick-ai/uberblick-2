@@ -29,8 +29,8 @@ import { changedBlocks } from "../editor/changed-blocks.js";
 import { findForeignBlocks } from "../editor/palette.js";
 import type { ForeignBlock } from "../editor/palette.js";
 import { blockText, plainText } from "../editor/ytext.js";
-import { observeDocRev, readActivity, sameActivity } from "./doc-chrome.js";
-import type { RemoteActivity } from "./doc-chrome.js";
+import { observeDocRev, readPresence, samePresence } from "./doc-chrome.js";
+import type { RemoteActivity, RemotePresence } from "./doc-chrome.js";
 import { observeOutline } from "./outline.js";
 import type { OutlineEntry } from "./outline.js";
 import { observeThreads } from "./threads.js";
@@ -271,36 +271,39 @@ export function usePeers(connection: RoomConnection | null): Peer[] {
   return peers;
 }
 
+/** Nobody else here. One frozen instance, so an empty room never re-renders. */
+const NOBODY: readonly RemotePresence[] = [];
+
 /**
- * The remote session the chrome names, live — see `readActivity` for which one
- * that is and why it is not called an agent here or anywhere else in the code.
+ * Every remote session in the room, live — the sync panel's present-now list,
+ * and the chrome's activity pill below.
  *
  * The reading is compared before it is stored, and that is the point rather
  * than an optimisation: awareness fires `change` on every caret movement, so a
  * peer typing a sentence produces dozens of readings that all say the same
- * thing. Storing them by identity would redraw the pill once per keystroke.
+ * thing. Storing them by identity would redraw the panel once per keystroke.
  *
- * Two subscriptions, because the pill names a block *number* and there are two
- * ways for that number to become wrong: the caret moves, or blocks are inserted
- * or removed above a caret that has not moved at all. The second observer is
- * shallow on purpose — it is the fragment's *shape* that renumbers blocks, and
- * a deep one would re-read every awareness state on every keystroke in the
- * document to learn nothing.
+ * Two subscriptions, because each entry names a block *number* and there are
+ * two ways for that number to become wrong: the caret moves, or blocks are
+ * inserted or removed above a caret that has not moved at all. The second
+ * observer is shallow on purpose — it is the fragment's *shape* that renumbers
+ * blocks, and a deep one would re-read every awareness state on every keystroke
+ * in the document to learn nothing.
  */
-export function useRemoteActivity(
+export function usePresence(
   connection: RoomConnection | null,
-): RemoteActivity | null {
-  const [activity, setActivity] = useState<RemoteActivity | null>(null);
+): readonly RemotePresence[] {
+  const [presence, setPresence] = useState<readonly RemotePresence[]>(NOBODY);
   useEffect(() => {
     const awareness = connection?.provider.awareness ?? null;
     if (connection === null || awareness === null) {
-      setActivity(null);
+      setPresence(NOBODY);
       return;
     }
     const fragment = getBlocksFragment(connection.ydoc);
     const read = (): void => {
-      const next = readActivity(connection.ydoc, awareness);
-      setActivity((previous) => (sameActivity(previous, next) ? previous : next));
+      const next = readPresence(connection.ydoc, awareness);
+      setPresence((previous) => (samePresence(previous, next) ? previous : next));
     };
     read();
     awareness.on("change", read);
@@ -310,7 +313,31 @@ export function useRemoteActivity(
       fragment.unobserve(read);
     };
   }, [connection]);
-  return activity;
+  return presence;
+}
+
+/**
+ * The remote session the chrome names: the lowest client id whose caret is in a
+ * block this document can name, or null when nobody's is.
+ *
+ * Lowest client id, so two carets do not swap the pill back and forth between
+ * them; the sync panel's present-now list is where everyone appears. In the
+ * spike that session is the agent — awareness carries no "this is an agent"
+ * marker, so the name is what says who it is (see `readPresence`).
+ *
+ * Derived from {@link usePresence} rather than observed separately: the pill
+ * and the panel are two readings of one awareness map, and one observer is what
+ * keeps them from disagreeing about who is where.
+ */
+export function useRemoteActivity(
+  connection: RoomConnection | null,
+): RemoteActivity | null {
+  const presence = usePresence(connection);
+  return (
+    presence.find(
+      (session): session is RemoteActivity => session.block !== null,
+    ) ?? null
+  );
 }
 
 /**
