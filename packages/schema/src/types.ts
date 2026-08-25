@@ -2,7 +2,7 @@
  * The vocabulary of the uberblick document model.
  *
  * Terminology is stable and shared by every package: block, block id, block
- * type, annotation thread, directory entry.
+ * type, annotation thread, directory entry, sidebar group.
  */
 
 /** Block types. The set is closed; a block type is a Y.XmlElement nodeName. */
@@ -176,4 +176,12 @@ export interface DirectoryEntry {
   title: string;
   tags: string[];
   deleted?: boolean;
+}
+
+/** One group in the sidebar doc: a stable id, a name, and what it pins. */
+export interface SidebarGroup {
+  id: string;
+  name: string;
+  /** Pinned document uuids, in stored order. */
+  docs: string[];
 }

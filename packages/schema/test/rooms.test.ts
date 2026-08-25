@@ -3,10 +3,12 @@ import {
   DIRECTORY_SUFFIX,
   InvalidRoomError,
   InvalidWorkspaceIdError,
+  SIDEBAR_SUFFIX,
   directoryRoom,
   parseRoom,
   parseWorkspaceId,
   roomForDoc,
+  sidebarRoom,
 } from "../src/index.js";
 
 const UUID = "77777777-7777-4777-8777-777777777777";
@@ -58,6 +60,8 @@ describe("room names", () => {
   it("builds document and directory rooms under a workspace", () => {
     expect(roomForDoc(WORKSPACE, UUID)).toBe(`${WORKSPACE}/${UUID}`);
     expect(directoryRoom(WORKSPACE)).toBe(`${WORKSPACE}/${DIRECTORY_SUFFIX}`);
+    expect(SIDEBAR_SUFFIX).toBe("_sidebar");
+    expect(sidebarRoom(WORKSPACE)).toBe(`${WORKSPACE}/${SIDEBAR_SUFFIX}`);
   });
 
   it("keeps the slug out of the room name, so both spellings name one room", () => {

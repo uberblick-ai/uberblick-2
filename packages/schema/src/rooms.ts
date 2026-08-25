@@ -1,8 +1,9 @@
 /**
  * Room names.
  *
- * A room name is `<workspaceId>/<docUuid>`, and the directory doc of a
- * workspace lives at `<workspaceId>/_directory`. Tenancy sits in the room key
+ * A room name is `<workspaceId>/<docUuid>`. A workspace's two well-known docs
+ * take reserved document-id slots: the directory at `<workspaceId>/_directory`
+ * and the sidebar at `<workspaceId>/_sidebar`. Tenancy sits in the room key
  * from day one so a hosted hub never needs a room migration.
  *
  * The workspace segment is always the **bare uuid** (see `workspace.ts`): a
@@ -17,6 +18,9 @@ import { parseWorkspaceId } from "./workspace.js";
 
 /** The document-id slot the directory doc occupies inside a workspace. */
 export const DIRECTORY_SUFFIX = "_directory";
+
+/** The document-id slot the sidebar doc occupies inside a workspace. */
+export const SIDEBAR_SUFFIX = "_sidebar";
 
 const SEPARATOR = "/";
 
@@ -47,6 +51,11 @@ export function roomForDoc(workspaceId: string, uuid: string): string {
 /** The room name of a workspace's directory doc. */
 export function directoryRoom(workspaceId: string): string {
   return roomForDoc(workspaceId, DIRECTORY_SUFFIX);
+}
+
+/** The room name of a workspace's sidebar doc. */
+export function sidebarRoom(workspaceId: string): string {
+  return roomForDoc(workspaceId, SIDEBAR_SUFFIX);
 }
 
 export interface ParsedRoom {
