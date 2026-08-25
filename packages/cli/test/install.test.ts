@@ -366,6 +366,28 @@ describe("ub mcp install (JSON targets)", () => {
     }
   });
 
+  it("refuses duplicate fields inside its own entry", () => {
+    // The nastiest shape of the duplicate-key problem: everything *around* the
+    // entry is unambiguous, and the entry parses here to exactly what `ub`
+    // installs — so without this check the answer is a confident "already
+    // installed" while a first-key parser spawns `somebody-elses`.
+    const box = sandbox();
+    const path = join(box.cwd, ".mcp.json");
+    const before =
+      '{\n  "mcpServers": {\n    "uberblick": {\n' +
+      '      "command": "somebody-elses",\n      "command": "ub",\n' +
+      '      "args": ["mcp", "serve"]\n    }\n  }\n}\n';
+    writeFileSync(path, before, "utf8");
+
+    const run = runUb(["mcp", "install", "claude", "--project"], box, NO_VENDOR);
+    expect(run.status).not.toBe(0);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain(path);
+    expect(run.stderr).toMatch(/"command" more than once/);
+    expect(read(path)).toBe(before);
+    expect(backupsOf(box.cwd, ".mcp.json")).toEqual([]);
+  });
+
   it("refuses a symlink rather than writing through it", () => {
     const box = sandbox();
     const target = join(box.cwd, "elsewhere.json");
@@ -455,6 +477,29 @@ describe("ub mcp install, and what it will not print", () => {
     // …with nothing of the comments that rode along with them.
     expect(run.output).not.toContain(SECRET);
     expect(run.output).not.toContain("#");
+  });
+
+  it("masks a value whose string was never closed", () => {
+    // An unterminated quote swallows the rest of the line, `#` included, so the
+    // scanner cannot say where the value ended or whether a comment followed.
+    // Not being able to bound it is exactly the reason not to print it.
+    const box = sandbox();
+    const home = join(box.cwd, "codex-home");
+    mkdirSync(home, { recursive: true });
+    const path = join(home, "config.toml");
+    writeFileSync(
+      path,
+      `[mcp_servers.uberblick]\ncommand = "somebody-elses # ${SECRET}\nargs = []\n`,
+      "utf8",
+    );
+
+    const run = runUb(["mcp", "install", "codex", "--user"], box, {
+      ...NO_VENDOR,
+      CODEX_HOME: home,
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("command = …");
+    expect(run.output).not.toContain(SECRET);
   });
 
   it("masks the values in a conflicting Codex env table too", () => {

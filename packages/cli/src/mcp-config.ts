@@ -265,8 +265,12 @@ function uniqueMember(
 /**
  * Refuse a file whose duplicate keys would make "what is installed" ambiguous.
  *
- * Only the two keys this command reads and writes are checked; a duplicate
- * anywhere else is somebody else's business.
+ * Only what this command reads and writes is checked — a duplicate anywhere else
+ * is somebody else's business — but that reaches *inside* the entry as well as
+ * to it. `{"command": "other", "command": "ub"}` parses to `ub` here and would be
+ * declared already installed, while a client whose parser keeps the first key
+ * spawns `other`. Which key wins is the whole question, so it is not answered by
+ * whichever parser happened to be asked.
  */
 function assertUnambiguousJson(text: string): void {
   const rootOpen = skipJsonWs(text, 0);
@@ -278,11 +282,18 @@ function assertUnambiguousJson(text: string): void {
   if (servers === null || text[servers.valueStart] !== "{") {
     return;
   }
-  uniqueMember(
+  const ours = uniqueMember(
     objectMembers(text, servers.valueStart).members,
     SERVER_NAME,
     `"${SERVER_NAME}"`,
   );
+  if (ours === null || text[ours.valueStart] !== "{") {
+    return;
+  }
+  const fields = objectMembers(text, ours.valueStart).members;
+  for (const key of KNOWN_JSON_KEYS) {
+    uniqueMember(fields, key, `"${SERVER_NAME}"'s "${key}"`);
+  }
 }
 
 /** The whitespace the line containing `index` begins with. */
@@ -668,28 +679,44 @@ function findMultilineClose(
   return -1;
 }
 
+/** What a line leaves behind for the line after it. */
+interface ScanState {
+  depth: number;
+  multiline: MultilineDelimiter | null;
+  commentAt: number | null;
+  /**
+   * A single-line string that never closed.
+   *
+   * Treating one as "it ran to the end of the line" is the tempting reading and
+   * the wrong one: everything after the opening quote — a `#` and whatever
+   * follows it included — was then swallowed as string content, so the scanner
+   * has no idea where the value ended or whether it had a comment. That is
+   * precisely the case the caller must not show.
+   */
+  unterminated: boolean;
+}
+
 /**
  * Walk the rest of a line for the state the *next* line starts in: how deep
- * inside brackets it is, whether a multi-line string is still open, and where
- * its comment began.
+ * inside brackets it is, whether a multi-line string is still open, where its
+ * comment began, and whether a string was left hanging.
  *
  * This is what keeps a line inside a multi-line array — `[` on a line of its
  * own — from being mistaken for a table header.
  */
-function scanRest(
-  text: string,
-  startDepth: number,
-): {
-  depth: number;
-  multiline: MultilineDelimiter | null;
-  commentAt: number | null;
-} {
+function scanRest(text: string, startDepth: number): ScanState {
   let depth = startDepth;
   let i = 0;
+  const hanging = (): ScanState => ({
+    depth,
+    multiline: null,
+    commentAt: null,
+    unterminated: true,
+  });
   while (i < text.length) {
     const character = text[i];
     if (character === "#") {
-      return { depth, multiline: null, commentAt: i };
+      return { depth, multiline: null, commentAt: i, unterminated: false };
     }
     let opened: MultilineDelimiter | null = null;
     if (text.startsWith('"""', i)) {
@@ -700,19 +727,25 @@ function scanRest(
     if (opened !== null) {
       const close = findMultilineClose(text, i + 3, opened);
       if (close === -1) {
-        return { depth, multiline: opened, commentAt: null };
+        return { depth, multiline: opened, commentAt: null, unterminated: false };
       }
       i = close;
       continue;
     }
     if (character === '"') {
       const end = skipTomlBasic(text, i);
-      i = end === -1 ? text.length : end;
+      if (end === -1) {
+        return hanging();
+      }
+      i = end;
       continue;
     }
     if (character === "'") {
       const close = text.indexOf("'", i + 1);
-      i = close === -1 ? text.length : close + 1;
+      if (close === -1) {
+        return hanging();
+      }
+      i = close + 1;
       continue;
     }
     if (character === "[" || character === "{") {
@@ -722,7 +755,7 @@ function scanRest(
     }
     i += 1;
   }
-  return { depth, multiline: null, commentAt: null };
+  return { depth, multiline: null, commentAt: null, unterminated: false };
 }
 
 type TomlLine =
@@ -888,13 +921,16 @@ function renderKeyPath(path: string[]): string {
 
 /**
  * A value with its trailing comment removed, or null when the scanner cannot
- * bound it exactly — a value that runs past its line, or one that opens a
- * multi-line string. Null means "mask this", because a value this cannot
- * delimit is a value it cannot promise to have stripped a comment off.
+ * bound it exactly — a value that runs past its line, one that opens a
+ * multi-line string, or one that leaves a string unterminated. Null means "mask
+ * this", because a value this cannot delimit is a value it cannot promise to
+ * have stripped a comment off: `command = "other # tok` never closes its quote,
+ * so the `#` is inside the string as far as any scanner can tell, and printing
+ * the line would print whatever follows it.
  */
 function comparableValue(text: string): string | null {
   const state = scanRest(text, 0);
-  if (state.depth !== 0 || state.multiline !== null) {
+  if (state.depth !== 0 || state.multiline !== null || state.unterminated) {
     return null;
   }
   return (state.commentAt === null ? text : text.slice(0, state.commentAt)).trim();
