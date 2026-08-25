@@ -218,11 +218,21 @@ export function ThreadsPane({
   // go: hiding the form while a thread reads as resolved is not the same as
   // forgetting it, and a thread someone else resolves and then reopens would
   // bring the form — and its focus grab — back with nobody having asked.
+  //
+  // Read-only is the same hazard with a different cause: archiving a document
+  // hides the form without forgetting it, and the restore would bring it back
+  // and take the focus with it (`CommentForm` autofocuses), on a gesture nobody
+  // made. Whoever archived it ended the conversation for now; the reply is let
+  // go with it.
   useEffect(() => {
     if (replyTo === null) return;
+    if (readOnly) {
+      setReplyTo(null);
+      return;
+    }
     const thread = threads.find((candidate) => candidate.id === replyTo);
     if (thread === undefined || thread.resolved) setReplyTo(null);
-  }, [threads, replyTo]);
+  }, [threads, replyTo, readOnly]);
 
   // A refusal describes a thread at one moment, and that thread is shared:
   // whoever settled it can reopen it, and an id that is gone can come back on a

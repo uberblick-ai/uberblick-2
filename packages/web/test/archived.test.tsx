@@ -35,6 +35,7 @@ import {
   appendBlock,
   directoryRoom,
   getDirectoryEntry,
+  getMeta,
   initDoc,
   listDirectory,
   roomForDoc,
@@ -123,6 +124,26 @@ function openApp(path: string): HTMLElement {
   return mount(<App />).host;
 }
 
+/**
+ * Change an input the way a keystroke does, so React's `onChange` runs.
+ *
+ * Assigning `.value` is not enough: React installs its own setter on the
+ * prototype to track the last value it saw, so a plain assignment updates that
+ * record too and the event that follows is dismissed as "nothing changed" —
+ * which would make an assertion about the handler pass without ever reaching
+ * it. Writing through the *native* setter leaves React's record behind, which
+ * is exactly the state a real keystroke leaves it in.
+ */
+function typeInto(input: HTMLInputElement | null, value: string): void {
+  if (input === null) return;
+  const native = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  native?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 /** The bound editor's own element, or null when nothing is bound. */
 function prose(host: HTMLElement): HTMLElement | null {
   return host.querySelector(".ub-editor .ProseMirror");
@@ -180,6 +201,13 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(prose(host)).toBe(bound);
     expect(bound?.getAttribute("contenteditable")).toBe("false");
     expect(host.querySelector(".ub-gutter-add")).toBeNull();
+
+    // The title's *write* is guarded, not just its field. `readOnly` is a
+    // statement to the browser about typing; a change event that reaches the
+    // handler by another route must still not reach the document.
+    const title = host.querySelector<HTMLInputElement>(".ub-title");
+    act(() => typeInto(title, "typed anyway"));
+    expect(getMeta(ydoc).title).toBe("Retired protocol");
   });
 
   /**

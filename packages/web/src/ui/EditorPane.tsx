@@ -439,7 +439,15 @@ export function EditorPane({
           // `readOnly`, not `disabled`: the title is still the document's name
           // and still worth selecting and copying — it just cannot be retyped.
           readOnly={archived}
-          onChange={(event) => setTitle(connection.ydoc, event.target.value)}
+          // And the write is guarded as well as the field. `readOnly` is a
+          // statement to the browser about typing; the rule is that an archived
+          // document takes no write from here, and a rule worth having is worth
+          // enforcing where the write happens rather than trusting the one
+          // attribute that happens to sit in front of it today.
+          onChange={(event) => {
+            if (archived) return;
+            setTitle(connection.ydoc, event.target.value);
+          }}
         />
         <StatusLine connection={connection} />
         {foreign.length > 0 ? (
