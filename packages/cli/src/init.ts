@@ -59,7 +59,7 @@ import {
   writeUserConfig,
 } from "./config.js";
 import type { InitLock } from "./init-lock.js";
-import { acquireInitLock } from "./init-lock.js";
+import { acquireInitLock, seedLockPath } from "./init-lock.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
@@ -366,6 +366,8 @@ export async function initCommand(
   let persistedWorkspace: string;
   let localConfig: string | null = null;
   let trustAfterRelease: string | null = null;
+  // Replaced once the workspace on disk is known.
+  let mcpEnv: NodeJS.ProcessEnv = resolved.env;
   try {
     // Read inside the lock, not before it: a decision made from a snapshot
     // taken before the lock was held is a decision about a machine that may
@@ -475,25 +477,46 @@ export async function initCommand(
     }
   }
 
+  // --- the starter documents -----------------------------------------------
+  //
   // What the MCP server would resolve for the workspace that is now on disk.
   // `secret` is added explicitly because it may have been generated moments ago,
   // after `resolved` was read — and a seed written without it stays local
   // instead of reaching a hub that is up.
-  const mcpEnv: NodeJS.ProcessEnv = {
+  mcpEnv = {
     ...resolved.env,
     WORKSPACE_ID: persistedWorkspace,
     ...(secret === null ? {} : { HUB_AUTH_TOKEN: secret }),
   };
 
-  // The starter documents, outside the lock: they are written through the
-  // update log, which has its own durability, and holding a machine-wide lock
-  // across a hub connection would block every other `ub init` on the network.
-  // A failure here is a warning rather than an exit code because everything
-  // `ub init` was asked to settle is settled by now — and because the seed is
-  // not lost with the run: it is decided by what the workspace is missing, so
-  // the next `ub init` writes whatever this one did not.
+  // Under the seed's own lock, not the one above: what to write is decided by
+  // reading the workspace, so two runs reading before either writes would both
+  // find it empty and both write the same documents into it — but the read and
+  // the write together take seconds, and holding the file lock across them
+  // would make every concurrent `ub init` fail on a hub connection it has no
+  // stake in. Nothing waits for this lock either: a run that finds it held has
+  // nothing to add, because whoever holds it is writing exactly these documents.
+  //
+  // A failure is a warning rather than an exit code: everything `ub init` was
+  // asked to settle is settled by now, and the seed is not lost with the run —
+  // it is decided by what the workspace is missing, so the next `ub init`
+  // writes whatever this one did not.
   let starter: string[] = [];
+  let seedLock: InitLock | null = null;
   if (maySeed) {
+    try {
+      seedLock = await acquireInitLock(process.env, {
+        path: seedLockPath(),
+        waitMs: 0,
+      });
+    } catch (error) {
+      warnings.add(
+        `${error instanceof Error ? error.message : String(error)} — this run ` +
+          "left the starter documents to it",
+      );
+    }
+  }
+  if (seedLock !== null) {
     try {
       starter = await seedStarterDocs(mcpEnv);
     } catch (error) {
@@ -501,6 +524,8 @@ export async function initCommand(
         `${error instanceof Error ? error.message : String(error)} — the ` +
           "starter documents are incomplete; run `ub init` again to finish them",
       );
+    } finally {
+      seedLock.release();
     }
   }
 

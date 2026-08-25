@@ -25,9 +25,10 @@ import {
   PACKAGE_ROOT,
   removeTempDirs,
   runUb,
+  runUbAsync,
   sandbox,
 } from "./helpers.js";
-import type { Sandbox } from "./helpers.js";
+import type { Run, Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -45,11 +46,12 @@ const HALF_WORKSPACE = "5f2b7c48-9d31-4a6e-8c05-3e7a1b9d4f62";
 const OWNED_WORKSPACE = "b7e9c130-6a48-4f21-9d3c-8e05a2b6f741";
 
 /** `ub init` on a machine with no hub and nothing to install. */
-function init(target: Sandbox = box): void {
+function init(target: Sandbox = box): Run {
   const run = runUb(["init", "--yes", "--no-mcp"], target, {
     HUB_URL: DEAD_HUB_URL,
   });
   expect(run.status, run.output).toBe(0);
+  return run;
 }
 
 function workspace(target: Sandbox = box): string {
@@ -181,6 +183,58 @@ it("adds nothing to a workspace that already holds other documents", async () =>
     const { docs } = await call("list_docs");
     expect(docs.map((doc: { title: string }) => doc.title)).toEqual(["Real work"]);
   }, owned);
+});
+
+it("leaves an archived starter document archived", async () => {
+  // A tombstone is sticky, so a document the user threw away must not read as
+  // "missing" — re-seeding it would be refused every time and complained about
+  // every time. Uses the workspace the first cases seeded.
+  await withTools(async (call) => call("archive_doc", { uuid: uuidOf("welcome.md") }));
+
+  const run = init();
+
+  // Nothing was attempted at all: no import to refuse, so no warning about a
+  // document the importer had to skip and none about an incomplete seed.
+  expect(run.output).not.toContain("skipping a seed document");
+  expect(run.output).not.toContain("starter documents");
+  await withTools(async (call) => {
+    const { docs } = await call("list_docs");
+    expect(docs.map((doc: { title: string }) => doc.title)).toEqual([
+      "Bring your docs in",
+    ]);
+    const all = await call("list_docs", { include_deleted: true });
+    expect(all.docs).toHaveLength(2);
+  });
+});
+
+it("does not duplicate a document when two ub init runs race", async () => {
+  // Deciding what to write by reading the workspace is only safe while nothing
+  // else can write between the two, which is what the init lock is for here:
+  // without it both runs read an empty workspace and both write Welcome into
+  // the same room, where Yjs merges two copies of every block.
+  const race = sandbox();
+  const runs = await Promise.all([
+    runUbAsync(["init", "--yes", "--no-mcp"], race, { HUB_URL: DEAD_HUB_URL }),
+    runUbAsync(["init", "--yes", "--no-mcp"], race, { HUB_URL: DEAD_HUB_URL }),
+  ]);
+  // Both still succeed: the loser leaves the documents to the run that holds
+  // the seed lock rather than failing over a lock it has no stake in.
+  expect(runs.map((run) => run.status)).toEqual([0, 0]);
+
+  await withTools(async (call) => {
+    const { docs } = await call("list_docs");
+    expect(docs.map((doc: { title: string }) => doc.title)).toEqual([
+      "Bring your docs in",
+      "Welcome",
+    ]);
+    for (const template of TEMPLATES) {
+      const source = importMarkdown(
+        readFileSync(join(PACKAGE_ROOT, "templates", template.file), "utf8"),
+      );
+      const doc = await call("get_doc", { uuid: source.uuid });
+      expect(doc.blocks).toHaveLength(source.blocks.length);
+    }
+  }, race);
 });
 
 it("ships the templates inside the package", () => {

@@ -18,6 +18,15 @@
  * The write phase is a handful of file operations, so anything approaching that
  * bound is a wedged or dead process, not contention.
  *
+ * The starter-document seed needs the same mutual exclusion for a different
+ * reason — it reads the workspace to decide what to write, and two runs reading
+ * before either writes would write the same documents twice — but it takes
+ * seconds rather than milliseconds, so it takes a lock of its own
+ * ({@link seedLockPath}) and never blocks anybody's file writing behind a hub
+ * connection. Its caller does not wait for it either: a run that finds it held
+ * has nothing to add, because whoever holds it is writing exactly those
+ * documents.
+ *
  * **Only its creator removes it.** There is no automatic takeover of an old
  * lock, and that is a deliberate reversal: an expiry rule needs a second
  * mechanism to decide when a holder is dead, and every version of that is a
@@ -55,6 +64,9 @@ import { removeQuietly } from "./safe-write.js";
 /** Beside the files it protects, so one directory holds one machine's state. */
 const LOCK_FILE = ".init.lock";
 
+/** Beside it, held only while the starter documents are being written. */
+const SEED_LOCK_FILE = ".seed.lock";
+
 /** How long to wait for another `ub init` before giving up. */
 const WAIT_TIMEOUT_MS = 2_000;
 
@@ -69,6 +81,11 @@ export interface InitLock {
 
 export function initLockPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(dirname(credentialsPath(env)), LOCK_FILE);
+}
+
+/** The starter-document seed's lock. See the module comment for why it is separate. */
+export function seedLockPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(dirname(credentialsPath(env)), SEED_LOCK_FILE);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -144,6 +161,13 @@ function describeAge(path: string): string {
   }
 }
 
+export interface LockOptions {
+  /** Which lock file. Defaults to {@link initLockPath}. */
+  path?: string;
+  /** How long to wait for a holder before giving up. Zero tries exactly once. */
+  waitMs?: number;
+}
+
 /**
  * Take the lock, or throw with something a person can act on.
  *
@@ -153,10 +177,11 @@ function describeAge(path: string): string {
  */
 export async function acquireInitLock(
   env: NodeJS.ProcessEnv = process.env,
+  options: LockOptions = {},
 ): Promise<InitLock> {
-  const path = initLockPath(env);
+  const path = options.path ?? initLockPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const deadline = Date.now() + WAIT_TIMEOUT_MS;
+  const deadline = Date.now() + (options.waitMs ?? WAIT_TIMEOUT_MS);
 
   for (;;) {
     try {

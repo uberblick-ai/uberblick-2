@@ -26,7 +26,10 @@
  *    the next `ub init` finishes it, because "what is missing" is asked again
  *    every time. The same reading is what keeps the starter documents out of a
  *    workspace that is already somebody's: a corpus holding anything else is
- *    not one to write into.
+ *    not one to write into. The caller holds `ub init`'s lock across the whole
+ *    of it, because a read that decides a write is only as good as the window
+ *    between the two: without it, two first-time runs on one machine both read
+ *    an empty workspace and both write the same documents into it.
  */
 
 import { dirname, join } from "node:path";
@@ -34,7 +37,6 @@ import { fileURLToPath } from "node:url";
 import {
   bridgeConfig,
   importSeedDir,
-  liveDocs,
   readSeedDocs,
   resolveMcpConfig,
   syncWorkspace,
@@ -56,7 +58,8 @@ export const TEMPLATE_DIR = join(
  * because two questions have to be answered before anything is written: whether
  * the starter documents are already here, and whether anything *else* is. A
  * workspace holding other documents — one joined from a remote, one that
- * predates this feature — is left exactly as it is.
+ * predates this feature — is left exactly as it is. Read and write both happen
+ * under the caller's init lock.
  *
  * Offline-first like every other write: the documents land in the local update
  * log whether or not a hub answers, and reach the hub when one does.
@@ -68,11 +71,18 @@ export async function seedStarterDocs(
   const starters = readSeedDocs(TEMPLATE_DIR);
   const uuids = new Set(starters.map((doc) => doc.uuid));
 
-  const held = liveDocs(
-    await syncWorkspace(bridgeConfig(config, { authSecret: null })),
-  );
-  if (held.some((doc) => !uuids.has(doc.uuid))) return [];
-  if (held.length === starters.length) return [];
+  // Every directory stub, tombstoned ones included. A tombstone is what a
+  // deleted document leaves behind, and it has to count on both sides of this:
+  // an archived starter document is a document this workspace has had — writing
+  // it again is not something a user asked for, and reading it as absent would
+  // make every later `ub init` try, fail on the sticky tombstone, and say so
+  // forever. An archived document that is not a starter is the same evidence
+  // the live ones are: this workspace is somebody's already.
+  const stubs = (await syncWorkspace(bridgeConfig(config, { authSecret: null })))
+    .entries;
+  if (stubs.some((stub) => !uuids.has(stub.uuid))) return [];
+  const known = new Set(stubs.map((stub) => stub.uuid));
+  if (starters.every((doc) => known.has(doc.uuid))) return [];
 
   const { results } = await importSeedDir(TEMPLATE_DIR, config);
   return results
