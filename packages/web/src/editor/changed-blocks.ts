@@ -118,20 +118,48 @@ export function trackChangedBlocks(ydoc: Y.Doc): ChangedBlocks {
     return block instanceof Y.XmlElement ? block.getAttribute("id") : undefined;
   };
 
+  /**
+   * Drop marks for blocks the document no longer has. Returns whether any went.
+   *
+   * Called only when a remote transaction removed something, which is rare
+   * enough to afford reading the block ids — and identifying the deleted
+   * element from the event itself would mean reading attributes off a type Yjs
+   * has already tombstoned.
+   */
+  const pruneDeleted = (): boolean => {
+    if (marked.size === 0) return false;
+    const live = new Set<string>();
+    for (const child of fragment.toArray()) {
+      if (!(child instanceof Y.XmlElement)) continue;
+      const id = child.getAttribute("id");
+      if (typeof id === "string") live.add(id);
+    }
+    let dropped = false;
+    for (const id of [...marked.keys()]) {
+      if (live.has(id)) continue;
+      marked.delete(id);
+      dropped = true;
+    }
+    return dropped;
+  };
+
   const record = (
     events: Array<Y.YEvent<Y.AbstractType<unknown>>>,
     transaction: Y.Transaction,
   ): void => {
     if (!recording || transaction.local) return;
     const touched = new Set<string>();
+    let removed = false;
     const add = (id: unknown): void => {
       if (typeof id === "string" && id !== "") touched.add(id);
     };
     for (const event of events) {
       if (event.path.length === 0) {
-        // The fragment itself: blocks arriving or leaving. Only arrivals can be
-        // marked — a block that is gone has no gutter left to draw in.
+        // The fragment itself: blocks arriving or leaving.
         for (const change of event.changes.delta) {
+          if (typeof change.delete === "number" && change.delete > 0) {
+            removed = true;
+          }
           if (!Array.isArray(change.insert)) continue;
           for (const child of change.insert) {
             if (child instanceof Y.XmlElement) add(child.getAttribute("id"));
@@ -143,12 +171,24 @@ export function trackChangedBlocks(ydoc: Y.Doc): ChangedBlocks {
       // change to the block the path starts at.
       add(blockOfEvent(event.path));
     }
-    if (touched.size === 0) return;
+    if (touched.size === 0 && !removed) return;
+
     // One generation per remote transaction, stamped on every block it touched:
     // a block marked again is a block the reader has *not* read, whatever they
     // were part-way through.
-    generation += 1;
-    for (const id of touched) marked.set(id, generation);
+    const next = generation + 1;
+    for (const id of touched) marked.set(id, next);
+    // After the marking, not before: a block this transaction both edited and
+    // deleted is deleted, whatever the earlier event said.
+    //
+    // A block somebody else deleted is the last news that block will ever
+    // carry. Nothing remains to read, so no amount of looking could clear the
+    // mark, and a mark that cannot clear is a mark that outlives its meaning.
+    // A *local* deletion is a different case and is deliberately left alone:
+    // the reader can undo it, and the block — and its mark — come back.
+    const pruned = removed ? pruneDeleted() : false;
+    if (touched.size === 0 && !pruned) return;
+    generation = next;
     notify();
   };
   fragment.observeDeep(record);

@@ -27,14 +27,23 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import * as Y from "yjs";
 import { undo } from "y-prosemirror";
-import { appendBlock, editBlock, getBlocks, initDoc } from "@uberblick/schema";
+import {
+  appendBlock,
+  deleteBlock,
+  editBlock,
+  getBlocks,
+  initDoc,
+} from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import {
   changedBlocks,
   trackChangedBlocks,
 } from "../src/editor/changed-blocks.js";
 import type { ChangedBlocks } from "../src/editor/changed-blocks.js";
-import { clearWhenSeen } from "../src/editor/changed-marks.js";
+import {
+  changedBlocksPluginKey,
+  clearWhenSeen,
+} from "../src/editor/changed-marks.js";
 import { retypeSelectedBlock } from "../src/editor/retype.js";
 import { outlineDots } from "../src/ui/outline.js";
 import {
@@ -648,6 +657,9 @@ describe("the mark reaches both places a reader looks", () => {
       await flush();
       expect(drawn()).toBeNull();
       expect(marks.has(blocks[1]!)).toBe(true);
+      // The set knows it is short of one, which is what buys the recovery
+      // below — and what a *remote* deletion deliberately does not leave behind.
+      expect(changedBlocksPluginKey.getState(editor.state)?.missing).toBe(1);
 
       // Undo brings the block back with no decoration to map and nothing for
       // `onRemove` to report — the marker used to stay gone while the tracker
@@ -656,6 +668,84 @@ describe("the mark reaches both places a reader looks", () => {
       await flush();
       expect(marks.has(blocks[1]!)).toBe(true);
       expect(drawn()).not.toBeNull();
+      expect(changedBlocksPluginKey.getState(editor.state)?.missing).toBe(0);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("keeps knowing it is short of a block while the reader types", async () => {
+    const { local, remote, blocks } = replicas();
+    const marks = trackChangedBlocks(local);
+    marks.start();
+    const { editor } = mountEditor(local, { changed: marks });
+    const missing = (): number | undefined =>
+      changedBlocksPluginKey.getState(editor.state)?.missing;
+    try {
+      editBlock(remote, blocks[1]!, PARAGRAPH, "Rewritten by an agent.");
+      await flush();
+      let start = 0;
+      let size = 0;
+      editor.state.doc.forEach((node, offset) => {
+        if (node.attrs.id === blocks[1]!) {
+          start = offset;
+          size = node.nodeSize;
+        }
+      });
+      editor.commands.deleteRange({ from: start, to: start + size });
+      await flush();
+      expect(missing()).toBe(1);
+
+      // Typing cannot put a block back, so it is deliberately taken off the
+      // rebuild path — but the set is still short of one, and forgetting that
+      // would strand the marker when the delete is undone.
+      editor.commands.insertContentAt(1, "typing");
+      await flush();
+      expect(missing()).toBe(1);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("drops the mark when somebody else deletes the block", async () => {
+    const { local, remote, blocks } = replicas();
+    const marks = trackChangedBlocks(local);
+    marks.start();
+    const { editor } = mountEditor(local, { changed: marks });
+    try {
+      editBlock(remote, blocks[1]!, PARAGRAPH, "Rewritten by an agent.");
+      await flush();
+      expect(marks.has(blocks[1]!)).toBe(true);
+
+      // Nothing remains to read, so no amount of looking could ever clear this
+      // mark. Left tracked it would strand the decoration set one short of
+      // itself for the rest of the session.
+      deleteBlock(remote, blocks[1]!);
+      await flush();
+
+      expect(marks.has(blocks[1]!)).toBe(false);
+      expect(marked(marks)).toEqual([]);
+      expect(changedBlocksPluginKey.getState(editor.state)?.missing).toBe(0);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("leaves the other marks alone when a remote deletion arrives", async () => {
+    const { local, remote, blocks } = replicas();
+    const marks = trackChangedBlocks(local);
+    marks.start();
+    const { editor } = mountEditor(local, { changed: marks });
+    try {
+      editBlock(remote, blocks[1]!, PARAGRAPH, "Rewritten by an agent.");
+      editBlock(remote, blocks[2]!, CODE, "console.log(2)");
+      await flush();
+
+      deleteBlock(remote, blocks[1]!);
+      await flush();
+
+      expect(marked(marks)).toEqual([blocks[2]!]);
+      expect(changedBlocksPluginKey.getState(editor.state)?.missing).toBe(0);
     } finally {
       editor.destroy();
     }

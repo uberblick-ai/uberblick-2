@@ -136,16 +136,26 @@ export const ChangedBlockMarks = Extension.create<ChangedBlockMarkOptions>({
           // legitimately short of it; undo, and the block comes back with
           // nothing to map and nothing to announce — the tracker and the
           // outline dot would go on saying "changed" over a block with no
-          // marker. So while the set is short of a marked block, every edit is
-          // a chance for that block to reappear, and every edit re-derives.
-          // `missing` is zero in every ordinary session, which is what keeps
-          // this off the keystroke path.
+          // marker.
+          //
+          // So while the set is short, a rebuild is owed — but only to a
+          // transaction that could actually have put a block back, which means
+          // one that changed how many top-level blocks there are. Typing cannot,
+          // so a missing block never puts a rebuild on the keystroke path. The
+          // other half of keeping `missing` small lives in the tracker: a block
+          // somebody *else* deleted is unmarked outright, because nothing about
+          // it can ever be read again (see changed-blocks.ts).
           apply: (transaction, previous, _old, next) => {
             if (marks.generation() !== previous.generation) {
               return build(next.doc, marks);
             }
             if (!transaction.docChanged) return previous;
-            if (previous.missing > 0) return build(next.doc, marks);
+            if (
+              previous.missing > 0 &&
+              transaction.before.childCount !== transaction.doc.childCount
+            ) {
+              return build(next.doc, marks);
+            }
             let dropped = false;
             const decorations = previous.decorations.map(
               transaction.mapping,
@@ -157,7 +167,11 @@ export const ChangedBlockMarks = Extension.create<ChangedBlockMarkOptions>({
               },
             );
             if (dropped) return build(next.doc, marks);
-            return { generation: previous.generation, decorations, missing: 0 };
+            return {
+              generation: previous.generation,
+              decorations,
+              missing: previous.missing,
+            };
           },
         },
         props: {
