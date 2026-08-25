@@ -25,13 +25,18 @@
  * **One file, start to finish.** The config is opened once, without following
  * symlinks, and that descriptor stays open until the write is done. Everything
  * after — what is already installed, what the backup holds, what gets published
- * — is decided from the bytes read through it, and the file's identity is
- * checked again immediately before anything is written. Reading by name, then
- * writing by name some milliseconds later, is how a backup ends up holding a
- * version that was already replaced, and how a symlink dropped in between the
- * two ends up receiving the write. A residual window remains between the last
- * check and the rename, which no amount of care in one process closes; what this
- * rules out is the wide one.
+ * — is decided from the bytes read through it. Reading by name, then writing by
+ * name some milliseconds later, is how a backup ends up holding a version that
+ * was already replaced, and how a symlink dropped in between the two ends up
+ * receiving the write.
+ *
+ * The file's identity is therefore checked twice: once before the backup, so the
+ * copy is of what was actually read, and once *after* the replacement has been
+ * staged, immediately before the rename that publishes it. The second one is the
+ * one that matters — an editor saving over the file takes milliseconds, and
+ * backing up, rendering and staging is more than enough time for one to land.
+ * What is left is the instant between that check and the rename itself, which no
+ * amount of care inside one process closes.
  */
 
 import { spawnSync } from "node:child_process";
@@ -267,6 +272,7 @@ function stageInto(
   contents: string,
   onto: "absent" | "regular",
   mode: number | null,
+  verify: (() => void) | null = null,
 ): boolean {
   const staged = writeTempBeside(path, contents);
   let published = false;
@@ -274,6 +280,12 @@ function stageInto(
     if (mode !== null) {
       chmodSync(staged, mode);
     }
+    // The last look, with the replacement already staged on disk: from here to
+    // the rename is the residual window, and it is a few instructions wide.
+    // Checking any earlier would leave the backup, the render and the staging
+    // write inside it — long enough for an editor's own atomic replace to land
+    // and be clobbered.
+    verify?.();
     published = publishStaged(staged, path, onto);
   } finally {
     // A successful publication consumed the name; every other path leaves it.
@@ -293,10 +305,15 @@ function stageInto(
  * default for a per-user config on a shared machine — and for a `.mcp.json` that
  * later gets committed the mode is not what travels anyway.
  */
-function publish(path: string, contents: string, existing: OpenConfig | null): void {
+export function publish(
+  path: string,
+  contents: string,
+  existing: OpenConfig | null,
+): void {
   const onto = existing === null ? "absent" : "regular";
   const mode = existing === null ? null : Number(existing.mode & 0o777n);
-  if (!stageInto(path, contents, onto, mode)) {
+  const verify = existing === null ? null : () => verifyUnchanged(path, existing);
+  if (!stageInto(path, contents, onto, mode, verify)) {
     throw new Error(`${path} appeared while it was being written — run again`);
   }
 }
@@ -485,6 +502,11 @@ export async function installCommand(
       const vendor = vendorCli(flags.target, flags.scope, flags.entry);
       let ran: VendorRun = { kind: "absent" };
       if (vendor !== null) {
+        if (existingFile !== null) {
+          // The vendor does its own writing, so the closest this can get is
+          // here: the backup is still current as of this instant.
+          verifyUnchanged(file.path, existingFile);
+        }
         // A vendor CLI that will not overwrite has to be told to remove first;
         // the file was copied aside a moment ago, so this is recoverable.
         ran =

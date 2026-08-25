@@ -28,7 +28,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { openConfig, verifyUnchanged } from "../src/install.js";
+import { openConfig, publish, verifyUnchanged } from "../src/install.js";
 import { REPO_ROOT, type Sandbox, removeTempDirs, runUb, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -338,6 +338,34 @@ describe("ub mcp install (JSON targets)", () => {
     expect(backupsOf(box.cwd, ".mcp.json")).toEqual([]);
   });
 
+  it("refuses a file whose duplicate keys hide which entry is real", () => {
+    // Duplicate keys are not valid JSON, but every parser takes them: this one
+    // keeps the *last*, and a scan of the text finds the *first*. Editing one
+    // while reporting on the other, with the client reading a third answer, is
+    // not something to do quietly.
+    for (const before of [
+      '{\n  "mcpServers": {"other": {"command": "a"}},\n' +
+        '  "mcpServers": {"uberblick": {"command": "somebody-elses"}}\n}\n',
+      '{\n  "mcpServers": {\n    "uberblick": {"command": "first"},\n' +
+        '    "uberblick": {"command": "second"}\n  }\n}\n',
+    ]) {
+      const box = sandbox();
+      const path = join(box.cwd, ".mcp.json");
+      writeFileSync(path, before, "utf8");
+
+      const run = runUb(
+        ["mcp", "install", "claude", "--project", "--force"],
+        box,
+        NO_VENDOR,
+      );
+      expect(run.status, before).not.toBe(0);
+      expect(run.stderr).toContain(path);
+      expect(run.stderr).toMatch(/more than once/);
+      expect(read(path)).toBe(before);
+      expect(backupsOf(box.cwd, ".mcp.json")).toEqual([]);
+    }
+  });
+
   it("refuses a symlink rather than writing through it", () => {
     const box = sandbox();
     const target = join(box.cwd, "elsewhere.json");
@@ -399,6 +427,34 @@ describe("ub mcp install, and what it will not print", () => {
     // …including which variables are set, but never what they are set to.
     expect(run.stderr).toContain("API_TOKEN");
     expect(run.output).not.toContain(SECRET);
+  });
+
+  it("strips comments out of a Codex conflict report", () => {
+    // A trailing `# …` is as good a place to leave a token as any, and both the
+    // header and the one value this report is allowed to show can carry one.
+    const box = sandbox();
+    const home = join(box.cwd, "codex-home");
+    mkdirSync(home, { recursive: true });
+    const path = join(home, "config.toml");
+    writeFileSync(
+      path,
+      `[mcp_servers.uberblick] # ${SECRET}\n` +
+        `command = "somebody-elses" # ${SECRET}\n` +
+        `args = [] # ${SECRET}\n`,
+      "utf8",
+    );
+
+    const run = runUb(["mcp", "install", "codex", "--user"], box, {
+      ...NO_VENDOR,
+      CODEX_HOME: home,
+    });
+    expect(run.status).toBe(1);
+    // Still comparable: the header and the command survive…
+    expect(run.stderr).toContain("[mcp_servers.uberblick]");
+    expect(run.stderr).toContain('command = "somebody-elses"');
+    // …with nothing of the comments that rode along with them.
+    expect(run.output).not.toContain(SECRET);
+    expect(run.output).not.toContain("#");
   });
 
   it("masks the values in a conflicting Codex env table too", () => {
@@ -564,6 +620,38 @@ describe("ub mcp install codex", () => {
     expect(after).not.toContain("somebody-elses");
   });
 
+  it("bounds a multi-line string that contains an escaped quote run", () => {
+    // `\"""` inside a basic string is one escaped quote and two literal ones,
+    // not a terminator. Ending the string there turns the real terminator into
+    // an *opener*, which swallows every line after it — the table header
+    // included — and the table is then appended a second time.
+    const box = sandbox();
+    const { home, path } = codexHome(box);
+    const before =
+      'notice = """\nhe said \\""" loudly\n"""\n\n' +
+      '[mcp_servers.uberblick]\ncommand = "somebody-elses"\nargs = []\n';
+    writeFileSync(path, before, "utf8");
+
+    const refused = runUb(["mcp", "install", "codex", "--user"], box, env(home));
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/somebody-elses/);
+    expect(read(path)).toBe(before);
+
+    const forced = runUb(
+      ["mcp", "install", "codex", "--user", "--force"],
+      box,
+      env(home),
+    );
+    expect(forced.status).toBe(0);
+    const after = read(path);
+    // Replaced in place, not appended: exactly one table, and the string that
+    // confused the scanner is still there byte for byte.
+    expect(after.match(/\[mcp_servers\.uberblick\]/g)).toHaveLength(1);
+    expect(after).toContain('notice = """\nhe said \\""" loudly\n"""');
+    expect(after).toContain('command = "ub"');
+    expect(after).not.toContain("somebody-elses");
+  });
+
   it("refuses a config whose shape it cannot edit without guessing", () => {
     // Three ways of defining the same thing that cannot be spliced as a table:
     // appending one would give Codex a duplicate key and take down its whole
@@ -612,6 +700,37 @@ describe("the file it read is the file it writes", () => {
       // Somebody else rewrites it.
       writeFileSync(path, '{"mcpServers":{"other":{"command":"x"}}}\n', "utf8");
       expect(() => verifyUnchanged(path, opened.config)).toThrow(/changed while/);
+    } finally {
+      closeSync(opened.config.fd);
+    }
+  });
+
+  it("does not clobber a replace that lands after the decision was made", () => {
+    // The window that matters: everything between reading the config and the
+    // rename that replaces it — backing up, rendering, staging. An editor's own
+    // atomic save takes milliseconds and fits inside it comfortably, so the
+    // check has to sit after the staging write rather than before the backup.
+    const box = sandbox();
+    const path = join(box.cwd, ".mcp.json");
+    writeFileSync(path, '{"mcpServers":{}}\n', "utf8");
+
+    const opened = openConfig(path);
+    expect(opened.kind).toBe("open");
+    if (opened.kind !== "open") {
+      return;
+    }
+    try {
+      const landed = '{"mcpServers":{"someone-else":{"command":"x"}}}\n';
+      writeFileSync(path, landed, "utf8");
+
+      expect(() => publish(path, '{"clobbered":true}\n', opened.config)).toThrow(
+        /changed while/,
+      );
+      // Their save survived, and nothing of ours was left lying beside it.
+      expect(read(path)).toBe(landed);
+      expect(
+        readdirSync(box.cwd).filter((entry) => entry.includes(".tmp")),
+      ).toEqual([]);
     } finally {
       closeSync(opened.config.fd);
     }

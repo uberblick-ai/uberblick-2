@@ -239,6 +239,52 @@ function objectMembers(
   }
 }
 
+/**
+ * The one member with this key, or null when there is none.
+ *
+ * @throws UnusableConfig when there are two. Duplicate keys are not valid JSON,
+ * but every parser accepts them and they do not agree with each other about
+ * which one wins: `JSON.parse` keeps the *last*, and a scan of the text finds
+ * the *first*. A file with two `mcpServers` objects — or two `uberblick` entries
+ * inside one — is therefore a file where this command would report on one entry
+ * and edit the other, and the client would read a third answer. There is no
+ * version of guessing that is safe, so it is named and refused.
+ */
+function uniqueMember(
+  members: Member[],
+  key: string,
+  what: string,
+): Member | null {
+  const found = members.filter((member) => member.key === key);
+  if (found.length > 1) {
+    throw new UnusableConfig(`it defines ${what} more than once`);
+  }
+  return found[0] ?? null;
+}
+
+/**
+ * Refuse a file whose duplicate keys would make "what is installed" ambiguous.
+ *
+ * Only the two keys this command reads and writes are checked; a duplicate
+ * anywhere else is somebody else's business.
+ */
+function assertUnambiguousJson(text: string): void {
+  const rootOpen = skipJsonWs(text, 0);
+  if (text[rootOpen] !== "{") {
+    return;
+  }
+  const root = objectMembers(text, rootOpen);
+  const servers = uniqueMember(root.members, "mcpServers", '"mcpServers"');
+  if (servers === null || text[servers.valueStart] !== "{") {
+    return;
+  }
+  uniqueMember(
+    objectMembers(text, servers.valueStart).members,
+    SERVER_NAME,
+    `"${SERVER_NAME}"`,
+  );
+}
+
 /** The whitespace the line containing `index` begins with. */
 function lineLeading(text: string, index: number): string {
   const start = text.lastIndexOf("\n", Math.max(index - 1, 0)) + 1;
@@ -389,6 +435,9 @@ function inspectJson(text: string, entry: Entry): Found {
   if (!isPlainObject(doc)) {
     throw new UnusableConfig("its top level is not a JSON object");
   }
+  // Before anything is read out of the parsed document: what `JSON.parse` just
+  // produced is only one of the answers a duplicate key can give.
+  assertUnambiguousJson(text);
   const servers = doc.mcpServers;
   if (servers !== undefined && !isPlainObject(servers)) {
     throw new UnusableConfig('its "mcpServers" is not a JSON object');
@@ -424,8 +473,8 @@ function withEntryJson(text: string | null, entry: Entry): string {
     throw new UnusableConfig("its top level is not a JSON object");
   }
   const root = objectMembers(text, rootOpen);
-  const servers = root.members.find((member) => member.key === "mcpServers");
-  if (servers === undefined) {
+  const servers = uniqueMember(root.members, "mcpServers", '"mcpServers"');
+  if (servers === null) {
     return insertMember(text, rootOpen, root, "mcpServers", {
       [SERVER_NAME]: serverObject(entry),
     }, unit);
@@ -434,8 +483,8 @@ function withEntryJson(text: string | null, entry: Entry): string {
     throw new UnusableConfig('its "mcpServers" is not a JSON object');
   }
   const inner = objectMembers(text, servers.valueStart);
-  const ours = inner.members.find((member) => member.key === SERVER_NAME);
-  if (ours === undefined) {
+  const ours = uniqueMember(inner.members, SERVER_NAME, `"${SERVER_NAME}"`);
+  if (ours === null) {
     return insertMember(
       text,
       servers.valueStart,
@@ -578,8 +627,51 @@ function parseKeyPath(
 type MultilineDelimiter = '"""' | "'''";
 
 /**
+ * The index just past the delimiter that closes a multi-line string, searching
+ * from `from`, or -1 while it is still open.
+ *
+ * Two details that a plain `indexOf` gets wrong, both of which corrupt a file
+ * rather than merely misreading it:
+ *
+ * - **Escapes.** A basic string may contain `\"""`, which is one escaped quote
+ *   and two literal ones, not a terminator. Ending the string there turns the
+ *   real terminator into an *opener*, which swallows every line after it —
+ *   including a `[mcp_servers.uberblick]` header, which is then appended a
+ *   second time. Literal strings (`'''`) have no escapes at all, so they are
+ *   scanned without them rather than with a rule that does not apply.
+ * - **Runs.** TOML lets one or two quotes sit immediately before the delimiter,
+ *   so `""""` is a string ending in a quote. The closer is the *last* three of
+ *   the run.
+ */
+function findMultilineClose(
+  text: string,
+  from: number,
+  delimiter: MultilineDelimiter,
+): number {
+  const quote = delimiter[0] as string;
+  const escaped = delimiter === '"""';
+  let i = from;
+  while (i < text.length) {
+    if (escaped && text[i] === "\\") {
+      i += 2;
+      continue;
+    }
+    if (text.startsWith(delimiter, i)) {
+      let run = i;
+      while (run < text.length && text[run] === quote) {
+        run += 1;
+      }
+      return run;
+    }
+    i += 1;
+  }
+  return -1;
+}
+
+/**
  * Walk the rest of a line for the state the *next* line starts in: how deep
- * inside brackets it is, and whether a multi-line string is still open.
+ * inside brackets it is, whether a multi-line string is still open, and where
+ * its comment began.
  *
  * This is what keeps a line inside a multi-line array — `[` on a line of its
  * own — from being mistaken for a table header.
@@ -587,13 +679,17 @@ type MultilineDelimiter = '"""' | "'''";
 function scanRest(
   text: string,
   startDepth: number,
-): { depth: number; multiline: MultilineDelimiter | null } {
+): {
+  depth: number;
+  multiline: MultilineDelimiter | null;
+  commentAt: number | null;
+} {
   let depth = startDepth;
   let i = 0;
   while (i < text.length) {
     const character = text[i];
     if (character === "#") {
-      return { depth, multiline: null };
+      return { depth, multiline: null, commentAt: i };
     }
     let opened: MultilineDelimiter | null = null;
     if (text.startsWith('"""', i)) {
@@ -602,11 +698,11 @@ function scanRest(
       opened = "'''";
     }
     if (opened !== null) {
-      const close = text.indexOf(opened, i + 3);
+      const close = findMultilineClose(text, i + 3, opened);
       if (close === -1) {
-        return { depth, multiline: opened };
+        return { depth, multiline: opened, commentAt: null };
       }
-      i = close + 3;
+      i = close;
       continue;
     }
     if (character === '"') {
@@ -626,7 +722,7 @@ function scanRest(
     }
     i += 1;
   }
-  return { depth, multiline: null };
+  return { depth, multiline: null, commentAt: null };
 }
 
 type TomlLine =
@@ -678,12 +774,14 @@ function scanToml(text: string): TomlLine[] {
   let multiline: MultilineDelimiter | null = null;
   for (const line of text.split("\n")) {
     if (multiline !== null) {
-      const close = line.indexOf(multiline);
+      // A line-ending backslash consumes the newline rather than the first
+      // character of this line, so each continuation line starts unescaped.
+      const close = findMultilineClose(line, 0, multiline);
       if (close === -1) {
         out.push({ kind: "other" });
         continue;
       }
-      const state = scanRest(line.slice(close + 3), depth);
+      const state = scanRest(line.slice(close), depth);
       depth = state.depth;
       multiline = state.multiline;
       out.push({ kind: "other" });
@@ -779,12 +877,41 @@ function ourRegion(
   return found;
 }
 
+/** A bare key needs no quotes; anything else is written back as a quoted one. */
+const BARE_KEY = /^[A-Za-z0-9_-]+$/;
+
+function renderKeyPath(path: string[]): string {
+  return path
+    .map((part) => (BARE_KEY.test(part) ? part : JSON.stringify(part)))
+    .join(".");
+}
+
+/**
+ * A value with its trailing comment removed, or null when the scanner cannot
+ * bound it exactly — a value that runs past its line, or one that opens a
+ * multi-line string. Null means "mask this", because a value this cannot
+ * delimit is a value it cannot promise to have stripped a comment off.
+ */
+function comparableValue(text: string): string | null {
+  const state = scanRest(text, 0);
+  if (state.depth !== 0 || state.multiline !== null) {
+    return null;
+  }
+  return (state.commentAt === null ? text : text.slice(0, state.commentAt)).trim();
+}
+
 /**
  * The existing block, safe to print: the header, the command and its arguments,
- * and the *names* of anything else it sets. A Codex `env` table is exactly where
- * a token would be, so no other value is echoed back.
+ * and the *names* of anything else it sets.
+ *
+ * **Not one byte is copied out of the file.** Headers are re-rendered from the
+ * key path that was parsed out of them and values are stripped of comments,
+ * because `# …` at the end of a line is as good a place to keep a token as any
+ * other — and echoing the line verbatim would hand back exactly what the masking
+ * either side of it is for. A Codex `env` table is where a token would be
+ * declared; a comment is where one gets left lying around.
  */
-function redactTomlRegion(source: string[], classified: TomlLine[]): string {
+function redactTomlRegion(classified: TomlLine[]): string {
   const out: string[] = [];
   // Only the table's own `command` and `args` are ever shown. Past the first
   // sub-table header — `[mcp_servers.uberblick.env]` — every key is somebody's
@@ -795,18 +922,18 @@ function redactTomlRegion(source: string[], classified: TomlLine[]): string {
       if (index > 0) {
         inRoot = false;
       }
-      out.push(source[index] as string);
+      out.push(`[${renderKeyPath(line.path)}]`);
       continue;
     }
     if (line.kind !== "assign") {
       continue;
     }
-    const name = line.path.join(".");
-    const shown =
-      inRoot &&
-      (name === "command" || name === "args") &&
-      scanRest(line.value, 0).depth === 0;
-    out.push(shown ? `${name} = ${line.value.trim()}` : `${name} = ${MASK}`);
+    const name = renderKeyPath(line.path);
+    const value =
+      inRoot && (name === "command" || name === "args")
+        ? comparableValue(line.value)
+        : null;
+    out.push(`${name} = ${value ?? MASK}`);
   }
   return out.join("\n");
 }
@@ -829,10 +956,7 @@ function inspectToml(text: string, entry: Entry): Found {
   }
   const block = source.slice(region.start, region.end).join("\n").replace(/\s+$/, "");
   return {
-    existing: redactTomlRegion(
-      source.slice(region.start, region.end),
-      classified.slice(region.start, region.end),
-    ),
+    existing: redactTomlRegion(classified.slice(region.start, region.end)),
     matches: `${block}\n` === tomlBlock(entry),
   };
 }
