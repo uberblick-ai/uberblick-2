@@ -83,9 +83,43 @@ protocol, scheduling semantics, and lint. This file does not restate it.
      the same: be critical, and hunt specifically for overtesting and
      overengineering per this repo's principles (KISS/YAGNI, least code wins,
      tests defend contracts and invariants — not implementation trivia).
-   Triage findings: real ones become a fix-up brief for an Opus sub-agent on
-   the branch; rejected ones get an explicit reply on the PR thread — never
-   silent dismissal. **Final gate, immediately before merging:** re-fetch the
+   **Finding disposition — triage before any fix-up brief.** A finding is
+   not a work item by default. The bar is the supported usage model (single
+   user, local-first, one hub, parallel loop-dispatched agents, dev-stage
+   data), not conceivability. Every finding gets exactly one disposition:
+   - **P1 — fix now.** Breaks supported usage, loses data, or violates a
+     CLAUDE.md invariant. Fixed before merge; the only class the external
+     reviewer re-assesses.
+   - **P2 — fix if cheap.** Real within the usage model, edge frequency.
+     Fixed in the current wave when the diff stays small, otherwise
+     extracted to an issue. Never spawns an extra review round on its own.
+   - **Document.** Real only outside the usage model. One code comment or
+     doc line naming the boundary — zero code, zero tests. This is the
+     `edit_block` idiom: document the limit, don't engineer it away.
+   - **Reject.** Not reachable, or cost exceeds stake. Explicit reply on
+     the PR thread — never silent dismissal.
+   Calibration from this loop's own record: skepticism scales with
+   hypotheticality, not with severity labels. A concurrency finding on a
+   human-run command starts at "document"; a startup/shutdown/stdin/spawn
+   lifecycle finding starts at "fix if cheap" — that category has repeatedly
+   proven real here (#102, #154, #161) while speculative concurrency
+   hardening has proven expensive (#127, six review rounds).
+   **One fix-up wave per round.** Collect every open finding — Codex,
+   Copilot, coordinator validation — into one batched brief, one Opus
+   dispatch, one re-gate at the new head. Never dispatch per finding or per
+   reviewer. The brief carries two standing lines: smallest diff that
+   closes the findings; new tests only for the invariant a finding names,
+   never for the mechanism of the fix. The gate check applies to fix-up
+   diffs too: a wave that grew beyond its briefed findings is triaged like
+   any other scope escape.
+   **Re-review scope and exit.** Further external-review rounds happen only
+   while a P1 is open, and each is scoped to the P1 fixes plus the commits
+   since the previous round — P2/P3 fixes are verified by the coordinator
+   (tests plus diff read), never re-submitted for blessing. Exit when no P1
+   remains. Convergence guard rather than a round cap: the open-P1 count
+   must shrink every round; a round surfacing net-new P1s parks the PR as
+   `needs-human` with the finding list instead of looping.
+   **Final gate, immediately before merging:** re-fetch the
    PR's reviews and comment threads (`gh pr view <n> --comments` plus review
    threads via `gh api graphql` — inline review comments don't show in the
    former) and confirm zero unaddressed remarks, human or bot, including any
