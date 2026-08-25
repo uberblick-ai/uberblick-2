@@ -1,16 +1,17 @@
 /**
- * The block-insertion menu, in a real browser.
+ * The three block-creation paths, in a real browser.
  *
  * Only what jsdom structurally cannot answer belongs here. The document
  * outcomes — what a conversion does to a block id, what an insertion does to
  * the fragment, what Esc leaves behind — are pinned in `test/block-menu.test.tsx`
- * against a real Y.Doc and are not repeated. What is left needs layout and real
- * key events:
+ * and `test/input-rules.test.ts` against a real Y.Doc and are not repeated. What
+ * is left needs layout and real key events:
  *
  * - the gutter `+` revealing on hover *without moving the prose*, which is a
  *   claim about pixels and can only be measured where there are pixels;
- * - the two gestures end to end through the browser's own event plumbing —
- *   typed keys reaching ProseMirror, a click reaching the menu.
+ * - the three gestures end to end through the browser's own event plumbing —
+ *   typed keys reaching ProseMirror, a click reaching the menu, and a markdown
+ *   prefix reaching `handleTextInput`, which only a real keystroke does.
  */
 
 import { expect, test } from "@playwright/test";
@@ -112,4 +113,38 @@ test("typing / on an empty block filters, and Enter converts it", async ({
 
   await page.keyboard.type("a heading", { delay: 15 });
   await expect(blocks(page).nth(1)).toHaveText("a heading");
+});
+
+/**
+ * The third path. This one is here rather than only in jsdom because the rule
+ * hangs off `handleTextInput`, which is reached from the browser's own
+ * `beforeinput`/`keypress` plumbing — a dispatched transaction never gets near
+ * it, so a real keyboard is the only honest proof that a reader typing `## `
+ * gets a heading.
+ */
+test("typing ## converts the block in place, and one undo gives it back", async ({
+  page,
+}) => {
+  await openDoc(page, "first");
+  await page.keyboard.press("Enter");
+
+  const second = blocks(page).nth(1);
+  const id = await second.getAttribute("id");
+  expect(id).not.toBeNull();
+
+  await page.keyboard.type("## ", { delay: 15 });
+  expect(await second.evaluate((node) => node.tagName)).toBe("H2");
+  // The same block, not a new one wearing the same place: the id is the
+  // invariant, and a node-replacing input rule would have churned it.
+  await expect(second).toHaveAttribute("id", id ?? "");
+  await expect(second).toHaveText("");
+
+  // Undo is one step, and it lands on the typing rather than on an empty block:
+  // this is how a reader writes a literal "## ".
+  await page.keyboard.press("ControlOrMeta+z");
+  expect(await second.evaluate((node) => node.tagName)).toBe("P");
+  // `textContent`, not `toHaveText`: the trailing space is the whole point, and
+  // `toHaveText` normalises whitespace away.
+  expect(await second.textContent()).toBe("## ");
+  await expect(second).toHaveAttribute("id", id ?? "");
 });

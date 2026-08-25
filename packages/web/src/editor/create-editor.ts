@@ -10,6 +10,7 @@ import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { BlockIds } from "./block-ids.js";
 import { Collaboration } from "./collaboration.js";
+import { BlockInputRules } from "./input-rules.js";
 import { paletteExtensions } from "./nodes.js";
 
 /** The palette without collaboration — the schema, and nothing that needs a Y.Doc. */
@@ -39,6 +40,11 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     BlockIds.configure(
       options.newBlockId === undefined ? {} : { newId: options.newBlockId },
     ),
+    // Behaviour, not schema — which is why the markdown input rules are here
+    // and not in `paletteExtensions`: `uberblickSchema` above has to stay the
+    // node and mark set alone. After `BlockIds`, because a rule names the block
+    // it converts by the id that plugin assigns.
+    BlockInputRules,
     Collaboration.configure({
       fragment: options.fragment,
       awareness: options.awareness ?? null,
