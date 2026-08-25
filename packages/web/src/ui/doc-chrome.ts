@@ -131,31 +131,38 @@ function blockElementOf(target: Y.AbstractType<unknown>): Y.XmlElement | null {
  * shape — read `getBlocks(ydoc)` whenever anything changes — reads and rehashes
  * every character of every block on every keystroke, which is the whole
  * document's worth of work for eight characters of chrome. So the revs are
- * cached per block id and only the block an event landed in is re-read:
- * `getBlocks` runs once, to seed, and each later edit costs one `getBlock` plus
- * the fold. The fold itself walks the fragment reading `id` attributes — no
- * text — so the recurring cost is in blocks, never in characters.
+ * cached and only the block an event landed in is re-read: `getBlocks` runs
+ * once, to seed, and each later edit costs one `getBlock` plus the fold. The
+ * fold itself walks the fragment reading `id` attributes — no text — so the
+ * recurring cost is in blocks, never in characters.
+ *
+ * **The cache is keyed by element identity, not by block id**, and that is a
+ * correctness rule rather than a preference. A `setBlockType` keeps the block's
+ * id and *replaces its element* (Yjs element names are immutable), so the only
+ * event it produces is a structural one on the fragment: nothing names the
+ * block, and an id-keyed cache would answer with the old type's rev for as long
+ * as the document stayed open. A replaced element is a different object, so it
+ * is a cache miss for free — no invalidation rule to get wrong.
  *
  * The cache is rebuilt by the fold rather than pruned, so a block that leaves
  * the document takes its entry with it.
  */
 export function observeDocRev(ydoc: Y.Doc, emit: (rev: string) => void): () => void {
   const fragment = getBlocksFragment(ydoc);
-  let revs = new Map<string, string>();
-  // One whole-document pass, and the only one.
-  for (const block of getBlocks(ydoc)) revs.set(block.id, block.rev);
+  let revs = new Map<Y.XmlElement, string>();
 
-  const fold = (): string => {
-    const next = new Map<string, string>();
+  const fold = (seeded?: ReadonlyMap<string, string>): string => {
+    const next = new Map<Y.XmlElement, string>();
     const lines: string[] = [];
     for (const child of fragment.toArray()) {
       if (!(child instanceof Y.XmlElement)) continue;
       const id = child.getAttribute("id") ?? "";
-      // A miss is a block this fold has not seen yet — a new one, or one an
-      // event just invalidated. `getBlock` is the schema's own read, so the
-      // shadowing rule for duplicate ids stays in the one place it lives.
-      const rev = revs.get(id) ?? getBlock(ydoc, id)?.rev ?? "";
-      next.set(id, rev);
+      // A miss is an element this fold has not seen: a new block, one an event
+      // invalidated, or the replacement a re-type left behind. `getBlock` is the
+      // schema's own read, so the shadowing rule for duplicate ids stays in the
+      // one place it lives.
+      const rev = revs.get(child) ?? seeded?.get(id) ?? getBlock(ydoc, id)?.rev ?? "";
+      next.set(child, rev);
       lines.push(`${id} ${rev}`);
     }
     revs = next;
@@ -165,12 +172,14 @@ export function observeDocRev(ydoc: Y.Doc, emit: (rev: string) => void): () => v
   const onChange = (events: Array<Y.YEvent<Y.AbstractType<unknown>>>): void => {
     for (const event of events) {
       const element = blockElementOf(event.target);
-      if (element !== null) revs.delete(element.getAttribute("id") ?? "");
+      if (element !== null) revs.delete(element);
     }
     emit(fold());
   };
 
-  emit(fold());
+  // The one whole-document pass, handed to the first fold so it costs a single
+  // read rather than a `getBlock` scan per block.
+  emit(fold(new Map(getBlocks(ydoc).map((block) => [block.id, block.rev]))));
   fragment.observeDeep(onChange);
   return () => fragment.unobserveDeep(onChange);
 }

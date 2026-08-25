@@ -21,7 +21,14 @@ vi.mock("@uberblick/schema", async (importOriginal) => {
   return { ...actual, getBlock: vi.fn(actual.getBlock), getBlocks: vi.fn(actual.getBlocks) };
 });
 
-import { appendBlock, editBlock, getBlock, getBlocks, initDoc } from "@uberblick/schema";
+import {
+  appendBlock,
+  editBlock,
+  getBlock,
+  getBlocks,
+  initDoc,
+  setBlockType,
+} from "@uberblick/schema";
 import { observeDocRev } from "../src/ui/doc-chrome.js";
 
 interface Fixture {
@@ -77,6 +84,22 @@ describe("the document rev is recomputed incrementally", () => {
       expect(vi.mocked(getBlock).mock.calls.map((call) => call[1])).toEqual([
         charlie,
       ]);
+    } finally {
+      fix.stop();
+    }
+  });
+
+  it("moves the rev when a re-type replaces a block's element under its id", () => {
+    const fix = fixture();
+    try {
+      // The trap this test exists for: `setBlockType` keeps the block id and
+      // swaps the element beneath it, and Yjs reports that as a structural
+      // change on the fragment alone — no event names the block. A cache keyed
+      // by id would answer with the paragraph's rev for as long as the document
+      // stayed open, so the chrome would say nothing had changed.
+      setBlockType(fix.ydoc, fix.alpha, "heading", { level: 2 });
+      expect(fix.revs.at(-1)).not.toBe(fix.revs[0]);
+      expect(vi.mocked(getBlocks)).not.toHaveBeenCalled();
     } finally {
       fix.stop();
     }
