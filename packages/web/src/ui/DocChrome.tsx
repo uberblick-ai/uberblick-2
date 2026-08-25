@@ -311,6 +311,14 @@ function TagStrip({
  * a second line. The uuid and rev are pinned to the row's end, so a chip
  * appearing moves neither them nor the title.
  *
+ * **The row is drawn before there is anything to put in it**, and that is the
+ * same rule rather than a second one. `meta` is null for the first paint after
+ * a document is opened or switched to — the observer reads it an effect later —
+ * so a row that appeared with its contents would push the title down one frame
+ * after every navigation, which is the jump the whole layout is built to avoid.
+ * The shell is unconditional and its height comes from `min-height`; the words
+ * arrive into a space that was already reserved for them.
+ *
  * The uuid is shortened because identity is the uuid but *recognition* is its
  * first few characters — the full one is a click away on the room key below the
  * title. The rev is the whole document's, folded from its block revs
@@ -330,21 +338,26 @@ export function DocMetaLine({
   knownTags: readonly string[];
   /** Whether the directory tombstones this document: no writes from here. */
   archived: boolean;
-}): ReactElement | null {
+}): ReactElement {
   const rev = useDocRev(connection);
-  if (meta === null || meta.uuid === "") return null;
   return (
     <p className="ub-doc-meta">
-      <span className="ub-badge">{groupOf(meta)}</span>
-      <TagStrip
-        ydoc={connection.ydoc}
-        tags={meta.tags}
-        known={knownTags}
-        readOnly={archived}
-      />
-      <span className="ub-doc-ids">
-        uuid {meta.uuid.slice(0, 8)} · rev {rev ?? "········"}
-      </span>
+      {/* Nothing to say about a room that has not answered yet, and nothing to
+          tag in it either — but the row itself stands, holding the space. */}
+      {meta !== null && meta.uuid !== "" && (
+        <>
+          <span className="ub-badge">{groupOf(meta)}</span>
+          <TagStrip
+            ydoc={connection.ydoc}
+            tags={meta.tags}
+            known={knownTags}
+            readOnly={archived}
+          />
+          <span className="ub-doc-ids">
+            uuid {meta.uuid.slice(0, 8)} · rev {rev ?? "········"}
+          </span>
+        </>
+      )}
     </p>
   );
 }
