@@ -31,6 +31,12 @@ packages/*/data/
 mise.local.toml
 .mise.local.toml
 
+# the timestamped copy `ub mcp install --force` leaves beside a config file it
+# replaces. It is there so the previous version is recoverable by hand, not so
+# it can be committed — and the one config file this repository carries,
+# .mcp.json, is exactly where somebody would generate one.
+*.bak
+
 # playwright run artifacts (traces, screenshots, HTML report)
 test-results/
 playwright-report/

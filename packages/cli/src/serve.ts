@@ -134,16 +134,3 @@ export async function serveCommand(
     });
   });
 }
-
-export async function mcpCommand(
-  argv: string[],
-  err: (text: string) => void = (text) => process.stderr.write(text),
-): Promise<number> {
-  const [subcommand, ...rest] = argv;
-  if (subcommand === "serve") {
-    return await serveCommand(rest, err);
-  }
-  const named = subcommand === undefined ? "" : ` ${JSON.stringify(subcommand)}`;
-  err(`ub mcp: expected "serve", got${named || " nothing"}\n`);
-  return 2;
-}

@@ -123,13 +123,54 @@ the web server would never start.
 
 ## The MCP server, as a client sees it
 
-`.mcp.json` registers the server for any MCP client that reads it, Claude Code
-included — the client spawns it for you, so there is nothing to start by hand.
-For a standalone smoke test, `mise run mcp` runs the same thing in the
-foreground. The exact spawn is config, and `.mcp.json` is where it lives; read it
-there rather than copying it into a shell.
+`ub mcp install [target]` wires uberblick into an MCP client, so nobody has to
+hand-edit JSON. It knows `claude`, `codex` and `cursor`; `--project` writes the
+current directory's config and `--user` the per-user one; `--print` emits the
+snippet and writes nothing, which is also the answer for a client it does not
+know:
 
-What that config is careful about, since none of it is obvious:
+```
+ub mcp install claude --project     # this checkout's .mcp.json
+ub mcp install codex --user         # ~/.codex/config.toml
+ub mcp install cursor --print       # the snippet, on stdout
+```
+
+Where the vendor ships its own installer — `claude mcp add`, `codex mcp add` for
+its global config — that is what runs, because the vendor knows its own file
+best; otherwise the documented config file is edited directly. The report names
+which of the two happened. Either way the command reads the file first, so an
+unrelated server in it is left alone — byte for byte, since both formats are
+spliced as text rather than reparsed and re-emitted — a second run is a no-op
+that says "already installed", and an `uberblick` entry it did not write is
+reported next to what would replace it and left in place unless `--force` says
+otherwise. A file it changes is copied to a timestamped `.bak` beside it first,
+and it is read and written through one descriptor so the copy cannot be of a
+version that has already been replaced. Nothing prompts, so the whole command
+runs unattended.
+
+Reports name files, never their contents: a conflicting entry is shown with its
+command and the *names* of anything else it sets, with the values masked, and a
+file that will not parse is reported by path alone. Config files are where API
+tokens live.
+
+The installed line is always `ub mcp serve`, with no arguments and no
+environment. Which workspace, which hub and which credential apply is resolved
+by `ub` — a client config that pinned any of them would be a second copy of
+configuration that already has an owner.
+
+**This checkout is the exception, and `.mcp.json` records it.** A fresh clone has
+no installed `ub` on its PATH, and the owner's real secret only becomes visible
+through `fnox exec`, so the committed `.mcp.json` registers a spawn that runs the
+server out of the checkout instead — through mise, wrapped in `fnox exec`, with
+the package manager's own output silenced. The exact spawn is config, and
+`.mcp.json` is where it lives; read it there rather than copying it into a shell.
+
+It is still generated rather than hand-maintained: everything after `--` replaces
+the command `ub mcp install` registers, so regenerating the file means passing
+that recorded spawn back to `ub mcp install claude --project --force -- …`. A
+test asserts that the committed file is exactly what doing so produces.
+
+What that spawn is careful about, since none of it is obvious:
 
 - Secrets come from `fnox exec`, which supplies `HUB_AUTH_TOKEN`. A missing key
   is a warning, not an error, on purpose: a contributor without the age key still
@@ -138,6 +179,9 @@ What that config is careful about, since none of it is obvious:
   transport, so a banner on it would corrupt the session.
 - `HUB_URL` is left unset, so the server falls back to `ws://localhost:1234` —
   the same default mise's `[env]` carries. No hub address is pinned here.
+
+For a standalone smoke test, `mise run mcp` runs the same thing in the
+foreground.
 
 `mise run import-seed` is the one-time import of `docs-seed/` into the system.
 After it, the product docs live in the documents, and are read and written
@@ -154,6 +198,7 @@ checkout:
 node packages/cli/bin/ub.mjs init            # identity, workspace, signing secret
 node packages/cli/bin/ub.mjs status          # workspace, hub, credential, sync state
 node packages/cli/bin/ub.mjs status --json   # the same, as one JSON object
+node packages/cli/bin/ub.mjs mcp install     # register uberblick with an MCP client
 node packages/cli/bin/ub.mjs mcp serve       # the stdio entry point for an MCP client
 ```
 
@@ -161,10 +206,10 @@ Inside a checkout prefer `mise run init` over calling `ub init` directly: the
 task wraps it in `fnox exec`, which is how a decryptable secret becomes visible
 to it in the first place. Every question `ub init` asks has a flag (`--name`,
 `--color`, `--workspace`, `--yes`), and a non-interactive stdin takes the
-defaults rather than blocking, so it needs no TTY. `--mcp` / `--no-mcp` decide
-whether it offers to wire up an agent's MCP client; that wiring itself arrives
-with `ub mcp install` (#88), and until then `.mcp.json` already registers the
-server for MCP clients that read it.
+defaults rather than blocking, so it needs no TTY. `--mcp` runs `ub mcp install`
+with its defaults when `ub init` finishes, and `--no-mcp` says not to mention it;
+a refusal there is a warning rather than a failed bootstrap, because everything
+`ub init` was asked to settle has been settled by then.
 
 Configuration is JSON and every layer is optional — absent configuration is a
 default, never an error, and no command requires `ub init` to have run.
@@ -186,9 +231,9 @@ credential at its author's endpoint. Exporting `HUB_AUTH_TOKEN`, or setting
 
 `ub mcp serve` resolves that configuration and runs the MCP server with it, so
 the server keeps its environment-only contract — no flags, no config file — and
-a client's spawn line never has to change again when internals move. `.mcp.json`
-still holds the older `pnpm --filter` spawn; rewriting it belongs to
-`ub mcp install`.
+a client's spawn line never has to change again when internals move. This
+checkout's `.mcp.json` is the one place that still names a spawn of its own,
+for the reasons given above, and `ub mcp install` generates it.
 
 ## Review isolation
 
