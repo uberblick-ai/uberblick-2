@@ -142,7 +142,13 @@ Edit `.env` and set the four required values (`WEB_HUB_URL` is optional; see
   value may contain only letters, digits, `,` and `-`; `remote-compose.sh`
   refuses anything else, because the list is substituted into the JSON
   configuration document and a quote there could inject a second `hubUrl` that
-  retargets every browser.
+  retargets every browser. That refusal is the guarantee: no quote and no
+  backslash reaches the document, so no escape can be written into it. The
+  client also refuses a document that plainly names a key twice, but that is
+  best-effort defence in depth — it reads raw JSON spelling, so an escaped key
+  would slip past it, and anyone able to write into the served document could
+  set `hubUrl` outright anyway. A document an attacker controls is outside this
+  deployment's threat model.
 - `TAILSCALE_IP` is the IPv4 address printed by `tailscale ip -4`. Compose binds
   port 443 only to this address, not to the host's public or LAN interfaces.
 - `HUB_AUTH_TOKEN` is the existing shared signing secret used by the local MCP

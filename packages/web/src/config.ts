@@ -22,9 +22,11 @@
  * address that names no workspace — redirects to. It may also be written as one
  * comma-separated string, because the environments that serve this document
  * substitute plain strings and cannot build a JSON array (see the Caddyfile).
- * A document that names either key more than once is refused outright: that is
- * what a value injected through such a substitution looks like, and `JSON.parse`
- * would otherwise keep the injected occurrence rather than the intended one.
+ * A document that plainly names either key more than once is refused, because
+ * `JSON.parse` would otherwise keep the *last* occurrence — what a value
+ * injected through such a substitution produces. That check is best-effort
+ * defence in depth; what guarantees it cannot happen is the deploy wrapper
+ * refusing a value that could close a JSON string in the first place.
  *
  * Rule from CLAUDE.md: no hardcoded hub addresses anywhere except the in-code
  * fallback default. There are still exactly two, both fallbacks behind the
@@ -260,15 +262,21 @@ function readDocument(
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { rejected: "it is not a JSON object" };
   }
-  // A key named twice is a document somebody wrote *into*, not one somebody
-  // wrote. The deployed document is a template with values substituted into it
-  // (see the Caddyfile), so a value carrying a quote can close its string and
-  // append `,"hubUrl":"wss://elsewhere"` — and `JSON.parse` keeps the last
-  // occurrence, which would be the injected one. The wrapper refuses such a
-  // value before it is ever served; this refuses the document if one gets
-  // through, because the whole point of this file is naming the hub a browser
-  // dials. `\s*:` so a workspace *called* "hubUrl" — which cannot be an id, but
-  // could be text — is not mistaken for a second key.
+  // Best-effort, and deliberately not more than that.
+  //
+  // The deployed document is a template with values substituted into it (see
+  // the Caddyfile), so a value carrying a quote could close its string and
+  // append `,"hubUrl":"wss://elsewhere"` — which `JSON.parse` would then keep,
+  // last occurrence winning. The *guarantee* against that is `remote-compose.sh`
+  // refusing any `WEB_WORKSPACES` outside `[A-Za-z0-9,-]`: no quote and no
+  // backslash ever reaches the body, so no escape can be written into it.
+  //
+  // This check is defence in depth for the plainly spelled case, and it reads
+  // raw JSON *spelling*: an escaped key (`"hub\u0055rl"`) decodes to a second
+  // `hubUrl` and passes it. That is not a hole worth a tokenizer — anyone who
+  // can write escapes into the served document can set `hubUrl` outright, and a
+  // document an attacker controls is outside this model. `\s*:` so a value
+  // containing the text `"hubUrl"` is not mistaken for a second key.
   const twice = ["hubUrl", "workspaces"].find(
     (key) => (body.match(new RegExp(`"${key}"\\s*:`, "g")) ?? []).length > 1,
   );

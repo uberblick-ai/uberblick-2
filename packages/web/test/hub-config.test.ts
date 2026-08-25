@@ -268,13 +268,16 @@ describe("the workspaces it names", () => {
     expect(workspacesSource).toBe("document");
   });
 
-  it("refuses a document that names a key twice, rather than taking the last one", async () => {
-    // The injection this guards: the deployed document is a template with
-    // values substituted into it, so a value carrying a quote can close its
-    // string and append a second `hubUrl` — and `JSON.parse` keeps the last
-    // occurrence, pointing every browser at a hub of the attacker's choosing.
-    // `remote-compose.sh` refuses such a value before it is served; this is the
-    // client refusing the document if one ever gets through.
+  it("refuses a document that plainly names a key twice, rather than taking the last one", async () => {
+    // Defence in depth, not the guarantee. The deployed document is a template
+    // with values substituted into it, so a value carrying a quote could close
+    // its string and append a second `hubUrl` — and `JSON.parse` keeps the last
+    // occurrence, pointing every browser at a hub of somebody else's choosing.
+    // What makes that impossible is `remote-compose.sh` refusing any value that
+    // could close a string; this pins the client's own best-effort refusal of
+    // the plainly spelled case. It reads raw JSON spelling, so an escaped key
+    // would pass — which is not worth a tokenizer, because writing escapes into
+    // the served document already means being able to set `hubUrl` outright.
     const injected =
       '{"hubUrl":"wss://hub.example/ws","workspaces":"' +
       `${FIRST}","hubUrl":"wss://elsewhere.example/ws"}`;
