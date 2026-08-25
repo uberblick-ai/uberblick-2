@@ -54,7 +54,7 @@ function report(results: SeedImport[], hub: string): boolean {
 
 async function main(): Promise<void> {
   const config = resolveMcpConfig();
-  const store = new MirrorStore(config.databasePath);
+  const store = new MirrorStore(config.databasePath, config.workspaceId);
   const replicas = new Replicas(config, store);
 
   try {

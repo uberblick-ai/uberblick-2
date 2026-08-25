@@ -46,7 +46,7 @@ const hubs: Hub[] = [];
 const peers: PeerClient[] = [];
 
 function store(databasePath: string): MirrorStore {
-  const opened = new MirrorStore(databasePath);
+  const opened = new MirrorStore(databasePath, WORKSPACE);
   stores.push(opened);
   return opened;
 }
@@ -144,7 +144,7 @@ describe("reading the log", () => {
 
     // A reader that has applied row 1 and is about to read the rest, while
     // another process compacts through 3 and appends a fourth update.
-    const reader = new InterleavingStore(databasePath);
+    const reader = new InterleavingStore(databasePath, WORKSPACE);
     stores.push(reader);
     const other = store(databasePath);
     const later = new Y.Doc();
@@ -228,7 +228,7 @@ describe("compaction", () => {
 describe("a failed append", () => {
   it("stops every tool instead of serving a replica ahead of its log", async () => {
     const databasePath = tempDatabasePath();
-    const faulty = new FailingStore(databasePath);
+    const faulty = new FailingStore(databasePath, WORKSPACE);
     stores.push(faulty);
     const rig = await startServer(testConfig({ databasePath }), faulty);
     rigs.push(rig);
@@ -287,7 +287,7 @@ describe("a failed append", () => {
     // real hub and a real second client are the only way to see that.
     const running = await hub();
     const databasePath = tempDatabasePath();
-    const faulty = new FailingStore(databasePath);
+    const faulty = new FailingStore(databasePath, WORKSPACE);
     stores.push(faulty);
     const rig = await startServer(
       testConfig({
@@ -335,7 +335,7 @@ describe("a failed append", () => {
     // holds the unlogged change, so compacting would make a write reported as
     // refused durable — and a restart would bring it back.
     const databasePath = tempDatabasePath();
-    const faulty = new FailingStore(databasePath);
+    const faulty = new FailingStore(databasePath, WORKSPACE);
     stores.push(faulty);
     const rig = await startServer(
       testConfig({ databasePath, compactAfter: 1 }),
@@ -447,7 +447,7 @@ describe("the pending watermark", () => {
     // database ends up ahead of everything this replica has applied.
     const running = await hub();
     const racedPath = tempDatabasePath();
-    const late = new LatePendingStore(racedPath);
+    const late = new LatePendingStore(racedPath, WORKSPACE);
     stores.push(late);
 
     const rig = await startServer(
@@ -502,7 +502,7 @@ describe("the pending watermark", () => {
     const uuid = randomUUID();
     const room = `${WORKSPACE}/${uuid}`;
 
-    const seeded = new MirrorStore(databasePath);
+    const seeded = new MirrorStore(databasePath, WORKSPACE);
     const doc = new Y.Doc();
     initDoc(doc, { uuid, title: "Offline only" });
     appendBlock(doc, { type: "paragraph", text: "never announced" });

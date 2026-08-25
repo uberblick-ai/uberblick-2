@@ -35,7 +35,10 @@ const OTHER = "9a1c7d2e-4f60-4b18-8f3a-2c5e9b0d6c11";
 // stop reproducing the file it exists to reproduce.
 const ROOM = `main/${UUID}`;
 
-const store = new MirrorStore(target);
+// The workspace as it was spelled then — a name, not a uuid. The committed
+// fixture predates the `meta` row entirely, which is the other thing that makes
+// it a legacy database.
+const store = new MirrorStore(target, "main");
 
 // A snapshot plus a live tail, so the fixture exercises both BLOB columns.
 const doc = new Y.Doc();
