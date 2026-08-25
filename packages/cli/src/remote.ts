@@ -126,6 +126,13 @@ const SHARING_BOUNDARY =
  * is committable, and {@link secretAppliesTo} deliberately withholds the stored
  * signing secret from a repository-chosen hub — so clients pointed there would
  * dial it with no credential at all. Naming what wins is the fix.
+ *
+ * Only a higher layer naming a *different* hub is any of this. One naming the
+ * endpoint being written outranks nothing that matters: the value takes effect,
+ * there is no switch that did not happen, and nothing is worth saying — which is
+ * the ordinary shape of a second machine whose `HUB_URL` already points at the
+ * hub it is joining. Endpoints compare as trimmed strings, because that is what
+ * `resolveConfig` hands to a client and what {@link normalizeRemoteUrl} keeps.
  */
 interface Outranking {
   /** `HUB_URL` or `./uberblick.json`. */
@@ -133,17 +140,28 @@ interface Outranking {
   endpoint: string;
 }
 
-function outranking(resolved: ResolvedConfig, cwd: string): Outranking | null {
-  if (resolved.origins.hubUrl === "environment") {
-    const endpoint = resolved.env.HUB_URL?.trim();
-    return endpoint === undefined || endpoint === ""
+function outranking(
+  resolved: ResolvedConfig,
+  cwd: string,
+  /** The endpoint being written; a higher layer naming it is not a conflict. */
+  requested: string,
+): Outranking | null {
+  const found = (): Outranking | null => {
+    if (resolved.origins.hubUrl === "environment") {
+      const endpoint = resolved.env.HUB_URL?.trim();
+      return endpoint === undefined || endpoint === ""
+        ? null
+        : { layer: "HUB_URL in the environment", endpoint };
+    }
+    const pinned = directoryHubUrl(cwd);
+    return pinned === null
       ? null
-      : { layer: "HUB_URL in the environment", endpoint };
-  }
-  const pinned = directoryHubUrl(cwd);
-  return pinned === null
+      : { layer: `"hubUrl" in ./uberblick.json`, endpoint: pinned };
+  };
+  const outranked = found();
+  return outranked === null || outranked.endpoint === requested.trim()
     ? null
-    : { layer: `"hubUrl" in ./uberblick.json`, endpoint: pinned };
+    : outranked;
 }
 
 function outrankedNote(outranked: Outranking, what: string): string {
@@ -232,10 +250,13 @@ export function setRemote(
   // with a credential that is not its own — the exact mismatch the ordering
   // below exists to prevent, arrived at from the other side. The endpoint is
   // still written, because it is what takes over the moment the higher layer
-  // goes away; the secret is not, and the report says so.
+  // goes away; the secret is not, and the report says so. A higher layer naming
+  // the endpoint being written is not this and reads as null — see
+  // {@link outranking}, or a second machine already pointed at the hub it is
+  // joining would be refused the credential it went there to get.
   // (Neither answer depends on the write: `HUB_URL` and `./uberblick.json` are
   // untouched by it, and with neither present nothing outranks anything.)
-  const outrankedBy = outranking(resolveConfig({ env, cwd }), cwd);
+  const outrankedBy = outranking(resolveConfig({ env, cwd }), cwd, url);
   const newSecret = secret !== null && secret !== stored.signingSecret;
   if (newSecret && outrankedBy !== null) {
     warnings.push(

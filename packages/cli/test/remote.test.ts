@@ -458,6 +458,23 @@ describe("ub remote", () => {
       "HUB_URL in the environment",
     );
     expect(persistedHubUrl(box)).toBe("wss://hub.example.ts.net");
+
+    // …but a higher layer naming the endpoint being written outranks nothing
+    // that matters, and withholding there would refuse a second machine the
+    // credential it ran `join` to get.
+    const agreeing = sandbox({ credentials: { signingSecret: SECRET } });
+    agreeing.env.HUB_URL = "wss://hub.example.ts.net";
+
+    const stored = setRemote("wss://hub.example.ts.net", {
+      secret: OTHER_SECRET,
+      env: agreeing.env,
+      cwd: agreeing.cwd,
+    });
+
+    expect(storedSecret(agreeing)).toBe(OTHER_SECRET);
+    expect(stored.replacedSecret).toBe(true);
+    expect(stored.warnings).toEqual([]);
+    expect(stored.outrankedBy).toBe(null);
   });
 });
 
