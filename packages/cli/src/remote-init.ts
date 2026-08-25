@@ -31,9 +31,10 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { request } from "node:https";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -94,13 +95,33 @@ interface Ran {
   stderr: string;
 }
 
+/**
+ * The environment a vendor process gets: the caller's, minus the signing
+ * secret.
+ *
+ * `HUB_AUTH_TOKEN` is routinely exported into this process — that is what
+ * `fnox exec` and the mise tasks do — and an inherited environment is readable
+ * from `/proc/<pid>/environ` and lands in whatever the child spawns next. The
+ * secret has exactly one route to the host, the `.env` payload on stdin, so it
+ * is removed here rather than trusted not to be looked at.
+ *
+ * Nothing else is stripped: `gh` authenticates with `GH_TOKEN`/`GITHUB_TOKEN`
+ * and `ssh` with `SSH_AUTH_SOCK`, so removing the vendors' own credentials
+ * would break the delegation this command exists to perform.
+ */
+function childEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const child = { ...env };
+  delete child.HUB_AUTH_TOKEN;
+  return child;
+}
+
 function run(
   program: string,
   args: string[],
   options: { env: NodeJS.ProcessEnv; input?: string },
 ): Ran {
   const result = spawnSync(program, args, {
-    env: options.env,
+    env: childEnvironment(options.env),
     // No `input` means stdin is an immediately closed pipe: a remote command
     // that reads stdin gets nothing rather than swallowing this process's.
     input: options.input ?? "",
@@ -279,6 +300,14 @@ export type Reach = (host: string) => Promise<string | null>;
 
 const REACH_BUDGET_MS = 90_000;
 
+/**
+ * A deployment is always `https://`; `http://` exists so a test can drive these
+ * probes against a server on loopback, where there is no certificate to trust.
+ */
+function requestFor(url: string): typeof httpRequest {
+  return url.startsWith("http://") ? httpRequest : httpsRequest;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -286,7 +315,7 @@ function sleep(ms: number): Promise<void> {
 /** A plain GET. Null when the server answered at all with a final status. */
 function fetchPage(url: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const call = request(url, { method: "GET", timeout: 10_000 }, (response) => {
+    const call = requestFor(url)(url, { method: "GET", timeout: 10_000 }, (response) => {
       response.resume();
       const status = response.statusCode ?? 0;
       resolve(status >= 200 && status < 400 ? null : `answered HTTP ${status}`);
@@ -300,25 +329,41 @@ function fetchPage(url: string): Promise<string | null> {
   });
 }
 
-/** Null when the endpoint completes a websocket handshake. */
-function upgradeWebsocket(url: string): Promise<string | null> {
+/**
+ * Null when the endpoint completes a websocket handshake.
+ *
+ * RFC 6455 to the letter, because a compliant server holds it to the letter:
+ * the key is 16 random bytes, base64 — anything else is refused before the
+ * upgrade, which would report a healthy deployment as broken — and the
+ * `Sec-WebSocket-Accept` it comes back with is checked, so a proxy answering
+ * 101 without understanding websockets does not pass for a hub.
+ *
+ * Exported for the test that drives it against a real server; `reachStack` is
+ * the caller that matters.
+ */
+export function upgradeWebsocket(url: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const call = request(url, {
+    const key = randomBytes(16).toString("base64");
+    const accept = createHash("sha1")
+      .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest("base64");
+    const call = requestFor(url)(url, {
       method: "GET",
       timeout: 10_000,
       headers: {
         Connection: "Upgrade",
         Upgrade: "websocket",
         "Sec-WebSocket-Version": "13",
-        "Sec-WebSocket-Key": createHash("sha256")
-          .update(String(Date.now()))
-          .digest("base64")
-          .slice(0, 24),
+        "Sec-WebSocket-Key": key,
       },
     });
-    call.on("upgrade", (_response, socket) => {
+    call.on("upgrade", (response, socket) => {
       socket.destroy();
-      resolve(null);
+      resolve(
+        response.headers["sec-websocket-accept"] === accept
+          ? null
+          : "upgraded without a valid Sec-WebSocket-Accept: that is not a websocket endpoint",
+      );
     });
     call.on("response", (response) => {
       response.resume();

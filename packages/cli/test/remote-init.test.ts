@@ -19,6 +19,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
+import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+import type { Socket } from "node:net";
 import {
   chmodSync,
   existsSync,
@@ -31,7 +34,11 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { readUserConfig } from "../src/config.js";
 import type { Io } from "../src/io.js";
-import { remoteInitCommand, remoteUpdateCommand } from "../src/remote-init.js";
+import {
+  remoteInitCommand,
+  remoteUpdateCommand,
+  upgradeWebsocket,
+} from "../src/remote-init.js";
 import { type Sandbox, removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -62,6 +69,8 @@ function stubProgram(program: string): string {
 count=$(ls "$UB_TEST_RECORD" | wc -l | tr -d ' ')
 {
   for a in "$@"; do printf '%s\\0' "$a"; done
+  printf 'ENV\\0'
+  env | tr '\\n' '\\0'
   printf 'STDIN\\0'
   cat
 } > "$UB_TEST_RECORD/$(printf '%03d' "$count")-${program}"
@@ -104,6 +113,8 @@ esac
 interface Step {
   program: string;
   args: string[];
+  /** `NAME=value` for every variable the spawned process inherited. */
+  env: string[];
   stdin: string;
 }
 
@@ -167,10 +178,12 @@ function harness(host: Host = {}, box: Sandbox = sandbox({ credentials: { signin
         .sort()
         .map((name) => {
           const parts = readFileSync(join(record, name), "utf8").split("\0");
+          const environment = parts.indexOf("ENV");
           const marker = parts.indexOf("STDIN");
           return {
             program: name.slice(4),
-            args: parts.slice(0, marker),
+            args: parts.slice(0, environment),
+            env: parts.slice(environment + 1, marker),
             stdin: parts.slice(marker + 1).join("\0"),
           };
         }),
@@ -278,12 +291,19 @@ describe("ub remote init", () => {
     expect(added.args[added.args.indexOf("--title") + 1]).toMatch(/^uberblick-box-.{12}$/);
   });
 
-  it("keeps the signing secret out of every argument vector and both streams", async () => {
+  it("keeps the signing secret out of every argument vector, environment and stream", async () => {
     const rig = harness();
+    // The shape `fnox exec` and the mise tasks leave: the secret is exported
+    // into this process, so every child would inherit it by default.
+    rig.env.HUB_AUTH_TOKEN = SECRET;
     expect(await init(rig)).toBe(0);
 
     for (const step of rig.steps()) {
       expect(step.args.join("\n")).not.toContain(SECRET);
+      // Readable from /proc/<pid>/environ, and inherited onwards by whatever
+      // the vendor spawns next — so it must not be there either.
+      expect(step.env.join("\n")).not.toContain(SECRET);
+      expect(step.env.some((entry) => entry.startsWith("HUB_AUTH_TOKEN="))).toBe(false);
     }
     expect(rig.output()).not.toContain(SECRET);
     // It travelled, though — on the one channel that is not argv.
@@ -384,6 +404,66 @@ describe("ub remote init", () => {
     expect(stepFor(rig, "uberblick:fast-forward").args.join("\n")).toContain(
       "git merge --ff-only origin/main",
     );
+  });
+});
+
+describe("the /ws probe", () => {
+  /**
+   * A server that holds the handshake to RFC 6455: the key must decode to 16
+   * bytes, and the answer proves the server understood it. `wrongAccept` is the
+   * other half — 101 alone is not a websocket endpoint.
+   */
+  async function handshakeServer(
+    options: { wrongAccept?: boolean } = {},
+  ): Promise<{ url: string; close: () => Promise<void> }> {
+    const sockets: Socket[] = [];
+    const server = createServer();
+    server.on("upgrade", (incoming, socket: Socket) => {
+      sockets.push(socket);
+      const key = incoming.headers["sec-websocket-key"] ?? "";
+      if (Buffer.from(key, "base64").length !== 16) {
+        socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+        return;
+      }
+      const accept = options.wrongAccept === true
+        ? "not-the-accept-value"
+        : createHash("sha1")
+            .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+            .digest("base64");
+      socket.write(
+        "HTTP/1.1 101 Switching Protocols\r\n" +
+          "Upgrade: websocket\r\nConnection: Upgrade\r\n" +
+          `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("the handshake server did not bind a port");
+    }
+    return {
+      url: `http://127.0.0.1:${address.port}/ws`,
+      close: async () => {
+        for (const socket of sockets) socket.destroy();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      },
+    };
+  }
+
+  it("completes a compliant handshake and checks what came back", async () => {
+    const good = await handshakeServer();
+    try {
+      expect(await upgradeWebsocket(good.url)).toBeNull();
+    } finally {
+      await good.close();
+    }
+
+    const liar = await handshakeServer({ wrongAccept: true });
+    try {
+      expect(await upgradeWebsocket(liar.url)).toMatch(/Sec-WebSocket-Accept/);
+    } finally {
+      await liar.close();
+    }
   });
 });
 
