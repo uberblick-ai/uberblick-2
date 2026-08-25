@@ -177,6 +177,55 @@ describe("typing a list", () => {
     }
   });
 
+  /**
+   * The marker a reader sees has to be the marker their document exports, and a
+   * nested bullet is *inside* the ordered item above it — so it ends nothing the
+   * enclosing list was counting. CSS counters cannot express that (no selector
+   * says "a bullet nested inside an ordered item"), which is why the number is
+   * decorated onto the block from the schema package's own rule.
+   */
+  it("numbers ordered items the way the export does, nesting included", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "list-numbers", title: "Numbers" });
+    for (const [text, list, indent] of [
+      ["parent", "ordered", 0],
+      ["child", "bullet", 1],
+      ["parent two", "ordered", 0],
+      ["nested count", "ordered", 1],
+      ["parent three", "ordered", 0],
+    ] as const) {
+      appendBlock(ydoc, { type: "list-item", text, list, indent });
+    }
+    const { editor } = mountEditor(ydoc);
+    try {
+      const drawn = [...editor.view.dom.querySelectorAll("li")].map((item) => [
+        item.textContent,
+        item.getAttribute("data-number"),
+      ]);
+      expect(drawn).toEqual([
+        ["parent", "1"],
+        ["child", null],
+        ["parent two", "2"],
+        ["nested count", "1"],
+        ["parent three", "3"],
+      ]);
+
+      // The same numbers the markdown carries — one rule, two readers.
+      expect(exportMarkdown(ydoc, { frontmatter: false })).toBe(
+        [
+          "1. parent",
+          "    - child",
+          "2. parent two",
+          "    1. nested count",
+          "3. parent three",
+          "",
+        ].join("\n"),
+      );
+    } finally {
+      editor.destroy();
+    }
+  });
+
   it("leaves Enter, Tab and Backspace alone outside a list", () => {
     const { ydoc, ids } = docWith(["prose"]);
     const { editor } = mountEditor(ydoc);

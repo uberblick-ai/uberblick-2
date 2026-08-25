@@ -6,6 +6,7 @@ import {
   getBlocks,
   importMarkdown,
   initDoc,
+  listNumbers,
   setTags,
 } from "../src/index.js";
 
@@ -303,6 +304,40 @@ describe("lists and quotes", () => {
     expect(deep.blocks.map((block) => block.indent)).toEqual([0, 1, 2, 3, 3]);
   });
 
+  /**
+   * Depth is not "further right than the line above": an item is nested only
+   * when it reaches the column where the item above it starts its *content* —
+   * marker column, plus the marker, plus the spaces after it. Reading a
+   * relative column instead invents nesting a reader never wrote, and the
+   * export then writes a different list back out.
+   */
+  it("nests only an item that reaches the parent's content column", () => {
+    // One space in is still a sibling: `- a` starts its content at column 2.
+    expect(
+      importMarkdown(["- a", " - b", "   - c"].join("\n")).blocks.map(
+        (block) => block.indent,
+      ),
+    ).toEqual([0, 0, 1]);
+
+    // An ordered marker is wider, so its children start further in: two spaces
+    // do not reach `1. a`'s content column of three.
+    expect(
+      importMarkdown(["1. a", "  - b", "    - c"].join("\n")).blocks.map(
+        (block) => block.indent,
+      ),
+    ).toEqual([0, 0, 1]);
+
+    // …and what this writer emits comes back as what it meant, which is the
+    // property the four-space unit exists for.
+    const nested = ["- a", "    - b", "        - c"].join("\n");
+    expect(importMarkdown(nested).blocks.map((block) => block.indent)).toEqual([
+      0, 1, 2,
+    ]);
+    expect(exportMarkdown(docFrom(nested), { frontmatter: false })).toBe(
+      `${nested}\n`,
+    );
+  });
+
   it("exports a run of items as one tight, correctly nested list", () => {
     const doc = docFrom(LIST_SOURCE);
     const exported = exportMarkdown(doc, { frontmatter: false });
@@ -353,6 +388,40 @@ describe("lists and quotes", () => {
         "",
       ].join("\n"),
     );
+  });
+
+  /**
+   * A nested bullet is *inside* the ordered item above it, so it ends nothing
+   * the enclosing list was counting — the parent after it is item two. The
+   * editor draws the same numbers from the same rule (`listNumbers`), which is
+   * what keeps the markers a reader sees and the markdown they export in step.
+   */
+  it("keeps an outer ordered run counting across a nested bullet", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Mixed" });
+    for (const [text, list, indent] of [
+      ["parent", "ordered", 0],
+      ["child", "bullet", 1],
+      ["parent two", "ordered", 0],
+      ["child two", "bullet", 1],
+      ["parent three", "ordered", 0],
+    ] as const) {
+      appendBlock(doc, { type: "list-item", text, list, indent });
+    }
+
+    expect(exportMarkdown(doc, { frontmatter: false })).toBe(
+      [
+        "1. parent",
+        "    - child",
+        "2. parent two",
+        "    - child two",
+        "3. parent three",
+        "",
+      ].join("\n"),
+    );
+    expect(
+      listNumbers(getBlocks(doc).map(({ type, list, indent }) => ({ type, list, indent }))),
+    ).toEqual([1, null, 2, null, 3]);
   });
 
   it("carries inline marks through both directions", () => {

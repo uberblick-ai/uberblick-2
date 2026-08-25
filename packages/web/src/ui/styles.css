@@ -1587,12 +1587,13 @@ h3.ub-heading {
    are the schema's, so the rendering follows the document rather than the other
    way round.
 
-   Ordered numbering is a CSS counter per level, and the *reset* is the part
-   worth explaining. CSS has no previous-sibling selector, so a run cannot ask
-   "did a list end before me?" — instead every block that is not an ordered item
-   resets all four counters, which is exactly the block that ends a run. An
-   ordered item then increments its own level and resets the deeper ones, so a
-   nested list starts at 1 each time its parent moves on. */
+   An ordered item's number is *not* a CSS counter: it is `data-number`, put
+   there by a decoration that asks the schema package for the same numbering the
+   markdown writer uses (editor/list-keys.ts). Counters cannot express this
+   list — no selector can say "a bullet nested inside an ordered item", so a
+   nested bullet would restart the enclosing list while the export carried on
+   counting, and the reader would be shown a number that is not the one their
+   document exports. */
 .ub-list-item {
   list-style: none;
   position: relative;
@@ -1618,39 +1619,8 @@ h3.ub-heading {
   content: "•";
 }
 
-.ub-editor .tiptap > :not([data-list="ordered"]) {
-  counter-reset: ub-ol-0 ub-ol-1 ub-ol-2 ub-ol-3;
-}
-
-.ub-list-item[data-list="ordered"][data-indent="0"] {
-  counter-increment: ub-ol-0;
-  counter-reset: ub-ol-1 ub-ol-2 ub-ol-3;
-}
-.ub-list-item[data-list="ordered"][data-indent="0"]::before {
-  content: counter(ub-ol-0) ".";
-}
-
-.ub-list-item[data-list="ordered"][data-indent="1"] {
-  counter-increment: ub-ol-1;
-  counter-reset: ub-ol-2 ub-ol-3;
-}
-.ub-list-item[data-list="ordered"][data-indent="1"]::before {
-  content: counter(ub-ol-1) ".";
-}
-
-.ub-list-item[data-list="ordered"][data-indent="2"] {
-  counter-increment: ub-ol-2;
-  counter-reset: ub-ol-3;
-}
-.ub-list-item[data-list="ordered"][data-indent="2"]::before {
-  content: counter(ub-ol-2) ".";
-}
-
-.ub-list-item[data-list="ordered"][data-indent="3"] {
-  counter-increment: ub-ol-3;
-}
-.ub-list-item[data-list="ordered"][data-indent="3"]::before {
-  content: counter(ub-ol-3) ".";
+.ub-list-item[data-list="ordered"][data-number]::before {
+  content: attr(data-number) ".";
 }
 
 .ub-quote {

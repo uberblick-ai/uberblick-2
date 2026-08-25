@@ -47,6 +47,7 @@ import {
   pushInlineRun,
   sameInlineMarks,
 } from "./marks.js";
+import { listNumbers } from "./lists.js";
 import { MAX_LIST_INDENT } from "./types.js";
 import type {
   Block,
@@ -599,33 +600,14 @@ function renderInline(source: readonly InlineRun[]): string {
  */
 const LIST_INDENT_UNIT = "    ";
 
-/** The open ordered-list counters, one per indent level of the current run. */
-interface ListLevel {
-  style: ListStyle;
-  count: number;
-}
-
 /**
- * The marker `block` is written with, advancing `run` — the counters for the
- * run of adjacent list items this block belongs to.
- *
- * Ordered items are numbered per level and start again whenever the level is
- * re-entered or changes style, which is what a reader of the markdown expects
- * and what re-importing produces anyway: the numbers are display, and the model
- * stores only "ordered".
+ * The marker one list item is written with: its indentation, then `- ` or the
+ * number {@link listNumbers} gave it. The numbering rule itself is shared with
+ * the editor and lives in `lists.ts`.
  */
-function listMarker(run: ListLevel[], block: Block): string {
+function listMarker(block: Block, number: number | null): string {
   const indent = Math.min(block.indent ?? 0, MAX_LIST_INDENT);
-  const style = block.list ?? "bullet";
-  // Levels deeper than this item have ended with the item that opened them.
-  if (run.length > indent + 1) run.length = indent + 1;
-  const level = run[indent];
-  if (level === undefined || level.style !== style) {
-    run[indent] = { style, count: 1 };
-  } else {
-    level.count += 1;
-  }
-  const marker = style === "ordered" ? `${run[indent]?.count ?? 1}. ` : "- ";
+  const marker = number === null ? "- " : `${number}. `;
   return `${LIST_INDENT_UNIT.repeat(indent)}${marker}`;
 }
 
@@ -741,16 +723,15 @@ export function exportMarkdown(
 
   // Blocks and their marks come from one traversal. Looking each block's marks
   // up by id would rescan the whole fragment per block.
-  const run: ListLevel[] = [];
-  for (const { block, inline } of getBlocksWithInline(ydoc)) {
+  const entries = getBlocksWithInline(ydoc);
+  const numbers = listNumbers(entries.map((entry) => entry.block));
+  for (const [index, { block, inline }] of entries.entries()) {
     const listItem = block.type === "list-item";
-    // Anything else between two items ends the run, and its numbering with it.
-    if (!listItem) run.length = 0;
     push(
       renderBlock(
         block,
         inline.length === 0 ? [{ text: block.text, marks: {} }] : inline,
-        listItem ? listMarker(run, block) : "",
+        listItem ? listMarker(block, numbers[index] ?? null) : "",
       ),
       listItem,
     );
@@ -1478,8 +1459,14 @@ function proseBlock(
     : { type, text };
 }
 
-/** `- `, `* `, `+ `, `1. ` or `1) `, with whatever indentation precedes it. */
-const LIST_LINE = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:[ \t]+(.*))?$/;
+/**
+ * `- `, `* `, `+ `, `1. ` or `1) `, with whatever indentation precedes it.
+ *
+ * Four captures: the indentation, the marker, the run of spaces after it, and
+ * the content. The gap is captured because it is part of the arithmetic — see
+ * `contentColumn` in {@link importMarkdown}.
+ */
+const LIST_LINE = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?[ \t]*$/;
 
 /** `> `, indented no further than a paragraph may be. */
 const QUOTE_LINE = /^ {0,3}>[ \t]?(.*)$/;
@@ -1520,22 +1507,29 @@ export function importMarkdown(markdown: string): ImportedDoc {
   };
 
   /**
-   * The indentation columns of the list levels currently open, innermost last.
+   * The **content column** of every list item still open, innermost last.
    *
-   * Depth is relative, never a division: a source indenting nested items by two
-   * spaces and one indenting them by four both mean "one level in", and the
-   * writer's own four-space unit has to come back as the level it went out as.
-   * So a column deeper than the open one opens a level, and a shallower one
-   * closes levels until it fits.
+   * Depth is never a division of the indentation: a source nesting by two
+   * spaces and one nesting by four both mean "one level in". It is not the
+   * relative column either, which is the trap — an item is nested only when it
+   * reaches the column where the item above it *starts its content*, which is
+   * that item's marker column plus its marker plus the spaces after it. So
+   * `- a` followed by ` - b` is two siblings (one space does not reach column
+   * two), while `1. a` followed by `   1. b` is a child (three does reach
+   * three). CommonMark's rule, and the reason each open item remembers a column
+   * rather than the level remembering one.
    */
-  let listColumns: number[] = [];
-  const listLevel = (column: number): number => {
-    while (listColumns.length > 0 && column < (listColumns.at(-1) ?? 0)) {
-      listColumns.pop();
+  let openItems: number[] = [];
+  const listLevel = (column: number, contentColumn: number): number => {
+    // An item closes every open item whose content column it does not reach:
+    // indented less than that, it is a sibling of one of their lists, never a
+    // child of the item above it.
+    while (openItems.length > 0 && column < (openItems.at(-1) ?? 0)) {
+      openItems.pop();
     }
-    const open = listColumns.at(-1);
-    if (open === undefined || column > open) listColumns.push(column);
-    return Math.min(listColumns.length - 1, MAX_LIST_INDENT);
+    const depth = openItems.length;
+    openItems.push(contentColumn);
+    return Math.min(depth, MAX_LIST_INDENT);
   };
 
   for (let i = front.bodyStart; i < lines.length; i += 1) {
@@ -1554,15 +1548,21 @@ export function importMarkdown(markdown: string): ImportedDoc {
       flush();
       const column = (listLine[1] ?? "").replace(/\t/g, "    ").length;
       const marker = listLine[2] ?? "-";
+      const gap = (listLine[3] ?? " ").replace(/\t/g, "    ").length;
+      // Where this item's own content starts, which is what decides whether the
+      // next line is inside it. Five spaces or more after the marker begin an
+      // indented code block instead, and the content column is then the marker
+      // plus one — CommonMark again, and the one place the gap is not itself.
+      const contentColumn = column + marker.length + (gap > 4 ? 1 : gap);
       blocks.push({
-        ...proseBlock("list-item", (listLine[3] ?? "").trim()),
+        ...proseBlock("list-item", (listLine[4] ?? "").trim()),
         list: /^\d/.test(marker) ? "ordered" : "bullet",
-        indent: listLevel(column),
+        indent: listLevel(column, contentColumn),
       });
       continue;
     }
     // Anything else closes the list, so the next run starts at level zero.
-    listColumns = [];
+    openItems = [];
 
     const quoteLine = QUOTE_LINE.exec(line);
     if (quoteLine !== null) {

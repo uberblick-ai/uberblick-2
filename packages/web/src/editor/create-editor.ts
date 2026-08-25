@@ -16,7 +16,7 @@ import { GitHubHovercards } from "./github-hovercard.js";
 import type { GitHubHovercardOptions } from "./github-hovercard.js";
 import { GitHubRefs } from "./github-refs.js";
 import { BlockInputRules } from "./input-rules.js";
-import { ListKeys } from "./list-keys.js";
+import { ListBlocks } from "./list-keys.js";
 import { paletteExtensions } from "./nodes.js";
 import { AgentTypingTheater } from "./typing-theater.js";
 import type { AgentTypingOptions } from "./typing-theater.js";
@@ -71,10 +71,10 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // node and mark set alone. After `BlockIds`, because a rule names the block
     // it converts by the id that plugin assigns.
     BlockInputRules,
-    // Behaviour too: Tab/Shift-Tab/Enter/Backspace inside a list item. Its
+    // Behaviour too: Tab/Shift-Tab/Enter/Backspace inside a list item — the
     // bindings refuse everywhere else, so the core keymap still owns those keys
-    // in every other block.
-    ListKeys,
+    // in every other block — plus the numbers an ordered item is drawn with.
+    ListBlocks,
     Collaboration.configure({
       fragment: options.fragment,
       awareness: options.awareness ?? null,

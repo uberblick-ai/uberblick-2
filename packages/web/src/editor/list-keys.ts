@@ -1,6 +1,9 @@
 /**
- * The list keyboard: Tab and Shift-Tab change depth, Enter continues the list,
- * Backspace at the start of an item leaves it.
+ * The list's behaviour: its keyboard, and the numbers on its ordered items.
+ *
+ * The keyboard is Tab and Shift-Tab to change depth, Enter to continue the
+ * list, Backspace at the start of an item to leave it. The numbers are a
+ * decoration — see {@link listNumberPlugin}.
  *
  * Four bindings, and every one of them is a rule about *one block*, because a
  * list here is a run of adjacent `list-item` blocks rather than a tree (#59).
@@ -35,8 +38,9 @@ import { Extension } from "@tiptap/core";
 import { keymap } from "@tiptap/pm/keymap";
 import type { Command, EditorState } from "@tiptap/pm/state";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import type { Plugin } from "@tiptap/pm/state";
-import { MAX_LIST_INDENT } from "@uberblick/schema";
+import { Plugin } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { MAX_LIST_INDENT, listNumbers } from "@uberblick/schema";
 import { renderableIndent } from "./nodes.js";
 import { retypeBlockInTransaction } from "./retype.js";
 
@@ -119,10 +123,61 @@ export function listKeymap(): Plugin {
   });
 }
 
-/** Tiptap wrapper around {@link listKeymap}. */
-export const ListKeys = Extension.create({
-  name: "uberblickListKeys",
+/* ----------------------------------------------------------------- markers */
+
+/**
+ * Put each ordered item's number on the block as `data-number`, which the
+ * stylesheet draws as its marker.
+ *
+ * The number comes from the schema package's {@link listNumbers} — the same
+ * call the markdown writer makes — so what a reader sees and what an export
+ * writes cannot disagree. Doing it in CSS instead was tried and is wrong: a
+ * counter can only be reset by a rule matching some block, and no selector can
+ * say "a bullet nested *inside* an ordered item", so a nested bullet restarted
+ * the enclosing list's numbering while the export carried on counting.
+ *
+ * A decoration, so nothing is written to the document: the numbers are display,
+ * and they are recomputed from the document on every draw — including for a
+ * peer's edit or an agent's, which is what keeps a live list numbered right.
+ */
+export function listNumberPlugin(): Plugin {
+  return new Plugin({
+    props: {
+      decorations(state: EditorState): DecorationSet | null {
+        const blocks: Array<{ offset: number; node: ProseMirrorNode }> = [];
+        state.doc.forEach((node, offset) => {
+          blocks.push({ offset, node });
+        });
+        const numbers = listNumbers(
+          blocks.map(({ node }) => ({
+            type: node.type.name,
+            list: typeof node.attrs.list === "string" ? node.attrs.list : undefined,
+            indent: renderableIndent(node.attrs.indent),
+          })),
+        );
+
+        const decorations: Decoration[] = [];
+        for (const [index, { offset, node }] of blocks.entries()) {
+          const number = numbers[index];
+          if (number === null || number === undefined) continue;
+          decorations.push(
+            Decoration.node(offset, offset + node.nodeSize, {
+              "data-number": String(number),
+            }),
+          );
+        }
+        return decorations.length === 0
+          ? null
+          : DecorationSet.create(state.doc, decorations);
+      },
+    },
+  });
+}
+
+/** Tiptap wrapper around the list's keyboard and its markers. */
+export const ListBlocks = Extension.create({
+  name: "uberblickListBlocks",
   addProseMirrorPlugins() {
-    return [listKeymap()];
+    return [listKeymap(), listNumberPlugin()];
   },
 });

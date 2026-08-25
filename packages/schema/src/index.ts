@@ -75,6 +75,9 @@ export {
 } from "./annotations.js";
 export type { CommentRun } from "./annotations.js";
 
+export { listNumbers } from "./lists.js";
+export type { ListMarkerInput } from "./lists.js";
+
 export { exportMarkdown, importMarkdown } from "./markdown.js";
 export type {
   ExportMarkdownOptions,
