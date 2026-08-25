@@ -48,6 +48,7 @@ import {
   insertBlockBelow,
   opensSlashSession,
   slashTriggerAt,
+  triggerHint,
 } from "../editor/block-menu.js";
 import type { BlockMenuEntry, SlashTrigger } from "../editor/block-menu.js";
 
@@ -655,8 +656,10 @@ export function BlockMenu({
                     onClick={() => choose(entry)}
                   >
                     <span className="ub-blockmenu-label">{entry.label}</span>
-                    {entry.hint !== null && (
-                      <span className="ub-blockmenu-hint">{entry.hint}</span>
+                    {entry.trigger !== null && (
+                      <span className="ub-blockmenu-hint">
+                        {triggerHint(entry)}
+                      </span>
                     )}
                   </button>
                 </Fragment>

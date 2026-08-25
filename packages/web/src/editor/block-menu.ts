@@ -6,12 +6,14 @@
  * React shell (`ui/BlockMenu.tsx`) owns pixels, focus and keys; this module owns
  * the registry and the transactions.
  *
- * ## One registry, two paths
+ * ## One registry, three paths
  *
  * The menu is reached by typing `/` in an empty paragraph (which CONVERTS that
  * block) and by the gutter `+` (which INSERTS a new block below the hovered
- * one). Both read {@link BLOCK_MENU_ENTRIES}, so a new block type is one entry
- * in that array — never a change to menu code.
+ * one). The third path skips the menu: the markdown input rules in
+ * `editor/input-rules.ts` convert on the entry's `trigger` (`# `, ```` ``` ````)
+ * as it is typed. All three read {@link BLOCK_MENU_ENTRIES}, so a new block type
+ * is one entry in that array — never a change to menu or input-rule code.
  *
  * ## The two operations, and why each is a single transaction
  *
@@ -57,7 +59,7 @@
 
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
-import type { Transaction } from "@tiptap/pm/state";
+import type { EditorState, Transaction } from "@tiptap/pm/state";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { ySyncPluginKey, yUndoPluginKey } from "y-prosemirror";
 import type { BlockType } from "@uberblick/schema";
@@ -71,9 +73,19 @@ export interface BlockMenuEntry {
   label: string;
   /** The heading it is listed under. Consecutive entries share one heading. */
   group: string;
-  /** The markdown-flavoured shortcut shown in the right column, or `null`. */
-  hint: string | null;
-  /** Extra words the filter matches on, beyond the label and the hint. */
+  /**
+   * The markdown prefix that produces this block — the exact characters a
+   * reader types at the start of an empty paragraph (`"# "`, `` "```" ``) — or
+   * `null` for a type markdown has no syntax for.
+   *
+   * One field, three readers: the input rules in `editor/input-rules.ts` fire on
+   * it, the filter matches on it, and the menu shows it in its right column
+   * (without the trailing space — see {@link triggerHint}). So the shortcut a
+   * reader is shown is by construction the shortcut that works, and a new block
+   * type gets its input rule by filling this in.
+   */
+  trigger: string | null;
+  /** Extra words the filter matches on, beyond the label and the trigger. */
   keywords: readonly string[];
   type: BlockType;
   attrs: RetypeAttrs;
@@ -84,17 +96,17 @@ export interface BlockMenuEntry {
  * point: this array *is* the block palette as far as a reader is concerned, so
  * the types listed here have to stay the types the schema owns.
  *
- * The hint column is the token that selects the entry from a query (`/#` lands
- * on the headings, `/``` ` on Code), written the way the markdown export writes
- * that block. It is not a promise about typing `# ` in the prose: this editor
- * has no block-level input rules yet.
+ * The trigger column is both the token that selects the entry from a query (`/#`
+ * lands on the headings, `/``` ` on Code) and the markdown prefix that converts
+ * a block outright — see `editor/input-rules.ts`. Written the way the markdown
+ * export writes that block, because that is what a reader will type.
  */
 export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
   {
     id: "paragraph",
     label: "Paragraph",
     group: "Text",
-    hint: null,
+    trigger: null,
     keywords: ["text", "plain", "body"],
     type: "paragraph",
     attrs: {},
@@ -103,7 +115,7 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     id: "heading-1",
     label: "Heading 1",
     group: "Text",
-    hint: "#",
+    trigger: "# ",
     keywords: ["h1", "title"],
     type: "heading",
     attrs: { level: 1 },
@@ -112,7 +124,7 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     id: "heading-2",
     label: "Heading 2",
     group: "Text",
-    hint: "##",
+    trigger: "## ",
     keywords: ["h2", "section"],
     type: "heading",
     attrs: { level: 2 },
@@ -121,7 +133,7 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     id: "heading-3",
     label: "Heading 3",
     group: "Text",
-    hint: "###",
+    trigger: "### ",
     keywords: ["h3", "subsection"],
     type: "heading",
     attrs: { level: 3 },
@@ -130,7 +142,7 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     id: "code",
     label: "Code",
     group: "Source",
-    hint: "```",
+    trigger: "```",
     keywords: ["snippet", "pre", "fence"],
     type: "code",
     attrs: {},
@@ -139,12 +151,22 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     id: "mermaid",
     label: "Mermaid",
     group: "Source",
-    hint: null,
+    trigger: null,
     keywords: ["diagram", "chart", "flowchart", "sequence"],
     type: "mermaid",
     attrs: {},
   },
 ];
+
+/**
+ * The trigger as a shortcut to *show*, or `null` when there is none. The
+ * trailing space is what commits `# ` in the prose; on a menu row it would only
+ * read as a typo, so it is trimmed for display and for the filter — `##` still
+ * finds Heading 2.
+ */
+export function triggerHint(entry: BlockMenuEntry): string | null {
+  return entry.trigger === null ? null : entry.trigger.trimEnd();
+}
 
 /** Everything a query is matched against, lower-cased. */
 function haystack(entry: BlockMenuEntry): string[] {
@@ -153,7 +175,7 @@ function haystack(entry: BlockMenuEntry): string[] {
     // "heading1" as well as "heading 1", so a query never has to guess whether
     // the label has a space in it.
     entry.label.replace(/\s+/g, ""),
-    entry.hint ?? "",
+    triggerHint(entry) ?? "",
     ...entry.keywords,
   ].map((term) => term.toLowerCase());
 }
@@ -283,9 +305,13 @@ export function opensSlashSession(
  * back", not "give me my empty block back". The boundary belongs in the command
  * because the reader's gesture is where it is — a test that arranges it is
  * testing itself.
+ *
+ * Shared with the markdown input rules (`editor/input-rules.ts`), which split
+ * the same way and for the same reason: the typed `# ` is one step, converting
+ * on it is the next.
  */
-function endUndoCapture(editor: Editor): void {
-  const undo = yUndoPluginKey.getState(editor.state) as
+export function endUndoCapture(state: EditorState): void {
+  const undo = yUndoPluginKey.getState(state) as
     | { undoManager?: { stopCapturing: () => void } }
     | undefined;
   undo?.undoManager?.stopCapturing();
@@ -329,7 +355,7 @@ export function convertBlockAtTrigger(
   const found = findBlockById(editor.state.doc, live.blockId);
   if (found === null) return false;
 
-  endUndoCapture(editor);
+  endUndoCapture(editor.state);
   const tr = editor.state.tr;
   const contentStart = found.pos + 1;
   tr.delete(contentStart, contentStart + found.node.content.size);
@@ -364,7 +390,7 @@ export function insertBlockBelow(
   const fresh = nodeType.createAndFill(attrsForNewBlock(entry));
   if (fresh === null) return false;
 
-  endUndoCapture(editor);
+  endUndoCapture(state);
   const at = blockPos + block.nodeSize;
   const tr = state.tr.insert(at, fresh);
   tr.setSelection(TextSelection.near(tr.doc.resolve(at + 1)));
