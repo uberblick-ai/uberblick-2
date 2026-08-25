@@ -1409,3 +1409,76 @@ h3.ub-heading {
     transition: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Agent typing theater (#121)
+ *
+ * Four classes, all applied by ProseMirror decorations over text that is
+ * already correct — see `src/editor/typing-theater.ts`. There is no
+ * `prefers-reduced-motion` block down here on purpose: the plugin itself is the
+ * off-switch, so under that preference none of these classes is ever applied
+ * and a rule turning off animations that are not running would be dead CSS.
+ * ------------------------------------------------------------------------- */
+
+/* Text the agent removed, drawn back in as a widget so it can be seen leaving.
+   It is not in the document — the document already says the new thing. */
+.ub-typed-out {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  opacity: 0.5;
+}
+
+/* The collapse is `font-size`, which is the only way inline text can shrink to
+   nothing and still wrap while it does. Width and `max-width` do not apply to
+   an inline box, and making it `inline-block` to give them something to act on
+   would stop a removed paragraph from wrapping at all — one very long line
+   sliding out of the column. `forwards` holds it at zero for the frame between
+   the animation ending and the widget being dropped. */
+.ub-typed-out-going {
+  /* Matches STRIKE_MS in typing-theater.ts. */
+  animation: ub-typed-out 350ms ease-in forwards;
+}
+
+@keyframes ub-typed-out {
+  to {
+    font-size: 0;
+    opacity: 0;
+  }
+}
+
+/* Text the agent has written but the reader has not been shown yet. `display:
+   none` rather than `visibility: hidden`, so the line grows as it is typed
+   instead of the whole final paragraph sitting there as blank space — and so a
+   screen reader is not read text that is, as far as this reader is concerned,
+   still being written. Nothing is ever hidden under the local caret: a block
+   the reader's selection is in is not animated at all. */
+.ub-typing-veil {
+  display: none;
+}
+
+/* The frontier the text is arriving at. The negative margin is what keeps it
+   free: the bar is painted in the space the next character will occupy, so no
+   prose moves when it does. One colour for now — a caret per agent session
+   needs the awareness attribution that #73 will bring. */
+.ub-typing-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-right: -2px;
+  vertical-align: text-bottom;
+  background: var(--brand);
+}
+
+/* A block that was fast-forwarded rather than played, because the reader had
+   more waiting for them than the backlog allows. The gutter line has already
+   said the block changed; this only says "and it changed just now". */
+.ub-typed-pulse {
+  /* Matches PULSE_MS in typing-theater.ts. */
+  animation: ub-typed-pulse 600ms ease-out;
+}
+
+@keyframes ub-typed-pulse {
+  from {
+    background: color-mix(in oklch, var(--brand) 20%, transparent);
+  }
+}

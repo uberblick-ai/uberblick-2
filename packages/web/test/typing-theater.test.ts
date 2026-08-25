@@ -1,0 +1,417 @@
+/**
+ * Agent typing theater (#121).
+ *
+ * The contracts this defends, and nothing beyond them:
+ *
+ * 1. **The document is never the animation.** The new text is in the Y.Doc and
+ *    in the editor the instant the update lands — including while the reader is
+ *    still being shown the old text. What the animation moves is what has been
+ *    *shown*, which is why the visible text is read out of the DOM here rather
+ *    than out of the document: they are two different things, and the whole
+ *    feature is the gap between them.
+ * 2. **The reader wins.** A block their caret is in is not animated, and their
+ *    keystrokes survive a remote edit to that block untouched.
+ * 3. **A second edit replaces the first**, so a block plays once, to its final
+ *    state.
+ * 4. **`prefers-reduced-motion` is a real off-switch**, not a shorter animation.
+ * 5. **The backlog is bounded and one take is not** — the ~5s bound falls on
+ *    what is *pending*, and the per-edit cap of an earlier draft does not exist.
+ *
+ * Everything runs against a real Y.Doc with a second replica wired the way the
+ * hub wires one, because "remote" is a property of the transaction that
+ * delivered the change and no fixture can fake one. Time is injected rather
+ * than waited on: the animation frame loop keeps running under jsdom, and a
+ * test driving playback by hand would otherwise be racing the wall clock.
+ */
+
+import { afterEach, describe, expect, it } from "vitest";
+import * as Y from "yjs";
+import { appendBlock, editBlock, getBlocks, initDoc } from "@uberblick/schema";
+import type { Editor } from "@tiptap/core";
+import { trackChangedBlocks } from "../src/editor/changed-blocks.js";
+import {
+  BACKLOG_MS,
+  CARET_CLASS,
+  STRIKE_MS,
+  VEIL_CLASS,
+  spliceBetween,
+  typeSchedule,
+  typingTheaterPluginKey,
+} from "../src/editor/typing-theater.js";
+import { mountEditor, snapshotFragment } from "./helpers.js";
+
+const PARAGRAPH = "The quick brown fox jumps.";
+
+/** No jitter, so a schedule is exactly the base rate. */
+const STEADY = (): number => 0.5;
+
+interface Scene {
+  local: Y.Doc;
+  remote: Y.Doc;
+  blocks: string[];
+  editor: Editor;
+  /** Move the injected clock on and let the plugin see it. */
+  tick: (ms: number) => void;
+  dispose: () => void;
+}
+
+function scene(
+  options: {
+    paragraphs?: string[];
+    reducedMotion?: boolean;
+  } = {},
+): Scene {
+  const paragraphs = options.paragraphs ?? [PARAGRAPH];
+  const local = new Y.Doc();
+  initDoc(local, { uuid: "typing-doc", title: "Typing" });
+  const blocks = paragraphs.map((text) =>
+    appendBlock(local, { type: "paragraph", text }),
+  );
+
+  const remote = new Y.Doc();
+  Y.applyUpdate(remote, Y.encodeStateAsUpdate(local));
+  remote.on("update", (update: Uint8Array) => Y.applyUpdate(local, update));
+  local.on("update", (update: Uint8Array) => Y.applyUpdate(remote, update));
+
+  const marks = trackChangedBlocks(local);
+  // The document has arrived — everything after this is somebody else's news.
+  marks.start();
+
+  let clock = 1_000;
+  const { editor } = mountEditor(local, {
+    changed: marks,
+    typing: {
+      random: STEADY,
+      now: () => clock,
+      reducedMotion: () => options.reducedMotion === true,
+    },
+  });
+
+  return {
+    local,
+    remote,
+    blocks,
+    editor,
+    tick: (ms) => {
+      clock += ms;
+      editor.view.dispatch(
+        editor.state.tr.setMeta(typingTheaterPluginKey, { now: clock }),
+      );
+    },
+    dispose: () => editor.destroy(),
+  };
+}
+
+let open: Scene | null = null;
+
+afterEach(() => {
+  open?.dispose();
+  open = null;
+});
+
+function start(options?: Parameters<typeof scene>[0]): Scene {
+  open = scene(options);
+  return open;
+}
+
+/** What the theater state says it is doing. */
+function theater(editor: Editor) {
+  const state = typingTheaterPluginKey.getState(editor.state);
+  if (state === undefined) throw new Error("the typing plugin is not installed");
+  return state;
+}
+
+/**
+ * The text a reader can actually see in a block: the document's own text minus
+ * whatever the veil is hiding, plus the removed text the theater has drawn back
+ * in. Read out of the DOM because that is the only place the two differ.
+ */
+function visibleText(blockId: string): string {
+  const block = document.getElementById(blockId);
+  if (block === null) throw new Error(`no block ${blockId} in the document`);
+  let shown = "";
+  const walk = (node: Node): void => {
+    if (node.nodeType === 3) {
+      shown += node.nodeValue ?? "";
+      return;
+    }
+    if (
+      node instanceof HTMLElement &&
+      node.classList.contains(VEIL_CLASS)
+    ) {
+      return;
+    }
+    for (const child of Array.from(node.childNodes)) walk(child);
+  };
+  walk(block);
+  return shown;
+}
+
+/** The block's text as the document holds it — the truth, not the show. */
+function documentText(ydoc: Y.Doc, blockId: string): string {
+  const block = getBlocks(ydoc).find((candidate) => candidate.id === blockId);
+  if (block === undefined) throw new Error(`no block ${blockId}`);
+  return block.text;
+}
+
+/** Put the caret at the start of a block's text. */
+function caretIn(editor: Editor, blockId: string): void {
+  let start = 0;
+  editor.state.doc.forEach((node, offset) => {
+    if (node.attrs.id === blockId) start = offset;
+  });
+  editor.commands.setTextSelection(start + 1);
+}
+
+describe("the state is true the moment it arrives, however slowly it is shown", () => {
+  it("holds the new text throughout an animation that is still showing the old", () => {
+    const { local, remote, blocks, editor, tick } = start();
+    const id = blocks[0]!;
+    const rewritten = "The quick red fox leaps over the lazy dog.";
+
+    editBlock(remote, id, PARAGRAPH, rewritten);
+
+    // Applied in full, at once — in the CRDT and in the editor alike.
+    expect(documentText(local, id)).toBe(rewritten);
+    expect(editor.state.doc.child(0).textContent).toBe(rewritten);
+    // And yet the reader is still looking at the sentence that was there.
+    expect(visibleText(id)).toBe(PARAGRAPH);
+
+    // 300ms into the typing phase, at 400wpm with no jitter: ten characters of
+    // "red fox leaps over the lazy dog" — the rate is the pacing, and this is
+    // what it paces to.
+    tick(STRIKE_MS + 300);
+    expect(visibleText(id)).toBe("The quick red fox le.");
+    // The text arrives behind a caret, which is what makes it read as somebody
+    // typing rather than as text fading in.
+    expect(document.querySelectorAll(`.${CARET_CLASS}`)).toHaveLength(1);
+    // Mid-animation, and the document has not wavered.
+    expect(documentText(local, id)).toBe(rewritten);
+    expect(snapshotFragment(local)[0]?.text).toBe(rewritten);
+
+    tick(10_000);
+    expect(visibleText(id)).toBe(rewritten);
+    expect(theater(editor).playing).toBeNull();
+    expect(document.querySelectorAll(`.${VEIL_CLASS}`)).toHaveLength(0);
+  });
+});
+
+describe("the editor is bound before the document arrives", () => {
+  /**
+   * The load order the app actually has, which every other test in this file
+   * skips by seeding the fragment first.
+   *
+   * A real editor binds to an empty room and renders ProseMirror's own
+   * placeholder paragraph, and `BlockIds` then appends a local transaction to
+   * give that placeholder an id. Anything that reads a local document change as
+   * "the reader is working in here" is fooled by that one transaction, claims
+   * the block the default selection sits in — the first — and silently animates
+   * nothing ever again. Every other test here passed while that was true.
+   */
+  it("still animates the first block once the document turns up", () => {
+    const local = new Y.Doc();
+    const marks = trackChangedBlocks(local);
+    marks.start();
+    // The clock never moves here: this test is about whether the take is ever
+    // built at all, which is settled the moment the edit arrives.
+    const { editor } = mountEditor(local, {
+      changed: marks,
+      typing: {
+        random: STEADY,
+        now: () => 1_000,
+        reducedMotion: () => false,
+      },
+    });
+    open = {
+      local,
+      remote: local,
+      blocks: [],
+      editor,
+      tick: () => {},
+      dispose: () => editor.destroy(),
+    };
+
+    // The placeholder has been rendered and given an id by now. The document
+    // then arrives, and is edited.
+    const source = new Y.Doc();
+    initDoc(source, { uuid: "late-doc", title: "Late" });
+    const id = appendBlock(source, { type: "paragraph", text: PARAGRAPH });
+    Y.applyUpdate(local, Y.encodeStateAsUpdate(source));
+    source.on("update", (update: Uint8Array) => Y.applyUpdate(local, update));
+
+    editBlock(source, id, PARAGRAPH, "The quick red fox jumps.");
+
+    expect(theater(editor).playing?.take.id).toBe(id);
+    expect(visibleText(id)).toBe(PARAGRAPH);
+    expect(documentText(local, id)).toBe("The quick red fox jumps.");
+  });
+});
+
+describe("the reader wins", () => {
+  it("never animates the block their caret is in, and loses none of their typing", () => {
+    const { local, remote, blocks, editor } = start();
+    const id = blocks[0]!;
+
+    caretIn(editor, id);
+    editor.commands.insertContent("ABC");
+    expect(documentText(local, id)).toBe(`ABC${PARAGRAPH}`);
+
+    // An agent rewrites the very block being typed in.
+    editBlock(remote, id, `ABC${PARAGRAPH}`, "ABCThe quick red fox jumps.");
+
+    // Asserted here, before another keystroke: the edit was never queued at
+    // all. Later in this test the reader's own typing would invalidate a take
+    // anyway, which would leave these same assertions true for a reason that
+    // has nothing to do with the rule being tested.
+    expect(theater(editor).playing).toBeNull();
+    expect(theater(editor).queue).toHaveLength(0);
+    expect(document.querySelectorAll(`.${VEIL_CLASS}`)).toHaveLength(0);
+    expect(visibleText(id)).toBe(documentText(local, id));
+
+    // ...and the reader keeps typing straight through it.
+    editor.commands.insertContent("DEF");
+
+    // Every keystroke survived, the agent's edit merged, and the document and
+    // the editor agree about all of it.
+    const text = documentText(local, id);
+    expect(text).toContain("ABC");
+    expect(text).toContain("DEF");
+    expect(text).toContain("red fox");
+    expect(text).not.toContain("brown");
+    expect(editor.state.doc.child(0).textContent).toBe(text);
+    expect(snapshotFragment(local)[0]?.text).toBe(text);
+    expect(visibleText(id)).toBe(text);
+  });
+
+  it("fast-forwards a block that is mid-animation when the reader clicks into it", () => {
+    const { local, remote, blocks, editor, tick } = start();
+    const id = blocks[0]!;
+
+    editBlock(remote, id, PARAGRAPH, "A brand new sentence entirely.");
+    tick(STRIKE_MS + 60);
+    expect(visibleText(id)).not.toBe(documentText(local, id));
+
+    caretIn(editor, id);
+
+    expect(theater(editor).playing).toBeNull();
+    expect(visibleText(id)).toBe(documentText(local, id));
+  });
+});
+
+describe("a second edit replaces the first", () => {
+  it("plays the block once, to its final state", () => {
+    const { local, remote, blocks, editor, tick } = start();
+    const id = blocks[0]!;
+
+    editBlock(remote, id, PARAGRAPH, "First rewrite.");
+    tick(STRIKE_MS + 60);
+    expect(theater(editor).playing?.take.text).toBe("First rewrite.");
+
+    editBlock(remote, id, "First rewrite.", "Second rewrite.");
+
+    // One take for the block, not two queued behind each other.
+    expect(theater(editor).queue).toHaveLength(0);
+    expect(theater(editor).playing?.take.text).toBe("Second rewrite.");
+
+    tick(10_000);
+    expect(visibleText(id)).toBe("Second rewrite.");
+    expect(documentText(local, id)).toBe("Second rewrite.");
+  });
+});
+
+describe("prefers-reduced-motion is an off-switch, not a shorter animation", () => {
+  it("shows the new text at once and queues nothing", () => {
+    const { local, remote, blocks, editor } = start({ reducedMotion: true });
+    const id = blocks[0]!;
+
+    editBlock(remote, id, PARAGRAPH, "Rewritten with no ceremony.");
+
+    expect(visibleText(id)).toBe("Rewritten with no ceremony.");
+    expect(documentText(local, id)).toBe("Rewritten with no ceremony.");
+    expect(theater(editor).playing).toBeNull();
+    expect(theater(editor).queue).toHaveLength(0);
+    expect(document.querySelectorAll(`.${VEIL_CLASS}`)).toHaveLength(0);
+  });
+});
+
+describe("the backlog is bounded; one take is not", () => {
+  it("fast-forwards the oldest pending edits and leaves the long one playing", () => {
+    // Four paragraphs, each rewritten to something that takes many seconds to
+    // type — so the pending pile is well past the bound while any single take
+    // is too.
+    const long = "word ".repeat(40).trim();
+    const { local, remote, blocks, editor } = start({
+      paragraphs: ["one", "two", "three", "four"],
+    });
+
+    // One remote transaction carrying all four, so they arrive together.
+    remote.transact(() => {
+      editBlock(remote, blocks[0]!, "one", `one ${long}`);
+      editBlock(remote, blocks[1]!, "two", `two ${long}`);
+      editBlock(remote, blocks[2]!, "three", `three ${long}`);
+      editBlock(remote, blocks[3]!, "four", `four ${long}`);
+    });
+
+    const state = theater(editor);
+    // The first is playing and is itself longer than the backlog bound: the
+    // "~1.5s cap" of the earlier draft is superseded by rate pacing, and a long
+    // edit is allowed to take the time it honestly takes.
+    expect(state.playing?.take.id).toBe(blocks[0]!);
+    expect(state.playing?.take.duration).toBeGreaterThan(BACKLOG_MS);
+    // Only the newest still animates; the ones in between were fast-forwarded.
+    expect(state.queue.map((take) => take.id)).toEqual([blocks[3]!]);
+    expect([...state.pulses.keys()]).toEqual([blocks[1]!, blocks[2]!]);
+
+    // Fast-forwarded means shown, not skipped.
+    expect(visibleText(blocks[1]!)).toBe(documentText(local, blocks[1]!));
+    expect(visibleText(blocks[2]!)).toBe(documentText(local, blocks[2]!));
+    // ...and waiting means still looking like its old self.
+    expect(visibleText(blocks[3]!)).toBe("four");
+  });
+});
+
+describe("the splice a take is built from", () => {
+  it("keeps the common prefix and suffix out of the change", () => {
+    expect(spliceBetween("The quick brown fox.", "The quick red fox.")).toEqual({
+      at: 10,
+      removed: "brown",
+      inserted: "red",
+    });
+  });
+
+  it("reports an append as an insertion at the end, not an overlap", () => {
+    expect(spliceBetween("aa", "aaa")).toEqual({
+      at: 2,
+      removed: "",
+      inserted: "a",
+    });
+  });
+
+  it("has nothing to say about text that did not change", () => {
+    expect(spliceBetween("same", "same")).toBeNull();
+  });
+});
+
+describe("the typing schedule", () => {
+  it("paces at the configured reading rate", () => {
+    const times = typeSchedule("abcdefghij", STEADY);
+    // Ten characters at 400wpm — two words of five — is 300ms.
+    expect(times[9]).toBeCloseTo(300, 5);
+  });
+
+  it("takes a longer beat after a sentence than after a clause", () => {
+    const sentence = typeSchedule("a.b", STEADY);
+    const clause = typeSchedule("a,b", STEADY);
+    const plain = typeSchedule("axb", STEADY);
+    const gap = (times: number[]): number => times[2]! - times[1]!;
+    expect(gap(sentence)).toBeGreaterThan(gap(clause));
+    expect(gap(clause)).toBeGreaterThan(gap(plain));
+  });
+
+  it("reveals both halves of a surrogate pair at once", () => {
+    const times = typeSchedule("a😀b", STEADY);
+    expect(times).toHaveLength(4);
+    // The emoji is two code units and one keystroke: never half an emoji.
+    expect(times[1]).toBe(times[2]);
+  });
+});

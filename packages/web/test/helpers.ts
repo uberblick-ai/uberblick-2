@@ -7,6 +7,7 @@ import * as Y from "yjs";
 import { getBlocksFragment } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
+import type { CreateEditorOptions } from "../src/editor/create-editor.js";
 import type { ChangedBlocks } from "../src/editor/changed-blocks.js";
 import { plainText } from "../src/editor/ytext.js";
 
@@ -66,7 +67,11 @@ export function snapshotFragment(ydoc: Y.Doc): FragmentSnapshot[] {
  */
 export function mountEditor(
   ydoc: Y.Doc,
-  options: { newBlockId?: () => string; changed?: ChangedBlocks } = {},
+  options: {
+    newBlockId?: () => string;
+    changed?: ChangedBlocks;
+    typing?: CreateEditorOptions["typing"];
+  } = {},
 ): { editor: Editor; element: HTMLElement } {
   const element = document.createElement("div");
   document.body.appendChild(element);
@@ -78,6 +83,7 @@ export function mountEditor(
       ? {}
       : { newBlockId: options.newBlockId }),
     ...(options.changed === undefined ? {} : { changed: options.changed }),
+    ...(options.typing === undefined ? {} : { typing: options.typing }),
   });
   editor.on("destroy", () => element.remove());
   return { editor, element };

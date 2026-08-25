@@ -79,6 +79,16 @@ export interface ChangedBlocks {
   generation(): number;
   /** Begin recording. Idempotent; nothing is recorded before it is called. */
   start(): void;
+  /**
+   * Whether the document has arrived — see "Why the document arriving is not a
+   * change" above.
+   *
+   * Read by anything else that has to tell a genuine remote change from
+   * hydration, so that answer is worked out in one place. The typing animation
+   * (#121) is the other caller: it replays remote edits and would otherwise
+   * replay the whole document the moment it opened.
+   */
+  recording(): boolean;
   /** This block has been read. */
   clear(id: string): void;
   /** Returns the unsubscribe. Listeners are called on a microtask — see above. */
@@ -200,6 +210,7 @@ export function trackChangedBlocks(ydoc: Y.Doc): ChangedBlocks {
     start: () => {
       recording = true;
     },
+    recording: () => recording,
     clear: (id) => {
       if (!marked.delete(id)) return;
       generation += 1;
