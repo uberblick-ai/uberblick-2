@@ -14,7 +14,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@uberblick/mcp-server": "workspace:*"
+    "@uberblick/mcp-server": "workspace:*",
+    "@uberblick/schema": "workspace:*"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

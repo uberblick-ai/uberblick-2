@@ -45,6 +45,9 @@ import type { ThreadFocus, ThreadView } from "../src/ui/threads.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { mountEditor } from "./helpers.js";
 
+/** The workspace these stub room keys sit in. A workspace id is a uuid. */
+const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
+
 /** Indices used below: "quick brown" is [4, 15), "jumps" is [20, 25). */
 const PARAGRAPH = "The quick brown fox jumps.";
 
@@ -254,7 +257,7 @@ describe("the rail renders its cards", () => {
 
   /** Only the document matters to the rail: it reads the Y.Doc and nothing else. */
   function stubConnection(ydoc: Y.Doc): RoomConnection {
-    return { room: "main/doc-1", ydoc } as unknown as RoomConnection;
+    return { room: `${WORKSPACE}/doc-1`, ydoc } as unknown as RoomConnection;
   }
 
   function renderRail(
@@ -442,7 +445,7 @@ describe("a highlight and its card focus each other", () => {
       act(() => {
         root.render(
           <ThreadsPane
-            connection={{ room: "main/doc-1", ydoc } as unknown as RoomConnection}
+            connection={{ room: `${WORKSPACE}/doc-1`, ydoc } as unknown as RoomConnection}
             focused={null}
             author="ben"
             onFocus={(threadId) => focus.push(threadId)}
@@ -483,7 +486,7 @@ describe("a highlight and its card focus each other", () => {
       act(() => {
         root.render(
           <ThreadsPane
-            connection={{ room: "main/doc-1", ydoc } as unknown as RoomConnection}
+            connection={{ room: `${WORKSPACE}/doc-1`, ydoc } as unknown as RoomConnection}
             focused={null}
             author="ben"
             onFocus={() => {}}

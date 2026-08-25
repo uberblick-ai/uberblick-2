@@ -53,6 +53,9 @@ import {
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { mountEditor } from "./helpers.js";
 
+/** The workspace these stub room keys sit in. A workspace id is a uuid. */
+const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
+
 /** Put the caret in the block with this id. */
 function caretIn(editor: Editor, blockId: string): void {
   let start = 0;
@@ -170,7 +173,7 @@ function fakeConnection(
     for (const listener of [...listeners]) listener({ ...status });
   };
   const connection = {
-    room: "main/doc-1",
+    room: `${WORKSPACE}/doc-1`,
     ydoc,
     provider: null as unknown as RoomConnection["provider"],
     status,

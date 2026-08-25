@@ -83,6 +83,18 @@ const DELETE = "\u007f";
 
 const hasGit = spawnSync("git", ["--version"]).status === 0;
 
+/** A workspace id, as `ub init` generates one: a bare lowercase uuid. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** A workspace somebody else already owns, joined by id. */
+const JOINED = "7c2b91d4-3e05-4a68-9f31-b0d5e6a71c82";
+
+/** The workspace id in the derived mise config, or null when there is none. */
+function derivedWorkspace(box: Sandbox): string | null {
+  const text = readFileSync(localConfigPath(box), "utf8");
+  return /^WORKSPACE_ID = "([^"\n]+)"$/m.exec(text)?.[1] ?? null;
+}
+
 describe("ub init", () => {
   it("generates an owner-only secret, mirrors it into the checkout, prints none of it", () => {
     const box = sandbox({ checkout: true });
@@ -102,19 +114,33 @@ describe("ub init", () => {
       true,
     );
     expect(derivedSecret(box)).toBe(secret);
-    // One workspace, agreed between `ub` and every mise task.
-    expect(readFileSync(localConfigPath(box), "utf8")).toMatch(
-      /^WORKSPACE_ID = "main"$/m,
-    );
+    // One workspace, agreed between `ub` and every mise task — and generated
+    // here, because nothing else in the system will invent one.
+    expect(userConfig(box).workspace).toMatch(UUID);
+    expect(derivedWorkspace(box)).toBe(userConfig(box).workspace);
+    // It is in the report too, so the id is not something to go looking for.
+    expect(run.stdout).toContain(userConfig(box).workspace as string);
 
     // Identity is recorded, and the colour is one y-prosemirror will accept.
-    expect(userConfig(box).workspace).toBe("main");
     expect(typeof userConfig(box).displayName).toBe("string");
     expect(userConfig(box).color).toMatch(/^#[0-9a-f]{6}$/i);
 
     // The one thing this command must never do.
     expect(run.output).not.toContain(secret);
     expect(run.stdout).toMatch(/credential\s+generated for local development/);
+  });
+
+  it("keeps the workspace it generated, rather than minting a second one", () => {
+    // A workspace id is an identity, and a second run is not a second
+    // workspace: the one in force is what a re-run confirms.
+    const box = sandbox({ checkout: true });
+    expect(runUb(["init", "--yes"], box, WITHOUT_MISE).status).toBe(0);
+    const first = userConfig(box).workspace as string;
+    expect(first).toMatch(UUID);
+
+    expect(runUb(["init", "--yes"], box, WITHOUT_MISE).status).toBe(0);
+    expect(userConfig(box).workspace).toBe(first);
+    expect(derivedWorkspace(box)).toBe(first);
   });
 
   it("is a no-op for the secret on a second run", () => {
@@ -208,11 +234,13 @@ describe("ub init", () => {
   it("needs no TTY: takes flags, and defaults rather than prompting", () => {
     const box = sandbox({ checkout: true });
     // No `--yes`, stdin a pipe: this must complete rather than block on input.
+    // With nobody to ask for a display slug, the id is the bare uuid.
     expect(runUb(["init"], box, WITHOUT_MISE).status).toBe(0);
-    expect(userConfig(box).workspace).toBe("main");
+    expect(userConfig(box).workspace).toMatch(UUID);
 
+    const decorated = `team-b-${JOINED}`;
     const flagged = runUb(
-      ["init", "--name", "Ada", "--color", "#0675c9", "--workspace", "team-b"],
+      ["init", "--name", "Ada", "--color", "#0675c9", "--workspace", decorated],
       box,
       WITHOUT_MISE,
     );
@@ -220,11 +248,11 @@ describe("ub init", () => {
     expect(userConfig(box)).toMatchObject({
       displayName: "Ada",
       color: "#0675c9",
-      workspace: "team-b",
+      workspace: decorated,
     });
-    expect(readFileSync(localConfigPath(box), "utf8")).toMatch(
-      /^WORKSPACE_ID = "team-b"$/m,
-    );
+    // Stored and mirrored exactly as typed: the slug is display, and nothing
+    // rewrites somebody's spelling of their own workspace.
+    expect(derivedWorkspace(box)).toBe(decorated);
   });
 
   it("refuses an answer it cannot write safely, without printing the secret", () => {
@@ -233,10 +261,12 @@ describe("ub init", () => {
 
     for (const argv of [
       ["init", "--yes", "--color", "teal"],
-      // The workspace names a room AND a SQLite file, and `path.join` follows
-      // every one of these out of the data directory.
+      // A workspace id is a uuid, optionally slug-decorated. Nothing else is
+      // one — including the name that used to be the default.
       ["init", "--yes", "--workspace", "a/b"],
       ["init", "--yes", "--workspace", ".."],
+      ["init", "--yes", "--workspace", "main"],
+      ["init", "--yes", "--workspace", `${JOINED}-trailing`],
       ["init", "--yes", "--mcp", "--no-mcp"],
     ]) {
       const run = runUb(argv, box, WITHOUT_MISE);
@@ -248,16 +278,15 @@ describe("ub init", () => {
     // The rejection is the shared rule's, so it names the source and states the
     // real constraints rather than a rule this command invented.
     const named = runUb(["init", "--yes", "--workspace", "a/b"], box, WITHOUT_MISE);
-    expect(named.stderr).toMatch(/--workspace must be a single path and room segment/);
-    expect(named.stderr).toMatch(/not "\."/);
+    expect(named.stderr).toMatch(/--workspace must be a workspace id/);
+    expect(named.stderr).toMatch(/<slug>-<uuid>/);
   });
 
-  it("accepts every workspace the shared rule accepts, and quotes it correctly", () => {
-    // The regression Copilot caught: `ub init` had its own, stricter alphabet, so
-    // it exited 2 for workspaces every other command is happy with. There is one
-    // owner of that rule — `assertWorkspaceSegment` — and writing the value into
-    // TOML is an escaping problem, not a reason to narrow it.
-    for (const workspace of ["team b", 'sales"q3', "équipe"]) {
+  it("accepts every workspace the shared rule accepts, and stores it as typed", () => {
+    // One owner of that rule — schema's `parseWorkspaceId` — and `ub init` must
+    // not be stricter than it: a workspace `ub status` accepts is not one this
+    // command refuses. The slug is display, so the spelling is kept verbatim.
+    for (const workspace of [JOINED, `uberblick-${JOINED}`, `team-b-${JOINED}`]) {
       const box = sandbox({ checkout: true });
       const run = runUb(["init", "--yes", "--workspace", workspace], box, WITHOUT_MISE);
       expect(run.status, run.stderr).toBe(0);
@@ -373,21 +402,21 @@ describe("ub init", () => {
     }
   });
 
-  it("refuses to write a value mise could not parse", () => {
-    // `JSON.stringify` is not a complete TOML escaper: it leaves U+007F raw,
-    // and TOML forbids it raw in a basic string. `assertWorkspaceSegment`
-    // accepts it — a room key does not care — so this refusal belongs to the
-    // file rather than to the shared rule, and it happens before the write.
+  it("refuses a value that could never reach the derived config", () => {
+    // U+007F is what `JSON.stringify` leaves raw and TOML forbids raw, so a
+    // value carrying one would produce a mise.local.toml that takes every task
+    // in the directory down. Since a workspace id is `[a-z0-9-]`, the shared
+    // rule now catches this first — the TOML guard in mise-config.ts stays for
+    // the other value that file carries, the signing secret — and either way
+    // nothing is written.
     const box = sandbox({ checkout: true });
     const run = runUb(
-      ["init", "--yes", "--workspace", `team${DELETE}`],
+      ["init", "--yes", "--workspace", `${JOINED}${DELETE}`],
       box,
       WITHOUT_MISE,
     );
     expect(run.status).toBe(2);
-    expect(run.stderr).toMatch(
-      /--workspace cannot be used because it contains control characters/,
-    );
+    expect(run.stderr).toMatch(/--workspace must be a workspace id/);
     expect(existsSync(localConfigPath(box))).toBe(false);
   });
 
@@ -441,7 +470,7 @@ describe("ub init", () => {
   });
 
   it("repairs the mode of a config.json that was left readable", () => {
-    const box = sandbox({ checkout: true, userConfig: { workspace: "main" } });
+    const box = sandbox({ checkout: true, userConfig: { workspace: JOINED } });
     chmodSync(join(box.configHome, "uberblick", "config.json"), 0o644);
 
     expect(runUb(["init", "--yes"], box, WITHOUT_MISE).status).toBe(0);

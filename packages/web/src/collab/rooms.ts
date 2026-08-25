@@ -34,7 +34,8 @@ import {
 } from "@hocuspocus/provider";
 import { IndexeddbPersistence } from "y-indexeddb";
 import * as Y from "yjs";
-import { HUB_AUTH_TOKEN, WORKSPACE, hubUrl } from "../config.js";
+import { parseRoom } from "@uberblick/schema";
+import { HUB_AUTH_TOKEN, hubUrl } from "../config.js";
 import { mintToken } from "./token.js";
 import type { AwarenessUser } from "./identity.js";
 
@@ -128,8 +129,16 @@ function dropSocket(): void {
   current.disconnect();
 }
 
-/** Mint a fresh hub token. Called by Hocuspocus before every connect. */
-async function hubToken(identity: AwarenessUser): Promise<string> {
+/**
+ * Mint a fresh hub token for one room. Called by Hocuspocus before every
+ * connect.
+ *
+ * The workspace claim comes from the room name rather than from configuration:
+ * the hub compares the two as strings, so reading them out of one place is what
+ * keeps them equal. A room name carries the bare uuid by construction
+ * (`roomForDoc` parses any slug off), which is exactly what the claim must be.
+ */
+async function hubToken(room: string, identity: AwarenessUser): Promise<string> {
   if (HUB_AUTH_TOKEN === "") {
     // `fnox exec --if-missing warn` leaves the secret unset for contributors
     // without the age key. Fail loudly here rather than sending garbage.
@@ -139,7 +148,7 @@ async function hubToken(identity: AwarenessUser): Promise<string> {
   }
   return mintToken(HUB_AUTH_TOKEN, {
     sub: identity.name,
-    workspace: WORKSPACE,
+    workspace: parseRoom(room).workspaceId,
     scope: "read-write",
   });
 }
@@ -211,7 +220,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     document: ydoc,
     websocketProvider: socket,
     // Async callable form: re-minted on every (re)connect.
-    token: () => hubToken(identity),
+    token: () => hubToken(room, identity),
   });
 
   // Required when the socket is shared. `HocuspocusProvider` only attaches

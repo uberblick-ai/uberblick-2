@@ -26,6 +26,8 @@
  * hosted future.
  */
 
+import { parseWorkspaceId } from "@uberblick/schema";
+
 /** What a token is allowed to do. Read-only connections can sync down only. */
 export type TokenScope = "read-write" | "read-only";
 
@@ -91,7 +93,8 @@ function assertClaims(claims: TokenRequest): void {
   }
   if (!isWorkspace(claims.workspace)) {
     throw new Error(
-      'mintToken: workspace must be non-empty and must not contain "/"',
+      "mintToken: workspace must be a workspace uuid, undecorated — a " +
+        "<slug>-<uuid> spelling is not an identity",
     );
   }
   if (!isTokenScope(claims.scope)) {
@@ -112,9 +115,25 @@ function isIssuedAt(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
-/** A workspace is one room segment, so it cannot contain the separator. */
+/**
+ * A workspace claim is the workspace's **bare uuid** — never a decorated
+ * `<slug>-<uuid>` spelling of it.
+ *
+ * `onAuthenticate` compares this claim against the room's workspace segment as
+ * a string, and room names carry the bare uuid, so a decorated claim would sign
+ * a token the hub then refuses on every room in the workspace it names. Mint
+ * and verify apply the same rule: the hub must not sign what it will not
+ * accept.
+ */
 function isWorkspace(value: unknown): value is string {
-  return typeof value === "string" && value !== "" && !value.includes("/");
+  if (typeof value !== "string") {
+    return false;
+  }
+  try {
+    return parseWorkspaceId(value).uuid === value;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -172,8 +191,8 @@ function parseClaims(payloadJson: string): TokenClaims | null {
 /**
  * Verify a token and return its claims, or `null` for anything that is not a
  * well-formed, correctly signed token whose claims {@link mintToken} could have
- * produced — the two apply the same rules, so a signed payload with a workspace
- * spanning two room segments or a fractional `iat` is not a token. Never throws:
+ * produced — the two apply the same rules, so a signed payload with a
+ * slug-decorated workspace or a fractional `iat` is not a token. Never throws:
  * every rejection reason collapses to `null` so callers cannot accidentally
  * distinguish "bad signature" from "bad shape".
  */

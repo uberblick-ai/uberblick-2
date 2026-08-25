@@ -26,6 +26,9 @@ import type { ReactElement } from "react";
 import * as Y from "yjs";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
+/** The workspace these stub room keys sit in. A workspace id is a uuid. */
+const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
+
 const OFFLINE: RoomStatus = {
   connected: false,
   synced: false,
@@ -74,13 +77,13 @@ describe("a room connection is paired with the room it was asked for", () => {
     document.body.appendChild(host);
     const root = createRoot(host);
 
-    act(() => root.render(<Probe room="main/alpha" />));
-    expect(seen.at(-1)).toEqual(["main/alpha", "main/alpha"]);
+    act(() => root.render(<Probe room={`${WORKSPACE}/alpha`} />));
+    expect(seen.at(-1)).toEqual([`${WORKSPACE}/alpha`, `${WORKSPACE}/alpha`]);
 
     // The navigation. Somewhere in here is a render where the state still holds
     // alpha while the caller has already asked for beta.
-    act(() => root.render(<Probe room="main/beta" />));
-    expect(seen.at(-1)).toEqual(["main/beta", "main/beta"]);
+    act(() => root.render(<Probe room={`${WORKSPACE}/beta`} />));
+    expect(seen.at(-1)).toEqual([`${WORKSPACE}/beta`, `${WORKSPACE}/beta`]);
 
     // …and leaving the document entirely.
     act(() => root.render(<Probe room={null} />));

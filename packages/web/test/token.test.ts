@@ -11,22 +11,23 @@
 
 import { describe, expect, it } from "vitest";
 import { verifyToken } from "@uberblick/hub/token";
-import { DEFAULT_WORKSPACE } from "@uberblick/schema";
 import { mintToken } from "../src/collab/token.js";
 
 const SECRET = "dev-secret";
+/** A workspace claim is the workspace's bare uuid. */
+const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 
 describe("client-minted tokens", () => {
   it("verifies against the hub with the claims intact", async () => {
     const token = await mintToken(SECRET, {
       sub: "loitering otter",
-      workspace: DEFAULT_WORKSPACE,
+      workspace: WORKSPACE,
       scope: "read-write",
     });
     const claims = await verifyToken(SECRET, token);
     expect(claims).not.toBeNull();
     expect(claims?.sub).toBe("loitering otter");
-    expect(claims?.workspace).toBe(DEFAULT_WORKSPACE);
+    expect(claims?.workspace).toBe(WORKSPACE);
     expect(claims?.scope).toBe("read-write");
     expect(typeof claims?.iat).toBe("number");
 
@@ -36,7 +37,7 @@ describe("client-minted tokens", () => {
     await expect(
       mintToken(SECRET, {
         sub: "agent",
-        workspace: "main/evil",
+        workspace: `${WORKSPACE}/evil`,
         scope: "read-write",
       }),
     ).rejects.toThrow(/workspace/);

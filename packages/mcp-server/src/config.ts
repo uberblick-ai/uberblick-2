@@ -8,6 +8,12 @@
  * hardcoded address in this package is {@link DEFAULT_HUB_URL}. `HUB_AUTH_TOKEN`
  * is the HMAC *secret* tokens are signed with, delivered by `fnox exec`.
  *
+ * `WORKSPACE_ID` is required and has no default: it names the rooms, the token
+ * claim and the local database, and a wrong guess would quietly open somebody
+ * else's corpus or start an empty one. A workspace id is a uuid, optionally
+ * decorated as `<slug>-<uuid>` for display — schema owns that parse, and only
+ * the uuid survives it.
+ *
  * A missing secret is not a startup error here, unlike in the hub: this server
  * is offline-first by construction, so it starts and serves every tool with no
  * secret and no hub — it just cannot sync, and `sync_status` says so. A hub that
@@ -18,7 +24,7 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_WORKSPACE } from "@uberblick/schema";
+import { parseWorkspaceId } from "@uberblick/schema";
 
 /** The only hub address in this package. Matches mise's `HUB_URL` default. */
 export const DEFAULT_HUB_URL = "ws://localhost:1234";
@@ -37,7 +43,12 @@ const AGENT_COLORS = [
 ] as const;
 
 export interface McpConfig {
-  /** The workspace whose rooms this server opens (`WORKSPACE_ID`). */
+  /**
+   * The workspace whose rooms this server opens — the **bare uuid**, whatever
+   * spelling `WORKSPACE_ID` used. Never a decorated `<slug>-<uuid>`: it keys
+   * the rooms, the token claim and the database file, and two spellings of one
+   * workspace must resolve to one of each.
+   */
   workspaceId: string;
   /** Websocket endpoint of the hub (`HUB_URL`). */
   hubUrl: string;
@@ -90,16 +101,25 @@ function dataHome(env: NodeJS.ProcessEnv): string {
 }
 
 /**
- * `<data home>/uberblick/<workspace>.sqlite` — one database per user per
+ * `<data home>/uberblick/<workspaceUuid>.sqlite` — one database per user per
  * workspace. Two MCP server instances sharing it is the normal case, not an
  * edge case: the store runs in WAL with a busy timeout, and every tool call
  * polls the log tail before it serves.
+ *
+ * Keyed by the bare uuid, never by a decorated spelling: `<slug>-<uuid>` and
+ * `<uuid>` are one workspace, and they must hydrate one file — a slug-prefixed
+ * filename would give the same corpus two local replicas that never converge.
+ * A uuid is inherently path-safe, so nothing else has to guard this join.
  */
 export function defaultDatabasePath(
   workspaceId: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(dataHome(env), "uberblick", `${workspaceId}.sqlite`);
+  return join(
+    dataHome(env),
+    "uberblick",
+    `${parseWorkspaceId(workspaceId).uuid}.sqlite`,
+  );
 }
 
 function trimmed(value: string | undefined): string | null {
@@ -107,44 +127,23 @@ function trimmed(value: string | undefined): string | null {
   return text === undefined || text === "" ? null : text;
 }
 
-/**
- * The workspace has to be one path segment as well as one room segment: it names
- * the SQLite file, and `path.join` happily follows `..` or a `\` out of the data
- * directory — on Windows both separators count.
- *
- * Exported because `ub` resolves a workspace from files as well as the
- * environment and must apply this exact rule to all of them; `label` names the
- * source in the message, so a bad value in `./uberblick.json` does not report
- * itself as a bad `WORKSPACE_ID`.
- *
- * The rejected value is deliberately not in the message. `label` already says
- * where to look, and a secret mistakenly exported as `WORKSPACE_ID` would
- * otherwise be printed by the very error that refuses it.
- */
-export function assertWorkspaceSegment(
-  value: string,
-  label = "WORKSPACE_ID",
-): void {
-  const rejected =
-    value === "" ||
-    value === "." ||
-    value === ".." ||
-    value.includes("/") ||
-    value.includes("\\") ||
-    value.includes("\0");
-  if (rejected) {
-    throw new Error(
-      `${label} must be a single path and room segment: no "/", no "\\", ` +
-        'not "." or ".."',
-    );
-  }
-}
+/** Every room, the token claim and the database file are keyed by this. */
+const MISSING_WORKSPACE =
+  "WORKSPACE_ID is not set. It names the rooms this server opens, the " +
+  "workspace claim in its hub token, and its local database — there is no " +
+  "default. Run `ub init` to create a workspace, or export WORKSPACE_ID " +
+  "yourself (`ub status` prints the one in force).";
 
 export function resolveMcpConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): McpConfig {
-  const workspaceId = trimmed(env.WORKSPACE_ID) ?? DEFAULT_WORKSPACE;
-  assertWorkspaceSegment(workspaceId);
+  const configured = trimmed(env.WORKSPACE_ID);
+  if (configured === null) {
+    throw new Error(MISSING_WORKSPACE);
+  }
+  // A decorated value is accepted and parsed down: the slug is display, the
+  // uuid is the identity, and only the identity goes any further.
+  const workspaceId = parseWorkspaceId(configured).uuid;
   const sessionId = `agent-${randomUUID()}`;
 
   return {

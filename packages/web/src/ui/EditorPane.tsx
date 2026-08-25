@@ -31,7 +31,7 @@ import { threadIdFromTarget } from "./threads.js";
  * The pane frame with a message in it instead of a document.
  *
  * Every "there is nothing to edit here" screen renders through this — no
- * document picked, an unknown workspace, a malformed link, a link whose
+ * document picked, no workspace at all, a malformed link, a link whose
  * document has not synced yet. One frame for all of them means resolving a link
  * swaps the words inside the column rather than moving the column.
  */

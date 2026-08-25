@@ -41,6 +41,7 @@ import {
   testConfig,
   TEST_SECRET,
   waitUntil,
+  WORKSPACE,
 } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
@@ -122,6 +123,7 @@ async function startWriter(port: number): Promise<Writer> {
     cwd: PACKAGE_ROOT,
     env: {
       ...getDefaultEnvironment(),
+      WORKSPACE_ID: WORKSPACE,
       UBERBLICK_DB: tempDatabasePath(),
       HUB_URL: `ws://127.0.0.1:${port}`,
       HUB_AUTH_TOKEN: TEST_SECRET,
@@ -209,7 +211,7 @@ describe("synced", () => {
       title: "The debounce window",
       blocks: [{ type: "paragraph", text: STORED }],
     });
-    const room = `main/${created.uuid}`;
+    const room = `${WORKSPACE}/${created.uuid}`;
 
     // The create has to reach the hub's disk before the edit is made: otherwise
     // the crash takes the whole document and says nothing about the window.
@@ -217,7 +219,7 @@ describe("synced", () => {
       "the hub to store the created document",
       () =>
         storedBlocks(hubDatabase, room)?.includes(STORED) === true &&
-        storedBlocks(hubDatabase, "main/_directory") !== null,
+        storedBlocks(hubDatabase, `${WORKSPACE}/_directory`) !== null,
     );
 
     await writer.call("edit_block", {

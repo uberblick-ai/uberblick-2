@@ -139,9 +139,12 @@ the fallback, which is exactly why CI is high priority.
 
 - TypeScript everywhere; single pnpm monorepo.
 - One Y.Doc per document; room name = `<workspaceId>/<docUuid>`, directory at
-  `<workspaceId>/_directory`. One configured workspace for now (`WORKSPACE_ID`,
-  default `main`) — tenancy lives in the room key from day one so a hosted hub
-  never needs a room migration.
+  `<workspaceId>/_directory`. A workspace id is a **uuid** — globally unique,
+  assigned by `ub init`, never guessable, no default. For display it may be
+  decorated as `<slug>-<uuid>`; the slug is cosmetic, parsed off (schema owns
+  the parse) before the id reaches rooms, token claims, or the database
+  filename — nothing two machines compare ever carries a slug. Tenancy lives in
+  the room key from day one so a hosted hub never needs a room migration.
 - Doc layout: `meta` (Y.Map: uuid, title, tags, links-by-UUID), `blocks`
   (Y.XmlFragment, one element per block with stable `id` attrs; types:
   paragraph, heading, code, mermaid), `annotations` (Y.Map of thread JSON;

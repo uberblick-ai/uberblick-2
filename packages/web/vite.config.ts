@@ -4,10 +4,15 @@ import { defineConfig } from "vitest/config";
 /**
  * Client configuration reaches the bundle through `define`.
  *
- * `HUB_URL` is plaintext config (mise `[env]`); `HUB_AUTH_TOKEN` is a real
- * secret decrypted by `fnox exec`, which the `mise run web` task already wraps
- * this command in. Both are read here, at config time, from the task's
- * environment — never from a committed `.env`.
+ * `HUB_URL` and `WORKSPACE_ID` are plaintext config (mise `[env]`, the latter
+ * written into the derived `mise.local.toml` by `ub init`); `HUB_AUTH_TOKEN` is
+ * a real secret decrypted by `fnox exec`, which the `mise run web` task already
+ * wraps this command in. All three are read here, at config time, from the
+ * task's environment — never from a committed `.env`.
+ *
+ * `__WORKSPACE_ID__` answers one address, `/`, which names no workspace. Every
+ * other address carries its own: a bundle is not bound to a workspace, and an
+ * empty define means `/` says so rather than guessing. See src/ui/route.ts.
  *
  * `__HUB_URL__` is a *default*, not the answer. The client prefers the hub
  * endpoint served at `/uberblick-config.json` on its own origin and falls back
@@ -33,6 +38,7 @@ export default defineConfig({
   define: {
     __HUB_URL__: JSON.stringify(process.env.HUB_URL ?? "ws://localhost:1234"),
     __HUB_AUTH_TOKEN__: JSON.stringify(process.env.HUB_AUTH_TOKEN ?? ""),
+    __WORKSPACE_ID__: JSON.stringify(process.env.WORKSPACE_ID ?? ""),
   },
   server: {
     port: 5173,
