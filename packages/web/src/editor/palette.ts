@@ -1,8 +1,8 @@
 /**
  * The restricted block palette, and the gate that keeps foreign content out.
  *
- * The editor's ProseMirror schema declares exactly the four schema-owned block
- * types and exactly one mark. That is deliberate: y-prosemirror serialises a
+ * The editor's ProseMirror schema declares exactly the schema-owned block types
+ * and exactly the schema-owned marks. That is deliberate: y-prosemirror serialises a
  * ProseMirror node straight onto the `blocks` Y.XmlFragment, and its
  * `updateYFragment` removes any Yjs attribute the ProseMirror node spec does
  * not declare. A wider palette means the web client can write shapes the schema

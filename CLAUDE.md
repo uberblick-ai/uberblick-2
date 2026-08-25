@@ -153,15 +153,18 @@ the fallback, which is exactly why CI is high priority.
   the room key from day one so a hosted hub never needs a room migration.
 - Doc layout: `meta` (Y.Map: uuid, title, tags, links-by-UUID), `blocks`
   (Y.XmlFragment, one element per block with stable `id` attrs; types:
-  paragraph, heading, code, mermaid), `annotations` (Y.Map of thread JSON;
+  paragraph, heading, code, mermaid, list-item, quote), `annotations` (Y.Map of thread JSON;
   ranges are anchored by a `comment` formatting mark carrying the threadId on
   the block's Y.XmlText — marks survive splits, re-types, and concurrent
   edits, unlike relative positions). Inline formatting rides the same
   mechanism: a closed set of Yjs text-formatting marks on the block's
   Y.XmlText — `bold`, `italic`, `strike`, `inlineCode`, `link` (external
   http(s) URLs only) — plus `comment`, and nothing else. Prose blocks
-  (paragraph, heading) carry inline marks; `code` and `mermaid` are source
-  text and carry only `comment`. The mark is named `inlineCode` rather than
+  (paragraph, heading, list-item, quote) carry inline marks; `code` and
+  `mermaid` are source text and carry only `comment`. A list is a *run of
+  adjacent `list-item` blocks* carrying `list` (bullet|ordered) and `indent`
+  (0–3) — markdown's own model, so nothing nests. The mark is named
+  `inlineCode` rather than
   `code` because ProseMirror forbids one name being both a node and a mark,
   and a mark's name is its Yjs key. Links reference UUIDs, never paths or
   titles.
@@ -174,9 +177,11 @@ the fallback, which is exactly why CI is high priority.
   weakens offline; document that, don't hide it. A whole-document replace tool
   must not exist.
 - The web editor is Tiptap + y-prosemirror with custom nodes matching the
-  schema-owned shape; the block palette is restricted to the four block types;
-  unknown blocks degrade loudly (visible placeholder, explicit export marker),
-  never silently dropped.
+  schema-owned shape; the block palette is restricted to the closed set the
+  schema owns — paragraph, heading, code, mermaid, list-item, quote — and
+  stock Tiptap list extensions are rejected, because a nested list tree has no
+  block-scoped text for an agent to edit; unknown blocks degrade loudly
+  (visible placeholder, explicit export marker), never silently dropped.
 - Markdown is an export format, never the storage format.
 - Every client publishes awareness (name, color, cursor); agent sessions are
   visible in the UI.

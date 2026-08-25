@@ -149,7 +149,7 @@ const CLAUSE_END = new Set([",", ";", ":"]);
  * The blocks that animate. `code` and `mermaid` are source text, not prose —
  * they update instantly and are announced by the #120 gutter marker instead.
  */
-const PROSE_BLOCKS = new Set(["paragraph", "heading"]);
+const PROSE_BLOCKS = new Set(["paragraph", "heading", "list-item", "quote"]);
 
 /** The removed text, drawn back in. */
 export const REMOVED_CLASS = "ub-typed-out";

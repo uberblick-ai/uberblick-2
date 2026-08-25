@@ -139,6 +139,36 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     attrs: { level: 3 },
   },
   {
+    id: "quote",
+    label: "Quote",
+    group: "Text",
+    trigger: "> ",
+    keywords: ["blockquote", "cite", "quotation"],
+    type: "quote",
+    attrs: {},
+  },
+  {
+    id: "list-bullet",
+    label: "Bullet list",
+    group: "Lists",
+    trigger: "- ",
+    keywords: ["ul", "unordered", "bullets", "item"],
+    type: "list-item",
+    attrs: { list: "bullet" },
+  },
+  {
+    // Only `1. ` converts, not `7. `: the trigger is a literal, and the number
+    // a reader types is not stored anyway — a run of items numbers itself on
+    // export. Continuing the list is Enter's job, not the input rule's.
+    id: "list-ordered",
+    label: "Numbered list",
+    group: "Lists",
+    trigger: "1. ",
+    keywords: ["ol", "ordered", "numbers", "item"],
+    type: "list-item",
+    attrs: { list: "ordered" },
+  },
+  {
     id: "code",
     label: "Code",
     group: "Source",
@@ -323,6 +353,10 @@ function attrsForNewBlock(entry: BlockMenuEntry): Record<string, unknown> {
   // Strings, like everything the schema stores — see editor/nodes.ts.
   if (entry.type === "heading") attrs.level = String(entry.attrs.level ?? 1);
   if (entry.type === "code") attrs.language = entry.attrs.language ?? null;
+  if (entry.type === "list-item") {
+    attrs.list = entry.attrs.list ?? "bullet";
+    attrs.indent = String(entry.attrs.indent ?? 0);
+  }
   return attrs;
 }
 

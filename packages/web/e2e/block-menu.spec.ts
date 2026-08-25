@@ -150,3 +150,36 @@ test("typing ## converts the block in place, and one undo gives it back", async 
   expect(await second.textContent()).toBe("## ");
   await expect(second).toHaveAttribute("id", id ?? "");
 });
+
+/**
+ * The list keyboard, and Tab in particular. In a browser Tab moves focus — so
+ * the proof that it indents the item instead, leaving the caret where it was,
+ * is a claim about a real focus model that jsdom cannot make. The rest of the
+ * list rules are pinned in `test/list-keys.test.ts` against a real Y.Doc.
+ */
+test("typing - starts a list, and Tab indents the item rather than leaving it", async ({
+  page,
+}) => {
+  await openDoc(page, "first");
+  await page.keyboard.press("Enter");
+
+  await page.keyboard.type("- a", { delay: 15 });
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("b", { delay: 15 });
+  await page.keyboard.press("Tab");
+
+  const items = page.locator(".ub-editor .ProseMirror > li");
+  await expect(items).toHaveCount(2);
+  await expect(items.nth(0)).toHaveAttribute("data-indent", "0");
+  await expect(items.nth(1)).toHaveAttribute("data-indent", "1");
+
+  // Two items, two blocks, two ids — each of them addressable on its own.
+  const first = await items.nth(0).getAttribute("id");
+  const second = await items.nth(1).getAttribute("id");
+  expect(first).not.toBeNull();
+  expect(second).not.toBe(first);
+
+  // And the caret is still in the item Tab indented: typing carries on there.
+  await page.keyboard.type("!", { delay: 15 });
+  await expect(items.nth(1)).toHaveText("b!");
+});

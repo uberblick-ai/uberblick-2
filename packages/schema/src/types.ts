@@ -6,7 +6,14 @@
  */
 
 /** Block types. The set is closed; a block type is a Y.XmlElement nodeName. */
-export const BLOCK_TYPES = ["paragraph", "heading", "code", "mermaid"] as const;
+export const BLOCK_TYPES = [
+  "paragraph",
+  "heading",
+  "code",
+  "mermaid",
+  "list-item",
+  "quote",
+] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];
 
@@ -15,6 +22,45 @@ export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 export function isBlockType(value: string): value is BlockType {
   return (BLOCK_TYPES as readonly string[]).includes(value);
 }
+
+/**
+ * The block types whose text is prose: they carry the inline mark set, and the
+ * markdown reader resolves inline syntax inside them.
+ *
+ * The complement is source text — `code` and `mermaid` — which carries only the
+ * `comment` anchor. Everything that has to tell the two apart asks here, so the
+ * distinction is stated once.
+ */
+export const PROSE_BLOCK_TYPES = [
+  "paragraph",
+  "heading",
+  "list-item",
+  "quote",
+] as const;
+
+export type ProseBlockType = (typeof PROSE_BLOCK_TYPES)[number];
+
+export function isProseBlockType(value: string): value is ProseBlockType {
+  return (PROSE_BLOCK_TYPES as readonly string[]).includes(value);
+}
+
+/**
+ * What a `list-item` block's marker looks like. A "list" is a run of adjacent
+ * list-item blocks — markdown's own model, and the reason the document stays
+ * flat: there is no list node to nest into.
+ */
+export const LIST_STYLES = ["bullet", "ordered"] as const;
+
+export type ListStyle = (typeof LIST_STYLES)[number];
+
+export function isListStyle(value: string): value is ListStyle {
+  return (LIST_STYLES as readonly string[]).includes(value);
+}
+
+/** How deep a list item may sit. Four levels, counted from zero. */
+export type ListIndent = 0 | 1 | 2 | 3;
+
+export const MAX_LIST_INDENT = 3;
 
 /**
  * Inline formatting marks. The set is closed; a mark name is a Yjs text
@@ -69,7 +115,8 @@ export interface InlineRun {
  * A block as read out of the document.
  *
  * `level` is present exactly for `heading`, `language` exactly for `code`
- * (possibly the empty string when no language was set).
+ * (possibly the empty string when no language was set), and `list`/`indent`
+ * exactly for `list-item`.
  */
 export interface Block {
   id: string;
@@ -86,6 +133,10 @@ export interface Block {
   rev: string;
   level?: HeadingLevel;
   language?: string;
+  /** List items only: the marker their run is written with. */
+  list?: ListStyle;
+  /** List items only: nesting depth, 0–3. */
+  indent?: ListIndent;
 }
 
 /** The shape accepted when creating a block. */
@@ -96,9 +147,13 @@ export interface BlockInput {
   level?: HeadingLevel;
   /** Code blocks only, e.g. "ts". Ignored for other types. */
   language?: string;
+  /** List items only. Defaults to "bullet". Ignored for other types. */
+  list?: ListStyle;
+  /** List items only. Clamped to 0–3, defaults to 0. Ignored for other types. */
+  indent?: number;
   /**
-   * Formatted content, for `paragraph` and `heading` only — the two block types
-   * that carry inline marks. When present it *replaces* `text`, so a caller
+   * Formatted content, for the prose block types only — see
+   * {@link PROSE_BLOCK_TYPES}. When present it *replaces* `text`, so a caller
    * setting both must keep them consistent; `importMarkdown` does.
    *
    * `code` and `mermaid` hold source, so this is ignored for them.

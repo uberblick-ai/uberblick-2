@@ -242,3 +242,160 @@ describe("markdown round-trip", () => {
     expect(exportMarkdown(doc, { frontmatter: false })).toBe("## One line\n");
   });
 });
+
+/**
+ * Lists and quotes are the flat model's whole claim about GFM: a list is a run
+ * of adjacent `list-item` blocks and a quote is one block, so the trip out and
+ * back has to be exact in *both* directions — the markdown a reader wrote, and
+ * the blocks an agent reads.
+ */
+describe("lists and quotes", () => {
+  const LIST_SOURCE = [
+    "- alpha",
+    "- beta",
+    "    - nested one",
+    "    - nested two",
+    "1. first",
+    "2. second",
+    "    1. sub",
+    "",
+    "> a quote",
+    "> second line",
+    "",
+    "Plain paragraph.",
+    "",
+  ].join("\n");
+
+  it("reads a list into flat blocks, depth from the source's own indentation", () => {
+    expect(importMarkdown(LIST_SOURCE).blocks).toEqual([
+      { type: "list-item", text: "alpha", list: "bullet", indent: 0 },
+      { type: "list-item", text: "beta", list: "bullet", indent: 0 },
+      { type: "list-item", text: "nested one", list: "bullet", indent: 1 },
+      { type: "list-item", text: "nested two", list: "bullet", indent: 1 },
+      { type: "list-item", text: "first", list: "ordered", indent: 0 },
+      { type: "list-item", text: "second", list: "ordered", indent: 0 },
+      { type: "list-item", text: "sub", list: "ordered", indent: 1 },
+      { type: "quote", text: "a quote\nsecond line" },
+      { type: "paragraph", text: "Plain paragraph." },
+    ]);
+  });
+
+  /**
+   * Two spaces, four spaces, `*`, `+`, `1)` — all of them are GFM, and an agent
+   * writing markdown by hand will use whichever it likes. Depth is relative, so
+   * every one of them means the same list.
+   */
+  it("reads every marker and any indent unit as the same depth", () => {
+    expect(
+      importMarkdown(["* alpha", "  + nested", "  + also", "1) numbered"].join("\n"))
+        .blocks,
+    ).toEqual([
+      { type: "list-item", text: "alpha", list: "bullet", indent: 0 },
+      { type: "list-item", text: "nested", list: "bullet", indent: 1 },
+      { type: "list-item", text: "also", list: "bullet", indent: 1 },
+      { type: "list-item", text: "numbered", list: "ordered", indent: 0 },
+    ]);
+
+    // Deeper than the model holds is clamped, not refused.
+    const deep = importMarkdown(
+      ["- a", "  - b", "    - c", "      - d", "        - e"].join("\n"),
+    );
+    expect(deep.blocks.map((block) => block.indent)).toEqual([0, 1, 2, 3, 3]);
+  });
+
+  it("exports a run of items as one tight, correctly nested list", () => {
+    const doc = docFrom(LIST_SOURCE);
+    const exported = exportMarkdown(doc, { frontmatter: false });
+    expect(exported).toBe(LIST_SOURCE);
+
+    // …and the second trip changes nothing, blocks or bytes.
+    expect(importMarkdown(exported).blocks).toEqual(
+      importMarkdown(LIST_SOURCE).blocks,
+    );
+    expect(exportMarkdown(docFrom(exported), { frontmatter: false })).toBe(
+      exported,
+    );
+  });
+
+  /**
+   * The numbers are display: the model stores "ordered" and nothing else, so
+   * the writer counts. A run that changes style, or a level that is re-entered,
+   * starts again at one — which is what the markdown means anyway.
+   */
+  it("numbers ordered items per level, restarting where the run does", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Numbers" });
+    for (const [text, list, indent] of [
+      ["one", "ordered", 0],
+      ["one.one", "ordered", 1],
+      ["one.two", "ordered", 1],
+      ["two", "ordered", 0],
+      ["bullet", "bullet", 0],
+      ["one again", "ordered", 0],
+    ] as const) {
+      appendBlock(doc, { type: "list-item", text, list, indent });
+    }
+    appendBlock(doc, { type: "paragraph", text: "After." });
+    appendBlock(doc, { type: "list-item", text: "fresh", list: "ordered" });
+
+    expect(exportMarkdown(doc, { frontmatter: false })).toBe(
+      [
+        "1. one",
+        "    1. one.one",
+        "    2. one.two",
+        "2. two",
+        "- bullet",
+        "1. one again",
+        "",
+        "After.",
+        "",
+        "1. fresh",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("carries inline marks through both directions", () => {
+    const source = ["- an *emphatic* item", "", "> a **loud** quote", ""].join(
+      "\n",
+    );
+    const imported = importMarkdown(source);
+    expect(imported.blocks[0]?.inline).toEqual([
+      { text: "an ", marks: {} },
+      { text: "emphatic", marks: { italic: true } },
+      { text: " item", marks: {} },
+    ]);
+    expect(imported.blocks[1]?.inline).toEqual([
+      { text: "a ", marks: {} },
+      { text: "loud", marks: { bold: true } },
+      { text: " quote", marks: {} },
+    ]);
+    expect(exportMarkdown(docFrom(source), { frontmatter: false })).toBe(source);
+  });
+
+  it("keeps a blank line inside a list from ending it", () => {
+    expect(
+      importMarkdown(["- a", "", "- b", "", "Prose.", "", "- c"].join("\n"))
+        .blocks,
+    ).toEqual([
+      { type: "list-item", text: "a", list: "bullet", indent: 0 },
+      { type: "list-item", text: "b", list: "bullet", indent: 0 },
+      { type: "paragraph", text: "Prose." },
+      { type: "list-item", text: "c", list: "bullet", indent: 0 },
+    ]);
+  });
+
+  it("reads an empty item and an empty quote line without losing the block", () => {
+    expect(importMarkdown(["-", "> "].join("\n")).blocks).toEqual([
+      { type: "list-item", text: "", list: "bullet", indent: 0 },
+      { type: "quote", text: "" },
+    ]);
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Empty" });
+    appendBlock(doc, { type: "list-item" });
+    appendBlock(doc, { type: "quote", text: "line\n\nlast" });
+    expect(exportMarkdown(doc, { frontmatter: false })).toBe(
+      ["-", "", "> line", ">", "> last", ""].join("\n"),
+    );
+  });
+});

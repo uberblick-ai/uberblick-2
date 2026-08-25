@@ -8,8 +8,9 @@
  * Both directions carry the closed inline-mark set — `**bold**`, `*italic*`,
  * `~~strike~~`, `` `code` `` and `[text](https://…)` — because a block's text
  * does store inline formatting (as Yjs formatting attributes; see `marks.ts`).
- * Block structure is still line-based: no lists, tables or block quotes exist in
- * the model, so none are read or written here.
+ * Block structure stays line-based, which is exactly what the flat block model
+ * needs: a list is a run of `list-item` blocks and a quote is a `quote` block,
+ * so a line maps to a block and back with nothing to nest.
  *
  * Reader and writer are one unit: every legal combination of marks has to
  * survive the trip out and back, so the reader implements CommonMark's delimiter
@@ -46,12 +47,15 @@ import {
   pushInlineRun,
   sameInlineMarks,
 } from "./marks.js";
+import { MAX_LIST_INDENT } from "./types.js";
 import type {
   Block,
   BlockType,
   HeadingLevel,
   InlineMarkSet,
   InlineRun,
+  ListStyle,
+  ProseBlockType,
 } from "./types.js";
 
 export interface ExportMarkdownOptions {
@@ -584,7 +588,53 @@ function renderInline(source: readonly InlineRun[]): string {
   return out;
 }
 
-function renderBlock(block: Block, inline: readonly InlineRun[]): string {
+/**
+ * One indent level, as written.
+ *
+ * Four spaces rather than two, because both markers have to nest under it: a
+ * child of `1. ` has to start at or past the parent's content column, which is
+ * three, and two spaces would close the list instead of nesting into it. Four
+ * clears every marker this writer emits and still stays under the parent's
+ * content column plus four, where an indented code block would begin.
+ */
+const LIST_INDENT_UNIT = "    ";
+
+/** The open ordered-list counters, one per indent level of the current run. */
+interface ListLevel {
+  style: ListStyle;
+  count: number;
+}
+
+/**
+ * The marker `block` is written with, advancing `run` — the counters for the
+ * run of adjacent list items this block belongs to.
+ *
+ * Ordered items are numbered per level and start again whenever the level is
+ * re-entered or changes style, which is what a reader of the markdown expects
+ * and what re-importing produces anyway: the numbers are display, and the model
+ * stores only "ordered".
+ */
+function listMarker(run: ListLevel[], block: Block): string {
+  const indent = Math.min(block.indent ?? 0, MAX_LIST_INDENT);
+  const style = block.list ?? "bullet";
+  // Levels deeper than this item have ended with the item that opened them.
+  if (run.length > indent + 1) run.length = indent + 1;
+  const level = run[indent];
+  if (level === undefined || level.style !== style) {
+    run[indent] = { style, count: 1 };
+  } else {
+    level.count += 1;
+  }
+  const marker = style === "ordered" ? `${run[indent]?.count ?? 1}. ` : "- ";
+  return `${LIST_INDENT_UNIT.repeat(indent)}${marker}`;
+}
+
+function renderBlock(
+  block: Block,
+  inline: readonly InlineRun[],
+  /** The list marker, for a `list-item`; ignored by every other type. */
+  marker = "",
+): string {
   switch (block.type) {
     case "heading": {
       const level = block.level ?? 1;
@@ -600,6 +650,18 @@ function renderBlock(block: Block, inline: readonly InlineRun[]): string {
       const fence = fenceFor(block.text);
       return `${fence}mermaid\n${block.text}\n${fence}`;
     }
+    case "list-item": {
+      // One item, one line — a second line would be a continuation the reader
+      // resolves against the marker's column, which no flat block can promise.
+      const text = renderInline(inline).replace(/\s*\n\s*/g, " ").trim();
+      return `${marker}${text}`.trimEnd();
+    }
+    case "quote":
+      // Every line marked, so a multi-line quote comes back as one block.
+      return renderInline(inline)
+        .split("\n")
+        .map((line) => `> ${line}`.trimEnd())
+        .join("\n");
     case "paragraph":
       return renderInline(inline);
   }
@@ -620,7 +682,12 @@ function renderAnnotationComment(
  * Render the document as markdown.
  *
  * headings → `#`×level, paragraphs → their text, code → a fenced block tagged
- * with its language, mermaid → a ```mermaid fence.
+ * with its language, mermaid → a ```mermaid fence, list items → a `- `/`1. `
+ * line indented by their level, quotes → `> ` on every line.
+ *
+ * Blocks are separated by a blank line, except two adjacent list items: a blank
+ * line between them is what makes a reader render the list *loose*, so a run of
+ * items is written as the tight list it is.
  */
 export function exportMarkdown(
   ydoc: Y.Doc,
@@ -629,7 +696,11 @@ export function exportMarkdown(
   const withFrontmatter = options.frontmatter ?? true;
   const annotationMode = options.annotations ?? "drop";
 
-  const sections: string[] = [];
+  /** Rendered blocks, each knowing whether it is a list item — see the join. */
+  const sections: Array<{ text: string; listItem: boolean }> = [];
+  const push = (text: string, listItem = false): void => {
+    sections.push({ text, listItem });
+  };
 
   if (withFrontmatter) {
     const meta = getMeta(ydoc);
@@ -640,7 +711,7 @@ export function exportMarkdown(
       `tags: [${meta.tags.map(emitScalar).join(", ")}]`,
       "---",
     ];
-    sections.push(lines.join("\n"));
+    push(lines.join("\n"));
   }
 
   const annotationsByBlock = new Map<string, string[]>();
@@ -670,18 +741,34 @@ export function exportMarkdown(
 
   // Blocks and their marks come from one traversal. Looking each block's marks
   // up by id would rescan the whole fragment per block.
+  const run: ListLevel[] = [];
   for (const { block, inline } of getBlocksWithInline(ydoc)) {
-    sections.push(
+    const listItem = block.type === "list-item";
+    // Anything else between two items ends the run, and its numbering with it.
+    if (!listItem) run.length = 0;
+    push(
       renderBlock(
         block,
         inline.length === 0 ? [{ text: block.text, marks: {} }] : inline,
+        listItem ? listMarker(run, block) : "",
       ),
+      listItem,
     );
     const comments = annotationsByBlock.get(block.id);
-    if (comments !== undefined) sections.push(comments.join("\n"));
+    if (comments !== undefined) push(comments.join("\n"));
   }
 
-  return sections.length === 0 ? "" : `${sections.join("\n\n")}\n`;
+  if (sections.length === 0) return "";
+  let out = "";
+  for (let i = 0; i < sections.length; i += 1) {
+    const section = sections[i];
+    if (section === undefined) continue;
+    if (i > 0) {
+      out += section.listItem && sections[i - 1]?.listItem === true ? "\n" : "\n\n";
+    }
+    out += section.text;
+  }
+  return `${out}\n`;
 }
 
 export interface ImportedBlock {
@@ -690,6 +777,10 @@ export interface ImportedBlock {
   text: string;
   level?: HeadingLevel;
   language?: string;
+  /** List items only: the marker the source line carried. */
+  list?: ListStyle;
+  /** List items only: nesting depth, 0–3, read from the source's indentation. */
+  indent?: number;
   /**
    * The formatted content, present only when the source carried inline syntax.
    * Feeding it to `appendBlock`/`insertBlock` is what preserves the formatting;
@@ -1376,7 +1467,7 @@ function scanInline(source: string, out: InlineRun[]): void {
  * exactly what it did before inline marks existed.
  */
 function proseBlock(
-  type: "paragraph" | "heading",
+  type: ProseBlockType,
   source: string,
 ): ImportedBlock {
   const runs: InlineRun[] = [];
@@ -1387,15 +1478,26 @@ function proseBlock(
     : { type, text };
 }
 
+/** `- `, `* `, `+ `, `1. ` or `1) `, with whatever indentation precedes it. */
+const LIST_LINE = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:[ \t]+(.*))?$/;
+
+/** `> `, indented no further than a paragraph may be. */
+const QUOTE_LINE = /^ {0,3}>[ \t]?(.*)$/;
+
 /**
  * Parse markdown into the pieces needed to build a document: title, tags, links
  * and a flat block list. Handles frontmatter, ATX headings, fenced code (with
- * language) and mermaid fences; everything else becomes a paragraph, with its
- * inline formatting read into `inline`.
+ * language), mermaid fences, list items and block quotes; everything else
+ * becomes a paragraph, with its inline formatting read into `inline`.
  *
  * Title precedence: frontmatter `title`, else a leading level-1 heading — which
  * is then *consumed*, so the title is not duplicated as a block. Any other
  * heading stays a block.
+ *
+ * A list item is one line and one block: continuation lines and nested block
+ * content inside an item are not read, because no flat block can hold them.
+ * Consecutive `>` lines are one quote block, which is what makes a multi-line
+ * quote survive the trip out and back.
  *
  * HTML comments (including exported annotation comments) are skipped.
  */
@@ -1405,10 +1507,35 @@ export function importMarkdown(markdown: string): ImportedDoc {
   const blocks: ImportedBlock[] = [];
 
   let paragraph: string[] = [];
+  let quote: string[] = [];
   const flush = (): void => {
+    // Only one of the two can be open, and a quote always opened first.
+    if (quote.length > 0) {
+      blocks.push(proseBlock("quote", quote.join("\n")));
+      quote = [];
+    }
     if (paragraph.length === 0) return;
     blocks.push(proseBlock("paragraph", paragraph.join("\n")));
     paragraph = [];
+  };
+
+  /**
+   * The indentation columns of the list levels currently open, innermost last.
+   *
+   * Depth is relative, never a division: a source indenting nested items by two
+   * spaces and one indenting them by four both mean "one level in", and the
+   * writer's own four-space unit has to come back as the level it went out as.
+   * So a column deeper than the open one opens a level, and a shallower one
+   * closes levels until it fits.
+   */
+  let listColumns: number[] = [];
+  const listLevel = (column: number): number => {
+    while (listColumns.length > 0 && column < (listColumns.at(-1) ?? 0)) {
+      listColumns.pop();
+    }
+    const open = listColumns.at(-1);
+    if (open === undefined || column > open) listColumns.push(column);
+    return Math.min(listColumns.length - 1, MAX_LIST_INDENT);
   };
 
   for (let i = front.bodyStart; i < lines.length; i += 1) {
@@ -1416,7 +1543,33 @@ export function importMarkdown(markdown: string): ImportedDoc {
     const trimmed = line.trim();
 
     if (trimmed === "") {
+      // A blank line ends a paragraph but not a list: a blank line between
+      // items is a loose list, still one list.
       flush();
+      continue;
+    }
+
+    const listLine = LIST_LINE.exec(line);
+    if (listLine !== null) {
+      flush();
+      const column = (listLine[1] ?? "").replace(/\t/g, "    ").length;
+      const marker = listLine[2] ?? "-";
+      blocks.push({
+        ...proseBlock("list-item", (listLine[3] ?? "").trim()),
+        list: /^\d/.test(marker) ? "ordered" : "bullet",
+        indent: listLevel(column),
+      });
+      continue;
+    }
+    // Anything else closes the list, so the next run starts at level zero.
+    listColumns = [];
+
+    const quoteLine = QUOTE_LINE.exec(line);
+    if (quoteLine !== null) {
+      // Prose ahead of it is its own block; the quote lines that follow join
+      // this one.
+      if (paragraph.length > 0) flush();
+      quote.push(quoteLine[1] ?? "");
       continue;
     }
 

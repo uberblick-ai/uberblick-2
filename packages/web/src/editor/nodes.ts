@@ -1,5 +1,5 @@
 /**
- * The editor palette: four custom block nodes, six marks, nothing else.
+ * The editor palette: six custom block nodes, six marks, nothing else.
  *
  * The marks live in marks.ts — the five inline ones (`bold`, `italic`, `strike`,
  * `inlineCode`, `link`) plus the `comment` anchor defined below. StarterKit is
@@ -10,6 +10,15 @@
  *   <heading   id="…" level="2">  Y.XmlText
  *   <code      id="…" language="ts">  Y.XmlText
  *   <mermaid   id="…">        Y.XmlText
+ *   <list-item id="…" list="bullet" indent="1">  Y.XmlText
+ *   <quote     id="…">        Y.XmlText
+ *
+ * A list is a *run* of adjacent `list-item` blocks, exactly as markdown means
+ * it — no `bulletList` wrapper, no nested `listItem` tree. Stock Tiptap's list
+ * extensions were rejected for that reason (#59): a nested tree has no
+ * block-scoped text for an agent to edit, which is the contract the whole model
+ * rests on. Depth is the `indent` attribute, and the keyboard that changes it
+ * lives in list-keys.ts.
  *
  * Three non-obvious constraints, each of which comes from reading
  * y-prosemirror's sync-plugin rather than from taste:
@@ -41,8 +50,8 @@
  */
 
 import { Node, Mark, mergeAttributes } from "@tiptap/core";
-import { COMMENT_MARK } from "@uberblick/schema";
-import type { HeadingLevel } from "@uberblick/schema";
+import { COMMENT_MARK, MAX_LIST_INDENT } from "@uberblick/schema";
+import type { HeadingLevel, ListIndent } from "@uberblick/schema";
 import { PROSE_MARKS, inlineMarkExtensions } from "./marks.js";
 import {
   codeBlockChrome,
@@ -75,6 +84,17 @@ export function renderableHeadingLevel(raw: unknown): HeadingLevel {
   if (parsed < 1) return 1;
   if (parsed > 6) return 6;
   return parsed as HeadingLevel;
+}
+
+/**
+ * Clamp a stored `indent` to a depth the stylesheet can draw. Render-time only,
+ * like the heading level: the attribute keeps whatever the document holds.
+ */
+export function renderableIndent(raw: unknown): ListIndent {
+  const parsed = Number.parseInt(String(raw ?? ""), 10);
+  if (Number.isNaN(parsed) || parsed < 0) return 0;
+  if (parsed > MAX_LIST_INDENT) return MAX_LIST_INDENT as ListIndent;
+  return parsed as ListIndent;
 }
 
 export const Doc = Node.create({
@@ -135,6 +155,72 @@ export const Heading = Node.create({
     return [
       `h${renderableHeadingLevel(node.attrs.level)}`,
       mergeAttributes({ class: "ub-heading" }, HTMLAttributes),
+      0,
+    ];
+  },
+});
+
+/**
+ * One item of a list. Flat: `list` is its marker and `indent` its depth, and
+ * the run of items around it is the list.
+ *
+ * Rendered as a bare `<li>` — no `<ul>` to put it in, since the document has no
+ * nesting to build one from. The marker is drawn by CSS off `data-list` and
+ * `data-indent` (ordered numbering included, by counters); see styles.css. A
+ * bare `<li>` is also what makes a list copied out of this editor paste back as
+ * list items, and what lets an HTML list pasted *in* land as one item per line.
+ */
+export const ListItem = Node.create({
+  name: "list-item",
+  group: "block",
+  content: "inline*",
+  marks: PROSE_MARKS,
+  addAttributes() {
+    return {
+      id: idAttribute,
+      // Strings, verbatim, like every other attribute — see constraint 2.
+      list: {
+        default: "bullet",
+        parseHTML: (element: HTMLElement): string =>
+          element.getAttribute("data-list") === "ordered" ? "ordered" : "bullet",
+        renderHTML: (attributes: Record<string, unknown>) => ({
+          "data-list": String(attributes.list ?? "bullet"),
+        }),
+      },
+      indent: {
+        default: "0",
+        parseHTML: (element: HTMLElement): string =>
+          String(renderableIndent(element.getAttribute("data-indent"))),
+        renderHTML: (attributes: Record<string, unknown>) => ({
+          "data-indent": String(renderableIndent(attributes.indent)),
+        }),
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "li" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["li", mergeAttributes({ class: "ub-list-item" }, HTMLAttributes), 0];
+  },
+});
+
+/** A block quote. One block, one quote — nested quotes are out of scope (#59). */
+export const Quote = Node.create({
+  name: "quote",
+  group: "block",
+  content: "inline*",
+  marks: PROSE_MARKS,
+  addAttributes() {
+    return { id: idAttribute };
+  },
+  parseHTML() {
+    return [{ tag: "blockquote" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return [
+      "blockquote",
+      mergeAttributes({ class: "ub-quote" }, HTMLAttributes),
       0,
     ];
   },
@@ -288,6 +374,8 @@ export const paletteExtensions = [
   Heading,
   CodeBlock,
   Mermaid,
+  ListItem,
+  Quote,
   CommentMark,
   ...inlineMarkExtensions,
 ];

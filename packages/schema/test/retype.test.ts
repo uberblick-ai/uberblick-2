@@ -110,10 +110,33 @@ describe("setBlockType", () => {
     expect(getBlock(doc, code)?.language).toBeUndefined();
     setBlockType(doc, code, "code");
     expect(getBlock(doc, code)?.language).toBe("");
+
+    // A list item's marker and depth behave the same way: kept across a
+    // list-item → list-item re-type, dropped when it stops being one, and back
+    // to the defaults when it becomes one again.
+    const item = appendBlock(doc, {
+      type: "list-item",
+      text: "point",
+      list: "ordered",
+      indent: 2,
+    });
+    setBlockType(doc, item, "list-item");
+    expect(getBlock(doc, item)).toMatchObject({ list: "ordered", indent: 2 });
+    setBlockType(doc, item, "quote");
+    expect(getBlock(doc, item)?.list).toBeUndefined();
+    setBlockType(doc, item, "list-item");
+    expect(getBlock(doc, item)).toMatchObject({ list: "bullet", indent: 0 });
   });
 
   it("re-types every pair of block types without touching the text", () => {
-    const types = ["paragraph", "heading", "code", "mermaid"] as const;
+    const types = [
+      "paragraph",
+      "heading",
+      "code",
+      "mermaid",
+      "list-item",
+      "quote",
+    ] as const;
     for (const from of types) {
       for (const to of types) {
         const doc = seeded();

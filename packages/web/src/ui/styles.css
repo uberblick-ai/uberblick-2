@@ -1579,6 +1579,88 @@ h3.ub-heading {
   color: var(--prose-text);
 }
 
+/* ---- list items and quotes (#59) ----
+
+   A list is a *run of sibling blocks*, never a tree, so there is no <ul> to
+   hang a marker on: the item is a bare <li> with `list-style: none`, its marker
+   drawn as a `::before` and its depth read off `data-indent`. Both attributes
+   are the schema's, so the rendering follows the document rather than the other
+   way round.
+
+   Ordered numbering is a CSS counter per level, and the *reset* is the part
+   worth explaining. CSS has no previous-sibling selector, so a run cannot ask
+   "did a list end before me?" — instead every block that is not an ordered item
+   resets all four counters, which is exactly the block that ends a run. An
+   ordered item then increments its own level and resets the deeper ones, so a
+   nested list starts at 1 each time its parent moves on. */
+.ub-list-item {
+  list-style: none;
+  position: relative;
+  margin: 0.15em 0;
+  padding-left: 1.6rem;
+  color: var(--prose-text);
+}
+
+.ub-list-item[data-indent="1"] { margin-left: 1.6rem; }
+.ub-list-item[data-indent="2"] { margin-left: 3.2rem; }
+.ub-list-item[data-indent="3"] { margin-left: 4.8rem; }
+
+.ub-list-item::before {
+  position: absolute;
+  left: 0;
+  width: 1.25rem;
+  text-align: right;
+  color: var(--muted-foreground);
+  user-select: none;
+}
+
+.ub-list-item[data-list="bullet"]::before {
+  content: "•";
+}
+
+.ub-editor .tiptap > :not([data-list="ordered"]) {
+  counter-reset: ub-ol-0 ub-ol-1 ub-ol-2 ub-ol-3;
+}
+
+.ub-list-item[data-list="ordered"][data-indent="0"] {
+  counter-increment: ub-ol-0;
+  counter-reset: ub-ol-1 ub-ol-2 ub-ol-3;
+}
+.ub-list-item[data-list="ordered"][data-indent="0"]::before {
+  content: counter(ub-ol-0) ".";
+}
+
+.ub-list-item[data-list="ordered"][data-indent="1"] {
+  counter-increment: ub-ol-1;
+  counter-reset: ub-ol-2 ub-ol-3;
+}
+.ub-list-item[data-list="ordered"][data-indent="1"]::before {
+  content: counter(ub-ol-1) ".";
+}
+
+.ub-list-item[data-list="ordered"][data-indent="2"] {
+  counter-increment: ub-ol-2;
+  counter-reset: ub-ol-3;
+}
+.ub-list-item[data-list="ordered"][data-indent="2"]::before {
+  content: counter(ub-ol-2) ".";
+}
+
+.ub-list-item[data-list="ordered"][data-indent="3"] {
+  counter-increment: ub-ol-3;
+}
+.ub-list-item[data-list="ordered"][data-indent="3"]::before {
+  content: counter(ub-ol-3) ".";
+}
+
+.ub-quote {
+  margin: 0.7em 0;
+  padding: 0.1rem 0 0.1rem 0.9rem;
+  border-left: 3px solid var(--brand);
+  color: var(--prose-text);
+  font-style: italic;
+}
+
 .ub-code,
 .ub-mermaid pre {
   background: var(--muted);
