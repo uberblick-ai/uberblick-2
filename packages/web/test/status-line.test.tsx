@@ -51,7 +51,12 @@ function label(
   document.body.appendChild(host);
   const root = createRoot(host);
   act(() =>
-    root.render(<StatusLine connection={stubConnection(unsyncedChanges, patch)} />),
+    root.render(
+      <StatusLine
+        connection={stubConnection(unsyncedChanges, patch)}
+        segment={WORKSPACE}
+      />,
+    ),
   );
   const text = host.querySelector(".ub-pending")?.textContent ?? null;
   act(() => root.unmount());
@@ -78,7 +83,11 @@ function claimsCache(patch: Partial<RoomStatus>): boolean {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  act(() => root.render(<StatusLine connection={stubConnection(0, patch)} />));
+  act(() =>
+    root.render(
+      <StatusLine connection={stubConnection(0, patch)} segment={WORKSPACE} />,
+    ),
+  );
   const claimed = host.querySelector(".ub-status .ub-muted")?.textContent === "local cache";
   act(() => root.unmount());
   host.remove();
@@ -125,7 +134,9 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
     document.body.appendChild(host);
     const root = createRoot(host);
     act(() =>
-      root.render(<StatusLine connection={stubConnection(4, status)} />),
+      root.render(
+        <StatusLine connection={stubConnection(4, status)} segment={WORKSPACE} />,
+      ),
     );
     // Past every settle window, so what is on screen is what the reader sees.
     act(() => void vi.advanceTimersByTime(5_000));
@@ -158,6 +169,7 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
       root.render(
         <StatusLine
           connection={stubConnection(0, { connected: true, synced: true })}
+          segment={WORKSPACE}
         />,
       ),
     );

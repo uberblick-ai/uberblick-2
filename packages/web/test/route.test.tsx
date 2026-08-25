@@ -548,14 +548,25 @@ describe("an address that resolves to no document says which one, and why", () =
   });
 });
 
-/** Click the room key on a mounted status line and return what it then says. */
-async function clickCopy(): Promise<{ label: string; ariaLabel: string; said: string }> {
+/**
+ * Click the room key on a mounted status line and return what it then says.
+ *
+ * `segment` is the workspace as the address spells it, which is what the app
+ * hands the line — the room key is always the bare uuid.
+ */
+async function clickCopy(
+  segment = WS,
+): Promise<{ label: string; ariaLabel: string; said: string }> {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  act(() => root.render(<StatusLine connection={stubConnection(`${WS}/${UUID}`)} />));
+  act(() =>
+    root.render(
+      <StatusLine connection={stubConnection(`${WS}/${UUID}`)} segment={segment} />,
+    ),
+  );
 
   const button = host.querySelector<HTMLButtonElement>(".ub-room");
   const label = button?.textContent ?? "";
@@ -606,6 +617,34 @@ describe("the room key copies the document's canonical link", () => {
       uuid: UUID,
     });
     expect(said).toBe("link copied");
+  });
+
+  it("copies the workspace as the address spells it, slug and all", async () => {
+    // Opened at `/<slug>-<uuid>/<doc>`, the copy has to hand back that link.
+    // Building it from the room key would silently undecorate somebody's URL on
+    // its way out of their own address bar — and the room key, which is what
+    // the line is labelled with, keeps carrying the bare uuid either way.
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (text: string) => {
+          written.push(text);
+          return Promise.resolve();
+        },
+      },
+    });
+
+    const { label } = await clickCopy(DECORATED);
+
+    expect(written).toEqual([`${window.location.origin}/${DECORATED}/${UUID}`]);
+    expect(label).toBe(`${WS}/${UUID}`);
+    // And it is a link that resolves back to this document.
+    expect(route(new URL(written[0] as string).pathname)).toEqual({
+      kind: "doc",
+      workspace: { uuid: WS, segment: DECORATED },
+      uuid: UUID,
+    });
   });
 
   it("still copies where navigator.clipboard does not exist", async () => {

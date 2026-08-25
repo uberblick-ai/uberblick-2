@@ -181,9 +181,15 @@ export function canonicalPath(route: Route): string | null {
   }
 }
 
-/** The absolute link to a room, for sharing. */
-export function shareUrl(room: string, origin: string): string {
-  return `${origin}/${room}`;
+/**
+ * The absolute link to an address, for sharing.
+ *
+ * `address` is the path without its leading slash — `<workspace>/<uuid>`, with
+ * the workspace spelled the way the address bar spells it. For an undecorated
+ * workspace that is also the room key, which is why one function serves both.
+ */
+export function shareUrl(address: string, origin: string): string {
+  return `${origin}/${address}`;
 }
 
 /**

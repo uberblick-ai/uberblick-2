@@ -175,8 +175,10 @@ export class InvalidWorkspaceIdError extends Error {
   constructor(label: string) {
     super(
       `${label} must be a workspace id: a lowercase uuid, optionally prefixed ` +
-        "with a display slug as <slug>-<uuid>, where <slug> is [a-z0-9] and " +
-        "hyphens and does not end in a hyphen. Run `ub init` to create one.",
+        "for display as <slug>-<uuid>, where the slug is made of lowercase " +
+        "letters, digits and hyphens, starts and ends with a letter or digit, " +
+        "and is joined to the uuid by a single hyphen. Run `ub init` to " +
+        "create one.",
     );
     this.name = "InvalidWorkspaceIdError";
     this.label = label;

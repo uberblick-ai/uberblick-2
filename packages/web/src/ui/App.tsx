@@ -137,7 +137,7 @@ export function RoutePane({
         <PaneNotice>
           {/* The live sync state, so a link that is waiting says what it is
               waiting on rather than looking stuck. */}
-          <StatusLine connection={connection} />
+          <StatusLine connection={connection} segment={route.workspace.segment} />
           <p className="ub-notice">
             <strong>Waiting for sync.</strong> Document <code>{route.uuid}</code>{" "}
             has not reached this replica yet. It opens here as soon as it arrives.
@@ -150,6 +150,9 @@ export function RoutePane({
   return (
     <EditorPane
       connection={connection}
+      // Only `list` and `doc` reach here; both carry the workspace the address
+      // spelled, which is what a copied link has to keep.
+      segment={route.workspace.segment}
       author={author}
       archived={archived}
       onRestore={onRestore}
