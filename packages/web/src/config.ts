@@ -22,6 +22,9 @@
  * address that names no workspace — redirects to. It may also be written as one
  * comma-separated string, because the environments that serve this document
  * substitute plain strings and cannot build a JSON array (see the Caddyfile).
+ * A document that names either key more than once is refused outright: that is
+ * what a value injected through such a substitution looks like, and `JSON.parse`
+ * would otherwise keep the injected occurrence rather than the intended one.
  *
  * Rule from CLAUDE.md: no hardcoded hub addresses anywhere except the in-code
  * fallback default. There are still exactly two, both fallbacks behind the
@@ -186,15 +189,21 @@ function usableWorkspaces(
   const list: string[] = [];
   let dropped = 0;
   for (const entry of entries) {
-    const id = typeof entry === "string" ? entry.trim() : "";
+    if (typeof entry !== "string") {
+      dropped += 1;
+      continue;
+    }
+    const id = entry.trim();
+    // An empty entry is a formatting artefact of the string spelling (`a,,b`,
+    // or an unset variable substituting to nothing), not a typo anybody needs
+    // to be told about. Every other unusable entry is counted, whatever its
+    // type: a list whose entries are half numbers has to say so.
+    if (id === "") continue;
     try {
       parseWorkspaceId(id);
       list.push(id);
     } catch {
-      // An empty entry is a formatting artefact of the string spelling (`a,,b`,
-      // or an unset variable substituting to nothing), not a typo anybody needs
-      // to be told about.
-      if (id !== "") dropped += 1;
+      dropped += 1;
     }
   }
   if (list.length === 0) {
@@ -250,6 +259,21 @@ function readDocument(
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { rejected: "it is not a JSON object" };
+  }
+  // A key named twice is a document somebody wrote *into*, not one somebody
+  // wrote. The deployed document is a template with values substituted into it
+  // (see the Caddyfile), so a value carrying a quote can close its string and
+  // append `,"hubUrl":"wss://elsewhere"` — and `JSON.parse` keeps the last
+  // occurrence, which would be the injected one. The wrapper refuses such a
+  // value before it is ever served; this refuses the document if one gets
+  // through, because the whole point of this file is naming the hub a browser
+  // dials. `\s*:` so a workspace *called* "hubUrl" — which cannot be an id, but
+  // could be text — is not mistaken for a second key.
+  const twice = ["hubUrl", "workspaces"].find(
+    (key) => (body.match(new RegExp(`"${key}"\\s*:`, "g")) ?? []).length > 1,
+  );
+  if (twice !== undefined) {
+    return { rejected: `it names ${twice} more than once` };
   }
   const document = parsed as Record<string, unknown>;
   const url = document.hubUrl;
@@ -323,8 +347,9 @@ export async function readClientConfig(
   if ("rejected" in outcome.hubUrl) notes.push(outcome.hubUrl.rejected);
   if ("rejected" in outcome.workspaces) notes.push(outcome.workspaces.rejected);
   else if (outcome.workspaces.dropped > 0) {
+    const dropped = outcome.workspaces.dropped;
     notes.push(
-      `${outcome.workspaces.dropped} of its workspaces are not workspace ids`,
+      `${dropped} of its workspaces ${dropped === 1 ? "is not a workspace id" : "are not workspace ids"}`,
     );
   }
 

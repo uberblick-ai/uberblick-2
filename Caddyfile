@@ -13,6 +13,12 @@
 	# reads as "no workspaces named" — deep links still open, `/` says there is
 	# no workspace.
 	#
+	# Both values land *inside* a JSON string, so a quote or a backslash in
+	# either would close it and append further keys — a second `hubUrl` wins on
+	# parse and retargets every browser. `remote-compose.sh` refuses such a
+	# `WEB_WORKSPACES` before it reaches this file, and the client refuses a
+	# document that names a key twice; neither is the whole guard on its own.
+	#
 	# It must be matched before the SPA fallback below. `try_files … /index.html`
 	# exists for deep links (#68) and would answer a mis-deployed configuration
 	# path with the app's own HTML, which the client can only report as a

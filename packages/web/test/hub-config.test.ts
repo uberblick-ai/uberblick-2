@@ -268,6 +268,25 @@ describe("the workspaces it names", () => {
     expect(workspacesSource).toBe("document");
   });
 
+  it("refuses a document that names a key twice, rather than taking the last one", async () => {
+    // The injection this guards: the deployed document is a template with
+    // values substituted into it, so a value carrying a quote can close its
+    // string and append a second `hubUrl` — and `JSON.parse` keeps the last
+    // occurrence, pointing every browser at a hub of the attacker's choosing.
+    // `remote-compose.sh` refuses such a value before it is served; this is the
+    // client refusing the document if one ever gets through.
+    const injected =
+      '{"hubUrl":"wss://hub.example/ws","workspaces":"' +
+      `${FIRST}","hubUrl":"wss://elsewhere.example/ws"}`;
+
+    const config = await readClientConfig(serving({ body: injected }).fetch);
+
+    expect(config.hubUrl).toBe(INJECTED);
+    expect(config.hubUrlSource).toBe("define");
+    expect(config.workspaces).toEqual(await builtInWorkspaces());
+    expect(config.rejected).toContain("names hubUrl more than once");
+  });
+
   it("drops an entry that is not a workspace id, and counts it in the diagnostic", async () => {
     // A menu item that navigates to the invalid-link screen reads as a broken
     // workspace, so it is not offered — but a deployment whose list is half
@@ -288,6 +307,17 @@ describe("the workspaces it names", () => {
     // value must never be echoed, and the rule does not get a workspace-shaped
     // exception.
     expect(rejected).not.toContain("not-a-uuid");
+
+    // An entry that is not even a string counts too. Reporting zero rejected
+    // for a list that dropped one is the diagnostic lying about the only thing
+    // it is for.
+    const mixed = await readClientConfig(
+      serving({
+        body: JSON.stringify({ hubUrl: "wss://hub.example/ws", workspaces: [FIRST, 42] }),
+      }).fetch,
+    );
+    expect(mixed.workspaces).toEqual([FIRST]);
+    expect(mixed.rejected).toContain("1 of its workspaces is not a workspace id");
   });
 
   it("keeps the endpoint when it lists no usable workspace, and falls back only for the menu", async () => {
@@ -350,5 +380,13 @@ describe("the deployments that serve it", () => {
     expect(readFileSync(resolve(repoRoot, "remote.env.example"), "utf8")).toContain(
       "WEB_WORKSPACES=",
     );
+
+    // …and the value is substituted *inside* a JSON string, so the wrapper that
+    // renders it refuses anything that could close that string and append a
+    // second `hubUrl`. The client refuses such a document too, but this is
+    // where the value is stopped before it is ever served.
+    const wrapper = readFileSync(resolve(repoRoot, "remote-compose.sh"), "utf8");
+    expect(wrapper).toContain("WEB_WORKSPACES");
+    expect(wrapper).toContain("*[!A-Za-z0-9,-]*)");
   });
 });

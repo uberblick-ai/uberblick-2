@@ -138,7 +138,11 @@ Edit `.env` and set the four required values (`WEB_HUB_URL` is optional; see
   workspace id `ub status` prints on the machine whose documents this hub is
   for, optionally decorated with a display slug (`<slug>-<uuid>`). Left at the
   placeholder, the root address has nothing to open and says so — document links
-  still work, and the switcher shows only the workspace the address names.
+  still work, and the switcher shows only the workspace the address names. The
+  value may contain only letters, digits, `,` and `-`; `remote-compose.sh`
+  refuses anything else, because the list is substituted into the JSON
+  configuration document and a quote there could inject a second `hubUrl` that
+  retargets every browser.
 - `TAILSCALE_IP` is the IPv4 address printed by `tailscale ip -4`. Compose binds
   port 443 only to this address, not to the host's public or LAN interfaces.
 - `HUB_AUTH_TOKEN` is the existing shared signing secret used by the local MCP
