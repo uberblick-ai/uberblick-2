@@ -14,14 +14,14 @@
  * words in place rather than moving the header around them.
  */
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type * as Y from "yjs";
 import { getMeta, setTags } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
-import { groupKeyForTags, groupLabel } from "./groups.js";
+import { GROUP_TAGS, groupKeyForTags, groupLabel } from "./groups.js";
 import { useDocRev, useRemoteActivity, useRoomStatus } from "./hooks.js";
 import { distinctTags, withTag, withoutTag } from "./tags.js";
 import type { ThreadView } from "./threads.js";
@@ -170,6 +170,10 @@ const SUGGESTIONS_ID = "ub-tag-suggestions";
  * types, keyboard included, and free-form input stays free-form. The list is
  * the workspace's tags minus the ones already on this document — suggesting a
  * chip that is already on screen would offer a write this component rejects.
+ *
+ * The same list, with the canonical group tags in front of it, is what a new
+ * tag's spelling is snapped to (`withTag`): the group tags are spelled a
+ * particular way whether or not any document in this workspace carries one yet.
  */
 function TagStrip({
   ydoc,
@@ -186,16 +190,44 @@ function TagStrip({
   readOnly: boolean;
 }): ReactElement {
   const [draft, setDraft] = useState("");
+  const strip = useRef<HTMLSpanElement | null>(null);
+  /**
+   * The chip position whose removal still owes the reader somewhere to stand.
+   *
+   * Removing a chip unmounts the button that had focus, and focus on a detached
+   * element is focus on `<body>` — the keyboard reader is silently returned to
+   * the top of the page, mid-gesture. The target cannot be picked here, because
+   * the element to focus does not exist until the write has re-rendered the
+   * strip, so the *position* is remembered and resolved in the layout effect
+   * below.
+   */
+  const [refocus, setRefocus] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    if (refocus === null) return;
+    setRefocus(null);
+    const buttons = [
+      ...(strip.current?.querySelectorAll<HTMLButtonElement>(".ub-tag-x") ?? []),
+    ];
+    // The chip that took the removed one's place, the last chip when it was the
+    // last, and the add field when it was the only one: always the nearest
+    // thing to where the reader was.
+    const next = buttons[Math.min(refocus, buttons.length - 1)];
+    const target =
+      next ?? strip.current?.querySelector<HTMLInputElement>(".ub-tag-add");
+    target?.focus();
+  }, [refocus]);
 
   const add = (): void => {
-    const next = withTag(getMeta(ydoc).tags, draft);
+    const next = withTag(getMeta(ydoc).tags, draft, [...GROUP_TAGS, ...known]);
     // Cleared either way: a duplicate or a blank is rejected quietly, and
     // leaving the word in the field would read as a failure nobody explained.
     setDraft("");
     if (next !== null) setTags(ydoc, next);
   };
 
-  const remove = (tag: string): void => {
+  const remove = (tag: string, at: number): void => {
+    setRefocus(at);
     setTags(ydoc, withoutTag(getMeta(ydoc).tags, tag));
   };
 
@@ -207,8 +239,8 @@ function TagStrip({
   );
 
   return (
-    <span className="ub-tags">
-      {shown.map((tag) => (
+    <span className="ub-tags" ref={strip}>
+      {shown.map((tag, at) => (
         <span className="ub-tag" key={tag}>
           <span className="ub-tag-name">{tag}</span>
           {!readOnly && (
@@ -219,14 +251,14 @@ function TagStrip({
               // the button does and to which tag.
               aria-label={`Remove tag ${tag}`}
               title={`Remove tag ${tag}`}
-              onClick={() => remove(tag)}
+              onClick={() => remove(tag, at)}
               // The keyboard-only path: the × is the chip's tab stop, and the
               // keys a reader reaches for on a focused chip are the delete
               // keys. Enter and Space already activate it, natively.
               onKeyDown={(event) => {
                 if (event.key !== "Delete" && event.key !== "Backspace") return;
                 event.preventDefault();
-                remove(tag);
+                remove(tag, at);
               }}
             >
               ×
@@ -245,6 +277,13 @@ function TagStrip({
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key !== "Enter") return;
+              // An Enter that ends an IME composition belongs to the input
+              // method, not to this field: it is how a Japanese or Chinese
+              // reader accepts the candidate they are still typing, and
+              // committing a tag there would cut the word in half. The keyCode
+              // is the same check for the browsers that predate `isComposing`.
+              const native = event.nativeEvent;
+              if (native.isComposing || native.keyCode === 229) return;
               event.preventDefault();
               add();
             }}

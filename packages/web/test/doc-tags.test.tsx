@@ -139,8 +139,12 @@ function typeInto(input: HTMLInputElement | null, value: string): void {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-function press(element: Element | null, key: string): void {
-  element?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+function press(
+  element: Element | null,
+  key: string,
+  init: KeyboardEventInit = {},
+): void {
+  element?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...init }));
 }
 
 function field(host: HTMLElement): HTMLInputElement | null {
@@ -205,7 +209,15 @@ describe("tags are editable in the doc header", () => {
     expect(groups(host)).toEqual(["Verify", "Reference", "Other"]);
 
     // ---- adding a tag is the write set_tags makes ----
-    addTag(host, "feature");
+    act(() => typeInto(field(host), "Feature"));
+    // An Enter that ends an IME composition belongs to the input method, not to
+    // this field: nothing is committed, and the word is still being typed.
+    act(() => press(field(host), "Enter", { isComposing: true }));
+    expect(getMeta(ydoc).tags).toEqual([]);
+    // The same word, committed for real — and stored in the spelling the
+    // workspace already knows, because a "Feature" that never joined the
+    // Features group would be a tag this editor and the sidebar disagree about.
+    act(() => press(field(host), "Enter"));
     expect(chips(host)).toEqual(["feature"]);
     expect(getMeta(ydoc).tags).toEqual(["feature"]);
     // The stub is repaired from meta, so the second client sees it without
@@ -234,6 +246,10 @@ describe("tags are editable in the doc header", () => {
     act(() => remove?.focus());
     expect(document.activeElement).toBe(remove);
     act(() => press(remove, "Backspace"));
+    // Focus went somewhere a keyboard reader can stand — the add field, since
+    // that chip was the only one. Left on the unmounted button it would have
+    // fallen to `<body>`, returning them to the top of the page mid-gesture.
+    expect(document.activeElement).toBe(field(host));
     expect(chips(host)).toEqual([]);
     expect(getMeta(ydoc).tags).toEqual([]);
     expect(getDirectoryEntry(peer, UUID)?.tags).toEqual([]);
