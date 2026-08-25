@@ -10,8 +10,9 @@
  * The path and the shape are contract, not implementation detail: this module,
  * the Caddy config and `ub open` (#97) all have to agree on them. The document
  * is `{"hubUrl": "wss://host/ws"}` — one key, a string, anything else ignored.
- * It carries the endpoint and nothing else, which is what keeps it from
- * becoming a credential channel; #84 owns the signing secret that is still
+ * The value must be a bare `ws://` or `wss://` address: no userinfo, no query,
+ * no fragment. It carries the endpoint and nothing else, which is what keeps it
+ * from becoming a credential channel; #84 owns the signing secret that is still
  * compiled into the bundle.
  *
  * Rule from CLAUDE.md: no hardcoded hub addresses anywhere except the in-code
@@ -74,18 +75,58 @@ const BUILT_IN: HubUrlResolution =
     : { url: FALLBACK_HUB_URL, source: "fallback" };
 
 /**
+ * Whether `value` is an address this client may dial, and nothing more.
+ *
+ * A non-empty string is not enough. An `https://` or malformed value would be
+ * reported as `source: "document"` and then throw inside socket construction
+ * rather than falling back, and userinfo or a query string is how a credential
+ * gets into a URL — which this document must never carry, and which would then
+ * be transmitted and printed in every diagnostic that named the endpoint.
+ */
+function usableEndpoint(value: string): { url: string } | { rejected: string } {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return { rejected: "hubUrl is not an absolute URL" };
+  }
+  if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+    return { rejected: "hubUrl is not a ws:// or wss:// URL" };
+  }
+  if (
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.search !== "" ||
+    parsed.hash !== ""
+  ) {
+    return { rejected: "hubUrl carries credentials (userinfo, query or fragment)" };
+  }
+  // The parsed form, not the raw string: `new URL` accepts surrounding
+  // whitespace that the websocket constructor would then choke on.
+  return { url: parsed.href };
+}
+
+/**
  * The endpoint the document names, or the reason it could not be used.
  *
- * Unusable is deliberately *one* outcome covering a non-200, a non-JSON body
- * and JSON without a string `hubUrl`. Under the SPA fallback (#68),
- * `try_files … /index.html` answers an absent document with 200 and the app's
- * own HTML, so "missing" and "wrong shape" are the same observation in
- * production — splitting them would mean a branch only the dev server ever
- * takes. Extra keys are ignored rather than rejected: the contract is one key,
- * and a document that grows another must not strand an already deployed bundle.
+ * Unusable is deliberately *one* outcome covering a non-200, a non-JSON body,
+ * JSON without a string `hubUrl`, and a `hubUrl` that is not a bare ws(s)
+ * address. Under the SPA fallback (#68), `try_files … /index.html` answers an
+ * absent document with 200 and the app's own HTML, so "missing" and "wrong
+ * shape" are the same observation in production — splitting them would mean a
+ * branch only the dev server ever takes. Extra keys are ignored rather than
+ * rejected: the contract is one key, and a document that grows another must not
+ * strand an already deployed bundle.
+ *
+ * No reason ever quotes the response. A misrouted request can return anything —
+ * an upstream error page, another service's secret — and a diagnostic that
+ * echoed it would copy that into the browser console and every log that
+ * collects one. The rejected `hubUrl` is withheld for the same reason: the
+ * values most worth naming are exactly the ones that might carry a credential.
  */
 function readDocument(
   status: number,
+  contentType: string,
   body: string,
 ): { url: string } | { rejected: string } {
   if (status !== 200) {
@@ -95,10 +136,10 @@ function readDocument(
   try {
     parsed = JSON.parse(body);
   } catch {
-    // Overwhelmingly the SPA fallback handing back index.html.
-    return {
-      rejected: `it is not JSON (the body starts ${JSON.stringify(body.slice(0, 40))})`,
-    };
+    // Overwhelmingly the SPA fallback handing back index.html, which the
+    // content type says without quoting a byte of it.
+    const said = contentType === "" ? "no content type" : contentType;
+    return { rejected: `it is not JSON (content type: ${said})` };
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { rejected: "it is not a JSON object" };
@@ -107,21 +148,36 @@ function readDocument(
   if (typeof url !== "string" || url === "") {
     return { rejected: "it has no string hubUrl" };
   }
-  return { url };
+  return usableEndpoint(url);
 }
+
+/**
+ * How long the read may take before the built-in value is used instead.
+ *
+ * Not a nicety. Room acquisition waits on this read, and a request that hangs
+ * — a proxy holding the connection open, a captive portal — never rejects on
+ * its own, so without a deadline the app would sit with no rooms at all, not
+ * even the IndexedDB-backed ones it could serve offline. A few seconds is long
+ * enough for a same-origin file and short enough to be a blink.
+ */
+export const HUB_CONFIG_TIMEOUT_MS = 3_000;
 
 /**
  * Read the hub endpoint: the served document, else the build-time define, else
  * the in-code fallback.
  *
- * Never rejects. A client left with no hub at all would be worse than one
- * dialling a stale address, and the `rejected` reason — which
+ * Never rejects, and always settles. A client left with no hub at all would be
+ * worse than one dialling a stale address, and the `rejected` reason — which
  * {@link resolveHubUrl} logs — is what keeps the difference legible.
  */
 export async function readHubUrl(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+  timeoutMs: number = HUB_CONFIG_TIMEOUT_MS,
 ): Promise<HubUrlResolution & { rejected?: string }> {
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), timeoutMs);
   let status: number;
+  let contentType: string;
   let body: string;
   try {
     const response = await fetchImpl(HUB_CONFIG_PATH, {
@@ -132,14 +188,23 @@ export async function readHubUrl(
       // does) answering 404 rather than HTML. Caddy's `try_files` does not, so
       // `readDocument` still has to survive HTML.
       headers: { Accept: "application/json" },
+      // Covers reading the body too, not just the headers: aborting the signal
+      // rejects an in-flight `text()`, which is the other place this can hang.
+      signal: deadline.signal,
     });
     status = response.status;
+    contentType = response.headers.get("content-type") ?? "";
     body = await response.text();
   } catch (error) {
+    if (deadline.signal.aborted) {
+      return { ...BUILT_IN, rejected: `it did not answer within ${timeoutMs}ms` };
+    }
     const reason = error instanceof Error ? error.message : String(error);
     return { ...BUILT_IN, rejected: `it could not be fetched (${reason})` };
+  } finally {
+    clearTimeout(timer);
   }
-  const outcome = readDocument(status, body);
+  const outcome = readDocument(status, contentType, body);
   if ("rejected" in outcome) return { ...BUILT_IN, rejected: outcome.rejected };
   return { url: outcome.url, source: "document" };
 }

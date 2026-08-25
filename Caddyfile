@@ -1,7 +1,10 @@
 {$TAILSCALE_HOST} {
 	# The client's runtime configuration: the hub endpoint it dials, and nothing
 	# else (#91). Served rather than baked into the bundle, so pointing this
-	# deployment at another hub is `HUB_URL=… up --detach`, not a rebuild.
+	# deployment at another hub is `WEB_HUB_URL=… up --detach caddy`, not a
+	# rebuild. `WEB_HUB_URL` is the name operators set in `.env`; compose passes
+	# it into this container as `HUB_URL` (see docker-compose.yml, which explains
+	# why the two names differ).
 	#
 	# It must be matched before the SPA fallback below. `try_files … /index.html`
 	# exists for deep links (#68) and would answer a mis-deployed configuration

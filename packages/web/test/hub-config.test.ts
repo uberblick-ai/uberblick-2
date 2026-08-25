@@ -36,6 +36,21 @@ const repoRoot = resolve(webRoot, "../..");
  */
 const INJECTED = "ws://localhost:1234";
 
+/**
+ * A `fetch` that never answers on its own — a proxy holding the connection
+ * open, a captive portal. It rejects only when the caller aborts, which is what
+ * a real `fetch` does and what makes this a genuine test of the deadline: drop
+ * the signal and this promise is never settled by anything.
+ */
+function stalling(): typeof globalThis.fetch {
+  return (async (_input: string, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => {
+        reject(new DOMException("The operation was aborted", "AbortError"));
+      });
+    })) as unknown as typeof globalThis.fetch;
+}
+
 /** A stub `fetch` for `HUB_CONFIG_PATH`, answering from a queue of responses. */
 function serving(...answers: Array<{ status?: number; body: string }>): {
   fetch: typeof globalThis.fetch;
@@ -81,6 +96,52 @@ describe("the served hub configuration", () => {
     expect(message).toContain(`hub ${INJECTED} (source: define)`);
     expect(message).toContain(`${HUB_CONFIG_PATH} unused`);
     expect(message).toContain("not JSON");
+
+    // …and not one byte of what came back. A misroute can answer with an
+    // upstream error page or another service's secret, and a diagnostic that
+    // quoted it would copy that into the console and every log that collects
+    // one. The content type says "HTML" without repeating any of it.
+    expect(message).not.toContain("<!doctype");
+    expect(message).not.toContain("<html");
+    expect(message).toContain("text/plain");
+  });
+
+  it("refuses a hubUrl that is not a bare ws(s) address, without echoing it", async () => {
+    const unusable = {
+      "wrong scheme": "https://hub.example/ws",
+      "not a URL": "hub.example/ws",
+      whitespace: "   ",
+      userinfo: "wss://agent:s3cret@hub.example/ws",
+      "query credential": "wss://hub.example/ws?token=s3cret",
+      fragment: "wss://hub.example/ws#s3cret",
+    };
+
+    for (const [kind, value] of Object.entries(unusable)) {
+      const { fetch } = serving({ body: JSON.stringify({ hubUrl: value }) });
+      const { url, source, rejected } = await readHubUrl(fetch);
+
+      // The same unified fallback, not a `source: "document"` the socket would
+      // then throw on.
+      expect(url, kind).toBe(INJECTED);
+      expect(source, kind).toBe("define");
+      expect(rejected, kind).toMatch(/hubUrl (is not|carries)/);
+      // The values most worth naming are the ones that might carry a secret,
+      // so none of the value reaches the diagnostic — not the credential, not
+      // even the host it was pointed at.
+      expect(rejected, kind).not.toContain("s3cret");
+      expect(rejected, kind).not.toContain("hub.example");
+    }
+  });
+
+  it("gives the read a deadline, so a hung request cannot wedge every room", async () => {
+    // Nothing acquires a room until this settles — not even the IndexedDB-backed
+    // rooms that need no hub at all — so "never settles" is the worst outcome
+    // available, worse than dialling a stale address.
+    const { url, source, rejected } = await readHubUrl(stalling(), 20);
+
+    expect(url).toBe(INJECTED);
+    expect(source).toBe("define");
+    expect(rejected).toContain("did not answer within 20ms");
   });
 
   it("supplies the endpoint when the document names one, and falls back the same way for every response it cannot use", async () => {

@@ -98,8 +98,11 @@ sh remote-compose.sh up --detach caddy
 ```
 
 The document is served with `Cache-Control: no-store`, so the next page load
-picks up the change. It carries the endpoint and nothing else: the client
-rejects any other key, so a token can never be added to it.
+picks up the change. It carries the endpoint and nothing else: the client reads
+`hubUrl` and ignores every other key, so there is no field a token could be
+added to. `hubUrl` must be a plain `ws://` or `wss://` address — one carrying
+userinfo, a query string or a fragment is refused, and the client falls back to
+the endpoint compiled into the bundle rather than dialling it.
 
 `HUB_AUTH_TOKEN` is still compiled into the bundle, so rotating it does need
 `sh remote-compose.sh up --build --detach`. Removing it from the bundle
