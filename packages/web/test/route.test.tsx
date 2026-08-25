@@ -240,6 +240,7 @@ function LinkedPane({
       connection={connection}
       meta={docMeta}
       author="tester"
+      knownTags={[]}
       archived={false}
       onRestore={() => {}}
       onSelectThread={() => {}}
@@ -453,6 +454,7 @@ function paneText(target: Route, docMeta: DocMeta | null): string {
         connection={target.kind === "doc" ? stubConnection(`main/${UUID}`) : null}
         meta={docMeta}
         author="tester"
+        knownTags={[]}
         archived={false}
         onRestore={() => {}}
         onSelectThread={() => {}}

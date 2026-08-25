@@ -2,22 +2,28 @@
  * The doc view's chrome (#69, design surface 1a): what the topbar says about
  * the open document, and the identity line above its prose.
  *
- * Everything here is a reading of state the system already keeps — the
+ * Almost everything here is a reading of state the system already keeps — the
  * document's tags, its uuid and rev, the awareness of whoever else is in the
- * room, the provider's connection status. None of it is new state, and nothing
- * here writes.
+ * room, the provider's connection status. None of it is new state. The one
+ * writer is the tag strip on the identity line (#122), and it writes `meta.tags`
+ * wholesale through schema's `setTags` — the same call, on the same key, that
+ * `set_tags` makes for an agent.
  *
  * The two pills are drawn on the same rules as the rest of the chrome (#76):
  * fixed slots and no growth, so a peer arriving or the hub going away swaps
  * words in place rather than moving the header around them.
  */
 
+import { useState } from "react";
 import type { ReactElement } from "react";
+import type * as Y from "yjs";
+import { getMeta, setTags } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
 import { groupKeyForTags, groupLabel } from "./groups.js";
 import { useDocRev, useRemoteActivity, useRoomStatus } from "./hooks.js";
+import { distinctTags, withTag, withoutTag } from "./tags.js";
 import type { ThreadView } from "./threads.js";
 
 /** What an untitled document is called wherever its name is shown. */
@@ -143,9 +149,128 @@ export function DocChrome({
   );
 }
 
+/** The id the add field points at — one document is open at a time. */
+const SUGGESTIONS_ID = "ub-tag-suggestions";
+
 /**
- * The document's identity, above its prose: what kind of document this is, and
- * the two machine facts that identify the thing on screen.
+ * The document's tags, editable (#122).
+ *
+ * Every write is `setTags` on the document's own Y.Doc — the wholesale replace
+ * `set_tags` performs, on the same `meta.tags`. That is what makes this a
+ * *human front door to the agent's write* rather than a second tagging
+ * mechanism: the directory stub is repaired from `meta` by the shell's existing
+ * observer, so the sidebar group, the breadcrumb, `list_docs` and every other
+ * client follow a chip the way they follow an agent.
+ *
+ * The next array is folded from `getMeta(ydoc).tags`, never from the rendered
+ * prop. A remote wholesale write that landed between paint and click is already
+ * in the document, and adding a chip must not carry a stale list back over it.
+ *
+ * Suggestions ride a native `<datalist>`: the browser filters it as the reader
+ * types, keyboard included, and free-form input stays free-form. The list is
+ * the workspace's tags minus the ones already on this document — suggesting a
+ * chip that is already on screen would offer a write this component rejects.
+ */
+function TagStrip({
+  ydoc,
+  tags,
+  known,
+  readOnly,
+}: {
+  ydoc: Y.Doc;
+  /** The document's tags as last read — what the chips show. */
+  tags: readonly string[];
+  /** Every tag the workspace uses, from the directory stubs. */
+  known: readonly string[];
+  /** Archived: the chips are still worth reading, and nothing here writes. */
+  readOnly: boolean;
+}): ReactElement {
+  const [draft, setDraft] = useState("");
+
+  const add = (): void => {
+    const next = withTag(getMeta(ydoc).tags, draft);
+    // Cleared either way: a duplicate or a blank is rejected quietly, and
+    // leaving the word in the field would read as a failure nobody explained.
+    setDraft("");
+    if (next !== null) setTags(ydoc, next);
+  };
+
+  const remove = (tag: string): void => {
+    setTags(ydoc, withoutTag(getMeta(ydoc).tags, tag));
+  };
+
+  // One chip per distinct tag: a duplicate in the array is one tag, and two
+  // chips carrying the same word would be two React children with one key.
+  const shown = distinctTags(tags);
+  const suggestions = known.filter(
+    (tag) => !tags.some((current) => current.toLowerCase() === tag.toLowerCase()),
+  );
+
+  return (
+    <span className="ub-tags">
+      {shown.map((tag) => (
+        <span className="ub-tag" key={tag}>
+          <span className="ub-tag-name">{tag}</span>
+          {!readOnly && (
+            <button
+              type="button"
+              className="ub-tag-x"
+              // The visible label is a glyph, so the accessible name says what
+              // the button does and to which tag.
+              aria-label={`Remove tag ${tag}`}
+              title={`Remove tag ${tag}`}
+              onClick={() => remove(tag)}
+              // The keyboard-only path: the × is the chip's tab stop, and the
+              // keys a reader reaches for on a focused chip are the delete
+              // keys. Enter and Space already activate it, natively.
+              onKeyDown={(event) => {
+                if (event.key !== "Delete" && event.key !== "Backspace") return;
+                event.preventDefault();
+                remove(tag);
+              }}
+            >
+              ×
+            </button>
+          )}
+        </span>
+      ))}
+      {!readOnly && (
+        <>
+          <input
+            className="ub-tag-add"
+            list={SUGGESTIONS_ID}
+            value={draft}
+            placeholder="+ tag"
+            aria-label="Add a tag"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              add();
+            }}
+          />
+          <datalist id={SUGGESTIONS_ID}>
+            {suggestions.map((tag) => (
+              <option key={tag} value={tag} />
+            ))}
+          </datalist>
+        </>
+      )}
+    </span>
+  );
+}
+
+/**
+ * The document's identity, above its prose: what kind of document this is, its
+ * tags, and the two machine facts that identify the thing on screen.
+ *
+ * **Above the prose and above the title** (owner, design surface 1a): the
+ * eyebrow line sits over the H1, and the tags sit in it. Putting them there
+ * costs the title nothing, because the row is a fixed-height single line whose
+ * add field is always drawn — the height with no chips is the height with six —
+ * and the chips scroll sideways inside their own box rather than wrapping onto
+ * a second line. The uuid and rev are pinned to the row's end, so a chip
+ * appearing moves neither them nor the title.
  *
  * The uuid is shortened because identity is the uuid but *recognition* is its
  * first few characters — the full one is a click away on the room key below the
@@ -157,15 +282,27 @@ export function DocChrome({
 export function DocMetaLine({
   connection,
   meta,
+  knownTags,
+  archived,
 }: {
   connection: RoomConnection;
   meta: DocMeta | null;
+  /** Every tag the workspace uses — the add field's suggestions. */
+  knownTags: readonly string[];
+  /** Whether the directory tombstones this document: no writes from here. */
+  archived: boolean;
 }): ReactElement | null {
   const rev = useDocRev(connection);
   if (meta === null || meta.uuid === "") return null;
   return (
     <p className="ub-doc-meta">
       <span className="ub-badge">{groupOf(meta)}</span>
+      <TagStrip
+        ydoc={connection.ydoc}
+        tags={meta.tags}
+        known={knownTags}
+        readOnly={archived}
+      />
       <span className="ub-doc-ids">
         uuid {meta.uuid.slice(0, 8)} · rev {rev ?? "········"}
       </span>
