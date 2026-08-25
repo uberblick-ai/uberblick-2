@@ -1,6 +1,11 @@
 /**
  * The app shell. Two rooms at a time: the workspace directory, and whichever
  * document is open.
+ *
+ * Which document that is comes from the address bar and nowhere else (#68) —
+ * see route.ts. The sidebar, Back/Forward and a pasted link are then the same
+ * gesture, and there is no second copy of the selection to drift out of step
+ * with the URL.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -17,20 +22,104 @@ import {
 import { WORKSPACE } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
 import { randomIdentity } from "../collab/identity.js";
+import type { RoomConnection } from "../collab/rooms.js";
 import { DocList } from "./DocList.js";
-import { EditorPane } from "./EditorPane.js";
+import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { ThreadsPane } from "./ThreadsPane.js";
 import { focusThread } from "./threads.js";
 import type { ThreadFocus } from "./threads.js";
-import { useDirectory, useIdentity, useRoom, useStoredFlag } from "./hooks.js";
+import {
+  canonicalPath,
+  docIsPresent,
+  docPath,
+  parseRoute,
+  useRoutePath,
+} from "./route.js";
+import type { Route } from "./route.js";
+import {
+  useDirectory,
+  useDocMeta,
+  useIdentity,
+  useRoom,
+  useStoredFlag,
+} from "./hooks.js";
 
 /** Sidebar preference, persisted per browser. */
 const SIDEBAR_COLLAPSED_KEY = "uberblick.sidebar.collapsed";
 
+/**
+ * What the address resolves to on screen.
+ *
+ * The three non-document branches are states, never errors to be swallowed: a
+ * link is worth telling the truth about. A well-formed uuid this replica has
+ * not seen is explicitly *not* one of them — it is a document that has not
+ * arrived, and it resolves into itself when it does.
+ */
+export function RoutePane({
+  route,
+  connection,
+  present,
+  author,
+  onSelectThread,
+}: {
+  route: Route;
+  connection: RoomConnection | null;
+  /** Whether this replica holds the document `route` names — see docIsPresent. */
+  present: boolean;
+  author: string;
+  onSelectThread: (threadId: string) => void;
+}): ReactElement {
+  if (route.kind === "unknown-workspace") {
+    return (
+      <PaneNotice>
+        <p className="ub-notice">
+          <strong>Unknown workspace.</strong> This client is configured for{" "}
+          <code>{WORKSPACE}</code>; the link names <code>{route.workspaceId}</code>.
+        </p>
+      </PaneNotice>
+    );
+  }
+
+  if (route.kind === "invalid") {
+    return (
+      <PaneNotice>
+        <p className="ub-notice">
+          <strong>Not a document link.</strong> {route.reason} A document link
+          looks like <code>/{WORKSPACE}/&lt;uuid&gt;</code>.
+        </p>
+      </PaneNotice>
+    );
+  }
+
+  if (route.kind === "doc" && !present) {
+    return (
+      <PaneNotice>
+        {/* The live sync state, so a link that is waiting says what it is
+            waiting on rather than looking stuck. */}
+        {connection !== null && <StatusLine connection={connection} />}
+        <p className="ub-notice">
+          <strong>Waiting for sync.</strong> Document <code>{route.uuid}</code>{" "}
+          has not reached this replica yet. It opens here as soon as it arrives.
+        </p>
+      </PaneNotice>
+    );
+  }
+
+  return (
+    <EditorPane
+      connection={connection}
+      author={author}
+      onSelectThread={onSelectThread}
+    />
+  );
+}
+
 export function App(): ReactElement {
   const identity = useIdentity(randomIdentity);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [path, navigate] = useRoutePath();
+  const route = parseRoute(path, WORKSPACE);
+  const selected = route.kind === "doc" ? route.uuid : null;
   const [collapsed, setCollapsed] = useStoredFlag(SIDEBAR_COLLAPSED_KEY, false);
   /**
    * The thread the reader is looking at. It lives here because the two ends of
@@ -48,6 +137,25 @@ export function App(): ReactElement {
     identity,
   );
   const entries = useDirectory(directory);
+  const meta = useDocMeta(doc);
+  const present = selected !== null && docIsPresent(selected, meta, entries);
+
+  /**
+   * Normalise the address to the one form the app hands out: `/` becomes
+   * `/<workspace>`, a trailing slash or a shouted uuid becomes the canonical
+   * spelling. `replace`, never `push` — a redirect the reader did not ask for
+   * must not become a history entry that Back bounces off.
+   */
+  useEffect(() => {
+    const canonical = canonicalPath(parseRoute(path, WORKSPACE), WORKSPACE);
+    if (canonical !== null && canonical !== path) navigate(canonical, "replace");
+  }, [path, navigate]);
+
+  /** Opening a document is navigating to it. There is nothing else to update. */
+  const onSelect = useCallback(
+    (uuid: string) => navigate(docPath(WORKSPACE, uuid)),
+    [navigate],
+  );
 
   /**
    * A create needs the new document's Y.Doc *before* React has mounted the
@@ -78,8 +186,8 @@ export function App(): ReactElement {
     upsertDirectoryEntry(directory.ydoc, { uuid, title: "" });
     pending.current?.release();
     pending.current = { room, release: handle.release };
-    setSelected(uuid);
-  }, [directory, identity]);
+    onSelect(uuid);
+  }, [directory, identity, onSelect]);
 
   /**
    * The directory stub is a cache; `meta.title` in the document is
@@ -129,12 +237,14 @@ export function App(): ReactElement {
             connection={directory}
             entries={entries}
             selected={selected}
-            onSelect={setSelected}
+            onSelect={onSelect}
             onCreate={onCreate}
           />
         )}
-        <EditorPane
+        <RoutePane
+          route={route}
           connection={doc}
+          present={present}
           author={identity.name}
           onSelectThread={onFocusThread}
         />

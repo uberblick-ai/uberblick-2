@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { getBlocksFragment, setTitle } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { bindGuardedEditor } from "../editor/guarded-binding.js";
@@ -23,7 +23,76 @@ import {
   useRoomStatus,
 } from "./hooks.js";
 import { CommentComposer } from "./CommentComposer.js";
+import { shareUrl } from "./route.js";
 import { threadIdFromTarget } from "./threads.js";
+
+/**
+ * The pane frame with a message in it instead of a document.
+ *
+ * Every "there is nothing to edit here" screen renders through this — no
+ * document picked, an unknown workspace, a malformed link, a link whose
+ * document has not synced yet. One frame for all of them means resolving a link
+ * swaps the words inside the column rather than moving the column.
+ */
+export function PaneNotice({ children }: { children: ReactNode }): ReactElement {
+  return (
+    <section className="ub-pane">
+      <div className="ub-column">{children}</div>
+    </section>
+  );
+}
+
+/** How long the copy confirmation stays up, in milliseconds. */
+const COPIED_MS = 1_500;
+
+/**
+ * The room key, doubling as the document's shareable link (#68).
+ *
+ * The line that already identified the document becomes the copy affordance
+ * rather than growing a button beside it — the path and the room key are the
+ * same string, so there was never anything else to show. The confirmation is
+ * positioned out of flow for the reason the rest of this line is built the way
+ * it is (#76): nothing here may move sideways, and a word appearing in the row
+ * would move everything after it.
+ */
+function CopyLink({ room }: { room: string }): ReactElement {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), COPIED_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  const copy = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(shareUrl(room, window.location.origin));
+      setCopied(true);
+    } catch {
+      // No clipboard: denied permission, or an insecure context, where
+      // `navigator.clipboard` is not there at all. The link is on screen and
+      // selectable, so there is nothing to recover from and nothing to say.
+    }
+  };
+
+  return (
+    <span className="ub-room-wrap">
+      <button
+        type="button"
+        className="ub-room"
+        title="Copy link to this document"
+        onClick={() => void copy()}
+      >
+        {room}
+      </button>
+      {/* Rendered always, empty when idle: `role="status"` only announces
+          changes to a region the reader was already in. */}
+      <span className="ub-copied" role="status">
+        {copied ? "link copied" : ""}
+      </span>
+    </span>
+  );
+}
 
 /**
  * Exported for the label test only.
@@ -78,7 +147,7 @@ export function StatusLine({
       </span>
       <span className="ub-status-word">{label}</span>
       {status.localReplicaLoaded && <span className="ub-muted">local cache</span>}
-      <span className="ub-muted">{connection.room}</span>
+      <CopyLink room={connection.room} />
       {state !== "synced" && status.unsyncedChanges > 0 && (
         <span className="ub-pending">
           {status.unsyncedChanges} sync message
@@ -224,8 +293,16 @@ function BoundEditor({
   // Reading a block clears its mark. Separate from the binding above because it
   // needs the editor that binding produced, and because it is the one part of
   // the feature that depends on the viewport rather than on the document.
+  //
+  // `isDestroyed` is the guard for switching straight from one open document to
+  // another. Both effects re-run on the same pass, and React runs every cleanup
+  // before any setup: the binding above tears its editor down and queues the
+  // replacement through `setEditor`, so on that one pass `editor` still holds
+  // the editor that was just destroyed — and reading `view.dom` off it throws
+  // (#68). Skipping is not a lost subscription: `setEditor` re-runs this effect
+  // with the live editor a moment later.
   useEffect(() => {
-    if (editor === null) return;
+    if (editor === null || editor.isDestroyed) return;
     return clearWhenSeen(changedBlocks(connection), editor);
   }, [connection, editor]);
 
@@ -273,11 +350,9 @@ export function EditorPane({
 
   if (connection === null) {
     return (
-      <section className="ub-pane">
-        <div className="ub-column">
-          <p className="ub-muted">Pick a document, or create one.</p>
-        </div>
-      </section>
+      <PaneNotice>
+        <p className="ub-muted">Pick a document, or create one.</p>
+      </PaneNotice>
     );
   }
 
