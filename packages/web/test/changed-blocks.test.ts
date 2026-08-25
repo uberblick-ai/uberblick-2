@@ -26,6 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import * as Y from "yjs";
+import { undo } from "y-prosemirror";
 import { appendBlock, editBlock, getBlocks, initDoc } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import {
@@ -280,9 +281,28 @@ describe("the document arriving is not a change, in any order", () => {
   });
 });
 
-/** An IntersectionObserver the test drives, since jsdom has none. */
+/** Pretend this element has been laid out `height` pixels tall. */
+function stubHeight(element: Element, height: number): void {
+  element.getBoundingClientRect = () =>
+    ({ height, top: 0, bottom: height, left: 0, right: 0, width: 0 }) as DOMRect;
+}
+
+/**
+ * An IntersectionObserver the test drives, faithful about **thresholds** —
+ * which is the property under test.
+ *
+ * A real observer calls back only when a listed threshold is crossed, and it
+ * calls back *at* the crossing. So the geometry a callback ever sees is the
+ * geometry at some listed threshold, never the best geometry the block reached
+ * in between. Handing the callback the true ratio directly, as this fake used
+ * to, is exactly what hid the bug this models: a block that tops out at 0.333
+ * with hundredth thresholds is only ever reported at 0.33.
+ *
+ * Heights come from the elements themselves, the same way the code under test
+ * measures them, so a test cannot describe geometry the code disagrees with.
+ */
 class FakeIntersectionObserver {
-  static latest: FakeIntersectionObserver | null = null;
+  static live: FakeIntersectionObserver[] = [];
   readonly targets = new Set<Element>();
   readonly root: Element | Document | null;
   readonly thresholds: number[];
@@ -293,8 +313,18 @@ class FakeIntersectionObserver {
     this.root = init?.root ?? null;
     const threshold = init?.threshold ?? 0;
     this.thresholds = Array.isArray(threshold) ? [...threshold] : [threshold];
-    FakeIntersectionObserver.latest = this;
+    FakeIntersectionObserver.live.push(this);
   }
+
+  /** The live observer watching `id`. */
+  static watching(id: string): FakeIntersectionObserver {
+    const found = FakeIntersectionObserver.live.find((observer) =>
+      [...observer.targets].some((element) => element.id === id),
+    );
+    if (found === undefined) throw new Error(`not observed: ${id}`);
+    return found;
+  }
+
   observe(target: Element): void {
     this.targets.add(target);
   }
@@ -307,23 +337,29 @@ class FakeIntersectionObserver {
   takeRecords(): IntersectionObserverEntry[] {
     return [];
   }
-  /** Report how much of `id` is inside the root box. */
-  report(
-    id: string,
-    seen: { ratio: number; height?: number; rootHeight?: number },
-  ): void {
+
+  /** Scroll so that `covered` pixels of `id` sit inside the root box. */
+  cover(id: string, covered: number): void {
     const target = [...this.targets].find((element) => element.id === id);
     if (target === undefined) throw new Error(`not observed: ${id}`);
-    const rootHeight = seen.rootHeight ?? 800;
+    const blockHeight = target.getBoundingClientRect().height;
+    const rootHeight =
+      this.root instanceof Element ? this.root.getBoundingClientRect().height : 0;
+    const trueRatio =
+      blockHeight === 0 ? 0 : Math.min(1, Math.max(0, covered / blockHeight));
+    const crossed = Math.max(
+      ...this.thresholds.filter((step) => step <= trueRatio),
+    );
+    // At the 0 threshold an observer reports wherever the block actually is —
+    // that callback is "it entered", not "it reached a fraction".
+    const ratio = crossed > 0 ? crossed : trueRatio;
     this.callback(
       [
         {
           target,
-          isIntersecting: seen.ratio > 0,
-          intersectionRatio: seen.ratio,
-          intersectionRect: {
-            height: seen.height ?? rootHeight * seen.ratio,
-          } as DOMRectReadOnly,
+          isIntersecting: trueRatio > 0,
+          intersectionRatio: ratio,
+          intersectionRect: { height: ratio * blockHeight } as DOMRectReadOnly,
           rootBounds: { height: rootHeight } as DOMRectReadOnly,
         } as IntersectionObserverEntry,
       ],
@@ -345,42 +381,60 @@ describe("a block that has been read stops being marked", () => {
 
   afterEach(() => {
     globalThis.IntersectionObserver = restore as typeof IntersectionObserver;
-    FakeIntersectionObserver.latest = null;
+    FakeIntersectionObserver.live = [];
     vi.useRealTimers();
   });
 
-  /** A marked paragraph, a mounted editor, and the watcher running over both. */
-  function watching(): {
+  /** The pane is 800px tall; every block is 100px unless a test says otherwise. */
+  const PANE_HEIGHT = 800;
+  const BLOCK_HEIGHT = 100;
+
+  /**
+   * A mounted editor inside a scrolling pane, with real heights on both — the
+   * thresholds the code asks for are derived from them, so a test that did not
+   * lay anything out would be testing the fallback rather than the rule.
+   */
+  function watching(heights: Record<number, number> = {}): {
     marks: ChangedBlocks;
     remote: Y.Doc;
     blocks: string[];
-    observer: () => FakeIntersectionObserver;
+    seeing: (id: string) => FakeIntersectionObserver;
     stop: () => void;
   } {
     const { local, remote, blocks } = replicas();
     const marks = trackChangedBlocks(local);
     marks.start();
-    const { editor } = mountEditor(local, { changed: marks });
+    const { editor, element } = mountEditor(local, { changed: marks });
+    const pane = document.createElement("div");
+    pane.style.overflowY = "auto";
+    document.body.appendChild(pane);
+    pane.appendChild(element);
+    stubHeight(pane, PANE_HEIGHT);
+    blocks.forEach((id, index) => {
+      const block = document.getElementById(id);
+      if (block !== null) stubHeight(block, heights[index] ?? BLOCK_HEIGHT);
+    });
     const release = clearWhenSeen(marks, editor, { delayMs: SEEN });
     return {
       marks,
       remote,
       blocks,
-      observer: () => FakeIntersectionObserver.latest!,
+      seeing: (id) => FakeIntersectionObserver.watching(id),
       stop: () => {
         release();
         editor.destroy();
+        pane.remove();
       },
     };
   }
 
   it("clears once the block has been fully on screen for the delay", async () => {
-    const { marks, remote, blocks, observer, stop } = watching();
+    const { marks, remote, blocks, seeing, stop } = watching();
     try {
       editBlock(remote, blocks[1]!, PARAGRAPH, "Rewritten by an agent.");
       await flush();
 
-      observer().report(blocks[1]!, { ratio: 1 });
+      seeing(blocks[1]!).cover(blocks[1]!, BLOCK_HEIGHT);
       vi.advanceTimersByTime(SEEN - 1);
       expect(marks.has(blocks[1]!)).toBe(true);
       vi.advanceTimersByTime(1);
@@ -391,14 +445,14 @@ describe("a block that has been read stops being marked", () => {
   });
 
   it("keeps the mark on a block that was only scrolled past", async () => {
-    const { marks, remote, blocks, observer, stop } = watching();
+    const { marks, remote, blocks, seeing, stop } = watching();
     try {
       editBlock(remote, blocks[1]!, PARAGRAPH, "Rewritten by an agent.");
       await flush();
 
-      observer().report(blocks[1]!, { ratio: 1 });
+      seeing(blocks[1]!).cover(blocks[1]!, BLOCK_HEIGHT);
       vi.advanceTimersByTime(SEEN - 1);
-      observer().report(blocks[1]!, { ratio: 0.4 });
+      seeing(blocks[1]!).cover(blocks[1]!, BLOCK_HEIGHT * 0.4);
       vi.advanceTimersByTime(SEEN * 3);
 
       expect(marks.has(blocks[1]!)).toBe(true);
@@ -408,18 +462,19 @@ describe("a block that has been read stops being marked", () => {
   });
 
   it("clears a block taller than the pane once it fills the pane", async () => {
-    const { marks, remote, blocks, observer, stop } = watching();
+    // Three panes tall: it tops out at a ratio of 0.333 and can never be
+    // "fully" visible, so covering the pane has to count — and the observer has
+    // to be *asked* at that geometry, which a fixed threshold ladder cannot
+    // promise. The fake only calls back at thresholds the code listed, so this
+    // fails unless the threshold was computed from this block's own height.
+    const { marks, remote, blocks, seeing, stop } = watching({
+      2: PANE_HEIGHT * 3,
+    });
     try {
       editBlock(remote, blocks[2]!, CODE, "console.log(2)");
       await flush();
 
-      // A ratio of 1 is unreachable for a 2400px block in an 800px pane, so
-      // filling the pane has to count — otherwise its mark is permanent.
-      observer().report(blocks[2]!, {
-        ratio: 800 / 2400,
-        height: 800,
-        rootHeight: 800,
-      });
+      seeing(blocks[2]!).cover(blocks[2]!, PANE_HEIGHT);
       vi.advanceTimersByTime(SEEN);
 
       expect(marks.has(blocks[2]!)).toBe(false);
@@ -429,11 +484,11 @@ describe("a block that has been read stops being marked", () => {
   });
 
   it("starts the read window over when the block changes again", async () => {
-    const { marks, remote, blocks, observer, stop } = watching();
+    const { marks, remote, blocks, seeing, stop } = watching();
     try {
       editBlock(remote, blocks[1]!, PARAGRAPH, "First rewrite.");
       await flush();
-      observer().report(blocks[1]!, { ratio: 1 });
+      seeing(blocks[1]!).cover(blocks[1]!, BLOCK_HEIGHT);
       vi.advanceTimersByTime(SEEN - 500);
 
       // Changed again under the reader's eyes: what they have been looking at
@@ -450,44 +505,17 @@ describe("a block that has been read stops being marked", () => {
     }
   });
 
-  it("asks often enough for a block that can never fill the pane", async () => {
-    const { marks, remote, blocks, observer, stop } = watching();
+  it("measures against the pane the prose scrolls in, not the window", async () => {
+    const { remote, blocks, seeing, stop } = watching();
     try {
       editBlock(remote, blocks[1]!, PARAGRAPH, "Rewritten by an agent.");
       await flush();
-
-      // An observer only calls back on a threshold crossing. A block ten times
-      // the pane's height peaks at a ratio of 0.1, so `[0, 1]` would give it
-      // exactly one callback — the one where it first touched the pane, which
-      // is the one moment "fills the pane" is guaranteed to be false.
-      const { thresholds } = observer();
-      expect(thresholds.length).toBeGreaterThan(2);
-      expect(thresholds.filter((step) => step > 0 && step < 0.1).length)
-        .toBeGreaterThan(0);
-      expect(marks.has(blocks[1]!)).toBe(true);
-    } finally {
-      stop();
-    }
-  });
-
-  it("measures against the pane the prose scrolls in, not the window", () => {
-    const { local } = replicas();
-    const marks = trackChangedBlocks(local);
-    marks.start();
-    const { editor, element } = mountEditor(local, { changed: marks });
-    const pane = document.createElement("div");
-    pane.style.overflowY = "auto";
-    document.body.appendChild(pane);
-    pane.appendChild(element);
-    const release = clearWhenSeen(marks, editor, { delayMs: SEEN });
-    try {
       // A block below the fold of `.ub-pane` is still inside the window's
       // rectangle, so rooting on the window would clear marks nobody saw.
-      expect(FakeIntersectionObserver.latest!.root).toBe(pane);
+      const pane = document.querySelector<HTMLElement>("div[style*='overflow']");
+      expect(seeing(blocks[1]!).root).toBe(pane);
     } finally {
-      release();
-      editor.destroy();
-      pane.remove();
+      stop();
     }
   });
 });
@@ -589,6 +617,45 @@ describe("the mark reaches both places a reader looks", () => {
       await flush();
       expect(marks.has(blocks[2]!)).toBe(true);
       expect(drawn(blocks[2]!)).not.toBeNull();
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("brings the marker back when a deleted marked block is undone", async () => {
+    const { local, remote, blocks } = replicas();
+    const marks = trackChangedBlocks(local);
+    marks.start();
+    const { editor, element } = mountEditor(local, { changed: marks });
+    const drawn = (): Element | null =>
+      element.querySelector(`[id="${blocks[1]!}"].ub-changed`);
+    try {
+      editBlock(remote, blocks[1]!, PARAGRAPH, "Rewritten by an agent.");
+      await flush();
+      expect(drawn()).not.toBeNull();
+
+      // Delete it. The tracker still holds the mark — nothing was read — but
+      // there is no block left to draw it on, which is correct.
+      let start = 0;
+      let size = 0;
+      editor.state.doc.forEach((node, offset) => {
+        if (node.attrs.id === blocks[1]!) {
+          start = offset;
+          size = node.nodeSize;
+        }
+      });
+      editor.commands.deleteRange({ from: start, to: start + size });
+      await flush();
+      expect(drawn()).toBeNull();
+      expect(marks.has(blocks[1]!)).toBe(true);
+
+      // Undo brings the block back with no decoration to map and nothing for
+      // `onRemove` to report — the marker used to stay gone while the tracker
+      // and the outline dot went on saying "changed".
+      undo(editor.state);
+      await flush();
+      expect(marks.has(blocks[1]!)).toBe(true);
+      expect(drawn()).not.toBeNull();
     } finally {
       editor.destroy();
     }

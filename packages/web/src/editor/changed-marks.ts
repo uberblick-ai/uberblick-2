@@ -59,6 +59,12 @@ export interface ChangedBlockMarkOptions {
 interface MarkedDecorations {
   generation: number;
   decorations: DecorationSet;
+  /**
+   * How many marked blocks the document did not contain when this set was
+   * built — a block deleted while its mark still stands. Non-zero means the set
+   * is short of something that could come back.
+   */
+  missing: number;
 }
 
 function build(
@@ -68,7 +74,7 @@ function build(
   const generation = marks.generation();
   const touched = marks.touched();
   if (touched.size === 0) {
-    return { generation, decorations: DecorationSet.empty };
+    return { generation, decorations: DecorationSet.empty, missing: 0 };
   }
   const decorations: Decoration[] = [];
   doc.forEach((node, offset) => {
@@ -80,7 +86,11 @@ function build(
       }),
     );
   });
-  return { generation, decorations: DecorationSet.create(doc, decorations) };
+  return {
+    generation,
+    decorations: DecorationSet.create(doc, decorations),
+    missing: touched.size - decorations.length,
+  };
 }
 
 
@@ -120,11 +130,22 @@ export const ChangedBlockMarks = Extension.create<ChangedBlockMarkOptions>({
           //
           // Either way the answer is the same: rebuild from the tracker, which
           // is the only thing that actually knows what is marked.
+          //
+          // What `onRemove` cannot report is a decoration that was never in the
+          // set to lose. Delete a marked block and the rebuild leaves the set
+          // legitimately short of it; undo, and the block comes back with
+          // nothing to map and nothing to announce — the tracker and the
+          // outline dot would go on saying "changed" over a block with no
+          // marker. So while the set is short of a marked block, every edit is
+          // a chance for that block to reappear, and every edit re-derives.
+          // `missing` is zero in every ordinary session, which is what keeps
+          // this off the keystroke path.
           apply: (transaction, previous, _old, next) => {
             if (marks.generation() !== previous.generation) {
               return build(next.doc, marks);
             }
             if (!transaction.docChanged) return previous;
+            if (previous.missing > 0) return build(next.doc, marks);
             let dropped = false;
             const decorations = previous.decorations.map(
               transaction.mapping,
@@ -136,7 +157,7 @@ export const ChangedBlockMarks = Extension.create<ChangedBlockMarkOptions>({
               },
             );
             if (dropped) return build(next.doc, marks);
-            return { generation: previous.generation, decorations };
+            return { generation: previous.generation, decorations, missing: 0 };
           },
         },
         props: {
@@ -165,21 +186,50 @@ export const ChangedBlockMarks = Extension.create<ChangedBlockMarkOptions>({
 /** Slack for sub-pixel layout, in CSS pixels. */
 const VIEWPORT_EPSILON_PX = 1;
 
+/** The height of the box a block is measured against. */
+function heightOf(root: Element | null): number {
+  if (root !== null) return root.getBoundingClientRect().height;
+  return typeof window === "undefined" ? 0 : window.innerHeight;
+}
+
 /**
- * Every hundredth of the way in, rather than just "any" and "all".
+ * The thresholds one block needs, worked out from how tall it is.
  *
- * An IntersectionObserver only calls back when a threshold is crossed, and a
- * block taller than the pane never reaches a ratio of 1 — so with `[0, 1]` the
- * only callback it ever gets is the one where it first touched the pane, at
- * whatever ratio it happened to have then. The "fills the pane" test below
- * would then be asked at the one moment it is guaranteed to be false. A block
- * ten times the height of the pane peaks at a ratio of 0.1, so the steps have
- * to be fine enough to still land inside its whole range.
+ * An IntersectionObserver only calls back when a **listed** threshold is
+ * crossed, and it calls back *at* the crossing — so the geometry a callback
+ * ever sees is the geometry at some listed threshold, never the best geometry
+ * the block happened to reach in between. A fixed ladder of thresholds is
+ * therefore not good enough for {@link fullySeen}: a 2400px block in an 800px
+ * pane tops out at a ratio of 0.333, and with hundredths the last threshold it
+ * crosses is 0.33 — 792px of an 800px pane, forever one step short of
+ * qualifying. The block would keep its mark however long the reader stared at
+ * it.
+ *
+ * So the threshold is computed rather than chosen: the exact ratio at which
+ * *this* block covers the pane. A block shorter than the pane wants 1 (it can
+ * be seen whole); a taller one wants the fraction of itself that fills the
+ * pane. Two entries, so the observer also reports the block leaving.
+ *
+ * Zero heights mean nothing has been laid out yet — a headless DOM, or a block
+ * measured before its first frame. `[0, 1]` is the honest answer there: it is
+ * what a block that fits would want anyway, and the size is re-derived the
+ * moment anything resizes.
  */
-const VISIBILITY_THRESHOLDS: number[] = Array.from(
-  { length: 101 },
-  (_unused, step) => step / 100,
-);
+function coverageThresholds(element: Element, root: Element | null): number[] {
+  const blockHeight = element.getBoundingClientRect().height;
+  const paneHeight = heightOf(root);
+  if (blockHeight <= 0 || paneHeight <= 0) return [0, 1];
+  const covered = (paneHeight - VIEWPORT_EPSILON_PX) / blockHeight;
+  if (!Number.isFinite(covered) || covered <= 0) return [0, 1];
+  return [0, Math.min(1, covered)];
+}
+
+function sameThresholds(left: number[], right: number[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
 
 /**
  * Whether the reader can see the whole block.
@@ -221,6 +271,23 @@ function scrollRoot(from: Element): Element | null {
   return null;
 }
 
+/** One marked block's observer, and the geometry it was built for. */
+interface Watch {
+  element: Element;
+  observer: IntersectionObserver;
+  thresholds: number[];
+}
+
+/**
+ * Watch for size changes, when the browser can. Returns `null` where
+ * ResizeObserver does not exist (a headless DOM, an old browser), which costs
+ * only the re-derivation the next edit would do anyway.
+ */
+function watchSizes(onResize: () => void): ResizeObserver | null {
+  const Sizes = globalThis.ResizeObserver;
+  return Sizes === undefined ? null : new Sizes(onResize);
+}
+
 export interface ClearWhenSeenOptions {
   /** How long "fully on screen" has to last. */
   delayMs?: number;
@@ -237,9 +304,15 @@ export interface ClearWhenSeenOptions {
  * replaces a block's element when its markup changes, and an observer left on
  * the old element would never fire again.
  *
+ * **One observer per marked block**, because the threshold each block needs
+ * depends on how tall that block is — see {@link coverageThresholds}. Marked
+ * blocks are counted on one hand, so this is a handful of observers, and each
+ * one is re-derived when its block or the pane changes size.
+ *
  * A browser with no IntersectionObserver gets no clearing rather than a
  * fallback scroll handler: the marks are then simply persistent for the
- * session, which is honest and costs nothing.
+ * session, which is honest and costs nothing. A missing ResizeObserver costs
+ * only the re-derivation, which the next edit does anyway.
  */
 export function clearWhenSeen(
   marks: ChangedBlocks,
@@ -257,7 +330,10 @@ export function clearWhenSeen(
   const armedAt = new Map<string, number>();
   /** What the observer last reported as fully on screen. */
   const onScreen = new Set<string>();
-  const watched = new Map<string, Element>();
+  const watched = new Map<string, Watch>();
+  const sizes = watchSizes(() => {
+    for (const [id, watch] of [...watched]) rewatch(id, watch.element);
+  });
 
   const stop = (id: string): void => {
     const timer = timers.get(id);
@@ -283,50 +359,72 @@ export function clearWhenSeen(
     );
   };
 
-  const observer = new Observer(
-    (entries) => {
-      for (const entry of entries) {
-        const id = entry.target.id;
-        if (id === "") continue;
-        if (!fullySeen(entry)) {
-          // Scrolled past, or only partly there. Not read.
-          onScreen.delete(id);
-          stop(id);
-          continue;
-        }
-        // Already counting: a second report of the same visibility must not
-        // extend the window, or a block that stays on screen never clears.
-        if (onScreen.has(id) && timers.has(id)) continue;
-        onScreen.add(id);
-        arm(id);
+  const report: IntersectionObserverCallback = (entries) => {
+    for (const entry of entries) {
+      const id = entry.target.id;
+      if (id === "") continue;
+      if (!fullySeen(entry)) {
+        // Scrolled past, or only partly there. Not read.
+        onScreen.delete(id);
+        stop(id);
+        continue;
       }
-    },
-    { root, threshold: VISIBILITY_THRESHOLDS },
-  );
+      // Already counting: a second report of the same visibility must not
+      // extend the window, or a block that stays on screen never clears.
+      if (onScreen.has(id) && timers.has(id)) continue;
+      onScreen.add(id);
+      arm(id);
+    }
+  };
+
+  /**
+   * Point an observer at this block, with the thresholds its current height
+   * calls for. A running read window survives: the fresh `observe` reports the
+   * block's visibility immediately, and a block still on screen lands in the
+   * "already counting" branch above rather than starting over.
+   */
+  function rewatch(id: string, element: Element): void {
+    const thresholds = coverageThresholds(element, root);
+    const existing = watched.get(id);
+    if (existing !== undefined) {
+      if (
+        existing.element === element &&
+        sameThresholds(existing.thresholds, thresholds)
+      ) {
+        return;
+      }
+      existing.observer.disconnect();
+      sizes?.unobserve(existing.element);
+    }
+    const observer = new Observer(report, { root, threshold: thresholds });
+    observer.observe(element);
+    sizes?.observe(element);
+    watched.set(id, { element, observer, thresholds });
+  }
+
+  const unwatch = (id: string, watch: Watch): void => {
+    watch.observer.disconnect();
+    sizes?.unobserve(watch.element);
+    watched.delete(id);
+    onScreen.delete(id);
+    stop(id);
+  };
 
   const sync = (): void => {
     const touched = marks.touched();
     if (touched.size === 0 && watched.size === 0) return;
-    for (const [id, element] of [...watched]) {
-      if (touched.has(id) && element.isConnected) continue;
-      observer.unobserve(element);
-      watched.delete(id);
-      onScreen.delete(id);
-      stop(id);
+    for (const [id, watch] of [...watched]) {
+      if (touched.has(id) && watch.element.isConnected) continue;
+      unwatch(id, watch);
     }
     for (const [id, generation] of touched) {
-      if (!watched.has(id)) {
-        const element = document.getElementById(id);
-        if (element === null) continue;
-        watched.set(id, element);
-        // `observe` reports the target's current visibility on its own, so a
-        // block marked while it is already on screen still starts a window.
-        observer.observe(element);
-        continue;
-      }
+      const element = document.getElementById(id);
+      if (element === null) continue;
+      const known = watched.has(id);
+      rewatch(id, element);
       // Changed again since the window started: whatever the reader has been
       // looking at, it is not this, so the window starts over.
-      if (armedAt.get(id) !== generation) arm(id);
+      if (known && armedAt.get(id) !== generation) arm(id);
     }
   };
 
@@ -334,6 +432,7 @@ export function clearWhenSeen(
     if (transaction.docChanged) sync();
   };
 
+  if (root !== null) sizes?.observe(root);
   sync();
   const unsubscribe = marks.subscribe(sync);
   editor.on("transaction", onTransaction);
@@ -341,7 +440,8 @@ export function clearWhenSeen(
   return () => {
     unsubscribe();
     editor.off("transaction", onTransaction);
-    observer.disconnect();
+    for (const watch of watched.values()) watch.observer.disconnect();
+    sizes?.disconnect();
     for (const timer of timers.values()) clearTimeout(timer);
     timers.clear();
     armedAt.clear();
