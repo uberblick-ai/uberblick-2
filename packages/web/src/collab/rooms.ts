@@ -154,7 +154,12 @@ export interface RoomStatus {
    * where the number is labelled.
    */
   unsyncedChanges: number;
-  /** True once the IndexedDB replica has been loaded into the Y.Doc. */
+  /**
+   * True once the local read is done: the IndexedDB replica has been applied to
+   * the Y.Doc — or there is no IndexedDB, so there was never anything to apply.
+   * Either way the Y.Doc now holds everything this replica has offline, so an
+   * empty document is an answer rather than a not-yet.
+   */
   localReplicaLoaded: boolean;
 }
 
@@ -261,6 +266,11 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
       emit();
     });
   } else {
+    // No IndexedDB, so there is no local replica to wait for and the question is
+    // already settled — which is what `localReplicaLoaded` answers. Leaving it
+    // false would be a promise of a read that is never coming, and readers of
+    // the flag (see `replicaHasAnswered`) would wait for it forever.
+    status.localReplicaLoaded = true;
     resolveLocal();
   }
 
