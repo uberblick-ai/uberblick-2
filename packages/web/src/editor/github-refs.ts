@@ -32,7 +32,7 @@
  */
 
 import { Extension } from "@tiptap/core";
-import type { MarkType, Node as ProseMirrorNode } from "@tiptap/pm/model";
+import type { Mark, MarkType, Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
@@ -106,6 +106,19 @@ interface LinkRun {
   href: string;
   from: number;
   text: string;
+  /**
+   * The marks in force where the reference is drawn, the link itself removed —
+   * the widget is rendered inside them. Without this a bold URL would come back
+   * unbold, and a commented one would lose the `data-comment-thread` wrapper
+   * that makes clicking it focus the thread.
+   *
+   * Taken at the run's first node, which is where the widget sits: a widget
+   * carries the marks in force at its own position. A comment covering only the
+   * *tail* of a URL therefore leaves the reference outside it — the same rule
+   * read the other way, and the highlight is hidden along with the URL either
+   * way.
+   */
+  marks: readonly Mark[];
 }
 
 /**
@@ -136,7 +149,12 @@ function linkRuns(block: ProseMirrorNode, base: number, linkType: MarkType): Lin
       open.text += child.text ?? "";
       return;
     }
-    runs.push({ href, from: start, text: child.text ?? "" });
+    runs.push({
+      href,
+      from: start,
+      text: child.text ?? "",
+      marks: child.marks.filter((candidate) => candidate.type !== linkType),
+    });
   });
   return runs;
 }
@@ -161,10 +179,16 @@ function build(state: EditorState): DecorationSet {
         Decoration.inline(run.from, to, { class: GITHUB_URL_CLASS }),
         Decoration.widget(run.from, () => refElement(short, run.href), {
           side: -1,
-          // No inherited marks: the reference is its own anchor, and nesting it
-          // inside the link mark's `<a>` would be invalid HTML.
-          marks: [],
-          key: `gh:${short}:${run.href}`,
+          // Every mark of the run except the link: the reference is its own
+          // anchor, and nesting it inside the link mark's `<a>` would be
+          // invalid HTML — but a bold or commented URL goes on being bold or
+          // commented once it reads `#62`.
+          marks: run.marks,
+          // The marks are part of the identity: commenting a shortened
+          // reference has to re-place the widget, not reuse it where it stood.
+          key: `gh:${short}:${run.href}:${run.marks
+            .map((mark) => mark.type.name)
+            .join(",")}`,
         }),
       );
     }

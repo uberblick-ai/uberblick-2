@@ -146,13 +146,21 @@ describe("a pasted GitHub link", () => {
    * A comment splits the link into two text nodes, neither of which is the
    * whole URL. It is still one link whose text is its href, and a reference
    * that went long here would do so for a reason no reader could see.
+   *
+   * The wrapper is the second half of it: the reference is drawn inside the
+   * marks in force where it sits, so an annotated URL reads `#62` *and* is
+   * still the thing a reader clicks to reach the thread.
    */
-  it("is still one reference when a comment splits it", () => {
+  it("is still one reference, inside the comment, when a comment splits it", () => {
     const { ydoc, id, editor, element } = mount(PR, PR);
-    createAnnotation(ydoc, id, 0, 10, "tester", "which PR?");
+    const annotation = createAnnotation(ydoc, id, 0, 10, "tester", "which PR?");
     editor.commands.setTextSelection(startOf(editor, 1));
 
-    expect(reference(element)?.textContent).toBe("#62");
+    const ref = reference(element);
+    expect(ref?.textContent).toBe("#62");
+    expect(ref?.closest("span[data-comment-thread]")?.getAttribute("data-comment-thread")).toBe(
+      annotation.id,
+    );
     expect(getBlockText(ydoc, id)).toBe(PR);
   });
 
