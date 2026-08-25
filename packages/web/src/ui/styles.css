@@ -1073,6 +1073,36 @@ h3.ub-heading {
   font-size: 0.85rem;
 }
 
+/* ---- the archive banner (#146) ---- */
+
+/* A state, not an error, so the warning ground rather than the destructive one
+   — and built like the unsupported-content banner otherwise, since both say
+   "this pane will not take an edit". The prose stays `--foreground` for the
+   same contrast reason given there. */
+.ub-archived-banner {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  background: var(--status-warning-subtle);
+  color: var(--foreground);
+  border: 1px solid var(--status-warning);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.75rem;
+  line-height: 1.5;
+}
+
+.ub-archived-banner strong {
+  font-weight: 500;
+}
+
+/* The action pushed to the end of the row, so it reads as the banner's answer
+   rather than as a word inside its sentence. */
+.ub-archived-banner .ub-tool {
+  margin-left: auto;
+}
+
 /* ---- what an address resolved to, when it was not a document (#68) ---- */
 
 /* Quieter than the unsupported-content banner above and built the same way: a

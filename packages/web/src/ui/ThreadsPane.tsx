@@ -72,6 +72,7 @@ function ThreadCard({
   focused,
   collapsed,
   replying,
+  readOnly,
   refusal,
   onSelect,
   onReply,
@@ -84,6 +85,8 @@ function ThreadCard({
   /** Resolved and not expanded: head and excerpt only. */
   collapsed: boolean;
   replying: boolean;
+  /** The conversation is readable, but nothing on the card writes. */
+  readOnly: boolean;
   /**
    * Why the last reply to this thread was refused, if it was — and null on a
    * card that reads as open, because that is what the refusal is about.
@@ -138,7 +141,10 @@ function ThreadCard({
           else resolved the thread arrives on a card that is collapsing in the
           same flush, and the reason has to outlive that. */}
       {refusal !== null && <p className="ub-comment-error">{refusal}</p>}
+      {/* An archived document's threads are history: every comment stays
+          readable, and there is nothing here that would write to it. */}
       {!collapsed &&
+        !readOnly &&
         (replying ? (
           <CommentForm
             placeholder="Reply…"
@@ -170,12 +176,18 @@ export function ThreadsPane({
   connection,
   focused,
   author,
+  readOnly = false,
   onFocus,
 }: {
   connection: RoomConnection | null;
   focused: ThreadFocus | null;
   /** The awareness name this client publishes — the author of its replies. */
   author: string;
+  /**
+   * Read the threads, write nothing — what an archived document allows. The
+   * rail keeps every card, and drops Reply, Resolve and Reopen.
+   */
+  readOnly?: boolean;
   onFocus: (threadId: string) => void;
 }): ReactElement | null {
   const threads = useThreads(connection);
@@ -248,6 +260,7 @@ export function ThreadsPane({
       // may name a thread someone else resolved a moment ago, and expanding
       // that card must not offer a reply nobody asked for.
       replying={replyTo === thread.id && !thread.resolved}
+      readOnly={readOnly}
       // Same guard as `replying` above, for the same reason: the message is
       // about a settled thread, so a card that reads as open must not show it —
       // not even for the one committed frame between a reopen reaching the rail

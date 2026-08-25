@@ -43,6 +43,29 @@ export function PaneNotice({ children }: { children: ReactNode }): ReactElement 
   );
 }
 
+/**
+ * The archive banner: what an archived document says about itself, and the one
+ * action it offers.
+ *
+ * Deliberately the *only* action. Archiving is a tombstone on the directory
+ * stub, not a deletion — every byte of the document is still here, which is
+ * why the pane below still renders it, still scrolls, still copies. What it
+ * does not do is take an edit: restoring is the way back, and there is no
+ * second path that quietly writes to a document someone archived.
+ */
+function ArchivedBanner({ onRestore }: { onRestore: () => void }): ReactElement {
+  return (
+    <p className="ub-archived-banner">
+      <strong>Archived.</strong> This document is tombstoned in the directory:
+      it is read-only here and hidden from the document list. Restore it to edit
+      it again.
+      <button type="button" className="ub-tool" onClick={onRestore}>
+        Restore
+      </button>
+    </p>
+  );
+}
+
 /** How long the copy confirmation stays up, in milliseconds. */
 const COPIED_MS = 1_500;
 
@@ -253,10 +276,13 @@ function CodeLanguageField({ editor }: { editor: Editor }): ReactElement | null 
 function BoundEditor({
   connection,
   author,
+  archived,
   onSelectThread,
 }: {
   connection: RoomConnection;
   author: string;
+  /** Read-only, and none of the chrome that writes. */
+  archived: boolean;
   onSelectThread: (threadId: string) => void;
 }): ReactElement {
   const host = useRef<HTMLDivElement | null>(null);
@@ -313,16 +339,34 @@ function BoundEditor({
     return clearWhenSeen(changedBlocks(connection), editor);
   }, [connection, editor]);
 
+  /**
+   * Read-only is a *setting* on the live editor, never a reason to rebind.
+   * Archiving a document someone is reading has to flip it in place — a rebind
+   * would throw away their caret, their scroll position and the changed-block
+   * marks they have not read yet, on a change that touched no content at all.
+   *
+   * ProseMirror's own `editable` is what enforces it: with it off the view
+   * ignores every user input path — keys, `beforeinput`, paste, drop — while
+   * leaving selection and copy exactly as they were.
+   */
+  useEffect(() => {
+    if (editor === null || editor.isDestroyed) return;
+    editor.setEditable(!archived);
+  }, [editor, archived]);
+
   return (
     <>
-      {editor !== null && <CodeLanguageField editor={editor} />}
+      {editor !== null && !archived && <CodeLanguageField editor={editor} />}
       {/* The composer and the block menu are positioned against this frame, not
           against the editor itself: ProseMirror owns every child of
           `.ub-editor`. */}
       <div className="ub-editor-frame" ref={frame}>
         <div className="ub-editor" ref={host} />
-        {editor !== null && <BlockMenu editor={editor} host={frame} />}
-        {editor !== null && (
+        {/* Both are ways of writing to the document, so an archived document
+            offers neither: the insertion menu and the comment composer are
+            gone, not merely inert. */}
+        {editor !== null && !archived && <BlockMenu editor={editor} host={frame} />}
+        {editor !== null && !archived && (
           <CommentComposer
             editor={editor}
             ydoc={connection.ydoc}
@@ -340,11 +384,20 @@ function BoundEditor({
 export function EditorPane({
   connection,
   author,
+  archived,
+  onRestore,
   onSelectThread,
 }: {
   connection: RoomConnection | null;
   /** The awareness name this client publishes — the author of its comments. */
   author: string;
+  /**
+   * Whether the directory tombstones this document. Live in both directions:
+   * the value changes under an open pane when anyone archives or restores.
+   */
+  archived: boolean;
+  /** Lift the tombstone. */
+  onRestore: () => void;
   /**
    * Called when a click lands inside a comment highlight, so the rail can focus
    * that thread. Must be referentially stable — it is an effect dependency.
@@ -368,10 +421,14 @@ export function EditorPane({
   return (
     <section className="ub-pane">
       <div className="ub-column">
+        {archived && <ArchivedBanner onRestore={onRestore} />}
         <input
           className="ub-title"
           value={meta?.title ?? ""}
           placeholder="Untitled"
+          // `readOnly`, not `disabled`: the title is still the document's name
+          // and still worth selecting and copying — it just cannot be retyped.
+          readOnly={archived}
           onChange={(event) => setTitle(connection.ydoc, event.target.value)}
         />
         <StatusLine connection={connection} />
@@ -384,6 +441,7 @@ export function EditorPane({
           <BoundEditor
             connection={connection}
             author={author}
+            archived={archived}
             onSelectThread={onSelectThread}
           />
         )}

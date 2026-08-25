@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import * as Y from "yjs";
 import {
   getBlocksFragment,
+  getDirectoryEntry,
   getDirectoryMap,
   getMeta,
   getMetaMap,
@@ -120,6 +121,41 @@ export function useDirectory(connection: RoomConnection | null): DirectoryEntry[
     return () => map.unobserve(read);
   }, [connection]);
   return entries;
+}
+
+/**
+ * Whether the directory tombstones this document, live.
+ *
+ * The directory stub is the source of the archived flag — the document itself
+ * holds no such state — so this reads the same entry `list_docs` and
+ * `archive_doc` read, over the same observer every other view here uses. That
+ * is what makes the transition live in both directions: a doc archived from an
+ * agent or from another tab flips this without a reload, and so does a restore.
+ *
+ * A uuid the directory has never seen is not archived. Silence is not a
+ * tombstone: an unsynced deep link resolves into itself when it arrives, and
+ * calling it archived in the meantime would offer Restore for a document
+ * nobody deleted.
+ */
+export function useArchived(
+  directory: RoomConnection | null,
+  uuid: string | null,
+): boolean {
+  const [archived, setArchived] = useState(false);
+  useEffect(() => {
+    if (directory === null || uuid === null) {
+      setArchived(false);
+      return;
+    }
+    const { ydoc } = directory;
+    const map = getDirectoryMap(ydoc);
+    const read = (): void =>
+      setArchived(getDirectoryEntry(ydoc, uuid)?.deleted === true);
+    read();
+    map.observe(read);
+    return () => map.unobserve(read);
+  }, [directory, uuid]);
+  return archived;
 }
 
 /**
