@@ -1050,6 +1050,18 @@ h3.ub-heading {
   text-underline-offset: 0.15em;
 }
 
+/* A pasted GitHub issue/PR link, shown as GitHub shows it (#58). Two
+   decorations: the URL text is hidden and the reference is drawn in its place —
+   display only, the document still holds the full URL. The caret stepping into
+   the link drops both, so the text is there to edit. */
+.ub-gh-url {
+  display: none;
+}
+
+.ub-gh-ref {
+  white-space: nowrap;
+}
+
 /* ---- foreign-content fallback ---- */
 
 /* Loud comes from the ground and the 2px border; the prose stays
