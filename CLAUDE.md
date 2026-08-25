@@ -74,8 +74,11 @@ before moving on.
      the PR's reviews and comment threads (human and bot alike, including
      remarks that arrived after the other gates passed); merge only when
      every remark is fixed or explicitly answered.
-   Findings are triaged: real ones are fixed on the branch; rejected ones get
-   an explicit reply on the PR thread, never silent dismissal.
+   Findings are triaged into an explicit disposition: fixed on the branch;
+   deferred to a linked issue with the accepted risk recorded on the PR
+   (never for data loss, auth/security exposure, or a violated invariant);
+   documented as an out-of-usage-model boundary; or rejected with an
+   explicit reply on the PR thread — never silent dismissal.
    Reviewing a commit is one command, `REVIEW_SHA=<head-sha> mise run review`,
    run from a checkout at freshly fetched `origin/main` with `mise.toml`,
    `Dockerfile.review` and `.dockerignore` unmodified — the task refuses
