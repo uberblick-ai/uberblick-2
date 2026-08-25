@@ -25,7 +25,7 @@
  * transport is not what is under test (see `reconnect.test.ts` for that).
  */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
@@ -98,6 +98,16 @@ function peerDirectory(local: Y.Doc): Y.Doc {
 
 let mounted: { root: Root; host: HTMLElement } | null = null;
 
+// No served configuration document: the client falls back to its build-time
+// endpoint, which is the deployment every other test in this suite assumes.
+// Answered here rather than left to a real `fetch` so the gate settles on this
+// suite's own terms and not on what the sandbox does with a relative URL.
+beforeEach(() => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response("", { status: 404 }),
+  );
+});
+
 afterEach(() => {
   const open = mounted;
   mounted = null;
@@ -106,22 +116,34 @@ afterEach(() => {
     open.host.remove();
   }
   rooms.clear();
+  vi.restoreAllMocks();
 });
 
-function mount(node: ReactNode): { host: HTMLElement; root: Root } {
+/**
+ * Render, and let the hub endpoint settle before anything is asserted.
+ *
+ * `await act(async …)`, not `act(…)`: since #155 the app reads its endpoint
+ * from a served document and `useHubEndpoint` holds every room acquisition back
+ * until that read resolves. A synchronous render therefore commits the shell
+ * with no rooms and no pane at all — every assertion here would be about an
+ * empty document. Awaiting is what the app itself waits for.
+ */
+async function mount(node: ReactNode): Promise<{ host: HTMLElement; root: Root }> {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
   mounted = { root, host };
-  act(() => root.render(node));
+  await act(async () => {
+    root.render(node);
+  });
   return { host, root };
 }
 
-function openApp(path: string): HTMLElement {
+async function openApp(path: string): Promise<HTMLElement> {
   window.history.replaceState(null, "", path);
-  return mount(<App />).host;
+  return (await mount(<App />)).host;
 }
 
 /**
@@ -158,7 +180,7 @@ function restoreButton(host: HTMLElement): HTMLButtonElement | null {
 }
 
 describe("an archived document is readable, says so, and offers one way back", () => {
-  it("follows the directory tombstone in both directions, under an open pane", () => {
+  it("follows the directory tombstone in both directions, under an open pane", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
     initDoc(ydoc, { uuid: UUID, title: "Retired protocol" });
@@ -169,7 +191,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     // Archived before anyone opens the link — the deep-link case.
     tombstoneDirectoryEntry(peer, UUID);
 
-    const host = openApp(`/${WORKSPACE}/${UUID}`);
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
 
     // ---- the deep link says what it opened ----
     expect(banner(host)?.textContent).toContain("Archived");
@@ -223,7 +245,7 @@ describe("an archived document is readable, says so, and offers one way back", (
    * render is the one in the middle: `act` flushes effects, so a check after it
    * is exactly the check that cannot see the bug.
    */
-  it("reports the tombstone from its first render, never a frame late", () => {
+  it("reports the tombstone from its first render, never a frame late", async () => {
     const directory = room(directoryRoom(WORKSPACE));
     upsertDirectoryEntry(directory.ydoc, { uuid: OTHER, title: "Still live" });
     upsertDirectoryEntry(directory.ydoc, { uuid: UUID, title: "Retired protocol" });
@@ -236,7 +258,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     }
 
     // A deep link straight to the archived document: the very first value.
-    const { root } = mount(<Probe uuid={UUID} />);
+    const { root } = await mount(<Probe uuid={UUID} />);
     expect(seen[0]).toBe(true);
     expect(seen).not.toContain(false);
 
