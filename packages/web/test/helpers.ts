@@ -71,6 +71,7 @@ export function mountEditor(
     newBlockId?: () => string;
     changed?: ChangedBlocks;
     typing?: CreateEditorOptions["typing"];
+    hovercard?: CreateEditorOptions["hovercard"];
   } = {},
 ): { editor: Editor; element: HTMLElement } {
   const element = document.createElement("div");
@@ -84,6 +85,7 @@ export function mountEditor(
       : { newBlockId: options.newBlockId }),
     ...(options.changed === undefined ? {} : { changed: options.changed }),
     ...(options.typing === undefined ? {} : { typing: options.typing }),
+    ...(options.hovercard === undefined ? {} : { hovercard: options.hovercard }),
   });
   editor.on("destroy", () => element.remove());
   return { editor, element };

@@ -1582,6 +1582,107 @@ h3.ub-heading {
   white-space: nowrap;
 }
 
+/* The hovercard on a reference (#175). A tooltip in a portal on <body>, so it
+   escapes the editor's overflow and cannot be clipped by a scrolling pane; it
+   holds nothing focusable, which is what keeps Tab order the prose's own.
+
+   The same card surface and lift as the block menu and the comment composer —
+   three things floating over the prose should read as one kind of thing. */
+.ub-hovercard {
+  position: fixed;
+  z-index: 7;
+  width: 22rem;
+  max-width: calc(100vw - 1rem);
+  padding: 0.6rem 0.7rem;
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px oklch(0 0 0 / 25%);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.ub-hovercard-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* The chip carries the state in colour *and* in a word: colour alone is not a
+   statement a reader who cannot see it can read. GitHub's purple has no
+   counterpart in this palette, so merged takes the info hue — the point is
+   that the three states are three colours, not that they are GitHub's. */
+.ub-hovercard-state {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid currentcolor;
+}
+
+.ub-hovercard-state-open {
+  color: var(--status-success);
+  background: var(--status-success-subtle);
+}
+
+.ub-hovercard-state-merged {
+  color: var(--status-info);
+  background: var(--status-info-subtle);
+}
+
+.ub-hovercard-state-closed {
+  color: var(--destructive);
+  background: var(--destructive-subtle);
+}
+
+.ub-hovercard-ref {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.ub-hovercard-title {
+  margin-top: 0.35rem;
+  font-weight: 500;
+}
+
+.ub-hovercard-meta,
+.ub-hovercard-size {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.ub-hovercard-avatar {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+
+.ub-hovercard-size {
+  font-family: var(--font-mono);
+}
+
+.ub-hovercard-adds {
+  color: var(--status-success);
+}
+
+.ub-hovercard-dels {
+  color: var(--destructive);
+}
+
+/* No token: one line saying where one goes. The card never asks for it here —
+   entry, validation and removal are Settings → Connections and nowhere else. */
+.ub-hovercard-hint {
+  color: var(--muted-foreground);
+}
+
 /* ---- foreign-content fallback ---- */
 
 /* Loud comes from the ground and the 2px border; the prose stays

@@ -26,9 +26,11 @@
  *
  * The same-repo comparison is a plain constant ({@link GITHUB_REPO} in
  * config.ts), which is honest for a single-repo spike and is the seam a hosted
- * uberblick would replace with a per-workspace setting. Nothing is fetched:
- * titles and open/closed state would need the network, and uberblick is
- * offline-first by construction.
+ * uberblick would replace with a per-workspace setting. Nothing here is
+ * fetched: the reference is drawn from the URL alone, so the document reads
+ * identically with no network at all. Titles and open/closed state live one
+ * file over, in github-hovercard.ts (#175) — opt-in, hover-triggered, and
+ * degrading to nothing, which is what keeps this decoration offline-first.
  */
 
 import { Extension } from "@tiptap/core";
@@ -53,17 +55,26 @@ const GITHUB_HOSTS = new Set(["github.com", "www.github.com"]);
  */
 const REF_PATH = /^\/([^/]+)\/([^/]+)\/(?:issues|pull)\/([0-9]+)\/?$/;
 
+/** What a canonical issue/PR URL names. Rule 2, as three fields. */
+export interface GitHubRef {
+  owner: string;
+  repo: string;
+  number: number;
+}
+
 /**
- * How `href` reads shortened, or `null` when it is not an issue/PR reference.
+ * The issue or pull request `href` points at, or `null` when it points at
+ * anything else — which is rule 2 above, and the only place it is decided.
  *
  * A query string or fragment disqualifies it: `.../pull/62#issuecomment-1` and
  * `.../pull/62/files` point *into* a pull request rather than at it, and a bare
  * `#62` would say something the link does not.
+ *
+ * Shared with the hovercards (#175) rather than re-derived there: a card may
+ * only ever ask GitHub about a reference this file would shorten, so the two
+ * must not be able to disagree about what qualifies.
  */
-export function shortGitHubRef(
-  href: string,
-  sameRepo: string = GITHUB_REPO,
-): string | null {
+export function parseGitHubRef(href: string): GitHubRef | null {
   let url: URL;
   try {
     url = new URL(href);
@@ -75,16 +86,28 @@ export function shortGitHubRef(
   if (url.search !== "" || url.hash !== "") return null;
   const match = REF_PATH.exec(url.pathname);
   if (match === null) return null;
-  const [, org, repo, number] = match;
-  if (org === undefined || repo === undefined || number === undefined) {
+  const [, owner, repo, number] = match;
+  if (owner === undefined || repo === undefined || number === undefined) {
     return null;
   }
-  const slug = `${org}/${repo}`;
+  return { owner, repo, number: Number(number) };
+}
+
+/**
+ * How `href` reads shortened, or `null` when it is not an issue/PR reference.
+ */
+export function shortGitHubRef(
+  href: string,
+  sameRepo: string = GITHUB_REPO,
+): string | null {
+  const ref = parseGitHubRef(href);
+  if (ref === null) return null;
+  const slug = `${ref.owner}/${ref.repo}`;
   // GitHub's own slugs are case-insensitive, and a pasted URL need not match
   // the constant's casing.
   return slug.toLowerCase() === sameRepo.toLowerCase()
-    ? `#${number}`
-    : `${slug}#${number}`;
+    ? `#${ref.number}`
+    : `${slug}#${ref.number}`;
 }
 
 /** The rendered reference: a real anchor, so hover and click reach the URL. */
