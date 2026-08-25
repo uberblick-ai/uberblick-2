@@ -18,19 +18,30 @@
  *    `unknown` and `archived` rather than dropped: a pin nothing can resolve is
  *    exactly what the reader has to see in order to unpin it.
  * 3. **The one-time seed.** Before the sidebar existed, the web UI grouped the
- *    corpus by four tags. The first tool call that reads an empty sidebar in a
- *    workspace that has documents carrying those tags reproduces that grouping
- *    once — including the owner's reading order, Overview before Install and
- *    run — after which tags are metadata and the sidebar is the navigation.
+ *    corpus by four tags. {@link seedSidebarOnce} reproduces that grouping —
+ *    including the owner's reading order, Overview before Install and run —
+ *    after which tags are metadata and the sidebar is the navigation.
  *
- * The seed's "has it already run?" is the sidebar being non-empty, not a flag:
- * a flag would be new state inside a schema-owned document, and the whole point
- * of the migration is to stop being a derivation. The honest consequence is
- * that a sidebar deliberately emptied down to zero groups seeds again on the
- * next read. It is bounded — the seed only ever adds groups the tags describe,
- * and never touches a sidebar that holds one — and it is why the sidebar room
- * is attached from boot in `replica.ts`: `settle` gives the hub its chance to
- * deliver curation made elsewhere before this replica acts on its absence.
+ * The seed runs at server start and nowhere else. Not from the tools: a read
+ * that writes would report a sidebar the update log may have refused, because
+ * only a mutating handler ends with `assertHealthy` and `{applied, synced}`.
+ * Running it from one place at boot means a refused append is caught where it
+ * happens — it poisons the replica set, every tool then refuses to serve, and
+ * the restart that follows rebuilds from the log with the seed unwritten, which
+ * is the honest outcome.
+ *
+ * Two things make running it safe without any coordination:
+ *
+ *   - **A set-once flag in the sidebar doc says it has run** (schema's
+ *     `isSidebarSeeded` / `markSidebarSeeded`), so it is a migration rather than
+ *     a derivation: a sidebar deliberately emptied stays empty, and the flag
+ *     travels with the document to every replica.
+ *   - **Its group ids are fixed constants, not generated.** Two replicas that
+ *     both seed while offline — neither having seen the other's flag — write the
+ *     same four groups rather than eight, and the merge is one sidebar. It is
+ *     also why the sidebar room is attached from boot in `replica.ts`:
+ *     hydrating from the log before the seed decides is what makes a second run
+ *     rare in the first place.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -39,7 +50,9 @@ import {
   createGroup,
   deleteGroup,
   getDirectoryEntry,
+  isSidebarSeeded,
   listDirectory,
+  markSidebarSeeded,
   moveDoc,
   moveGroup,
   pinDoc,
@@ -49,6 +62,7 @@ import {
 } from "@uberblick/schema";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import { z } from "zod";
+import { log } from "./log.js";
 import type { Replica, Replicas } from "./replica.js";
 
 /**
@@ -56,10 +70,22 @@ import type { Replica, Replicas } from "./replica.js";
  * order it showed them. The seed reproduces exactly this, once.
  */
 const LEGACY_TAG_GROUPS = [
-  { tag: "start-here", name: "Start here" },
-  { tag: "feature", name: "Features" },
-  { tag: "verify", name: "Verify" },
-  { tag: "reference", name: "Reference" },
+  {
+    tag: "start-here",
+    name: "Start here",
+    id: "5e1d0000-0000-4000-8000-000000000001",
+  },
+  {
+    tag: "feature",
+    name: "Features",
+    id: "5e1d0000-0000-4000-8000-000000000002",
+  },
+  { tag: "verify", name: "Verify", id: "5e1d0000-0000-4000-8000-000000000003" },
+  {
+    tag: "reference",
+    name: "Reference",
+    id: "5e1d0000-0000-4000-8000-000000000004",
+  },
 ] as const;
 
 /**
@@ -113,13 +139,15 @@ function seedOrder(entries: DirectoryEntry[]): DirectoryEntry[] {
 }
 
 /**
- * Reproduce the legacy tag grouping in an empty sidebar, once.
+ * Reproduce the legacy tag grouping in the sidebar, once.
  *
  * A document carrying more than one legacy tag lands in the first group that
  * claims it, which is what the derived sidebar did — one pin per document is a
  * sidebar rule, not a convention this could break.
+ *
+ * @returns the groups written, zero when the corpus gave it nothing to do.
  */
-function seedFromTags(replicas: Replicas, sidebar: Replica): void {
+function seedFromTags(replicas: Replicas, sidebar: Replica): number {
   const buckets = new Map<string, DirectoryEntry[]>();
   for (const entry of listDirectory(replicas.directory().doc)) {
     const group = LEGACY_TAG_GROUPS.find((candidate) =>
@@ -130,40 +158,80 @@ function seedFromTags(replicas: Replicas, sidebar: Replica): void {
     if (bucket === undefined) buckets.set(group.tag, [entry]);
     else bucket.push(entry);
   }
-  if (buckets.size === 0) return;
+  if (buckets.size === 0) return 0;
 
   // One transaction, so the migration is one update in the log and one merge on
-  // every other replica — never a half-built sidebar somebody else can see.
+  // every other replica — never a half-built sidebar somebody else can see, and
+  // never a flag without the groups it stands for.
+  let written = 0;
   sidebar.doc.transact(() => {
-    for (const { tag, name } of LEGACY_TAG_GROUPS) {
+    for (const { tag, name, id } of LEGACY_TAG_GROUPS) {
       const bucket = buckets.get(tag);
       if (bucket === undefined) continue;
-      const groupId = createGroup(sidebar.doc, name);
+      // The id is fixed, so a replica seeding this group offline writes THIS
+      // group rather than a second one carrying the same name.
+      createGroup(sidebar.doc, name, undefined, id);
+      written += 1;
       for (const entry of seedOrder(bucket)) {
-        pinDoc(sidebar.doc, groupId, entry.uuid);
+        pinDoc(sidebar.doc, id, entry.uuid);
       }
     }
+    markSidebarSeeded(sidebar.doc);
   });
+  return written;
 }
 
 /**
- * The sidebar replica, seeded from the legacy tags if it is still empty.
+ * Run the one-time migration out of tag grouping, at server start.
  *
- * Call after `replicas.settle()`: the seed reads the directory and decides on
- * the absence of curation, and both want the log tail and the hub's word first.
+ * Called once, from `server.ts`, and never from a tool — see the header for why
+ * a read must not write. The replicas are hydrated from the log by then; the
+ * hub is deliberately not waited for, because the server serves offline and a
+ * second seed elsewhere merges rather than duplicates.
+ *
+ * A sidebar that already holds a group is adopted, not seeded: curation made
+ * before this flag existed, or by another client, is exactly what a migration
+ * must not write over.
+ *
+ * Never throws. An append the log refuses is already recorded as this replica
+ * set's sticky persistence failure, which stops every tool; failing server
+ * construction on top of that would only take the diagnostics away too.
  */
-export function ensureSidebar(replicas: Replicas): Replica {
+export function seedSidebarOnce(replicas: Replicas): void {
   const sidebar = replicas.sidebar();
-  if (readSidebar(sidebar.doc).length === 0) {
-    seedFromTags(replicas, sidebar);
+  if (isSidebarSeeded(sidebar.doc)) return;
+
+  if (readSidebar(sidebar.doc).length > 0) {
+    markSidebarSeeded(sidebar.doc);
+  } else if (seedFromTags(replicas, sidebar) === 0) {
+    // Nothing carries a legacy tag — an empty workspace, or one that never had
+    // them. Left unflagged on purpose: a corpus that arrives later still gets
+    // its sidebar, on the next start.
+    return;
   }
-  return sidebar;
+
+  // The same honesty a mutating tool owes its caller, told to the only reader
+  // there is at boot: applied means the update log took it.
+  const failure = replicas.persistenceError();
+  if (failure !== null) {
+    log.error("the sidebar seed did not reach the update log", {
+      room: sidebar.room,
+      applied: false,
+      message: failure.message,
+    });
+    return;
+  }
+  log.info("seeded the sidebar from the legacy tag groups", {
+    room: sidebar.room,
+    applied: true,
+    synced: replicas.isRoomQuiet(sidebar.room),
+  });
 }
 
 /** Every uuid the sidebar pins, for `list_docs`' derived `pinned` flag. */
 export function pinnedUuids(replicas: Replicas): Set<string> {
   const pinned = new Set<string>();
-  for (const group of readSidebar(ensureSidebar(replicas).doc)) {
+  for (const group of readSidebar(replicas.sidebar().doc)) {
     for (const uuid of group.docs) pinned.add(uuid);
   }
   return pinned;
@@ -241,7 +309,7 @@ export function registerSidebarTools(
     },
     context.guarded(async () => {
       await replicas.settle();
-      const sidebar = ensureSidebar(replicas);
+      const sidebar = replicas.sidebar();
       return context.json({
         ...sidebarPayload(replicas, sidebar),
         hub: replicas.sync.state(),
@@ -274,7 +342,7 @@ export function registerSidebarTools(
       // directory — an archived document is still pinnable, because archiving
       // is a directory act and get_sidebar surfaces it either way.
       context.requireStub(uuid);
-      const sidebar = ensureSidebar(replicas);
+      const sidebar = replicas.sidebar();
       const groups = readSidebar(sidebar.doc);
       const target = findGroup(groups, group);
       const groupId = target?.id ?? createGroup(sidebar.doc, group);
@@ -310,7 +378,7 @@ export function registerSidebarTools(
     },
     context.guarded(async ({ uuid }) => {
       await replicas.settle();
-      const sidebar = ensureSidebar(replicas);
+      const sidebar = replicas.sidebar();
       const wasPinned = readSidebar(sidebar.doc).some((group) =>
         group.docs.includes(uuid),
       );
@@ -346,7 +414,7 @@ export function registerSidebarTools(
     },
     context.guarded(async ({ action, group, name, index }) => {
       await replicas.settle();
-      const sidebar = ensureSidebar(replicas);
+      const sidebar = replicas.sidebar();
       const target = findGroup(readSidebar(sidebar.doc), group);
       if (target === null) {
         throw context.error(

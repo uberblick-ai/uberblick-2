@@ -6,9 +6,10 @@
  * owns the process — signals, stdio, exit codes — which is what makes this
  * usable from tests over an in-memory transport.
  *
- * Nothing here awaits the hub. The store is opened, the log is replayed, and
- * the server is ready to serve; the hub connection happens in the background
- * and its absence changes no tool's answer except `sync_status`.
+ * Nothing here awaits the hub. The store is opened, the log is replayed, the
+ * sidebar's one-time seed runs, and the server is ready to serve; the hub
+ * connection happens in the background and its absence changes no tool's answer
+ * except `sync_status`.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -16,6 +17,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
 import { Replicas } from "./replica.js";
+import { seedSidebarOnce } from "./sidebar-tools.js";
 import { MirrorStore } from "./store.js";
 import { registerTools } from "./tools.js";
 
@@ -39,6 +41,13 @@ export function createMcpServer(
   store: MirrorStore = new MirrorStore(config.databasePath),
 ): UberblickMcpServer {
   const replicas = new Replicas(config, store);
+
+  // The one-time migration out of tag-derived navigation, before any tool can
+  // read the sidebar — and here rather than inside a tool, because a read must
+  // not write. It is guarded by a flag in the sidebar doc, so it runs once per
+  // workspace and not once per start, and it never throws: a refused append is
+  // already the replica set's sticky persistence failure. See ./sidebar-tools.ts.
+  seedSidebarOnce(replicas);
 
   const server = new McpServer(
     { name: "uberblick", version: "0.0.0" },

@@ -12,19 +12,30 @@
  */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { pinDoc, readSidebar, upsertDirectoryEntry } from "@uberblick/schema";
+import * as Y from "yjs";
 import {
+  isSidebarSeeded,
+  pinDoc,
+  readSidebar,
+  upsertDirectoryEntry,
+} from "@uberblick/schema";
+import {
+  FailingStore,
   removeTempDirs,
   startServer,
   tempDatabasePath,
   testConfig,
 } from "./helpers.js";
 import type { Rig } from "./helpers.js";
+import type { MirrorStore } from "../src/store.js";
 
 let rig: Rig | null = null;
 
-async function server(databasePath = tempDatabasePath()): Promise<Rig> {
-  rig = await startServer(testConfig({ databasePath }));
+async function server(
+  databasePath = tempDatabasePath(),
+  store?: MirrorStore,
+): Promise<Rig> {
+  rig = await startServer(testConfig({ databasePath }), store);
   return rig;
 }
 
@@ -229,62 +240,144 @@ describe("resolving what the sidebar pins", () => {
 });
 
 describe("the one-time seed", () => {
-  /** The corpus as the legacy tags described it, in no helpful order. */
-  async function seedCorpus(rig: Rig): Promise<void> {
-    await createDoc(rig, "Architecture", ["reference"]);
-    await createDoc(rig, "Install and run", ["start-here"]);
-    await createDoc(rig, "Editing and blocks", ["feature"]);
-    await createDoc(rig, "Overview", ["start-here"]);
-    await createDoc(rig, "Test protocols", ["verify"]);
-    await createDoc(rig, "Annotations", ["feature"]);
-    await createDoc(rig, "Scratch", []);
+  /**
+   * The corpus as the legacy tags described it, in no helpful order.
+   *
+   * Written as directory stubs, which is all the seed reads: it groups the
+   * corpus without opening a single document.
+   */
+  const CORPUS: [string, string[]][] = [
+    ["Architecture", ["reference"]],
+    ["Install and run", ["start-here"]],
+    ["Editing and blocks", ["feature"]],
+    ["Overview", ["start-here"]],
+    ["Test protocols", ["verify"]],
+    ["Annotations", ["feature"]],
+    ["Scratch", []],
+  ];
+
+  /** The seeded sidebar, as every test here expects to find it. */
+  const SEEDED: [string, (string | null)[]][] = [
+    ["Start here", ["Overview", "Install and run"]],
+    ["Features", ["Annotations", "Editing and blocks"]],
+    ["Verify", ["Test protocols"]],
+    ["Reference", ["Architecture"]],
+  ];
+
+  /**
+   * A database holding the tagged corpus and nothing else.
+   *
+   * The seed runs at server start, so the corpus has to be in the log before
+   * the server that migrates it comes up — which is also the real shape of the
+   * migration: the documents were there first.
+   */
+  async function corpusDatabase(): Promise<string> {
+    const databasePath = tempDatabasePath();
+    const rig = await server(databasePath);
+    const directory = rig.instance.replicas.directory().doc;
+    for (const [index, [title, tags]] of CORPUS.entries()) {
+      upsertDirectoryEntry(directory, {
+        uuid: `0000000${index}-1111-4222-8333-444444444444`,
+        title,
+        tags,
+      });
+    }
+    await rig.close();
+    return databasePath;
   }
 
   it("reproduces the tag groups once, in the owner's order", async () => {
-    const rig = await server();
-    await seedCorpus(rig);
+    const databasePath = await corpusDatabase();
+    const seeded = await server(databasePath);
 
-    const seeded = await rig.ok("get_sidebar");
-    expect(shape(seeded)).toEqual([
-      ["Start here", ["Overview", "Install and run"]],
-      ["Features", ["Annotations", "Editing and blocks"]],
-      ["Verify", ["Test protocols"]],
-      ["Reference", ["Architecture"]],
-    ]);
-
-    // Idempotent: reading again neither re-seeds nor duplicates a group.
-    const again = await rig.ok("get_sidebar");
-    expect(again.groups).toEqual(seeded.groups);
-
+    const sidebar = await seeded.ok("get_sidebar");
+    expect(shape(sidebar)).toEqual(SEEDED);
     // An untagged document is not curation, and stays out of the sidebar.
-    const listed = await rig.ok("list_docs");
+    const listed = await seeded.ok("list_docs");
     expect(
-      listed.docs
-        .filter((doc: any) => !doc.pinned)
-        .map((doc: any) => doc.title),
+      listed.docs.filter((doc: any) => !doc.pinned).map((doc: any) => doc.title),
     ).toEqual(["Scratch"]);
-  });
-
-  it("never writes over a sidebar that already holds curation", async () => {
-    const databasePath = tempDatabasePath();
-    const first = await server(databasePath);
-    await seedCorpus(first);
-    const listed = await first.ok("get_sidebar");
-    const overview = listed.groups[0].docs[0].uuid as string;
-    await first.ok("unpin_doc", { uuid: overview });
-    await first.ok("sidebar_group", { action: "delete", group: "Verify" });
-    const curated = shape(await first.ok("get_sidebar"));
-    expect(curated).toEqual([
-      ["Start here", ["Install and run"]],
-      ["Features", ["Annotations", "Editing and blocks"]],
-      ["Reference", ["Architecture"]],
-    ]);
-    await first.close();
+    await seeded.close();
     rig = null;
 
-    // A restart replays the log: the sidebar is what the agent left, and the
-    // seed does not run a second time over it.
-    const second = await server(databasePath);
-    expect(shape(await second.ok("get_sidebar"))).toEqual(curated);
+    // The flag, not the emptiness, is what says it has run — so a restart
+    // neither re-seeds nor duplicates a group.
+    const restarted = await server(databasePath);
+    expect(await restarted.ok("get_sidebar")).toEqual(sidebar);
+  });
+
+  it("leaves a sidebar emptied on purpose empty", async () => {
+    const databasePath = await corpusDatabase();
+    const seeded = await server(databasePath);
+    for (const [name] of SEEDED) {
+      await seeded.ok("sidebar_group", { action: "delete", group: name });
+    }
+    expect((await seeded.ok("get_sidebar")).groups).toEqual([]);
+    await seeded.close();
+    rig = null;
+
+    // The delete sticks: a migration that ran once does not run again because
+    // somebody chose to keep no groups at all.
+    const restarted = await server(databasePath);
+    expect((await restarted.ok("get_sidebar")).groups).toEqual([]);
+  });
+
+  it("never writes over curation that is already there", async () => {
+    const databasePath = tempDatabasePath();
+    const before = await server(databasePath);
+    const directory = before.instance.replicas.directory().doc;
+    const uuid = "0000000a-1111-4222-8333-444444444444";
+    // A tagged corpus, and a sidebar somebody built by hand before the flag
+    // existed — the upgrade case, and the one a migration must not clobber.
+    upsertDirectoryEntry(directory, { uuid, title: "Overview", tags: ["start-here"] });
+    await before.ok("pin_doc", { uuid, group: "Mine" });
+    await before.close();
+    rig = null;
+
+    const after = await server(databasePath);
+    expect(shape(await after.ok("get_sidebar"))).toEqual([["Mine", ["Overview"]]]);
+    // Adopted, not seeded: the flag is set, so it stays this way.
+    expect(isSidebarSeeded(after.instance.replicas.sidebar().doc)).toBe(true);
+  });
+
+  it("converges when two replicas seed the same corpus offline", async () => {
+    // Two machines, each with the corpus in its own log, each starting with no
+    // hub — so neither can see that the other has already migrated.
+    const first = await server(await corpusDatabase());
+    const left = first.instance.replicas.sidebar().doc;
+    const second = await startServer(
+      testConfig({ databasePath: await corpusDatabase() }),
+    );
+    const right = second.instance.replicas.sidebar().doc;
+    expect(shape(await second.ok("get_sidebar"))).toEqual(SEEDED);
+
+    // …and when they meet, one sidebar rather than two sets of same-named
+    // groups: the seed's group ids are fixed, so both wrote the same groups.
+    Y.applyUpdate(left, Y.encodeStateAsUpdate(right));
+    Y.applyUpdate(right, Y.encodeStateAsUpdate(left));
+    await second.close();
+
+    expect(readSidebar(left)).toEqual(readSidebar(right));
+    expect(shape(await first.ok("get_sidebar"))).toEqual(SEEDED);
+  });
+
+  it("reports a seed the update log refused, and does not keep it", async () => {
+    const databasePath = await corpusDatabase();
+    const refusing = new FailingStore(databasePath);
+    refusing.failing = true;
+    const failed = await server(databasePath, refusing);
+
+    // The seed could not be logged, so this replica is ahead of its own log and
+    // every tool refuses — including the one that would have shown the sidebar.
+    const refused = await failed.call("get_sidebar");
+    expect(refused.isError).toBe(true);
+    expect(refused.payload.error).toBe("persistence_failed");
+    await failed.close();
+    rig = null;
+
+    // Nothing of it survived: the next start finds the sidebar unseeded and
+    // migrates for real.
+    const healthy = await server(databasePath);
+    expect(shape(await healthy.ok("get_sidebar"))).toEqual(SEEDED);
   });
 });

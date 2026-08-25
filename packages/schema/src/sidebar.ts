@@ -11,10 +11,11 @@
  * list of references, so nothing here can change, hide or delete a document.
  * Unpinning and deleting a group are sidebar-only acts.
  *
- * Layout — three top-level keys, deliberately:
+ * Layout — four top-level keys, deliberately:
  *   - `groups`   Y.Map: groupId → Y.Map { name: string, docs: Y.Array<Pin> }
  *   - `order`    Y.Array<groupId>: the group order
  *   - `unpinned` Y.Map: `<uuid>#<clientID>` → number, unpin counters (below)
+ *   - `flags`    Y.Map: set-once booleans about the sidebar itself (below)
  *
  * A `Pin` is a plain `{ uuid, since }` object, never a nested Y type.
  *
@@ -98,6 +99,24 @@
  * Every operation naming a group id the sidebar does not hold does nothing. A
  * group can always be deleted concurrently, so a throw here would fire on
  * ordinary merges rather than on caller mistakes.
+ *
+ * ## Flags: set once, never cleared
+ *
+ * `flags` answers questions about the sidebar that its contents cannot — the
+ * one there is being {@link isSidebarSeeded}, whether the one-time migration
+ * that built a sidebar out of the old tag grouping has already run. Emptiness
+ * cannot answer it: a sidebar deliberately emptied would be migrated again, and
+ * the delete would not stick.
+ *
+ * A flag is only ever set, and only ever to `true`. That is what makes it
+ * convergent without a rule: two replicas setting one key to the same value
+ * agree however Yjs orders them, whereas a flag that could be cleared would be
+ * the concurrent set-and-delete this module refuses everywhere else.
+ *
+ * A migration guarded by a flag still has to survive being run twice — two
+ * offline replicas can each seed before either sees the other's flag — so it
+ * writes with ids of its own choosing rather than generated ones (see
+ * {@link createGroup}), and the two runs merge into one sidebar instead of two.
  */
 
 import * as Y from "yjs";
@@ -111,6 +130,12 @@ export const SIDEBAR_ORDER_KEY = "order";
 
 /** The key of the sidebar's unpin-counter Y.Map. */
 export const SIDEBAR_UNPINNED_KEY = "unpinned";
+
+/** The key of the sidebar's set-once flag Y.Map. */
+export const SIDEBAR_FLAGS_KEY = "flags";
+
+/** The flag recording that the one-time tag-group migration has run. */
+const SEEDED_FLAG = "seeded";
 
 const NAME_KEY = "name";
 const DOCS_KEY = "docs";
@@ -143,6 +168,24 @@ export function getSidebarOrder(sidebarDoc: Y.Doc): Y.Array<string> {
  */
 export function getSidebarUnpinned(sidebarDoc: Y.Doc): Y.Map<number> {
   return sidebarDoc.getMap<number>(SIDEBAR_UNPINNED_KEY);
+}
+
+/** The set-once flags inside a sidebar doc. See the header. */
+export function getSidebarFlags(sidebarDoc: Y.Doc): Y.Map<boolean> {
+  return sidebarDoc.getMap<boolean>(SIDEBAR_FLAGS_KEY);
+}
+
+/** Whether the one-time migration out of tag grouping has already run. */
+export function isSidebarSeeded(sidebarDoc: Y.Doc): boolean {
+  return getSidebarFlags(sidebarDoc).get(SEEDED_FLAG) === true;
+}
+
+/**
+ * Record that the one-time migration has run. Set once, never cleared: a
+ * sidebar emptied down to nothing stays migrated, which is the whole point.
+ */
+export function markSidebarSeeded(sidebarDoc: Y.Doc): void {
+  getSidebarFlags(sidebarDoc).set(SEEDED_FLAG, true);
 }
 
 function groupById(sidebarDoc: Y.Doc, groupId: string): Y.Map<unknown> | null {
@@ -274,13 +317,21 @@ function unpinCeiling(sidebarDoc: Y.Doc, uuid: string): number {
   return ceiling;
 }
 
-/** Add an empty group at `index` (default: last) and return its generated id. */
+/**
+ * Add an empty group at `index` (default: last) and return its id.
+ *
+ * `id` defaults to a generated one, which is what an ordinary create wants. A
+ * caller passes one when two replicas may make the *same* group independently —
+ * the one-time migration does, because a generated id would give each replica
+ * its own copy of every group, and a merge would show both. With one id they
+ * write the same group instead, and it merges into one.
+ */
 export function createGroup(
   sidebarDoc: Y.Doc,
   name: string,
   index?: number,
+  id: string = crypto.randomUUID(),
 ): string {
-  const id = crypto.randomUUID();
   sidebarDoc.transact(() => {
     const group = new Y.Map<unknown>();
     getSidebarGroups(sidebarDoc).set(id, group);

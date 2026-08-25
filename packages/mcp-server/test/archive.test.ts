@@ -288,9 +288,7 @@ describe("restore_doc", () => {
       uuid: doc.uuid,
       title: "Concepts",
       tags: ["reference"],
-      // The legacy-tag seed reaches a restored document like any other: it
-      // carries `reference`, so the sidebar's first read pins it.
-      pinned: true,
+      pinned: false,
     });
 
     const hits = await rig.ok("search", { query: "glossary" });

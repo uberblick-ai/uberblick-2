@@ -7,6 +7,8 @@ import {
   getBlocks,
   getSidebarUnpinned,
   initDoc,
+  isSidebarSeeded,
+  markSidebarSeeded,
   moveDoc,
   moveGroup,
   pinDoc,
@@ -361,5 +363,49 @@ describe("sidebar doc", () => {
     pinDoc(a, work, ALPHA);
     syncDocs(a, b);
     expect(readSidebar(b)).toEqual([{ id: work, name: "Work", docs: [ALPHA] }]);
+  });
+});
+
+/**
+ * What a one-time migration needs from this module: a way to say it has run
+ * that a delete cannot undo, and ids of its own choosing so that two replicas
+ * running it independently write one sidebar rather than two.
+ */
+describe("migrating into the sidebar", () => {
+  const START_HERE = "5e1d0000-0000-4000-8000-000000000001";
+
+  it("merges two independent runs into one set of groups", () => {
+    const a = new Y.Doc();
+    a.clientID = 1;
+    const b = new Y.Doc();
+    b.clientID = 2;
+
+    // Neither replica has seen the other's flag — the offline case a migration
+    // guarded by one still has to survive.
+    for (const doc of [a, b]) {
+      expect(isSidebarSeeded(doc)).toBe(false);
+      createGroup(doc, "Start here", undefined, START_HERE);
+      pinDoc(doc, START_HERE, ALPHA);
+      markSidebarSeeded(doc);
+    }
+    syncDocs(a, b);
+
+    expect(readSidebar(a)).toEqual(readSidebar(b));
+    expect(readSidebar(a)).toEqual([
+      { id: START_HERE, name: "Start here", docs: [ALPHA] },
+    ]);
+  });
+
+  it("stays marked when the sidebar is emptied", () => {
+    const doc = new Y.Doc();
+    createGroup(doc, "Start here", undefined, START_HERE);
+    markSidebarSeeded(doc);
+
+    deleteGroup(doc, START_HERE);
+
+    // Emptiness is not the marker: the migration ran, and a deliberate delete
+    // of everything it wrote must not bring it back.
+    expect(readSidebar(doc)).toEqual([]);
+    expect(isSidebarSeeded(doc)).toBe(true);
   });
 });
