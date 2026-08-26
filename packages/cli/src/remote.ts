@@ -658,12 +658,8 @@ function report(
   persistence: RemotePersistence,
   /** When the snapshot this verified was taken. See the note it prints. */
   takenAt: string,
-  extras: {
-    /** What this verb has to say about the documents, if anything. */
-    note?: string;
-    /** Whether this run also rewrote the checkout's derived mise config. */
-    derivedFollowed?: boolean;
-  } = {},
+  /** What this verb has to say about the documents, if anything. */
+  note = "",
 ): string {
   const live = liveDocs(corpus);
   const tombstones = corpus.entries.length - live.length;
@@ -674,7 +670,7 @@ function report(
       `\n${plural(tombstones, "archived directory entry")} travelled with the ` +
       "directory. Archived documents stay archived; their content is not moved.\n";
   }
-  text += extras.note ?? "";
+  text += note;
   text += "\nconfiguration\n";
   for (const path of persistence.written) {
     text += `  ${path}\n`;
@@ -689,10 +685,7 @@ function report(
   text +=
     "\n`ub`, `ub mcp serve` and the MCP server it spawns read this endpoint from\n" +
     "config.json. A deployed web client reads its own from the served\n" +
-    "/uberblick-config.json; a checkout's `mise run web` takes it from mise, " +
-    (extras.derivedFollowed === true
-      ? "which\nthis run's rewrite of mise.local.toml has already brought into line.\n"
-      : "so\npoint a development build at it with `HUB_URL=… mise run web`.\n");
+    "/uberblick-config.json.\n";
   text +=
     "\nVerified here means the hub acknowledged the writes and a fresh client read\n" +
     `them back — not that the hub has flushed them to disk. The snapshot this\n` +
@@ -1131,7 +1124,7 @@ async function promoteCommand(argv: string[], io: Io): Promise<number> {
   if (localProblem !== null) {
     io.err(
       `ub remote promote: ${localProblem}Documents held only by that hub cannot ` +
-        "be included, so nothing was written. Start it (mise run hub) and try " +
+        "be included, so nothing was written. Start it (`ub open --no-browser`) and try " +
         "again — or use `ub remote set` if there is nothing here to move.\n",
     );
     return 1;
@@ -1455,23 +1448,19 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
       // Only when it is true, and it is the whole of what makes the line above
       // insufficient: that hub authenticated the old secret, and `ub remote
       // set` carries no credential of its own. One route, and it is the hub's
-      // own environment — putting the value back in credentials.json would not
-      // reach it, because `mise run hub` takes HUB_AUTH_TOKEN from mise's
-      // [env], which is the derived file this join has just rewritten.
+      // own environment, and the environment is the one layer that outranks
+      // the files this join has just rewritten.
       (persistence.replacedSecret
         ? "\nThat hub was authenticated with the signing secret this join has just " +
           "replaced, and\n`ub remote set` carries no credential — so pointing " +
-          "back is not enough on its own.\nThe hub reads HUB_AUTH_TOKEN from its " +
-          "own environment: start it again with the\nprevious value exported " +
-          "there. `mise run hub` will not do it — mise's [env] supplies\nthe " +
-          "derived value, which is now this remote's.\n"
+          "back is not enough on its own. A\nhub reads HUB_AUTH_TOKEN from its " +
+          "own environment, and for `ub` the environment\noutranks every stored " +
+          "value, so start one with the previous secret exported:\n\n" +
+          "  HUB_AUTH_TOKEN=<that secret> ub open --no-browser\n"
         : "");
   }
   io.out(
-    report("joined", bridge.target, checked.corpus, persistence, takenAt, {
-      note,
-      derivedFollowed: regenerated.kind === "written",
-    }) +
+    report("joined", bridge.target, checked.corpus, persistence, takenAt, note) +
       (regenerated.kind === "written"
         ? `\nmise config   ${regenerated.path} (derived, gitignored)\n`
         : ""),

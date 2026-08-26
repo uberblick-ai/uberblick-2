@@ -237,7 +237,11 @@ function hubProber(config: McpConfig): Dial {
 /** What both hub checks are handed: an endpoint in, what a client found out. */
 type Dial = (url: string) => Promise<HubReach>;
 
-async function hubCheck(config: McpConfig | null, dial: Dial): Promise<Check> {
+async function hubCheck(
+  config: McpConfig | null,
+  endpoint: Endpoint | null,
+  dial: Dial,
+): Promise<Check> {
   if (config === null) {
     return skipped("hub", "no workspace configured, so no hub token could be minted");
   }
@@ -247,6 +251,10 @@ async function hubCheck(config: McpConfig | null, dial: Dial): Promise<Check> {
       `no signing secret, so ${config.hubUrl} was not dialled — this machine is local-only`,
     );
   }
+  // Which remedy applies is a property of the endpoint, not of the failure. A
+  // hub on this machine is one `ub open` away; a remote one is somebody's
+  // deployment, which this command can neither start nor pretend to.
+  const local = endpoint !== null && isLocalHost(endpoint.host);
   const status = await dial(config.hubUrl);
   if (status === "connected") {
     return pass("hub", `${config.hubUrl} answered and served the directory room`);
@@ -265,13 +273,17 @@ async function hubCheck(config: McpConfig | null, dial: Dial): Promise<Check> {
     return fail(
       "hub",
       `${config.hubUrl} answered but the directory room did not finish syncing`,
-      "check the hub's log — it accepted the connection without serving the room; restarting it with `mise run hub` is the usual fix",
+      local
+        ? "check the hub's log — it accepted the connection without serving the room; restarting it (`ub open --no-browser` starts one on loopback) is the usual fix"
+        : "check the deployment's log — it accepted the connection without serving the room; restarting the hub there is the usual fix",
     );
   }
   return fail(
     "hub",
     `nothing answered ${config.hubUrl}`,
-    "start the hub with `mise run hub` — if it is running, the port check says whether HUB_URL disagrees with the port it bound",
+    local
+      ? "start a hub with `ub open --no-browser` — if one is running, the port check says whether HUB_URL disagrees with the port it bound"
+      : "check that the deployment is running and that this machine can reach it — nothing is listening at that address from here",
   );
 }
 
@@ -484,7 +496,7 @@ export async function doctorReport(
     workspaceCheck(resolvedEnv, resolved, config, error),
     credentialCheck(resolved, resolvedEnv),
     databaseCheck(config),
-    await hubCheck(config, dial),
+    await hubCheck(config, endpoint, dial),
     portCheck(config, endpoint, resolvedEnv),
     await bindCheck(config, endpoint, resolvedEnv, dial),
     mcpCheck(resolvedEnv, cwd),

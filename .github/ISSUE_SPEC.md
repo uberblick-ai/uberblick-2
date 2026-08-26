@@ -79,11 +79,20 @@ just the thread.
 
 ### Claim protocol
 
-On claiming an issue the loop adds `in-progress` and comments
-`Claimed: <branch-name>` (e.g. `Claimed: feat/mcp-server`). Recovery rule: an
-issue carrying `in-progress` whose named branch has no live worktree and no
-open PR is stale and may be reclaimed. Claims live on GitHub, not in any
-session's memory, so a crashed session never strands an issue.
+The cross-agent workflow lives in [`AGENTS.md`](../AGENTS.md). Its minimum
+durable records use this issue grammar. On claim, add `in-progress` and post:
+
+```text
+Claimed: feat/mcp-server
+Implementer: opus a12a538d
+```
+
+`Implementer` is `<opus|codex> <session-or-agent id>`. Completion is a PR
+comment recording what changed,
+how it was verified, unresolved blockers, risks, or findings, and the
+KISS/overtesting self-review. Head SHA, check state, and timing remain derived
+from the PR rather than copied into the durable record. Recovery and
+independent-review rules live only in `AGENTS.md`.
 
 ## Body sections
 

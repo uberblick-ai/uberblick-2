@@ -390,9 +390,10 @@ interface HubDecision {
  * wildcards `0.0.0.0` and `::` — those are addresses to *listen* on, and a hub
  * bound to one is on every interface. The hub's only credential is a single
  * shared signing secret, so that would hand the whole network a hub which
- * trusts anyone holding it. `HUB_HOST=0.0.0.0 mise run hub` is the deliberate
- * opt-in and `ub open` is not it. Probing such an endpoint for a hub somebody
- * else started stays fine: this governs only what this command starts.
+ * trusts anyone holding it. Offering a hub beyond this machine is the remote
+ * deployment's job (`ub remote init`, REMOTE.md), and `ub open` is not it.
+ * Probing such an endpoint for a hub somebody else started stays fine: this
+ * governs only what this command starts.
  *
  * **A literal, or one of two exact names — never a prefix.** `/^127\./` also
  * matches the *DNS name* `127.attacker.example`, whose resolution somebody else
@@ -443,8 +444,9 @@ function whyNotStartable(hubUrl: string, parsed: URL): string | null {
     return (
       `${preamble}\`ub open\` binds loopback only, and ${host} is not a loopback ` +
       "address. A hub's only credential is one shared signing secret, so binding " +
-      "it there would offer that hub to every interface — `HUB_HOST=… mise run " +
-      "hub` is the deliberate way to do that on purpose"
+      "it there would offer that hub to every interface — reaching a hub from " +
+      "another machine is the remote deployment's job (`ub remote init`, and " +
+      "REMOTE.md)"
     );
   }
   return null;
@@ -745,8 +747,8 @@ export async function openCommand(
         : null;
   if (missing !== null) {
     io.err(
-      `ub open: ${missing}. Build one with \`mise run build-web\` in a checkout, ` +
-        "or point UBERBLICK_WEB_DIST at a bundle.\n",
+      `ub open: ${missing}. Point UBERBLICK_WEB_DIST at a built bundle, or ` +
+        "build one from a checkout — the README says how.\n",
     );
     return await foreground.shutdown(1);
   }

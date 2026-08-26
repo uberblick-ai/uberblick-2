@@ -34,12 +34,13 @@ Rule: no hardcoded hub addresses anywhere except the in-code fallback default.
 
 ## Orchestration policy
 
-Work in this repo is always done by sub-agents, spawned as Opus. Fable (the
-coordinating model) is there to coordinate, validate, and make the right
-decisions — it does not write feature code itself. Code lives in sub-agents and
-workflows: delegate implementation to Opus sub-agents (or Workflow pipelines
-for fan-out), then validate their output (run tests, check acceptance criteria)
-before moving on.
+`AGENTS.md` is the canonical agent-neutral workflow for every implementer lane.
+Work in this repo is always done by isolated implementer agents — Opus
+sub-agents by default, or a Codex session dispatched through Herdr under the
+same claim/handoff/review rules; Fable coordinates, validates and merges and
+never implements. Code lives in those agents and in workflows: delegate
+implementation (or Workflow pipelines for fan-out), then validate their output
+(run tests, check acceptance criteria) before moving on.
 
 ## Development workflow (every functionality)
 
@@ -48,10 +49,10 @@ before moving on.
    implementation loop may pick up must conform to `.github/ISSUE_SPEC.md`
    (`Depends-on`/`Touches` header, runnable acceptance criteria, explicit
    out-of-scope); the `ready` label asserts conformance and eligibility.
-2. **Branch + sub-agents.** Implementation happens on a feature branch
-   (`feat/<slug>`, `fix/<slug>`), written by Opus sub-agents coordinated by
-   Fable with decision-complete briefs. Never commit feature work directly to
-   `main`.
+2. **Branch + implementer agents.** Implementation happens on a feature branch
+   (`feat/<slug>`, `fix/<slug>`), written by isolated implementer agents
+   coordinated by Fable with decision-complete briefs. Never commit feature
+   work directly to `main`.
 3. **PR.** Open a PR against `main` linked to the issue (`Closes #N`), with a
    body stating what changed and how it was verified.
 4. **Gates — all of them, before merge:**

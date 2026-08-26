@@ -534,6 +534,12 @@ describe("ub remote promote", () => {
     expect(seen.get(fromWeb)).toEqual(["Web note body"]);
     expect(seen.get(fromMcp)).toEqual(["Agent note body"]);
 
+    // The report says who follows the endpoint, and says it in `ub` terms: a
+    // deployed client reads the served document, and no contributor task is
+    // named at a user who may have no checkout.
+    expect(run.stdout).toContain("/uberblick-config.json");
+    expect(run.stdout).not.toMatch(/mise/);
+
     // Neither the secret nor a token it signs may appear in either stream.
     expect(run.output).not.toContain(SECRET);
     expect(run.output).not.toMatch(TOKEN_SHAPE);
@@ -729,6 +735,9 @@ describe("ub remote promote", () => {
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("did not answer");
     expect(run.stderr).toContain("nothing was written");
+    // The way out is a command this user has: `ub`, not a checkout's task.
+    expect(run.stderr).toContain("ub open --no-browser");
+    expect(run.stderr).not.toMatch(/mise/);
     expect(persistedHubUrl(box)).toBe(DEAD_HUB_URL);
   });
 });
@@ -842,7 +851,7 @@ describe("ub remote join", () => {
     // environment — not `mise run hub`, whose [env] is the file this rewrote.
     expect(run.stdout).toContain("carries no credential");
     expect(run.stdout).toContain("HUB_AUTH_TOKEN from its own environment");
-    expect(run.stdout).toContain("`mise run hub` will not do it");
+    expect(run.stdout).toContain("ub open --no-browser");
 
     // Both are listed, and the first one still holds everything it held.
     const listed = await runUbAsync(["workspace", "list"], box);
