@@ -60,6 +60,7 @@ store.indexDoc({
   uuid: UUID,
   title: "Written by better-sqlite3",
   tags: ["legacy"],
+  description: "",
   links: [OTHER],
   body: "seeded by the old binding\nappended after the snapshot",
 });

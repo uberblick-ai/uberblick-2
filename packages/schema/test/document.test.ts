@@ -15,6 +15,7 @@ import {
   insertBlock,
   setBlockLanguage,
   setBlockLevel,
+  setDescription,
   setLinks,
   setTags,
   setTitle,
@@ -44,6 +45,7 @@ describe("document round-trip", () => {
       uuid: UUID,
       title: "Block model",
       tags: ["schema"],
+      description: null,
       links: [],
     });
     expect(doc.share.has("meta")).toBe(true);
@@ -61,8 +63,31 @@ describe("document round-trip", () => {
       uuid: UUID,
       title: "Block model, revised",
       tags: ["schema", "keystone"],
+      description: null,
       links: [target],
     });
+  });
+
+  it("carries a description, and reads absent and blank as the same null", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Described" });
+    // Nobody has said what this is for. That is one fact, with one shape.
+    expect(getMeta(doc).description).toBeNull();
+
+    setDescription(doc, "What this document is for, in a sentence.");
+    expect(getMeta(doc).description).toBe(
+      "What this document is for, in a sentence.",
+    );
+
+    // Re-initialising without one must not erase a description the document
+    // has since acquired — the same rule `links` already has.
+    initDoc(doc, { uuid: UUID, title: "Described" });
+    expect(getMeta(doc).description).toBe(
+      "What this document is for, in a sentence.",
+    );
+
+    setDescription(doc, "");
+    expect(getMeta(doc).description).toBeNull();
   });
 
   it("defaults tags and links to empty arrays and keeps links across re-init", () => {

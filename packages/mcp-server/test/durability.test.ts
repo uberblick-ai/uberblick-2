@@ -235,6 +235,7 @@ describe("a failed append", () => {
 
     const created = await rig.ok("create_doc", {
       title: "Fail-stop",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "one" }],
     });
     const blockId = created.blocks[0].id;
@@ -301,6 +302,7 @@ describe("a failed append", () => {
 
     const created = await rig.ok("create_doc", {
       title: "Quarantine",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "one" }],
     });
     const room = `${WORKSPACE}/${created.uuid}`;
@@ -345,6 +347,7 @@ describe("a failed append", () => {
 
     const created = await rig.ok("create_doc", {
       title: "No snapshots while broken",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "original" }],
     });
     const room = `${WORKSPACE}/${created.uuid}`;
@@ -460,7 +463,7 @@ describe("the pending watermark", () => {
     );
     rigs.push(rig);
 
-    const created = await rig.ok("create_doc", { title: "Watermarks" });
+    const created = await rig.ok("create_doc", { title: "Watermarks", description: "A test document." });
     const room = `${WORKSPACE}/${created.uuid}`;
     await waitUntil("the room to be acknowledged", async () => {
       const status = await rig.ok("sync_status", {});

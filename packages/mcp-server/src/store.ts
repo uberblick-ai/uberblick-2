@@ -68,6 +68,8 @@ export interface IndexedDoc {
   uuid: string;
   title: string;
   tags: string[];
+  /** The document's description, or the empty string when it has none. */
+  description: string;
   /** Outbound links, by target document UUID. */
   links: string[];
   /** The document's block text, concatenated, for full-text search. */
@@ -78,6 +80,8 @@ export interface SearchHit {
   uuid: string;
   title: string;
   tags: string[];
+  /** The document's description, or null when it has none. */
+  description: string | null;
   /** A match excerpt from the body, or the title when the title matched. */
   snippet: string;
 }
@@ -164,8 +168,9 @@ CREATE TABLE IF NOT EXISTS pending_rooms (
 );
 
 CREATE TABLE IF NOT EXISTS doc_index (
-  uuid  TEXT PRIMARY KEY,
-  title TEXT NOT NULL
+  uuid        TEXT PRIMARY KEY,
+  title       TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS doc_tags (
   uuid TEXT NOT NULL,
@@ -180,6 +185,11 @@ CREATE TABLE IF NOT EXISTS doc_links (
 );
 CREATE INDEX IF NOT EXISTS doc_links_target ON doc_links (target);
 
+-- The description is searched as part of \`body\` rather than as a column of its
+-- own. FTS5 has no ADD COLUMN, so a fourth column would mean dropping and
+-- recreating this table — throwing away every existing row's body index for a
+-- field no document had until now. Concatenating costs nothing and reindexes
+-- one document at a time, as descriptions are written.
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5 (
   uuid UNINDEXED,
   title,
@@ -267,7 +277,7 @@ export class MirrorStore {
     markPending: Prepared<[string, number]>;
     clearPending: Prepared<[string, number]>;
     listPending: Prepared<[]>;
-    putDoc: Prepared<[string, string]>;
+    putDoc: Prepared<[string, string, string]>;
     hasDoc: Prepared<[string]>;
     dropDoc: Prepared<[string]>;
     dropTags: Prepared<[string]>;
@@ -327,6 +337,7 @@ export class MirrorStore {
     this.db.exec(SCHEMA);
     // After the schema, so the backfill can read `updates` and `snapshots`.
     this.migratePendingRooms();
+    this.migrateDocDescription();
 
     const prepare = <P extends SQLInputValue[]>(sql: string): Prepared<P> =>
       this.db.prepare(sql) as Prepared<P>;
@@ -368,8 +379,9 @@ export class MirrorStore {
       ),
       listPending: prepare("SELECT room, seq FROM pending_rooms ORDER BY room"),
       putDoc: prepare(
-        "INSERT INTO doc_index (uuid, title) VALUES (?, ?) " +
-          "ON CONFLICT (uuid) DO UPDATE SET title = excluded.title",
+        "INSERT INTO doc_index (uuid, title, description) VALUES (?, ?, ?) " +
+          "ON CONFLICT (uuid) DO UPDATE SET title = excluded.title, " +
+          "description = excluded.description",
       ),
       hasDoc: prepare("SELECT 1 AS present FROM doc_index WHERE uuid = ?"),
       dropDoc: prepare("DELETE FROM doc_index WHERE uuid = ?"),
@@ -391,7 +403,7 @@ export class MirrorStore {
       // text, so any in-band separator would split a tag that contains it and
       // swallow an empty one.
       search: prepare(
-        "SELECT f.uuid AS uuid, d.title AS title, " +
+        "SELECT f.uuid AS uuid, d.title AS title, d.description AS description, " +
           "snippet(docs_fts, 2, '', '', '…', 16) AS snippet, " +
           "(SELECT json_group_array(t.tag) FROM " +
           "(SELECT tag FROM doc_tags WHERE uuid = f.uuid ORDER BY tag) t) AS tags " +
@@ -399,7 +411,8 @@ export class MirrorStore {
           "WHERE docs_fts MATCH ? ORDER BY bm25(docs_fts) LIMIT ?",
       ),
       backlinks: prepare(
-        "SELECT l.source AS uuid, COALESCE(d.title, '') AS title " +
+        "SELECT l.source AS uuid, COALESCE(d.title, '') AS title, " +
+          "COALESCE(d.description, '') AS description " +
           "FROM doc_links l LEFT JOIN doc_index d ON d.uuid = l.source " +
           "WHERE l.target = ? ORDER BY title, l.source",
       ),
@@ -458,7 +471,7 @@ export class MirrorStore {
     );
 
     this.indexTx = transactional(this.db, (doc: IndexedDoc) => {
-      this.statements.putDoc.run(doc.uuid, doc.title);
+      this.statements.putDoc.run(doc.uuid, doc.title, doc.description);
       this.statements.dropTags.run(doc.uuid);
       for (const tag of new Set(doc.tags)) {
         this.statements.putTag.run(doc.uuid, tag);
@@ -468,7 +481,14 @@ export class MirrorStore {
         if (target !== doc.uuid) this.statements.putLink.run(doc.uuid, target);
       }
       this.statements.dropFts.run(doc.uuid);
-      this.statements.putFts.run(doc.uuid, doc.title, doc.body);
+      // The description leads the indexed body, so a description-only match
+      // gives a snippet that reads as the description rather than as an
+      // unrelated fragment of the document.
+      this.statements.putFts.run(
+        doc.uuid,
+        doc.title,
+        doc.description === "" ? doc.body : `${doc.description}\n${doc.body}`,
+      );
     });
 
     this.unindexTx = transactional(this.db, (uuid: string) => {
@@ -617,6 +637,7 @@ export class MirrorStore {
     const rows = this.statements.search.all(match, limit) as {
       uuid: string;
       title: string;
+      description: string;
       snippet: string;
       tags: string | null;
     }[];
@@ -624,16 +645,25 @@ export class MirrorStore {
       uuid: row.uuid,
       title: row.title,
       tags: parseTags(row.tags),
+      description: row.description === "" ? null : row.description,
       snippet: row.snippet === "" ? row.title : row.snippet,
     }));
   }
 
   /** Documents whose `links` name `uuid`. */
-  backlinks(uuid: string): { uuid: string; title: string }[] {
-    return this.statements.backlinks.all(uuid) as {
+  backlinks(
+    uuid: string,
+  ): { uuid: string; title: string; description: string | null }[] {
+    const rows = this.statements.backlinks.all(uuid) as {
       uuid: string;
       title: string;
+      description: string;
     }[];
+    return rows.map((row) => ({
+      uuid: row.uuid,
+      title: row.title,
+      description: row.description === "" ? null : row.description,
+    }));
   }
 
   /**
@@ -721,6 +751,29 @@ export class MirrorStore {
           "ALTER TABLE pending_rooms_migrated RENAME TO pending_rooms;",
       );
     })();
+  }
+
+  /**
+   * Add `doc_index.description` to a database written before descriptions
+   * existed.
+   *
+   * A plain `ADD COLUMN` with a default, because `doc_index` is an ordinary
+   * table and the column starts empty for every row — which is exactly true:
+   * no document had a description before this migration, and each one's row is
+   * rewritten the moment it gets one. Nothing is dropped and no rebuild is
+   * needed, which is why the description rides `docs_fts.body` rather than a
+   * column FTS5 cannot add.
+   */
+  private migrateDocDescription(): void {
+    const columns = this.db
+      .prepare("SELECT name FROM pragma_table_info('doc_index')")
+      .all() as { name: string }[];
+    if (columns.some((column) => column.name === "description")) {
+      return;
+    }
+    this.db.exec(
+      "ALTER TABLE doc_index ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+    );
   }
 
   /**

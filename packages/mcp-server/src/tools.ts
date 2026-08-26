@@ -1,12 +1,12 @@
 /**
  * The v0 MCP tool set.
  *
- * Twenty-one tools and no more: create_doc, get_doc, list_docs, search,
+ * Twenty-two tools and no more: create_doc, get_doc, list_docs, search,
  * backlinks, edit_block, insert_block, delete_block, set_tags, set_links,
- * archive_doc, restore_doc, annotate, export_markdown, sync_status, the
- * four sidebar tools registered from ./sidebar-tools.ts — get_sidebar,
- * pin_doc, unpin_doc, sidebar_group — and the two feedback tools registered
- * from ./feedback-tools.ts, rate_doc and feedback_report. There is
+ * set_description, archive_doc, restore_doc, annotate, export_markdown,
+ * sync_status, the four sidebar tools registered from ./sidebar-tools.ts —
+ * get_sidebar, pin_doc, unpin_doc, sidebar_group — and the two feedback tools
+ * registered from ./feedback-tools.ts, rate_doc and feedback_report. There is
  * deliberately no whole-document write — every content change names one block
  * — no markdown-import tool, because markdown is an export format, and no hard
  * delete: archive_doc tombstones the directory stub and leaves every byte of
@@ -34,6 +34,7 @@ import {
   AnnotationRangeError,
   BLOCK_TYPES,
   BlockNotFoundError,
+  MAX_DESCRIPTION_LENGTH,
   StaleBlockError,
   addComment,
   appendBlock,
@@ -51,6 +52,7 @@ import {
   listDirectory,
   resolveAnnotationRange,
   restoreDirectoryEntry,
+  setDescription,
   setLinks,
   setTags,
   tombstoneDirectoryEntry,
@@ -230,6 +232,35 @@ const linkArg = z
   .uuid("a link is a target document UUID, never a path or a title")
   .describe("Target document UUID.");
 
+/**
+ * What a description is for, in the words an agent reads. Stated wherever one is
+ * asked for, because a description written for a human reader — "notes", "misc"
+ * — costs the corpus the whole benefit of having them.
+ */
+const DESCRIPTION_IS_FOR_CHOOSING =
+  "A description is written for an agent deciding whether to open this document. One or two sentences saying what " +
+  "is in it and what it is for, concrete enough to tell it apart from its neighbours — list_docs, search and " +
+  "backlinks all answer with it, so a good one saves a get_doc and a bad one wastes it. " +
+  `At most ${MAX_DESCRIPTION_LENGTH} characters.`;
+
+/** The one-line prompt a mutating tool carries when a document has none. */
+const DESCRIPTION_NUDGE =
+  "This document has no description: call set_description with one or two sentences saying what it is for, so " +
+  "list_docs and search can answer for it without anyone opening it.";
+
+const descriptionArg = z
+  .string({
+    error:
+      "create_doc and set_description require a `description`: one or two sentences saying what the document " +
+      "is for, so agents can judge it from list_docs and search without opening it.",
+  })
+  .min(1, "a description cannot be empty")
+  .max(
+    MAX_DESCRIPTION_LENGTH,
+    `a description is at most ${MAX_DESCRIPTION_LENGTH} characters — one or two sentences, not a summary`,
+  )
+  .describe(DESCRIPTION_IS_FOR_CHOOSING);
+
 const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
   text: z.string().optional(),
@@ -354,6 +385,32 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       : stub.title;
 
   /**
+   * The backfill nudge, on every mutating answer for a document that has no
+   * description.
+   *
+   * Enforcement is asymmetric on purpose: `create_doc` refuses without one, but
+   * the web UI creates documents that have none, and refusing to edit those
+   * would punish the agent for somebody else's omission. So a write succeeds and
+   * says what is missing — and it says it to exactly the right party, since an
+   * agent already working inside a document is the one who can describe it.
+   *
+   * Sitting in {@link durability} rather than in each handler is deliberate:
+   * every mutator that touches a document goes through it, including ones
+   * written later. The workspace's own rooms are skipped — the directory, the
+   * sidebar and the feedback doc are not documents and have no description to
+   * miss.
+   */
+  const descriptionGap = (replica: Replica): Record<string, unknown> => {
+    if (replica.isDirectory || replica.isSidebar || replica.isFeedback) {
+      return {};
+    }
+    if (getMeta(replica.doc).description !== null) {
+      return {};
+    }
+    return { description: null, descriptionHint: DESCRIPTION_NUDGE };
+  };
+
+  /**
    * What a mutating tool owes its caller: the write landed locally, and whether
    * it has reached the hub — which, right after a write, it has not.
    *
@@ -370,6 +427,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       applied: true,
       synced: replicas.isRoomQuiet(replica.room),
       hub: replicas.sync.state(),
+      ...descriptionGap(replica),
     };
   };
 
@@ -389,9 +447,13 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Create a document and publish its directory stub, so every client can discover it. " +
         "Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
         "The write applies to the local replica and syncs in the background.\n\n" +
+        "A `description` is REQUIRED here and the call fails without one. " +
+        DESCRIPTION_IS_FOR_CHOOSING +
+        "\n\n" +
         SYNCED_MEANS,
       inputSchema: {
         title: z.string().describe("Display title. Identity is the returned UUID."),
+        description: descriptionArg,
         tags: z.array(z.string().min(1)).optional(),
         blocks: z
           .array(blockInputSchema)
@@ -399,7 +461,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           .describe("Initial blocks, in order."),
       },
     },
-    guarded(async ({ title, tags, blocks }) => {
+    guarded(async ({ title, description, tags, blocks }) => {
       await replicas.settle();
 
       const uuid = randomUUID();
@@ -407,6 +469,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       initDoc(replica.doc, {
         uuid,
         title,
+        description,
         ...(tags === undefined ? {} : { tags }),
       });
       for (const block of blocks ?? []) {
@@ -422,6 +485,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         upsertDirectoryEntry(directory.doc, {
           uuid,
           title,
+          description,
           ...(tags === undefined ? {} : { tags }),
           createdAt: now,
           updatedAt: now,
@@ -432,6 +496,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         uuid,
         room: replica.room,
         title,
+        description,
         tags: tags ?? [],
         blocks: getBlocks(replica.doc),
         ...durability(replica),
@@ -444,7 +509,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     {
       title: "Read a document",
       description:
-        "Read a document's metadata, its blocks and its annotation threads. " +
+        "Read a document's metadata — including its `description`, null when nobody has written one — its blocks " +
+        "and its annotation threads. " +
         "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
         "Reading a document records it as used by this session in the workspace's `_feedback` document — once per " +
         "document per session, however often you read it, so re-reading costs nothing. The first read of a " +
@@ -479,6 +545,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       description:
         "Every document in the workspace, from the synced directory document — never from locally observed creations. " +
         "A fresh replica lists the whole corpus once the directory room has synced.\n\n" +
+        "`description` is the document's own one-or-two-sentence description, cached in the stub so this listing " +
+        "answers with it without opening a single room — read it before deciding what to get_doc. It is null for a " +
+        "document nobody has described yet; documents created in the web UI start that way, and set_description " +
+        "fixes one.\n\n" +
         "`pinned` says whether the sidebar carries the document as an entry point — derived from the sidebar doc, " +
         "read with get_sidebar. Unpinned documents are fully alive; the flag separates entry points from the long tail.\n\n" +
         "`createdAt` and `updatedAt` are epoch milliseconds, present only where known — sort keys, not history. " +
@@ -501,6 +571,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         workspace: replicas.config.workspaceId,
         docs: entries.map((entry) => ({
           ...entry,
+          // Always present, null when absent: an agent scanning this listing
+          // should read one shape, not test for a missing key.
+          description: entry.description ?? null,
           pinned: pinned.has(entry.uuid),
         })),
         hub: replicas.sync.state(),
@@ -513,8 +586,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     {
       title: "Search documents",
       description:
-        "Full-text search over document titles and block text, from the local FTS5 index. " +
-        "The index is derived from the replicas and updated as updates are observed, so it reflects edits from any client this replica has seen.",
+        "Full-text search over document titles, descriptions and block text, from the local FTS5 index. " +
+        "The index is derived from the replicas and updated as updates are observed, so it reflects edits from any client this replica has seen.\n\n" +
+        "Every hit carries the document's `description` — null where nobody has written one — so relevance can be " +
+        "judged from the result list rather than by opening each document in turn.",
       inputSchema: {
         query: z.string().min(1).describe("Words to match. A trailing * is a prefix match."),
         limit: z.number().int().min(1).max(100).optional(),
@@ -534,7 +609,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     {
       title: "Documents linking here",
       description:
-        "Documents whose `links` name this document. Links are by UUID, never by path or title.",
+        "Documents whose `links` name this document. Links are by UUID, never by path or title. " +
+        "Each one carries its `description` — null where it has none — so a citing document can be judged without " +
+        "opening it.",
       inputSchema: { uuid: uuidArg },
     },
     guarded(async ({ uuid }) => {
@@ -683,6 +760,31 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const replica = requireWritableDoc(uuid);
       setLinks(replica.doc, links);
       return json({ uuid, links, ...durability(replica) });
+    }),
+  );
+
+  server.registerTool(
+    "set_description",
+    {
+      title: "Set a document's description",
+      description:
+        "Replace the document's description wholesale. A description is rewritten rather than patched, so there is " +
+        "nothing to splice here and no `old_text` to assert. The directory stub follows immediately, the way it " +
+        "does for a rename, so the next list_docs, search and backlinks answer with it.\n\n" +
+        DESCRIPTION_IS_FOR_CHOOSING +
+        "\n\n" +
+        "This is the tool the `descriptionHint` on a write points at: a document created in the web UI has no " +
+        "description, and an agent that has just worked inside one is the party who can write it.\n\n" +
+        ARCHIVED_IS_READ_ONLY +
+        "\n\n" +
+        SYNCED_IS_ACKNOWLEDGED,
+      inputSchema: { uuid: uuidArg, description: descriptionArg },
+    },
+    guarded(async ({ uuid, description }) => {
+      await replicas.settle();
+      const replica = requireWritableDoc(uuid);
+      setDescription(replica.doc, description);
+      return json({ uuid, description, ...durability(replica) });
     }),
   );
 

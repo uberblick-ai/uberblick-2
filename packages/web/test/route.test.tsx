@@ -254,7 +254,7 @@ function waitForPop(): Promise<void> {
 }
 
 function meta(uuid: string): DocMeta {
-  return { uuid, title: "", tags: [], links: [] };
+  return { uuid, title: "", tags: [], description: null, links: [] };
 }
 
 describe("a link whose document has not synced yet is a wait, not a 404", () => {

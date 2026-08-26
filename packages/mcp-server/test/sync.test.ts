@@ -96,6 +96,7 @@ describe("hub sync", () => {
     const rig = await serverOn(port);
     const created = await rig.ok("create_doc", {
       title: "Created offline",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "no hub was involved" }],
     });
     expect(created.synced).toBe(false);
@@ -138,11 +139,13 @@ describe("hub sync", () => {
 
     const first = await author.ok("create_doc", {
       title: "Alpha",
+      description: "A test document.",
       tags: ["seed"],
       blocks: [{ type: "paragraph", text: "the quick brown capybara" }],
     });
     const second = await author.ok("create_doc", {
       title: "Beta",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "an entirely different marmot" }],
     });
     await waitForQuiet(author);
@@ -188,6 +191,7 @@ describe("hub sync", () => {
     const author = await serverOn(running.port);
     const doc = await author.ok("create_doc", {
       title: "Concepts",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "a glossary of pangolin terms" }],
     });
     await waitForQuiet(author);
@@ -224,9 +228,10 @@ describe("hub sync", () => {
     const author = await serverOn(running.port);
     const first = await author.ok("create_doc", {
       title: "Gamma",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "a wandering wombat" }],
     });
-    const second = await author.ok("create_doc", { title: "Delta" });
+    const second = await author.ok("create_doc", { title: "Delta", description: "A test document." });
     await waitForQuiet(author);
 
     // Every one of these is a *first* call on an empty replica set: they all
@@ -261,6 +266,7 @@ describe("hub sync", () => {
 
     const created = await rig.ok("create_doc", {
       title: "Shared",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "written by the agent" }],
     });
     await waitForQuiet(rig);
@@ -319,7 +325,7 @@ describe("hub sync", () => {
     expect(status.hub.reason).not.toContain(wrongSecret);
 
     // A rejected token is a sync problem, never a local one.
-    const created = await rig.ok("create_doc", { title: "Still writable" });
+    const created = await rig.ok("create_doc", { title: "Still writable", description: "A test document." });
     expect(created.applied).toBe(true);
     expect(created.synced).toBe(false);
     expect(created.hub.status).toBe("auth-failed");

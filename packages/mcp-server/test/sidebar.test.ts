@@ -74,6 +74,7 @@ async function createDoc(
 ): Promise<string> {
   const created = await rig.ok("create_doc", {
     title,
+    description: "A test document.",
     ...(tags === undefined ? {} : { tags }),
   });
   return created.uuid as string;

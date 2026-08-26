@@ -89,11 +89,14 @@ describe("a database written by the better-sqlite3 build", () => {
         uuid: LEGACY.uuid,
         title: LEGACY.title,
         tags: ["legacy"],
+        // The column this file predates, added by migration and empty for
+        // every row it already held.
+        description: null,
         snippet: expect.stringContaining("old binding"),
       },
     ]);
     expect(opened.backlinks(LEGACY.linked)).toEqual([
-      { uuid: LEGACY.uuid, title: LEGACY.title },
+      { uuid: LEGACY.uuid, title: LEGACY.title, description: null },
     ]);
   });
 });
@@ -123,6 +126,7 @@ describe("a transaction body that throws", () => {
       uuid: LEGACY.uuid,
       title: "before",
       tags: ["kept"],
+      description: "",
       links: [],
       body: "the indexed body",
     });
@@ -141,6 +145,7 @@ describe("a transaction body that throws", () => {
         uuid: LEGACY.uuid,
         title: "after",
         tags: ["replaced"],
+        description: "",
         links: [LEGACY.linked],
         body: "a different body",
       }),
@@ -153,6 +158,7 @@ describe("a transaction body that throws", () => {
         uuid: LEGACY.uuid,
         title: "before",
         tags: ["kept"],
+        description: null,
         snippet: expect.stringContaining("indexed body"),
       },
     ]);

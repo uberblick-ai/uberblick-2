@@ -181,7 +181,12 @@ it("adds nothing to a workspace that already holds other documents", async () =>
   // the starter corpus it happens to hold.
   const owned = sandbox({ userConfig: { workspace: OWNED_WORKSPACE } });
   await withTools(
-    async (call) => call("create_doc", { title: "Real work", tags: ["feature"] }),
+    async (call) =>
+      call("create_doc", {
+        title: "Real work",
+        description: "A test document.",
+        tags: ["feature"],
+      }),
     owned,
   );
 

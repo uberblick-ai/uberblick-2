@@ -162,11 +162,28 @@ export interface BlockInput {
   inline?: InlineRun[];
 }
 
+/**
+ * How long a document description may be.
+ *
+ * One or two sentences is the shape asked for; this is the ceiling that keeps a
+ * listing readable, not a target. A description is written for an agent scanning
+ * `list_docs` or `search` — it has to fit beside the title, or it stops being
+ * cheaper than opening the document.
+ */
+export const MAX_DESCRIPTION_LENGTH = 300;
+
 /** Document metadata. Identity is the uuid; title and tags are display data. */
 export interface DocMeta {
   uuid: string;
   title: string;
   tags: string[];
+  /**
+   * One or two sentences saying what this document is for, so a reader can
+   * judge relevance from a listing without opening it. Null when nobody has
+   * written one — documents created in the web UI start that way, and MCP's
+   * `create_doc` refuses to.
+   */
+  description: string | null;
   /** Outbound links, by target document UUID. Never paths or titles. */
   links: string[];
 }
@@ -244,6 +261,13 @@ export interface DirectoryEntry {
    * sort by, never history. Absent until something stamps it.
    */
   updatedAt?: number;
+  /**
+   * The document's description, mirrored here like the title so a listing can
+   * answer with it without opening a single room. `meta.description` in the
+   * document is authoritative; this is a cache repaired on write and on
+   * connect. Absent when the document has none.
+   */
+  description?: string;
 }
 
 /** One group in the sidebar doc: a stable id, a name, and what it pins. */

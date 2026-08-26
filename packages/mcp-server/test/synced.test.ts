@@ -209,6 +209,7 @@ describe("synced", () => {
 
     const created = await writer.call("create_doc", {
       title: "The debounce window",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: STORED }],
     });
     const room = `${WORKSPACE}/${created.uuid}`;

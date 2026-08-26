@@ -3,13 +3,17 @@
  *
  * Discovery is itself a synced doc: one Y.Doc per workspace, in the well-known
  * room `<workspaceId>/_directory` (see `rooms.ts`), holding a Y.Map of
- * uuid → {title, tags, deleted?, createdAt?, updatedAt?} stubs. It travels over
- * the same sync channel as every other document, so a fresh client with empty
- * local state learns the corpus by joining one more room. There is no other
- * discovery mechanism — never enumerate locally-observed creations.
+ * uuid → {title, tags, deleted?, createdAt?, updatedAt?, description?} stubs.
+ * It travels over the same sync channel as every other document, so a fresh
+ * client with empty local state learns the corpus by joining one more room.
+ * There is no other discovery mechanism — never enumerate locally-observed
+ * creations.
  *
- * The stub is a cache, not the truth: `meta.title` inside the document itself
- * is authoritative, and the stub is repaired on write and on connect.
+ * The stub is a cache, not the truth: `meta.title` and `meta.description`
+ * inside the document itself are authoritative, and the stub is repaired on
+ * write and on connect. Caching the description is what lets a listing say what
+ * a document is for without opening a single room — the whole point of having
+ * one.
  *
  * Entries are whole-object writes, so concurrent upserts to the same uuid
  * converge last-write-wins per key while different uuids never conflict.
@@ -36,6 +40,7 @@ interface StoredEntry {
   deleted?: boolean;
   createdAt?: number;
   updatedAt?: number;
+  description?: string;
 }
 
 /** A stored epoch-millisecond stamp, or undefined when absent or malformed. */
@@ -43,6 +48,15 @@ function readStamp(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value)
     ? value
     : undefined;
+}
+
+/**
+ * A stored description, or undefined when absent, blank or malformed. Blank and
+ * absent are one fact here as they are in `getMeta`, so nothing has to carry an
+ * empty string around to mean "none".
+ */
+function readDescription(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
 }
 
 export function getDirectoryMap(dirDoc: Y.Doc): Y.Map<unknown> {
@@ -58,26 +72,32 @@ function readStored(value: unknown): StoredEntry | null {
   const title = typeof candidate.title === "string" ? candidate.title : "";
   const createdAt = readStamp(candidate.createdAt);
   const updatedAt = readStamp(candidate.updatedAt);
+  const description = readDescription(candidate.description);
   return {
     title,
     tags,
     ...(candidate.deleted === true ? { deleted: true as const } : {}),
     ...(createdAt === undefined ? {} : { createdAt }),
     ...(updatedAt === undefined ? {} : { updatedAt }),
+    ...(description === undefined ? {} : { description }),
   };
 }
 
 /**
- * Carry the timestamps of an entry that is being rewritten.
+ * Carry the fields of an entry that is being rewritten but not restated: its
+ * timestamps and its description.
  *
- * Every writer here replaces the whole object, so a stamp that is not copied
- * forward is a stamp that is erased.
+ * Every writer here replaces the whole object, so a field that is not copied
+ * forward is a field that is erased.
  */
-function withStamps(next: StoredEntry, from: StoredEntry | null): StoredEntry {
+function carryForward(next: StoredEntry, from: StoredEntry | null): StoredEntry {
   return {
     ...next,
     ...(from?.createdAt === undefined ? {} : { createdAt: from.createdAt }),
     ...(from?.updatedAt === undefined ? {} : { updatedAt: from.updatedAt }),
+    ...(from?.description === undefined
+      ? {}
+      : { description: from.description }),
   };
 }
 
@@ -97,6 +117,15 @@ export interface DirectoryUpsert {
    * title does not have to know the freshness stamp in order to preserve it.
    */
   updatedAt?: number;
+  /**
+   * The document's description, cached here for listings. Written when given and
+   * carried forward untouched otherwise — the web client repairs stubs without
+   * knowing this field exists, and must not erase it by writing a title.
+   *
+   * The empty string is the one way to clear it, which is how a document whose
+   * description was removed stops advertising the old one.
+   */
+  description?: string;
 }
 
 /**
@@ -124,12 +153,16 @@ export function upsertDirectoryEntry(
     const existing = readStored(docs.get(entry.uuid));
     const createdAt = existing?.createdAt ?? entry.createdAt;
     const updatedAt = entry.updatedAt ?? existing?.updatedAt;
+    const description = readDescription(
+      entry.description ?? existing?.description,
+    );
     const next: StoredEntry = {
       title: entry.title,
       tags: [...(entry.tags ?? [])],
       ...(existing?.deleted === true ? { deleted: true as const } : {}),
       ...(createdAt === undefined ? {} : { createdAt }),
       ...(updatedAt === undefined ? {} : { updatedAt }),
+      ...(description === undefined ? {} : { description }),
     };
     docs.set(entry.uuid, next);
   });
@@ -145,7 +178,7 @@ export function tombstoneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
     const existing = readStored(docs.get(uuid));
     docs.set(
       uuid,
-      withStamps(
+      carryForward(
         {
           title: existing?.title ?? "",
           tags: existing?.tags ?? [],
@@ -186,7 +219,7 @@ export function restoreDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
   dirDoc.transact(() => {
     docs.set(
       uuid,
-      withStamps(
+      carryForward(
         { title: existing.title, tags: existing.tags },
         existing,
       ) satisfies StoredEntry,
@@ -207,6 +240,9 @@ function toEntry(uuid: string, stored: StoredEntry): DirectoryEntry {
     ...(stored.deleted === true ? { deleted: true as const } : {}),
     ...(stored.createdAt === undefined ? {} : { createdAt: stored.createdAt }),
     ...(stored.updatedAt === undefined ? {} : { updatedAt: stored.updatedAt }),
+    ...(stored.description === undefined
+      ? {}
+      : { description: stored.description }),
   };
 }
 
