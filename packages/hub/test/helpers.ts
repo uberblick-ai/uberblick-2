@@ -14,6 +14,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import * as Y from "yjs";
 import type { HubConfig } from "../src/config.js";
@@ -39,6 +40,30 @@ export function tempDatabasePath(): string {
   const dir = mkdtempSync(join(tmpdir(), "uberblick-hub-"));
   tempDirs.push(dir);
   return join(dir, "hub.sqlite");
+}
+
+/**
+ * A room's persisted state, read straight out of the hub's SQLite file rather
+ * than inferred from a client: durability tests have to look at the disk.
+ * `null` when the room has no row yet.
+ */
+export function storedText(databasePath: string, room: string): string | null {
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    const row = database
+      .prepare('SELECT data FROM "documents" WHERE name = ?')
+      .get(room);
+    if (!(row?.data instanceof Uint8Array)) {
+      return null;
+    }
+    const doc = new Y.Doc();
+    Y.applyUpdate(doc, row.data);
+    const text = doc.getText(TEXT_KEY).toString();
+    doc.destroy();
+    return text;
+  } finally {
+    database.close();
+  }
 }
 
 export function removeTempDatabases(): void {
