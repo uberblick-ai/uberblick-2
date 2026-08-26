@@ -837,10 +837,12 @@ describe("ub remote join", () => {
     expect(run.stdout).toContain("nothing points at it any more");
     expect(run.stdout).toContain(`ub remote set ${DEAD_HUB_URL}`);
     // And that pointing back is not enough on its own: this join replaced the
-    // only signing secret this machine had with the remote's, and
-    // `ub remote set` carries no credential.
+    // only signing secret this machine had with the remote's, `ub remote set`
+    // carries no credential, and the one route that reaches that hub is its own
+    // environment — not `mise run hub`, whose [env] is the file this rewrote.
     expect(run.stdout).toContain("carries no credential");
-    expect(run.stdout).toContain("replaced in\ncredentials.json");
+    expect(run.stdout).toContain("HUB_AUTH_TOKEN from its own environment");
+    expect(run.stdout).toContain("`mise run hub` will not do it");
 
     // Both are listed, and the first one still holds everything it held.
     const listed = await runUbAsync(["workspace", "list"], box);
