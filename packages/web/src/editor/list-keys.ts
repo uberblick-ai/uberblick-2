@@ -1,9 +1,10 @@
 /**
- * The list's behaviour: its keyboard, and the numbers on its ordered items.
+ * The list's behaviour: its keyboard, and what a run of items is rendered as.
  *
  * The keyboard is Tab and Shift-Tab to change depth, Enter to continue the
- * list, Backspace at the start of an item to leave it. The numbers are a
- * decoration — see {@link listNumberPlugin}.
+ * list, Backspace at the start of an item to leave it. The markers on screen
+ * and the list a screen reader hears are both decoration — see
+ * {@link listStructurePlugin}.
  *
  * Four bindings, and every one of them is a rule about *one block*, because a
  * list here is a run of adjacent `list-item` blocks rather than a tree (#59).
@@ -41,6 +42,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { MAX_LIST_INDENT, listNumbers } from "@uberblick/schema";
+import type { ListMarkerInput } from "@uberblick/schema";
 import { renderableIndent } from "./nodes.js";
 import { retypeBlockInTransaction } from "./retype.js";
 
@@ -123,12 +125,199 @@ export function listKeymap(): Plugin {
   });
 }
 
-/* ----------------------------------------------------------------- markers */
+/* ------------------------------------------------- markers and structure */
+
+/** A top-level block, with the position a decoration is placed at. */
+interface DocBlock {
+  offset: number;
+  node: ProseMirrorNode;
+}
+
+/** Where one list item sits, for the eye and for a screen reader alike. */
+interface ItemStructure {
+  /** The marker an ordered item is drawn with; `null` for a bullet. */
+  number: number | null;
+  /** Its depth, as ARIA counts depth: the outermost level is 1. */
+  level: number;
+  /** Its place among the siblings at its own depth, and how many there are. */
+  position: number;
+  size: number;
+}
 
 /**
- * Put each ordered item's number on the block as `data-number`, which the
- * stylesheet draws as its marker.
+ * Read the shape of every list in the document off its blocks: `null` for each
+ * block that is not a list item, and where the item sits for each one that is.
  *
+ * The sets come from the schema package's {@link listNumbers}, called twice.
+ * The first call numbers the ordered items; the second, with the two styles
+ * swapped, numbers exactly the ones the first left null. Swapping flips the
+ * comparison that opens a new set on both sides at once, so the two calls agree
+ * about where every set begins — which is what lets the rule stay in the schema
+ * package, where the markdown writer reads it, instead of being written a
+ * second time here.
+ */
+function listStructure(
+  blocks: readonly ListMarkerInput[],
+): Array<ItemStructure | null> {
+  const numbers = listNumbers(blocks);
+  const swapped = listNumbers(
+    blocks.map((block) => ({
+      ...block,
+      list: block.list === "ordered" ? "bullet" : "ordered",
+    })),
+  );
+  const positions = blocks.map(
+    (_block, index) => numbers[index] ?? swapped[index] ?? null,
+  );
+
+  // Backwards, so the first item met at a depth is its set's *last* one — and
+  // therefore its size. The set is finished once the item numbered 1 is
+  // reached, and a shallower item ends every deeper set below it, because a
+  // deeper set can only belong to the items that follow it.
+  const sizes: Array<number | null> = positions.map(() => null);
+  const open = new Map<number, number>();
+  for (let index = positions.length - 1; index >= 0; index -= 1) {
+    const position = positions[index];
+    if (position === null || position === undefined) {
+      open.clear();
+      continue;
+    }
+    const depth = blocks[index]?.indent ?? 0;
+    for (const level of [...open.keys()]) if (level > depth) open.delete(level);
+    const size = open.get(depth) ?? position;
+    open.set(depth, size);
+    sizes[index] = size;
+    if (position === 1) open.delete(depth);
+  }
+
+  return positions.map((position, index) => {
+    if (position === null) return null;
+    return {
+      number: numbers[index] ?? null,
+      level: (blocks[index]?.indent ?? 0) + 1,
+      position,
+      size: sizes[index] ?? position,
+    };
+  });
+}
+
+/** One list a screen reader is told about: the items of a single set. */
+interface ListSet {
+  /** `ol` for a numbered set, `ul` for a bulleted one — every member agrees. */
+  tag: "ol" | "ul";
+  items: DocBlock[];
+}
+
+/**
+ * The list itself: an empty `<ul>`/`<ol>`, off screen, that claims a set's
+ * items with `aria-owns`.
+ *
+ * There is no element to wrap the items in. They are siblings of every other
+ * block and the document has no nesting to build a wrapper from (#59), so the
+ * container is *asserted* rather than drawn: `aria-owns` re-parents the items
+ * in the accessibility tree only, and on screen nothing moves. It addresses
+ * them by the ids already on the `<li>`s — a block id, unique and stable for
+ * the life of the block — so the reference cannot drift onto another block. A
+ * set holding an item without an id yet gets no container at all: a dangling
+ * `aria-owns` reference is worse than none.
+ *
+ * One container per *set*, not per run: a set is the one grouping in which
+ * every item shares a style and a depth, so a nested set — or a bulleted one
+ * following a numbered one — is a list of its own with its own tag. Anything
+ * coarser would announce items as numbered that are bulleted, or the other way
+ * round, because `ol` versus `ul` is the one thing ARIA has no word for.
+ *
+ * A widget decoration, keyed on the set, so the element is left alone while the
+ * set is unchanged and replaced the moment its membership changes.
+ */
+function listContainer(set: ListSet): Decoration | null {
+  const first = set.items[0];
+  if (first === undefined) return null;
+  const ids = set.items
+    .map(({ node }) => node.attrs.id)
+    .filter((id): id is string => typeof id === "string" && id !== "");
+  if (ids.length !== set.items.length) return null;
+
+  const owns = ids.join(" ");
+  const tag = set.tag;
+  return Decoration.widget(
+    first.offset,
+    () => {
+      const dom = document.createElement(tag);
+      // Spelled out rather than left to the tag, because a list styled without
+      // markers — which is exactly how the items are styled — is a list some
+      // browsers stop reporting as one.
+      dom.setAttribute("role", "list");
+      dom.setAttribute("aria-owns", owns);
+      dom.className = "ub-sr-only";
+      return dom;
+    },
+    { key: `list-set:${tag}:${owns}`, side: -1 },
+  );
+}
+
+/** Every decoration the lists in `doc` need. */
+function listDecorations(doc: ProseMirrorNode): Decoration[] {
+  const blocks: DocBlock[] = [];
+  doc.forEach((node, offset) => {
+    blocks.push({ offset, node });
+  });
+  const structure = listStructure(
+    blocks.map(({ node }) => ({
+      type: node.type.name,
+      list: typeof node.attrs.list === "string" ? node.attrs.list : undefined,
+      indent: renderableIndent(node.attrs.indent),
+    })),
+  );
+
+  const decorations: Decoration[] = [];
+  const sets: ListSet[] = [];
+  // The set currently open at each depth. An item is the first of a new set
+  // exactly when it is the one numbered 1 — that is what {@link listStructure}
+  // restarting the count means — and an item ends every set deeper than
+  // itself, since a deeper set belongs to the items that follow it. Anything
+  // that is not a list item ends them all.
+  const open = new Map<number, ListSet>();
+
+  for (const [index, block] of blocks.entries()) {
+    const item = structure[index];
+    if (item === null || item === undefined) {
+      open.clear();
+      continue;
+    }
+    const depth = item.level - 1;
+    for (const level of [...open.keys()]) if (level > depth) open.delete(level);
+    let set = item.position === 1 ? undefined : open.get(depth);
+    if (set === undefined) {
+      set = { tag: item.number === null ? "ul" : "ol", items: [] };
+      sets.push(set);
+      open.set(depth, set);
+    }
+    set.items.push(block);
+
+    decorations.push(
+      Decoration.node(block.offset, block.offset + block.node.nodeSize, {
+        role: "listitem",
+        "aria-level": String(item.level),
+        "aria-posinset": String(item.position),
+        "aria-setsize": String(item.size),
+        ...(item.number === null ? {} : { "data-number": String(item.number) }),
+      }),
+    );
+  }
+
+  for (const set of sets) {
+    const container = listContainer(set);
+    if (container !== null) decorations.push(container);
+  }
+  return decorations;
+}
+
+/**
+ * What a list is, said twice: to the eye as the marker on each item, and to a
+ * screen reader as a list that contains them.
+ *
+ * The marker is `data-number` on an ordered item, which the stylesheet draws.
  * The number comes from the schema package's {@link listNumbers} — the same
  * call the markdown writer makes — so what a reader sees and what an export
  * writes cannot disagree. Doing it in CSS instead was tried and is wrong: a
@@ -136,36 +325,22 @@ export function listKeymap(): Plugin {
  * say "a bullet nested *inside* an ordered item", so a nested bullet restarted
  * the enclosing list's numbering while the export carried on counting.
  *
- * A decoration, so nothing is written to the document: the numbers are display,
- * and they are recomputed from the document on every draw — including for a
- * peer's edit or an agent's, which is what keeps a live list numbered right.
+ * The screen reader's half is the same facts as ARIA: `role="listitem"` with
+ * `aria-level`, `aria-posinset` and `aria-setsize` on every item, and a list
+ * container per set (see {@link listContainer}). Without it a bare `<li>`
+ * outside a list is not a list item at all — HTML gives it no role there, and
+ * the marker, being generated content, is the only thing left saying otherwise.
+ *
+ * Decorations, so nothing is written to the document: this is all display, and
+ * it is recomputed from the document on every draw — including for a peer's
+ * edit or an agent's, which is what keeps a live list numbered, counted and
+ * announced correctly.
  */
-export function listNumberPlugin(): Plugin {
+export function listStructurePlugin(): Plugin {
   return new Plugin({
     props: {
       decorations(state: EditorState): DecorationSet | null {
-        const blocks: Array<{ offset: number; node: ProseMirrorNode }> = [];
-        state.doc.forEach((node, offset) => {
-          blocks.push({ offset, node });
-        });
-        const numbers = listNumbers(
-          blocks.map(({ node }) => ({
-            type: node.type.name,
-            list: typeof node.attrs.list === "string" ? node.attrs.list : undefined,
-            indent: renderableIndent(node.attrs.indent),
-          })),
-        );
-
-        const decorations: Decoration[] = [];
-        for (const [index, { offset, node }] of blocks.entries()) {
-          const number = numbers[index];
-          if (number === null || number === undefined) continue;
-          decorations.push(
-            Decoration.node(offset, offset + node.nodeSize, {
-              "data-number": String(number),
-            }),
-          );
-        }
+        const decorations = listDecorations(state.doc);
         return decorations.length === 0
           ? null
           : DecorationSet.create(state.doc, decorations);
@@ -174,10 +349,10 @@ export function listNumberPlugin(): Plugin {
   });
 }
 
-/** Tiptap wrapper around the list's keyboard and its markers. */
+/** Tiptap wrapper around the list's keyboard and its rendering layer. */
 export const ListBlocks = Extension.create({
   name: "uberblickListBlocks",
   addProseMirrorPlugins() {
-    return [listKeymap(), listNumberPlugin()];
+    return [listKeymap(), listStructurePlugin()];
   },
 });

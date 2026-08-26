@@ -182,6 +182,20 @@ test("typing - starts a list, and Tab indents the item rather than leaving it", 
   // And the caret is still in the item Tab indented: typing carries on there.
   await page.keyboard.type("!", { delay: 15 });
   await expect(items.nth(1)).toHaveText("b!");
+
+  // The two blocks are lists for a screen reader (#227): a container per set,
+  // and each item levelled and counted where it sits. Tab made the second item
+  // a nested set of its own, so it is a list of its own — the attributes are
+  // pinned in `test/list-a11y.test.ts`; what a browser adds is that they
+  // survive a list built by typing, in the live editor.
+  const lists = page.locator(".ub-editor .ProseMirror [role=list]");
+  await expect(lists).toHaveCount(2);
+  await expect(lists.nth(0)).toHaveAttribute("aria-owns", first ?? "");
+  await expect(lists.nth(1)).toHaveAttribute("aria-owns", second ?? "");
+  await expect(items.nth(0)).toHaveAttribute("aria-level", "1");
+  await expect(items.nth(0)).toHaveAttribute("aria-setsize", "1");
+  await expect(items.nth(1)).toHaveAttribute("aria-level", "2");
+  await expect(items.nth(1)).toHaveAttribute("aria-posinset", "1");
 });
 
 /**
