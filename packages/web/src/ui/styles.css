@@ -7,10 +7,20 @@
  * rather than declaring any of its own.
  *
  * Colors live in the token block below and nowhere else: every rule reads a
- * custom property. Dark is the default (`:root`); light overrides inside the
- * `prefers-color-scheme: light` query. No `.dark` class, no toggle, no JS —
- * the system preference is the only input, so the app restyles live when
- * macOS appearance changes.
+ * custom property, and every custom property names both of its values at once
+ * with `light-dark()`. There is no second palette anywhere in the file, which
+ * is what keeps the two schemes from drifting.
+ *
+ * Which half is in force is `color-scheme`, and only that: unset by the reader
+ * it is `light dark`, so the system preference decides and the app restyles
+ * live when macOS appearance changes; the appearance menu (#74) stamps
+ * `data-theme` on <html> and pins it. One attribute, two rules, no per-rule
+ * theming.
+ *
+ * That sets the floor deliberately: `light-dark()` is Chrome 123, Safari 17.5
+ * and Firefox 120 (all 2024). The app already asks for more than those in
+ * places — `inert`, oklch — and the alternative was a second copy of every
+ * colour, which is the thing this file exists to not have.
  *
  * Token values are the uberblick brand set (uberblick-ai/uberblick-rails
  * `frontend/src/style.css`), with the rails light/dark default inverted.
@@ -27,42 +37,48 @@
  */
 
 :root {
-  color-scheme: dark;
+  /* Both schemes, always — this is what `light-dark()` below reads to pick a
+     half of each token, and the *page* is what sets it. The two rules after
+     this block are then the entire appearance override (#74): the reader's
+     choice is stamped on <html> as `data-theme`, and every colour in the app
+     follows because every colour in the app is one of these tokens. Without a
+     choice there is no attribute, and the system preference decides. */
+  color-scheme: light dark;
 
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: #111827;
+  --background: light-dark(oklch(0.96 0.008 75), oklch(0.145 0 0));
+  --foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
+  --card: light-dark(oklch(0.97 0.005 75), oklch(0.205 0 0));
+  --card-foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
+  --primary: light-dark(oklch(0.205 0 0), oklch(0.922 0 0));
+  --primary-foreground: light-dark(oklch(0.985 0 0), oklch(0.205 0 0));
+  --secondary: light-dark(oklch(0.97 0 0), oklch(0.269 0 0));
+  --secondary-foreground: light-dark(oklch(0.205 0 0), oklch(0.985 0 0));
+  --muted: light-dark(oklch(0.97 0 0), oklch(0.269 0 0));
+  --muted-foreground: light-dark(oklch(0.556 0 0), oklch(0.708 0 0));
+  --accent: light-dark(oklch(0.97 0 0), oklch(0.269 0 0));
+  --accent-foreground: light-dark(oklch(0.205 0 0), oklch(0.985 0 0));
+  --destructive: light-dark(oklch(0.577 0.245 27.325), oklch(0.704 0.191 22.216));
+  --destructive-foreground: light-dark(#ffffff, #111827);
   /* Not in the brand set: the loud unsupported-content banner needs a tinted
      ground, and the set ships `-subtle` pairs for every other status hue. Same
      recipe, destructive's hue. */
-  --destructive-subtle: oklch(0.25 0.04 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --brand: oklch(0.8 0.18 65);
-  --brand-subtle: oklch(0.25 0.04 65);
-  --status-success: oklch(0.7 0.2 145);
-  --status-success-subtle: oklch(0.25 0.04 145);
-  --status-warning: oklch(0.8 0.2 75);
-  --status-warning-subtle: oklch(0.25 0.04 75);
-  --status-info: oklch(0.7 0.17 240);
-  --status-info-subtle: oklch(0.25 0.03 240);
+  --destructive-subtle: light-dark(oklch(0.95 0.03 27.325), oklch(0.25 0.04 22.216));
+  --border: light-dark(oklch(0.922 0 0), oklch(1 0 0 / 10%));
+  --input: light-dark(oklch(0.922 0 0), oklch(1 0 0 / 15%));
+  --ring: light-dark(oklch(0.708 0 0), oklch(0.556 0 0));
+  --brand: light-dark(oklch(0.75 0.15 65), oklch(0.8 0.18 65));
+  --brand-subtle: light-dark(oklch(0.95 0.03 65), oklch(0.25 0.04 65));
+  --status-success: light-dark(oklch(0.65 0.18 145), oklch(0.7 0.2 145));
+  --status-success-subtle: light-dark(oklch(0.95 0.04 145), oklch(0.25 0.04 145));
+  --status-warning: light-dark(oklch(0.75 0.18 75), oklch(0.8 0.2 75));
+  --status-warning-subtle: light-dark(oklch(0.95 0.04 75), oklch(0.25 0.04 75));
+  --status-info: light-dark(oklch(0.65 0.15 240), oklch(0.7 0.17 240));
+  --status-info-subtle: light-dark(oklch(0.95 0.03 240), oklch(0.25 0.03 240));
 
   /* Running prose, one step back from `--foreground`. A whole column set at
      the brightest ink in the palette glares; headings keep `--foreground`, so
      the hierarchy is carried by contrast rather than by size alone. */
-  --prose-text: oklch(0.92 0 0);
+  --prose-text: light-dark(oklch(0.3 0 0), oklch(0.92 0 0));
 
   /* Remote-cursor label text. Theme-invariant on purpose — it sits on the peer's
      awareness colour, which y-prosemirror writes inline as a `#rrggbb` literal
@@ -140,39 +156,18 @@
   font-display: swap;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
+/* The appearance override (#74), and all of it: the reader's choice is an
+   attribute on <html>, and `color-scheme` is the one property `light-dark()`
+   consults. No token is restated, so light and dark cannot drift apart, and
+   the UA's own surfaces — scrollbars, form controls, the canvas behind the
+   page — follow the choice for free. `src/ui/theme.ts` writes the attribute;
+   nothing else may. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
 
-    --background: oklch(0.96 0.008 75);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(0.97 0.005 75);
-    --card-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --destructive-foreground: #ffffff;
-    --destructive-subtle: oklch(0.95 0.03 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --brand: oklch(0.75 0.15 65);
-    --brand-subtle: oklch(0.95 0.03 65);
-    --status-success: oklch(0.65 0.18 145);
-    --status-success-subtle: oklch(0.95 0.04 145);
-    --status-warning: oklch(0.75 0.18 75);
-    --status-warning-subtle: oklch(0.95 0.04 75);
-    --status-info: oklch(0.65 0.15 240);
-    --status-info-subtle: oklch(0.95 0.03 240);
-
-    --prose-text: oklch(0.3 0 0);
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 * {
@@ -235,20 +230,9 @@ body {
 .ub-list-head .ub-muted,
 .ub-status,
 .ub-group-head,
+.ub-workspace-name,
 .ub-foreign-list {
   font-family: var(--font-mono);
-}
-
-/* The workspace switcher (#151). It replaces the workspace label when there is
-   more than one workspace configured, so it inherits that label's muted mono
-   line (`.ub-header .ub-muted`) and adds only what makes it look operable. The
-   segment can be a bare uuid, so it truncates rather than eating the topbar. */
-.ub-workspace {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0.1rem 0.25rem;
-  max-width: 24ch;
 }
 
 /* Presence names are words, not identifiers, so the pills stay Geist wherever
@@ -520,6 +504,235 @@ body {
 .ub-settings-open:hover {
   background: var(--accent);
   color: var(--accent-foreground);
+}
+
+/* ---- the sidebar's two anchored menus (#74, design 1c) ----
+
+   Both are the vendored shadcn menu (#27) in the product's own clothes. The
+   floating surface — ground, border, radius, lift — is the Tailwind side of
+   the components reading these same tokens through the bridge; everything
+   below is plain CSS, like every other product surface.
+
+   A portalled menu is a sibling of `.ub-app`, not a child, so every selector
+   here matches a class *on* the menu or inside it. None of them reaches down
+   from `.ub-app`, and none of them can. */
+
+/* The workspace, across the top of the sidebar. Full-bleed: it pulls back
+   through the column's padding so its underline meets both edges, which is
+   what makes it read as the sidebar's own header rather than as a control
+   sitting inside it. */
+.ub-workspace {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: calc(100% + 1rem);
+  margin: -0.5rem -0.5rem 0.5rem;
+  padding: 0.5rem;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ub-workspace:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+/* A segment can be a bare uuid, so it truncates rather than pushing the count
+   and the caret out of the column. */
+.ub-workspace-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+
+.ub-workspace-count {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.ub-menu-caret {
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+}
+
+/* Opens across the column it is the header of — Radix publishes the trigger's
+   width, so the two cannot drift apart. */
+.ub-workspace-menu {
+  width: var(--radix-dropdown-menu-trigger-width);
+}
+
+/* An item's own label takes the row, and truncates rather than widening it. */
+.ub-menu-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ub-workspace-menu .ub-menu-text {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+/* The user card: the footer's row shape, plus the dot that carries this
+   session's presence colour — the same colour peers see it in. */
+.ub-user-card {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  margin-top: 0.15rem;
+  padding: 0.3rem 0.4rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ub-user-card:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.ub-user-dot {
+  flex: none;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 999px;
+}
+
+.ub-user-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ub-menu-value {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.ub-menu-current {
+  color: var(--brand);
+}
+
+/* The user panel: three stacked sections, each a label over its controls. */
+.ub-user-panel {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.ub-user-heading {
+  margin: 0;
+  font-weight: 500;
+}
+
+/* A <fieldset>, because a caption over a set of related controls is what one
+   is for — with the UA's box taken back off it. */
+.ub-panel-group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-inline-size: 0;
+}
+
+.ub-panel-label {
+  padding: 0;
+  margin-bottom: 0.3rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+/* The presence palette. A row of eight rather than eight lines: it is one
+   choice, and a list of it would be the whole panel. */
+.ub-swatches {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 0.25rem;
+}
+
+.ub-swatch {
+  height: 1.2rem;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+/* The chosen one is ringed in the ink of the ground it sits on, so the mark
+   works over any of the eight hues. */
+.ub-swatch[aria-pressed="true"] {
+  outline: 2px solid var(--foreground);
+  outline-offset: 1px;
+}
+
+.ub-appearance {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.25rem;
+}
+
+.ub-appearance-option {
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.ub-appearance-option:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.ub-appearance-option[aria-pressed="true"] {
+  background: var(--brand-subtle);
+  border-color: var(--brand);
+}
+
+/* Readouts. Nothing here takes the pointer or the keyboard, because there is
+   nothing to do — they are facts about this client. */
+.ub-panel-facts {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.ub-panel-fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ub-panel-fact dt {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.ub-panel-fact dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
 }
 
 /* ---- doc list groups ---- */

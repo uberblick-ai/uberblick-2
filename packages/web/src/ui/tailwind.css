@@ -27,8 +27,10 @@
  *    exist in `styles.css` (they were kept shadcn-canonical in #34 for exactly
  *    this). It *defines* nothing: every value on the right-hand side is a
  *    `var()` at an existing token. Light and dark therefore come for free —
- *    `styles.css` flips those properties under `prefers-color-scheme`, and the
- *    components re-resolve with them.
+ *    each of those properties is a `light-dark()` naming both of its values,
+ *    picked between by `color-scheme` (the system's preference, or the
+ *    appearance choice `styles.css` stamps as `data-theme`), and the components
+ *    re-resolve with them.
  *
  * Not everything can go through `@theme`, and the exceptions are deliberate:
  *

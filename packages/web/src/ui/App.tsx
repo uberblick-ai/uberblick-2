@@ -28,7 +28,6 @@ import { randomIdentity } from "../collab/identity.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { DocChrome } from "./DocChrome.js";
 import { Sidebar, togglePin } from "./Sidebar.js";
-import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { SettingsDialog } from "./SettingsDialog.js";
@@ -50,6 +49,7 @@ import {
 } from "./route.js";
 import type { Route } from "./route.js";
 import {
+  useAgentSessions,
   useArchived,
   useDirectory,
   useDocMeta,
@@ -58,6 +58,7 @@ import {
   usePresence,
   useRoom,
   useRoomStatus,
+  useSetting,
   useSidebar,
   useStoredFlag,
   useThreads,
@@ -374,6 +375,15 @@ export function App(): ReactElement {
    * awareness map is what keeps those two views of the same fact identical.
    */
   const presence = usePresence(chromeRoom);
+  /**
+   * The agent sessions the user menu counts, and the colour this session is
+   * seen in. Both are workspace-wide facts about *this client*, so they are
+   * read here beside the rest of the shell's state: the directory is the room
+   * every session joins, and the colour is one setting with two readers (the
+   * menu's swatches, and the chip in the header).
+   */
+  const agentSessions = useAgentSessions(directory);
+  const presenceColor = useSetting("presenceColor") ?? identity.color;
 
   /**
    * A drawer over an empty rail is a panel of nothing. The rail can empty out
@@ -530,11 +540,6 @@ export function App(): ReactElement {
           {collapsed ? "»" : "«"}
         </button>
         <span className="ub-brand">uberblick</span>
-        <WorkspaceSwitcher
-          workspaces={workspaces}
-          current={workspace}
-          onSwitch={onSwitchWorkspace}
-        />
         {/* The open document's breadcrumb, and the activity and connection
             pills. The document's room when there is one, the directory's when
             there is not: one shared socket, so it is the same truth about the
@@ -551,7 +556,9 @@ export function App(): ReactElement {
           syncOpen={syncOpen}
           onToggleSync={onToggleSync}
         />
-        <span className="ub-me" style={{ borderColor: identity.color }}>
+        {/* The colour the picker chose, which is also the colour peers see this
+            session in — one reading of one setting (#74). */}
+        <span className="ub-me" style={{ borderColor: presenceColor }}>
           {identity.name}
         </span>
       </header>
@@ -562,6 +569,11 @@ export function App(): ReactElement {
             sidebar={sidebar}
             groups={sidebarGroups}
             entries={entries}
+            workspaces={workspaces}
+            workspace={workspace}
+            onSwitchWorkspace={onSwitchWorkspace}
+            identity={identity}
+            agentSessions={agentSessions}
             selected={selected}
             onSelect={onSelect}
             onCreate={onCreate}

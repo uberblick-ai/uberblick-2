@@ -193,6 +193,28 @@ test("a peer's cursor renders in the other context with its name and colour", as
     (element) => getComputedStyle(element).borderTopColor,
   );
   await expect(label).toHaveCSS("background-color", color);
+
+  // And when A picks a different presence colour (#74), B's copy of A's cursor
+  // follows it live — the choice is an awareness republish, not something that
+  // waits for a reconnect. The colour is read back off A's own chip, so this
+  // asserts the two ends agree rather than pinning a hex.
+  await a.locator(".ub-user-card").click();
+  // Anything but the one it was dealt, which is random per tab.
+  const dealt = await a
+    .locator('.ub-swatch[aria-pressed="true"]')
+    .getAttribute("aria-label");
+  await a
+    .getByRole("button", { name: dealt === "teal" ? "violet" : "teal", exact: true })
+    .click();
+  const chosen = await identity.evaluate(
+    (element) => getComputedStyle(element).borderTopColor,
+  );
+  expect(chosen).not.toBe(color);
+  // Back into the block: awareness only carries a cursor while the editor has
+  // focus, and opening the panel took it.
+  await a.keyboard.press("Escape");
+  await caretTo(a, "end");
+  await expect(label).toHaveCSS("background-color", chosen);
 });
 
 test("a reload with the hub stopped renders from the local cache, and the offline edit converges on restart", async ({
