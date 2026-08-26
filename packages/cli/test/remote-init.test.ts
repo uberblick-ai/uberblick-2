@@ -9,11 +9,11 @@
  * Linux tailnet host is #98's, not this suite's.
  *
  * What is asserted, and nothing else: the recorded sequence and the `.env`
- * payload; that the three tailscale failure modes are told apart and that a
- * missing passwordless sudo refuses before anything is cloned; that the signing
- * secret is in no argument vector and on neither stream; that a failed `up`
- * persists nothing and installs no timer; which way the workspace hands off;
- * and that a second run is a no-op.
+ * payload; that the three tailscale failure modes are told apart; that nothing
+ * scheduled is installed on the host, updates being deliberate; that the
+ * signing secret is in no argument vector and on neither stream; that a failed
+ * `up` persists nothing; which way the workspace hands off; and that a second
+ * run is a no-op.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -58,7 +58,6 @@ const HEALTHY: Record<string, string> = {
   compose: "5.0.0",
   git: "yes",
   tailscale: "yes",
-  linger: "yes",
   checkout: "absent",
   deploykey: "none",
 };
@@ -266,7 +265,6 @@ describe("ub remote init", () => {
       `ssh ${TARGET} uberblick:clone`,
       `ssh ${TARGET} uberblick:env`,
       `ssh ${TARGET} uberblick:up`,
-      `ssh ${TARGET} uberblick:timer`,
     ]);
     expect(rig.out()).toContain(`https://${MAGIC_DNS}/`);
 
@@ -281,9 +279,6 @@ describe("ub remote init", () => {
     );
     expect(stepFor(rig, "uberblick:up").args.join("\n")).toContain(
       "sh remote-compose.sh up --build --detach",
-    );
-    expect(stepFor(rig, "uberblick:timer").args.join("\n")).toContain(
-      "systemctl --user enable --now uberblick-update.timer",
     );
     // The title carries a fingerprint, so two hosts called `box` never alias.
     const added = rig.steps().find((step) => step.args[1] === "deploy-key") as Step;
@@ -350,14 +345,15 @@ describe("ub remote init", () => {
     expect(stepFor(rig, "uberblick:env").stdin).toContain(`TAILSCALE_HOST=${MAGIC_DNS}`);
   });
 
-  it("refuses before cloning when the timer needs sudo and there is none", async () => {
-    const rig = harness({ facts: { linger: "no", sudo: "no" } });
-    expect(await init(rig)).toBe(1);
-    expect(rig.err()).toMatch(/loginctl enable-linger uberblick.*--no-auto-update/s);
-    expect(rig.labels()).toEqual([
-      "tailscale status --json",
-      `ssh ${TARGET} uberblick:preflight`,
-    ]);
+  it("schedules nothing on the host, and says the host does not update itself", async () => {
+    const rig = harness();
+    expect(await init(rig)).toBe(0);
+    // The posture, not an implementation detail: an unattended updater would
+    // deploy a wire-semantics change to production with nobody present.
+    const sent = rig.steps().map((step) => step.args.join("\n")).join("\n");
+    expect(sent).not.toMatch(/systemctl|\.timer|enable-linger/);
+    expect(rig.out()).toContain("does not update itself");
+    expect(rig.out()).toContain("ub remote update");
   });
 
   it("prints the logs and persists nothing when the stack does not come up", async () => {
@@ -366,7 +362,6 @@ describe("ub remote init", () => {
     });
     expect(await init(rig)).toBe(1);
     expect(rig.err()).toContain("hub | boom");
-    expect(rig.labels().join("\n")).not.toContain("uberblick:timer");
     expect(existsSync(join(rig.box.configHome, "uberblick", "config.json"))).toBe(false);
   });
 

@@ -96,7 +96,6 @@ options for init:
   --dir <path>           checkout directory on the host (default ~/uberblick-remote)
   --host <fqdn>          the host's MagicDNS name, when detection cannot see it
   --ip <v4>              the host's Tailscale IPv4, likewise
-  --no-auto-update       install the stack without the five-minute update timer
 
 options for promote and join:
   --secret-file <path>   read the remote's signing secret from a file only you
