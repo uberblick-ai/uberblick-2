@@ -19,6 +19,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
+import { parseWorkspaceId } from "@uberblick/schema";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { Socket } from "node:net";
@@ -250,6 +251,24 @@ async function createDocument(box: Sandbox): Promise<void> {
 }
 
 describe("ub remote init", () => {
+  it("keeps every accepted workspace spelling inside the compose charset", () => {
+    // remote-compose.sh interpolates this value into JSON, so schema's accepted
+    // grammar must remain a subset of its explicit deployment rule.
+    const composeWebWorkspaces = /^[A-Za-z0-9,-]+$/;
+    const accepted = [
+      WORKSPACE,
+      `uberblick-${WORKSPACE}`,
+      `abcdefghijklmnopqrstuvwxyz0123456789-${WORKSPACE}`,
+      `2026-${WORKSPACE}`,
+      `team-one-${WORKSPACE}`,
+    ];
+
+    for (const value of accepted) {
+      expect(() => parseWorkspaceId(value)).not.toThrow();
+      expect(value).toMatch(composeWebWorkspaces);
+    }
+  });
+
   it("runs the whole sequence, and writes .env from stdin", async () => {
     const rig = harness();
     expect(await init(rig)).toBe(0);
@@ -275,7 +294,8 @@ describe("ub remote init", () => {
     // The payload, exactly — and on stdin.
     expect(stepFor(rig, "uberblick:env").stdin).toBe(
       "# Written by `ub remote init`. Untracked, so updates never touch it.\n" +
-        `TAILSCALE_HOST=${MAGIC_DNS}\nTAILSCALE_IP=${TAILSCALE_IP}\nHUB_AUTH_TOKEN=${SECRET}\n`,
+        `TAILSCALE_HOST=${MAGIC_DNS}\nTAILSCALE_IP=${TAILSCALE_IP}\nHUB_AUTH_TOKEN=${SECRET}\n` +
+        `WEB_WORKSPACES=${WORKSPACE}\n`,
     );
     expect(stepFor(rig, "uberblick:up").args.join("\n")).toContain(
       "sh remote-compose.sh up --build --detach",
@@ -345,6 +365,14 @@ describe("ub remote init", () => {
     expect(stepFor(rig, "uberblick:env").stdin).toContain(`TAILSCALE_HOST=${MAGIC_DNS}`);
   });
 
+  it("refuses before touching the host when no workspace is configured", async () => {
+    const rig = harness();
+    delete rig.env.WORKSPACE_ID;
+    expect(await init(rig)).toBe(2);
+    expect(rig.err()).toContain("Run `ub init`");
+    expect(rig.steps()).toEqual([]);
+  });
+
   it("schedules nothing on the host, and says the host does not update itself", async () => {
     const rig = harness();
     expect(await init(rig)).toBe(0);
@@ -399,6 +427,41 @@ describe("ub remote init", () => {
     expect(stepFor(rig, "uberblick:fast-forward").args.join("\n")).toContain(
       "git merge --ff-only origin/main",
     );
+  });
+
+  it("reports replacing a different workspace on a re-run", async () => {
+    const rig = harness({
+      facts: {
+        checkout: "present",
+        deploykey: HOST_KEY,
+        webworkspaces: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      },
+      keys: `[{"id":1,"title":"uberblick-box-something","key":"${HOST_KEY}"}]`,
+    });
+
+    expect(await init(rig)).toBe(0);
+    expect(rig.out()).toContain(
+      `Replaced the host's WEB_WORKSPACES with \`${WORKSPACE}\`.`,
+    );
+  });
+
+  it("keeps an identical workspace assignment silent on a re-run", async () => {
+    const rig = harness({
+      facts: {
+        checkout: "present",
+        deploykey: HOST_KEY,
+        webworkspaces: WORKSPACE,
+      },
+      keys: `[{"id":1,"title":"uberblick-box-something","key":"${HOST_KEY}"}]`,
+    });
+
+    expect(await init(rig)).toBe(0);
+    expect(rig.out()).not.toContain("WEB_WORKSPACES");
+    expect(
+      stepFor(rig, "uberblick:env").stdin
+        .split("\n")
+        .filter((line) => line.startsWith("WEB_WORKSPACES=")),
+    ).toEqual([`WEB_WORKSPACES=${WORKSPACE}`]);
   });
 });
 

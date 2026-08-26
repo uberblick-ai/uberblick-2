@@ -184,6 +184,11 @@ if [ -f ${hostPath(KEY_PATH)}.pub ]; then
 else
   printf 'deploykey=none\\n'
 fi
+web_workspaces=
+if [ -f ${hostPath(dir)}/.env ]; then
+  web_workspaces="$(sed -n 's/^WEB_WORKSPACES=//p' ${hostPath(dir)}/.env | tail -n 1)"
+fi
+printf 'webworkspaces=%s\\n' "$web_workspaces"
 `;
 }
 
@@ -567,6 +572,7 @@ export async function remoteInitCommand(
     return 2;
   }
 
+  const webWorkspace = base.workspaceId;
   const secret = base.authSecret;
   if (secret === null) {
     io.err(
@@ -776,9 +782,11 @@ export async function remoteInitCommand(
   }
 
   // Over stdin: the secret is never an argument, on either side.
+  // resolveConfig's workspace grammar is a strict subset of the compose
+  // script's JSON-interpolation charset, pinned by the companion contract test.
   const wrote = ssh(flags.target, envScript(flags.dir), {
     env,
-    input: `# Written by \`ub remote init\`. Untracked, so updates never touch it.\nTAILSCALE_HOST=${magicDns}\nTAILSCALE_IP=${address}\nHUB_AUTH_TOKEN=${secret}\n`,
+    input: `# Written by \`ub remote init\`. Untracked, so updates never touch it.\nTAILSCALE_HOST=${magicDns}\nTAILSCALE_IP=${address}\nHUB_AUTH_TOKEN=${secret}\nWEB_WORKSPACES=${webWorkspace}\n`,
   });
   if (wrote.status !== 0) {
     io.err(`ub remote init: ${failed("writing .env on the host", wrote)}.\n`);
@@ -808,6 +816,13 @@ export async function remoteInitCommand(
   report +=
     `${flags.target} does not update itself. Deploy origin/main onto it when ` +
     "you mean to, with `ub remote update`.\n";
+  if (
+    facts.webworkspaces !== undefined &&
+    facts.webworkspaces !== "" &&
+    facts.webworkspaces !== webWorkspace
+  ) {
+    report += `Replaced the host's WEB_WORKSPACES with \`${webWorkspace}\`.\n`;
+  }
 
   const held = await localDocumentCount(base);
   if (held > 0) {
