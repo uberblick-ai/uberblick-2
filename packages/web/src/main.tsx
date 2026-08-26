@@ -18,6 +18,11 @@ import { createRoot } from "react-dom/client";
 import { resolveClientConfig } from "./config.js";
 import { App } from "./ui/App.js";
 import "./ui/styles.css";
+// The app's own surfaces are the plain CSS above; this is the chrome
+// framework the vendored shadcn components need (#27). It is imported after,
+// and everything it emits is inside a cascade layer, so it cannot reach a
+// `.ub-*` rule — see ui/tailwind.css.
+import "./ui/tailwind.css";
 
 const container = document.getElementById("root");
 if (!container) {
