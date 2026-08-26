@@ -249,8 +249,19 @@ describe("a write lock held by another process", () => {
     await sleep(200);
 
     const holder = await holdWriteLock(databasePath, 200);
-    await started.flush();
-    await once(holder, "exit");
+    // Subscribed before the flush, not after: the flush blocks this event loop
+    // while the child commits and exits, so a listener attached afterwards can
+    // be waiting for an event that has already happened.
+    const holderExited = once(holder, "exit");
+    try {
+      await started.flush();
+    } catch (error) {
+      // Whatever went wrong, the child must not outlive the test.
+      holder.kill("SIGKILL");
+      throw error;
+    } finally {
+      await holderExited;
+    }
 
     expect(storedText(databasePath, room)).toBe("written while locked");
     expect(records.map((record) => record.event)).not.toContain(
