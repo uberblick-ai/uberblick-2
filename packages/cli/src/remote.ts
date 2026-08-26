@@ -87,11 +87,15 @@ import {
   writeUserConfig,
 } from "./config.js";
 import type { ResolvedConfig } from "./config.js";
+import type { InitLock } from "./init-lock.js";
+import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
+import { trustLocalConfig } from "./mise-config.js";
 import { processIo } from "./io.js";
 import { remoteInitCommand, remoteUpdateCommand } from "./remote-init.js";
 import { publishOwnerOnly, removeQuietly } from "./safe-write.js";
 import { ORIGIN_LABELS } from "./status.js";
+import type { Regeneration } from "./workspace.js";
 import { regenerateLocalConfig } from "./workspace.js";
 
 export const REMOTE_HELP = `usage: ub remote [command]
@@ -639,8 +643,12 @@ function report(
   persistence: RemotePersistence,
   /** When the snapshot this verified was taken. See the note it prints. */
   takenAt: string,
-  /** What this verb has to say about the documents, if anything. */
-  note = "",
+  extras: {
+    /** What this verb has to say about the documents, if anything. */
+    note?: string;
+    /** Whether this run also rewrote the checkout's derived mise config. */
+    derivedFollowed?: boolean;
+  } = {},
 ): string {
   const live = liveDocs(corpus);
   const tombstones = corpus.entries.length - live.length;
@@ -651,7 +659,7 @@ function report(
       `\n${plural(tombstones, "archived directory entry")} travelled with the ` +
       "directory. Archived documents stay archived; their content is not moved.\n";
   }
-  text += note;
+  text += extras.note ?? "";
   text += "\nconfiguration\n";
   for (const path of persistence.written) {
     text += `  ${path}\n`;
@@ -666,8 +674,10 @@ function report(
   text +=
     "\n`ub`, `ub mcp serve` and the MCP server it spawns read this endpoint from\n" +
     "config.json. A deployed web client reads its own from the served\n" +
-    "/uberblick-config.json; a checkout's `mise run web` still uses mise's\n" +
-    "HUB_URL, so point a development build at it with `HUB_URL=… mise run web`.\n";
+    "/uberblick-config.json; a checkout's `mise run web` takes it from mise, " +
+    (extras.derivedFollowed === true
+      ? "which\nthis run's rewrite of mise.local.toml has already brought into line.\n"
+      : "so\npoint a development build at it with `HUB_URL=… mise run web`.\n");
   text +=
     "\nVerified here means the hub acknowledged the writes and a fresh client read\n" +
     `them back — not that the hub has flushed them to disk. The snapshot this\n` +
@@ -1265,19 +1275,27 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     previous !== undefined &&
     previous !== "" &&
     parseWorkspaceId(previous).uuid !== parseWorkspaceId(flags.workspace).uuid;
+  // The endpoint that workspace was dialling, from the snapshot taken before
+  // anything was written — the built-in default filled in, because "start the
+  // hub and point back at it" needs an address a person can paste.
+  const previousEndpoint = switched
+    ? resolveMcpConfig(resolved.env).hubUrl
+    : bridge.target;
 
-  let persistence: RemotePersistence;
+  // The binding, and the file derived from it, are two writes that have to
+  // agree when this returns — so they happen under the lock `ub init` and
+  // `ub workspace use` hold for exactly the same pair. Without it, a concurrent
+  // `ub init` can settle a workspace between them and leave the derived file
+  // naming one run's workspace over the other run's binding.
+  let lock: InitLock;
   try {
-    persistence = setRemote(bridge.target, {
-      secret: bridge.credential.persist ? bridge.credential.secret : null,
-      workspace: flags.workspace,
-    });
+    lock = await acquireInitLock();
   } catch (error) {
     io.err(`ub remote join: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
-  warn(io, persistence.warnings);
 
+  let persistence: RemotePersistence;
   // The binding is only half done while this checkout's derived mise config
   // still names the workspace and endpoint it had before: nothing in the
   // repository reads `ub`'s configuration, so `mise run web` and the hub would
@@ -1285,7 +1303,33 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   // there — see {@link regenerateLocalConfig}, and `ub workspace use`, which
   // pairs the same two writes for the same reason. A second machine joining
   // from outside a checkout has no such file and gets `none`.
-  const regenerated = regenerateLocalConfig(process.cwd());
+  let regenerated: Regeneration = { kind: "none" };
+  try {
+    persistence = setRemote(bridge.target, {
+      secret: bridge.credential.persist ? bridge.credential.secret : null,
+      workspace: flags.workspace,
+    });
+    // Derived from what is on disk now — the binding above included — rather
+    // than from what this process decided.
+    regenerated = regenerateLocalConfig(process.cwd());
+  } catch (error) {
+    io.err(`ub remote join: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  } finally {
+    lock.release();
+  }
+  warn(io, persistence.warnings);
+
+  if (regenerated.kind === "written") {
+    // Outside the lock: trusting is a `mise` subprocess, and it reads the file
+    // rather than writing it. Not a nicety — mise refuses every task in a
+    // directory whose config file it does not trust, and trust is bound to the
+    // file's contents, so a rewrite untrusts what `ub init` had trusted.
+    const trust = trustLocalConfig(regenerated.path);
+    if (!trust.trusted) {
+      warn(io, [trust.hint]);
+    }
+  }
 
   let note = "";
   if (liveDocs(checked.corpus).length === 0) {
@@ -1296,15 +1340,26 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   }
   note += `\nworkspace     ${flags.workspace}\n`;
   if (switched) {
+    // What this machine holds for the old workspace, rather than "its
+    // documents": all this knows is that something configured it, which is not
+    // evidence of a replica.
     note +=
-      `\n${previous} is still on this machine, with its documents: nothing was ` +
-      "merged and nothing\nwas moved. `ub workspace list` shows both, and " +
-      `\`ub workspace use ${previous} --user\`\nswitches back. The endpoint is ` +
-      "machine-wide, so that workspace syncs with this hub\ntoo, under its own " +
-      "rooms.\n";
+      `\n${previous} was not merged into this one and nothing of it was moved. ` +
+      "Whatever this\nmachine holds for it is still here — `ub workspace list` " +
+      "shows the workspaces with\na replica on this machine — and " +
+      `\`ub workspace use ${previous} --user\` switches back.\n` +
+      "\nThe endpoint, though, is machine-wide: that workspace now syncs with " +
+      `${bridge.target}\ntoo, under its own rooms. Documents that only ever ` +
+      "reached a local hub — written in\na browser and never pulled down by an " +
+      "MCP session — are in that hub's database and\nnowhere else, and nothing " +
+      `points at it any more. Start it and \`ub remote set ${previousEndpoint}\`\n` +
+      "to reach them.\n";
   }
   io.out(
-    report("joined", bridge.target, checked.corpus, persistence, takenAt, note) +
+    report("joined", bridge.target, checked.corpus, persistence, takenAt, {
+      note,
+      derivedFollowed: regenerated.kind === "written",
+    }) +
       (regenerated.kind === "written"
         ? `\nmise config   ${regenerated.path} (derived, gitignored)\n`
         : ""),

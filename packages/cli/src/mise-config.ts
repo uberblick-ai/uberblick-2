@@ -12,10 +12,11 @@
  * rerun `ub init` and it comes back with the same value; it is regenerated, not
  * re-randomised, because the authority is elsewhere.
  *
- * `ub init` is what *creates* it, and `ub workspace use` rewrites the one it
- * created — a binding the mise tasks never saw would leave them serving the
- * workspace the directory used to be bound to. Both write under the same lock,
- * and both derive from the files rather than from what they just decided.
+ * `ub init` is what *creates* it; `ub workspace use` and `ub remote join`
+ * rewrite the one it created — a binding or an endpoint the mise tasks never saw
+ * would leave them serving the workspace the directory used to be bound to, or
+ * dialling the hub it used to sync with. All three write under the same lock,
+ * and all three derive from the files rather than from what they just decided.
  *
  * Two mise behaviours shape this module, both verified against mise 2026.7:
  *
@@ -324,10 +325,11 @@ function render(env: DerivedEnvironment, extra: readonly string[]): string {
 #
 # Derived from the config \`ub\` resolves — $XDG_CONFIG_HOME/uberblick/
 # {credentials,config}.json and ./uberblick.json — same values, one owner. Do
-# not edit the three values below: \`ub init\` writes them and \`ub workspace
-# use\` rewrites them, and no other command does. Anything else you add to
-# [env] is kept. \`ub remote\` changes the authority files without
-# regenerating this — rerun \`ub init\` to pick the new endpoint and secret up.
+# not edit the three values below: \`ub init\` writes them, \`ub workspace use\`
+# and \`ub remote join\` rewrite them, and no other command does. Anything else
+# you add to [env] is kept. \`ub remote set\` and \`ub remote promote\` change the
+# authority files without regenerating this — rerun \`ub init\` to pick the new
+# endpoint up.
 # Delete it and rerun \`ub init\` and it comes back the same.
 #
 # It exists because mise tasks and \`.mcp.json\` inherit their environment from

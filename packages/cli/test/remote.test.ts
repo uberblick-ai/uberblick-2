@@ -60,6 +60,8 @@ import {
 } from "./helpers.js";
 
 const SECRET = "test-signing-secret-for-the-remote-bridge";
+/** No `mise` on PATH, so no `mise trust` subprocess in the middle of a test. */
+const WITHOUT_MISE = { PATH: "/usr/bin:/bin" };
 const OTHER_SECRET = "a-different-secret-the-remote-was-deployed-with";
 const WORKSPACE = "b7c3d914-5a20-4e6f-8d13-9f04a2c68e75";
 
@@ -816,8 +818,13 @@ describe("ub remote join", () => {
     expect(runUb(["workspace"], box).stdout).toContain(WORKSPACE);
     // …and told where the other one went, because it did not go anywhere.
     expect(run.stdout).toContain(mine);
-    expect(run.stdout).toContain("nothing was");
+    expect(run.stdout).toContain("was not merged into this one");
     expect(run.stdout).toContain(`ub workspace use ${mine} --user`);
+    // Including the hazard the machine-wide endpoint creates for it: documents
+    // that only ever reached the local hub are in that hub's database, and
+    // nothing dials it any more.
+    expect(run.stdout).toContain("nothing points at it any more");
+    expect(run.stdout).toContain(`ub remote set ${DEAD_HUB_URL}`);
 
     // Both are listed, and the first one still holds everything it held.
     const listed = runUb(["workspace", "list"], box);
@@ -828,6 +835,53 @@ describe("ub remote join", () => {
     }
     expect(await readMirror(box, mine)).toEqual(seeded);
     expect([...(await readMirror(box, WORKSPACE)).keys()]).toEqual([theirs]);
+  });
+
+  // A join inside a checkout has a third file to keep in step: the derived
+  // `mise.local.toml`, which is where `mise run web` and the hub get their
+  // workspace, endpoint and secret from. A binding nothing derived from would
+  // leave every mise task here serving the workspace this machine just left.
+  it("rewrites the checkout's derived mise config, and trusts it again", async () => {
+    const remote = await startHub(OTHER_SECRET);
+    await webDoc(remote, "Shared note", OTHER_SECRET);
+
+    // A checkout as `ub init` leaves it: a derived file naming this machine's
+    // own workspace, its endpoint and its generated secret.
+    const box = sandbox({ checkout: true, userConfig: { hubUrl: DEAD_HUB_URL } });
+    expect(
+      (await runUbAsync(["init", "--yes", "--no-mcp"], box, WITHOUT_MISE)).status,
+    ).toBe(0);
+    const derived = join(box.cwd, "mise.local.toml");
+    const mine = readConfigFile(box, "config.json").workspace as string;
+    expect(readFileSync(derived, "utf8")).toContain(`WORKSPACE_ID = "${mine}"`);
+    expect(readFileSync(derived, "utf8")).toContain(`HUB_URL = "${DEAD_HUB_URL}"`);
+
+    const run = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(box, OTHER_SECRET),
+      ],
+      box,
+      WITHOUT_MISE,
+    );
+    expect(run.status, run.output).toBe(0);
+
+    // All three values, because all three moved: the file is derived from the
+    // authority, not patched.
+    const after = readFileSync(derived, "utf8");
+    expect(after).toContain(`WORKSPACE_ID = "${WORKSPACE}"`);
+    expect(after).toContain(`HUB_URL = "${url(remote)}"`);
+    expect(after).toContain(`HUB_AUTH_TOKEN = "${OTHER_SECRET}"`);
+    expect(run.stdout).toContain("mise config");
+    expect(run.stdout).toContain(derived);
+
+    // mise binds trust to a config file's contents, so a rewrite untrusts what
+    // `ub init` had trusted. With no `mise` to run, the command says what to
+    // run by hand rather than leaving every task in the directory refused.
+    expect(run.stderr).toContain(`mise trust ${derived}`);
   });
 
   // Nothing is written before the URL is understood — not the endpoint, not a

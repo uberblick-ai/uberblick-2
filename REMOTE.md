@@ -367,8 +367,9 @@ Persisting the endpoint — and, after a join, the workspace binding — writes
 `$XDG_CONFIG_HOME/uberblick/config.json`, which is where `ub`, `ub mcp serve`
 and the MCP server it spawns resolve them. `HUB_URL` in the environment and a
 `hubUrl` in a committable `./uberblick.json` both outrank that file, as
-`WORKSPACE_ID` and a `workspace` there outrank the binding; when either does, these commands name the one that wins
-instead of claiming a switch that did not take effect. The deployed web client
+`WORKSPACE_ID` and a `workspace` there outrank the binding; when either does,
+these commands name the one that wins instead of claiming a switch that did not
+take effect. The deployed web client
 here reads its endpoint at runtime from the served `/uberblick-config.json`, not
 from any of them.
 

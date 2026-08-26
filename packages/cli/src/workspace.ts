@@ -430,12 +430,26 @@ export function regenerateLocalConfig(cwd: string): Regeneration {
     };
   }
 
-  const outcome = writeLocalConfig(root, {
-    signingSecret,
-    workspace,
-    hubUrl: resolved.env.HUB_URL,
-    authorityPath: resolved.paths.credentials,
-  });
+  // A failure to publish is reported, not thrown. `refused` already means "the
+  // authority moved and this file did not", which is exactly what an EACCES on
+  // the staged write leaves behind — and a caller with a report to print (`ub
+  // remote join` has one by the time this runs) must not lose it to an
+  // exception whose message says nothing about the split brain.
+  let outcome: ReturnType<typeof writeLocalConfig>;
+  try {
+    outcome = writeLocalConfig(root, {
+      signingSecret,
+      workspace,
+      hubUrl: resolved.env.HUB_URL,
+      authorityPath: resolved.paths.credentials,
+    });
+  } catch (error) {
+    return {
+      kind: "refused",
+      path,
+      reason: `${error instanceof Error ? error.message : String(error)}.`,
+    };
+  }
   return outcome.written
     ? { kind: "written", path: outcome.path }
     : { kind: "refused", path: outcome.path, reason: outcome.reason };
