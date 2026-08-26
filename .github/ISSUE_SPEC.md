@@ -129,6 +129,31 @@ shared set, and the PR carries the tier-2 merge report of CLAUDE.md's merge
 policy, checking each issue's acceptance criteria separately — a batch PR
 carries that report even where it would otherwise be tier 1.
 
+### Body length, and what a body is for
+
+An issue body records the **final contract**, not the history of arriving at
+it. Review corrections, superseded designs and decision chronology belong in
+**comments** — searchable, and out of the way of the person implementing.
+Targets, not lint rules, because judgement beats a character count:
+
+| Kind | Target |
+|---|---|
+| ordinary leaf | 1,500–4,000 characters |
+| complex or security-sensitive leaf | up to 8,000; past that, justify it |
+| parent | under 5,000 characters |
+| acceptance criteria | 3–8 runnable bullets |
+
+Two consequences worth stating, because both have gone wrong here:
+
+- **Mechanism belongs in a document, not an issue.** When the corpus is
+  unreachable and a design lands in an issue body instead, that is a recorded
+  debt to repay, not a precedent — see CLAUDE.md's dogfooding contract.
+- **A draft carries exactly one unresolved decision** and the
+  `needs-decision` label. An issue with several open questions is not a draft,
+  it is a conversation; close it until it becomes actionable.
+
+Close a parent when its final child closes.
+
 ## Lint — the exact checks
 
 An issue labeled `ready` must pass all of:
