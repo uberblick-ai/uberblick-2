@@ -2,21 +2,12 @@
   "mcpServers": {
     "uberblick": {
       "type": "stdio",
-      "command": "mise",
+      "command": "ub",
       "args": [
-        "exec",
-        "--",
-        "fnox",
-        "exec",
-        "--if-missing",
-        "warn",
-        "--",
-        "pnpm",
-        "--silent",
-        "--filter",
-        "@uberblick/mcp-server",
-        "start"
-      ]
+        "mcp",
+        "serve"
+      ],
+      "env": {}
     }
   }
 }
