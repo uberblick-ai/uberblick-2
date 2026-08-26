@@ -11,7 +11,6 @@
  */
 
 import { doctorCommand } from "./doctor.js";
-import { helpWanted } from "./help.js";
 import { initCommand } from "./init.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
@@ -131,7 +130,9 @@ export async function runCli(
     if (subcommand === "install") {
       return await installCommand(args, io);
     }
-    if (subcommand === "help" || helpWanted(rest)) {
+    // Only the subcommand slot asks for help here: `ub mcp bogus --help` is an
+    // unknown command, the same as `ub bogus --help` is below.
+    if (subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
       io.out(MCP_HELP);
       return 0;
     }

@@ -77,7 +77,7 @@ import {
   writeUserConfig,
 } from "./config.js";
 import type { ResolvedConfig } from "./config.js";
-import { helpWanted, takeHelp } from "./help.js";
+import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { remoteInitCommand, remoteUpdateCommand } from "./remote-init.js";
@@ -1246,7 +1246,9 @@ export async function remoteCommand(
   io: Io = processIo,
 ): Promise<number> {
   // The subcommand first, so `ub remote promote --help` reaches the help of the
-  // leaf it names rather than being answered by the group.
+  // leaf it names rather than being answered by the group. A group's own
+  // argument is that one word, so only that word can ask for help — an unknown
+  // command is still an unknown command, `--help` after it or not.
   const [sub, ...rest] = argv;
   if (sub === "init") {
     return await remoteInitCommand(rest, io);
@@ -1263,12 +1265,12 @@ export async function remoteCommand(
   if (sub === "join") {
     return await joinCommand(rest, io);
   }
-  if (sub === "help" || helpWanted(argv)) {
-    io.out(REMOTE_HELP);
-    return 0;
-  }
   if (sub === undefined) {
     return showRemote(io);
+  }
+  if (sub === "help" || sub === "--help" || sub === "-h") {
+    io.out(REMOTE_HELP);
+    return 0;
   }
   io.err(`ub remote: unknown command ${JSON.stringify(sub)}\n\n${REMOTE_HELP}`);
   return 2;

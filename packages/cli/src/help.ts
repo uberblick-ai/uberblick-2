@@ -12,12 +12,18 @@
  * A bare `--` ends our options: everything after it belongs to whatever the
  * command hands it to — `ub mcp install -- ub mcp serve --help` registers a
  * command with `--help` in it, and must not print help instead.
+ *
+ * The scan runs before `parseArgs`, so it cannot tell an option's *value* from
+ * an option: `ub remote update host --dir -h` prints help rather than deploying
+ * into a directory called `-h`. That is the accepted price of help winning over
+ * validation, and it costs nothing real — no option here takes a value that
+ * plausibly spells `-h` or `--help`, and the fix is to write `--dir=-h`.
  */
 
 import type { Io } from "./io.js";
 
 /** Whether these arguments ask for help, with a bare `--` ending the search. */
-export function helpWanted(argv: readonly string[]): boolean {
+function helpWanted(argv: readonly string[]): boolean {
   for (const arg of argv) {
     if (arg === "--") return false;
     if (arg === "--help" || arg === "-h") return true;

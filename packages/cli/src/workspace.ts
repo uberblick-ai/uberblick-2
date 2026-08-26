@@ -42,7 +42,7 @@ import {
   userConfigPath,
   writeUserConfig,
 } from "./config.js";
-import { helpWanted, takeHelp } from "./help.js";
+import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
@@ -625,7 +625,10 @@ export async function workspaceCommand(
   io: Io = processIo,
 ): Promise<number> {
   // The subcommand first, so `ub workspace use --help` reaches the help of the
-  // leaf it names rather than being answered by the group.
+  // leaf it names rather than being answered by the group. A group's own
+  // argument is that one word, so only that word can ask for help — an unknown
+  // command is still an unknown command, `--help` after it or not, which is what
+  // the top level does too.
   const [sub, ...rest] = argv;
   if (sub === "list") {
     return listCommand(rest, io);
@@ -633,12 +636,12 @@ export async function workspaceCommand(
   if (sub === "use") {
     return await useCommand(rest, io);
   }
-  if (sub === "help" || helpWanted(argv)) {
-    io.out(WORKSPACE_HELP);
-    return 0;
-  }
   if (sub === undefined) {
     return showWorkspace(io);
+  }
+  if (sub === "help" || sub === "--help" || sub === "-h") {
+    io.out(WORKSPACE_HELP);
+    return 0;
   }
   io.err(`ub workspace: unknown command ${JSON.stringify(sub)}\n\n${WORKSPACE_HELP}`);
   return 2;

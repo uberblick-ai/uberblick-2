@@ -13,8 +13,9 @@
  * connected to, prompted for, or read out of somebody's MCP client config.
  */
 
-import { readdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { HELP, MCP_HELP } from "../src/cli.js";
 import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
@@ -43,7 +44,7 @@ import {
   WORKSPACE_USE_OPTIONS,
 } from "../src/workspace.js";
 import type { Sandbox } from "./helpers.js";
-import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox } from "./helpers.js";
+import { DEAD_HUB_URL, PACKAGE_ROOT, removeTempDirs, runUb, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -98,10 +99,36 @@ const PATHS: Path[] = [
   { argv: ["mcp", "install"], help: INSTALL_HELP, options: INSTALL_OPTIONS },
 ];
 
-/** Everything under the sandbox root, so "it wrote nothing" is checkable. */
+/**
+ * Where the dispatch actually happens, so the manifest can be checked against
+ * it: the variable each dispatcher switches on, and the path its cases hang off.
+ */
+const DISPATCHERS = [
+  { file: "cli.ts", group: [], variable: "command" },
+  { file: "cli.ts", group: ["mcp"], variable: "subcommand" },
+  { file: "workspace.ts", group: ["workspace"], variable: "sub" },
+  { file: "remote.ts", group: ["remote"], variable: "sub" },
+];
+
+/** Not commands: the hidden machine entry, the help words, the version flags. */
+const HIDDEN = ["serve", "help", "--help", "-h", "--version", "-v"];
+
+/**
+ * Everything under the sandbox root, so "it wrote nothing" is checkable.
+ *
+ * Contents and not just names: half of what these commands would do is
+ * rewriting a file that is already there — a config, a credential — and a
+ * listing alone cannot see an overwrite.
+ */
 function tree(box: Sandbox): string[] {
   const root = dirname(box.cwd);
-  return readdirSync(root, { recursive: true, encoding: "utf8" }).sort();
+  return readdirSync(root, { recursive: true, encoding: "utf8" })
+    .map((entry) => {
+      const path = join(root, entry);
+      if (!statSync(path).isFile()) return entry;
+      return `${entry} ${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
+    })
+    .sort();
 }
 
 describe("ub init --help", () => {
@@ -158,13 +185,31 @@ describe("every human-facing command path", () => {
         }
       }
       expect(path.help, `${name} help documents -h, --help`).toContain("-h, --help");
-      // More than a usage line: every path says what it is for.
-      expect(path.help.trim().split("\n").length).toBeGreaterThan(3);
       for (const child of path.children ?? []) {
         expect(path.help, `${name} help lists ${child}`).toContain(child);
       }
     });
   }
+
+  it("lists every command the dispatchers actually accept", () => {
+    // The manifest above is written by hand, so this reads the dispatchers
+    // themselves — the same trick the option maps play. A command wired into
+    // `runCli` or into a group and given no help fails here rather than
+    // shipping.
+    const listed = new Set(PATHS.map((path) => path.argv.join(" ")));
+    for (const { file, group, variable } of DISPATCHERS) {
+      const source = readFileSync(join(PACKAGE_ROOT, "src", file), "utf8");
+      for (const [, command] of source.matchAll(
+        // \b, or `command` would match inside `subcommand`.
+        new RegExp(`\\b${variable} === "([^"]+)"`, "g"),
+      )) {
+        // `serve` is hidden by design; the help words are not commands.
+        if (command === undefined || HIDDEN.includes(command)) continue;
+        const path = [...group, command].join(" ");
+        expect(listed, `the manifest lists \`ub ${path}\``).toContain(path);
+      }
+    }
+  });
 
   it("keeps the hidden `mcp serve` out of the group help it is dispatched by", () => {
     const run = runUb(["mcp", "--help"], sandbox());
@@ -181,44 +226,34 @@ describe("every human-facing command path", () => {
 });
 
 describe("help before the work", () => {
-  // A missing operand or a contradiction is what somebody reaching for help is
-  // most likely to have; answering it with a usage error would be answering the
-  // wrong question.
-  const overruled: string[][] = [
-    ["workspace", "use", "--help"],
-    ["remote", "set", "--help"],
-    ["remote", "promote", "-h"],
-    ["remote", "init", "--help"],
-    ["init", "--mcp", "--no-mcp", "--help"],
-    ["mcp", "install", "zed", "--help"],
-    ["open", "--port", "0", "-h"],
-  ];
-  for (const argv of overruled) {
-    it(`answers \`ub ${argv.join(" ")}\` with help rather than a usage error`, () => {
-      const run = runUb(argv, sandbox());
-      expect(run.status).toBe(0);
-      expect(run.stderr).toBe("");
-      expect(run.stdout).toMatch(/^usage: ub/);
-    });
-  }
-
-  // The representative mutating and networked paths: a write, an SSH round
-  // trip, a hub connection, and the one command that reads somebody's MCP
-  // client config. An empty stderr is the second half of the proof — every one
-  // of these announces its warnings and its failures there.
+  // Two properties, one run each, because the second implies the first: help is
+  // answered before validation — a missing operand, a contradiction, a bad
+  // value is exactly what somebody reaching for help is likely to have — and it
+  // runs none of the command. The list covers the representative mutating and
+  // networked paths: a write, an SSH round trip, a hub connection, and the one
+  // command that reads somebody's MCP client config. An empty stderr is the
+  // other half of the proof, since every one of these announces its warnings
+  // and its failures there.
   const inert: string[][] = [
     ["init", "--yes", "--help"],
-    ["workspace", "use", WORKSPACE, "--help"],
-    ["remote", "set", "ws://example.invalid:1234", "--help"],
-    ["remote", "promote", "ws://example.invalid:1234", "--help"],
-    ["remote", "join", "ws://example.invalid:1234", "-h"],
-    ["remote", "update", "uberblick@example.invalid", "--help"],
-    ["mcp", "install", "claude", "--help"],
+    ["init", "--mcp", "--no-mcp", "--help"],
+    ["open", "--port", "0", "-h"],
     ["status", "--help"],
     ["doctor", "-h"],
+    ["workspace", "use", "--help"],
+    ["workspace", "use", WORKSPACE, "--help"],
+    ["remote", "set", "--help"],
+    ["remote", "set", "ws://example.invalid:1234", "--help"],
+    ["remote", "init", "--help"],
+    ["remote", "update", "uberblick@example.invalid", "--help"],
+    ["remote", "promote", "-h"],
+    ["remote", "promote", "ws://example.invalid:1234", "--help"],
+    ["remote", "join", "ws://example.invalid:1234", "-h"],
+    ["mcp", "install", "zed", "--help"],
+    ["mcp", "install", "claude", "--help"],
   ];
   for (const argv of inert) {
-    it(`runs none of \`ub ${argv.join(" ")}\` — no write, no connection`, () => {
+    it(`answers \`ub ${argv.join(" ")}\` with help, and runs none of it`, () => {
       const box = sandbox({
         checkout: true,
         userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
@@ -246,6 +281,19 @@ describe("what is not a request for help", () => {
     expect(run.status).toBe(0);
     expect(run.stdout).not.toBe(INSTALL_HELP);
     expect(run.stdout).toContain('"--help"');
+  });
+
+  it("still refuses an unknown subcommand, `--help` after it or not", () => {
+    // A group answers for itself only when its own one argument is the
+    // question. `ub workspace bogus --help` is a typo, not a request, and every
+    // level says so the same way — the top level always has.
+    for (const group of [[], ["workspace"], ["remote"], ["mcp"]]) {
+      const argv = [...group, "bogus", "--help"];
+      const run = runUb(argv, sandbox());
+      expect(run.status, argv.join(" ")).toBe(2);
+      expect(run.stdout, argv.join(" ")).toBe("");
+      expect(run.stderr, argv.join(" ")).toMatch(/bogus/);
+    }
   });
 
   it("still refuses an unknown option, on stderr, with exit 2", () => {
