@@ -50,7 +50,7 @@ import {
 import * as Y from "yjs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Sandbox } from "./helpers.js";
-import { setRemote } from "../src/remote.js";
+import { parseJoinTarget, setRemote } from "../src/remote.js";
 import {
   DEAD_HUB_URL,
   removeTempDirs,
@@ -900,6 +900,30 @@ describe("ub remote join", () => {
     // `ub init` had trusted. With no `mise` to run, the command says what to
     // run by hand rather than leaving every task in the directory refused.
     expect(run.stderr).toContain(`mise trust ${derived}`);
+  });
+
+  // The split is byte-for-byte: the endpoint stored is what was typed with the
+  // id and its separator taken off, and nothing else tidied. An empty segment
+  // is somebody's reverse proxy path — `/proxy//ws` and `/proxy/ws` may route
+  // to different places, and only the person who typed it knows which.
+  it.each([
+    [`wss://hub.example.ts.net/ws/${WORKSPACE}`, "wss://hub.example.ts.net/ws"],
+    [`wss://hub.example.ts.net/${WORKSPACE}`, "wss://hub.example.ts.net"],
+    [
+      `wss://hub.example.ts.net/proxy//ws/${WORKSPACE}`,
+      "wss://hub.example.ts.net/proxy//ws",
+    ],
+    [`wss://hub.example.ts.net/ws//${WORKSPACE}`, "wss://hub.example.ts.net/ws/"],
+    // The decorated spelling is an id like any other, and is kept as typed.
+    [
+      `wss://hub.example.ts.net/ws/notes-${WORKSPACE}`,
+      "wss://hub.example.ts.net/ws",
+    ],
+  ])("takes the id off %s and leaves the endpoint alone", (url, endpoint) => {
+    const target = parseJoinTarget(url);
+    expect(target.endpoint).toBe(endpoint);
+    // Lossless: the two halves put back together are the URL that was typed.
+    expect(`${target.endpoint}/${target.workspace}`).toBe(url);
   });
 
   // Nothing is written before the URL is understood — not the endpoint, not a

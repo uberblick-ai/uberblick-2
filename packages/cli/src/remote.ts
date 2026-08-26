@@ -458,12 +458,19 @@ export function parseJoinTarget(value: string): {
   workspace: string;
 } {
   const url = new URL(normalizeRemoteUrl(value));
-  const segments = url.pathname.split("/").filter((segment) => segment !== "");
-  const workspace = segments.pop();
-  if (workspace === undefined) {
+  // The last segment and its own separator; everything before them is the
+  // endpoint, **verbatim**. Splitting the path and rejoining the non-empty
+  // parts would rewrite it — `/proxy//ws/<id>` would come back as `/proxy/ws`
+  // — and an empty segment is somebody's reverse proxy path, which may well
+  // route differently from the tidied version. Only the id is this command's
+  // to remove. A path of "/" leaves an empty workspace, which is the refusal
+  // below rather than a special case.
+  const cut = url.pathname.lastIndexOf("/");
+  const workspace = url.pathname.slice(cut + 1);
+  if (workspace === "") {
     throw new Error(
       "that URL names no workspace. A join URL is the endpoint with the " +
-        "workspace id as its last path segment, like " +
+        "workspace id as its last path segment and nothing after it, like " +
         "wss://hub.example.ts.net/ws/<workspace-id> — `ub remote init` prints " +
         "it, and `ub status` on the first machine names the id",
     );
@@ -477,9 +484,13 @@ export function parseJoinTarget(value: string): {
         "wss://hub.example.ts.net/ws/<workspace-id> — `ub remote init` prints it",
     );
   }
-  const path = segments.join("/");
   return {
-    endpoint: `${url.protocol}//${url.host}${path === "" ? "" : `/${path}`}`,
+    // Back through the same normaliser, so an endpoint that is nothing but a
+    // host reads as one — the one thing it does to a path is collapse a bare
+    // root, which is exactly what removing `/<id>` leaves behind.
+    endpoint: normalizeRemoteUrl(
+      `${url.protocol}//${url.host}${url.pathname.slice(0, cut)}`,
+    ),
     workspace,
   };
 }
