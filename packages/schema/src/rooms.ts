@@ -1,10 +1,11 @@
 /**
  * Room names.
  *
- * A room name is `<workspaceId>/<docUuid>`. A workspace's two well-known docs
- * take reserved document-id slots: the directory at `<workspaceId>/_directory`
- * and the sidebar at `<workspaceId>/_sidebar`. Tenancy sits in the room key
- * from day one so a hosted hub never needs a room migration.
+ * A room name is `<workspaceId>/<docUuid>`. A workspace's well-known docs take
+ * reserved document-id slots: the directory at `<workspaceId>/_directory`, the
+ * sidebar at `<workspaceId>/_sidebar` and the feedback telemetry at
+ * `<workspaceId>/_feedback`. Tenancy sits in the room key from day one so a
+ * hosted hub never needs a room migration.
  *
  * The workspace segment is always the **bare uuid** (see `workspace.ts`): a
  * decorated `<slug>-<uuid>` is parsed here and only its uuid reaches the name,
@@ -21,6 +22,9 @@ export const DIRECTORY_SUFFIX = "_directory";
 
 /** The document-id slot the sidebar doc occupies inside a workspace. */
 export const SIDEBAR_SUFFIX = "_sidebar";
+
+/** The document-id slot the feedback doc occupies inside a workspace. */
+export const FEEDBACK_SUFFIX = "_feedback";
 
 const SEPARATOR = "/";
 
@@ -56,6 +60,11 @@ export function directoryRoom(workspaceId: string): string {
 /** The room name of a workspace's sidebar doc. */
 export function sidebarRoom(workspaceId: string): string {
   return roomForDoc(workspaceId, SIDEBAR_SUFFIX);
+}
+
+/** The room name of a workspace's feedback doc. */
+export function feedbackRoom(workspaceId: string): string {
+  return roomForDoc(workspaceId, FEEDBACK_SUFFIX);
 }
 
 export interface ParsedRoom {

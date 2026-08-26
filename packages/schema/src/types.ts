@@ -253,3 +253,53 @@ export interface SidebarGroup {
   /** Pinned document uuids, in stored order. */
   docs: string[];
 }
+
+/**
+ * What an agent session reported about a document: that it used it, or how it
+ * rated it. Self-reported and advisory — see `feedback.ts`.
+ */
+export type FeedbackKind = "used" | "helpful" | "unhelpful";
+
+/** The two verdicts. Abstaining is legal, and is its own bucket in a report. */
+export type FeedbackVerdict = Exclude<FeedbackKind, "used">;
+
+/** One stored feedback event. Plain data, never a nested Y type. */
+export interface FeedbackEvent {
+  docUuid: string;
+  /** The reporting session's id — one MCP server process. */
+  session: string;
+  /** The session's self-asserted display name. Never identity. */
+  agent: string;
+  kind: FeedbackKind;
+  /** Why, in the rater's own words. Verdicts only, and always optional. */
+  reason?: string;
+  /** Epoch ms on the reporting replica's clock. Display only. */
+  at: number;
+}
+
+/** Folded counts for one document. Sessions, never calls. */
+export interface FeedbackTotals {
+  sessionsUsed: number;
+  helpful: number;
+  unhelpful: number;
+  /** Sessions that used the document and gave no verdict. */
+  unrated: number;
+}
+
+/** One rater's words, carried into a report. */
+export interface FeedbackReason {
+  session: string;
+  agent: string;
+  verdict: FeedbackVerdict;
+  reason: string;
+  at: number;
+}
+
+/** One document's row in a feedback report. */
+export interface DocFeedback extends FeedbackTotals {
+  uuid: string;
+  /** helpful / (helpful + unhelpful), or null when nobody rated it. */
+  helpfulRatio: number | null;
+  /** The most recent reasons, newest first. Compaction does not keep them. */
+  reasons: FeedbackReason[];
+}
