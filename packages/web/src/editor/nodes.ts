@@ -169,11 +169,15 @@ export const Heading = Node.create({
  * Rendered as a bare `<li>` — no `<ul>` to put it in, since the document has no
  * nesting to build one from. The marker is drawn by CSS off `data-list` and
  * `data-indent`; an ordered item's number comes from `data-number`, which
- * `listNumberPlugin` (list-keys.ts) decorates onto the block using the schema
- * package's own numbering, so the marker on screen is the one the markdown
- * export writes. See styles.css. A bare `<li>` is also what makes a list copied
- * out of this editor paste back as list items, and what lets an HTML list
- * pasted *in* land as one item per line.
+ * `listStructurePlugin` (list-keys.ts) decorates onto the block using the
+ * schema package's own numbering, so the marker on screen is the one the
+ * markdown export writes. See styles.css. That same plugin is what makes a run
+ * of items a list for a screen reader — `role="listitem"` with its level and
+ * position, inside an off-screen list container claiming the run (#227).
+ *
+ * A bare `<li>` is also what makes a list copied out of this editor paste back
+ * as list items, and what lets an HTML list pasted *in* land as one item per
+ * line.
  */
 export const ListItem = Node.create({
   name: "list-item",
