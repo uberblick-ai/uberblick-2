@@ -121,6 +121,10 @@ describe("archive_doc", () => {
       tags: ["reference"],
       deleted: true,
       pinned: false,
+      // Stamped at creation and carried through the tombstone — see
+      // timestamps.test.ts for what they mean.
+      createdAt: expect.any(Number),
+      updatedAt: expect.any(Number),
     });
 
     // Search reads the derived index, which a directory write does not itself
@@ -290,6 +294,8 @@ describe("restore_doc", () => {
       title: "Concepts",
       tags: ["reference"],
       pinned: false,
+      createdAt: expect.any(Number),
+      updatedAt: expect.any(Number),
     });
 
     const hits = await rig.ok("search", { query: "glossary" });
@@ -477,6 +483,8 @@ describe("restore_doc", () => {
       title: "Concepts",
       tags: ["retired"],
       pinned: false,
+      createdAt: expect.any(Number),
+      updatedAt: expect.any(Number),
     });
   });
 });

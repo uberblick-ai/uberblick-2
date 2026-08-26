@@ -232,6 +232,18 @@ export interface DirectoryEntry {
   title: string;
   tags: string[];
   deleted?: boolean;
+  /**
+   * When the document was created, epoch ms on the creating replica's clock.
+   * Absent for stubs written before the field existed, until something
+   * backfills them.
+   */
+  createdAt?: number;
+  /**
+   * When a replica last observed the document change, epoch ms on that
+   * replica's clock — coarse by design, and cache-quality: a freshness hint to
+   * sort by, never history. Absent until something stamps it.
+   */
+  updatedAt?: number;
 }
 
 /** One group in the sidebar doc: a stable id, a name, and what it pins. */

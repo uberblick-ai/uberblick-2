@@ -82,6 +82,17 @@ export interface McpConfig {
    * paces how often it is tried.
    */
   reconcileRetryMs: number;
+  /**
+   * How stale a directory stub's `updatedAt` must be before an observed content
+   * change re-stamps it (ms).
+   *
+   * The whole point of the field is to be coarse. Every keystroke in any
+   * document is an observed change, and stamping each one would put a directory
+   * update — broadcast to every client in the workspace — behind every one of
+   * them. A title or tag change still updates the stub immediately, because
+   * that write has to happen anyway.
+   */
+  updatedAtCoarsenessMs: number;
 }
 
 function hashToIndex(value: string, buckets: number): number {
@@ -160,5 +171,6 @@ export function resolveMcpConfig(
     cursorTtlMs: 30_000,
     compactAfter: 500,
     reconcileRetryMs: 5_000,
+    updatedAtCoarsenessMs: 5 * 60_000,
   };
 }

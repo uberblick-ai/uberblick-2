@@ -187,6 +187,19 @@ function applySeed(
   // now. The document belongs to the MCP tools from here on, and a changed seed
   // file is indistinguishable from an edited document.
   if (hydrated) {
+    // The one thing a re-run still does: give a stub imported before the
+    // directory carried timestamps a `createdAt`, so it can be sorted with the
+    // rest. `upsertDirectoryEntry` sets it once, so this is a no-op the second
+    // time — and it deliberately does not touch `updatedAt`, because importing
+    // nothing is not the document changing.
+    if (stub !== null && stub.createdAt === undefined) {
+      upsertDirectoryEntry(directory.doc, {
+        uuid: seed.uuid,
+        title: stub.title,
+        tags: stub.tags,
+        createdAt: Date.now(),
+      });
+    }
     return { ...identity, action: "unchanged", reason: null };
   }
 
@@ -204,10 +217,13 @@ function applySeed(
 
   // Discovery is a synced doc, so being discoverable is an explicit write here —
   // the way `create_doc` does it — not a side effect of having been observed.
+  const now = Date.now();
   upsertDirectoryEntry(directory.doc, {
     uuid: seed.uuid,
     title: seed.title,
     tags: seed.tags,
+    createdAt: now,
+    updatedAt: now,
   });
 
   return { ...identity, action: "created", reason: null };
