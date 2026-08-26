@@ -37,6 +37,13 @@
  * and the rooms stay pending until one appears. With a hub it waits for the
  * rooms to sync *before* deciding what exists, which is what keeps a second
  * machine's import from duplicating a corpus it has not downloaded yet.
+ *
+ * {@link importSeedDir} takes an optional {@link SidebarSeed} on top of that,
+ * because a seeded workspace is a *first-open state* rather than a set of
+ * rooms: `ub init` owns the starter sidebar group and writes it here, through
+ * this same replica set and this same log, so the pins exist whether or not an
+ * MCP server ever starts. The MCP server's own boot-time migration
+ * (`sidebar-tools.ts`) then adopts what it finds rather than seeding again.
  */
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -44,10 +51,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   appendBlock,
+  createGroup,
   getDirectoryEntry,
   getMeta,
   importMarkdown,
   initDoc,
+  isSidebarSeeded,
+  markSidebarSeeded,
+  pinDoc,
+  readSidebar,
   setLinks,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -300,24 +312,104 @@ export async function importSeedDocs(
 }
 
 /**
+ * One sidebar group a seed asks for: a fixed id, a name, and pins in order.
+ *
+ * The id is the caller's and it is fixed rather than generated, for the reason
+ * the schema module's header states — two replicas seeding offline write the
+ * same group instead of two, and merge into one. Its boundary is #210: two
+ * concurrent creates of one id are two writes of one key, so one nested map
+ * wins whole and the loser's pins go with it. That is safe *here* because every
+ * writer of this group writes exactly the same name and the same pins — `ub
+ * init` seeds one fixed starter layout, and its runs are serialised on one
+ * machine by the seed lock.
+ */
+export interface SidebarSeed {
+  /** The group's fixed id. */
+  id: string;
+  /** The group's name, as a reader sees it. */
+  name: string;
+  /** Document uuids, pinned in this order. */
+  docs: string[];
+}
+
+/**
+ * Write one starter sidebar group through the same replica set the documents
+ * went through, so the pins are in the update log before this returns — with or
+ * without a hub, and with or without an MCP server ever having started.
+ *
+ * Three things it refuses, all of them "this sidebar is not a blank one":
+ *
+ * 1. **The seed marker is set.** Set once and never cleared, which is what lets
+ *    a sidebar deliberately emptied stay empty.
+ * 2. **A group is already there.** Curation — a user's, another client's, or
+ *    the MCP server's own legacy tag migration — is exactly what a seed must
+ *    not write over.
+ * 3. **A pin would not resolve.** Every uuid must have a live directory entry:
+ *    an archived starter document stays archived rather than being pinned back,
+ *    and a layout that is not fully durable is not one to mark as seeded.
+ *
+ * @returns whether the group was written.
+ */
+async function seedSidebar(
+  replicas: Replicas,
+  seed: SidebarSeed,
+): Promise<boolean> {
+  const sidebar = replicas.sidebar();
+  if (isSidebarSeeded(sidebar.doc) || readSidebar(sidebar.doc).length > 0) {
+    return false;
+  }
+  const directory = replicas.directory().doc;
+  for (const uuid of seed.docs) {
+    const stub = getDirectoryEntry(directory, uuid);
+    if (stub === null || stub.deleted === true) return false;
+  }
+
+  // One transaction, so the group, its pins and the marker are one update: no
+  // replica ever sees a half-built starter layout, and no marker ever stands
+  // for pins that are not there.
+  sidebar.doc.transact(() => {
+    createGroup(sidebar.doc, seed.name, undefined, seed.id);
+    for (const uuid of seed.docs) {
+      pinDoc(sidebar.doc, seed.id, uuid);
+    }
+    markSidebarSeeded(sidebar.doc);
+  });
+  // The same bar the documents were held to: applied means the log took it.
+  replicas.assertHealthy();
+  await replicas.sync.waitForQuiet();
+  replicas.assertHealthy();
+  return true;
+}
+
+/**
  * The whole import as one call: open a replica set for `config`, import every
- * markdown file in `dir`, close both handles again.
+ * markdown file in `dir`, optionally pin the result into one sidebar group,
+ * close both handles again.
  *
  * The lifecycle is the reason this exists — a caller that is not a process
  * dedicated to importing (`ub init` seeding a new workspace's starter
  * documents) must not leave a SQLite handle and a hub connection open behind
  * it. `hub` is the sync layer's status at the end, reported after the replicas
  * are gone.
+ *
+ * `sidebar` is what makes a seeded workspace open the same way for every first
+ * client: the starter documents are navigation, not just rooms, and the
+ * `_sidebar` document is the only thing that says so. It is written last and
+ * only from documents the directory already names, so the layout is durable
+ * before it is declared. See {@link seedSidebar}.
  */
 export async function importSeedDir(
   dir: string,
   config: McpConfig,
-): Promise<{ results: SeedImport[]; hub: string }> {
+  sidebar: SidebarSeed | null = null,
+): Promise<{ results: SeedImport[]; hub: string; sidebar: boolean }> {
   const store = new MirrorStore(config.databasePath, config.workspaceId);
   const replicas = new Replicas(config, store);
   try {
     const results = await importSeedDocs(replicas, readSeedDocs(dir));
-    return { results, hub: replicas.sync.state().status };
+    const seeded =
+      sidebar === null ? false : await seedSidebar(replicas, sidebar);
+    return { results, hub: replicas.sync.state().status, sidebar: seeded };
   } finally {
     replicas.destroy();
     store.close();

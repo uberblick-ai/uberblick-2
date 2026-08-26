@@ -20,13 +20,15 @@ import {
   getBlocks,
   getDirectoryMap,
   getMeta,
+  isSidebarSeeded,
+  readSidebar,
   roomForDoc,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import { PersistenceError, Replicas } from "../src/replica.js";
 import { MirrorStore } from "../src/store.js";
-import { importSeedDocs, readSeedDocs } from "../src/seed.js";
+import { importSeedDir, importSeedDocs, readSeedDocs } from "../src/seed.js";
 import type { SeedImport } from "../src/seed.js";
 import {
   FailingStore,
@@ -461,5 +463,113 @@ describe("seed import", () => {
     } finally {
       await rig.close();
     }
+  });
+});
+
+/**
+ * The starter sidebar an `ub init` asks {@link importSeedDir} for.
+ *
+ * The CLI owns the real one and proves the whole path end to end; this suite
+ * owns the boundary the CLI cannot reach from outside, which is what happens
+ * when the layout the pins describe is not actually there.
+ */
+describe("starter sidebar seed", () => {
+  const first = "b4e1c206-9f38-4d5a-8c71-0a2b6e93f157";
+  const second = "d0c37a51-2e64-4b98-a13f-5c8e70d6b249";
+  const group = { id: "57a27e40-0000-4000-8000-0000000000ff", name: "Starter" };
+
+  /** Two importable documents. */
+  function starterDir(): string {
+    const dir = tempDir();
+    for (const [uuid, title] of [
+      [first, "First"],
+      [second, "Second"],
+    ]) {
+      writeFileSync(
+        join(dir, `${title}.md`),
+        `---\nuuid: ${uuid}\ntitle: ${title}\ntags: [start-here]\n---\n\nOne paragraph.\n`,
+      );
+    }
+    return dir;
+  }
+
+  /** The sidebar as a fresh replica set hydrated from the log alone sees it. */
+  function sidebarOf(databasePath: string): {
+    groups: ReturnType<typeof readSidebar>;
+    seeded: boolean;
+  } {
+    const store = new MirrorStore(databasePath, WORKSPACE);
+    const replicas = new Replicas(testConfig({ databasePath }), store);
+    try {
+      const doc = replicas.sidebar().doc;
+      return { groups: readSidebar(doc), seeded: isSidebarSeeded(doc) };
+    } finally {
+      replicas.destroy();
+      store.close();
+    }
+  }
+
+  it("pins the documents in the order it was given, and marks the sidebar seeded", async () => {
+    const databasePath = tempDatabasePath();
+    const outcome = await importSeedDir(
+      starterDir(),
+      testConfig({ databasePath }),
+      { ...group, docs: [second, first] },
+    );
+
+    expect(outcome.sidebar).toBe(true);
+    expect(sidebarOf(databasePath)).toEqual({
+      groups: [{ ...group, docs: [second, first] }],
+      seeded: true,
+    });
+  });
+
+  it("pins nothing when a document it would pin is tombstoned", async () => {
+    // The pins are a promise that the layout exists. A document the user threw
+    // away breaks it — and a half-layout must not be declared seeded either,
+    // because the marker would stop the repair that is still owed.
+    const databasePath = tempDatabasePath();
+    const dir = starterDir();
+    await importSeedDir(dir, testConfig({ databasePath }));
+
+    const store = new MirrorStore(databasePath, WORKSPACE);
+    const replicas = new Replicas(testConfig({ databasePath }), store);
+    try {
+      tombstoneDirectoryEntry(replicas.directory().doc, first);
+    } finally {
+      replicas.destroy();
+      store.close();
+    }
+
+    const outcome = await importSeedDir(dir, testConfig({ databasePath }), {
+      ...group,
+      docs: [first, second],
+    });
+
+    expect(outcome.sidebar).toBe(false);
+    expect(sidebarOf(databasePath)).toEqual({ groups: [], seeded: false });
+  });
+
+  it("adopts a sidebar that already holds a group rather than seeding beside it", async () => {
+    // Curation — a user's, another client's, or the MCP server's own legacy tag
+    // migration — is exactly what a seed must not write over.
+    const curated = "57a27e40-0000-4000-8000-0000000000fe";
+    const databasePath = tempDatabasePath();
+    const dir = starterDir();
+    await importSeedDir(dir, testConfig({ databasePath }), {
+      id: curated,
+      name: "Mine",
+      docs: [first],
+    });
+
+    const outcome = await importSeedDir(dir, testConfig({ databasePath }), {
+      ...group,
+      docs: [first, second],
+    });
+
+    expect(outcome.sidebar).toBe(false);
+    expect(sidebarOf(databasePath).groups).toEqual([
+      { id: curated, name: "Mine", docs: [first] },
+    ]);
   });
 });
