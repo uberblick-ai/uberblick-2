@@ -9,8 +9,10 @@
  * from: with none in force, `ub init` generates it and asks only for an
  * optional display slug, storing `<slug>-<uuid>` (or the bare uuid when the
  * answer is empty). With one in force it is offered as the default, so a second
- * run changes nothing. Nothing guesses a workspace anywhere else — the MCP
- * server refuses to start without one.
+ * run changes nothing. Two first-time runs at once settle on one workspace
+ * rather than two: a uuid a run generated is a proposal, and whichever run
+ * publishes second adopts the one already on disk. Nothing guesses a workspace
+ * anywhere else — the MCP server refuses to start without one.
  *
  * **The starter documents.** A workspace holding nothing but the two documents
  * in `templates/` is topped up with whatever of them is missing, through the
@@ -266,6 +268,11 @@ export async function initCommand(
   // *yet*, so the emptiness `starter.ts` reads would be the wrong answer. The
   // rest of the decision is read from the workspace itself, not from this run.
   const maySeed = flags.workspace === undefined;
+  // Whether the workspace below is this run's own invention. A generated uuid is
+  // a proposal until it is published, and the write phase treats it as one — see
+  // the claim under the lock.
+  const generatingWorkspace =
+    inForceWorkspace === null && flags.workspace === undefined;
 
   // A pipe is not a person: it gets the defaults rather than a blocked prompt.
   const interactive = !flags.yes && process.stdin.isTTY === true;
@@ -385,6 +392,18 @@ export async function initCommand(
     const current = readUserConfig();
     for (const warning of current.warnings) {
       warnings.add(warning);
+    }
+    // A uuid this run generated is claimed the way the signing secret is: the
+    // loser adopts the winner's. Another `ub init` may have published a
+    // workspace while this one was waiting for the lock, and writing a second
+    // uuid over it would leave this machine's configuration naming one
+    // workspace while the run that got there first — the one holding the seed
+    // lock — writes the starter documents into another.
+    const settled = generatingWorkspace
+      ? trimmed(current.config.workspace)
+      : null;
+    if (settled !== null) {
+      workspace = settled;
     }
     configPath = writeUserConfig({
       ...current.raw,
