@@ -7,9 +7,10 @@
  * Nothing is copied by hand.
  *
  * **Nothing is deployed *from* here.** The host clones `main` from GitHub and
- * updates itself out of that checkout, by running `remote-update.sh` there.
- * Deploying this machine's checkout was considered and rejected: with more than
- * one user it deploys whichever version somebody happened to have.
+ * is updated by running `remote-update.sh` in that checkout — never on its own,
+ * only when somebody runs it. Deploying this machine's checkout was considered
+ * and rejected: with more than one user it deploys whichever version somebody
+ * happened to have.
  *
  * **Updates are deliberate, never unattended.** `ub remote update` is the one
  * command, run by a person or by an agent session over SSH; nothing installs a
