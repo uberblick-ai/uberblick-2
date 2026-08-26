@@ -414,6 +414,9 @@ describe("ub open", () => {
     expect(refused.status).toBe(1);
     expect(refused.output).toContain(empty);
     expect(refused.output).toContain("index.html");
+    // The way out names the variable this user can set, not a checkout's task.
+    expect(refused.output).toContain("UBERBLICK_WEB_DIST");
+    expect(refused.output).not.toMatch(/mise/);
 
     // And in a checkout, an absent bundle is one to build rather than to
     // refuse: the web package is right there and the plan says so.
@@ -506,6 +509,10 @@ describe("ub open", () => {
     expect(refused.status).toBe(1);
     expect(refused.output).toContain("binds loopback only");
     expect(refused.output).toContain("0.0.0.0");
+    // Exposing a hub deliberately is the remote deployment's job, and that is
+    // what the refusal points at — no contributor task stands in for it.
+    expect(refused.output).toContain("REMOTE.md");
+    expect(refused.output).not.toMatch(/mise/);
     // Refused means refused: nothing was left listening there.
     expect((await probePort("0.0.0.0", port)).state).toBe("free");
 

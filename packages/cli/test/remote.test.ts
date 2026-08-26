@@ -530,6 +530,12 @@ describe("ub remote promote", () => {
     expect(seen.get(fromWeb)).toEqual(["Web note body"]);
     expect(seen.get(fromMcp)).toEqual(["Agent note body"]);
 
+    // The report says who follows the endpoint, and says it in `ub` terms: a
+    // deployed client reads the served document, and no contributor task is
+    // named at a user who may have no checkout.
+    expect(run.stdout).toContain("/uberblick-config.json");
+    expect(run.stdout).not.toMatch(/mise/);
+
     // Neither the secret nor a token it signs may appear in either stream.
     expect(run.output).not.toContain(SECRET);
     expect(run.output).not.toMatch(TOKEN_SHAPE);
@@ -725,6 +731,9 @@ describe("ub remote promote", () => {
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("did not answer");
     expect(run.stderr).toContain("nothing was written");
+    // The way out is a command this user has: `ub`, not a checkout's task.
+    expect(run.stderr).toContain("ub open --no-browser");
+    expect(run.stderr).not.toMatch(/mise/);
     expect(persistedHubUrl(box)).toBe(DEAD_HUB_URL);
   });
 });
@@ -798,6 +807,8 @@ describe("ub remote join", () => {
     expect(run.stderr).toContain('"is this workspace empty" check');
     expect(run.stderr).toContain("saw only the local update log");
     expect(run.stderr).toContain("leave those documents behind");
+    expect(run.stderr).toContain("ub open --no-browser");
+    expect(run.stderr).not.toMatch(/mise/);
     expect(persistedHubUrl(box)).toBe(url(remote));
   });
 

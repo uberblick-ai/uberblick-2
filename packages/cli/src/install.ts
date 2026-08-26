@@ -125,8 +125,8 @@ const LABEL = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
  * Everything after a bare `--` is the command to install, verbatim.
  *
  * It is taken before `parseArgs` sees it because the override is frequently a
- * command with `--` in it of its own — the checkout's own `.mcp.json` runs
- * `mise exec -- fnox exec -- pnpm …` — and only the first separator is ours.
+ * command with `--` in it of its own — a wrapper such as
+ * `fnox exec -- ub mcp serve` — and only the first separator is ours.
  */
 function splitOverride(argv: string[]): {
   flags: string[];

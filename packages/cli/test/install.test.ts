@@ -890,42 +890,36 @@ describe("the checkout's own .mcp.json", () => {
    * The spawn the committed file has to carry, stated here independently.
    *
    * This is the whole point of the test: with the expectation written out, the
-   * committed file and the generator have to agree with *it*, so changing
+   * committed file and the generator are each checked against *it*, so changing
    * either one alone fails. Reading the arguments out of the file and feeding
    * them back in would only ever prove the generator agrees with itself.
    */
-  const CHECKOUT_SPAWN = [
-    "mise",
-    "exec",
-    "--",
-    "fnox",
-    "exec",
-    "--if-missing",
-    "warn",
-    "--",
-    "pnpm",
-    "--silent",
-    "--filter",
-    "@uberblick/mcp-server",
-    "start",
-  ];
+  const CHECKOUT_SPAWN = ["ub", "mcp", "serve"];
 
   it("is what this command generates, rather than hand-maintained", () => {
-    // It does not run `ub mcp serve` — a fresh checkout has no installed `ub`,
-    // and the owner's secret only reaches it through `fnox exec` — so it is
-    // generated with the `--` override instead.
+    // The same line every other client gets, and for the same reason: `ub mcp
+    // serve` resolves workspace, endpoint and credential itself, so this file
+    // never needs an override or a wrapper to carry them.
     const committed = read(join(REPO_ROOT, ".mcp.json"));
     const entry = JSON.parse(committed).mcpServers.uberblick;
     expect([entry.command, ...entry.args]).toEqual(CHECKOUT_SPAWN);
 
     const box = sandbox();
-    const run = runUb(
-      ["mcp", "install", "claude", "--project", "--", ...CHECKOUT_SPAWN],
-      box,
-      NO_VENDOR,
-    );
+    const run = runUb(["mcp", "install", "claude", "--project"], box, NO_VENDOR);
     expect(run.status).toBe(0);
-    expect(read(join(box.cwd, ".mcp.json"))).toBe(committed);
+    const generated = JSON.parse(read(join(box.cwd, ".mcp.json"))).mcpServers
+      .uberblick;
+    expect([generated.command, ...generated.args]).toEqual(CHECKOUT_SPAWN);
+
+    // The whole entry, and not the bytes around it. The committed file was
+    // written through `claude mcp add` and this one by the fallback writer,
+    // which spell an empty `env` and a trailing newline differently — a
+    // difference in whose typewriter ran, not in what got registered.
+    const registered = (server: Record<string, unknown>) => ({
+      ...server,
+      env: server.env ?? {},
+    });
+    expect(registered(generated)).toEqual(registered(entry));
   });
 });
 

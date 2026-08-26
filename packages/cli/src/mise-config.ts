@@ -3,14 +3,15 @@
  *
  * The authority for local configuration is
  * `$XDG_CONFIG_HOME/uberblick/{config,credentials}.json`, and `ub` reads it
- * directly. Everything else in this repository does not: `mise run hub`,
- * `mise run web`, `mise run import-seed` and the `.mcp.json` spawn all inherit
- * their environment from mise, and the hub in particular refuses to start
- * without `HUB_AUTH_TOKEN`. So `ub init` also writes `mise.local.toml` — mise's
- * conventional gitignored local config — as a file **derived** from that
- * authority: same value, one owner, rewritten whenever it drifts. Delete it and
- * rerun `ub init` and it comes back with the same value; it is regenerated, not
- * re-randomised, because the authority is elsewhere.
+ * directly. The mise tasks do not: `mise run hub`, `mise run web` and
+ * `mise run import-seed` inherit their environment from mise, and the hub in
+ * particular refuses to start without `HUB_AUTH_TOKEN`. (The committed
+ * `.mcp.json` no longer belongs on that list — it spawns `ub mcp serve`, which
+ * resolves the configuration itself.) So `ub init` also writes
+ * `mise.local.toml` — mise's conventional gitignored local config — as a file
+ * **derived** from that authority: same value, one owner, rewritten whenever it
+ * drifts. Delete it and rerun `ub init` and it comes back with the same value;
+ * it is regenerated, not re-randomised, because the authority is elsewhere.
  *
  * `ub init` is what *creates* it, and `ub workspace use` rewrites the one it
  * created — a binding the mise tasks never saw would leave them serving the
@@ -330,9 +331,9 @@ function render(env: DerivedEnvironment, extra: readonly string[]): string {
 # regenerating this — rerun \`ub init\` to pick the new endpoint and secret up.
 # Delete it and rerun \`ub init\` and it comes back the same.
 #
-# It exists because mise tasks and \`.mcp.json\` inherit their environment from
-# mise rather than from \`ub\`. \`fnox exec\` overrides it, so a decryptable
-# \`HUB_AUTH_TOKEN\` in fnox.toml still wins for every task.
+# It exists because mise tasks inherit their environment from mise rather than
+# from \`ub\`. \`fnox exec\` overrides it, so a decryptable \`HUB_AUTH_TOKEN\`
+# in fnox.toml still wins for every task.
 #
 # HUB_AUTH_TOKEN is the HMAC signing secret, not a token. Never commit it —
 # .gitignore covers this file.

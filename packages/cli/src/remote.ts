@@ -587,8 +587,7 @@ function report(
   text +=
     "\n`ub`, `ub mcp serve` and the MCP server it spawns read this endpoint from\n" +
     "config.json. A deployed web client reads its own from the served\n" +
-    "/uberblick-config.json; a checkout's `mise run web` still uses mise's\n" +
-    "HUB_URL, so point a development build at it with `HUB_URL=… mise run web`.\n";
+    "/uberblick-config.json.\n";
   text +=
     "\nVerified here means the hub acknowledged the writes and a fresh client read\n" +
     `them back — not that the hub has flushed them to disk. The snapshot this\n` +
@@ -990,7 +989,7 @@ async function promoteCommand(argv: string[], io: Io): Promise<number> {
   if (localProblem !== null) {
     io.err(
       `ub remote promote: ${localProblem}Documents held only by that hub cannot ` +
-        "be included, so nothing was written. Start it (mise run hub) and try " +
+        "be included, so nothing was written. Start it (`ub open --no-browser`) and try " +
         "again — or use `ub remote set` if there is nothing here to move.\n",
     );
     return 1;
@@ -1171,7 +1170,7 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
         "therefore saw only the local update log. If this machine has a local " +
         "hub with documents on it, this will read as empty, join anyway, and " +
         "leave those documents behind on a hub nothing points at any more — " +
-        "start it (mise run hub) and rerun instead.\n",
+        "start it (`ub open --no-browser`) and rerun instead.\n",
     );
   }
 
