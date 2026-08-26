@@ -1,50 +1,29 @@
 ---
 name: next-issue
-description: One iteration of the implementation loop — observe GitHub, advance open PRs through the gates, dispatch Opus sub-agents for eligible issues per .github/ISSUE_SPEC.md. Designed to be driven by /loop (e.g. `/loop /next-issue`); a single manual invocation runs exactly one iteration.
+description: >-
+  One Claude coordinator iteration: advance open PRs through the gates, then
+  dispatch eligible issues through the agent-neutral AGENTS.md workflow.
+  Designed for /loop; one manual invocation runs one iteration.
 ---
 
 # next-issue — one iteration of the implementation loop
 
 You are the coordinator (CLAUDE.md orchestration policy): you observe, decide,
 validate, and merge — you never write feature code. All implementation happens
-in an isolated implementer agent. The issue contract is
-`.github/ISSUE_SPEC.md`; read it before triaging — it is authoritative for the
-header grammar, labels, claim protocol, scheduling semantics, and lint. This
-file does not restate it.
+in an isolated implementer agent. Read `AGENTS.md` for the shared agent-neutral
+claim, implementation, review, and handoff workflow. Read
+`.github/ISSUE_SPEC.md` for issue grammar, labels, scheduling, and lint. This
+file contains only Claude coordinator machinery and does not restate either.
 
 ## Hard rules
 
-- Dispatch implementation to an isolated implementer: an Opus sub-agent
-  (`model: opus`, `isolation: worktree`) by default, or a Codex session located
-  through Herdr — one agent per branch, and the claim records which type. Never
-  edit feature code in the main checkout — it may hold the user's uncommitted
-  work; worktrees only.
-- The agent that wrote a diff never reviews it authoritatively. You validate
-  against the acceptance criteria, and the external round goes to a session
-  that did not write the diff. Where CLAUDE.md's gate list makes a Codex round
-  mandatory, a Codex-implemented PR does not satisfy it by substituting a
-  different reviewer type: it goes to a *different* Codex session where one is
-  available, and only otherwise to an independent Opus reviewer — either way
-  you record on the PR which session read it. (Codex implementers are
-  currently confined to tier-2 `web`/`cli` issues by the owner's pilot scope,
-  so the mandatory gate rarely fires on their PRs.)
-- **GitHub is the source of truth for coordination state; Herdr is a
-  doorbell.** Every durable thing — claim, decision, handoff, finding
-  disposition, gate result — is written to GitHub before the message that
-  announces it. A Herdr message names the issue or PR URL it concerns and
-  carries nothing that exists only in that message. Interactive control
-  traffic is the exception: approval keystrokes, `continue`, and the like
-  carry no durable content and need no URL (per-role approval allowlists are
-  a follow-up). No recovery step reads pane history: reconstruct from
-  `gh issue list/view`, `gh pr list/view`, checks, reviews and comments
-  alone.
+- Apply `AGENTS.md` to every implementer lane and external review. The
+  coordinator owns validation and rulings, not feature code.
 - The coordinator's own repo edits (skill or docs changes, commits) happen in
   the coordinator's own worktree too (EnterWorktree), never in the shared
   checkout — multiple sessions share it and it may sit on any branch. Even
   small doc/skill edits are dispatched to an implementer agent; the coordinator
   briefs, validates, and merges.
-- Never commit to `main`. Code reaches `main` only through a PR that passed
-  every gate.
 - Bounce nonconforming input per the spec's lint; never fill gaps by guessing.
 - Escalate genuine product decisions via the spec's `needs-decision` path
   (comment with concrete options + your recommendation), notify the user
@@ -65,8 +44,8 @@ file does not restate it.
    invocation loaded its instructions before the pull, so a protocol change
    on `main` governs from the next invocation onward.
    Then `gh issue list --state open`, `gh pr list --state open`, and
-   for each open PR its checks and reviews. Reconcile claims: apply the spec's
-   stale-claim recovery rule.
+   for each open PR its checks and reviews. Reconcile claims using the stale
+   predicate in `AGENTS.md`.
 
 2. **Advance open PRs first** — an open PR is closer to value than a new
    dispatch, and this includes PRs that predate the loop. For each, drive the
@@ -254,58 +233,33 @@ file does not restate it.
    work in flight — claimed issues plus unmerged PRs — at 6: the bottleneck is
    the gates, not implementation.
 
-6. **Dispatch.** For each issue to start: add `in-progress` and post the
-   spec's claim comment before you prompt any agent. **Announce the work to
-   the user** in your visible output: one or two plain sentences on what the
-   issue is and why it's next, plus the direct GitHub URL (from
-   `gh issue view <n> --json url`). Then prompt the implementer the claim
-   names — spawn an Opus sub-agent, or dispatch the Codex session — with a
-   brief that is decision-complete but pulled, not pushed: pass the full issue
-   body and the applicable CLAUDE.md invariants, and instruct the agent to
-   START by
-   reading the product docs its Pointers cite through the uberblick MCP tools
-   — `get_doc` on each cited uuid, `search` for what the issue did not
-   anticipate — before any implementation or repository changes. You inline
-   only what those tools cannot serve: PR diffs, review threads, decisions
-   taken in this session. Excerpts you paste start aging the moment you paste
-   them; the live doc does not. Where this session has the uberblick MCP
-   server registered as tools the sub-agent inherits it; where it does not,
-   the agent reaches the same tools through a throwaway stdio client script
-   spawning the command recorded in `.mcp.json`, the pattern #77 and #134
-   use; that script is a temporary file in a scratch directory outside the
-   committed worktree, never part of the diff. The brief says which of the
-   two applies.
-   Every brief states the authoritative boundary verbatim: *Treat the issue
-   body and coordinator comments as the authoritative requirements,
-   constraints, and acceptance criteria. Use your own engineering judgment for
-   implementation details, test names, and small design choices explicitly left
-   open. If the brief conflicts with the code, is unsafe, or requires
-   unnecessary complexity, stop and record the discrepancy on GitHub rather
-   than silently deviating.* Say that, not "follow the issue exactly" — an
-   implementer told to obey a stale line obeys it.
-   Then the contract: branch from fresh `main`, implement, `mise run test` +
-   `mise run typecheck` green, push, open a PR with `Closes #N` and a body
-   stating what changed and how it was verified; and any live doc the agent
-   finds contradicting the code it read is named as a discrepancy in that PR
-   body — the read side of the dogfooding contract, mirroring the post-merge
-   doc update. Then the completion handoff as a comment on that PR per the
-   spec's claim protocol, and only then a Herdr message to you naming the PR
-   URL and the exact head SHA. GitHub first, always: the message only saves you
-   a polling interval, and polling `gh pr list` is the fallback when Herdr
-   delivery is unavailable, never the normal completion signal.
-   Where the implementer is a Codex session rather than a sub-agent, the brief
-   and the contract are this same text; only the transport differs — the herdr
-   skill and `herdr agent` locate the pane, and the dispatch message carries
-   the issue URL rather than the issue body.
-   Until #130 lands, the brief also asks the agent to close its
-   report with an uberblick-usage summary: MCP used or not, which docs by
-   title and uuid, helpful yes/no and one line why. Implementers never merge.
+6. **Dispatch.** For each issue to start, follow `AGENTS.md` for the claim,
+   implementer brief, worktree, validation, PR, handoff, and notification
+   contract. **Announce the work to the user** in your visible output: one or
+   two plain sentences on what the issue is and why it is next, plus the direct
+   GitHub URL (from `gh issue view <n> --json url`).
+
+   Prompt the implementer named by the claim: spawn an Opus sub-agent
+   (`model: opus`, `isolation: worktree`) by default, or use the Herdr skill to
+   dispatch a Codex session with the issue URL. The brief is decision-complete
+   but pulled, not pushed: pass the full issue body and applicable CLAUDE.md
+   invariants, and instruct the agent to start by reading the product docs its
+   Pointers cite through the uberblick MCP tools — `get_doc` on each cited
+   uuid, `search` for what the issue did not anticipate — before repository
+   changes. Inline only what those tools cannot serve: PR diffs, review
+   threads, and decisions taken in this session. Where the MCP server is not
+   registered, use the throwaway stdio-client pattern from #77 and #134 in a
+   scratch directory outside the committed worktree. The brief states which
+   route applies.
+
+   Any live doc that contradicts the code is named in the PR body — the read
+   side of the dogfooding contract, mirroring the post-merge doc update. Until
+   #130 lands, ask for an uberblick-usage summary: MCP used or not, docs read
+   by title and uuid, helpful yes/no, and one line why.
+
    Several individually-trivial issues with the same `Touches` set may go to
-   one agent as one batch: claim each issue separately, brief all their
-   bodies, and have the single PR close them all (`Closes #a, #b`) with a
-   combined diff reviewable in one sitting and a merge report checking each
-   issue's acceptance criteria — every condition of the spec's sizing
-   exception.
+   one agent only under the sizing exception in `.github/ISSUE_SPEC.md`; claim
+   each separately and validate every issue independently.
 
 7. **Report.** End with a short status a human can skim: PRs advanced (which
    gate), issues dispatched / bounced / parked, what the loop is waiting on.

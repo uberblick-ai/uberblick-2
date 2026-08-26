@@ -79,43 +79,20 @@ just the thread.
 
 ### Claim protocol
 
-On claiming an issue the loop adds `in-progress` and comments the branch and
-the implementer it dispatched to:
+The cross-agent workflow lives in [`AGENTS.md`](../AGENTS.md). Its minimum
+durable records use this issue grammar. On claim, add `in-progress` and post:
 
-```
+```text
 Claimed: feat/mcp-server
 Implementer: opus a12a538d
 ```
 
-`Implementer` is the agent type (`opus`, `codex`) plus the session or agent
-id — the coordinator's agent id, or the Herdr session id for a Codex lane.
-Type alone cannot tell two Codex sessions apart, and the reviewing session must
-be distinguishable from the authoring one: an implementer never reviews its own
-PR authoritatively. The claim comment is written **before** the implementing
-agent is prompted: a session that dies between the two must leave the claim
-behind, not the work.
-
-Recovery rule — one predicate, checkable by any session from GitHub alone. An
-issue carrying `in-progress` is stale, and may be reclaimed, when **all** of:
-
-- no open PR for the named branch;
-- no commit on the branch at `origin` newer than the claim comment;
-- the claim comment is older than 30 minutes.
-
-Local worktrees and terminal panes are deliberately not part of it: they are
-invisible to every session but one, so a rule that consults them cannot be
-evaluated by the coordinator that needs it. A dead agent holding a stale
-worktree is therefore reclaimable like any other. The 30-minute window is what
-the claim-before-prompt ordering costs: it keeps a parallel coordinator from
-reclaiming in the seconds between the claim and the first push. Claims live on
-GitHub, not in any session's memory, so a crashed session never strands an
-issue.
-
-The completion handoff is a comment on the **PR**, not the issue: what
-changed, how it was verified, and what is unresolved — blockers, accepted
-risks, findings left unaddressed. Review happens on the PR, so that is where
-the handoff has to be readable; the issue thread carries the claim only. Head
-SHA, check state and timing are derived from the PR and never restated here.
+`Implementer` is `<opus|codex> <session-or-agent id>`. Write the claim before
+prompting the implementer. Completion is a PR comment recording what changed,
+how it was verified, unresolved blockers, risks, or findings, and the
+KISS/overtesting self-review. Head SHA, check state, and timing remain derived
+from the PR rather than copied into the durable record. Recovery and
+independent-review rules live only in `AGENTS.md`.
 
 ## Body sections
 
