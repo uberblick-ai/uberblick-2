@@ -725,8 +725,22 @@ export function exportMarkdown(
   // up by id would rescan the whole fragment per block.
   const entries = getBlocksWithInline(ydoc);
   const numbers = listNumbers(entries.map((entry) => entry.block));
+
+  // An annotated *list item* holds its comments back until the run ends. A
+  // comment written between two items is a block between them — blank lines and
+  // all — which ends the list for any reader, this package's own included: the
+  // next item would come back at depth zero, so annotating a parent would have
+  // changed the document's shape.
+  const heldComments: string[] = [];
+  const releaseHeld = (): void => {
+    if (heldComments.length === 0) return;
+    push(heldComments.join("\n"));
+    heldComments.length = 0;
+  };
+
   for (const [index, { block, inline }] of entries.entries()) {
     const listItem = block.type === "list-item";
+    if (!listItem) releaseHeld();
     push(
       renderBlock(
         block,
@@ -736,8 +750,11 @@ export function exportMarkdown(
       listItem,
     );
     const comments = annotationsByBlock.get(block.id);
-    if (comments !== undefined) push(comments.join("\n"));
+    if (comments === undefined) continue;
+    if (listItem) heldComments.push(...comments);
+    else push(comments.join("\n"));
   }
+  releaseHeld();
 
   if (sections.length === 0) return "";
   let out = "";
@@ -1471,6 +1488,25 @@ const LIST_LINE = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?[ \t]*$/;
 /** `> `, indented no further than a paragraph may be. */
 const QUOTE_LINE = /^ {0,3}>[ \t]?(.*)$/;
 
+/** How wide a tab is, counted to the next stop rather than as four columns. */
+const TAB_WIDTH = 4;
+
+/**
+ * The column `text` ends at, starting from `column`.
+ *
+ * A tab advances to the next tab stop, which is what makes it worth a function:
+ * a tab in column two is worth two columns, not four, and a list whose depth was
+ * measured by expanding every tab to four spaces nests items their author wrote
+ * as siblings. CommonMark counts columns, so this counts columns.
+ */
+function advanceColumn(text: string, column: number): number {
+  let at = column;
+  for (const char of text) {
+    at = char === "\t" ? at + TAB_WIDTH - (at % TAB_WIDTH) : at + 1;
+  }
+  return at;
+}
+
 /**
  * Parse markdown into the pieces needed to build a document: title, tags, links
  * and a flat block list. Handles frontmatter, ATX headings, fenced code (with
@@ -1546,14 +1582,15 @@ export function importMarkdown(markdown: string): ImportedDoc {
     const listLine = LIST_LINE.exec(line);
     if (listLine !== null) {
       flush();
-      const column = (listLine[1] ?? "").replace(/\t/g, "    ").length;
       const marker = listLine[2] ?? "-";
-      const gap = (listLine[3] ?? " ").replace(/\t/g, "    ").length;
+      const column = advanceColumn(listLine[1] ?? "", 0);
+      const afterMarker = column + marker.length;
+      const gap = advanceColumn(listLine[3] ?? " ", afterMarker) - afterMarker;
       // Where this item's own content starts, which is what decides whether the
-      // next line is inside it. Five spaces or more after the marker begin an
+      // next line is inside it. Five columns or more after the marker begin an
       // indented code block instead, and the content column is then the marker
       // plus one — CommonMark again, and the one place the gap is not itself.
-      const contentColumn = column + marker.length + (gap > 4 ? 1 : gap);
+      const contentColumn = afterMarker + (gap > 4 ? 1 : gap);
       blocks.push({
         ...proseBlock("list-item", (listLine[4] ?? "").trim()),
         list: /^\d/.test(marker) ? "ordered" : "bullet",
@@ -1561,6 +1598,18 @@ export function importMarkdown(markdown: string): ImportedDoc {
       });
       continue;
     }
+    // An HTML comment is not content, so it is not a block between two items
+    // either: the run survives it, and an annotated list item exported with
+    // `annotations: "html-comments"` comes back at the depth it went out at.
+    // Checked before the reset below for exactly that reason.
+    if (trimmed.startsWith("<!--")) {
+      flush();
+      if (!trimmed.includes("-->")) {
+        while (i + 1 < lines.length && !(lines[i] ?? "").includes("-->")) i += 1;
+      }
+      continue;
+    }
+
     // Anything else closes the list, so the next run starts at level zero.
     openItems = [];
 
@@ -1570,14 +1619,6 @@ export function importMarkdown(markdown: string): ImportedDoc {
       // this one.
       if (paragraph.length > 0) flush();
       quote.push(quoteLine[1] ?? "");
-      continue;
-    }
-
-    if (trimmed.startsWith("<!--")) {
-      flush();
-      if (!trimmed.includes("-->")) {
-        while (i + 1 < lines.length && !(lines[i] ?? "").includes("-->")) i += 1;
-      }
       continue;
     }
 
