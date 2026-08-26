@@ -79,11 +79,28 @@ just the thread.
 
 ### Claim protocol
 
-On claiming an issue the loop adds `in-progress` and comments
-`Claimed: <branch-name>` (e.g. `Claimed: feat/mcp-server`). Recovery rule: an
-issue carrying `in-progress` whose named branch has no live worktree and no
-open PR is stale and may be reclaimed. Claims live on GitHub, not in any
-session's memory, so a crashed session never strands an issue.
+On claiming an issue the loop adds `in-progress` and comments the branch and
+the implementer it dispatched to:
+
+```
+Claimed: feat/mcp-server
+Implementer: opus
+```
+
+`Implementer` names the agent type (`opus`, `codex`) — who wrote the diff has
+to be readable without asking, because an implementer never reviews its own
+PR authoritatively. The claim comment is written **before** the implementing
+agent is prompted: a session that dies between the two must leave the claim
+behind, not the work.
+Recovery rule: an issue carrying `in-progress` whose named branch has no live
+worktree and no open PR is stale and may be reclaimed. Claims live on GitHub,
+not in any session's memory, so a crashed session never strands an issue.
+
+The completion handoff is a comment on the **PR**, not the issue: what
+changed, how it was verified, and what is unresolved — blockers, accepted
+risks, findings left unaddressed. Review happens on the PR, so that is where
+the handoff has to be readable; the issue thread carries the claim only. Head
+SHA, check state and timing are derived from the PR and never restated here.
 
 ## Body sections
 

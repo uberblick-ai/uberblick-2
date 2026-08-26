@@ -7,15 +7,29 @@ description: One iteration of the implementation loop — observe GitHub, advanc
 
 You are the coordinator (CLAUDE.md orchestration policy): you observe, decide,
 validate, and merge — you never write feature code. All implementation happens
-in Opus sub-agents. The issue contract is `.github/ISSUE_SPEC.md`; read it
-before triaging — it is authoritative for the header grammar, labels, claim
-protocol, scheduling semantics, and lint. This file does not restate it.
+in an isolated implementer agent. The issue contract is
+`.github/ISSUE_SPEC.md`; read it before triaging — it is authoritative for the
+header grammar, labels, claim protocol, scheduling semantics, and lint. This
+file does not restate it.
 
 ## Hard rules
 
-- Dispatch implementation to Opus sub-agents: `model: opus`,
-  `isolation: worktree`. Never edit feature code in the main checkout — it may
-  hold the user's uncommitted work; worktrees only.
+- Dispatch implementation to an isolated implementer: an Opus sub-agent
+  (`model: opus`, `isolation: worktree`) by default, or a Codex session located
+  through Herdr — one agent per branch, and the claim records which type. Never
+  edit feature code in the main checkout — it may hold the user's uncommitted
+  work; worktrees only.
+- The agent that wrote a diff never reviews it authoritatively. You validate
+  against the acceptance criteria, and the external round goes to an agent that
+  did not implement the PR — a Codex-implemented PR gets a Copilot/Opus reader,
+  never the Codex session that wrote it.
+- **GitHub is the source of truth; Herdr is a doorbell.** Every durable
+  thing — claim, decision, handoff, finding disposition, gate result — is
+  written to GitHub before or with the message that announces it. A Herdr
+  message carries the issue or PR URL it concerns, and nothing that exists only
+  in it. No recovery
+  step reads pane history: reconstruct from `gh issue list/view`,
+  `gh pr list/view`, checks, reviews and comments alone.
 - The coordinator's own repo edits (skill or docs changes, commits) happen in
   the coordinator's own worktree too (EnterWorktree), never in the shared
   checkout — multiple sessions share it and it may sit on any branch. Even
@@ -91,6 +105,12 @@ protocol, scheduling semantics, and lint. This file does not restate it.
      the same: be critical, and hunt specifically for overtesting and
      overengineering per this repo's principles (KISS/YAGNI, least code wins,
      tests defend contracts and invariants — not implementation trivia).
+   **Re-read before ruling.** Immediately before any ruling — a triage
+   disposition, an acceptance validation, a tier call, a merge — re-read the
+   linked issue thread and the PR thread (`gh issue view <n> --comments`,
+   `gh pr view <n> --comments`). Owner decisions and coordinator notes land
+   there mid-flight; a ruling made from session memory can contradict one that
+   was written down while you were elsewhere.
    **Finding triage — before any fix-up brief.** A finding is not
    automatically a work item; every finding is triaged explicitly against
    the supported usage model (single user, local-first, one hub, parallel
@@ -226,8 +246,10 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    work in flight — claimed issues plus unmerged PRs — at 6: the bottleneck is
    the gates, not implementation.
 
-6. **Dispatch.** For each issue to start: add `in-progress`, comment
-   `Claimed: feat/<slug>` (or `fix/`). **Announce the work to the user** in
+6. **Dispatch.** For each issue to start: add `in-progress` and post the
+   spec's claim comment — branch plus `Implementer:` — **before** you prompt
+   any agent, so a crash between the two strands nothing and the next
+   coordinator sees who holds the branch. **Announce the work to the user** in
    your visible output: one or two plain sentences on what the issue is and
    why it's next, plus the direct GitHub URL (from
    `gh issue view <n> --json url`). Then spawn an Opus sub-agent whose brief
@@ -245,14 +267,31 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    use; that script is a temporary file in a scratch directory outside the
    committed worktree, never part of the diff. The brief says which of the
    two applies.
+   Every brief states the authoritative boundary verbatim: *Treat the issue
+   body and coordinator comments as the authoritative requirements,
+   constraints, and acceptance criteria. Use your own engineering judgment for
+   implementation details, test names, and small design choices explicitly left
+   open. If the brief conflicts with the code, is unsafe, or requires
+   unnecessary complexity, stop and record the discrepancy on GitHub rather
+   than silently deviating.* Say that, not "follow the issue exactly" — an
+   implementer told to obey a stale line obeys it.
    Then the contract: branch from fresh `main`, implement, `mise run test` +
    `mise run typecheck` green, push, open a PR with `Closes #N` and a body
    stating what changed and how it was verified; and any live doc the agent
    finds contradicting the code it read is named as a discrepancy in that PR
    body — the read side of the dogfooding contract, mirroring the post-merge
-   doc update. Until #130 lands, the brief also asks the agent to close its
+   doc update. Then the completion handoff as a comment on that PR per the
+   spec's claim protocol, and only then a Herdr message to you naming the PR
+   URL and the exact head SHA. GitHub first, always: the message only saves you
+   a polling interval, and polling `gh pr list` is the fallback when Herdr
+   delivery is unavailable, never the normal completion signal.
+   Where the implementer is a Codex session rather than a sub-agent, the brief
+   and the contract are this same text; only the transport differs — the herdr
+   skill and `herdr agent` locate the pane, and the dispatch message carries
+   the issue URL rather than the issue body.
+   Until #130 lands, the brief also asks the agent to close its
    report with an uberblick-usage summary: MCP used or not, which docs by
-   title and uuid, helpful yes/no and one line why. Sub-agents never merge.
+   title and uuid, helpful yes/no and one line why. Implementers never merge.
    Several individually-trivial issues with the same `Touches` set may go to
    one agent as one batch: claim each issue separately, brief all their
    bodies, and have the single PR close them all (`Closes #a, #b`) with a
