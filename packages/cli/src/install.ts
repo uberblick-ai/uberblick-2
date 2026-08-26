@@ -66,6 +66,7 @@ import {
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
 import { parseWorkspaceId } from "@uberblick/schema";
+import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import type { Entry, Scope, TargetName } from "./mcp-config.js";
@@ -137,18 +138,53 @@ function splitOverride(argv: string[]): {
     : { flags: argv.slice(0, cut), override: argv.slice(cut + 1) };
 }
 
+/** Exported so the help below can be checked against the parser it describes. */
+export const INSTALL_OPTIONS = {
+  project: { type: "boolean", default: false },
+  user: { type: "boolean", default: false },
+  print: { type: "boolean", default: false },
+  force: { type: "boolean", default: false },
+  workspace: { type: "string" },
+  name: { type: "string" },
+} as const;
+
+export const INSTALL_HELP = `usage: ub mcp install [target] [options] [-- <command>]
+
+Register uberblick with an MCP client, so there is no JSON to hand-edit. What is
+registered is \`ub mcp serve\` with no arguments and no environment: workspace,
+endpoint and credential are resolved by \`ub\` itself, so a client config never
+carries a stale copy of them.
+
+operands:
+  target            the client: ${TARGETS.join(", ")} (default ${DEFAULT_TARGET}).
+                    Any other name needs --print, which gives the generic stdio
+                    snippet to paste into that client's own config.
+
+options:
+  --project         write this directory's config (the default)
+  --user            write the per-user config
+  --print           print the snippet to paste, and write nothing
+  --force           replace an existing "uberblick" entry, backing the file up
+  --workspace <id>  register a second entry pinned to this workspace instead,
+                    resolved the way \`ub workspace use\` resolves an id
+  --name <label>    call that entry "uberblick-<label>" (default: its slug);
+                    needs --workspace, which is the entry it names
+  -h, --help        show this help
+  -- <command>      register this command instead of uberblick's own. Only the
+                    first \`--\` is ours; everything after it is passed through
+                    verbatim, including further \`--\` and \`--help\`.
+
+Safe against a file you care about: other servers are left alone, a second run
+reports \`already installed\`, an entry it did not write is never replaced without
+--force, any file it changes is backed up first, it never prompts, and it never
+prints a value it read out of a config.
+`;
+
 function parseFlags(argv: string[]): Flags {
   const { flags, override } = splitOverride(argv);
   const { values, positionals } = parseArgs({
     args: flags,
-    options: {
-      project: { type: "boolean", default: false },
-      user: { type: "boolean", default: false },
-      print: { type: "boolean", default: false },
-      force: { type: "boolean", default: false },
-      workspace: { type: "string" },
-      name: { type: "string" },
-    },
+    options: INSTALL_OPTIONS,
     allowPositionals: true,
   });
 
@@ -508,6 +544,11 @@ export async function installCommand(
   argv: string[],
   io: Io = processIo,
 ): Promise<number> {
+  // Before the override is split off, and `takeHelp` stops at the same bare
+  // `--`: `ub mcp install -- … --help` registers a command, it does not ask a
+  // question.
+  if (takeHelp(argv, io, INSTALL_HELP)) return 0;
+
   let flags: Flags;
   try {
     flags = parseFlags(argv);

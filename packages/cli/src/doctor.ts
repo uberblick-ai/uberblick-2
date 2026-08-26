@@ -37,6 +37,7 @@ import type { McpConfig } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import type { ResolvedConfig } from "./config.js";
 import { readCredentials, resolveConfig } from "./config.js";
+import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import type { Scope } from "./mcp-config.js";
@@ -523,16 +524,37 @@ export function renderDoctor(report: DoctorReport): string {
   return text;
 }
 
+/** Exported so the help below can be checked against the parser it describes. */
+export const DOCTOR_OPTIONS = {
+  json: { type: "boolean", default: false },
+} as const;
+
+export const DOCTOR_HELP = `usage: ub doctor [--json]
+
+Check the local stack against its known failure modes — configuration, the
+signing secret and its file mode, the database, whether the hub is reachable,
+and the MCP client configs \`ub mcp install\` writes. Reads only; it fixes
+nothing and names what to run instead.
+
+options:
+  --json            the same checks as JSON on stdout, for a script to read
+  -h, --help        show this help
+
+Exits non-zero when any check fails, so it works as a gate in a script.
+`;
+
 export async function doctorCommand(
   argv: string[],
   io: Io = processIo,
 ): Promise<number> {
+  if (takeHelp(argv, io, DOCTOR_HELP)) return 0;
+
   let json = false;
   try {
     json =
       parseArgs({
         args: argv,
-        options: { json: { type: "boolean", default: false } },
+        options: DOCTOR_OPTIONS,
         allowPositionals: false,
       }).values.json === true;
   } catch (error) {

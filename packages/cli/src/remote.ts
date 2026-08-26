@@ -77,6 +77,7 @@ import {
   writeUserConfig,
 } from "./config.js";
 import type { ResolvedConfig } from "./config.js";
+import { helpWanted, takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { remoteInitCommand, remoteUpdateCommand } from "./remote-init.js";
@@ -103,6 +104,9 @@ options for promote and join:
                          configured is tried first, and a terminal is prompted
                          with the input hidden. Never pass a secret as an
                          argument.
+
+options:
+  -h, --help             show this help; after a command, that command's help
 `;
 
 /**
@@ -607,10 +611,54 @@ interface BridgeFlags {
   secretFile: string | undefined;
 }
 
+/** Exported so the two bridge helps can be checked against their parser. */
+export const REMOTE_BRIDGE_OPTIONS = {
+  "secret-file": { type: "string" },
+} as const;
+
+/** The paragraph both bridge helps end on: how the credential is supplied. */
+const SECRET_FILE_NOTE = `  --secret-file <path>  read the remote's signing secret from a file only you
+                        can read (mode 0600). Without it the secret already
+                        configured is tried first, and a terminal is prompted
+                        with the input hidden.
+  -h, --help            show this help
+
+Never pass a secret as an argument: it would be in the shell history and in
+every process listing on the machine.
+`;
+
+export const REMOTE_PROMOTE_HELP = `usage: ub remote promote <url> [--secret-file <path>]
+
+Move this populated workspace onto an empty remote hub: every local document is
+pushed, the endpoint is then repointed at <url>, and the credential that reached
+it is stored. Refuses when the remote already holds documents, so it can never
+merge two corpora by accident.
+
+operands:
+  <url>                 the remote endpoint, ws:// or wss:// (an https:// or
+                        http:// address is accepted and normalized)
+
+options:
+${SECRET_FILE_NOTE}`;
+
+export const REMOTE_JOIN_HELP = `usage: ub remote join <url> [--secret-file <path>]
+
+Pull a populated remote workspace into this empty one: the remote's documents
+are hydrated into the local replica, the endpoint is repointed at <url>, and the
+credential that reached it is stored. Refuses when this machine already holds
+documents, so it can never merge two corpora by accident.
+
+operands:
+  <url>                 the remote endpoint, ws:// or wss:// (an https:// or
+                        http:// address is accepted and normalized)
+
+options:
+${SECRET_FILE_NOTE}`;
+
 function parseBridgeFlags(argv: string[]): BridgeFlags {
   const { values, positionals } = parseArgs({
     args: argv,
-    options: { "secret-file": { type: "string" } },
+    options: REMOTE_BRIDGE_OPTIONS,
     allowPositionals: true,
   });
   if (positionals.length !== 1) {
@@ -671,7 +719,27 @@ function showRemote(io: Io): number {
 
 // --- ub remote set ---------------------------------------------------------
 
+export const REMOTE_SET_HELP = `usage: ub remote set <url>
+
+Point the clients at an endpoint, by writing it to the user config. Moves no
+documents: whatever the current hub holds stays there, and this machine's
+replica keeps whatever it has already logged.
+
+operands:
+  <url>             the endpoint, ws:// or wss:// (an https:// or http://
+                    address is accepted and normalized)
+
+options:
+  -h, --help        show this help
+
+Use \`ub remote promote <url>\` or \`ub remote join <url>\` when the documents
+have to move with the endpoint. A layer above the user config — HUB_URL, or a
+directory file — still wins, and this says so when it does.
+`;
+
 function setCommand(argv: string[], io: Io): number {
+  if (takeHelp(argv, io, REMOTE_SET_HELP)) return 0;
+
   const [value, ...rest] = argv;
   if (value === undefined || rest.length > 0) {
     io.err("usage: ub remote set <url>\n");
@@ -884,6 +952,8 @@ function foreignDocs(
 // --- ub remote promote -----------------------------------------------------
 
 async function promoteCommand(argv: string[], io: Io): Promise<number> {
+  if (takeHelp(argv, io, REMOTE_PROMOTE_HELP)) return 0;
+
   let flags: BridgeFlags;
   try {
     flags = parseBridgeFlags(argv);
@@ -1056,6 +1126,8 @@ async function promoteCommand(argv: string[], io: Io): Promise<number> {
 // --- ub remote join --------------------------------------------------------
 
 async function joinCommand(argv: string[], io: Io): Promise<number> {
+  if (takeHelp(argv, io, REMOTE_JOIN_HELP)) return 0;
+
   let flags: BridgeFlags;
   try {
     flags = parseBridgeFlags(argv);
@@ -1173,14 +1245,9 @@ export async function remoteCommand(
   argv: string[],
   io: Io = processIo,
 ): Promise<number> {
+  // The subcommand first, so `ub remote promote --help` reaches the help of the
+  // leaf it names rather than being answered by the group.
   const [sub, ...rest] = argv;
-  if (sub === undefined) {
-    return showRemote(io);
-  }
-  if (sub === "--help" || sub === "-h" || sub === "help") {
-    io.out(REMOTE_HELP);
-    return 0;
-  }
   if (sub === "init") {
     return await remoteInitCommand(rest, io);
   }
@@ -1195,6 +1262,13 @@ export async function remoteCommand(
   }
   if (sub === "join") {
     return await joinCommand(rest, io);
+  }
+  if (sub === "help" || helpWanted(argv)) {
+    io.out(REMOTE_HELP);
+    return 0;
+  }
+  if (sub === undefined) {
+    return showRemote(io);
   }
   io.err(`ub remote: unknown command ${JSON.stringify(sub)}\n\n${REMOTE_HELP}`);
   return 2;
