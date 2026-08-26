@@ -11,7 +11,9 @@
  * the header itself — handed to Radix with `asChild`. That is the whole point:
  * the plain-CSS button and the Tailwind surface it opens have to read as one
  * design, and they only do that if the tokens underneath them are the same
- * ones. Nothing here defines a colour.
+ * ones. No colour is spelled out here: the two places this file names one at
+ * all, it names a token — `text-brand` through the bridge, and `var(--brand)`
+ * directly where the app would put a peer's awareness colour.
  */
 
 import { useState } from "react";
@@ -64,6 +66,7 @@ export function ChromeDemo(): ReactElement {
                    by name, so `--color-brand` is exercised rather than merely
                    declared. */
                 className={name === chosen ? "text-brand" : undefined}
+                data-brand={name === chosen ? "" : undefined}
                 onSelect={() => setChosen(name)}
               >
                 {name}
@@ -111,7 +114,10 @@ export function ChromeDemo(): ReactElement {
           </DialogContent>
         </Dialog>
 
-        <span className="ub-me" style={{ borderColor: "oklch(0.8 0.18 65)" }}>
+        {/* The app puts the peer's awareness colour here, which is a runtime
+            `#rrggbb` from identity.ts. The demo has no peers, so it borrows
+            the brand token rather than inventing a literal. */}
+        <span className="ub-me" style={{ borderColor: "var(--brand)" }}>
           demo
         </span>
       </header>

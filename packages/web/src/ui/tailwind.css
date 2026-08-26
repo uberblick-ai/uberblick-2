@@ -46,14 +46,15 @@
 
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
-@import "tailwindcss/utilities.css" layer(utilities);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
 
-/* Tell Tailwind where class names live. Automatic detection would sweep the
-   whole package; the vendored components and their demo are the only files
-   that carry utilities, and naming them keeps a stray string in an editor
-   plugin from generating CSS. */
+/* `source(none)` above turns automatic detection off, and this is then the
+   whole source list — `@source` *adds* to detection rather than replacing it,
+   so without it Tailwind sweeps the package and mines class names out of
+   English prose (`src/editor` alone was producing `.list-item`, `.italic` and
+   `.collapse`). One directory, the only one whose class attributes are
+   Tailwind's. */
 @source "./shadcn";
-@source "../dev";
 
 /* The bridge. Left side: what shadcn's markup asks for. Right side: what this
    product already is. No colour is defined here. */

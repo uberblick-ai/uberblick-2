@@ -88,6 +88,13 @@ for (const scheme of ["light", "dark"] as const) {
     // Dropdown menu: opens, and selecting an item runs the item's action.
     await page.getByRole("button", { name: "uberblick ▾" }).click();
     await expect(page.getByRole("menu")).toBeVisible();
+    // The current item asks for the brand amber by its bridged name. It is the
+    // one utility on this page that the *product* stylesheet does not generate
+    // — the demo compiles its own Tailwind root for it (src/dev/chrome-demo.css)
+    // — so this is what catches that arrangement coming apart.
+    expect(
+      await painted(page, "[data-slot=dropdown-menu-item][data-brand]", "color"),
+    ).toBe(await painted(page, ".ub-brand", "color"));
     await page.getByRole("menuitem", { name: "ablauf" }).click();
     await expect(page.getByRole("menu")).toBeHidden();
     await expect(page.getByRole("button", { name: "ablauf ▾" })).toBeVisible();
