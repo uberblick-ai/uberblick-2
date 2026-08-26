@@ -1,9 +1,10 @@
 /**
  * The derived per-checkout mise config.
  *
- * The authority for local configuration is
- * `$XDG_CONFIG_HOME/uberblick/{config,credentials}.json`, and `ub` reads it
- * directly. Everything else in this repository does not: `mise run hub`,
+ * The authority for local configuration is this machine's
+ * `{config,credentials}.json` — in `$XDG_CONFIG_HOME/uberblick` or, on a Mac,
+ * `~/Library/Application Support/Uberblick`; `@uberblick/hub/storage` decides
+ * — and `ub` reads it directly. Everything else in this repository does not: `mise run hub`,
  * `mise run web`, `mise run import-seed` and the `.mcp.json` spawn all inherit
  * their environment from mise, and the hub in particular refuses to start
  * without `HUB_AUTH_TOKEN`. So `ub init` also writes `mise.local.toml` — mise's
@@ -322,8 +323,9 @@ export function tomlUnsafeReason(value: string): string | null {
 function render(env: DerivedEnvironment, extra: readonly string[]): string {
   return `${MARKER}
 #
-# Derived from the config \`ub\` resolves — $XDG_CONFIG_HOME/uberblick/
-# {credentials,config}.json and ./uberblick.json — same values, one owner. Do
+# Derived from the config \`ub\` resolves — this machine's credentials.json and
+# config.json (\`ub status\` names the directory they are in) and
+# ./uberblick.json — same values, one owner. Do
 # not edit the three values below: \`ub init\` writes them and \`ub workspace
 # use\` rewrites them, and no other command does. Anything else you add to
 # [env] is kept. \`ub remote\` changes the authority files without

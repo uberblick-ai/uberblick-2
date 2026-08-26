@@ -155,6 +155,7 @@ describe("ub doctor", () => {
 
     // A stack with nothing configured still gets an answer for every check.
     expect([...checks.keys()]).toEqual([
+      "storage-layout",
       "workspace",
       "credential",
       "database",

@@ -9,6 +9,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./config": "./src/config.ts",
+    "./storage": "./src/storage.ts",
     "./token": "./src/token.ts"
   },
   "scripts": {

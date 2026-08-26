@@ -13,6 +13,14 @@ fnox = "1"
 [env]
 HUB_URL = "ws://localhost:1234"
 
+# The hub's SQLite file, checkout-local and gitignored. Absent this, a hub opens
+# the *packaged user's* database — `~/Library/Application Support/Uberblick/
+# data/hub.sqlite` on macOS, `$XDG_DATA_HOME/uberblick/hub.sqlite` elsewhere —
+# and development has no business writing there. Every mise path inherits this:
+# `mise run hub`, `mise run dev`, and the review and e2e harnesses. (The e2e
+# harness goes further and starts its hub on a temp database of its own.)
+HUB_DB_PATH = "{{config_root}}/packages/hub/data/hub.sqlite"
+
 # `ub` and `uberblick` as plain commands inside the checkout. pnpm links the
 # cli package's declared bin entries here on install (the root package.json
 # depends on it for exactly that reason); mise prepends this directory for any

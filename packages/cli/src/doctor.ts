@@ -2,9 +2,10 @@
  * `ub doctor` — the local stack's documented failure modes, run as checks.
  *
  * Each check answers one question somebody would otherwise answer by finding,
- * reading and translating prose: is a workspace configured, is a signing secret
- * usable, can the database be written, does a hub answer, do the two port
- * settings agree, who holds the port, is any MCP client wired up. Three of the
+ * reading and translating prose: which storage layout is in force, is a
+ * workspace configured, is a signing secret usable, can the database be
+ * written, does a hub answer, do the two port settings agree, who holds the
+ * port, is any MCP client wired up. Three of the
  * hub-side failures present identically as "offline" in the web UI, which is
  * the reason this command exists — it names the cause and the fix.
  *
@@ -33,6 +34,12 @@
 import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
+import type { StoragePaths } from "@uberblick/hub/storage";
+import {
+  AmbiguousStorageError,
+  MAC_ROOT_DISPLAY,
+  resolveStorage,
+} from "@uberblick/hub/storage";
 import type { McpConfig } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import type { ResolvedConfig } from "./config.js";
@@ -102,6 +109,42 @@ const WORKSPACE_REMEDY =
 const PORT_REMEDY =
   "set PORT for the hub and HUB_URL for the clients together — the hub binds HUB_HOST:PORT and never reads HUB_URL";
 
+// --- storage layout ----------------------------------------------------------
+
+/**
+ * Which of the three storage layouts is in force, and the refusal when that
+ * cannot be answered.
+ *
+ * A Mac holding uberblick state in *both* `~/Library/Application Support` and
+ * the legacy XDG defaults is the one configuration this command cannot report
+ * around: every other check would have to open a file in one root or the
+ * other, and choosing would hide a corpus. So it is a failure with both roots
+ * named, and every check below it is skipped rather than run against a guess.
+ */
+function storageCheck(storage: StoragePaths): Check {
+  const where = `config ${storage.configDir}, data ${storage.dataDir}`;
+  if (storage.layout === "legacy-xdg") {
+    return {
+      name: "storage-layout",
+      status: "pass",
+      reason: `${storage.layout} — ${where}`,
+      remedy: `\`ub storage migrate\` (#249) will move these under ${MAC_ROOT_DISPLAY}; nothing has moved yet, and nothing new was created`,
+    };
+  }
+  return pass("storage-layout", `${storage.layout} — ${where}`);
+}
+
+/** The checks that need a resolved layout — every one of them, in order. */
+const AFTER_STORAGE = [
+  "workspace",
+  "credential",
+  "database",
+  "hub",
+  "port",
+  "bind",
+  "mcp",
+] as const;
+
 // --- workspace ---------------------------------------------------------------
 
 function workspaceCheck(
@@ -149,8 +192,9 @@ function modeOf(path: string): string {
 function credentialCheck(
   resolved: ResolvedConfig | null,
   env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
 ): Check {
-  const credentials = readCredentials(env);
+  const credentials = readCredentials(env, platform);
   if (credentials.exposed) {
     return fail(
       "credential",
@@ -442,6 +486,8 @@ function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
 export interface DoctorOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  /** `process.platform` by default; injected so the Mac layout is testable. */
+  platform?: NodeJS.Platform;
 }
 
 /** Run every check without printing anything. Exported for tests. */
@@ -450,7 +496,35 @@ export async function doctorReport(
 ): Promise<{ report: DoctorReport; warnings: string[] }> {
   const env = options.env ?? process.env;
   const cwd = options.cwd ?? process.cwd();
+  const platform = options.platform ?? process.platform;
   const warnings: string[] = [];
+
+  // Before anything reads a file: which root the files are in. An ambiguous
+  // answer stops the report here — nothing below it may open a database.
+  let storage: StoragePaths;
+  try {
+    storage = resolveStorage({ env, platform });
+  } catch (thrown) {
+    if (!(thrown instanceof AmbiguousStorageError)) {
+      throw thrown;
+    }
+    return {
+      warnings,
+      report: {
+        version: cliVersion(),
+        ok: false,
+        checks: [
+          fail("storage-layout", thrown.message, thrown.remedy),
+          ...AFTER_STORAGE.map((name) =>
+            skipped(
+              name,
+              "the storage layout is ambiguous, so nothing was resolved and no database was opened",
+            ),
+          ),
+        ],
+      },
+    };
+  }
 
   // Resolution itself can refuse — a workspace id that is not a uuid is a
   // configuration error, and a command whose job is to report configuration
@@ -458,7 +532,7 @@ export async function doctorReport(
   let resolved: ResolvedConfig | null = null;
   let error: string | null = null;
   try {
-    resolved = resolveConfig({ env, cwd });
+    resolved = resolveConfig({ env, cwd, platform });
     warnings.push(...resolved.warnings);
   } catch (thrown) {
     error = message(thrown);
@@ -467,7 +541,7 @@ export async function doctorReport(
   let config: McpConfig | null = null;
   if (resolved !== null) {
     try {
-      config = resolveMcpConfig(resolved.env);
+      config = resolveMcpConfig(resolved.env, platform);
     } catch (thrown) {
       error = message(thrown);
     }
@@ -480,8 +554,9 @@ export async function doctorReport(
     config === null ? async () => "disabled" : hubProber(config);
 
   const checks: Check[] = [
+    storageCheck(storage),
     workspaceCheck(resolvedEnv, resolved, config, error),
-    credentialCheck(resolved, resolvedEnv),
+    credentialCheck(resolved, resolvedEnv, platform),
     databaseCheck(config),
     await hubCheck(config, dial),
     portCheck(config, endpoint, resolvedEnv),
