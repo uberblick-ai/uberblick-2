@@ -12,6 +12,15 @@
  * run changes nothing. Nothing guesses a workspace anywhere else — the MCP
  * server refuses to start without one.
  *
+ * **The starter documents.** A workspace holding nothing but the two documents
+ * in `templates/` is topped up with whatever of them is missing, through the
+ * same seed importer `mise run import-seed` uses — so a fresh workspace gets
+ * both, an interrupted seed is finished by the next run, and a workspace that
+ * holds anything else is never written into. `--workspace` opts out entirely:
+ * naming an id is joining a workspace that exists elsewhere, and its emptiness
+ * here means only that it has not been hydrated yet. See `starter.ts`. They are
+ * ordinary documents from the moment they land.
+ *
  * It is convenience, never a precondition. Every other command works without it
  * — absent configuration is a default, not an error (see `config.ts`) — so
  * nothing here is the thing that makes `ub status` or `ub mcp serve` possible.
@@ -50,7 +59,7 @@ import {
   writeUserConfig,
 } from "./config.js";
 import type { InitLock } from "./init-lock.js";
-import { acquireInitLock } from "./init-lock.js";
+import { acquireInitLock, seedLockPath } from "./init-lock.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
@@ -62,6 +71,7 @@ import {
   trustLocalConfig,
   writeLocalConfig,
 } from "./mise-config.js";
+import { seedStarterDocs } from "./starter.js";
 
 /**
  * Awareness colours to default to.
@@ -250,6 +260,12 @@ export async function initCommand(
   const existing = readUserConfig();
   // The same problem is reported by each reader; the set keeps it said once.
   const warnings = new Set([...resolved.warnings, ...existing.warnings]);
+  // `--workspace` is somebody naming a workspace that already exists somewhere —
+  // joining it, usually before `ub remote join` hydrates it. Whatever that
+  // workspace holds is not this machine's to add to, and it may hold nothing
+  // *yet*, so the emptiness `starter.ts` reads would be the wrong answer. The
+  // rest of the decision is read from the workspace itself, not from this run.
+  const maySeed = flags.workspace === undefined;
 
   // A pipe is not a person: it gets the defaults rather than a blocked prompt.
   const interactive = !flags.yes && process.stdin.isTTY === true;
@@ -350,6 +366,8 @@ export async function initCommand(
   let persistedWorkspace: string;
   let localConfig: string | null = null;
   let trustAfterRelease: string | null = null;
+  // Replaced once the workspace on disk is known.
+  let mcpEnv: NodeJS.ProcessEnv = resolved.env;
   try {
     // Read inside the lock, not before it: a decision made from a snapshot
     // taken before the lock was held is a decision about a machine that may
@@ -459,6 +477,58 @@ export async function initCommand(
     }
   }
 
+  // --- the starter documents -----------------------------------------------
+  //
+  // What the MCP server would resolve for the workspace that is now on disk.
+  // `secret` is added explicitly because it may have been generated moments ago,
+  // after `resolved` was read — and a seed written without it stays local
+  // instead of reaching a hub that is up.
+  mcpEnv = {
+    ...resolved.env,
+    WORKSPACE_ID: persistedWorkspace,
+    ...(secret === null ? {} : { HUB_AUTH_TOKEN: secret }),
+  };
+
+  // Under the seed's own lock, not the one above: what to write is decided by
+  // reading the workspace, so two runs reading before either writes would both
+  // find it empty and both write the same documents into it — but the read and
+  // the write together take seconds, and holding the file lock across them
+  // would make every concurrent `ub init` fail on a hub connection it has no
+  // stake in. Nothing waits for this lock either: a run that finds it held has
+  // nothing to add, because whoever holds it is writing exactly these documents.
+  //
+  // A failure is a warning rather than an exit code: everything `ub init` was
+  // asked to settle is settled by now, and the seed is not lost with the run —
+  // it is decided by what the workspace is missing, so the next `ub init`
+  // writes whatever this one did not.
+  let starter: string[] = [];
+  let seedLock: InitLock | null = null;
+  if (maySeed) {
+    try {
+      seedLock = await acquireInitLock(process.env, {
+        path: seedLockPath(),
+        waitMs: 0,
+      });
+    } catch (error) {
+      warnings.add(
+        `${error instanceof Error ? error.message : String(error)} — this run ` +
+          "left the starter documents to it",
+      );
+    }
+  }
+  if (seedLock !== null) {
+    try {
+      starter = await seedStarterDocs(mcpEnv);
+    } catch (error) {
+      warnings.add(
+        `${error instanceof Error ? error.message : String(error)} — the ` +
+          "starter documents are incomplete; run `ub init` again to finish them",
+      );
+    } finally {
+      seedLock.release();
+    }
+  }
+
   for (const warning of warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }
@@ -468,11 +538,10 @@ export async function initCommand(
   // What is on disk, which under a concurrent run is not always what this
   // process asked for. The report describes the machine, not the intention.
   report += field("workspace", persistedWorkspace);
-  report += field(
-    "hub",
-    resolveMcpConfig({ ...resolved.env, WORKSPACE_ID: persistedWorkspace })
-      .hubUrl,
-  );
+  report += field("hub", resolveMcpConfig(mcpEnv).hubUrl);
+  if (starter.length > 0) {
+    report += field("documents", starter.join(", "));
+  }
   // "credential", not "token": the value is the secret tokens are signed with,
   // and it is not in this report — only where it came from.
   report += field("credential", credentialNote);
