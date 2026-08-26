@@ -382,14 +382,23 @@ describe("ub init", () => {
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
 
-    const running = runUbAsync(["init", "--yes"], box, WITHOUT_MISE);
-    // Comfortably past the ~0.4s a run takes to boot and read its
-    // configuration, and well inside the 2s it will wait for the lock. Both
-    // bounds only ever degrade this into passing for a lesser reason — a run
-    // that read the workspace as already in force never generated one, and a
-    // lock released before the wait even started is the uncontended case —
-    // so a slow machine cannot turn it red.
-    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    // No sleep: the run says when it starts waiting for the lock, and that
+    // line is proof it has already read the configuration — a workspace
+    // published before then would have been in force rather than adopted, and
+    // this would be passing for a lesser reason on a slow machine.
+    let waiting = false;
+    const running = runUbAsync(
+      ["init", "--yes"],
+      box,
+      WITHOUT_MISE,
+      undefined,
+      (stderr) => {
+        waiting ||= stderr.includes("waiting for another `ub init`");
+      },
+    );
+    while (!waiting) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     writeFileSync(
       join(box.configHome, "uberblick", "config.json"),
       `${JSON.stringify({ workspace: JOINED }, null, 2)}\n`,
@@ -402,6 +411,43 @@ describe("ub init", () => {
     expect(derivedWorkspace(box)).toBe(JOINED);
     // And the report describes the machine rather than the intention.
     expect(run.stdout).toContain(JOINED);
+  });
+
+  it("refuses a workspace it cannot read, rather than inventing one over it", async () => {
+    // The other side of adopting: what arrives under the lock is a value out
+    // of a file, and it is held to the rule every reader of that file applies.
+    // Writing an unusable workspace on would put it into `config.json` and the
+    // derived mise config, where the next run — or a seed, or a report — is
+    // where it would finally go wrong.
+    const box = sandbox({ checkout: true });
+    const config = join(box.configHome, "uberblick", "config.json");
+    const lock = join(box.configHome, "uberblick", ".init.lock");
+    mkdirSync(dirname(lock), { recursive: true });
+    writeFileSync(lock, "999999\n");
+
+    let waiting = false;
+    const running = runUbAsync(
+      ["init", "--yes"],
+      box,
+      WITHOUT_MISE,
+      undefined,
+      (stderr) => {
+        waiting ||= stderr.includes("waiting for another `ub init`");
+      },
+    );
+    while (!waiting) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    writeFileSync(config, `${JSON.stringify({ workspace: "a/b" }, null, 2)}\n`);
+    rmSync(lock);
+
+    const run = await running;
+    expect(run.status).not.toBe(0);
+    // Named by file, the way every other reader of it reports the same value.
+    expect(run.stderr).toContain(config);
+    // And nothing was written on top of it.
+    expect(userConfig(box).workspace).toBe("a/b");
+    expect(existsSync(localConfigPath(box))).toBe(false);
   });
 
   it("never removes a lock it did not create, however old that lock is", () => {
