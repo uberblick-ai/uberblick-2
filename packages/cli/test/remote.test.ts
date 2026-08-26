@@ -54,7 +54,6 @@ import { setRemote } from "../src/remote.js";
 import {
   DEAD_HUB_URL,
   removeTempDirs,
-  runUb,
   runUbAsync,
   sandbox,
 } from "./helpers.js";
@@ -333,19 +332,24 @@ function machine(hub: Hub): Sandbox {
 }
 
 describe("ub remote", () => {
-  it("says so when no remote is configured, and exits 0", () => {
+  it("says so when no remote is configured, and exits 0", async () => {
     // A workspace but no remote: `ub remote` reads which workspace it is
     // reporting on, and there is no default workspace to fall back to.
-    const run = runUb(["remote"], sandbox({ userConfig: { workspace: WORKSPACE } }));
+    const run = await runUbAsync(
+      ["remote"],
+      sandbox({ userConfig: { workspace: WORKSPACE } }),
+    );
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("no remote configured");
   });
 
-  it("names the endpoint and the sharing boundary once one is set", () => {
+  it("names the endpoint and the sharing boundary once one is set", async () => {
     const box = sandbox({ userConfig: { workspace: WORKSPACE } });
-    expect(runUb(["remote", "set", "wss://hub.example.ts.net"], box).status).toBe(0);
+    expect((await runUbAsync(["remote", "set", "wss://hub.example.ts.net"], box)).status).toBe(
+      0,
+    );
 
-    const run = runUb(["remote"], box);
+    const run = await runUbAsync(["remote"], box);
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("wss://hub.example.ts.net");
     expect(run.stdout).toContain("served bundle");
@@ -356,8 +360,11 @@ describe("ub remote", () => {
     expect(persistedHubUrl(box)).toBe("wss://hub.example.ts.net");
   });
 
-  it("refuses a command it does not have", () => {
-    const run = runUb(["remote", "invite", "someone@example.com"], sandbox());
+  it("refuses a command it does not have", async () => {
+    const run = await runUbAsync(
+      ["remote", "invite", "someone@example.com"],
+      sandbox(),
+    );
     expect(run.status).toBe(2);
     expect(run.stderr).toContain('unknown command "invite"');
   });
@@ -368,20 +375,22 @@ describe("ub remote", () => {
     ["wss://user:hunter2@hub.example.ts.net/ws", "username or password"],
     ["wss://hub.example.ts.net/ws?token=hunter2", "query string"],
     ["wss://hub.example.ts.net/ws#hunter2", "fragment"],
-  ])("refuses %s", (endpoint, because) => {
+  ])("refuses %s", async (endpoint, because) => {
     const box = sandbox();
-    const run = runUb(["remote", "set", endpoint], box);
+    const run = await runUbAsync(["remote", "set", endpoint], box);
     expect(run.status).toBe(2);
     expect(run.stderr).toContain(because);
     // The refusal must not echo back the credential it is refusing.
     expect(run.output).not.toContain("hunter2");
   });
 
-  it("preserves the other fields in config.json", () => {
+  it("preserves the other fields in config.json", async () => {
     const box = sandbox({
       userConfig: { workspace: WORKSPACE, displayName: "Someone", color: "#0e8085" },
     });
-    expect(runUb(["remote", "set", "wss://hub.example.ts.net"], box).status).toBe(0);
+    expect((await runUbAsync(["remote", "set", "wss://hub.example.ts.net"], box)).status).toBe(
+      0,
+    );
 
     const config = readConfigFile(box, "config.json");
     expect(config.displayName).toBe("Someone");
@@ -389,23 +398,25 @@ describe("ub remote", () => {
     expect(config.hubUrl).toBe("wss://hub.example.ts.net");
   });
 
-  it("never writes ./uberblick.json", () => {
+  it("never writes ./uberblick.json", async () => {
     // It is committable, and `secretAppliesTo` withholds the stored secret from
     // a repository-chosen hub — so an endpoint written there would be dialled
     // with no credential at all.
     const box = sandbox();
-    expect(runUb(["remote", "set", "wss://hub.example.ts.net"], box).status).toBe(0);
+    expect((await runUbAsync(["remote", "set", "wss://hub.example.ts.net"], box)).status).toBe(
+      0,
+    );
     expect(existsSync(join(box.cwd, "uberblick.json"))).toBe(false);
   });
 
-  it("says when ./uberblick.json outranks what it just wrote", () => {
+  it("says when ./uberblick.json outranks what it just wrote", async () => {
     // A committable file pins the endpoint, and `secretAppliesTo` withholds the
     // stored secret from a repository-chosen hub — so writing the endpoint
     // *there* is not the fix, and printing the new one without saying this
     // would be printing a value that does not take effect.
     const box = sandbox({ directoryFile: { hubUrl: "ws://127.0.0.1:9999" } });
 
-    const run = runUb(["remote", "set", "wss://hub.example.ts.net"], box);
+    const run = await runUbAsync(["remote", "set", "wss://hub.example.ts.net"], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("./uberblick.json");
     expect(run.stderr).toContain("ws://127.0.0.1:9999");
@@ -414,9 +425,9 @@ describe("ub remote", () => {
     expect(persistedHubUrl(box)).toBe("wss://hub.example.ts.net");
   });
 
-  it("says when HUB_URL in the environment outranks what it just wrote", () => {
+  it("says when HUB_URL in the environment outranks what it just wrote", async () => {
     const box = sandbox();
-    const run = runUb(["remote", "set", "wss://hub.example.ts.net"], box, {
+    const run = await runUbAsync(["remote", "set", "wss://hub.example.ts.net"], box, {
       HUB_URL: "ws://127.0.0.1:9999",
     });
     expect(run.status).toBe(1);
