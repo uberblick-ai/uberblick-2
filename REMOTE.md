@@ -66,7 +66,7 @@ hand:
    its own. An existing checkout is fast-forwarded instead.
 4. Writes the host's `.env` — `TAILSCALE_HOST`, `TAILSCALE_IP`,
    `HUB_AUTH_TOKEN` from your local signing secret, and `WEB_WORKSPACES` with
-   this machine's resolved workspace id — **over stdin**. The secret is never
+   this machine's resolved workspace uuid — **over stdin**. The secret is never
    an argument on either side, never echoed, and never reaches a shell history.
 5. Runs `sh remote-compose.sh up --build --detach`, then verifies from your
    machine: it polls `https://<host>/` for up to 90 seconds — the first request

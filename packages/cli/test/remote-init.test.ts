@@ -19,6 +19,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
+import { parseWorkspaceId } from "@uberblick/schema";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { Socket } from "node:net";
@@ -250,6 +251,24 @@ async function createDocument(box: Sandbox): Promise<void> {
 }
 
 describe("ub remote init", () => {
+  it("keeps every accepted workspace spelling inside the compose charset", () => {
+    // remote-compose.sh interpolates this value into JSON, so schema's accepted
+    // grammar must remain a subset of its explicit deployment rule.
+    const composeWebWorkspaces = /^[A-Za-z0-9,-]+$/;
+    const accepted = [
+      WORKSPACE,
+      `uberblick-${WORKSPACE}`,
+      `abcdefghijklmnopqrstuvwxyz0123456789-${WORKSPACE}`,
+      `2026-${WORKSPACE}`,
+      `team-one-${WORKSPACE}`,
+    ];
+
+    for (const value of accepted) {
+      expect(() => parseWorkspaceId(value)).not.toThrow();
+      expect(value).toMatch(composeWebWorkspaces);
+    }
+  });
+
   it("runs the whole sequence, and writes .env from stdin", async () => {
     const rig = harness();
     expect(await init(rig)).toBe(0);
@@ -422,8 +441,27 @@ describe("ub remote init", () => {
 
     expect(await init(rig)).toBe(0);
     expect(rig.out()).toContain(
-      `The host's different WEB_WORKSPACES was replaced with ${WORKSPACE}.`,
+      `Replaced the host's WEB_WORKSPACES with \`${WORKSPACE}\`.`,
     );
+  });
+
+  it("keeps an identical workspace assignment silent on a re-run", async () => {
+    const rig = harness({
+      facts: {
+        checkout: "present",
+        deploykey: HOST_KEY,
+        webworkspaces: WORKSPACE,
+      },
+      keys: `[{"id":1,"title":"uberblick-box-something","key":"${HOST_KEY}"}]`,
+    });
+
+    expect(await init(rig)).toBe(0);
+    expect(rig.out()).not.toContain("WEB_WORKSPACES");
+    expect(
+      stepFor(rig, "uberblick:env").stdin
+        .split("\n")
+        .filter((line) => line.startsWith("WEB_WORKSPACES=")),
+    ).toEqual([`WEB_WORKSPACES=${WORKSPACE}`]);
   });
 });
 
