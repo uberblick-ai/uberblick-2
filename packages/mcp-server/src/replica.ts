@@ -29,6 +29,7 @@ import {
   DIRECTORY_SUFFIX,
   FEEDBACK_SUFFIX,
   SIDEBAR_SUFFIX,
+  compactFeedback,
   directoryRoom,
   feedbackRoom,
   getBlocks,
@@ -147,6 +148,17 @@ export class Replicas {
    * monopolising the single slot.
    */
   private readonly pacedStubs = new Map<string, number>();
+
+  /**
+   * The feedback document changed and has not been offered to compaction since.
+   *
+   * Armed by any change — local, remote or replayed — and drained at settle.
+   * See {@link compactFeedbackIfDue}.
+   */
+  private feedbackCompactionDue = false;
+
+  /** Re-entrancy guard: compaction's own update must not re-arm the flag. */
+  private compactingFeedback = false;
 
   /** Display name published in awareness. Refined once the client identifies. */
   private agentName: string;
@@ -435,7 +447,18 @@ export class Replicas {
     // blocks or metadata, so there is no stub to repair and nothing to index.
     // Falling through would ask a document-shaped question of a doc that is not
     // one.
-    if (replica.isSidebar || replica.isFeedback) {
+    if (replica.isSidebar) {
+      return;
+    }
+    // The feedback doc has nothing to index either, but its size is this
+    // replica's problem however the events arrived: compaction that only ran
+    // after a local write would never fold a burst the hub delivered or the log
+    // replayed. Arm it here and run it at settle — this is the update
+    // observer's own transaction, which is no place to start another one.
+    if (replica.isFeedback) {
+      if (!this.compactingFeedback) {
+        this.feedbackCompactionDue = true;
+      }
       return;
     }
     this.repairDuplicates(replica);
@@ -804,6 +827,41 @@ export class Replicas {
     // one previously-failed entry is retried per call; see stubDueForRetry.
     if (this.staleStubs.size > 0 || this.pacedStubs.size > 0) {
       this.reconcileDirectory();
+    }
+    this.compactFeedbackIfDue();
+  }
+
+  /**
+   * Fold the feedback document down, if anything has changed it.
+   *
+   * Compaction follows the state, never the author. Two replicas can each sit
+   * comfortably under the limit and converge well over it, and neither of them
+   * has a local write coming — so the receiving replica has to fold what it now
+   * holds. Armed by {@link afterChange} on every change to that document; run
+   * from here, on the settle every tool call already pays, which is outside the
+   * update observer's transaction.
+   *
+   * Never from a poisoned replica, for the reason compaction is skipped
+   * everywhere else: the document is ahead of its own log, and folding it would
+   * make an unlogged change durable. Cheap when there is nothing to fold — the
+   * schema helper returns on a length check before it reads anything — and
+   * guarded so that its own update does not re-arm the flag it just cleared.
+   */
+  private compactFeedbackIfDue(): void {
+    if (!this.feedbackCompactionDue || this.persistenceFailure !== null) {
+      return;
+    }
+    this.feedbackCompactionDue = false;
+    this.compactingFeedback = true;
+    try {
+      compactFeedback(this.feedback().doc);
+    } catch (error) {
+      // Advisory telemetry: a fold that failed leaves the events where they
+      // are, which is only a larger document. A failed *append* is a different
+      // matter, and the observer above has already recorded that one.
+      log.warn("failed to compact the feedback document", error);
+    } finally {
+      this.compactingFeedback = false;
     }
   }
 

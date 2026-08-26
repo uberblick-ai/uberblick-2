@@ -52,6 +52,14 @@
  * events into per-doc `totals` and trims them, the same snapshot-then-trim
  * discipline the update log uses.
  *
+ * It is a function of the *state*, not of who wrote it, and callers are meant to
+ * use it that way: a replica whose event list grew because the hub delivered
+ * somebody else's burst has exactly the same list to fold as one that grew it
+ * itself. Two replicas each comfortably under the limit converge over it, so a
+ * compaction driven only by local writes would leave a merged list unbounded
+ * forever. Asking is free — the length check above the fold returns before
+ * anything is read.
+ *
  * Two rules, both deliberate:
  *
  *   - **Only settled pairs fold, whole.** A (document, session) pair is
@@ -389,8 +397,11 @@ export function compactFeedback(
   const limit = Math.max(1, options.limit ?? FEEDBACK_EVENT_LIMIT);
   const keep = Math.max(0, Math.min(options.keep ?? FEEDBACK_KEEP_EVENTS, limit));
   const list = getFeedbackEvents(feedbackDoc);
+  // Length first, so asking "is there anything to fold?" costs nothing. Callers
+  // that cannot know — a replica reacting to an update someone else made — are
+  // meant to call this on every change.
+  if (list.length <= limit) return 0;
   const stored = list.toArray().map(readEvent);
-  if (stored.length <= limit) return 0;
 
   const cut = stored.length - keep;
   // Per (document, session): where its newest event sits, and whether it has

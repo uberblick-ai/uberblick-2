@@ -37,8 +37,10 @@
  *    long session, and get_doc's description says so rather than promising an
  *    exactness the storage does not have.
  * 3. **feedback_report opens no document rooms.** It reads `_feedback` for the
- *    numbers and the directory for titles, both already attached, so a report
- *    over a thousand documents costs the same as a report over three. A uuid
+ *    numbers and the directory for titles, both already attached, so the number
+ *    of rooms it joins is zero whatever the corpus costs — the work itself is
+ *    linear in the documents reported on, because the fold walks every event
+ *    and the sort walks every row. Constant in connections, not in time. A uuid
  *    the directory has never heard of is reported with a null title rather than
  *    resolved: joining its room to find out would be the one thing this tool
  *    promises not to do.
@@ -217,8 +219,9 @@ export function registerFeedbackTools(
         "Per document: `sessionsUsed`, `helpful`, `unhelpful`, `unrated` (used and not rated), `helpfulRatio` " +
         "(helpful over rated, null when nobody rated it) and the most recent `reasons`. `title` comes from the " +
         "directory stub, never from opening the document — this tool reads two already-open rooms and joins " +
-        "nothing, so it costs the same over a thousand documents as over three. A null title means the directory " +
-        "has no entry for that uuid.\n\n" +
+        "nothing, so no number of documents makes it open a room or wait on the network. The work and the payload " +
+        "do grow with the corpus, though: every reported document is folded, sorted and returned, so use `limit` " +
+        "when you only want the head of the list. A null title means the directory has no entry for that uuid.\n\n" +
         "`events` and `compactedDocs` describe the store rather than the corpus: old events are folded into " +
         "per-document totals once the list grows, so counts survive compaction but the reasons in them do not — " +
         "`reasons` is always recent, never complete.\n\n" +

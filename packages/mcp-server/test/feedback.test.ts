@@ -13,10 +13,11 @@
  */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { getFeedbackEvents, readFeedback, recordUsage } from "@uberblick/schema";
+import { feedbackRoom, getFeedbackEvents, recordUsage } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
 import {
   hubUrl,
+  peerClient,
   removeTempDirs,
   startHub,
   startServer,
@@ -26,10 +27,11 @@ import {
   waitUntil,
   WORKSPACE,
 } from "./helpers.js";
-import type { Rig } from "./helpers.js";
+import type { PeerClient, Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
 const hubs: Hub[] = [];
+const peers: PeerClient[] = [];
 
 async function server(databasePath?: string): Promise<Rig> {
   const rig = await startServer(
@@ -41,6 +43,7 @@ async function server(databasePath?: string): Promise<Rig> {
 
 afterEach(async () => {
   for (const rig of rigs.splice(0)) await rig.close();
+  for (const peer of peers.splice(0)) peer.destroy();
   for (const hub of hubs.splice(0)) await hub.stop().catch(() => {});
 });
 
@@ -323,7 +326,8 @@ describe("feedback_report", () => {
   });
 
   it("keeps the event list bounded under a burst, without losing the counts", async () => {
-    const rig = await server();
+    const databasePath = tempDatabasePath();
+    const rig = await server(databasePath);
     const uuid = await createDoc(rig, "Read by everyone");
     const feedback = rig.instance.replicas.feedback().doc;
 
@@ -352,9 +356,75 @@ describe("feedback_report", () => {
       helpful: 1,
       unrated: 600,
     });
-    // Compaction is a fold, not a reset: the same numbers survive a restart,
-    // because the totals it wrote are in the log too.
-    expect(readFeedback(feedback)[0]).toMatchObject({ sessionsUsed: 601 });
+    // Compaction is a fold, not a reset, and the proof is a restart rather than
+    // a second look at the same in-memory document: the totals it wrote went
+    // through the update log like everything else.
+    await rig.close();
+    rigs.splice(rigs.indexOf(rig), 1);
+    const restarted = await server(databasePath);
+    expect(docRow(await restarted.ok("feedback_report"), uuid)).toMatchObject({
+      sessionsUsed: 601,
+      helpful: 1,
+      unrated: 600,
+    });
+  });
+
+  it("compacts a burst that arrived from the hub, with no local write", async () => {
+    // The case a compaction driven by local writes cannot reach: two replicas
+    // each under the limit, converging over it. Neither has a write coming, so
+    // the receiving replica has to fold what it now holds or hold it forever.
+    const hub = await startHub();
+    hubs.push(hub);
+    const rig = await startServer(
+      testConfig({
+        databasePath: tempDatabasePath(),
+        authSecret: TEST_SECRET,
+        hubUrl: hubUrl(hub.port),
+      }),
+    );
+    rigs.push(rig);
+    const uuid = await createDoc(rig, "Read on two machines");
+    const feedback = rig.instance.replicas.feedback().doc;
+
+    for (let index = 0; index < 300; index += 1) {
+      recordUsage(feedback, {
+        docUuid: uuid,
+        session: `here-${index}`,
+        agent: "burst",
+      });
+    }
+    // Under the limit, and nothing has been folded: this replica is fine.
+    expect(getFeedbackEvents(feedback).length).toBeLessThan(500);
+    expect((await rig.ok("feedback_report")).compactedDocs).toBe(0);
+
+    // The other machine's 300 sessions arrive over the hub as ordinary remote
+    // updates — no tool call, no local write, and now the list is over.
+    const peer = await peerClient(hub.port, feedbackRoom(WORKSPACE));
+    peers.push(peer);
+    await peer.synced;
+    for (let index = 0; index < 300; index += 1) {
+      recordUsage(peer.doc, {
+        docUuid: uuid,
+        session: `there-${index}`,
+        agent: "burst",
+      });
+    }
+    await waitUntil("the burst to reach this replica", () =>
+      getFeedbackEvents(feedback).length > 500,
+    );
+
+    // A read is enough: compaction runs on the settle every tool call pays.
+    const report = await rig.ok("feedback_report");
+    expect(report.events).toBeLessThanOrEqual(500);
+    expect(report.compactedDocs).toBe(1);
+    expect(docRow(report, uuid)).toMatchObject({ sessionsUsed: 600 });
+    expect(getFeedbackEvents(feedback).length).toBeLessThanOrEqual(500);
+
+    // And the fold travels back like any other write, so the machine that sent
+    // the burst converges on the compacted document rather than re-sending it.
+    await waitUntil("the peer to see the compaction", () =>
+      peer.doc.getArray("events").length <= 500,
+    );
   });
 });
 
