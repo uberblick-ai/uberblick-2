@@ -1352,8 +1352,18 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
       `${bridge.target}\ntoo, under its own rooms. Documents that only ever ` +
       "reached a local hub — written in\na browser and never pulled down by an " +
       "MCP session — are in that hub's database and\nnowhere else, and nothing " +
-      `points at it any more. Start it and \`ub remote set ${previousEndpoint}\`\n` +
-      "to reach them.\n";
+      `points at it any more. \`ub remote set ${previousEndpoint}\` points the\n` +
+      "clients back.\n" +
+      // Only when it is true, and it is the whole of what makes the line above
+      // insufficient: that hub authenticated the old secret, and `ub remote
+      // set` carries no credential of its own.
+      (persistence.replacedSecret
+        ? "\nThat hub was authenticated with the signing secret this join has just " +
+          "replaced in\ncredentials.json, and `ub remote set` carries no " +
+          "credential — so pointing back is not\nenough on its own. Restart that " +
+          "hub so it takes the secret now in force, or put the\nold one back " +
+          "(credentials.json, or HUB_AUTH_TOKEN in its environment).\n"
+        : "");
   }
   io.out(
     report("joined", bridge.target, checked.corpus, persistence, takenAt, {

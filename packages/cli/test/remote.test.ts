@@ -776,7 +776,7 @@ describe("ub remote join", () => {
     // and the workspace persisted is the one it named.
     expect(persistedHubUrl(box)).toBe(url(remote));
     expect(readConfigFile(box, "config.json").workspace).toBe(WORKSPACE);
-    expect(runUb(["workspace"], box).stdout).toContain(WORKSPACE);
+    expect((await runUbAsync(["workspace"], box)).stdout).toContain(WORKSPACE);
     // The credential that reached the remote is this machine's now. Still
     // owner-only afterwards.
     expect(storedSecret(box)).toBe(OTHER_SECRET);
@@ -826,7 +826,7 @@ describe("ub remote join", () => {
     expect(run.stdout).toContain("joined 1 document");
     // Switched to the joined one…
     expect(readConfigFile(box, "config.json").workspace).toBe(WORKSPACE);
-    expect(runUb(["workspace"], box).stdout).toContain(WORKSPACE);
+    expect((await runUbAsync(["workspace"], box)).stdout).toContain(WORKSPACE);
     // …and told where the other one went, because it did not go anywhere.
     expect(run.stdout).toContain(mine);
     expect(run.stdout).toContain("was not merged into this one");
@@ -836,9 +836,14 @@ describe("ub remote join", () => {
     // nothing dials it any more.
     expect(run.stdout).toContain("nothing points at it any more");
     expect(run.stdout).toContain(`ub remote set ${DEAD_HUB_URL}`);
+    // And that pointing back is not enough on its own: this join replaced the
+    // only signing secret this machine had with the remote's, and
+    // `ub remote set` carries no credential.
+    expect(run.stdout).toContain("carries no credential");
+    expect(run.stdout).toContain("replaced in\ncredentials.json");
 
     // Both are listed, and the first one still holds everything it held.
-    const listed = runUb(["workspace", "list"], box);
+    const listed = await runUbAsync(["workspace", "list"], box);
     expect(listed.stdout).toContain(mine);
     expect(listed.stdout).toContain(WORKSPACE);
     for (const hub of hubs.splice(0)) {
@@ -907,9 +912,9 @@ describe("ub remote join", () => {
     ["ws://127.0.0.1:9999/ws/not-a-workspace-id", "is not a workspace id"],
     // A truncated uuid: a real copy-paste failure, and not a prefix match here.
     ["ws://127.0.0.1:9999/ws/b7c3d914-5a20-4e6f", "is not a workspace id"],
-  ])("refuses %s and writes nothing", (target, because) => {
+  ])("refuses %s and writes nothing", async (target, because) => {
     const box = sandbox();
-    const run = runUb(["remote", "join", target], box);
+    const run = await runUbAsync(["remote", "join", target], box);
     expect(run.status).toBe(2);
     expect(run.stderr).toContain(because);
     // The expected form, in the refusal itself.
