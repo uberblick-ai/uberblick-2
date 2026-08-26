@@ -726,21 +726,16 @@ export function exportMarkdown(
   const entries = getBlocksWithInline(ydoc);
   const numbers = listNumbers(entries.map((entry) => entry.block));
 
-  // An annotated *list item* holds its comments back until the run ends. A
-  // comment written between two items is a block between them — blank lines and
-  // all — which ends the list for any reader, this package's own included: the
-  // next item would come back at depth zero, so annotating a parent would have
-  // changed the document's shape.
-  const heldComments: string[] = [];
-  const releaseHeld = (): void => {
-    if (heldComments.length === 0) return;
-    push(heldComments.join("\n"));
-    heldComments.length = 0;
-  };
-
+  // An annotated *list item* takes its comments indented underneath it, where
+  // they are the item's own content. Two things have to hold at once, and only
+  // that shape holds both: a comment is attributed by the block it follows —
+  // it carries a thread id, not a block id — so it must stay with its item;
+  // and a comment written *between* two items at column zero is a block between
+  // them, blank lines and all, which ends the list for any reader, so the next
+  // item would come back at depth zero. Indented, it is inside the item and the
+  // run carries on.
   for (const [index, { block, inline }] of entries.entries()) {
     const listItem = block.type === "list-item";
-    if (!listItem) releaseHeld();
     push(
       renderBlock(
         block,
@@ -751,10 +746,17 @@ export function exportMarkdown(
     );
     const comments = annotationsByBlock.get(block.id);
     if (comments === undefined) continue;
-    if (listItem) heldComments.push(...comments);
-    else push(comments.join("\n"));
+    if (!listItem) {
+      push(comments.join("\n"));
+      continue;
+    }
+    // One level in from the item, which clears any marker's content column and
+    // still stops short of where an indented code block would start.
+    const inside = LIST_INDENT_UNIT.repeat(
+      Math.min(block.indent ?? 0, MAX_LIST_INDENT) + 1,
+    );
+    push(comments.map((line) => `${inside}${line}`).join("\n"), true);
   }
-  releaseHeld();
 
   if (sections.length === 0) return "";
   let out = "";

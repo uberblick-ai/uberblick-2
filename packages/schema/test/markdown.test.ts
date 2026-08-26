@@ -465,18 +465,29 @@ describe("lists and quotes", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Annotated" });
     const parent = appendBlock(doc, { type: "list-item", text: "parent" });
-    appendBlock(doc, { type: "list-item", text: "child", indent: 1 });
+    const child = appendBlock(doc, {
+      type: "list-item",
+      text: "child",
+      indent: 1,
+    });
     appendBlock(doc, { type: "paragraph", text: "After." });
-    createAnnotation(doc, parent, 0, 6, "reviewer", "why?");
+    createAnnotation(doc, parent, 0, 6, "reviewer", "why parent?");
+    createAnnotation(doc, child, 0, 5, "reviewer", "why child?");
 
     const exported = exportMarkdown(doc, {
       frontmatter: false,
       annotations: "html-comments",
     });
-    // The run is written as the tight list it is; the comment waits for its end.
+    // Each comment sits inside the item it is about — a comment carries a
+    // thread id, not a block id, so the block it follows is the whole of its
+    // attribution — and indented it is that item's content, so the run holds.
     const lines = exported.split("\n");
-    expect(lines.slice(0, 2)).toEqual(["- parent", "    - child"]);
-    expect(lines[3]).toMatch(/^<!-- annotation /);
+    expect(lines[0]).toBe("- parent");
+    expect(lines[1]).toMatch(/^ {4}<!-- annotation .*why parent\?/);
+    expect(lines[2]).toBe("    - child");
+    expect(lines[3]).toMatch(/^ {8}<!-- annotation .*why child\?/);
+    expect(lines[4]).toBe("");
+    expect(lines[5]).toBe("After.");
 
     expect(importMarkdown(exported).blocks).toEqual([
       { type: "list-item", text: "parent", list: "bullet", indent: 0 },
