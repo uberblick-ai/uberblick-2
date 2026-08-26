@@ -538,6 +538,33 @@ describe("lists and quotes", () => {
   });
 
   /**
+   * …but a line that starts another block is not a row, however happily the
+   * table parser would read it as one. A table ends where the next block
+   * begins, blank line or no blank line, and only the reader knows what else a
+   * line could be — to `parseGfmTable`, `> quote` is a fine one-column row.
+   */
+  it("ends a table where the next block begins", () => {
+    const table = { type: "table", text: "| h |\n| - |" };
+    for (const [starter, expected] of [
+      ["> quote", { type: "quote", text: "quote" }],
+      ["# Heading", { type: "heading", text: "Heading", level: 1 }],
+      ["- item", { type: "list-item", text: "item", list: "bullet", indent: 0 }],
+      ["1. item", { type: "list-item", text: "item", list: "ordered", indent: 0 }],
+    ] as const) {
+      expect(
+        importMarkdown(`| h |\n| - |\n${starter}\n`).blocks,
+        starter,
+      ).toEqual([table, expected]);
+    }
+
+    // A fence too, and its body is the fence's, not the table's.
+    expect(importMarkdown("| h |\n| - |\n```ts\nx\n```\n").blocks).toEqual([
+      table,
+      { type: "code", text: "x", language: "ts" },
+    ]);
+  });
+
+  /**
    * The pipes that make a table are *structural* ones. A `\|` is a pipe in
    * somebody's prose, and a reader that counted it would take a paragraph plus
    * a line of hyphens — a setext heading, in any other reader — as a

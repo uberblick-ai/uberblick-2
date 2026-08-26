@@ -1496,6 +1496,29 @@ const LIST_LINE = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?[ \t]*$/;
 /** `> `, indented no further than a paragraph may be. */
 const QUOTE_LINE = /^ {0,3}>[ \t]?(.*)$/;
 
+/** An ATX heading, and a fence of either character — as block *starts*. */
+const HEADING_LINE = /^#{1,6}\s/;
+const FENCE_LINE = /^(?:`{3,}|~{3,})/;
+
+/**
+ * Whether `line` starts a block, in the sense that matters to a table: a table
+ * ends where another block begins, and every one of these begins one.
+ *
+ * This is the reader's knowledge, not the table parser's. `parseGfmTable` knows
+ * tables — to it a heading or a quote is a perfectly good one-column row — so
+ * the question of what else a line could be has to be asked out here, where the
+ * rest of the document's vocabulary lives.
+ */
+function startsBlock(line: string): boolean {
+  const trimmed = line.trim();
+  return (
+    QUOTE_LINE.test(line) ||
+    LIST_LINE.test(line) ||
+    HEADING_LINE.test(trimmed) ||
+    FENCE_LINE.test(trimmed)
+  );
+}
+
 /** How wide a tab is, counted to the next stop rather than as four columns. */
 const TAB_WIDTH = 4;
 
@@ -1607,17 +1630,23 @@ export function importMarkdown(markdown: string): ImportedDoc {
       openItems = [];
       const table = [line, delimiterLine];
       let j = i + 2;
-      // Where the table ends is the parser's question too, so it is the parser
-      // that answers it: a line joins the block while the block still parses as
-      // one table. A rule of its own — "the line has a pipe in it", say — would
-      // disagree with `parseGfmTable`, which reads a pipe-less line as a
-      // one-column row, and the block would then hold source it does not parse.
-      // The blank line is tested here rather than left to the parser only
-      // because a *trailing* one is trimmed off any source before it is parsed;
-      // inside the block, the parser rejects it as the table-ender it is.
+      // Where the table ends is two questions, and they are asked in this
+      // order. First: does this line *start another block*? The parser cannot
+      // answer that — it knows tables, and a heading, a quote, a fence or a
+      // list item is a fact about the document around one; to `parseGfmTable`
+      // every one of them is a perfectly good one-column row, so asking it
+      // first swallows the rest of the document up to the next blank line.
+      // Then, and only then: does the block still parse as one table? That is
+      // the parser's own boundary, and asking it keeps the reader from storing
+      // source it would itself read differently.
+      //
+      // The blank line is tested here rather than left to the parser because a
+      // *trailing* one is trimmed off any source before it is parsed; inside the
+      // block, the parser rejects it as the table-ender it is.
       while (
         j < lines.length &&
         (lines[j] ?? "").trim() !== "" &&
+        !startsBlock(lines[j] ?? "") &&
         parseGfmTable([...table, lines[j] ?? ""].join("\n")) !== null
       ) {
         table.push(lines[j] ?? "");
