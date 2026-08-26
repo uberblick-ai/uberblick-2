@@ -23,17 +23,20 @@ file does not restate it.
   against the acceptance criteria, and the external round goes to an agent that
   did not implement the PR — a Codex-implemented PR gets a Copilot/Opus reader,
   never the Codex session that wrote it.
-- **GitHub is the source of truth; Herdr is a doorbell.** Every durable
-  thing — claim, decision, handoff, finding disposition, gate result — is
-  written to GitHub before or with the message that announces it. A Herdr
-  message carries the issue or PR URL it concerns, and nothing that exists only
-  in it. No recovery
-  step reads pane history: reconstruct from `gh issue list/view`,
-  `gh pr list/view`, checks, reviews and comments alone.
+- **GitHub is the source of truth for coordination state; Herdr is a
+  doorbell.** Every durable thing — claim, decision, handoff, finding
+  disposition, gate result — is written to GitHub before the message that
+  announces it. A Herdr message names the issue or PR URL it concerns and
+  carries nothing that exists only in that message. Interactive control
+  traffic is the exception: approval keystrokes, `continue`, and the like
+  carry no durable content and need no URL (per-role approval allowlists are
+  a follow-up). No recovery step reads pane history: reconstruct from
+  `gh issue list/view`, `gh pr list/view`, checks, reviews and comments
+  alone.
 - The coordinator's own repo edits (skill or docs changes, commits) happen in
   the coordinator's own worktree too (EnterWorktree), never in the shared
   checkout — multiple sessions share it and it may sit on any branch. Even
-  small doc/skill edits are dispatched to Opus sub-agents; the coordinator
+  small doc/skill edits are dispatched to an implementer agent; the coordinator
   briefs, validates, and merges.
 - Never commit to `main`. Code reaches `main` only through a PR that passed
   every gate.
@@ -247,11 +250,9 @@ file does not restate it.
    the gates, not implementation.
 
 6. **Dispatch.** For each issue to start: add `in-progress` and post the
-   spec's claim comment — branch plus `Implementer:` — **before** you prompt
-   any agent, so a crash between the two strands nothing and the next
-   coordinator sees who holds the branch. **Announce the work to the user** in
-   your visible output: one or two plain sentences on what the issue is and
-   why it's next, plus the direct GitHub URL (from
+   spec's claim comment before you prompt any agent. **Announce the work to
+   the user** in your visible output: one or two plain sentences on what the
+   issue is and why it's next, plus the direct GitHub URL (from
    `gh issue view <n> --json url`). Then spawn an Opus sub-agent whose brief
    is decision-complete but pulled, not pushed: pass the full issue body and
    the applicable CLAUDE.md invariants, and instruct the agent to START by

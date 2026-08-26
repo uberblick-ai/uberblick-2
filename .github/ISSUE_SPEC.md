@@ -92,9 +92,15 @@ to be readable without asking, because an implementer never reviews its own
 PR authoritatively. The claim comment is written **before** the implementing
 agent is prompted: a session that dies between the two must leave the claim
 behind, not the work.
-Recovery rule: an issue carrying `in-progress` whose named branch has no live
-worktree and no open PR is stale and may be reclaimed. Claims live on GitHub,
-not in any session's memory, so a crashed session never strands an issue.
+
+Recovery rule: an issue carrying `in-progress` is stale, and may be reclaimed,
+when its named branch has no live worktree **and** no open PR **and** the claim
+comment is older than 30 minutes. The grace window exists because the claim now
+precedes the worktree: without it a parallel coordinator can reclaim an issue in
+the seconds between the two writes. Liveness for `Implementer: codex` is the
+branch on `origin` or the PR — never a terminal pane, which no other session can
+see. Claims live on GitHub, not in any session's memory, so a crashed session
+never strands an issue.
 
 The completion handoff is a comment on the **PR**, not the issue: what
 changed, how it was verified, and what is unresolved — blockers, accepted
