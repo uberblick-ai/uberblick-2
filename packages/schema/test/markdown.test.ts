@@ -641,6 +641,43 @@ describe("lists and quotes", () => {
    * blank lines and all — which ends the list, and the child of an annotated
    * parent would come back at depth zero.
    */
+  /**
+   * The indent is the item's *content column*, not a fixed unit: `100. ` is
+   * five columns wide, so four spaces would put the comment outside the item
+   * for any reader that counts columns — this one's trim-based comment handling
+   * would go on working and hide it.
+   */
+  it("indents an annotated item's comment to that item's content column", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Wide markers" });
+    let hundredth = "";
+    for (let n = 1; n <= 100; n += 1) {
+      hundredth = appendBlock(doc, {
+        type: "list-item",
+        text: `item ${n}`,
+        list: "ordered",
+      });
+    }
+    createAnnotation(doc, hundredth, 0, 4, "reviewer", "why 100?");
+
+    const lines = exportMarkdown(doc, {
+      frontmatter: false,
+      annotations: "html-comments",
+    }).split("\n");
+    expect(lines[0]).toBe("1. item 1");
+    expect(lines[99]).toBe("100. item 100");
+    expect(lines[100]).toMatch(/^ {5}<!-- annotation .*why 100\?/);
+
+    // …and the run is still one run of a hundred items.
+    const blocks = importMarkdown(lines.join("\n")).blocks;
+    expect(blocks).toHaveLength(100);
+    expect(
+      blocks.every(
+        (block) => block.type === "list-item" && block.indent === 0,
+      ),
+    ).toBe(true);
+  });
+
   it("keeps a list intact across an annotated item's exported comment", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Annotated" });
@@ -660,12 +697,14 @@ describe("lists and quotes", () => {
     });
     // Each comment sits inside the item it is about — a comment carries a
     // thread id, not a block id, so the block it follows is the whole of its
-    // attribution — and indented it is that item's content, so the run holds.
+    // attribution — and indented to that item's content column it is that
+    // item's content, so the run holds. `- ` is two columns, and the child's
+    // marker starts four columns in, so its content column is six.
     const lines = exported.split("\n");
     expect(lines[0]).toBe("- parent");
-    expect(lines[1]).toMatch(/^ {4}<!-- annotation .*why parent\?/);
+    expect(lines[1]).toMatch(/^ {2}<!-- annotation .*why parent\?/);
     expect(lines[2]).toBe("    - child");
-    expect(lines[3]).toMatch(/^ {8}<!-- annotation .*why child\?/);
+    expect(lines[3]).toMatch(/^ {6}<!-- annotation .*why child\?/);
     expect(lines[4]).toBe("");
     expect(lines[5]).toBe("After.");
 

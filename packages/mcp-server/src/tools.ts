@@ -1,9 +1,11 @@
 /**
  * The v0 MCP tool set.
  *
- * Fifteen tools and no more: create_doc, get_doc, list_docs, search,
+ * Nineteen tools and no more: create_doc, get_doc, list_docs, search,
  * backlinks, edit_block, insert_block, delete_block, set_tags, set_links,
- * archive_doc, restore_doc, annotate, export_markdown, sync_status. There is
+ * archive_doc, restore_doc, annotate, export_markdown, sync_status, and the
+ * four sidebar tools registered from ./sidebar-tools.ts — get_sidebar,
+ * pin_doc, unpin_doc, sidebar_group. There is
  * deliberately no whole-document write — every content change names one block
  * — no markdown-import tool, because markdown is an export format, and no hard
  * delete: archive_doc tombstones the directory stub and leaves every byte of
@@ -63,6 +65,7 @@ import { z } from "zod";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
 import type { Replica, Replicas } from "./replica.js";
+import { pinnedUuids, registerSidebarTools } from "./sidebar-tools.js";
 import { collectSyncStatus } from "./status.js";
 
 /** A tool failure with a stable machine-readable code. */
@@ -461,7 +464,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       title: "List documents",
       description:
         "Every document in the workspace, from the synced directory document — never from locally observed creations. " +
-        "A fresh replica lists the whole corpus once the directory room has synced.",
+        "A fresh replica lists the whole corpus once the directory room has synced.\n\n" +
+        "`pinned` says whether the sidebar carries the document as an entry point — derived from the sidebar doc, " +
+        "read with get_sidebar. Unpinned documents are fully alive; the flag separates entry points from the long tail.",
       inputSchema: {
         tag: z.string().min(1).optional().describe("Only documents carrying this tag."),
         include_deleted: z.boolean().optional(),
@@ -472,9 +477,14 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const entries = listDirectory(replicas.directory().doc, {
         includeDeleted: include_deleted ?? false,
       }).filter((entry) => tag === undefined || entry.tags.includes(tag));
+      // Derived, never stored: the sidebar doc is the one place a pin lives.
+      const pinned = pinnedUuids(replicas);
       return json({
         workspace: replicas.config.workspaceId,
-        docs: entries,
+        docs: entries.map((entry) => ({
+          ...entry,
+          pinned: pinned.has(entry.uuid),
+        })),
         hub: replicas.sync.state(),
       });
     }),
@@ -882,4 +892,16 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     // needs to know why every other tool stopped.
     guarded(async () => json(await collectSyncStatus(replicas))),
   );
+
+  // The sidebar tools live in ./sidebar-tools.ts and are handed exactly what
+  // every tool here uses — the identity check, the durability responder, the
+  // failure wrapper — so curation shares this file's contract without either
+  // module importing the other.
+  registerSidebarTools(server, replicas, {
+    requireStub,
+    durability,
+    guarded,
+    json,
+    error: (code, message, detail) => new ToolError(code, message, detail),
+  });
 }

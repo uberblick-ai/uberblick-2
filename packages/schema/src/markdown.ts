@@ -742,11 +742,12 @@ export function exportMarkdown(
   // run carries on.
   for (const [index, { block, inline }] of entries.entries()) {
     const listItem = block.type === "list-item";
+    const marker = listItem ? listMarker(block, numbers[index] ?? null) : "";
     push(
       renderBlock(
         block,
         inline.length === 0 ? [{ text: block.text, marks: {} }] : inline,
-        listItem ? listMarker(block, numbers[index] ?? null) : "",
+        marker,
       ),
       listItem,
     );
@@ -756,11 +757,11 @@ export function exportMarkdown(
       push(comments.join("\n"));
       continue;
     }
-    // One level in from the item, which clears any marker's content column and
-    // still stops short of where an indented code block would start.
-    const inside = LIST_INDENT_UNIT.repeat(
-      Math.min(block.indent ?? 0, MAX_LIST_INDENT) + 1,
-    );
+    // Indented to the item's own content column, which is the width of its
+    // marker — indentation, marker and the space after it. A fixed unit cannot
+    // do this: `100. ` is five columns wide, and four spaces would put the
+    // comment *outside* the item for any reader that counts columns.
+    const inside = " ".repeat(marker.length);
     push(comments.map((line) => `${inside}${line}`).join("\n"), true);
   }
 

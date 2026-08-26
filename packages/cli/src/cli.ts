@@ -15,6 +15,7 @@ import { initCommand } from "./init.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
+import { openCommand } from "./open.js";
 import { remoteCommand } from "./remote.js";
 import { serveCommand } from "./serve.js";
 import { statusCommand } from "./status.js";
@@ -27,6 +28,8 @@ usage: ub <command> [options]
 
 commands:
   init [options]         identity, workspace and a local development signing secret
+  open [options]         serve the web app and a hub in the foreground, and
+                         open the browser (--no-browser, --port <n>)
   status [--json]        workspace, hub, credential, database and sync state
   doctor [--json]        check the local stack against its known failure modes
   workspace [command]    which workspace this directory works in
@@ -86,6 +89,9 @@ export async function runCli(
   }
   if (command === "init") {
     return await initCommand(rest, io);
+  }
+  if (command === "open") {
+    return await openCommand(rest, io);
   }
   if (command === "status") {
     return await statusCommand(rest, io);

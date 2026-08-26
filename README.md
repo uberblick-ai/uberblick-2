@@ -193,20 +193,24 @@ directory at `<workspaceId>/_directory`), the token claim is scoped to it, and
 the local database is `<uuid>.sqlite`. There is nothing to create and nothing to
 migrate — a workspace is a uuid, and its rooms exist the moment something opens
 one. What it is *not* is tenancy: one shared secret still mints a token for any
-workspace, so this separates corpora, not people.
+workspace, so this separates corpora, not people — namespacing for one trusted
+user, with real isolation waiting on per-workspace auth (#84).
 
 Give a second project its own workspace by pinning it in that checkout, which is
-what `./uberblick.json` is for — committable, and never secrets. Once #162 lands
-that is one command:
+what `./uberblick.json` is for — committable, and never secrets. That is one
+command, run in the checkout:
 
 ```
 ub workspace use ablauf-$(uuidgen | tr A-Z a-z)
 ```
 
-Until then, edit the `workspace` field of `./uberblick.json` in place (creating
-the file with that one field if it does not exist). Write the field, never the
-file: a `hubUrl` beside it — or a field a later version of `ub` writes — is not
-this change's to drop.
+`ub workspace` on its own prints the workspace in force and which config layer
+chose it; `ub workspace list` shows the workspaces this machine has a database
+for, so `use` also takes a unique uuid prefix from that list. `use` writes
+`./uberblick.json` — the directory binding — and regenerates this checkout's
+derived `mise.local.toml` with it, so the mise tasks serve the workspace the
+directory is bound to; `--user` binds the machine instead, by writing the user
+config the way `ub init` does.
 
 `ub mcp install` then registers the plain `ub mcp serve`, which resolves that
 workspace from the directory it runs in. Where a client config spawns the server
@@ -242,8 +246,12 @@ the checkout does:
 
 ```
 ub init            # identity, workspace, signing secret
+ub open            # serve the web app and a hub, and open the browser
 ub status          # workspace, hub, credential, sync state
 ub status --json   # the same, as one JSON object
+ub workspace       # the workspace in force, and which layer chose it
+ub workspace list  # workspaces this machine has a database for
+ub workspace use   # bind this directory to a workspace (--user: this machine)
 ub remote          # the endpoint in force, and what sharing it buys
 ub mcp install     # register uberblick with an MCP client
 ub mcp serve       # the stdio entry point for an MCP client

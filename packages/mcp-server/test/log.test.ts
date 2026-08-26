@@ -85,7 +85,7 @@ describe("the update log", () => {
     try {
       const listed = await second.ok("list_docs", {});
       expect(listed.docs).toEqual([
-        { uuid, title: "Written once", tags: ["kept"] },
+        { uuid, title: "Written once", tags: ["kept"], pinned: false },
       ]);
 
       const read = await second.ok("get_doc", { uuid });
