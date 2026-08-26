@@ -246,6 +246,7 @@ the checkout does:
 
 ```
 ub init            # identity, workspace, signing secret
+ub open            # serve the web app and a hub, and open the browser
 ub status          # workspace, hub, credential, sync state
 ub status --json   # the same, as one JSON object
 ub workspace       # the workspace in force, and which layer chose it
