@@ -10,9 +10,10 @@
  *
  * Three contracts, and all three are about what is *exposed*, never about how:
  *
- * 1. **A run is one list.** One container per run, counting and levelling the
- *    items the way a nested list would — a nested item belongs to its own small
- *    set, not to the enclosing one.
+ * 1. **A set is one list.** One container per set — the grouping in which every
+ *    item shares a depth and a style — counting and levelling the items the way
+ *    a nested list would. A nested item belongs to its own small list, with its
+ *    own bullets or numbers, not to the enclosing one.
  * 2. **The document is untouched by it.** Every one of these attributes is a
  *    decoration; the Y.Doc still holds one flat element per item, carrying the
  *    schema's attributes and nothing else.
@@ -110,9 +111,54 @@ describe("a run of list items is one list", () => {
         },
       ]);
 
-      // One list, claiming every item of the run in document order. `ol`,
-      // because the run is a numbered one — the one thing ARIA cannot say.
-      expect(exposedLists(editor)).toEqual([{ tag: "ol", owns: ids }]);
+      // Three lists, not one: the numbered top level, and a list of its own
+      // for each nested set — each claiming only its own items, and tagged
+      // with its own style, which is the one thing ARIA cannot say.
+      expect(exposedLists(editor)).toEqual([
+        { tag: "ol", owns: [ids[0], ids[2], ids[4]] },
+        { tag: "ul", owns: [ids[1]] },
+        { tag: "ol", owns: [ids[3]] },
+      ]);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  /**
+   * The two ways one run holds more than one style: a nested set of the
+   * opposite style, and a change of style at the same depth. Each is a list in
+   * its own right — announcing the numbered items as bulleted, or the bulleted
+   * ones as numbered, is exactly what a single container per run would do.
+   */
+  it("gives every set its own list, by depth and by style", () => {
+    const { ydoc, ids } = docWith([
+      ["shopping", "bullet", 0],
+      ["step one", "ordered", 1],
+      ["step two", "ordered", 1],
+      ["and back to bullets", "bullet", 0],
+      ["numbered from here", "ordered", 0],
+    ]);
+    const { editor } = mountEditor(ydoc);
+    try {
+      expect(
+        exposedItems(editor).map((item) => [
+          item.level,
+          item.position,
+          item.size,
+        ]),
+      ).toEqual([
+        ["1", "1", "2"],
+        ["2", "1", "2"],
+        ["2", "2", "2"],
+        ["1", "2", "2"],
+        // The style changed at the same depth: a new list, of one item so far.
+        ["1", "1", "1"],
+      ]);
+      expect(exposedLists(editor)).toEqual([
+        { tag: "ul", owns: [ids[0], ids[3]] },
+        { tag: "ol", owns: [ids[1], ids[2]] },
+        { tag: "ol", owns: [ids[4]] },
+      ]);
     } finally {
       editor.destroy();
     }

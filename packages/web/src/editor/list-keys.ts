@@ -201,8 +201,15 @@ function listStructure(
   });
 }
 
+/** One list a screen reader is told about: the items of a single set. */
+interface ListSet {
+  /** `ol` for a numbered set, `ul` for a bulleted one — every member agrees. */
+  tag: "ol" | "ul";
+  items: DocBlock[];
+}
+
 /**
- * The list itself: an empty `<ul>`/`<ol>`, off screen, that claims the run's
+ * The list itself: an empty `<ul>`/`<ol>`, off screen, that claims a set's
  * items with `aria-owns`.
  *
  * There is no element to wrap the items in. They are siblings of every other
@@ -211,25 +218,28 @@ function listStructure(
  * in the accessibility tree only, and on screen nothing moves. It addresses
  * them by the ids already on the `<li>`s — a block id, unique and stable for
  * the life of the block — so the reference cannot drift onto another block. A
- * run holding an item without an id yet gets no container at all: a dangling
+ * set holding an item without an id yet gets no container at all: a dangling
  * `aria-owns` reference is worse than none.
  *
- * The tag is the run's own style, which is the one thing ARIA has no word for:
- * a screen reader tells a numbered list from a bulleted one by `ol` vs `ul`.
+ * One container per *set*, not per run: a set is the one grouping in which
+ * every item shares a style and a depth, so a nested set — or a bulleted one
+ * following a numbered one — is a list of its own with its own tag. Anything
+ * coarser would announce items as numbered that are bulleted, or the other way
+ * round, because `ol` versus `ul` is the one thing ARIA has no word for.
  *
- * A widget decoration, keyed on the run, so the element is left alone while the
- * run is unchanged and replaced the moment its membership changes.
+ * A widget decoration, keyed on the set, so the element is left alone while the
+ * set is unchanged and replaced the moment its membership changes.
  */
-function listContainer(run: readonly DocBlock[]): Decoration | null {
-  const first = run[0];
+function listContainer(set: ListSet): Decoration | null {
+  const first = set.items[0];
   if (first === undefined) return null;
-  const ids = run
+  const ids = set.items
     .map(({ node }) => node.attrs.id)
     .filter((id): id is string => typeof id === "string" && id !== "");
-  if (ids.length !== run.length) return null;
+  if (ids.length !== set.items.length) return null;
 
-  const tag = first.node.attrs.list === "ordered" ? "ol" : "ul";
   const owns = ids.join(" ");
+  const tag = set.tag;
   return Decoration.widget(
     first.offset,
     () => {
@@ -242,11 +252,11 @@ function listContainer(run: readonly DocBlock[]): Decoration | null {
       dom.className = "ub-sr-only";
       return dom;
     },
-    { key: `list-run:${tag}:${owns}`, side: -1 },
+    { key: `list-set:${tag}:${owns}`, side: -1 },
   );
 }
 
-/** Every decoration the lists in `doc` need, in document order. */
+/** Every decoration the lists in `doc` need. */
 function listDecorations(doc: ProseMirrorNode): Decoration[] {
   const blocks: DocBlock[] = [];
   doc.forEach((node, offset) => {
@@ -261,20 +271,30 @@ function listDecorations(doc: ProseMirrorNode): Decoration[] {
   );
 
   const decorations: Decoration[] = [];
-  let run: DocBlock[] = [];
-  const endRun = (): void => {
-    const container = listContainer(run);
-    if (container !== null) decorations.push(container);
-    run = [];
-  };
+  const sets: ListSet[] = [];
+  // The set currently open at each depth. An item is the first of a new set
+  // exactly when it is the one numbered 1 — that is what {@link listStructure}
+  // restarting the count means — and an item ends every set deeper than
+  // itself, since a deeper set belongs to the items that follow it. Anything
+  // that is not a list item ends them all.
+  const open = new Map<number, ListSet>();
 
   for (const [index, block] of blocks.entries()) {
     const item = structure[index];
     if (item === null || item === undefined) {
-      endRun();
+      open.clear();
       continue;
     }
-    run.push(block);
+    const depth = item.level - 1;
+    for (const level of [...open.keys()]) if (level > depth) open.delete(level);
+    let set = item.position === 1 ? undefined : open.get(depth);
+    if (set === undefined) {
+      set = { tag: item.number === null ? "ul" : "ol", items: [] };
+      sets.push(set);
+      open.set(depth, set);
+    }
+    set.items.push(block);
+
     decorations.push(
       Decoration.node(block.offset, block.offset + block.node.nodeSize, {
         role: "listitem",
@@ -285,7 +305,11 @@ function listDecorations(doc: ProseMirrorNode): Decoration[] {
       }),
     );
   }
-  endRun();
+
+  for (const set of sets) {
+    const container = listContainer(set);
+    if (container !== null) decorations.push(container);
+  }
   return decorations;
 }
 
@@ -303,7 +327,7 @@ function listDecorations(doc: ProseMirrorNode): Decoration[] {
  *
  * The screen reader's half is the same facts as ARIA: `role="listitem"` with
  * `aria-level`, `aria-posinset` and `aria-setsize` on every item, and a list
- * container per run (see {@link listContainer}). Without it a bare `<li>`
+ * container per set (see {@link listContainer}). Without it a bare `<li>`
  * outside a list is not a list item at all — HTML gives it no role there, and
  * the marker, being generated content, is the only thing left saying otherwise.
  *
