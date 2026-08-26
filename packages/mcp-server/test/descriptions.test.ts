@@ -95,6 +95,29 @@ describe("create_doc requires a description", () => {
     }
     expect((await rig.ok("list_docs")).docs).toEqual([]);
   });
+
+  it("refuses whitespace as a description, and trims the one it takes", async () => {
+    const rig = await localRig();
+    // Spaces are not a description. Accepting them would satisfy the
+    // requirement on paper, store blanks in the document and the stub, and
+    // silence the nudge that exists to get a real one written.
+    const refused = await rig.call("create_doc", {
+      title: "Undescribed",
+      description: "   ",
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.payload.message).toContain("whitespace");
+    expect((await rig.ok("list_docs")).docs).toEqual([]);
+
+    // And what is stored is what was checked: the trimmed value, not the
+    // padding it arrived in.
+    const doc = await rig.ok("create_doc", {
+      title: "Padded",
+      description: "  What this is for.  ",
+    });
+    expect(doc.description).toBe("What this is for.");
+    expect(stub(rig, doc.uuid).description).toBe("What this is for.");
+  });
 });
 
 describe("a description reaches every discovery surface", () => {
@@ -193,6 +216,31 @@ describe("set_description", () => {
 
     // And the old text is gone from search: this is a replace, not an append.
     expect((await rig.ok("search", { query: "attempt" })).hits).toEqual([]);
+  });
+
+  it("refuses whitespace and the empty string — there is no clear path", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Described",
+      description: "Something worth keeping.",
+    });
+
+    // Clearing a description is deliberately not reachable from MCP: the
+    // schema can do it, the tool will not. A document that advertises nothing
+    // is a gap to fill, not a state to ask for.
+    for (const description of ["", "   ", "\n\t "]) {
+      const refused = await rig.call("set_description", {
+        uuid: doc.uuid,
+        description,
+      });
+      expect(refused.isError).toBe(true);
+    }
+
+    // The description it already had is untouched by any of that.
+    expect(stub(rig, doc.uuid).description).toBe("Something worth keeping.");
+    expect(
+      getMeta(rig.instance.replicas.replica(doc.uuid).doc).description,
+    ).toBe("Something worth keeping.");
   });
 
   it("refuses an archived document, like every other mutator", async () => {

@@ -248,13 +248,22 @@ const DESCRIPTION_NUDGE =
   "This document has no description: call set_description with one or two sentences saying what it is for, so " +
   "list_docs and search can answer for it without anyone opening it.";
 
+/**
+ * `trim` before the length checks, and the order is the point: it makes both
+ * bounds measure the description rather than the whitespace around it. Without
+ * it `"   "` is a legal description — it would pass `min(1)`, be stored in the
+ * document and the stub, and silence the very nudge that exists to get a real
+ * one written. The parsed value is the trimmed one, so what is stored is what
+ * was checked.
+ */
 const descriptionArg = z
   .string({
     error:
       "create_doc and set_description require a `description`: one or two sentences saying what the document " +
       "is for, so agents can judge it from list_docs and search without opening it.",
   })
-  .min(1, "a description cannot be empty")
+  .trim()
+  .min(1, "a description cannot be empty or whitespace")
   .max(
     MAX_DESCRIPTION_LENGTH,
     `a description is at most ${MAX_DESCRIPTION_LENGTH} characters — one or two sentences, not a summary`,
@@ -775,6 +784,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "\n\n" +
         "This is the tool the `descriptionHint` on a write points at: a document created in the web UI has no " +
         "description, and an agent that has just worked inside one is the party who can write it.\n\n" +
+        "There is no way to clear a description from here: the empty string, and a string of nothing but " +
+        "whitespace, are both refused. Removing one is a schema-level operation, not a tool — a document that " +
+        "advertises nothing is a gap to fill rather than a state to ask for. Replace a description you dislike " +
+        "with a better one.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED,

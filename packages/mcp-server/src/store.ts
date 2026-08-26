@@ -82,7 +82,14 @@ export interface SearchHit {
   tags: string[];
   /** The document's description, or null when it has none. */
   description: string | null;
-  /** A match excerpt from the body, or the title when the title matched. */
+  /**
+   * A match excerpt from the body, or the title when the title matched.
+   *
+   * The description leads the indexed body, so this can be description text —
+   * either because the description is what matched, or because the match sat
+   * near enough to the start of a short document for the snippet window to
+   * reach back over it.
+   */
   snippet: string;
 }
 
@@ -190,6 +197,15 @@ CREATE INDEX IF NOT EXISTS doc_links_target ON doc_links (target);
 -- recreating this table — throwing away every existing row's body index for a
 -- field no document had until now. Concatenating costs nothing and reindexes
 -- one document at a time, as descriptions are written.
+--
+-- The cost is paid in ranking. bm25 weights columns, and a description folded
+-- into \`body\` cannot be weighted apart from it: a term in a description ranks
+-- as an ordinary body term rather than as the strong signal about a document
+-- that it is, and it lengthens the column it joins, which bm25 reads as
+-- slightly diluting every other term in that document. Both effects are small
+-- at 300 characters against a whole document, and neither is fixable without
+-- the column FTS5 will not add — so this is an accepted trade, not an
+-- oversight.
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5 (
   uuid UNINDEXED,
   title,

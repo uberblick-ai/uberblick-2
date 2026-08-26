@@ -725,7 +725,11 @@ export class Replicas {
       tags: meta.tags,
       // Always stated, never carried forward: this replica holds the document,
       // so it knows the authoritative answer — including that there is none,
-      // which the empty string is how to say.
+      // which the empty string is how to say. It is stated from THIS replica's
+      // copy of the document, which is the same discipline the title has: two
+      // replicas describing one document converge last-write-wins on the stub,
+      // and whichever of them saw the newer document then repairs the entry on
+      // its next observed update. The cache heals; it is not arbitrated.
       description: meta.description ?? "",
       createdAt: now,
       ...(metaChanged || staleStamp ? { updatedAt: now } : {}),
