@@ -1,3 +1,4 @@
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
@@ -39,7 +40,12 @@ import { defineConfig } from "vitest/config";
  * =====================================================================
  */
 export default defineConfig({
-  plugins: [react()],
+  // Tailwind is chrome-only (#27): it compiles `src/ui/tailwind.css`, which the
+  // vendored shadcn components under `src/ui/shadcn` are styled with. Preflight
+  // is deliberately not imported there — see that file. The plugin is a no-op
+  // for every module that does not import that stylesheet, the editor's and the
+  // sidebar's plain CSS included.
+  plugins: [tailwindcss(), react()],
   define: {
     __HUB_URL__: JSON.stringify(process.env.HUB_URL ?? "ws://localhost:1234"),
     __HUB_AUTH_TOKEN__: JSON.stringify(process.env.HUB_AUTH_TOKEN ?? ""),
