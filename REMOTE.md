@@ -75,9 +75,11 @@ hand:
    is what makes Tailscale issue the certificate, so an immediate check is a
    false negative — and confirms `/ws` upgrades to a WebSocket. A failure exits
    non-zero with the last hub and Caddy log lines, and persists nothing.
-6. Prints the URL. If this workspace holds no documents it points your clients
-   at the new hub (`ub remote set`); if it holds documents it switches nothing
-   and prints the `ub remote promote` command instead.
+6. Prints the URL, and the **join URL** a second computer binds to —
+   `wss://<host>/ws/<workspace id>`, the endpoint with this workspace's id on
+   the end. If this workspace holds no documents it also points your clients at
+   the new hub (`ub remote set`); if it holds documents it switches nothing and
+   prints the `ub remote promote` command instead.
 
 Every step is idempotent: re-running `ub remote init` against a host it already
 stood up adds no second deploy key and re-clones nothing.
@@ -313,44 +315,59 @@ the target accepted the connection but never finished serving its directory (a
 hub whose contents are unknown is not an empty hub), or if the target holds
 documents this workspace has never heard of.
 
-On a second computer, from a fresh clone:
+On a second computer, one command:
 
 ```sh
-mise trust && mise run setup -- --yes --workspace <WORKSPACE_ID>
-ub remote join wss://<TAILSCALE_HOST>/ws \
+ub remote join wss://<TAILSCALE_HOST>/ws/<WORKSPACE_ID> \
+  --secret-file ~/uberblick-remote-secret
+```
+
+That is the URL `ub remote init` printed: the endpoint with the workspace id as
+its last path segment. Nothing precedes it — no `ub init`, no `--workspace`, no
+clone. The id is what a second machine has to be told, because a workspace id is
+a uuid: a machine that invented its own would join the hub and find nothing of
+yours there, the rooms being keyed by a different id. Carrying it in the URL is
+what makes that one string, and one paste, rather than two.
+
+`join` binds this machine to the workspace the URL names **whatever is here
+already**, pulls the whole remote directory and every live document into the
+local update log for it, verifies that by the same read-back, and only then
+persists the endpoint and the binding. It seeds nothing into a joined workspace:
+the documents come off the wire, so `mise run import-seed` is not part of this.
+An unreachable or auth-rejecting remote writes nothing at all.
+
+A machine that already had a workspace of its own keeps it. It is not merged and
+not moved: `ub workspace list` shows both, and `ub workspace use <id> --user`
+switches back. The endpoint, though, is machine-wide — after a join, the
+workspace that was here syncs with this hub too, under its own rooms.
+
+A URL with no workspace id, or with something that is not one, is refused before
+anything is written, and the refusal names the form.
+
+To run the web client on this machine against the remote hub, from a clone:
+
+```sh
+mise trust && mise run setup -- --yes   # a checkout, its own local workspace
+ub remote join wss://<TAILSCALE_HOST>/ws/<WORKSPACE_ID> \
   --secret-file ~/uberblick-remote-secret
 mise run web
 ```
 
-`<WORKSPACE_ID>` is the workspace this second machine is joining — the value the
-first machine's `ub status` prints. It has to be given, because a workspace id
-is a uuid and `ub init` with none in force generates a *new* one: a machine that
-invented its own workspace would join a hub and find nothing of yours there, the
-rooms being keyed by a different id. Either spelling works, decorated or bare.
+`ub init` (which `mise run setup` runs) creates a *local* workspace with its
+starter documents; the join then binds this checkout to the remote one and
+rewrites the derived `mise.local.toml`, so `mise run web` serves the joined
+workspace against the remote hub.
 
-`ub init` imports no documents, so that workspace is empty and there is nothing
-to duplicate — do not run `mise run import-seed` on it. `join` pulls the whole
-remote directory and every live document into the local update log, verifies it
-the same way, and only then persists the endpoint; `mise run web` then starts the
-web client alone, against the remote hub. An unreachable or auth-rejecting
-remote writes nothing at all.
+The secret that reached the remote replaces whatever this machine had, at mode
+0600, and the command says so — on a second machine that is the point, since a
+locally generated secret is random and the remote verifies with the first
+machine's.
 
-Unlike `promote`, `join` does not require a local hub — a second computer has
-none. It says so, and says that the check deciding whether this workspace is
-empty could therefore see only the update log: a checkout whose documents only
-ever reached a local hub that is switched off reads as empty, joins anyway, and
-leaves that work on a hub nothing points at any more. If this machine has one,
-start it and rerun instead.
-
-The secret that reached the remote replaces whatever `ub init` generated on this
-machine, at mode 0600, and the command says so — on a second machine that is the
-point, since `ub init` invents a random secret and the remote verifies with the
-first machine's.
-
-Persisting the endpoint writes `$XDG_CONFIG_HOME/uberblick/config.json`, which
-is where `ub`, `ub mcp serve` and the MCP server it spawns resolve it. `HUB_URL`
-in the environment and a `hubUrl` in a committable `./uberblick.json` both
-outrank that file; when either does, these commands name the one that wins
+Persisting the endpoint — and, after a join, the workspace binding — writes
+`$XDG_CONFIG_HOME/uberblick/config.json`, which is where `ub`, `ub mcp serve`
+and the MCP server it spawns resolve them. `HUB_URL` in the environment and a
+`hubUrl` in a committable `./uberblick.json` both outrank that file, as
+`WORKSPACE_ID` and a `workspace` there outrank the binding; when either does, these commands name the one that wins
 instead of claiming a switch that did not take effect. The deployed web client
 here reads its endpoint at runtime from the served `/uberblick-config.json`, not
 from any of them.
@@ -362,5 +379,7 @@ configured is tried first and a terminal is prompted with the input hidden.
 Nothing here prints the secret or a token signed with it.
 
 Archived documents replicate as directory state and stay archived; their content
-is not moved. Merging two independently populated workspaces is not supported —
-both bridges refuse it explicitly, naming both document counts.
+is not moved. Merging two independently populated workspaces is not supported:
+`promote` refuses it explicitly, naming both document counts, and `join` never
+merges at all — the URL says which workspace it is about, and the others on the
+machine are left alone.

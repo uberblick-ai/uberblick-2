@@ -48,7 +48,7 @@ remote commands:
   remote update <target> deploy origin/main onto that host now
   remote set <url>       point the clients at an endpoint; moves nothing
   remote promote <url>   move this populated workspace onto an empty remote hub
-  remote join <url>      pull a populated remote workspace into this empty one
+  remote join <url>/<id> bind this machine to the remote workspace the URL names
 
 init options:
   -y, --yes         take every default; never prompt (also the default with no TTY)

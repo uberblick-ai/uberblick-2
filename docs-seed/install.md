@@ -56,6 +56,11 @@ not a warning.
   when this machine has none; it may be decorated for display as
   `<slug>-<uuid>`, and the slug is parsed off before the id reaches a room, a
   token claim or the database filename.
+- Writes the **starter documents** — *Welcome* and *Bring your docs in* — into a
+  workspace that is empty, so a new one opens with something in it. They are
+  ordinary documents from the moment they land. A workspace holding anything
+  else is never written into, and `--workspace <id>` opts out entirely: naming
+  an id is joining a workspace that exists elsewhere.
 - Makes sure there is a **hub signing secret**. `HUB_AUTH_TOKEN` is the HMAC
   secret hub tokens are signed with, not a token.
 
@@ -167,21 +172,31 @@ anything when the local hub is unreachable, when the target never finishes
 serving its directory, or when the target holds documents this workspace has
 never heard of.
 
-**On a second computer**, from a fresh clone:
+**On a second computer**, one command — the join URL `ub remote init` printed,
+which is the endpoint with the workspace id as its last path segment:
 
 ```
-mise trust && mise run setup -- --yes
-node packages/cli/bin/ub.mjs remote join wss://<host>.ts.net/ws \
+node packages/cli/bin/ub.mjs remote join wss://<host>.ts.net/ws/<workspace id> \
   --secret-file ~/uberblick-remote-secret
-mise run web
 ```
 
-`ub init` imports no documents, so that workspace is empty and there is nothing
-to duplicate — do not run `mise run import-seed` on it; the product documents
-arrive over the wire. `join` does not require a local hub, and says so rather
-than pretending it checked one. The secret that reached the remote replaces the
-random one `ub init` generated here, at mode 0600, because the remote verifies
-with the first machine's.
+Two journeys, two verbs: a **new** workspace is `ub init`, which generates an id
+and seeds the starter documents; a workspace that **already exists** somewhere
+is `ub remote join`, which seeds nothing — the documents arrive over the wire,
+so `mise run import-seed` is not part of this either.
+
+`join` binds this machine to the workspace the URL names regardless of what is
+here already: no prior `ub init` is required, and a workspace this machine
+already had is left alone rather than merged — `ub workspace list` shows both,
+and `ub workspace use <id> --user` switches between them. It needs no local hub.
+A URL with no workspace id, or with something that is not one, is refused before
+anything is written. The secret that reached the remote replaces whatever this
+machine had, at mode 0600, because the remote verifies with the first machine's.
+
+Inside a clone, `mise trust && mise run setup -- --yes` before the join gives
+you `mise run web` against the remote hub: the join rewrites the derived
+`mise.local.toml`, so the mise tasks follow the workspace and endpoint it
+persisted.
 
 A remote credential is never a command-line argument: `--secret-file <path>`
 points at a file only you can read, and without it a terminal is prompted with

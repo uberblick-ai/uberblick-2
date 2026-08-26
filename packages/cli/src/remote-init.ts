@@ -809,13 +809,20 @@ export async function remoteInitCommand(
     `${flags.target} does not update itself. Deploy origin/main onto it when ` +
     "you mean to, with `ub remote update`.\n";
 
+  // What a second machine is told, and the whole of it: the endpoint with this
+  // workspace's id on the end. Bare uuid, not the decorated spelling — this
+  // string is compared by two machines, and only the uuid is the identity.
+  const joinUrl = `${endpoint}/${base.workspaceId}`;
+
   const held = await localDocumentCount(base);
   if (held > 0) {
     report +=
       `\nThis workspace holds ${held} document${held === 1 ? "" : "s"}, so the ` +
       "endpoint was left alone — `ub remote set` moves nothing. Move them onto " +
       "the new hub with:\n\n" +
-      `  ub remote promote ${endpoint}\n`;
+      `  ub remote promote ${endpoint}\n` +
+      "\nAfter that, bind another machine to this workspace with:\n\n" +
+      `  ub remote join ${joinUrl}\n`;
     io.out(report);
     return 0;
   }
@@ -827,7 +834,8 @@ export async function remoteInitCommand(
     persistence.written.map((path) => `  wrote ${path}\n`).join("") +
     "(counted from the local update log: a document a browser wrote to a local " +
     "hub and no MCP session ever pulled down is not visible to it.)\n" +
-    "Point another machine here with `ub remote join`.\n";
+    "\nBind another machine to this workspace with:\n\n" +
+    `  ub remote join ${joinUrl}\n`;
   if (persistence.outrankedBy !== null) {
     io.out(report);
     io.err(

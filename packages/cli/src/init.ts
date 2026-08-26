@@ -264,9 +264,11 @@ export async function initCommand(
   // The same problem is reported by each reader; the set keeps it said once.
   const warnings = new Set([...resolved.warnings, ...existing.warnings]);
   // `--workspace` is somebody naming a workspace that already exists somewhere —
-  // joining it, usually before `ub remote join` hydrates it. Whatever that
-  // workspace holds is not this machine's to add to, and it may hold nothing
-  // *yet*, so the emptiness `starter.ts` reads would be the wrong answer. The
+  // a scripted setup, say. Whatever that workspace holds is not this machine's
+  // to add to, and it may hold nothing *yet*, so the emptiness `starter.ts`
+  // reads would be the wrong answer. (Binding to a remote workspace is
+  // `ub remote join <url>/<workspace-id>`, which needs no `ub init` first and
+  // seeds nothing either.) The
   // rest of the decision is read from the workspace itself, not from this run.
   const maySeed = flags.workspace === undefined;
   // Whether the workspace below is this run's own invention. A generated uuid is

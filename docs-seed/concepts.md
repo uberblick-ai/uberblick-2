@@ -53,6 +53,12 @@ Separation is namespacing for one trusted user, not a security boundary — one
 signing secret still mints a token for any workspace, so it separates corpora,
 not people; real isolation waits on per-workspace auth (issue #84).
 
+A machine gets a workspace one of two ways: `ub init` generates a new one (and
+seeds it), or `ub remote join <endpoint>/<workspace-id>` binds it to one that
+already exists on a hub. Several can sit side by side on one machine — each with
+its own replica file — listed by `ub workspace list`; the one in force is chosen
+by `ub workspace use`.
+
 ## Room
 
 A sync channel name, `<workspaceId>/<docUuid>`: one Y.Doc, one Hocuspocus room,

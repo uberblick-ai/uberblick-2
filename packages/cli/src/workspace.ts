@@ -382,7 +382,7 @@ function withoutOwnEcho(
  * directory now name different workspaces — the split-brain the lock exists to
  * prevent, arrived by another road.
  */
-type Regeneration =
+export type Regeneration =
   | { kind: "none" }
   | { kind: "written"; path: string }
   | { kind: "refused"; path: string; reason: string };
@@ -401,8 +401,12 @@ type Regeneration =
  * With no workspace or no secret in force there is nothing honest to write: the
  * file would lose its `HUB_AUTH_TOKEN` and the hub would refuse to start. It is
  * left as it was and the command fails; a half-derived file is not an option.
+ *
+ * Exported because `ub remote join` binds a workspace and an endpoint in one
+ * write, and the file derived from them has to follow both — a second copy of
+ * this would be a second answer to what "derived from" means.
  */
-function regenerateLocalConfig(cwd: string): Regeneration {
+export function regenerateLocalConfig(cwd: string): Regeneration {
   const root = findCheckoutRoot(cwd);
   if (root === null || !existsSync(localConfigPath(root))) {
     return { kind: "none" };
