@@ -1,6 +1,11 @@
 /**
- * The workspace switcher (#151): where you are, and — when the build was
- * configured with more than one workspace — a way to the others.
+ * The workspace switcher: where you are, what is in it, and the way to the
+ * other workspaces this client was configured with (#74, design 1c).
+ *
+ * It sits at the top of the sidebar and opens across it — the menu takes the
+ * trigger's width (`--radix-dropdown-menu-trigger-width`), so it reads as the
+ * sidebar's own header opening rather than as a popup that happens to be near
+ * it.
  *
  * Switching is navigating. There is no "active workspace" state to set: the
  * control writes `/<workspace>` into the address bar and the app re-reads it
@@ -8,56 +13,90 @@
  * same gesture. Nothing here knows about rooms, and nothing carries across the
  * switch — two workspaces are two corpora.
  *
- * With one workspace (the ordinary case) this is the plain label it has always
- * been: a menu of one is a control that does nothing.
+ * It renders *configuration*, not accounts. "New workspace" and "Workspace
+ * settings" are on the menu and disabled: making a workspace is `ub init` on a
+ * machine, and there is nothing here that could do it. They are rendered rather
+ * than hidden because a disabled item says "this exists and is not yours to do
+ * from here", which is the truth, while an absent one says the idea does not
+ * exist.
  *
- * #74 owns what a switcher should eventually look like — self-described names,
- * a real menu. This is the minimum that lists the configured workspaces and
- * navigates.
+ * The surface is the vendored shadcn menu (#27); everything about how this
+ * particular menu *looks* is plain CSS on `.ub-*` classes, like every other
+ * product surface. See `ui/tailwind.css` for why the two coexist.
  */
 
 import type { ReactElement } from "react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./shadcn/dropdown-menu.js";
 import type { Workspace } from "./route.js";
+
+/** "3 docs", and "1 doc" — the count is chrome, so it should read as English. */
+function docCountLabel(docs: number): string {
+  return docs === 1 ? "1 doc" : `${docs} docs`;
+}
 
 export function WorkspaceSwitcher({
   workspaces,
   current,
+  docs,
   onSwitch,
 }: {
   /** What to offer, already validated and deduplicated — see `workspaceList`. */
   workspaces: readonly Workspace[];
   /** The workspace the address names, or null when it names none. */
   current: Workspace | null;
+  /**
+   * How many documents the open workspace holds, live from the directory. Only
+   * the open one has a number: the other workspaces' directories are rooms this
+   * client has not joined, and guessing at their size would be a made-up fact.
+   */
+  docs: number;
   /** Go there. The value is a segment, spelled as the list spells it. */
   onSwitch: (segment: string) => void;
 }): ReactElement {
-  if (workspaces.length < 2) {
-    return (
-      <span className="ub-muted">
-        {/* As the address spells it: the slug is what a person reads. */}
-        {current === null ? "no workspace" : `workspace ${current.segment}`}
-      </span>
-    );
-  }
   return (
-    <select
-      className="ub-muted ub-workspace"
-      aria-label="Workspace"
-      // The empty value is unreachable once a workspace is open: it exists so
-      // the control has something to show at the one address that names none.
-      value={current?.segment ?? ""}
-      onChange={(event) => onSwitch(event.target.value)}
-    >
-      {current === null && (
-        <option value="" disabled>
-          no workspace
-        </option>
-      )}
-      {workspaces.map((workspace) => (
-        <option key={workspace.uuid} value={workspace.segment}>
-          {workspace.segment}
-        </option>
-      ))}
-    </select>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" className="ub-workspace" aria-label="Workspace">
+          <span className="ub-workspace-name">
+            {/* As the address spells it: the slug is what a person reads. */}
+            {current === null ? "no workspace" : current.segment}
+          </span>
+          {current !== null && (
+            <span className="ub-workspace-count">{docCountLabel(docs)}</span>
+          )}
+          <span className="ub-menu-caret" aria-hidden="true">
+            ▾
+          </span>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="ub-workspace-menu">
+        <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
+        {workspaces.map((workspace) => {
+          const here = workspace.uuid === current?.uuid;
+          return (
+            <DropdownMenuItem
+              key={workspace.uuid}
+              className={here ? "ub-menu-current" : undefined}
+              aria-current={here ? "true" : undefined}
+              onSelect={() => onSwitch(workspace.segment)}
+            >
+              <span className="ub-menu-text">{workspace.segment}</span>
+              {here && <span className="ub-menu-value">{docCountLabel(docs)}</span>}
+            </DropdownMenuItem>
+          );
+        })}
+        <DropdownMenuSeparator />
+        {/* Configuration, not accounts — see the header. */}
+        <DropdownMenuItem disabled>New workspace</DropdownMenuItem>
+        <DropdownMenuItem disabled>Workspace settings</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

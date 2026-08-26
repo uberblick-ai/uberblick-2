@@ -263,10 +263,13 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
   const title = docTitle("uberblick-only");
   await createDoc(page, title);
 
-  const switcher = page.locator(".ub-workspace");
-  await expect(switcher.locator("option")).toHaveCount(2);
+  await page.locator(".ub-workspace").click();
+  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveCount(
+    // Two workspaces, and the two management items that are always there.
+    4,
+  );
 
-  await switcher.selectOption(harness().secondWorkspace);
+  await page.getByRole("menuitem", { name: harness().secondWorkspace }).click();
   await expect(page).toHaveURL(new RegExp(`/${harness().secondWorkspace}$`));
   // Synced *and* empty — the difference between a corpus this hub kept to
   // itself and a directory that simply had not arrived yet.
@@ -277,7 +280,8 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
   await expect(docButton(page, title)).toHaveCount(0);
 
   // And back: the first workspace is exactly where it was left.
-  await switcher.selectOption(ws());
+  await page.locator(".ub-workspace").click();
+  await page.getByRole("menuitem", { name: ws() }).click();
   await expect(page).toHaveURL(new RegExp(`/${ws()}$`));
   await expect(docButton(page, title)).toBeVisible();
 });
@@ -306,13 +310,20 @@ test("the served configuration names the workspaces, and the build's define is o
   // bundle carries, which is what every other test in this file redirects to.
   await expect(page).toHaveURL(new RegExp(`/${served[0]}$`));
   expect(openPath(page)).not.toBe(`/${ws()}`);
-  await expect(page.locator(".ub-workspace option")).toHaveText(served);
+  await page.locator(".ub-workspace").click();
+  for (const workspace of served) {
+    await expect(
+      page.getByRole("menuitem", { name: workspace as string }),
+    ).toBeVisible();
+  }
+  await page.keyboard.press("Escape");
 
   // The endpoint came out of the same document: an empty corpus that reports
   // itself *synced* is a hub that answered, not a socket that never opened.
   await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
 
   // And the menu navigates, exactly as it does for a configured build.
-  await page.locator(".ub-workspace").selectOption(served[1] as string);
+  await page.locator(".ub-workspace").click();
+  await page.getByRole("menuitem", { name: served[1] as string }).click();
   await expect(page).toHaveURL(new RegExp(`/${served[1]}$`));
 });

@@ -20,10 +20,7 @@
       // on purpose: `@theme` and `@source` are a parse error everywhere else in
       // this repo, which is how the "chrome only, plain CSS elsewhere" rule
       // stays enforced rather than remembered.
-      "includes": [
-        "packages/web/src/ui/tailwind.css",
-        "packages/web/src/dev/chrome-demo.css"
-      ],
+      "includes": ["packages/web/src/ui/tailwind.css"],
       "css": { "parser": { "tailwindDirectives": true } }
     },
     {

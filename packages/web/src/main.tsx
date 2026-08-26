@@ -17,6 +17,7 @@
 import { createRoot } from "react-dom/client";
 import { resolveClientConfig } from "./config.js";
 import { App } from "./ui/App.js";
+import { applyStoredAppearance } from "./ui/theme.js";
 import "./ui/styles.css";
 // The app's own surfaces are the plain CSS above; this is the chrome
 // framework the vendored shadcn components need (#27). It is imported after,
@@ -32,5 +33,9 @@ if (!container) {
 // Memoised in config.ts, and it never rejects — the hook below joins this same
 // read rather than starting a second one.
 void resolveClientConfig();
+
+// Before the first paint, not from an effect: a reader who chose dark must not
+// watch the app flash light on every reload (#74).
+applyStoredAppearance();
 
 createRoot(container).render(<App />);

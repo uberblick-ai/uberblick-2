@@ -45,8 +45,12 @@ import {
   unpinDoc,
 } from "@uberblick/schema";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
+import type { AwarenessUser } from "../collab/identity.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useRoomStatus, useStoredFlag } from "./hooks.js";
+import { UserMenu } from "./UserMenu.js";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
+import type { Workspace } from "./route.js";
 
 /** The group a pin lands in when the sidebar has none yet. */
 const FIRST_GROUP_NAME = "Pinned";
@@ -122,6 +126,11 @@ export function Sidebar({
   sidebar,
   groups,
   entries,
+  workspaces,
+  workspace,
+  onSwitchWorkspace,
+  identity,
+  agentSessions,
   selected,
   onSelect,
   onCreate,
@@ -135,8 +144,21 @@ export function Sidebar({
   sidebar: RoomConnection | null;
   /** The sidebar as `readSidebar` reports it, live. */
   groups: SidebarGroup[];
-  /** The directory stubs, for the titles the sidebar itself does not store. */
+  /**
+   * The directory stubs, for the titles the sidebar itself does not store — and
+   * the workspace's document count, which is the same reading (#74).
+   */
   entries: DirectoryEntry[];
+  /** The workspaces the switcher offers — see `workspaceList`. */
+  workspaces: readonly Workspace[];
+  /** The workspace the address names, or null when it names none. */
+  workspace: Workspace | null;
+  /** Go to a workspace. Switching is navigating; see `WorkspaceSwitcher`. */
+  onSwitchWorkspace: (segment: string) => void;
+  /** This tab's awareness identity — what the user card is about. */
+  identity: AwarenessUser;
+  /** Agent sessions in the workspace, for the user menu's readout. */
+  agentSessions: number;
   selected: string | null;
   onSelect: (uuid: string) => void;
   onCreate: () => void;
@@ -222,6 +244,15 @@ export function Sidebar({
 
   return (
     <nav className="ub-list" data-dragging={drag?.kind}>
+      {/* The workspace, across the top of the column it is the workspace of
+          (#74). Above the head rather than in it: the head is about this
+          workspace's documents, and the switcher is about which workspace. */}
+      <WorkspaceSwitcher
+        workspaces={workspaces}
+        current={workspace}
+        docs={entries.length}
+        onSwitch={onSwitchWorkspace}
+      />
       <div className="ub-list-head">
         <button type="button" onClick={onCreate} disabled={connection === null}>
           + new doc
@@ -296,6 +327,9 @@ export function Sidebar({
         >
           <span aria-hidden="true">⚙</span> Settings
         </button>
+        {/* Who this client is (#74). Last, because it is the one row that is
+            about the person rather than about the corpus. */}
+        <UserMenu identity={identity} agentSessions={agentSessions} />
       </div>
     </nav>
   );

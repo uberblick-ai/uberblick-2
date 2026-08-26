@@ -76,6 +76,12 @@ export interface Harness {
    * too, because that document supplies the endpoint as well as the workspaces.
    */
   readonly hubUrl: string;
+  /**
+   * The signing secret this run's hub accepts, for a test that has to connect a
+   * client of its own — an agent session, say, which is not something a browser
+   * context can stand in for.
+   */
+  readonly authSecret: string;
   /** The workspace as the bundle spells it — what `/` redirects to. */
   readonly workspace: string;
   /** The same workspace, bare. Room keys and token claims carry only this. */
@@ -152,6 +158,7 @@ export async function startHarness(): Promise<Harness> {
     return {
       appUrl,
       hubUrl,
+      authSecret: SECRET,
       workspace: WORKSPACE,
       workspaceUuid: WORKSPACE_UUID,
       secondWorkspace: SECOND,
