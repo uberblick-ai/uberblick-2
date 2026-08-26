@@ -125,6 +125,8 @@ export function Sidebar({
   selected,
   onSelect,
   onCreate,
+  onOpenAll,
+  allOpen,
   onOpenSettings,
 }: {
   /** The directory room: its sync state, and whether a document can be created. */
@@ -138,6 +140,10 @@ export function Sidebar({
   selected: string | null;
   onSelect: (uuid: string) => void;
   onCreate: () => void;
+  /** Go to the "All docs" listing (#118) — the fixed entry in the footer. */
+  onOpenAll: () => void;
+  /** Whether that listing is what the address currently names. */
+  allOpen: boolean;
   /** Open the local settings dialog (#176) — what the footer's gear does. */
   onOpenSettings: () => void;
 }): ReactElement {
@@ -267,8 +273,21 @@ export function Sidebar({
       </button>
       {/* The sidebar's footer. Settings are machine-local and rarely opened, so
           they sit at the bottom of the one column that is always about this
-          client rather than about the open document. */}
+          client rather than about the open document.
+
+          "All docs" (#118) sits with them for the same reason: it is not part
+          of the curation above it — not a group, not a drop target, not
+          draggable, and present whether anything is pinned or not — so it
+          belongs below the line the groups end at, where it never moves. */}
       <div className="ub-list-foot">
+        <button
+          type="button"
+          className="ub-all-open-entry"
+          aria-current={allOpen ? "page" : undefined}
+          onClick={onOpenAll}
+        >
+          <span aria-hidden="true">▤</span> All docs
+        </button>
         <button
           type="button"
           className="ub-settings-open"

@@ -2511,3 +2511,160 @@ h3.ub-heading {
     animation: none;
   }
 }
+
+/* ---- all docs (#118) ------------------------------------------------------
+   The corpus listing and its fixed sidebar entry. Self-contained: nothing here
+   touches the tokens or the rules above, and nothing above knows about it. */
+
+/* The sidebar's fixed entry. It lives in the footer, below the line the
+   curated groups end at — quiet like Settings, but a place to go rather than a
+   dialog, so it keeps the foreground colour. */
+.ub-all-open-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  margin-bottom: 0.15rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ub-all-open-entry:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.ub-all-open-entry[aria-current="page"] {
+  background: var(--brand-subtle);
+  font-weight: 500;
+}
+
+/* One grid, declared once and shared by the column heads and every row, so
+   re-sorting moves the rows and nothing else. */
+.ub-all {
+  --all-columns: minmax(0, 1fr) 7rem 7rem;
+  --all-pin: 1.75rem;
+  gap: 0.5rem;
+}
+
+.ub-all-heading {
+  font-size: 1.4rem;
+  margin: 0;
+}
+
+/* The same box the rows lay their columns out in. A row's grid is measured
+   inside `.ub-all-open`'s padding, so a head grid without it would compute
+   wider columns and every column after the first would sit a few pixels off
+   the values it names. The pin column has no head, so the heads keep clear of
+   it too — its width plus the row's gap. */
+.ub-all-head {
+  display: grid;
+  grid-template-columns: var(--all-columns);
+  gap: 0.75rem;
+  padding-left: 0.4rem;
+  padding-right: calc(0.4rem + var(--all-pin) + 0.25rem);
+  border-bottom: 1px solid var(--border);
+}
+
+/* A column head that is also the sort control. The pressed one is the only
+   thing that changes when the order does — the labels never move. */
+.ub-all-sort {
+  text-align: left;
+  /* No horizontal padding: the head's own padding is what lines the labels up
+     with the values, and the control shows its state in weight and colour
+     rather than in a box, so it has nothing to inset. */
+  padding: 0.35rem 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.ub-all-sort:hover {
+  color: var(--foreground);
+}
+
+.ub-all-sort[aria-pressed="true"] {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.ub-all-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ub-all-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--all-pin);
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.ub-all-open {
+  display: grid;
+  grid-template-columns: var(--all-columns);
+  gap: 0.75rem;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  padding: 0.35rem 0.4rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ub-all-open:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+/* A long title is cut, never wrapped: a row that grows taller would move every
+   row below it the moment a document is renamed somewhere else. */
+.ub-all-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Stamps are machine-flavoured, like the room keys and the sync detail. */
+.ub-all-stamp {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--muted-foreground);
+}
+
+/* Quiet until the row is hovered or something in it has focus — the same
+   restraint the group actions in the sidebar show. */
+.ub-all-pin {
+  padding: 0.25rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.ub-all-row:hover .ub-all-pin,
+.ub-all-row:focus-within .ub-all-pin,
+.ub-all-pin[aria-pressed="true"] {
+  opacity: 1;
+}
+
+.ub-all-pin:hover {
+  color: var(--foreground);
+}

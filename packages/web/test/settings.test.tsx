@@ -167,6 +167,8 @@ describe("the settings dialog", () => {
           selected={null}
           onSelect={() => {}}
           onCreate={() => {}}
+          onOpenAll={() => {}}
+          allOpen={false}
           onOpenSettings={open}
         />,
       );
