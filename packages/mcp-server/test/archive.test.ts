@@ -120,6 +120,7 @@ describe("archive_doc", () => {
       title: "Concepts",
       tags: ["reference"],
       deleted: true,
+      pinned: false,
     });
 
     // Search reads the derived index, which a directory write does not itself
@@ -288,6 +289,7 @@ describe("restore_doc", () => {
       uuid: doc.uuid,
       title: "Concepts",
       tags: ["reference"],
+      pinned: false,
     });
 
     const hits = await rig.ok("search", { query: "glossary" });
@@ -474,6 +476,7 @@ describe("restore_doc", () => {
       uuid: doc.uuid,
       title: "Concepts",
       tags: ["retired"],
+      pinned: false,
     });
   });
 });

@@ -55,13 +55,17 @@ describe("with the hub stopped", () => {
       "edit_block",
       "export_markdown",
       "get_doc",
+      "get_sidebar",
       "insert_block",
       "list_docs",
+      "pin_doc",
       "restore_doc",
       "search",
       "set_links",
       "set_tags",
+      "sidebar_group",
       "sync_status",
+      "unpin_doc",
     ]);
 
     // The staleness guarantee is local-replica-only, and edit_block says so.
@@ -272,9 +276,11 @@ describe("with the hub stopped", () => {
     expect(missing.payload.error).toBe("doc_not_found");
     // A typo must not create an empty document on the hub.
     const status = await rig.ok("sync_status", {});
+    // The two well-known rooms and nothing else: discovery and curation are
+    // synced docs, attached from boot.
     expect(
       status.rooms.map((room: { room: string }) => room.room),
-    ).toEqual([`${WORKSPACE}/_directory`]);
+    ).toEqual([`${WORKSPACE}/_directory`, `${WORKSPACE}/_sidebar`]);
   });
 
 });

@@ -96,14 +96,18 @@ export { parseWorkspaceId } from "./workspace.js";
 export type { WorkspaceId } from "./workspace.js";
 
 export {
+  SIDEBAR_FLAGS_KEY,
   SIDEBAR_GROUPS_KEY,
   SIDEBAR_ORDER_KEY,
   SIDEBAR_UNPINNED_KEY,
   createGroup,
   deleteGroup,
+  getSidebarFlags,
   getSidebarGroups,
   getSidebarOrder,
   getSidebarUnpinned,
+  isSidebarSeeded,
+  markSidebarSeeded,
   moveDoc,
   moveGroup,
   pinDoc,
