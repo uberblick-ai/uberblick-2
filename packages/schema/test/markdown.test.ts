@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   appendBlock,
+  createAnnotation,
   exportMarkdown,
   getBlocks,
   importMarkdown,
@@ -575,6 +576,49 @@ describe("lists and quotes", () => {
     expect(importMarkdown("a | b\n:-: | -\n").blocks).toEqual([
       { type: "table", text: "a | b\n:-: | -" },
     ]);
+  });
+
+  /**
+   * An annotation must not change a document's shape. Exported as HTML comments,
+   * a thread on a list item would otherwise be a block between two items —
+   * blank lines and all — which ends the list, and the child of an annotated
+   * parent would come back at depth zero.
+   */
+  it("keeps a list intact across an annotated item's exported comment", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Annotated" });
+    const parent = appendBlock(doc, { type: "list-item", text: "parent" });
+    appendBlock(doc, { type: "list-item", text: "child", indent: 1 });
+    appendBlock(doc, { type: "paragraph", text: "After." });
+    createAnnotation(doc, parent, 0, 6, "reviewer", "why?");
+
+    const exported = exportMarkdown(doc, {
+      frontmatter: false,
+      annotations: "html-comments",
+    });
+    // The run is written as the tight list it is; the comment waits for its end.
+    const lines = exported.split("\n");
+    expect(lines.slice(0, 2)).toEqual(["- parent", "    - child"]);
+    expect(lines[3]).toMatch(/^<!-- annotation /);
+
+    expect(importMarkdown(exported).blocks).toEqual([
+      { type: "list-item", text: "parent", list: "bullet", indent: 0 },
+      { type: "list-item", text: "child", list: "bullet", indent: 1 },
+      { type: "paragraph", text: "After." },
+    ]);
+  });
+
+  /**
+   * A tab advances to the next tab stop, so a tab in column two is worth two
+   * columns and not four. Expanding every tab to four spaces measures a deeper
+   * indent than the author typed and nests items they wrote as siblings.
+   */
+  it("measures a tab to the next tab stop, not as four columns", () => {
+    expect(
+      importMarkdown(["- a", "    - b", "  \t- c"].join("\n")).blocks.map(
+        (block) => block.indent,
+      ),
+    ).toEqual([0, 1, 1]);
   });
 
   it("reads an empty item and an empty quote line without losing the block", () => {

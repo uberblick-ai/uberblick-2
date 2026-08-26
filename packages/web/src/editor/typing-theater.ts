@@ -113,6 +113,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { EditorState, Selection, Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { ySyncPluginKey } from "y-prosemirror";
+import { isProseBlockType } from "@uberblick/schema";
 import type { ChangedBlocks } from "./changed-blocks.js";
 
 /** How fast the agent types, in words per minute. One constant, by decision. */
@@ -146,10 +147,12 @@ const SENTENCE_END = new Set([".", "!", "?", "…"]);
 const CLAUSE_END = new Set([",", ";", ":"]);
 
 /**
- * The blocks that animate. `code` and `mermaid` are source text, not prose —
- * they update instantly and are announced by the #120 gutter marker instead.
+ * The blocks that animate are the prose ones, and this is the schema package's
+ * own answer rather than a copy of it — a block type added there animates, or
+ * does not, by that one declaration. Source text (`code`, `mermaid`) is the
+ * complement: it updates instantly and is announced by the #120 gutter marker.
  */
-const PROSE_BLOCKS = new Set(["paragraph", "heading", "list-item", "quote"]);
+const animates = isProseBlockType;
 
 /** The removed text, drawn back in. */
 export const REMOVED_CLASS = "ub-typed-out";
@@ -414,7 +417,7 @@ function blocksUnderSelection(
 function proseTextById(doc: ProseMirrorNode): Map<string, string> {
   const texts = new Map<string, string>();
   doc.forEach((node) => {
-    if (!PROSE_BLOCKS.has(node.type.name)) return;
+    if (!animates(node.type.name)) return;
     const id: unknown = node.attrs.id;
     if (typeof id === "string" && id !== "") texts.set(id, node.textContent);
   });
@@ -547,7 +550,7 @@ function enqueue(
 function stillApplies(take: Take, index: BlockIndex): boolean {
   const found = index.get(take.id);
   if (found === undefined) return false;
-  if (!PROSE_BLOCKS.has(found.node.type.name)) return false;
+  if (!animates(found.node.type.name)) return false;
   return found.node.textContent === take.text;
 }
 
