@@ -110,8 +110,12 @@ description = "Typecheck every package (tsc --noEmit)"
 run = "pnpm -r typecheck"
 
 [tasks.test]
-description = "Run all test suites"
-run = "pnpm -r test"
+description = "Run all test suites, and the repository checks that are not one"
+# The root script rather than `pnpm -r test`: it runs the package suites and
+# then `scripts/docs-seed-check.mjs`, which guards the seed snapshot's identity
+# metadata and the `mise run …` commands the documents tell a reader to type.
+# The Docker review already runs this same root script.
+run = "pnpm test"
 
 [tasks.e2e]
 description = "Run the browser end-to-end proof points (Playwright, Chromium only)"

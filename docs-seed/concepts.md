@@ -1,66 +1,35 @@
 ---
 uuid: 8865aba4-fc8b-4050-a8d2-9c851be0bed3
 title: Concepts
-tags:
-  - start-here
-links:
-  - 3231bff4-fb3c-4195-a83a-98031551ca68
-  - b1d5d904-c8b6-46a1-a4df-22251875bcdb
-  - 2e8de409-df1b-4716-b6a9-71fa2ccd2aca
-  - bea0f13c-5ba9-4fb6-af7b-d627b4807786
-  - 9b4ea859-8304-4e11-9cc8-76232c16a4e5
+tags: [reference]
+links: [3231bff4-fb3c-4195-a83a-98031551ca68, 9b4ea859-8304-4e11-9cc8-76232c16a4e5, b1d5d904-c8b6-46a1-a4df-22251875bcdb, bea0f13c-5ba9-4fb6-af7b-d627b4807786, 6ea21fbd-aef9-4e69-873e-6c2a182e8894]
 ---
 
-Eight terms, used with these exact meanings by every other document.
+The vocabulary every other document uses with these exact meanings. When two
+documents disagree about a word, this one is what they meant.
 
-## Document
+## Identity and place
 
-One Y.Doc, identified by a UUID, with three top-level shared types: `meta`,
-`blocks` and `annotations`. All document state lives in the Y.Doc, never in
-server-side tables.
+- **Workspace** — a uuid, assigned by `ub init`, never guessable, with no default. For display it may be decorated as `<slug>-<uuid>`; the slug is cosmetic and is parsed off before the id reaches a room, a token claim or a database filename.
+- **Room** — the sync key, `<workspaceUuid>/<docUuid>`: exactly two non-empty segments. Two reserved document slots exist, `_directory` and `_sidebar`.
+- **Document** — one Y.Doc, identified by its uuid. Its title is display data; on conflict `meta.title` inside the document wins over the directory stub.
+- **Directory** — the synced document at `<workspaceUuid>/_directory` holding a stub per document: title, tags, `deleted`, `createdAt`, `updatedAt`. It is a cache, repaired on write and on connect, and it is what `list_docs` reads.
+- **Sidebar** — the synced document at `<workspaceUuid>/_sidebar`, holding named groups of pinned document uuids. It stores uuids and nothing else.
 
-## Block
+## Inside a document
 
-One Y.XmlElement in the `blocks` fragment, carrying a stable `id` attribute and
-a single Y.XmlText of plain-text source. The four types are paragraph, heading,
-code and mermaid.
+- **Block** — one element of the `blocks` fragment, carrying a stable `id` and exactly one text child. The seven types are `paragraph`, `heading`, `code`, `mermaid`, `list-item`, `quote` and `table`.
+- **Prose block** — `paragraph`, `heading`, `list-item`, `quote`: the blocks that may carry inline marks. The others hold source text.
+- **Mark** — a Yjs text-formatting key on a block's text. The closed set is `bold`, `italic`, `strike`, `inlineCode` and `link`, plus `comment`.
+- **Annotation** — a comment thread in the `annotations` map, anchored by a `comment` mark on the text rather than by a position.
+- **rev** — a per-block content hash returned by every read and asserted by `edit_block`. Marks are deliberately excluded from it.
 
-## Annotation
+## Durability words
 
-A comment thread stored as JSON in the `annotations` map and anchored by a
-`comment` formatting mark on a block's Y.XmlText. The mark carries the thread
-id; the JSON carries no positions.
+- **applied** — the update is in this replica's append-only log, on disk, before the tool returned.
+- **synced** — the hub acknowledged receipt. It does not mean the hub has written it to its own disk.
+- **archived** — the directory stub is tombstoned. Nothing is erased: every block, mark and thread stays where it was, and there is no tool that erases content.
 
-## Tag
+## Tags
 
-A string in `meta.tags`. Tags are a plain array replaced wholesale on write, and
-they are mirrored into the directory document's stub for the document.
-
-## Link
-
-A target document UUID in `meta.links`. Links reference UUIDs, never paths or
-titles, so renaming a document breaks nothing.
-
-## Workspace
-
-The tenancy segment of a room name, and a uuid — optionally decorated for display
-as `<slug>-<uuid>`, with the slug parsed off before the id reaches a room, a
-token claim or the SQLite filename. There is no default workspace and nothing to
-create: several coexist on one hub with separate corpora, and a workspace's rooms
-exist the moment something opens one.
-
-Separation is namespacing for one trusted user, not a security boundary — one
-signing secret still mints a token for any workspace, so it separates corpora,
-not people; real isolation waits on per-workspace auth (issue #84).
-
-## Room
-
-A sync channel name, `<workspaceId>/<docUuid>`: one Y.Doc, one Hocuspocus room,
-one SQLite row in the hub. Both segments must be non-empty and contain no
-slash.
-
-## Directory document
-
-The document at `<workspaceId>/_directory`, holding a Y.Map of uuid →
-{title, tags, deleted?} stubs. Discovery is itself a synced doc; stubs are a
-cache, and `meta.title` in the document wins.
+A document carries exactly one of five tags, and the web client groups the corpus by them: start-here, feature, verify, reference and implementation-reference.

@@ -1,60 +1,74 @@
 ---
 uuid: b1d5d904-c8b6-46a1-a4df-22251875bcdb
 title: Editing and blocks
-tags:
-  - feature
-links:
-  - 8865aba4-fc8b-4050-a8d2-9c851be0bed3
-  - 2e8de409-df1b-4716-b6a9-71fa2ccd2aca
-  - bea0f13c-5ba9-4fb6-af7b-d627b4807786
-  - f1f403e6-fb4b-4e95-b12f-4fc0df8f4957
-  - 9b4ea859-8304-4e11-9cc8-76232c16a4e5
+tags: [feature]
+links: [8865aba4-fc8b-4050-a8d2-9c851be0bed3, bea0f13c-5ba9-4fb6-af7b-d627b4807786, 2e8de409-df1b-4716-b6a9-71fa2ccd2aca, 8a070124-2dc6-442a-8ea9-6db5b63ca950, 5238bd29-f9d5-43e8-ad40-2f039c705521]
 ---
 
-A document is a flat list of blocks; every write touches one block, and a block
-keeps its id for life.
+A document is a flat list of blocks. Every block has a stable id, one text
+child, and a type from a closed set. Every write — from an agent or from the
+editor — touches one block.
 
-## The four block types
+## The seven block types
 
-- `paragraph` — plain text, no inline formatting stored.
-- `heading` — plus a `level` attribute, stored as a string, clamped to 1–6 at
-  render time only.
-- `code` — plus a `language` attribute, exported as a tagged fence.
-- `mermaid` — a text block by storage, exported as a fence tagged `mermaid`.
+- `paragraph` — plain prose.
+- `heading` — carries `level`, 1 to 6, clamped rather than rejected.
+- `list-item` — carries `list` (`bullet` or `ordered`) and `indent`, 0 to 3. A list is a run of adjacent list-item blocks; nothing nests, and ordered numbering is computed at render time rather than stored.
+- `quote` — prose; a multi-line quote is one block.
+- `code` — source text, carrying an optional `language`.
+- `mermaid` — source text rendered as a diagram.
+- `table` — the block's text is GFM table source; there is no cell tree, so a bold marker inside a cell is literal text.
 
-The editor palette offers exactly these: ¶, H1, H2, H3, code, mermaid.
+## Inline formatting
 
-## Stable ids
+Prose blocks — paragraph, heading, list-item and quote — may carry five inline
+marks: `bold`, `italic`, `strike`, `inlineCode` and `link`. Source blocks —
+code, mermaid and table — carry only the `comment` mark that anchors an
+annotation. The mark is named `inlineCode` rather than `code` because
+ProseMirror forbids one name being both a node and a mark, and a mark's name is
+its Yjs key.
 
-- Each block element carries a UUID `id` attribute assigned on insert.
-- Annotation threads, agent edits and inbound references all key on that id.
-- The editor's node specs declare `id`, so binding never strips it.
+A link mark's target must be an `http` or `https` URL. A reference to another
+document is never a link mark: it is a uuid in the document's `links`.
 
-## Re-typing a block
+## Editing one block
 
-- `setBlockType` is the only sanctioned re-type. It inserts a replacement
-  element with the same id at the same position, replays the old text's delta
-  into it — marks included — and deletes the old element, all in one
-  transaction.
-- Delete-and-reinsert is an invariant violation: it churns the id and orphans
-  every annotation anchored in the block.
+Reads return a `rev` per block — a content hash over the block's type, its
+attributes and its text. Marks are deliberately excluded, so annotating or
+bolding a range never invalidates an edit somebody has already prepared.
 
-## Unknown content degrades loudly
+`edit_block` takes the text you read and, optionally, that `rev`, asserts both,
+and then applies the change as a diff-and-splice: only the characters that
+actually differ are touched. A concurrent edit elsewhere in the same block
+survives, and every mark over untouched text stays anchored. Text spliced in
+inherits the formatting of the character to its left.
 
-- The palette is scanned against the fragment before an editor is bound, and
-  recursively: unknown node name, nested element, undeclared mark, or a non-string
-  delta insert all count as foreign.
-- On any hit the app refuses to bind ProseMirror and renders a read-only banner,
-  "Unsupported content — editor disabled." Nothing is deleted from the document.
-- The refusal exists because y-prosemirror's error path deletes the offending Y
-  type, and that deletion would replicate.
+The stale check is against this replica at the moment of the call. There is no
+cross-replica compare-and-swap, and the window widens the longer a replica
+stays offline. It guarantees that an edit never silently overwrites a change
+this replica has already seen — not more than that.
 
-## Known limits
+## Changing a block's type
 
-- Two replicas re-typing the same block while unsynced converge on two elements
-  sharing one id. The fix is decided (dedupe-on-read plus repair-on-observe) and
-  not implemented — issue #11.
-- A text edit made concurrently with a re-type loses its characters with the
-  replaced element. `rev` and `old_text` protect a caller who checks.
-- There is no move operation. Blocks are inserted, appended and deleted;
-  reordering means delete and reinsert, which changes the id.
+`setBlockType` is the only sanctioned re-type. It keeps the block id, replays
+the whole text delta including every mark, and keeps the block's position.
+Delete-and-reinsert is forbidden: it churns the id, breaking every inbound
+reference, and drops the marks, orphaning every annotation anchored in the
+block.
+
+Turning a prose block into a source block is refused while its text still
+carries inline formatting, and refused before anything is mutated, because a
+Yjs transaction does not roll back.
+
+## Concurrency you can rely on
+
+Two replicas that re-type the same block converge on two elements sharing one
+id; the earlier in document order wins identically everywhere and the later is
+shadowed by every read, then swept. The losing copy's text is discarded rather
+than merged — divergent duplicate texts are never combined.
+
+## Limits worth knowing
+
+- There is no whole-document write, from any client, by design.
+- Nothing erases content: `archive_doc` tombstones a directory stub and leaves every block, mark and thread where it was.
+- Neither `insert_block` nor `edit_block` can write an inline mark today; the mark-aware reader is the seed importer, and exposing it as a tool is open work.

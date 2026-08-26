@@ -1,64 +1,87 @@
 ---
 uuid: f1f403e6-fb4b-4e95-b12f-4fc0df8f4957
 title: Test protocols
-tags:
-  - verify
-links:
-  - 7b4c11a6-37a2-4dff-862e-9bf5c4f0bfd8
-  - b1d5d904-c8b6-46a1-a4df-22251875bcdb
-  - 8727c914-c462-410a-bff4-0d2975d1dbcc
-  - bea0f13c-5ba9-4fb6-af7b-d627b4807786
+tags: [verify]
+links: [8727c914-c462-410a-bff4-0d2975d1dbcc, bea0f13c-5ba9-4fb6-af7b-d627b4807786, b1d5d904-c8b6-46a1-a4df-22251875bcdb, e6609049-7917-42ac-8ab3-f068aed2a707, 7b4c11a6-37a2-4dff-862e-9bf5c4f0bfd8]
 ---
 
-Nine protocols, one per spike acceptance criterion, each a sequence with a stated
-expected outcome. Start from a running stack — see Install and run.
+One runnable protocol per acceptance criterion, each with the outcome that
+counts as a pass. Run them against a stack started by `mise run dev` with an
+MCP client registered.
 
 ## 1. Two clients co-edit
 
-Open one document in two windows. Type a sentence in each, alternating. Expect
-every keystroke present in both, and a named remote cursor visible in each.
+Open the same document in two browser tabs. Type in both at once, in different
+paragraphs and then in the same one.
+
+Pass: no keystroke is lost in either tab, and each tab shows the other's caret
+with its name and colour.
 
 ## 2. An agent edit lands live
 
-With both windows open, call `edit_block` from an MCP client on a visible block.
-Expect the new text in both windows within a second, and the agent's cursor
-labelled in the presence list.
+With a document open in a tab, have an agent call `edit_block` on a block you
+can see.
 
-## 3. Concurrent edit to a different block merges
+Pass: the text changes in the tab without a reload, the changed block is
+briefly marked, and an agent cursor is visible with the agent's name.
 
-Type in block A in a window while an agent edits block B. Expect both edits
-present, neither truncated.
+## 3. A concurrent edit to another block merges
 
-## 4. Conflicting edit to the same range fails safely
+Type into block A in the tab while the agent calls `edit_block` on block B.
 
-Read a block's text and `rev`, type into that block in the browser, then call
-`edit_block` with the stale values. Expect a staleness error carrying the current
-text and rev, no document change, and success after re-reading.
+Pass: both changes are present afterwards, in both clients.
+
+## 4. A conflicting edit fails safely
+
+Read a block with `get_doc`, edit that block in the tab, then have the agent
+call `edit_block` with the text and `rev` it read before your edit.
+
+Pass: the call fails with `stale_block`, carrying `currentText` and
+`currentRev`; nothing in the document changed; re-reading and calling again
+succeeds.
 
 ## 5. Search and backlinks after edits
 
-Insert a distinctive word, set `links` to another document's UUID, then call
-`search` for the word and `backlinks` for that UUID. Expect the edited document
-in both results.
+Add a distinctive word to a block and set another document's `links` to this
+document's uuid.
+
+Pass: `search` finds the word; `backlinks` on this document names the other
+one; both without restarting the server.
 
 ## 6. Markdown export
 
-Call `export_markdown` on a document holding all four block types. Expect
-frontmatter, headings as hashes, a code fence tagged with its language, and a
-fence tagged mermaid.
+Call `export_markdown` on a document holding a heading, a list, a quote, a
+table, a fenced code block and a mermaid block.
+
+Pass: fences are closed and tagged, the list numbers correctly, the table comes
+back verbatim, and re-importing the output produces byte-identical markdown.
 
 ## 7. Hub restart loses nothing
 
-Stop the hub with SIGINT, restart it. Expect every document unchanged, and a
-client that edited while it was down to converge on reconnect.
+Edit from both clients, then stop the hub and start it again.
 
-## 8. Hub down, agent still works
+Pass: both clients reconnect, every edit is still there, and `sync_status`
+reports `connected` with no pending rooms.
 
-Kill the hub. Call every MCP tool, including `create_doc`. Expect all to succeed
-with `synced` false. Restart the hub and expect both the new document and the
-edits to appear in a browser window.
+## 8. Every tool works with the hub down
 
-## 9. Fresh client hydrates
+Stop the hub. Call `create_doc`, `insert_block`, `edit_block`, `list_docs`,
+`search` and `export_markdown`.
 
-Clear a browser profile's IndexedDB, or use a new profile, and connect. Expect
-the full document list and correct search results after sync.
+Pass: all of them succeed; mutating calls report `applied: true` and `synced:
+false`; `sync_status` says `hub-down` and names the endpoint. Start the hub
+again: the new document appears in the other client.
+
+## 9. A fresh client hydrates
+
+Point a second machine — or a fresh database path — at the same hub and
+workspace.
+
+Pass: after the directory room syncs, `list_docs` returns the whole corpus and
+`search` finds text in documents this replica never wrote.
+
+## What is machine-checked instead
+
+The repository's own suites cover the layers underneath these: `mise run test`
+for every package, `mise run e2e` for the browser proof points, and `mise run
+fue` for the documented install path on a clean machine.

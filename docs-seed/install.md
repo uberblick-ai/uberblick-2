@@ -1,227 +1,97 @@
 ---
 uuid: 7b4c11a6-37a2-4dff-862e-9bf5c4f0bfd8
 title: Install and run
-tags:
-  - start-here
-links:
-  - 3231bff4-fb3c-4195-a83a-98031551ca68
-  - 8865aba4-fc8b-4050-a8d2-9c851be0bed3
-  - 8727c914-c462-410a-bff4-0d2975d1dbcc
-  - f1f403e6-fb4b-4e95-b12f-4fc0df8f4957
+tags: [start-here]
+links: [3231bff4-fb3c-4195-a83a-98031551ca68, 8865aba4-fc8b-4050-a8d2-9c851be0bed3, bea0f13c-5ba9-4fb6-af7b-d627b4807786, 4575a744-1656-4699-af69-980a05d15fcc, f1f403e6-fb4b-4e95-b12f-4fc0df8f4957]
 ---
 
-Running uberblick locally takes one command. It needs no account, no age key,
-and no remote hub.
+Two commands from a clean machine to a running stack. Everything runs from
+TypeScript source inside a checkout; there is no installable package yet.
 
-```
-git clone https://github.com/uberblick-ai/uberblick-2.git
-cd uberblick-2
+## Prerequisites
+
+`git` and `mise`. Nothing else — mise installs the pinned Node, pnpm and fnox
+itself. No age key is needed: without one, `ub init` generates its own local
+development signing secret and says so.
+
+## Getting it running
+
+```sh
+git clone <repo> && cd uberblick
 mise trust && mise run setup -- --yes
 mise run dev
 ```
 
-`mise run setup` installs the pinned toolchain (Node 26, pnpm 10, fnox 1) and
-the frozen lockfile, then runs `ub init`. `mise run dev` starts the hub and the
-Vite dev server on http://localhost:5173.
+`mise trust` comes first because mise treats an untrusted config as a hard
+error for every task in the directory. `mise run setup` runs `mise install`,
+then a frozen-lockfile `pnpm install`, then `ub init`. Drop `--yes` to be
+prompted; a non-interactive shell behaves as if you passed it. `mise run dev`
+starts the hub and the Vite dev server together and takes both down on Ctrl-C.
 
-## What this supports
+Without an activated shell, prefix commands with `mise x --`.
 
-One workspace, one trusted user, multiple clients and machines; no login and no
-tenant isolation. Every client on your machines shares one signing secret, and
-anyone holding it can read and write everything. That is the deliberate shape of
-the current system, not a gap waiting on a patch.
+## What `ub init` creates
 
-A second workspace changes nothing about that: workspace separation is
-namespacing for one trusted user, not a security boundary — the same secret mints
-a token for any workspace — and real isolation waits on per-workspace auth (issue
-#84).
+- A workspace uuid, with an optional cosmetic display slug stored as `<slug>-<uuid>`. There is no default workspace and the uuid is never guessable.
+- `$XDG_CONFIG_HOME/uberblick/config.json` — the workspace, your awareness display name and colour. Mode 0600, in a 0700 directory.
+- `$XDG_CONFIG_HOME/uberblick/credentials.json` — the hub's HMAC signing secret, 32 random bytes. Mode 0600. It is never printed, and a file other users can read is refused rather than used.
+- `mise.local.toml` in the checkout, gitignored, derived from those two files. It owns exactly three keys — `WORKSPACE_ID`, `HUB_AUTH_TOKEN` and `HUB_URL` — and passes every other line through untouched, so mise tasks and a registered MCP client see the same values `ub` resolved.
+- A two-document starter corpus, but only into a workspace that holds nothing else.
 
-## Prerequisites
+Nothing here needs a network. Two `ub init` runs racing each other take a lock,
+and the loser adopts the winner's secret and workspace rather than overwriting
+them.
 
-- `git`.
-- `mise`, which pins Node 26, pnpm 10 and fnox 1 for this repository.
-- Nothing else. `age` and the repository owner's key are for the owner's
-  encrypted secret, not for running the system.
+## The tasks
 
-`mise trust` comes first because mise refuses to read a config file with an
-`[env]` block until it has been told to trust it — and refusing is a hard error,
-not a warning.
-
-## What `ub init` does
-
-- Settles your **awareness identity**: the display name and cursor colour other
-  clients see. Written to `$XDG_CONFIG_HOME/uberblick/config.json`.
-- Settles the **workspace**, which is the first segment of every room key and
-  the name of the local SQLite file. A workspace id is a uuid, generated here
-  when this machine has none; it may be decorated for display as
-  `<slug>-<uuid>`, and the slug is parsed off before the id reaches a room, a
-  token claim or the database filename.
-- Makes sure there is a **hub signing secret**. `HUB_AUTH_TOKEN` is the HMAC
-  secret hub tokens are signed with, not a token.
-
-It is convenience for everything except the workspace, which has no default:
-other commands fall back to hub `ws://localhost:1234`, but a command that opens
-the corpus — `ub status`, `ub remote`, `ub mcp serve`, the MCP server itself —
-exits non-zero and names `ub init` until a workspace is configured.
-
-Run it again whenever you like. It is idempotent, and it never replaces a secret
-that already exists.
-
-Every question has a flag — `--name`, `--color`, `--workspace` — and `--yes`
-takes all the defaults, so it needs no terminal to talk to. It finishes by
-offering to wire up an agent's MCP client: `--mcp` runs `ub mcp install` for you,
-`--no-mcp` says not to mention it.
+- `mise run dev` — hub and web dev server together, at `http://localhost:5173`.
+- `mise run hub` — the hub alone. It binds `HUB_HOST`:`PORT`, default `127.0.0.1:1234`; `HUB_URL` is what clients dial, so the two must agree.
+- `mise run web` — the Vite dev server alone.
+- `mise run import-seed` — import `docs-seed/*.md`, keyed by frontmatter uuid.
+- `mise run mcp` — a standalone smoke test of the MCP server. An MCP client normally spawns it over stdio itself.
+- `mise run lint`, `mise run typecheck`, `mise run test` — the gates.
+- `mise run e2e` — the browser proof points, on demand, on their own ports.
+- `mise run build-web` — a production bundle. This one needs the real secret.
+- `mise run fue` — the documented install path, executed on a clean machine in Docker and then asserted with the network switched off.
+- `mise run review` — build and verify an immutable commit in Docker.
 
 ## Wiring up an MCP client
 
-`ub mcp install [target]` registers uberblick with an MCP client, so there is no
-JSON to hand-edit. It knows three clients:
-
-```
-ub mcp install claude --project     # this directory's .mcp.json
-ub mcp install codex --user         # ~/.codex/config.toml
-ub mcp install cursor --project     # .cursor/mcp.json
+```sh
+ub mcp install claude          # or codex, or cursor
 ```
 
-`--project` writes the current directory's config; `--user` writes the per-user
-one. For any client not on that list, add `--print`: `ub mcp install zed --print`
-writes the snippet to stdout and touches nothing, whatever name you give it, so
-you can paste it wherever that client keeps its servers. The snippet is not
-reproduced here on purpose: the command is the one place it is defined, and a
-copy in a document is a copy that goes stale.
+It writes this directory's config by default, `--user` for the per-user one,
+`--print` to emit the snippet and write nothing, and `--force` to replace an
+existing entry after backing the file up. An unrelated server in the same file
+survives byte for byte. The registered command is always `ub mcp serve`, with
+no arguments and no environment: it resolves the workspace, endpoint and secret
+itself at spawn time, so switching workspaces never means editing a client
+config.
 
-The command is safe to run against a file you care about:
+`--workspace <id>` registers a second, pinned entry instead of touching the
+first.
 
-- **Other servers are left alone.** Only the `uberblick` key is added; every
-  other key and the file's own formatting survive.
-- **Running it twice does nothing.** The second run reports `already installed`
-  and exits 0. It recognises what the vendor's own installer writes, too, so
-  `claude mcp add` and `ub mcp install` do not fight over the same entry.
-- **It never clobbers.** An `uberblick` entry it did not write is reported next
-  to what would replace it, and the file is left alone unless you pass `--force`.
-- **It backs up first.** Any file it changes is copied to a timestamped `.bak`
-  beside it before anything is written.
-- **It never prompts.** Every decision has a flag, so it runs unattended.
-- **It never prints what it read.** When it reports a conflict it shows the
-  command and arguments already registered, and the *names* of anything else set
-  — never the values. A config file is where an API token lives, and a file that
-  will not parse is reported by path alone.
+## Knowing where you stand
 
-Where a client ships its own installer — `claude mcp add`, and `codex mcp add`
-for its global config — that is what runs. Otherwise the config file is edited
-directly. The report names which of the two happened.
-
-What gets registered is always `ub mcp serve`, with no arguments and no
-environment. Workspace, hub and credential are resolved by `ub` itself from the
-layers above, so a client config never carries a stale copy of them.
-
-The one exception is this repository's own `.mcp.json`, which spawns the server
-out of the checkout instead: a fresh clone has no installed `ub`, and the
-owner's secret only becomes visible through `fnox exec`. That file is still
-generated by the same command — everything after `--` replaces the command being
-registered.
+- `ub status` — the workspace and which layer chose it, the hub endpoint and its state, whether a credential is present, the database path, per-room applied sequence numbers and anything unsynced. `--json` prints one object.
+- `ub doctor` — seven checks against the known failure modes: workspace, credential, database, hub, port, bind and MCP registration. It diagnoses and never repairs, exits 1 on any failure, and never prints the secret.
+- `ub workspace` — the workspace in force; `ub workspace list` for the ones this machine has a database for; `ub workspace use <id>` to bind this directory, or `--user` to bind the machine. Either way it regenerates the derived mise config, so the tasks follow the switch.
+- `ub open` — serve a built bundle and, if nothing is listening locally, a hub, then open a browser. Loopback only, port 4173 by default.
 
 ## Where the signing secret comes from
 
-Two paths, and they do not fight:
+Highest wins: the environment, then `credentials.json`, then the derived mise
+config, then a freshly generated one. `fnox exec` supplies the environment
+layer on a machine that has the age key; every mise task that needs a secret
+wraps its command in `fnox exec --if-missing warn`, so a contributor without
+the key still runs the stack on a generated one.
 
-- **The repository owner** keeps the real secret age-encrypted in `fnox.toml`,
-  and every task wraps its command in `fnox exec`. With the age key present that
-  value overwrites `HUB_AUTH_TOKEN` in the task's environment, so it wins — and
-  `ub init` generates nothing when it can already see a secret.
-- **Everyone else** gets a generated development secret: 32 random bytes written
-  to `$XDG_CONFIG_HOME/uberblick/credentials.json`, mode 0600. That file is the
-  authority. Because mise tasks and `.mcp.json` inherit their environment from
-  mise rather than from `ub`, `ub init` also writes a gitignored
-  `mise.local.toml` derived from it — same value, one owner, rewritten if the two
-  ever drift, and restored with the same value if you delete it.
-
-The secret is never printed by any command, including error paths. The most any
-of them reports is where it came from.
-
-## Going remote, and onto a second computer
-
-The normal journey is local first, remote later. `ub remote` is the bridge, and
-it exists because simply changing `HUB_URL` strands whatever the local hub holds
-that the update log does not.
-
-**On the remote host** — a Linux box in your tailnet — bring the hub and web
-client up with Docker Compose as `Remote server setup` describes. That host runs
-`sh remote-compose.sh up --build --detach` and nothing else. The hub it starts
-is empty. Every command below runs on one of *your* computers.
-
-**On the computer that holds the documents**, with `mise run hub` still running
-so the browser-created ones can be collected:
-
-```
-node packages/cli/bin/ub.mjs remote promote wss://<host>.ts.net/ws
-```
-
-It hydrates the local directory and every live document into the update log,
-reads the target with a throwaway client that writes nothing, uploads, then
-opens the target again as a fresh client and compares what it finds against what
-this machine holds. The endpoint is persisted only after that read-back
-succeeds, so a failed run leaves you pointed at the hub that still works.
-Rerunning finishes an interrupted promotion. It exits non-zero without writing
-anything when the local hub is unreachable, when the target never finishes
-serving its directory, or when the target holds documents this workspace has
-never heard of.
-
-**On a second computer**, from a fresh clone:
-
-```
-mise trust && mise run setup -- --yes
-node packages/cli/bin/ub.mjs remote join wss://<host>.ts.net/ws \
-  --secret-file ~/uberblick-remote-secret
-mise run web
-```
-
-`ub init` imports no documents, so that workspace is empty and there is nothing
-to duplicate — do not run `mise run import-seed` on it; the product documents
-arrive over the wire. `join` does not require a local hub, and says so rather
-than pretending it checked one. The secret that reached the remote replaces the
-random one `ub init` generated here, at mode 0600, because the remote verifies
-with the first machine's.
-
-A remote credential is never a command-line argument: `--secret-file <path>`
-points at a file only you can read, and without it a terminal is prompted with
-the input hidden. Neither the secret nor a token signed with it is printed.
-
-The endpoint lands in `config.json`, which is the third resolution layer —
-`HUB_URL` and a committable `./uberblick.json` both outrank it, and these
-commands name whichever wins instead of claiming a switch that did not take
-effect.
-
-Sharing boundary: everyone who can reach the endpoint and load the web app
-receives the shared signing secret, because it is compiled into the served
-bundle. The network is the whole of the access control until accounts land.
-
-## Verify
-
-- Open `http://localhost:5173` in two browser windows.
-- Click "+ new doc" in the first window; the document appears in the second
-  window's list, which is fed by the directory document.
-- Open it in both windows and type in the first. The characters appear in the
-  second, and a named, coloured remote cursor marks where the other window is.
-- `mise run import-seed` imports the product documents; an MCP client's
-  `list_docs` then returns them.
+The secret is a signing secret, not a token. It is never written to a `.env`
+file, never committed, and never printed by any command.
 
 ## If it fails
 
-- `mise ERROR ... are not trusted`: run `mise trust` in the checkout. If it
-  names `mise.local.toml`, `mise trust mise.local.toml` — `ub init` normally
-  does this for you, and says so when it could not.
-- Both windows show "offline": the hub is not running, or `HUB_URL` disagrees
-  with the port the hub bound.
-- The hub refuses to start with "HUB_AUTH_TOKEN is not set": no secret reached
-  it. Run `mise run init` and check that it reports a credential.
-- `ub status` says `credential  none — local-only, no hub sync`: same cause, and
-  everything except hub sync still works.
-- `refusing ...credentials.json: mode 0644`: another user on the machine can read
-  your signing secret, so it was not used. `mise run init` repairs the mode and
-  keeps the value.
-- Port 1234 already in use: set `PORT` for the hub and `HUB_URL` for the clients
-  together. The hub binds `HUB_HOST`:`PORT`, default `127.0.0.1:1234`, and never
-  reads `HUB_URL`.
-- To check the checkout itself rather than the stack: `mise run test` and
-  `mise run typecheck`.
+- Nothing answers the hub — check that `PORT` and `HUB_URL` name the same socket; `ub doctor`'s `port` check is exactly that comparison.
+- The port is held by something else — `ub doctor`'s `bind` check tells you whether the holder is an uberblick hub or a stranger.
+- A refused workspace, an exposed credentials file, an unwritable database directory: each is its own `ub doctor` line with its own remedy.

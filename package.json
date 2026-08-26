@@ -11,7 +11,7 @@
     "build": "pnpm -r build",
     "lint": "biome lint --error-on-warnings .",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test && node scripts/docs-seed-check.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.9",

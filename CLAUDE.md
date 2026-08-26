@@ -224,7 +224,8 @@ auth in the spike itself.
   rebuilt. Why this cannot live in a synced document — the hub must decide before it
   admits a connection, and the party being revoked is the one who controls
   whether its own replica is current — and what losing these tables costs, is
-  reference material — see #84 until it lands in the architecture doc.
+  reference material: Architecture (`9b4ea859-8304-4e11-9cc8-76232c16a4e5`),
+  "Workspace isolation — decided, not yet built".
 - Identity is UUIDs everywhere; titles and paths are display data. On
   conflict, `meta.title` in the doc is authoritative; the directory stub is a
   cache repaired on write/connect.
@@ -301,5 +302,9 @@ is the work → do the work via a GitHub-style change → update the doc to the 
 status quo.
 
 Once the uberblick MCP server is registered (`.mcp.json`), read and update the
-product docs through its tools — never by editing `docs-seed/` files, which are
-only the one-time import source.
+product docs through its tools. **Live docs are authoritative for an
+initialized workspace; `docs-seed/` is the current bootstrap snapshot for a
+*new* one, and re-import never overwrites an existing uuid.** So the seed files
+are not frozen history and editing one is never a substitute for an MCP edit: a
+status-quo-changing PR refreshes the doc's seed file (from `export_markdown`)
+before merge, and updates the live doc through the MCP tools after.
