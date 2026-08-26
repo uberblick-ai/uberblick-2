@@ -115,5 +115,14 @@ describe("createHub", () => {
     // reference to it — or open a second connection through it.
     const entry = await import("../src/index.js");
     expect(Object.keys(entry)).not.toContain("HubDatabase");
+
+    // The seam is a live handle or nothing: after the close it must fail
+    // loudly, never hand #216's registry a database that is already shut.
+    const { HubDatabase } = await import("../src/persistence.js");
+    const owned = new HubDatabase(tempDatabasePath(), () => {});
+    owned.open();
+    expect(owned.connection.isOpen).toBe(true);
+    owned.close();
+    expect(() => owned.connection).toThrow(/not open/);
   });
 });

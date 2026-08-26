@@ -265,7 +265,8 @@ export async function createHub(config: HubConfig): Promise<Hub> {
   }
 
   if (isEphemeralDatabase(databasePath)) {
-    // The extension printed this to stdout. It is still worth saying: nothing
+    // The extension said this with console.warn (plus a blank line on stdout);
+    // it is one structured stderr line now, and still worth saying: nothing
     // written to an anonymous database survives the handle being closed.
     log({ event: "hub.database.ephemeral", database: databasePath });
   }

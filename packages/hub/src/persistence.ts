@@ -56,6 +56,17 @@ const UPSERT_DOCUMENT = `
 `;
 
 /**
+ * How long SQLite waits for another process to release a write lock before it
+ * gives up (ms). Not a tuning knob: better-sqlite3 defaulted to 5s and
+ * `node:sqlite` defaults to 0, and for this hub a lock held for a moment — a
+ * backup reading the file, an inspection tool, a second hub starting — would
+ * otherwise fail one store *permanently*, because a failed store is sticky by
+ * design and every later flush and the shutdown then report the state as not
+ * durable. Waiting is what that contract costs.
+ */
+const BUSY_TIMEOUT_MS = 5_000;
+
+/**
  * The two anonymous database forms SQLite accepts, which the hub's
  * configuration accepts too: `":memory:"` and `""` (an unnamed temporary file).
  * Neither names a directory to create, and neither survives the close.
@@ -100,6 +111,11 @@ export class HubDatabase implements Extension {
    * `node:sqlite` call, and called before the socket binds so that a hub which
    * is listening is a hub that can persist.
    *
+   * That check is what SQLite can answer at open time — a missing or unwritable
+   * directory, a path that is not a database — not every way a write can later
+   * fail; an existing file that is read-only opens here and surfaces as the
+   * sticky store failure instead.
+   *
    * @throws when the path cannot be opened — leaving no handle behind.
    */
   open(): void {
@@ -110,7 +126,9 @@ export class HubDatabase implements Extension {
       mkdirSync(dirname(this.databasePath), { recursive: true });
     }
 
-    const db = new DatabaseSync(this.databasePath);
+    const db = new DatabaseSync(this.databasePath, {
+      timeout: BUSY_TIMEOUT_MS,
+    });
     try {
       db.exec(SCHEMA);
       this.statements = {
@@ -163,11 +181,17 @@ export class HubDatabase implements Extension {
     }
   }
 
-  /** Idempotent: shutdown paths are the worst place to learn about a double close. */
+  /**
+   * Idempotent: shutdown paths are the worst place to learn about a double
+   * close. The handle is dropped as well as closed, so {@link connection} fails
+   * with "not open" afterwards instead of handing out a closed database.
+   */
   close(): void {
     if (this.db?.isOpen === true) {
       this.db.close();
     }
+    this.db = undefined;
+    this.statements = undefined;
   }
 
   private prepared(): { select: StatementSync; upsert: StatementSync } {

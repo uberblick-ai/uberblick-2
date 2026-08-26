@@ -24,12 +24,15 @@
  * and load.
  */
 
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { copyFileSync, readdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { HubConfig } from "../src/config.js";
+import type { HubLogRecord } from "../src/log.js";
 import type { Hub } from "../src/server.js";
 import {
   TEXT_KEY,
@@ -178,6 +181,81 @@ describe("flush", () => {
 
     hubs.length = 0;
     destroyClients();
+  });
+});
+
+/**
+ * Take the database's write lock in another process and hold it for `holdMs`.
+ * Resolves once the lock is actually held.
+ *
+ * The child is synchronous from the lock to the commit — `Atomics.wait`, not a
+ * timer — because the hub's store is synchronous too: a holder that went back
+ * to an event loop would be waiting for a hub that is itself blocked waiting
+ * for the lock.
+ */
+async function holdWriteLock(
+  databasePath: string,
+  holdMs: number,
+): Promise<ReturnType<typeof spawn>> {
+  const child = spawn(
+    process.execPath,
+    [
+      "-e",
+      `const { DatabaseSync } = require("node:sqlite");
+       const db = new DatabaseSync(process.env.DATABASE);
+       db.exec("BEGIN IMMEDIATE");
+       process.stdout.write("locked\\n");
+       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${holdMs});
+       db.exec("COMMIT");
+       db.close();`,
+    ],
+    {
+      env: { ...process.env, DATABASE: databasePath },
+      stdio: ["ignore", "pipe", "inherit"],
+    },
+  );
+
+  await new Promise<void>((resolve, reject) => {
+    child.stdout?.once("data", () => {
+      resolve();
+    });
+    child.once("exit", (code) => {
+      reject(new Error(`the lock holder exited before locking (code ${code})`));
+    });
+  });
+  return child;
+}
+
+describe("a write lock held by another process", () => {
+  // The hub is not the only thing that can open its database — a backup, an
+  // inspection tool, a second hub coming up as this one goes down. SQLite
+  // answers a held write lock with SQLITE_BUSY, and `node:sqlite` waits zero
+  // milliseconds by default where better-sqlite3 waited five seconds. A store
+  // that failed here would be sticky: one moment of contention, and every later
+  // flush and the shutdown would report the hub as not durable, for a write
+  // that only needed to wait its turn.
+  it("delays the store instead of failing it", async () => {
+    const databasePath = tempDatabasePath();
+    const records: HubLogRecord[] = [];
+    const started = await hub(databasePath, {
+      log: (record) => {
+        records.push(record);
+      },
+    });
+    const room = testRoom();
+    const writer = await client(started, room);
+
+    writer.text.insert(0, "written while locked");
+    await sleep(200);
+
+    const holder = await holdWriteLock(databasePath, 200);
+    await started.flush();
+    await once(holder, "exit");
+
+    expect(storedText(databasePath, room)).toBe("written while locked");
+    expect(records.map((record) => record.event)).not.toContain(
+      "hub.store.failed",
+    );
   });
 });
 
