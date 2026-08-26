@@ -46,6 +46,7 @@ import {
 } from "@uberblick/mcp-server";
 import type { McpConfig } from "@uberblick/mcp-server";
 import { resolveConfig } from "./config.js";
+import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { setRemote } from "./remote.js";
@@ -73,13 +74,39 @@ const SAFE_SECRET = /^[A-Za-z0-9._-]+$/;
 const HOSTNAME = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
 const IPV4 = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 
-export const REMOTE_INIT_USAGE = `usage: ub remote init <ssh-target> [options]
-       ub remote update <ssh-target> [--dir <path>]
+export const REMOTE_INIT_HELP = `usage: ub remote init <ssh-target> [options]
+
+Stand up the remote hub and web stack on a tailnet host, from this machine: the
+host is given a deploy key, clones ${REPO}
+from GitHub, and is brought up with this machine's signing secret. Idempotent —
+running it again repairs a host rather than rebuilding it.
+
+operands:
+  <ssh-target>       where to reach the host over SSH, such as uberblick@host
 
 options:
   --dir <path>       checkout directory on the host (default ${DEFAULT_DIR})
   --host <fqdn>      the host's MagicDNS name, when detection cannot see it
   --ip <v4>          the host's Tailscale IPv4, likewise
+  -h, --help         show this help
+
+The signing secret travels over stdin and is never in argv, never echoed and
+never in an error message. Keep the host on the tailnet: everyone who can reach
+the served app holds the credential.
+`;
+
+export const REMOTE_UPDATE_HELP = `usage: ub remote update <ssh-target> [--dir <path>]
+
+Deploy origin/main onto a host \`ub remote init\` already stood up, now. It runs
+that checkout's own \`remote-update.sh\`, so the deploy steps are the version the
+host is running rather than this machine's copy. Nothing updates on a timer.
+
+operands:
+  <ssh-target>       where to reach the host over SSH, such as uberblick@host
+
+options:
+  --dir <path>       checkout directory on the host (default ${DEFAULT_DIR})
+  -h, --help         show this help
 `;
 
 // --- talking to the two vendor commands ------------------------------------
@@ -472,14 +499,22 @@ interface InitFlags {
   ip: string | null;
 }
 
+/** Exported so the help above can be checked against the parser it describes. */
+export const REMOTE_INIT_OPTIONS = {
+  dir: { type: "string" },
+  host: { type: "string" },
+  ip: { type: "string" },
+} as const;
+
+/** Likewise — `ub remote update` takes the checkout directory and nothing else. */
+export const REMOTE_UPDATE_OPTIONS = {
+  dir: { type: "string" },
+} as const;
+
 function parseInitFlags(argv: string[]): InitFlags {
   const { values, positionals } = parseArgs({
     args: argv,
-    options: {
-      dir: { type: "string" },
-      host: { type: "string" },
-      ip: { type: "string" },
-    },
+    options: REMOTE_INIT_OPTIONS,
     allowPositionals: true,
   });
   if (positionals.length !== 1) {
@@ -548,12 +583,14 @@ export async function remoteInitCommand(
   io: Io = processIo,
   deps: RemoteInitDeps = {},
 ): Promise<number> {
+  if (takeHelp(argv, io, REMOTE_INIT_HELP)) return 0;
+
   let flags: InitFlags;
   try {
     flags = parseInitFlags(argv);
   } catch (error) {
     io.err(
-      `ub remote init: ${error instanceof Error ? error.message : String(error)}\n\n${REMOTE_INIT_USAGE}`,
+      `ub remote init: ${error instanceof Error ? error.message : String(error)}\n\n${REMOTE_INIT_HELP}`,
     );
     return 2;
   }
@@ -866,11 +903,13 @@ export async function remoteUpdateCommand(
   io: Io = processIo,
   deps: RemoteInitDeps = {},
 ): Promise<number> {
+  if (takeHelp(argv, io, REMOTE_UPDATE_HELP)) return 0;
+
   let flags: UpdateFlags;
   try {
     const { values, positionals } = parseArgs({
       args: argv,
-      options: { dir: { type: "string" } },
+      options: REMOTE_UPDATE_OPTIONS,
       allowPositionals: true,
     });
     if (positionals.length !== 1) {
@@ -879,7 +918,7 @@ export async function remoteUpdateCommand(
     flags = { target: positionals[0] as string, dir: values.dir ?? DEFAULT_DIR };
   } catch (error) {
     io.err(
-      `ub remote update: ${error instanceof Error ? error.message : String(error)}\n\n${REMOTE_INIT_USAGE}`,
+      `ub remote update: ${error instanceof Error ? error.message : String(error)}\n\n${REMOTE_UPDATE_HELP}`,
     );
     return 2;
   }

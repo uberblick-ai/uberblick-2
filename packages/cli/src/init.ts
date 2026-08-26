@@ -61,6 +61,7 @@ import {
   writeCredentials,
   writeUserConfig,
 } from "./config.js";
+import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock, seedLockPath } from "./init-lock.js";
 import { installCommand } from "./install.js";
@@ -151,18 +152,43 @@ interface Flags {
   mcp: boolean | undefined;
 }
 
+/** Exported so the help below can be checked against the parser it describes. */
+export const INIT_OPTIONS = {
+  yes: { type: "boolean", short: "y", default: false },
+  name: { type: "string" },
+  color: { type: "string" },
+  workspace: { type: "string" },
+  // Two booleans rather than one negatable flag: parseArgs has no `--no-x`.
+  mcp: { type: "boolean" },
+  "no-mcp": { type: "boolean" },
+} as const;
+
+export const INIT_HELP = `usage: ub init [options]
+
+Settle what every other command needs: your awareness identity, the workspace
+this machine works in, and a hub signing secret. Idempotent — it never replaces
+a secret that already exists, and it is safe to run again.
+
+options:
+  -y, --yes          take every default and never prompt (also what a
+                     non-interactive stdin does on its own)
+  --name <name>      awareness display name (default: this account's name)
+  --color <#rrggbb>  awareness cursor colour, 6-digit hex (default: one of the
+                     eight the web client uses, picked for you)
+  --workspace <id>   the workspace to work in, as <uuid> or <slug>-<uuid>
+                     (default: a fresh uuid, with the slug asked for)
+  --mcp, --no-mcp    whether to register uberblick with an MCP client — the
+                     question this ends on, answered up front
+  -h, --help         show this help
+
+The signing secret is generated only when none is visible, is written to
+$XDG_CONFIG_HOME/uberblick/credentials.json at mode 0600, and is never printed.
+`;
+
 function parseFlags(argv: string[]): Flags {
   const { values } = parseArgs({
     args: argv,
-    options: {
-      yes: { type: "boolean", short: "y", default: false },
-      name: { type: "string" },
-      color: { type: "string" },
-      workspace: { type: "string" },
-      // Two booleans rather than one negatable flag: parseArgs has no `--no-x`.
-      mcp: { type: "boolean" },
-      "no-mcp": { type: "boolean" },
-    },
+    options: INIT_OPTIONS,
     allowPositionals: false,
   });
   if (values.mcp === true && values["no-mcp"] === true) {
@@ -243,6 +269,8 @@ export async function initCommand(
   argv: string[],
   io: Io = processIo,
 ): Promise<number> {
+  if (takeHelp(argv, io, INIT_HELP)) return 0;
+
   let flags: Flags;
   try {
     flags = parseFlags(argv);
