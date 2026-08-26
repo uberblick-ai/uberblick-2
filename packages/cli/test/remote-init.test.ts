@@ -275,7 +275,8 @@ describe("ub remote init", () => {
     // The payload, exactly — and on stdin.
     expect(stepFor(rig, "uberblick:env").stdin).toBe(
       "# Written by `ub remote init`. Untracked, so updates never touch it.\n" +
-        `TAILSCALE_HOST=${MAGIC_DNS}\nTAILSCALE_IP=${TAILSCALE_IP}\nHUB_AUTH_TOKEN=${SECRET}\n`,
+        `TAILSCALE_HOST=${MAGIC_DNS}\nTAILSCALE_IP=${TAILSCALE_IP}\nHUB_AUTH_TOKEN=${SECRET}\n` +
+        `WEB_WORKSPACES=${WORKSPACE}\n`,
     );
     expect(stepFor(rig, "uberblick:up").args.join("\n")).toContain(
       "sh remote-compose.sh up --build --detach",
@@ -345,6 +346,14 @@ describe("ub remote init", () => {
     expect(stepFor(rig, "uberblick:env").stdin).toContain(`TAILSCALE_HOST=${MAGIC_DNS}`);
   });
 
+  it("refuses before touching the host when no workspace is configured", async () => {
+    const rig = harness();
+    delete rig.env.WORKSPACE_ID;
+    expect(await init(rig)).toBe(2);
+    expect(rig.err()).toContain("Run `ub init`");
+    expect(rig.steps()).toEqual([]);
+  });
+
   it("schedules nothing on the host, and says the host does not update itself", async () => {
     const rig = harness();
     expect(await init(rig)).toBe(0);
@@ -398,6 +407,22 @@ describe("ub remote init", () => {
     expect(labels.join("\n")).not.toContain("uberblick:clone");
     expect(stepFor(rig, "uberblick:fast-forward").args.join("\n")).toContain(
       "git merge --ff-only origin/main",
+    );
+  });
+
+  it("reports replacing a different workspace on a re-run", async () => {
+    const rig = harness({
+      facts: {
+        checkout: "present",
+        deploykey: HOST_KEY,
+        webworkspaces: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      },
+      keys: `[{"id":1,"title":"uberblick-box-something","key":"${HOST_KEY}"}]`,
+    });
+
+    expect(await init(rig)).toBe(0);
+    expect(rig.out()).toContain(
+      `The host's different WEB_WORKSPACES was replaced with ${WORKSPACE}.`,
     );
   });
 });

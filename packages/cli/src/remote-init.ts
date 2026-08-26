@@ -70,6 +70,9 @@ const SSH_COMMAND = `ssh -i ${KEY_PATH} -o IdentitiesOnly=yes`;
 /** The character set `remote-compose.sh` enforces on the deployed secret. */
 const SAFE_SECRET = /^[A-Za-z0-9._-]+$/;
 
+/** The character set `remote-compose.sh` permits inside its served JSON. */
+const SAFE_WEB_WORKSPACES = /^[A-Za-z0-9,-]+$/;
+
 const HOSTNAME = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
 const IPV4 = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 
@@ -184,6 +187,11 @@ if [ -f ${hostPath(KEY_PATH)}.pub ]; then
 else
   printf 'deploykey=none\\n'
 fi
+web_workspaces=
+if [ -f ${hostPath(dir)}/.env ]; then
+  web_workspaces="$(sed -n 's/^WEB_WORKSPACES=//p' ${hostPath(dir)}/.env | tail -n 1)"
+fi
+printf 'webworkspaces=%s\\n' "$web_workspaces"
 `;
 }
 
@@ -567,6 +575,20 @@ export async function remoteInitCommand(
     return 2;
   }
 
+  // The workspace is parsed before it gets here, but keep the deployment's
+  // narrower interpolation boundary beside the equivalent secret check. This
+  // value is written inside Caddy's JSON response, where quotes or backslashes
+  // would be syntax rather than data.
+  const webWorkspace = base.workspaceId;
+  if (!SAFE_WEB_WORKSPACES.test(webWorkspace)) {
+    io.err(
+      `ub remote init: workspace ${JSON.stringify(webWorkspace)} contains ` +
+        "characters `remote-compose.sh` refuses (only A-Z a-z 0-9 , - are safe). " +
+        "Run `ub init` with a valid workspace before deploying.\n",
+    );
+    return 2;
+  }
+
   const secret = base.authSecret;
   if (secret === null) {
     io.err(
@@ -778,7 +800,7 @@ export async function remoteInitCommand(
   // Over stdin: the secret is never an argument, on either side.
   const wrote = ssh(flags.target, envScript(flags.dir), {
     env,
-    input: `# Written by \`ub remote init\`. Untracked, so updates never touch it.\nTAILSCALE_HOST=${magicDns}\nTAILSCALE_IP=${address}\nHUB_AUTH_TOKEN=${secret}\n`,
+    input: `# Written by \`ub remote init\`. Untracked, so updates never touch it.\nTAILSCALE_HOST=${magicDns}\nTAILSCALE_IP=${address}\nHUB_AUTH_TOKEN=${secret}\nWEB_WORKSPACES=${webWorkspace}\n`,
   });
   if (wrote.status !== 0) {
     io.err(`ub remote init: ${failed("writing .env on the host", wrote)}.\n`);
@@ -808,6 +830,13 @@ export async function remoteInitCommand(
   report +=
     `${flags.target} does not update itself. Deploy origin/main onto it when ` +
     "you mean to, with `ub remote update`.\n";
+  if (
+    facts.webworkspaces !== undefined &&
+    facts.webworkspaces !== "" &&
+    facts.webworkspaces !== webWorkspace
+  ) {
+    report += `The host's different WEB_WORKSPACES was replaced with ${webWorkspace}.\n`;
+  }
 
   const held = await localDocumentCount(base);
   if (held > 0) {

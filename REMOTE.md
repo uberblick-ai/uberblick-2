@@ -64,12 +64,10 @@ hand:
 3. Clones `main` into `~/uberblick-remote` (`--dir` to change) with
    `core.sshCommand` set on the clone, so the updater needs no environment of
    its own. An existing checkout is fast-forwarded instead.
-4. Writes the host's `.env` — `TAILSCALE_HOST`, `TAILSCALE_IP` and
-   `HUB_AUTH_TOKEN` from your local signing secret — **over stdin**. The secret
-   is never an argument on either side, never echoed, and never reaches a shell
-   history. It does not yet write `WEB_WORKSPACES` (#152), so a host stood up
-   this way opens document links but answers `/` with "no workspace" until that
-   line is added to its `.env` and the Caddy container recreated.
+4. Writes the host's `.env` — `TAILSCALE_HOST`, `TAILSCALE_IP`,
+   `HUB_AUTH_TOKEN` from your local signing secret, and `WEB_WORKSPACES` with
+   this machine's resolved workspace id — **over stdin**. The secret is never
+   an argument on either side, never echoed, and never reaches a shell history.
 5. Runs `sh remote-compose.sh up --build --detach`, then verifies from your
    machine: it polls `https://<host>/` for up to 90 seconds — the first request
    is what makes Tailscale issue the certificate, so an immediate check is a
