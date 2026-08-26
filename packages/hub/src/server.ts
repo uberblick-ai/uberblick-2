@@ -26,25 +26,18 @@
  * 3. **Only the hub can tell whether a store landed.** `storeDocumentHooks()`
  *    catches a failing store, logs it, keeps the document in memory and
  *    *resolves*, so completion is not durability: a hub whose database went
- *    away would flush, stop and exit 0 having written nothing. {@link HubSQLite}
- *    records the failure where it is still an exception, and `flush()`/`stop()`
- *    reject on it — `stop()` after the teardown as well as before, because the
- *    teardown stores too. Likewise, storage is opened before the socket: the
- *    extension's own open happens in an `onConfigure` hook Hocuspocus never
- *    awaits, which turns a bad database path into an unhandled rejection after
- *    the hub already announced itself as listening.
+ *    away would flush, stop and exit 0 having written nothing.
+ *    {@link HubDatabase} records the failure where it is still an exception,
+ *    and `flush()`/`stop()` reject on it — `stop()` after the teardown as well
+ *    as before, because the teardown stores too. Likewise, storage is opened
+ *    before the socket, here rather than in a Hocuspocus hook nobody awaits:
+ *    a hub that is listening is a hub that can persist.
  *
- * Persistence is `@hocuspocus/extension-sqlite`, which stores one row per
- * document holding `Y.encodeStateAsUpdate(doc)` and hydrates with
- * `Y.applyUpdate` — Yjs v1 encoding, the extension's own default, matching the
- * one-encoding-everywhere invariant. (It upserts a full state snapshot per
- * document rather than appending updates, so there is no updates table to
- * prune.)
+ * Persistence is {@link HubDatabase} — the hub's own `node:sqlite` adapter, one
+ * row per document holding `Y.encodeStateAsUpdate(doc)`, hydrated with
+ * `Y.applyUpdate`. Yjs v1, matching the one-encoding-everywhere invariant.
  */
 
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { SQLite } from "@hocuspocus/extension-sqlite";
 import type { Hocuspocus, onStoreDocumentPayload } from "@hocuspocus/server";
 import { Server } from "@hocuspocus/server";
 import { parseRoom } from "@uberblick/schema";
@@ -52,6 +45,7 @@ import type { HubConfig } from "./config.js";
 import { DEFAULT_HOST, DEFAULT_PORT, defaultDatabasePath } from "./config.js";
 import type { HubLogger } from "./log.js";
 import { stderrLogger } from "./log.js";
+import { HubDatabase, isEphemeralDatabase } from "./persistence.js";
 import type { TokenClaims } from "./token.js";
 import { verifyToken } from "./token.js";
 
@@ -191,59 +185,6 @@ async function withTimeout(
 }
 
 /**
- * The SQLite extension, with its handle owned by the hub and its store failures
- * observable.
- *
- * Two upstream behaviours are wrong for a hub that promises to lose nothing:
- *
- * - `onConfigure` opens the database, and Hocuspocus fires `onConfigure` from
- *   its constructor without awaiting it — a bad path becomes an unhandled
- *   rejection *after* the hub logged that it is listening. `createHub` calls
- *   `onConfigure` itself before it binds the socket; this override makes
- *   Hocuspocus' own call a no-op instead of a second handle.
- * - a failing store is caught, logged and swallowed by
- *   `Hocuspocus.storeDocumentHooks`, so nothing downstream can tell a write
- *   that landed from one that did not. `onStoreFailed` sees it here, where it
- *   is still an exception, and it is rethrown so Hocuspocus keeps the document
- *   in memory as it does today.
- */
-class HubSQLite extends SQLite {
-  private readonly onStoreFailed: (error: unknown) => void;
-
-  constructor(databasePath: string, onStoreFailed: (error: unknown) => void) {
-    super({ database: databasePath });
-    this.onStoreFailed = onStoreFailed;
-  }
-
-  override async onConfigure(): Promise<void> {
-    if (this.db !== undefined) {
-      return;
-    }
-    await super.onConfigure();
-  }
-
-  override async onStoreDocument(
-    payload: onStoreDocumentPayload,
-  ): Promise<void> {
-    try {
-      await super.onStoreDocument(payload);
-    } catch (error) {
-      this.onStoreFailed(error);
-      throw error;
-    }
-  }
-
-  /** The extension never closes the handle it opened; the hub does. */
-  close(log: HubLogger): void {
-    try {
-      this.db?.close();
-    } catch (error) {
-      log({ event: "hub.database.closeFailed", error: String(error) });
-    }
-  }
-}
-
-/**
  * Bind the socket, with a bind failure as a rejection.
  *
  * `Server.listen()` resolves from the HTTP server's `listening` callback and
@@ -291,14 +232,10 @@ export async function createHub(config: HubConfig): Promise<Hub> {
   const address = config.address ?? DEFAULT_HOST;
   const shutdownTimeoutMs = config.shutdownTimeoutMs ?? 10_000;
 
-  if (databasePath !== ":memory:" && databasePath !== "") {
-    mkdirSync(dirname(databasePath), { recursive: true });
-  }
-
   // Sticky on purpose: once a store has failed, the hub cannot claim that what
   // it holds is on disk, so every later flush and the shutdown must say so.
   let storeFailure: { error: unknown } | undefined;
-  const sqlite = new HubSQLite(databasePath, (error) => {
+  const database = new HubDatabase(databasePath, (error) => {
     storeFailure ??= { error };
     log({
       event: "hub.store.failed",
@@ -307,15 +244,30 @@ export async function createHub(config: HubConfig): Promise<Hub> {
     });
   });
 
+  /** Releasing the handle is never the reason a shutdown fails; it is logged. */
+  const closeDatabase = (): void => {
+    try {
+      database.close();
+    } catch (error) {
+      log({ event: "hub.database.closeFailed", error: String(error) });
+    }
+  };
+
   // Before the socket, not after: a hub that is listening has a database.
   try {
-    await sqlite.onConfigure();
+    database.open();
   } catch (error) {
-    sqlite.close(log);
+    closeDatabase();
     throw new Error(
       `createHub: cannot open the SQLite database at ${databasePath}`,
       { cause: error },
     );
+  }
+
+  if (isEphemeralDatabase(databasePath)) {
+    // The extension printed this to stdout. It is still worth saying: nothing
+    // written to an anonymous database survives the handle being closed.
+    log({ event: "hub.database.ephemeral", database: databasePath });
   }
 
   const server = new Server<HubContext>({
@@ -331,7 +283,7 @@ export async function createHub(config: HubConfig): Promise<Hub> {
     ...(config.maxDebounce === undefined
       ? {}
       : { maxDebounce: config.maxDebounce }),
-    extensions: [sqlite],
+    extensions: [database],
 
     async onAuthenticate({
       token,
@@ -446,7 +398,7 @@ export async function createHub(config: HubConfig): Promise<Hub> {
     await server.destroy().catch((cleanup: unknown) => {
       log({ event: "hub.start.cleanupFailed", error: String(cleanup) });
     });
-    sqlite.close(log);
+    closeDatabase();
     throw error;
   }
   const port = server.address.port;
@@ -508,7 +460,7 @@ export async function createHub(config: HubConfig): Promise<Hub> {
     // server's handle (and the port) alive.
     server.httpServer.closeAllConnections?.();
 
-    sqlite.close(log);
+    closeDatabase();
 
     // Teardown stores too: it fires the pending stores of the documents it
     // unloads, and Hocuspocus swallows a failure there as it does everywhere

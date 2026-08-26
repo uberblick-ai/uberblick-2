@@ -9,14 +9,35 @@
  *
  * The bind address is here too: loopback by default is the hub's security model
  * while its only credential is one shared dev secret.
+ *
+ * And the handle itself: one `DatabaseSync` per hub, owned by `packages/hub`.
+ * A second connection to the same file would be a second writer meeting the
+ * first one's locks, so the workspace registry (#216) extends this one rather
+ * than opening its own — which only holds if startup opens exactly one.
  */
 
 import { dirname } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_HOST, resolveHubConfig } from "../src/config.js";
 import type { HubLogRecord } from "../src/log.js";
 import type { Hub } from "../src/server.js";
 import { removeTempDatabases, startHub, tempDatabasePath } from "./helpers.js";
+
+/** Every database this file's module graph opens, in order. */
+const sqlite = vi.hoisted(() => ({ opened: [] as string[] }));
+
+vi.mock("node:sqlite", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:sqlite")>();
+  return {
+    ...actual,
+    DatabaseSync: class extends actual.DatabaseSync {
+      constructor(...args: ConstructorParameters<typeof actual.DatabaseSync>) {
+        super(...args);
+        sqlite.opened.push(String(args[0]));
+      }
+    },
+  };
+});
 
 const hubs: Hub[] = [];
 
@@ -49,8 +70,14 @@ describe("createHub", () => {
     const directory = dirname(tempDatabasePath());
     const records: HubLogRecord[] = [];
 
+    // A port nobody holds: taken from a hub that has since released it.
+    const probe = await startHub();
+    const port = probe.port;
+    await probe.stop();
+
     await expect(
       startHub({
+        port,
         databasePath: directory,
         log: (record) => {
           records.push(record);
@@ -59,6 +86,12 @@ describe("createHub", () => {
     ).rejects.toThrow(/SQLite database/);
 
     expect(records.map((record) => record.event)).not.toContain("hub.listen");
+
+    // The socket was never bound, so it is still there for the next hub — the
+    // rejection left nothing running and nothing held.
+    const after = await startHub({ port });
+    hubs.push(after);
+    expect(after.port).toBe(port);
   });
 
   it("rejects when the port is already bound", async () => {
@@ -66,5 +99,21 @@ describe("createHub", () => {
     hubs.push(first);
 
     await expect(startHub({ port: first.port })).rejects.toThrow(/EADDRINUSE/);
+  });
+
+  it("opens exactly one database connection, owned inside the package", async () => {
+    const databasePath = tempDatabasePath();
+    sqlite.opened.length = 0;
+
+    const started = await startHub({ databasePath });
+    hubs.push(started);
+
+    expect(sqlite.opened).toEqual([databasePath]);
+
+    // And the handle stays hub-internal: `src/persistence.ts` is not part of
+    // the package entry, so nothing outside `packages/hub` can hold a second
+    // reference to it — or open a second connection through it.
+    const entry = await import("../src/index.js");
+    expect(Object.keys(entry)).not.toContain("HubDatabase");
   });
 });

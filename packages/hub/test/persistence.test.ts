@@ -15,11 +15,20 @@
  * store which could *not* land makes `stop()` say so, whether it failed during
  * the flush or during the teardown that follows it, because a shutdown that
  * reports success without writing is the same data loss with a clean exit code.
+ *
+ * The other half of the file is about the *file*: a database written by
+ * `@hocuspocus/extension-sqlite` and its better-sqlite3 binding must keep
+ * working under the hub's own `node:sqlite` adapter, with no migration, no
+ * second table and no second file — and every database form the configuration
+ * accepts (a fresh file, `":memory:"`, the anonymous temporary one) must store
+ * and load.
  */
 
+import { copyFileSync, readdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import Database from "better-sqlite3";
-import * as Y from "yjs";
 import type { HubConfig } from "../src/config.js";
 import type { Hub } from "../src/server.js";
 import {
@@ -28,6 +37,7 @@ import {
   removeTempDatabases,
   sleep,
   startHub,
+  storedText,
   tempDatabasePath,
   testRoom,
   token,
@@ -71,24 +81,14 @@ function destroyClients(): void {
   }
 }
 
-/** Read a room's persisted state straight out of the hub's SQLite file. */
-function storedText(databasePath: string, room: string): string | null {
-  const database = new Database(databasePath, { readonly: true });
-  try {
-    const row = database
-      .prepare('SELECT data FROM "documents" WHERE name = ?')
-      .get(room) as { data: Buffer } | undefined;
-    if (row === undefined) {
-      return null;
-    }
-    const doc = new Y.Doc();
-    Y.applyUpdate(doc, new Uint8Array(row.data));
-    const text = doc.getText(TEXT_KEY).toString();
-    doc.destroy();
-    return text;
-  } finally {
-    database.close();
-  }
+/**
+ * Fault injection: take the table out from under the hub's open handle, so its
+ * next store fails on a database that is otherwise perfectly healthy.
+ */
+function dropDocumentsTable(databasePath: string): void {
+  const database = new DatabaseSync(databasePath);
+  database.exec('DROP TABLE "documents"');
+  database.close();
 }
 
 afterEach(async () => {
@@ -135,9 +135,7 @@ describe("flush", () => {
     // failure, logs it and resolves the hook, which is exactly why the hub has
     // to observe it itself — otherwise stop() reports success and main.ts exits
     // 0 with the edit never written.
-    const database = new Database(databasePath);
-    database.exec('DROP TABLE "documents"');
-    database.close();
+    dropDocumentsTable(databasePath);
 
     await expect(started.stop()).rejects.toThrow(/not durable/);
 
@@ -167,9 +165,7 @@ describe("flush", () => {
       () => storedText(databasePath, room) === "flushed",
     );
 
-    const database = new Database(databasePath);
-    database.exec('DROP TABLE "documents"');
-    database.close();
+    dropDocumentsTable(databasePath);
 
     await direct.transact((doc) => {
       doc.getText(TEXT_KEY).insert(7, " then lost");
@@ -233,5 +229,141 @@ describe("restart", () => {
       "document one, edited before SIGTERM",
     );
     await waitForText("reader two", readerTwo.text, "document two");
+  });
+});
+
+/** What `test/fixtures/make-legacy.ts` wrote, and where. */
+const LEGACY = {
+  room: "3f6a1c20-9d84-4b1e-8a77-2c5e9b0d4411/6c0f2b48-1d5a-4c73-9f2e-8b41d7a90e35",
+  text: "written by the sqlite extension",
+  fixture: fileURLToPath(
+    new URL("./fixtures/extension-sqlite.sqlite", import.meta.url),
+  ),
+} as const;
+
+/** The fixture, copied somewhere writable — opening it for a hub is a write. */
+function legacyDatabase(): string {
+  const path = tempDatabasePath();
+  copyFileSync(LEGACY.fixture, path);
+  return path;
+}
+
+/** Every table in the file, and the rowid each document row lives at. */
+function inspect(databasePath: string): {
+  tables: string[];
+  rows: { rowid: number; name: string }[];
+} {
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    return {
+      tables: database
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table'")
+        .all()
+        .map((row) => String(row.name)),
+      rows: database
+        .prepare('SELECT rowid, name FROM "documents" ORDER BY rowid')
+        .all()
+        .map((row) => ({ rowid: Number(row.rowid), name: String(row.name) })),
+    };
+  } finally {
+    database.close();
+  }
+}
+
+describe("a database written by @hocuspocus/extension-sqlite", () => {
+  // The migration that must not exist. The extension and its better-sqlite3
+  // binding are gone; every hub database they ever wrote — local, remote, the
+  // one on the machine this ships to next — is still a file the hub has to open
+  // in place, serve, and write back to. Same file, same table, same row.
+  it("is served, edited and restarted with no migration and no second table", async () => {
+    const databasePath = legacyDatabase();
+    const before = inspect(databasePath);
+    expect(before.tables).toEqual(["documents"]);
+    expect(before.rows).toEqual([{ rowid: 1, name: LEGACY.room }]);
+
+    const first = await hub(databasePath);
+    const reader = await client(first, LEGACY.room);
+    // Hydrated from the extension's own Yjs v1 bytes, through a real client.
+    await waitForText("the legacy document", reader.text, LEGACY.text);
+
+    reader.text.insert(reader.text.length, ", edited by node:sqlite");
+    await sleep(200);
+    await first.flush();
+
+    const edited = `${LEGACY.text}, edited by node:sqlite`;
+    expect(storedText(databasePath, LEGACY.room)).toBe(edited);
+    // The same row, in the same table, in the same file: no new schema, no
+    // sibling database, nothing for an operator to reconcile afterwards.
+    expect(inspect(databasePath)).toEqual(before);
+    expect(readdirSync(dirname(databasePath))).toEqual(["hub.sqlite"]);
+
+    await first.stop();
+    hubs.length = 0;
+    destroyClients();
+
+    const second = await hub(databasePath);
+    const afterRestart = await client(second, LEGACY.room);
+    await waitForText("the restarted hub", afterRestart.text, edited);
+  });
+});
+
+describe("database forms", () => {
+  /**
+   * Store and load through a real client, without a restart — the only thing an
+   * anonymous database can prove, and the same proof for all three forms. The
+   * second client re-reads what the first one's flush wrote: Hocuspocus unloads
+   * a document when its last connection goes, so the room is hydrated from
+   * SQLite again rather than served out of memory.
+   */
+  async function storesAndLoads(databasePath: string): Promise<Hub> {
+    const started = await hub(databasePath);
+    const room = testRoom();
+    const writer = await client(started, room);
+
+    writer.text.insert(0, "stored and loaded");
+    await sleep(200);
+    await started.flush();
+
+    writer.destroy();
+    clients.length = 0;
+    await waitUntil(
+      "the document to unload",
+      () => started.hocuspocus.getDocumentsCount() === 0,
+    );
+
+    const reader = await client(started, room);
+    await waitForText("the reloaded document", reader.text, "stored and loaded");
+    return started;
+  }
+
+  it("persists to a fresh file", async () => {
+    const databasePath = tempDatabasePath();
+    const started = await storesAndLoads(databasePath);
+
+    // A file, with the extension's table in it, created by the hub itself.
+    expect(inspect(databasePath).tables).toEqual(["documents"]);
+
+    // The handle is released on stop() — asserted by reading the file after.
+    await started.stop();
+    hubs.length = 0;
+    destroyClients();
+    expect(inspect(databasePath).rows).toHaveLength(1);
+  });
+
+  it("works in memory", async () => {
+    const started = await storesAndLoads(":memory:");
+    await expect(started.stop()).resolves.toBeUndefined();
+    hubs.length = 0;
+    destroyClients();
+  });
+
+  it("works as an anonymous temporary database", async () => {
+    // SQLite's other anonymous form: an empty path is a private temporary file
+    // it deletes on close. Hub configuration accepts it, so the hub must too —
+    // and, like ":memory:", it must not be mistaken for a path to mkdir.
+    const started = await storesAndLoads("");
+    await expect(started.stop()).resolves.toBeUndefined();
+    hubs.length = 0;
+    destroyClients();
   });
 });
