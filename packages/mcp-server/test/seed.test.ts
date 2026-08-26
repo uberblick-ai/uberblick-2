@@ -17,16 +17,19 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import type { Hub } from "@uberblick/hub";
 import {
+  directoryRoom,
   getBlocks,
   getDirectoryMap,
   getMeta,
+  isSidebarSeeded,
+  readSidebar,
   roomForDoc,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import { PersistenceError, Replicas } from "../src/replica.js";
 import { MirrorStore } from "../src/store.js";
-import { importSeedDocs, readSeedDocs } from "../src/seed.js";
+import { importSeedDir, importSeedDocs, readSeedDocs } from "../src/seed.js";
 import type { SeedImport } from "../src/seed.js";
 import {
   FailingStore,
@@ -461,5 +464,155 @@ describe("seed import", () => {
     } finally {
       await rig.close();
     }
+  });
+});
+
+/**
+ * The starter sidebar an `ub init` asks {@link importSeedDir} for.
+ *
+ * The CLI owns the real one and proves the whole path end to end; this suite
+ * owns the boundary the CLI cannot reach from outside, which is what happens
+ * when the layout the pins describe is not actually there.
+ */
+describe("starter sidebar seed", () => {
+  const first = "b4e1c206-9f38-4d5a-8c71-0a2b6e93f157";
+  const second = "d0c37a51-2e64-4b98-a13f-5c8e70d6b249";
+  const group = { id: "57a27e40-0000-4000-8000-0000000000ff", name: "Starter" };
+
+  /** Two importable documents. */
+  function starterDir(): string {
+    const dir = tempDir();
+    for (const [uuid, title] of [
+      [first, "First"],
+      [second, "Second"],
+    ]) {
+      writeFileSync(
+        join(dir, `${title}.md`),
+        `---\nuuid: ${uuid}\ntitle: ${title}\ntags: [start-here]\n---\n\nOne paragraph.\n`,
+      );
+    }
+    return dir;
+  }
+
+  /** The sidebar as a fresh replica set hydrated from the log alone sees it. */
+  function sidebarOf(databasePath: string): {
+    groups: ReturnType<typeof readSidebar>;
+    seeded: boolean;
+  } {
+    const store = new MirrorStore(databasePath, WORKSPACE);
+    const replicas = new Replicas(testConfig({ databasePath }), store);
+    try {
+      const doc = replicas.sidebar().doc;
+      return { groups: readSidebar(doc), seeded: isSidebarSeeded(doc) };
+    } finally {
+      replicas.destroy();
+      store.close();
+    }
+  }
+
+  it("pins the documents in the order it was given, and marks the sidebar seeded", async () => {
+    const databasePath = tempDatabasePath();
+    const outcome = await importSeedDir(
+      starterDir(),
+      testConfig({ databasePath }),
+      { ...group, docs: [second, first] },
+    );
+
+    expect(outcome.sidebar).toBe(true);
+    expect(sidebarOf(databasePath)).toEqual({
+      groups: [{ ...group, docs: [second, first] }],
+      seeded: true,
+    });
+  });
+
+  it("pins nothing when a document it would pin is tombstoned", async () => {
+    // The pins are a promise that the layout exists. A document the user threw
+    // away breaks it — and a half-layout must not be declared seeded either,
+    // because the marker would stop the repair that is still owed.
+    const databasePath = tempDatabasePath();
+    const dir = starterDir();
+    await importSeedDir(dir, testConfig({ databasePath }));
+
+    const store = new MirrorStore(databasePath, WORKSPACE);
+    const replicas = new Replicas(testConfig({ databasePath }), store);
+    try {
+      tombstoneDirectoryEntry(replicas.directory().doc, first);
+    } finally {
+      replicas.destroy();
+      store.close();
+    }
+
+    const outcome = await importSeedDir(dir, testConfig({ databasePath }), {
+      ...group,
+      docs: [first, second],
+    });
+
+    expect(outcome.sidebar).toBe(false);
+    expect(sidebarOf(databasePath)).toEqual({ groups: [], seeded: false });
+  });
+
+  // The failure this defends against is the one a local-only eligibility read
+  // cannot see: a replica bound to a workspace it has never synced — `ub
+  // workspace use <id>` then `ub init`, or a database restored from a backup —
+  // reads an empty directory and would seed a starter corpus, and a starter
+  // sidebar group, into somebody's real one.
+  it("writes nothing into a workspace the hub says is already in use", async () => {
+    const hub = await startHub();
+    hubs.push(hub);
+
+    // Somebody else's document, reachable only through the hub.
+    const directory = await peerClient(hub.port, directoryRoom(WORKSPACE));
+    peers.push(directory);
+    await directory.synced;
+    upsertDirectoryEntry(directory.doc, {
+      uuid: "9f3d7c1e-5a82-4b06-9e17-3c48d05b6a2f",
+      title: "Real work",
+      tags: ["feature"],
+    });
+    await hub.flush();
+
+    // A fresh replica: its own local directory is empty, and says nothing.
+    const databasePath = tempDatabasePath();
+    const outcome = await importSeedDir(
+      starterDir(),
+      testConfig({
+        databasePath,
+        hubUrl: hubUrl(hub.port),
+        authSecret: TEST_SECRET,
+      }),
+      { ...group, docs: [first, second] },
+    );
+
+    expect(outcome.results).toEqual([]);
+    expect(outcome.sidebar).toBe(false);
+    expect(sidebarOf(databasePath)).toEqual({ groups: [], seeded: false });
+    // And the hub is untouched: the starter room was never written into.
+    const room = await peerClient(hub.port, roomForDoc(WORKSPACE, first));
+    peers.push(room);
+    await room.synced;
+    expect(getBlocks(room.doc)).toHaveLength(0);
+  });
+
+  it("adopts a sidebar that already holds a group rather than seeding beside it", async () => {
+    // Curation — a user's, another client's, or the MCP server's own legacy tag
+    // migration — is exactly what a seed must not write over.
+    const curated = "57a27e40-0000-4000-8000-0000000000fe";
+    const databasePath = tempDatabasePath();
+    const dir = starterDir();
+    await importSeedDir(dir, testConfig({ databasePath }), {
+      id: curated,
+      name: "Mine",
+      docs: [first],
+    });
+
+    const outcome = await importSeedDir(dir, testConfig({ databasePath }), {
+      ...group,
+      docs: [first, second],
+    });
+
+    expect(outcome.sidebar).toBe(false);
+    expect(sidebarOf(databasePath).groups).toEqual([
+      { id: curated, name: "Mine", docs: [first] },
+    ]);
   });
 });
