@@ -562,6 +562,13 @@ describe("lists and quotes", () => {
       table,
       { type: "code", text: "x", language: "ts" },
     ]);
+
+    // …and an HTML comment, which this reader takes as its own block: an
+    // exported annotation sitting under a table must not become a row of it.
+    expect(
+      importMarkdown('| h |\n| - |\n<!-- annotation a range=0-1 x: "y" -->\n')
+        .blocks,
+    ).toEqual([table]);
   });
 
   /**

@@ -1497,9 +1497,10 @@ const LIST_LINE = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?[ \t]*$/;
 /** `> `, indented no further than a paragraph may be. */
 const QUOTE_LINE = /^ {0,3}>[ \t]?(.*)$/;
 
-/** An ATX heading, and a fence of either character — as block *starts*. */
+/** An ATX heading, a fence of either character, an HTML comment — block *starts*. */
 const HEADING_LINE = /^#{1,6}\s/;
 const FENCE_LINE = /^(?:`{3,}|~{3,})/;
+const COMMENT_LINE = /^<!--/;
 
 /**
  * Whether `line` starts a block, in the sense that matters to a table: a table
@@ -1508,7 +1509,10 @@ const FENCE_LINE = /^(?:`{3,}|~{3,})/;
  * This is the reader's knowledge, not the table parser's. `parseGfmTable` knows
  * tables — to it a heading or a quote is a perfectly good one-column row — so
  * the question of what else a line could be has to be asked out here, where the
- * rest of the document's vocabulary lives.
+ * rest of the document's vocabulary lives. The list is exactly what the loop
+ * below recognises, HTML comments included: anything this reader would take as
+ * its own block after the table has to end the table, or the two disagree and
+ * the comment — an exported annotation, say — is stored as a row.
  */
 function startsBlock(line: string): boolean {
   const trimmed = line.trim();
@@ -1516,7 +1520,8 @@ function startsBlock(line: string): boolean {
     QUOTE_LINE.test(line) ||
     LIST_LINE.test(line) ||
     HEADING_LINE.test(trimmed) ||
-    FENCE_LINE.test(trimmed)
+    FENCE_LINE.test(trimmed) ||
+    COMMENT_LINE.test(trimmed)
   );
 }
 
