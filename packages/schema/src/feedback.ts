@@ -58,24 +58,30 @@
  *     foldable when it has a *verdict* and its newest event sits before the
  *     cut. Rating is the last thing a session says about a document — a
  *     verdict replaces the pair's earlier events — so a folded pair has nothing
- *     left to come, and the fold is exact. (Exact to the same boundary
- *     everything here has: a session that comes back to *re-rate* a document a
- *     whole compaction window later is counted twice for it, like one that
- *     re-reads one whose event the backstop folded. It takes a session that
- *     outlives the window.) An unrated `used` event stays live
+ *     left to come, and the fold is exact *for a session that has moved on*.
+ *     It is not exact for one that comes back: folding is what removes the
+ *     events `recordVerdict` replaces and `recordUsage` dedupes against, so a
+ *     session that re-rates or re-reads a document after its pair was folded
+ *     writes a second, unmergeable report of itself. Same bound as the
+ *     backstop's below — one extra count per (document, session) per compaction
+ *     window the session outlives — and same cause: nothing folded can be
+ *     replaced. An unrated `used` event stays live
  *     however old it is, because folding it would count the session once in
  *     `totals` and again the moment it rated the document: one session, two
  *     sessionsUsed. Cheap to leave alone, wrong to fold.
  *   - **A hard backstop.** A corpus read by sessions that never rate anything
  *     is entirely made of events the rule above will not fold, so when the
  *     settled fold cannot bring the list under the limit, everything before the
- *     cut is folded regardless. **This is the path that overcounts in ordinary use**: a
- *     session whose `used` event was folded that way and which then rates the
- *     document is counted twice for it — `sessionsUsed` and one bucket too high
- *     by exactly one per (document, session) it happens to. It is the right
- *     trade for advisory telemetry, an unbounded document being a real cost and
- *     a rare doubled count not, but it is a real inaccuracy and both this
- *     module and `feedback_report` say so rather than implying exactness.
+ *     cut is folded regardless. **This is the path that overcounts in ordinary
+ *     use**: a session whose `used` event was folded that way and which then
+ *     rates — or simply re-reads — the document is counted for it again. The
+ *     bound is one extra count per (document, session) **per compaction window
+ *     the session outlives**, not one in total: a session reading one document
+ *     across eight backstop windows is folded eight times and reads as eight
+ *     sessions. It is the right trade for advisory telemetry, an unbounded
+ *     document being a real cost and a drifting count on a very long session
+ *     not, but it is a real inaccuracy and this module, `feedback_report` and
+ *     `get_doc` all say so rather than implying exactness.
  *
  * `totals` is written per document as a whole object, and this is the other
  * place concurrency shows. Two replicas that fold the *same* events compute the
@@ -138,7 +144,7 @@ function readEvent(value: unknown): FeedbackEvent | null {
   return value as FeedbackEvent;
 }
 
-/** Stored totals, with a missing field read as zero. */
+/** Stored totals; a field that is absent or null reads as zero. */
 function readTotals(value: unknown): FeedbackTotals {
   const stored =
     typeof value === "object" && value !== null
@@ -192,10 +198,12 @@ export interface RecordUsageInput {
  * Record that this session used this document, once.
  *
  * The dedupe is the stored events, so it is exactly as durable as they are: a
- * session whose `used` event the compaction backstop folded away reports the
- * document again, and is counted twice for it. That is the same bounded
- * inaccuracy the backstop already carries — see the module header — and it takes
- * a session long-lived enough to outlive a whole compaction window.
+ * session whose event compaction folded away — by the backstop, or as part of a
+ * settled pair it had rated — reports the document again, and is counted for it
+ * again. One extra count per (document, session) per compaction window the
+ * session outlives, so a session that outlives eight of them reads as eight.
+ * See the module header; it takes a session long-lived enough for a whole
+ * window to pass under it.
  *
  * @returns whether an event was appended — false when this session has already
  * reported on the document, which is also the answer to "has this session been

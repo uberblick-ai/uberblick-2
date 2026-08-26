@@ -29,11 +29,13 @@
  *
  *    The one exception, which is the dedupe's own boundary rather than a second
  *    rule: the events are what remember, so a session that outlives a whole
- *    compaction window can have its `used` event folded away by the backstop and
- *    will then report — and be nudged about — that document a second time. It
- *    takes a very long session, it costs one extra count, and get_doc's
- *    description says so rather than promising an exactness the storage does not
- *    have.
+ *    compaction window can have its event folded away — by the backstop, or as
+ *    part of a settled pair it had already rated — and will then report, and be
+ *    nudged about, that document a second time. The cost is one extra count per
+ *    (document, session) per window the session outlives, so a session spanning
+ *    eight of them reads as eight sessions rather than as one. It takes a very
+ *    long session, and get_doc's description says so rather than promising an
+ *    exactness the storage does not have.
  * 3. **feedback_report opens no document rooms.** It reads `_feedback` for the
  *    numbers and the directory for titles, both already attached, so a report
  *    over a thousand documents costs the same as a report over three. A uuid
@@ -158,8 +160,10 @@ export function registerFeedbackTools(
         "words, which is what a rewrite is briefed from, so prefer \"the tool list is out of date\" over " +
         "\"unclear\".\n\n" +
         "One verdict per document per session: rating again replaces what this session said before, rather than " +
-        "adding to it. Rating a document also counts as using it, and rating is what settles a session's report — " +
-        "a rated document is folded exactly when the event list is compacted, an unrated one is left alone. The write goes to the workspace's synced " +
+        "adding to it — it replaces the earlier event, so this holds for as long as that event is still stored. " +
+        "Rating a document also counts as using it, and rating is what lets compaction fold this session's report " +
+        "on it; an unrated read is left alone. Should a session rate a document again long after its earlier " +
+        "verdict was folded away, there is nothing left to replace and it counts as a second session. The write goes to the workspace's synced " +
         "`_feedback` document, so it is an ordinary durable write — `applied` means this server's update log " +
         "holds it, `synced` means the hub acknowledged it.\n\n" +
         FEEDBACK_IS_ADVISORY,
@@ -219,11 +223,15 @@ export function registerFeedbackTools(
         "per-document totals once the list grows, so counts survive compaction but the reasons in them do not — " +
         "`reasons` is always recent, never complete.\n\n" +
         "Two ways compaction bends the counts, both bounded and neither hidden. Ordinarily it folds only sessions " +
-        "that rated the document, which is exact. When a burst of unrated reads is all there is to fold, a backstop " +
-        "folds those too — and a session whose read was folded that way and which later rates the document is then " +
-        "counted twice for it, one too many in `sessionsUsed` and in one bucket. In the other direction, two " +
-        "replicas compacting different slices at once converge on one of the two totals, so a count can sit below " +
-        "the truth. Read these as good numbers to act on, not as exact ones.\n\n" +
+        "that rated the document, which is exact for a session that has moved on — folding removes the events a " +
+        "later verdict would replace and a later read would dedupe against, so a session that comes back to that " +
+        "document afterwards counts again. When a burst of unrated reads is all there is to fold, a backstop folds " +
+        "those too, which widens the same case to sessions that never rated anything. Either way the overcount is " +
+        "one per (document, session) per compaction window the session outlives — a session reading one document " +
+        "across eight windows reads as eight sessions — so a very long-lived reader inflates its documents while " +
+        "ordinary ones are exact. In the other direction, two replicas compacting different slices at once " +
+        "converge on one of the two totals, so a count can sit below the truth. Read these as good numbers to act " +
+        "on, not as exact ones.\n\n" +
         FEEDBACK_IS_ADVISORY,
       inputSchema: {
         limit: z

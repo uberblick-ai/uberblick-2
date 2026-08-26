@@ -300,11 +300,11 @@ describe("compaction", () => {
     });
   });
 
-  it("never folds half a settled pair", () => {
+  it("folds one session's rated document without folding its unrated one", () => {
     const feedback = new Y.Doc();
     ratedBurst(feedback, 60);
-    // A pair whose newest event sits after the cut: its older event must not
-    // fold on its own, or the pair is counted twice.
+    // The fold is keyed per (document, session), not per session: this session
+    // has rated ALPHA and only read BETA, and the two must be decided apart.
     use(feedback, BETA, "session-0");
     compactFeedback(feedback, { limit: 30, keep: 10 });
 
