@@ -7,16 +7,14 @@
  * Nothing is copied by hand.
  *
  * **Nothing is deployed *from* here.** The host clones `main` from GitHub and
- * keeps itself current with a systemd user timer running `remote-update.sh` out
- * of that checkout. Deploying this machine's checkout was considered and
- * rejected: with more than one user it deploys whichever version somebody
- * happened to have, and it needs a human every time.
+ * updates itself out of that checkout, by running `remote-update.sh` there.
+ * Deploying this machine's checkout was considered and rejected: with more than
+ * one user it deploys whichever version somebody happened to have.
  *
- * **The consequence, stated plainly: anyone who can merge to `main` can execute
- * code on the host within five minutes.** The updater resets to `origin/main`
- * and runs `docker compose up --build` unattended. That is the accepted
- * tradeoff for a host whose whole purpose is to follow `main`, and it is why
- * `--no-auto-update` exists.
+ * **Updates are deliberate, never unattended.** `ub remote update` is the one
+ * command, run by a person or by an agent session over SSH; nothing installs a
+ * timer (owner decision, 2026-08-25). A five-minute auto-updater would apply a
+ * commit that changes wire semantics to production with nobody present.
  *
  * **The signing secret travels over stdin and nowhere else.** Never in argv on
  * either side — argv is in every `ps` listing and every shell history — never
@@ -27,7 +25,7 @@
  * host is how somebody repairs one: the key is generated only when absent and
  * registered only when GitHub does not already hold it (matched by key
  * material, never by title), an existing checkout is fast-forwarded instead of
- * re-cloned, and enabling an already-enabled timer changes nothing.
+ * re-cloned.
  */
 
 import { spawnSync } from "node:child_process";
@@ -64,11 +62,9 @@ const KEY_PATH = "~/.ssh/uberblick-deploy";
 
 /**
  * Set on the clone itself, so the updater needs no environment of its own — it
- * runs from a timer with no agent, no login session and no forwarded keys.
+ * runs over a bare SSH command with no agent and no forwarded keys.
  */
 const SSH_COMMAND = `ssh -i ${KEY_PATH} -o IdentitiesOnly=yes`;
-
-const TIMER_UNIT = "uberblick-update.timer";
 
 /** The character set `remote-compose.sh` enforces on the deployed secret. */
 const SAFE_SECRET = /^[A-Za-z0-9._-]+$/;
@@ -83,7 +79,6 @@ options:
   --dir <path>       checkout directory on the host (default ${DEFAULT_DIR})
   --host <fqdn>      the host's MagicDNS name, when detection cannot see it
   --ip <v4>          the host's Tailscale IPv4, likewise
-  --no-auto-update   install the stack without the five-minute update timer
 `;
 
 // --- talking to the two vendor commands ------------------------------------
@@ -170,7 +165,7 @@ function hostPath(path: string): string {
 // Each carries a marker comment. It is what a journal entry or a `ps` line on
 // the host is recognisable by — and what this package's tests assert against.
 
-function preflightScript(dir: string, wantTimer: boolean): string {
+function preflightScript(dir: string): string {
   return `# uberblick:preflight
 set -u
 printf 'user=%s\\n' "$(id -un)"
@@ -182,11 +177,6 @@ else
 fi
 if command -v git >/dev/null 2>&1; then printf 'git=yes\\n'; else printf 'git=no\\n'; fi
 if command -v tailscale >/dev/null 2>&1; then printf 'tailscale=yes\\n'; else printf 'tailscale=no\\n'; fi
-linger=$(loginctl show-user "$(id -u)" --property=Linger --value 2>/dev/null || echo no)
-printf 'linger=%s\\n' "$linger"
-if [ "$linger" != "yes" ] && [ ${wantTimer ? "1" : "0"} -eq 1 ]; then
-  if sudo -n true >/dev/null 2>&1; then printf 'sudo=yes\\n'; else printf 'sudo=no\\n'; fi
-fi
 if [ -d ${hostPath(dir)}/.git ]; then printf 'checkout=present\\n'; else printf 'checkout=absent\\n'; fi
 if [ -f ${hostPath(KEY_PATH)}.pub ]; then
   printf 'deploykey=%s\\n' "$(cat ${hostPath(KEY_PATH)}.pub)"
@@ -250,38 +240,6 @@ function logsScript(dir: string): string {
   return `# uberblick:logs
 cd ${hostPath(dir)}
 sh remote-compose.sh logs --tail=50 hub caddy
-`;
-}
-
-function timerScript(dir: string, linger: boolean): string {
-  return `# uberblick:timer
-set -eu
-cd ${hostPath(dir)}
-checkout=$(pwd)
-units="$HOME/.config/systemd/user"
-mkdir -p "$units"
-cat > "$units/uberblick-update.service" <<UNIT
-[Unit]
-Description=Update the uberblick stack to origin/main
-
-[Service]
-Type=oneshot
-WorkingDirectory=$checkout
-ExecStart=/bin/sh $checkout/remote-update.sh
-UNIT
-cat > "$units/${TIMER_UNIT}" <<'UNIT'
-[Unit]
-Description=Check uberblick's origin/main every five minutes
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
-
-[Install]
-WantedBy=timers.target
-UNIT
-${linger ? "" : 'sudo -n loginctl enable-linger "$(id -un)"\n'}systemctl --user daemon-reload
-systemctl --user enable --now ${TIMER_UNIT}
 `;
 }
 
@@ -506,7 +464,6 @@ interface InitFlags {
   dir: string;
   host: string | null;
   ip: string | null;
-  autoUpdate: boolean;
 }
 
 function parseInitFlags(argv: string[]): InitFlags {
@@ -516,7 +473,6 @@ function parseInitFlags(argv: string[]): InitFlags {
       dir: { type: "string" },
       host: { type: "string" },
       ip: { type: "string" },
-      "no-auto-update": { type: "boolean" },
     },
     allowPositionals: true,
   });
@@ -536,7 +492,6 @@ function parseInitFlags(argv: string[]): InitFlags {
     dir: values.dir ?? DEFAULT_DIR,
     host,
     ip,
-    autoUpdate: values["no-auto-update"] !== true,
   };
 }
 
@@ -648,7 +603,7 @@ export async function remoteInitCommand(
   }
 
   io.err(`ub remote: checking ${flags.target}…\n`);
-  const preflight = ssh(flags.target, preflightScript(flags.dir, flags.autoUpdate), { env });
+  const preflight = ssh(flags.target, preflightScript(flags.dir), { env });
   if (preflight.status !== 0) {
     io.err(`ub remote init: ${failed(`ssh ${flags.target}`, preflight)}.\n`);
     return 1;
@@ -674,19 +629,6 @@ export async function remoteInitCommand(
     io.err(`ub remote init: ${flags.target} has no \`git\`.\n`);
     return 1;
   }
-  // Before anything is cloned, and before the deploy key exists: passwordless
-  // sudo is a stated host prerequisite, and its absence is a refusal rather
-  // than a password prompt nobody can answer over a non-TTY channel.
-  if (flags.autoUpdate && facts.linger !== "yes" && facts.sudo !== "yes") {
-    io.err(
-      `ub remote init: the update timer needs lingering enabled for ${user} on ` +
-        `${flags.target}, and \`sudo -n true\` there failed, so this cannot ` +
-        "enable it. Run `sudo loginctl enable-linger " +
-        `${user}\` on the host once, or pass --no-auto-update. Nothing was done.\n`,
-    );
-    return 1;
-  }
-
   // Detection, then the flags, then a prompt — and a refusal that names what is
   // missing rather than guessing it.
   let host = flags.host;
@@ -847,7 +789,7 @@ export async function remoteInitCommand(
   if (up.status !== 0) {
     io.err(`ub remote init: ${failed("sh remote-compose.sh up", up)}.\n`);
     io.err(ssh(flags.target, logsScript(flags.dir), { env }).stdout);
-    io.err("Nothing was persisted here, and no update timer was installed.\n");
+    io.err("Nothing was persisted here.\n");
     return 1;
   }
 
@@ -856,32 +798,15 @@ export async function remoteInitCommand(
   if (unreachable !== null) {
     io.err(`ub remote init: ${unreachable}\n`);
     io.err(ssh(flags.target, logsScript(flags.dir), { env }).stdout);
-    io.err("Nothing was persisted here, and no update timer was installed.\n");
+    io.err("Nothing was persisted here.\n");
     return 1;
-  }
-
-  if (flags.autoUpdate) {
-    const timer = ssh(flags.target, timerScript(flags.dir, facts.linger === "yes"), {
-      env,
-    });
-    if (timer.status !== 0) {
-      io.err(
-        `ub remote init: the stack is up, but ${failed("installing the update timer", timer)}. ` +
-          "Rerun, or pass --no-auto-update and deploy with `ub remote update`. " +
-          "Nothing was persisted here.\n",
-      );
-      return 1;
-    }
   }
 
   const endpoint = `wss://${magicDns}/ws`;
   let report = `uberblick is up at https://${magicDns}/\n`;
-  report += flags.autoUpdate
-    ? `${flags.target} now follows origin/main by itself, checking every five ` +
-      "minutes: anyone who can merge to main can run code on it. " +
-      "`ub remote update` deploys on demand; --no-auto-update installs without " +
-      "the timer.\n"
-    : "No update timer was installed; deploy with `ub remote update`.\n";
+  report +=
+    `${flags.target} does not update itself. Deploy origin/main onto it when ` +
+    "you mean to, with `ub remote update`.\n";
 
   const held = await localDocumentCount(base);
   if (held > 0) {
@@ -944,8 +869,9 @@ export async function remoteUpdateCommand(
   }
 
   const env = deps.env ?? process.env;
-  // The host's own updater, on demand — the same script the timer runs, so the
-  // two can never drift apart, and the lock is what keeps them from colliding.
+  // The host's own updater, which is versioned in the checkout it deploys, so
+  // this and a by-hand `sh remote-update.sh` can never drift apart. Its `flock`
+  // is what keeps two deliberate runs from colliding.
   const ran = ssh(flags.target, updateScript(flags.dir), { env });
   if (ran.stdout !== "") io.out(ran.stdout);
   if (ran.status !== 0) {

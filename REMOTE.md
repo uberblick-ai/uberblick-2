@@ -25,11 +25,8 @@ Server-minted sessions are the planned replacement; see
   Tailscale documents that tradeoff in
   [Enabling HTTPS](https://tailscale.com/docs/how-to/set-up-https-certificates).
 - TCP port 443 free on the host's Tailscale IPv4 address.
-- `git` on the host, and SSH access to it (Tailscale SSH is enough).
-- For the update timer: lingering enabled for the SSH user
-  (`loginctl enable-linger <user>`), or passwordless `sudo` so `ub remote init`
-  can enable it. Without either, init refuses before it clones anything —
-  `--no-auto-update` installs the stack without the timer.
+- `git` on the host, and SSH access to it (Tailscale SSH is enough) — that SSH
+  access is also how the host is updated, since nothing on it updates itself.
 
 `ub remote init` runs from your own machine, which must itself be on the tailnet
 (it is what verifies the deployment afterwards) and must hold a GitHub login with
@@ -78,40 +75,49 @@ hand:
    is what makes Tailscale issue the certificate, so an immediate check is a
    false negative — and confirms `/ws` upgrades to a WebSocket. A failure exits
    non-zero with the last hub and Caddy log lines, and persists nothing.
-6. Installs a systemd **user** timer, `uberblick-update.timer`, which runs
-   `remote-update.sh` from the checkout every five minutes.
-7. Prints the URL. If this workspace holds no documents it points your clients
+6. Prints the URL. If this workspace holds no documents it points your clients
    at the new hub (`ub remote set`); if it holds documents it switches nothing
    and prints the `ub remote promote` command instead.
 
 Every step is idempotent: re-running `ub remote init` against a host it already
-stood up adds no second deploy key, re-clones nothing, and leaves the timer as
-it is.
+stood up adds no second deploy key and re-clones nothing.
 
-### The host tracks `main` itself
+### Updating the host — deliberately
 
-Nothing is deployed *from* your checkout. The host fetches `origin/main` every
-five minutes and, when it differs from the last **successfully deployed**
-commit, resets to it and rebuilds — `remote-update.sh`, versioned in this
-repository next to `remote-compose.sh`, so the updater updates itself.
+**The host does not update itself.** It stays on the commit it was last deployed
+at until somebody deploys another one. Nothing is scheduled: no timer, no
+webhook, no polling loop (owner decision, 2026-08-25 — an unattended updater
+would apply a commit that changes wire semantics to production with nobody
+present).
 
-**Anyone who can merge to `main` can execute code on this host within five
-minutes.** That is the accepted tradeoff for a host whose whole purpose is to
-follow `main`, and it is why `--no-auto-update` exists: it installs the stack
-with no timer, and
+One command, from your own machine, run by you or by an agent session over SSH:
 
 ```sh
 ub remote update uberblick@box.tailnet.ts.net
 ```
 
-then deploys on demand, reporting either "up to date" or the commit it moved to.
-It runs that same script on the host, so the two can never drift apart, and a
-`flock` outside the checkout keeps an on-demand run from colliding with a timer
-tick.
+It runs `remote-update.sh` in the host's checkout — the same script you would
+run by hand there — and reports either "up to date" or the commit it moved to.
+A `flock` outside the checkout keeps two runs from colliding.
 
+**When to update:** when a merged change is one you want live — a fix you are
+waiting on, a feature you are about to demonstrate, a deployment you are about
+to verify. Deploy while you are present to watch it, never as the last thing
+before walking away.
+
+**The wire-semantics rule.** A change to what travels over the socket — the auth
+token's shape or claims, the sync protocol, the room key, the served
+`/uberblick-config.json` contract — breaks every client still on the old code.
+Deploy such a change and update the clients in the **same sitting**: after
+`ub remote update`, pull `main` on each machine that syncs to this hub (and
+reload every open browser tab, which takes its bundle and its configuration from
+the host). If you cannot finish both halves now, do neither now.
+
+Nothing is deployed *from* your checkout: the host fetches `origin/main` itself
+and resets to it, so what runs there is always a commit that is on `main`.
 The updater compares against `refs/uberblick/deployed`, which moves only after a
 build exits 0 — never against `HEAD`. A commit whose build fails is therefore
-retried on the next tick rather than remembered as deployed, which is what keeps
+retried on the next run rather than remembered as deployed, which is what keeps
 one bad commit from wedging the host with its containers on the old code.
 `git reset --hard` discards host-local edits to **tracked** files, deliberately —
 the host mirrors `main` and is not a place to edit — and prints what it
@@ -261,12 +267,16 @@ sh remote-compose.sh down
 sh remote-compose.sh up --detach
 ```
 
-The update timer is a systemd user unit on the host:
+Deploying a new commit is [its own runbook](#updating-the-host--deliberately).
+A host stood up before 2026-08-25 carries the retired `uberblick-update.timer`;
+retire it once, on that host:
 
 ```sh
-systemctl --user status uberblick-update.timer
-journalctl --user -u uberblick-update.service --since -1h
 systemctl --user disable --now uberblick-update.timer
+rm -f ~/.config/systemd/user/uberblick-update.timer \
+      ~/.config/systemd/user/uberblick-update.service
+systemctl --user daemon-reload
+systemctl --user list-timers --all | grep uberblick   # expect no output
 ```
 
 The hub handles Compose's `SIGTERM` by flushing pending document updates before
