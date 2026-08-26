@@ -12,7 +12,6 @@ import * as Y from "yjs";
 import {
   compactFeedback,
   getFeedbackEvents,
-  hasSessionVerdict,
   readFeedback,
   recordUsage,
   recordVerdict,
@@ -149,8 +148,6 @@ describe("verdicts", () => {
       unrated: 1,
       helpfulRatio: 0.5,
     });
-    expect(hasSessionVerdict(feedback, ALPHA, "session-a")).toBe(true);
-    expect(hasSessionVerdict(feedback, ALPHA, "session-c")).toBe(false);
   });
 
   it("counts a session that only rated as having used the document", () => {
@@ -212,10 +209,10 @@ describe("the feedback doc is an ordinary synced doc", () => {
 });
 
 describe("the report", () => {
-  it("sorts by sessions used and caps the reasons it carries", () => {
+  it("sorts by sessions used and carries only the most recent reasons", () => {
     const feedback = new Y.Doc();
     use(feedback, BETA, "session-a");
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < 7; index += 1) {
       recordVerdict(feedback, {
         docUuid: ALPHA,
         session: `session-${index}`,
@@ -226,10 +223,13 @@ describe("the report", () => {
       });
     }
 
-    const report = readFeedback(feedback, { reasonLimit: 2 });
+    const report = readFeedback(feedback);
     expect(report.map((entry) => entry.uuid)).toEqual([ALPHA, BETA]);
-    // Newest first, and only as many as asked for.
+    // Newest first, capped: a report is a brief, not an archive.
     expect(report[0]?.reasons.map((entry) => entry.reason)).toEqual([
+      "reason 6",
+      "reason 5",
+      "reason 4",
       "reason 3",
       "reason 2",
     ]);
@@ -242,11 +242,22 @@ describe("the report", () => {
 });
 
 describe("compaction", () => {
-  it("bounds the event list under a burst and keeps the counts", () => {
-    const feedback = new Y.Doc();
-    for (let index = 0; index < 600; index += 1) {
-      use(feedback, ALPHA, `session-${index}`);
+  /** `count` sessions that used ALPHA and rated it — settled pairs. */
+  function ratedBurst(feedback: Y.Doc, count: number): void {
+    for (let index = 0; index < count; index += 1) {
+      recordVerdict(feedback, {
+        docUuid: ALPHA,
+        session: `session-${index}`,
+        agent: "test",
+        verdict: "helpful",
+        at: index,
+      });
     }
+  }
+
+  it("folds settled pairs and keeps their counts", () => {
+    const feedback = new Y.Doc();
+    ratedBurst(feedback, 600);
     expect(getFeedbackEvents(feedback).length).toBe(600);
 
     const folded = compactFeedback(feedback, { limit: 100, keep: 20 });
@@ -255,8 +266,8 @@ describe("compaction", () => {
     // Folded into totals, not thrown away.
     expect(row(feedback, ALPHA)).toMatchObject({
       sessionsUsed: 600,
-      unrated: 600,
-      helpful: 0,
+      helpful: 600,
+      unrated: 0,
     });
 
     // Idempotent below the limit: nothing more to fold, nothing more removed.
@@ -264,44 +275,58 @@ describe("compaction", () => {
     expect(getFeedbackEvents(feedback).length).toBe(20);
   });
 
-  it("never folds half a session, so a later verdict still replaces", () => {
+  it("never folds an unrated session, so a later verdict still replaces it", () => {
     const feedback = new Y.Doc();
-    use(feedback, ALPHA, "long-lived");
-    for (let index = 0; index < 30; index += 1) {
-      use(feedback, BETA, `session-${index}`);
-    }
-    // The long-lived session's newest event sits at the end, so none of its
-    // events are foldable — including the old one at index 0.
-    use(feedback, BETA, "long-lived");
-    compactFeedback(feedback, { limit: 20, keep: 5 });
+    // The oldest event in the list, and unrated: exactly the event the fold
+    // must leave alone, because folding it would count this session in totals
+    // and again the moment it rates the document.
+    use(feedback, ALPHA, "undecided");
+    ratedBurst(feedback, 60);
+    compactFeedback(feedback, { limit: 30, keep: 10 });
 
     recordVerdict(feedback, {
       docUuid: ALPHA,
-      session: "long-lived",
+      session: "undecided",
       agent: "test",
       verdict: "unhelpful",
       at: 99,
     });
+    // One session, one sessionsUsed — not one in totals plus one live.
     expect(row(feedback, ALPHA)).toMatchObject({
-      sessionsUsed: 1,
+      sessionsUsed: 61,
+      helpful: 60,
       unhelpful: 1,
       unrated: 0,
     });
   });
 
-  it("still bounds a list one live session made on its own", () => {
+  it("never folds half a settled pair", () => {
     const feedback = new Y.Doc();
-    // Every event belongs to one session, so the idle-session rule can fold
-    // nothing. The backstop has to, or the document grows without limit.
+    ratedBurst(feedback, 60);
+    // A pair whose newest event sits after the cut: its older event must not
+    // fold on its own, or the pair is counted twice.
+    use(feedback, BETA, "session-0");
+    compactFeedback(feedback, { limit: 30, keep: 10 });
+
+    expect(row(feedback, ALPHA)).toMatchObject({ sessionsUsed: 60, helpful: 60 });
+    expect(row(feedback, BETA)).toMatchObject({ sessionsUsed: 1, unrated: 1 });
+  });
+
+  it("still bounds a list of unrated reads, which is the backstop", () => {
+    const feedback = new Y.Doc();
+    // Nobody rated anything, so the settled fold can fold nothing. The backstop
+    // has to, or the document grows without limit — at the cost of counting a
+    // session twice if it comes back to rate one of these documents, which is
+    // the trade the header states.
     for (let index = 0; index < 300; index += 1) {
-      use(feedback, `doc-${index}`, "one-session");
+      use(feedback, `doc-${index}`, `session-${index}`);
     }
     const folded = compactFeedback(feedback, { limit: 100, keep: 20 });
 
     expect(folded).toBe(280);
     expect(getFeedbackEvents(feedback).length).toBe(20);
     expect(readFeedback(feedback).length).toBe(300);
-    expect(row(feedback, "doc-0")).toMatchObject({ sessionsUsed: 1 });
+    expect(row(feedback, "doc-0")).toMatchObject({ sessionsUsed: 1, unrated: 1 });
   });
 
   it("does nothing to a list under the limit", () => {
@@ -309,5 +334,40 @@ describe("compaction", () => {
     use(feedback, ALPHA, "session-a");
     expect(compactFeedback(feedback, { limit: 100, keep: 20 })).toBe(0);
     expect(getFeedbackEvents(feedback).length).toBe(1);
+  });
+
+  it("converges when two replicas compact different slices, and never overcounts", () => {
+    const first = new Y.Doc();
+    ratedBurst(first, 40);
+    const second = new Y.Doc();
+    syncDocs(first, second);
+    // The first replica has seen ten more sessions than the second, so the two
+    // are about to fold different slices of one list.
+    for (let index = 40; index < 50; index += 1) {
+      recordVerdict(first, {
+        docUuid: ALPHA,
+        session: `session-${index}`,
+        agent: "test",
+        verdict: "helpful",
+        at: index,
+      });
+    }
+
+    // Different slices, which is the whole point of the case: 45 events folded
+    // on one side, 35 on the other, and both writes land on the same key.
+    expect(compactFeedback(first, { limit: 5, keep: 5 })).toBe(45);
+    expect(compactFeedback(second, { limit: 5, keep: 5 })).toBe(35);
+    syncDocs(first, second);
+
+    // Convergent first: whichever whole-object totals write Yjs ordered last,
+    // both replicas answer with it.
+    expect(readFeedback(first)).toEqual(readFeedback(second));
+    const counted = row(first, ALPHA)?.sessionsUsed ?? 0;
+    // Never above the truth — 50 sessions really did rate this document — and
+    // never below the narrower fold plus the events still live, which is the
+    // bound the header claims for a lost totals write.
+    expect(counted).toBeLessThanOrEqual(50);
+    expect(counted).toBeGreaterThanOrEqual(40);
+    expect(row(first, ALPHA)?.unrated).toBe(0);
   });
 });

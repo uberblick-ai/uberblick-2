@@ -54,27 +54,38 @@
  *
  * Two rules, both deliberate:
  *
- *   - **Fold whole sessions, never half of one.** An event is foldable only
- *     when its session's newest event also sits before the cut. Folding half a
- *     session would count it once in `totals` and again from the events it has
- *     left, so a session that used a document and rated it later would inflate
- *     both buckets.
- *   - **A hard backstop.** One long-lived session reading a large corpus is
- *     entirely made of events that are not foldable by the rule above, so when
- *     the idle-session fold cannot bring the list under the limit, everything
- *     before the cut is folded regardless. That trades the exactness above for
- *     a bound, and it is the right trade for advisory telemetry: an unbounded
- *     document is a real cost, a doubled count in a rare race is not.
+ *   - **Only settled pairs fold, whole.** A (document, session) pair is
+ *     foldable when it has a *verdict* and its newest event sits before the
+ *     cut. Rating is the last thing a session says about a document — a
+ *     verdict replaces the pair's earlier events — so a folded pair has nothing
+ *     left to come, and the fold is exact. (Exact to the same boundary
+ *     everything here has: a session that comes back to *re-rate* a document a
+ *     whole compaction window later is counted twice for it, like one that
+ *     re-reads one whose event the backstop folded. It takes a session that
+ *     outlives the window.) An unrated `used` event stays live
+ *     however old it is, because folding it would count the session once in
+ *     `totals` and again the moment it rated the document: one session, two
+ *     sessionsUsed. Cheap to leave alone, wrong to fold.
+ *   - **A hard backstop.** A corpus read by sessions that never rate anything
+ *     is entirely made of events the rule above will not fold, so when the
+ *     settled fold cannot bring the list under the limit, everything before the
+ *     cut is folded regardless. **This is the path that overcounts in ordinary use**: a
+ *     session whose `used` event was folded that way and which then rates the
+ *     document is counted twice for it — `sessionsUsed` and one bucket too high
+ *     by exactly one per (document, session) it happens to. It is the right
+ *     trade for advisory telemetry, an unbounded document being a real cost and
+ *     a rare doubled count not, but it is a real inaccuracy and both this
+ *     module and `feedback_report` say so rather than implying exactness.
  *
- * `totals` is written per document as a whole object, and this is the one place
- * concurrency can lose something. Two replicas that fold the *same* events
- * compute the same totals and converge on them, which is the ordinary case —
- * both trim the same items, and Yjs deletes are idempotent. Two replicas that
- * fold *different* slices (one had seen more events than the other) converge on
- * whichever whole-object write Yjs orders last, so the wider slice's extra
- * events can be trimmed without being counted. That direction is deliberate:
- * compaction can undercount, never overcount, and usage telemetry that
- * understates itself is the safe failure.
+ * `totals` is written per document as a whole object, and this is the other
+ * place concurrency shows. Two replicas that fold the *same* events compute the
+ * same totals and converge on them, which is the ordinary case — both trim the
+ * same items, and Yjs deletes are idempotent. Two replicas that fold *different*
+ * slices (one had seen more events than the other) converge on whichever
+ * whole-object write Yjs orders last, so the wider slice's extra events can be
+ * trimmed without being counted. That direction is bounded and one-way: the
+ * result is never higher than the truth, and never lower than the narrower
+ * fold's own count plus whatever events are still live.
  *
  * Reasons are not folded. `totals` keeps counts only, so a reason survives
  * exactly as long as the event carrying it — which is what "recent reasons"
@@ -85,26 +96,25 @@ import type * as Y from "yjs";
 import type {
   DocFeedback,
   FeedbackEvent,
-  FeedbackKind,
   FeedbackReason,
   FeedbackTotals,
   FeedbackVerdict,
 } from "./types.js";
 
 /** The key of the append-only event array inside a feedback doc. */
-export const FEEDBACK_EVENTS_KEY = "events";
+const FEEDBACK_EVENTS_KEY = "events";
 
 /** The key of the folded per-document totals inside a feedback doc. */
-export const FEEDBACK_TOTALS_KEY = "totals";
+const FEEDBACK_TOTALS_KEY = "totals";
 
 /** Events above which {@link compactFeedback} folds. */
-export const FEEDBACK_EVENT_LIMIT = 500;
+const FEEDBACK_EVENT_LIMIT = 500;
 
 /** Events {@link compactFeedback} leaves in place, newest first. */
-export const FEEDBACK_KEEP_EVENTS = 100;
+const FEEDBACK_KEEP_EVENTS = 100;
 
 /** Reasons {@link readFeedback} returns per document, newest first. */
-const DEFAULT_REASON_LIMIT = 5;
+const REASON_LIMIT = 5;
 
 /** The append-only event array inside a feedback doc. */
 export function getFeedbackEvents(feedbackDoc: Y.Doc): Y.Array<FeedbackEvent> {
@@ -116,50 +126,35 @@ export function getFeedbackTotals(feedbackDoc: Y.Doc): Y.Map<unknown> {
   return feedbackDoc.getMap<unknown>(FEEDBACK_TOTALS_KEY);
 }
 
-/** A stored event, or null when the value is not one. */
+/**
+ * A stored event, or null when the value is not an object.
+ *
+ * Shape-checked, never repaired: every event in here was written by this
+ * module, and a reader that silently rewrote a field would hide the one case
+ * worth seeing.
+ */
 function readEvent(value: unknown): FeedbackEvent | null {
   if (typeof value !== "object" || value === null) return null;
-  const candidate = value as Partial<FeedbackEvent>;
-  if (typeof candidate.docUuid !== "string" || candidate.docUuid === "") {
-    return null;
-  }
-  if (typeof candidate.session !== "string" || candidate.session === "") {
-    return null;
-  }
-  const kind = candidate.kind;
-  if (kind !== "used" && kind !== "helpful" && kind !== "unhelpful") {
-    return null;
-  }
-  return {
-    docUuid: candidate.docUuid,
-    session: candidate.session,
-    agent: typeof candidate.agent === "string" ? candidate.agent : "",
-    kind,
-    ...(typeof candidate.reason === "string" && candidate.reason !== ""
-      ? { reason: candidate.reason }
-      : {}),
-    at: typeof candidate.at === "number" && Number.isFinite(candidate.at)
-      ? candidate.at
-      : 0,
-  };
+  return value as FeedbackEvent;
 }
 
-/** Stored totals, defaulting every missing field to zero. */
+/** Stored totals, with a missing field read as zero. */
 function readTotals(value: unknown): FeedbackTotals {
-  const candidate =
+  const stored =
     typeof value === "object" && value !== null
       ? (value as Partial<FeedbackTotals>)
       : {};
-  const count = (input: unknown): number =>
-    typeof input === "number" && Number.isFinite(input) && input > 0
-      ? Math.trunc(input)
-      : 0;
   return {
-    sessionsUsed: count(candidate.sessionsUsed),
-    helpful: count(candidate.helpful),
-    unhelpful: count(candidate.unhelpful),
-    unrated: count(candidate.unrated),
+    sessionsUsed: stored.sessionsUsed ?? 0,
+    helpful: stored.helpful ?? 0,
+    unhelpful: stored.unhelpful ?? 0,
+    unrated: stored.unrated ?? 0,
   };
+}
+
+/** The key one (document, session) pair folds under. */
+function pairKey(event: FeedbackEvent): string {
+  return `${event.docUuid}\u0000${event.session}`;
 }
 
 /** Every readable event, in stored order. */
@@ -177,13 +172,9 @@ function sessionEvent(
   feedbackDoc: Y.Doc,
   docUuid: string,
   session: string,
-  kinds?: readonly FeedbackKind[],
 ): boolean {
   return events(feedbackDoc).some(
-    (event) =>
-      event.docUuid === docUuid &&
-      event.session === session &&
-      (kinds === undefined || kinds.includes(event.kind)),
+    (event) => event.docUuid === docUuid && event.session === session,
   );
 }
 
@@ -199,6 +190,12 @@ export interface RecordUsageInput {
 
 /**
  * Record that this session used this document, once.
+ *
+ * The dedupe is the stored events, so it is exactly as durable as they are: a
+ * session whose `used` event the compaction backstop folded away reports the
+ * document again, and is counted twice for it. That is the same bounded
+ * inaccuracy the backstop already carries — see the module header — and it takes
+ * a session long-lived enough to outlive a whole compaction window.
  *
  * @returns whether an event was appended — false when this session has already
  * reported on the document, which is also the answer to "has this session been
@@ -264,15 +261,6 @@ export function recordVerdict(
   });
 }
 
-/** Whether this session has already rated this document. */
-export function hasSessionVerdict(
-  feedbackDoc: Y.Doc,
-  docUuid: string,
-  session: string,
-): boolean {
-  return sessionEvent(feedbackDoc, docUuid, session, ["helpful", "unhelpful"]);
-}
-
 /** Per document: each session that reported, and its verdict if it gave one. */
 function foldSessions(
   list: readonly FeedbackEvent[],
@@ -311,11 +299,6 @@ function tally(sessions: Map<string, FeedbackVerdict | null>): FeedbackTotals {
   };
 }
 
-export interface ReadFeedbackOptions {
-  /** Reasons per document, newest first. Default 5. */
-  reasonLimit?: number;
-}
-
 /**
  * The whole report: live events folded together with the totals compaction
  * already folded, sorted by sessions used (descending), then by uuid so every
@@ -324,11 +307,7 @@ export interface ReadFeedbackOptions {
  * Documents nothing has ever reported on are absent. There is no backfill and
  * no zero row: telemetry starts when an agent produces some.
  */
-export function readFeedback(
-  feedbackDoc: Y.Doc,
-  options: ReadFeedbackOptions = {},
-): DocFeedback[] {
-  const reasonLimit = Math.max(0, options.reasonLimit ?? DEFAULT_REASON_LIMIT);
+export function readFeedback(feedbackDoc: Y.Doc): DocFeedback[] {
   const live = events(feedbackDoc);
   const byDoc = foldSessions(live);
 
@@ -338,7 +317,7 @@ export function readFeedback(
     if (event === undefined || event.kind === "used") continue;
     if (event.reason === undefined) continue;
     const collected = reasons.get(event.docUuid) ?? [];
-    if (collected.length >= reasonLimit) continue;
+    if (collected.length >= REASON_LIMIT) continue;
     collected.push({
       session: event.session,
       agent: event.agent,
@@ -387,9 +366,10 @@ export interface CompactFeedbackOptions {
 /**
  * Fold old events into per-document totals and trim them.
  *
- * Whole sessions only, with a hard backstop when that cannot bring the list
- * under the limit — see the module header for both rules and for what a
- * concurrent compaction costs.
+ * Settled (document, session) pairs only — rated, and done writing — with a
+ * hard backstop that folds anything before the cut when that cannot bound the
+ * list. See the module header for both rules, for the overcount the backstop
+ * can cause, and for what a concurrent compaction costs.
  *
  * @returns how many events were folded. Zero means the list was short enough,
  * which is the ordinary answer.
@@ -405,24 +385,33 @@ export function compactFeedback(
   if (stored.length <= limit) return 0;
 
   const cut = stored.length - keep;
-  const lastIndex = new Map<string, number>();
+  // Per (document, session): where its newest event sits, and whether it has
+  // said the last thing it is going to say about that document.
+  const newest = new Map<string, number>();
+  const rated = new Set<string>();
   stored.forEach((event, index) => {
-    if (event !== null) lastIndex.set(event.session, index);
+    if (event === null) return;
+    const key = pairKey(event);
+    newest.set(key, index);
+    if (event.kind !== "used") rated.add(key);
   });
 
-  const idle: number[] = [];
+  const settled: number[] = [];
   const before: number[] = [];
   stored.forEach((event, index) => {
     if (index >= cut) return;
     before.push(index);
-    // A malformed entry is folded as nothing: it counts for no session and
-    // nothing can read it, so leaving it in place would only pad the list.
-    if (event === null || (lastIndex.get(event.session) ?? index) < cut) {
-      idle.push(index);
+    // A malformed entry folds as nothing: it counts for no session and nothing
+    // can read it, so leaving it in place would only pad the list.
+    if (event === null) {
+      settled.push(index);
+      return;
     }
+    const key = pairKey(event);
+    if (rated.has(key) && (newest.get(key) ?? index) < cut) settled.push(index);
   });
 
-  const indexes = stored.length - idle.length > limit ? before : idle;
+  const indexes = stored.length - settled.length > limit ? before : settled;
   if (indexes.length === 0) return 0;
 
   const folded = indexes

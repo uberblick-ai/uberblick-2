@@ -101,21 +101,15 @@ export {
 export type { ParsedRoom } from "./rooms.js";
 
 export {
-  FEEDBACK_EVENTS_KEY,
-  FEEDBACK_EVENT_LIMIT,
-  FEEDBACK_KEEP_EVENTS,
-  FEEDBACK_TOTALS_KEY,
   compactFeedback,
   getFeedbackEvents,
   getFeedbackTotals,
-  hasSessionVerdict,
   readFeedback,
   recordUsage,
   recordVerdict,
 } from "./feedback.js";
 export type {
   CompactFeedbackOptions,
-  ReadFeedbackOptions,
   RecordUsageInput,
   RecordVerdictInput,
 } from "./feedback.js";

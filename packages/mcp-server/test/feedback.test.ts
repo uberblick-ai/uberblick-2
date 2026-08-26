@@ -81,6 +81,17 @@ describe("usage counts sessions, not calls", () => {
         helpfulRatio: null,
       });
     }
+
+    // One of them forms an opinion; the other abstains and stays visible as
+    // its own bucket rather than being read as a vote either way.
+    await first.ok("rate_doc", { uuid, verdict: "helpful" });
+    expect(docRow(await second.ok("feedback_report"), uuid)).toMatchObject({
+      sessionsUsed: 2,
+      helpful: 1,
+      unhelpful: 0,
+      unrated: 1,
+      helpfulRatio: 1,
+    });
   });
 
   it("counts ten get_docs in one session once", async () => {
@@ -189,25 +200,6 @@ describe("rate_doc", () => {
         reason: "the contracts section answered it",
       }),
     ]);
-  });
-
-  it("keeps used-but-unrated as its own bucket", async () => {
-    const databasePath = tempDatabasePath();
-    const first = await server(databasePath);
-    const uuid = await createDoc(first, "Half rated");
-    const second = await server(databasePath);
-
-    await first.ok("get_doc", { uuid });
-    await second.ok("get_doc", { uuid });
-    await first.ok("rate_doc", { uuid, verdict: "helpful" });
-
-    expect(docRow(await second.ok("feedback_report"), uuid)).toMatchObject({
-      sessionsUsed: 2,
-      helpful: 1,
-      unhelpful: 0,
-      unrated: 1,
-      helpfulRatio: 1,
-    });
   });
 
   it("refuses a uuid the directory has never heard of", async () => {
@@ -326,25 +318,8 @@ describe("feedback_report", () => {
       sessionsUsed: 1,
     });
     expect(docRow(report, uuid)).toMatchObject({ title: "Reported on" });
-  });
-
-  it("sorts by usage and honours a limit", async () => {
-    const databasePath = tempDatabasePath();
-    const first = await server(databasePath);
-    const popular = await createDoc(first, "Popular");
-    const quiet = await createDoc(first, "Quiet");
-    const second = await server(databasePath);
-
-    await first.ok("get_doc", { uuid: popular });
-    await second.ok("get_doc", { uuid: popular });
-    await first.ok("get_doc", { uuid: quiet });
-
-    const report = await first.ok("feedback_report");
-    expect(report.docs.map((doc: { title: string }) => doc.title)).toEqual([
-      "Popular",
-      "Quiet",
-    ]);
-    expect((await first.ok("feedback_report", { limit: 1 })).docs).toHaveLength(1);
+    // Two rows in hand, so this is also where `limit` is worth asserting.
+    expect((await rig.ok("feedback_report", { limit: 1 })).docs).toHaveLength(1);
   });
 
   it("keeps the event list bounded under a burst, without losing the counts", async () => {
@@ -352,9 +327,10 @@ describe("feedback_report", () => {
     const uuid = await createDoc(rig, "Read by everyone");
     const feedback = rig.instance.replicas.feedback().doc;
 
-    // 600 sessions' worth of reads, past the production compaction limit. They
-    // are ordinary local writes on the replica, so they are logged like any
-    // other — this is a burst, not a fixture.
+    // 600 sessions' worth of reads, past the production compaction limit, none
+    // of them rated — the shape only the backstop can fold. They are ordinary
+    // local writes on the replica, so they are logged like any other: this is a
+    // burst, not a fixture.
     for (let index = 0; index < 600; index += 1) {
       recordUsage(feedback, {
         docUuid: uuid,

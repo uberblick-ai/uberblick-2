@@ -449,7 +449,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Reading a document records it as used by this session in the workspace's `_feedback` document — once per " +
         "document per session, however often you read it, so re-reading costs nothing. The first read of a " +
         "document you have not rated also answers with a one-line `feedback` reminder that rate_doc exists; it is " +
-        "advisory, never a failure, and never required.",
+        "advisory, never a failure, and never required. (The dedupe is the stored events, so after heavy " +
+        "compaction a very long-lived session may be counted and nudged once more for a document it read long ago.)",
       inputSchema: { uuid: uuidArg },
     },
     guarded(async ({ uuid }) => {
