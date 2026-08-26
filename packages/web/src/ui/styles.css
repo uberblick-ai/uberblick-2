@@ -2557,13 +2557,17 @@ h3.ub-heading {
   margin: 0;
 }
 
+/* The same box the rows lay their columns out in. A row's grid is measured
+   inside `.ub-all-open`'s padding, so a head grid without it would compute
+   wider columns and every column after the first would sit a few pixels off
+   the values it names. The pin column has no head, so the heads keep clear of
+   it too — its width plus the row's gap. */
 .ub-all-head {
   display: grid;
   grid-template-columns: var(--all-columns);
   gap: 0.75rem;
-  /* The pin column has no head; the heads keep clear of it so the labels stay
-     over the values they name. */
-  padding-right: calc(var(--all-pin) + 0.25rem);
+  padding-left: 0.4rem;
+  padding-right: calc(0.4rem + var(--all-pin) + 0.25rem);
   border-bottom: 1px solid var(--border);
 }
 
@@ -2571,7 +2575,10 @@ h3.ub-heading {
    thing that changes when the order does — the labels never move. */
 .ub-all-sort {
   text-align: left;
-  padding: 0.35rem 0.4rem;
+  /* No horizontal padding: the head's own padding is what lines the labels up
+     with the values, and the control shows its state in weight and colour
+     rather than in a box, so it has nothing to inset. */
+  padding: 0.35rem 0;
   border: 0;
   border-radius: var(--radius-sm);
   background: none;

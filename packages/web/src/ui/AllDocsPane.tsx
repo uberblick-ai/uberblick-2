@@ -23,6 +23,8 @@
 import { useCallback, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
+import type { RoomConnection } from "../collab/rooms.js";
+import { useRoomStatus } from "./hooks.js";
 
 /** How the listing is ordered. */
 export type DocSort = "title" | "changed" | "created";
@@ -39,6 +41,21 @@ const COLUMNS: ReadonlyArray<{ sort: DocSort; label: string }> = [
 
 /** Absolute and in the reader's locale, like a comment byline — never "3d ago". */
 const STAMP_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+
+/**
+ * The stamp, if a `Date` can actually hold it.
+ *
+ * The stubs are cache-quality and written by whichever replica had the clock,
+ * so a finite-but-absurd number is a state that can reach here — the schema
+ * only checks `Number.isFinite`, and `new Date(1e308).toISOString()` throws.
+ * An uncaught throw in a cell would blank the whole listing over one bad stub,
+ * so an unusable stamp is treated exactly like a missing one: a dash in the
+ * row, and last under the time sorts.
+ */
+function usableStamp(at: number | undefined): number | undefined {
+  if (at === undefined) return undefined;
+  return Number.isFinite(new Date(at).getTime()) ? at : undefined;
+}
 
 function isSort(value: unknown): value is DocSort {
   return value === "title" || value === "changed" || value === "created";
@@ -69,7 +86,7 @@ export function sortDirectory(
   const out = [...entries];
   if (sort === "title") return out.sort(byTitle);
   const stamp = (entry: DirectoryEntry): number | undefined =>
-    sort === "created" ? entry.createdAt : entry.updatedAt;
+    usableStamp(sort === "created" ? entry.createdAt : entry.updatedAt);
   return out.sort((a, b) => {
     const left = stamp(a);
     const right = stamp(b);
@@ -110,20 +127,28 @@ function useStoredSort(): [DocSort, (next: DocSort) => void] {
 
 /** One stamp cell: the reader's date, and the machine value beside it. */
 function Stamp({ at }: { at: number | undefined }): ReactElement {
-  if (at === undefined) return <span className="ub-all-stamp ub-muted">—</span>;
+  const stamp = usableStamp(at);
+  if (stamp === undefined) return <span className="ub-all-stamp ub-muted">—</span>;
   return (
-    <time className="ub-all-stamp" dateTime={new Date(at).toISOString()}>
-      {STAMP_FORMAT.format(at)}
+    <time className="ub-all-stamp" dateTime={new Date(stamp).toISOString()}>
+      {STAMP_FORMAT.format(stamp)}
     </time>
   );
 }
 
 export function AllDocsPane({
+  connection,
   entries,
   groups,
   onSelect,
   onTogglePin,
 }: {
+  /**
+   * The directory room, for its sync state alone — the same reading the
+   * sidebar's head prints. An empty listing means two different things
+   * depending on it, and only one of them is "there are no documents".
+   */
+  connection: RoomConnection | null;
   /** The directory's non-deleted stubs, live — `useDirectory` in the shell. */
   entries: readonly DirectoryEntry[];
   /** The sidebar as it stands, for which rows read as pinned. */
@@ -132,6 +157,7 @@ export function AllDocsPane({
   /** Pin or unpin a row, or null when there is no sidebar room to write to. */
   onTogglePin: ((uuid: string) => void) | null;
 }): ReactElement {
+  const status = useRoomStatus(connection);
   const [sort, choose] = useStoredSort();
   const pinned = useMemo(
     () => new Set(groups.flatMap((group) => group.docs)),
@@ -162,7 +188,14 @@ export function AllDocsPane({
           ))}
         </div>
         {rows.length === 0 ? (
-          <p className="ub-muted ub-empty">No documents in this workspace yet.</p>
+          /* Nothing listed is only an answer once the directory has synced.
+             Before that this client has simply not heard yet — and a workspace
+             full of documents would be told it has none. */
+          <p className="ub-muted ub-empty">
+            {status.synced
+              ? "No documents in this workspace yet."
+              : "Nothing here yet — the directory has not synced on this client."}
+          </p>
         ) : (
           <ul className="ub-all-rows">
             {rows.map((entry) => (

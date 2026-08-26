@@ -32,7 +32,7 @@ import {
 } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { allPath, canonicalPath, parseRoute } from "../src/ui/route.js";
-import { sortDirectory } from "../src/ui/AllDocsPane.js";
+import { AllDocsPane, sortDirectory } from "../src/ui/AllDocsPane.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
@@ -193,18 +193,26 @@ describe("the sort", () => {
     expect(titles("created")).toEqual(["Beta", "Gamma", "Alpha"]);
   });
 
-  it("puts documents with no stamp last under both time sorts, in title order", () => {
+  it("puts documents with no usable stamp last under both time sorts, in title order", () => {
     // The stamps are optional by construction: a stub written before they
-    // existed carries none, and "no answer" is not "very old".
+    // existed carries none, and "no answer" is not "very old". A stamp no
+    // `Date` can hold is the same kind of no-answer — the stubs are written by
+    // whichever replica had the clock, so a finite absurdity is a real state.
     const mixed = [
       ...stamped,
       entry({ uuid: GONE, title: "Zeta" }),
       entry({ uuid: "aaaa1111-2222-4333-8444-555566667777", title: "Aardvark" }),
+      entry({
+        uuid: "bbbb2222-3333-4444-8555-666677778888",
+        title: "Skewed",
+        createdAt: Number.MAX_VALUE,
+        updatedAt: Number.MAX_VALUE,
+      }),
     ];
     for (const sort of ["changed", "created"] as const) {
       const titles = sortDirectory(mixed, sort).map((row) => row.title);
-      expect(titles.slice(-2)).toEqual(["Aardvark", "Zeta"]);
-      expect(titles).toHaveLength(5);
+      expect(titles.slice(-3)).toEqual(["Aardvark", "Skewed", "Zeta"]);
+      expect(titles).toHaveLength(6);
     }
   });
 
@@ -232,6 +240,11 @@ describe("the listing", () => {
     const host = await openApp(allPath(WORKSPACE));
 
     expect(rowTitles(host)).toEqual(["Editing", "Overview"]);
+    // Discovery is the directory doc, and the listing is that doc: rendering it
+    // opens no document room. (`_sidebar` is the shell's, for the pin state.)
+    expect([...rooms.keys()].sort()).toEqual(
+      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE)].sort(),
+    );
     // The address is the one the entry hands out, and it survives a parse.
     expect(window.location.pathname).toBe(`/${WORKSPACE}/all`);
     expect(parseRoute(`/${WORKSPACE}/all`, null)).toEqual({
@@ -273,8 +286,17 @@ describe("the listing", () => {
       updatedAt: Date.UTC(2026, 0, 3),
     });
     upsertDirectoryEntry(peer, { uuid: TWO, title: "Unstamped" });
+    // One stub no `Date` can hold. Formatting it would throw, and a throw in a
+    // cell would take the whole listing with it.
+    upsertDirectoryEntry(peer, {
+      uuid: THREE,
+      title: "Zskewed",
+      createdAt: Number.MAX_VALUE,
+      updatedAt: Number.MAX_VALUE,
+    });
 
     const host = await openApp(allPath(WORKSPACE));
+    expect(rowTitles(host)).toEqual(["Stamped", "Unstamped", "Zskewed"]);
     const rows = [...host.querySelectorAll(".ub-all-row")];
     expect(
       [...(rows[0]?.querySelectorAll("time") ?? [])].map((node) =>
@@ -283,6 +305,52 @@ describe("the listing", () => {
     ).toEqual(["2026-01-03T00:00:00.000Z", "2026-01-02T00:00:00.000Z"]);
     expect(rows[1]?.querySelectorAll("time")).toHaveLength(0);
     expect(rows[1]?.textContent).toContain("—");
+    expect(rows[2]?.querySelectorAll("time")).toHaveLength(0);
+    expect(rows[2]?.textContent).toContain("—");
+  });
+});
+
+describe("an empty listing", () => {
+  /** A directory room that reports whether it has synced, and nothing else. */
+  function statusOnly(synced: boolean): RoomConnection {
+    return {
+      ...room(`status-${String(synced)}`),
+      onStatusChange: (listener: (next: RoomStatus) => void) => {
+        listener({ ...OFFLINE, connected: synced, synced });
+        return () => {};
+      },
+    } as unknown as RoomConnection;
+  }
+
+  it("says the workspace is empty only once the directory has synced", async () => {
+    const waiting = await mount(
+      <AllDocsPane
+        connection={statusOnly(false)}
+        entries={[]}
+        groups={[]}
+        onSelect={() => {}}
+        onTogglePin={null}
+      />,
+    );
+    // Nothing heard yet is not an answer: a workspace full of documents would
+    // otherwise be told it has none.
+    expect(waiting.querySelector(".ub-empty")?.textContent).toContain(
+      "has not synced",
+    );
+    unmount();
+
+    const synced = await mount(
+      <AllDocsPane
+        connection={statusOnly(true)}
+        entries={[]}
+        groups={[]}
+        onSelect={() => {}}
+        onTogglePin={null}
+      />,
+    );
+    expect(synced.querySelector(".ub-empty")?.textContent).toBe(
+      "No documents in this workspace yet.",
+    );
   });
 });
 

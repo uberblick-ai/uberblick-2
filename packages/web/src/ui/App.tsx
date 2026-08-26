@@ -579,6 +579,7 @@ export function App(): ReactElement {
             to. */}
         {route.kind === "all" ? (
           <AllDocsPane
+            connection={directory}
             entries={entries}
             groups={sidebarGroups}
             onSelect={onSelect}
