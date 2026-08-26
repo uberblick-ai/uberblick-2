@@ -55,11 +55,19 @@ function formatBytes(bytes: number): string {
  * document this tab reads lands in the IndexedDB replica. Null covers both ways
  * of not knowing — no Storage API at all, or an estimate that rejected — and
  * the row is left out rather than showing a zero nobody can vouch for.
+ *
+ * Closing forgets it, which matters for the same reason the re-read does: a
+ * kept number is a stale number, and the next open would paint the last
+ * session's figure for as long as the fresh estimate takes to answer.
  */
 function useLocalCacheSize(open: boolean): number | null {
   const [bytes, setBytes] = useState<number | null>(null);
   useEffect(() => {
-    if (!open || typeof navigator.storage?.estimate !== "function") return;
+    if (!open) {
+      setBytes(null);
+      return;
+    }
+    if (typeof navigator.storage?.estimate !== "function") return;
     let live = true;
     void navigator.storage.estimate().then(
       (report) => {

@@ -7,9 +7,18 @@
  * and the vendored chrome at once, with no rule anywhere knowing a theme
  * exists. Removing the attribute hands the decision back to the system.
  *
- * The stored value is applied once before React mounts (see main.tsx) rather
- * than from an effect alone: an effect paints the system's answer first, and a
- * reader who chose dark would watch the app flash light on every reload.
+ * Two things write that attribute, and the split is deliberate:
+ *
+ * - a blocking inline snippet in `index.html`, which is the only code that runs
+ *   before first paint — this module arrives on a deferred module script, so a
+ *   reader who chose dark would otherwise watch a light first paint and a swap;
+ * - this module, from `useAppearance`'s effect and from `applyStoredAppearance`
+ *   at startup, which is what keeps the attribute correct for the rest of the
+ *   session and re-asserts it if the snippet never ran.
+ *
+ * The snippet stamps and nothing else; every decision about appearance lives
+ * here. Both read the same key and honour the same rule — only an explicit
+ * "light" or "dark" is an attribute, and everything else is its absence.
  */
 
 import { useCallback, useEffect } from "react";

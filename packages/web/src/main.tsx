@@ -34,8 +34,11 @@ if (!container) {
 // read rather than starting a second one.
 void resolveClientConfig();
 
-// Before the first paint, not from an effect: a reader who chose dark must not
-// watch the app flash light on every reload (#74).
+// Not the first-paint path — this module is deferred, and `index.html`'s
+// blocking snippet is what stamps the attribute before anything is painted
+// (#74). This is the runtime owner catching up with it: one read at startup, so
+// the module's view and the document agree from the first render, and the
+// attribute is still correct if that snippet never ran.
 applyStoredAppearance();
 
 createRoot(container).render(<App />);

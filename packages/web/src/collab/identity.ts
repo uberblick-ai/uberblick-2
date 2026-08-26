@@ -17,8 +17,8 @@
  * literal rather than a CSS token: the theme cannot reach inside the inline
  * styles the cursor plugin writes.
  *
- * Because the theme follows `prefers-color-scheme`, each colour has to work on
- * both grounds. All eight sit near luminance 0.18: ≥4.1:1 against the dark
+ * Because the app is painted in either scheme — the system's preference, or the
+ * appearance the reader chose — each colour has to work on both grounds. All eight sit near luminance 0.18: ≥4.1:1 against the dark
  * background, ≥4.1:1 against the light one, and ≥4.69:1 against the white
  * cursor-label text (`--cursor-label-foreground`).
  *

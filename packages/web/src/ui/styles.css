@@ -17,6 +17,11 @@
  * `data-theme` on <html> and pins it. One attribute, two rules, no per-rule
  * theming.
  *
+ * That sets the floor deliberately: `light-dark()` is Chrome 123, Safari 17.5
+ * and Firefox 120 (all 2024). The app already asks for more than those in
+ * places — `inert`, oklch — and the alternative was a second copy of every
+ * colour, which is the thing this file exists to not have.
+ *
  * Token values are the uberblick brand set (uberblick-ai/uberblick-rails
  * `frontend/src/style.css`), with the rails light/dark default inverted.
  *

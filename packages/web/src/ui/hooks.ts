@@ -311,9 +311,18 @@ export function usePeers(connection: RoomConnection | null): Peer[] {
  * Awareness has no "this is an agent" field — an MCP session publishes the same
  * `user` a browser tab does — so the question is answered from the other side:
  * this app marks its own sessions (`WEB_CLIENT`), and a remote session that
- * does not claim to be a web client is an agent. The failure mode is honest and
- * self-correcting: a tab running a build older than that marker counts as an
- * agent until it reloads, and nothing is ever counted that is not there.
+ * does not claim to be a web client is an agent.
+ *
+ * **The boundary that classification buys, stated rather than hidden:** it is
+ * an *absence* test, so anything that predates the marker looks like an agent.
+ * Concretely, during a rollout a browser tab still running a bundle from before
+ * #267 is counted as an MCP connection until that tab reloads — for the length
+ * of one deploy, one workspace's count can read high. This is accepted as the
+ * price of keeping the change inside the web client: the positive marker
+ * belongs on the publishing side, and that is #73's `lastAction` awareness
+ * field, which is where a session will eventually say what it *is* instead of
+ * this inferring it from what it does not say. Nothing is ever counted that is
+ * not connected, and the miscount clears itself on reload.
  *
  * A state with no `user` is nobody: the MCP server's connectivity probe opens
  * rooms with its awareness deliberately unset, and it must not read as a
