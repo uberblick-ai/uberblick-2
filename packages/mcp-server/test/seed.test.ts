@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import type { Hub } from "@uberblick/hub";
 import {
+  directoryRoom,
   getBlocks,
   getDirectoryMap,
   getMeta,
@@ -548,6 +549,48 @@ describe("starter sidebar seed", () => {
 
     expect(outcome.sidebar).toBe(false);
     expect(sidebarOf(databasePath)).toEqual({ groups: [], seeded: false });
+  });
+
+  // The failure this defends against is the one a local-only eligibility read
+  // cannot see: a replica bound to a workspace it has never synced — `ub
+  // workspace use <id>` then `ub init`, or a database restored from a backup —
+  // reads an empty directory and would seed a starter corpus, and a starter
+  // sidebar group, into somebody's real one.
+  it("writes nothing into a workspace the hub says is already in use", async () => {
+    const hub = await startHub();
+    hubs.push(hub);
+
+    // Somebody else's document, reachable only through the hub.
+    const directory = await peerClient(hub.port, directoryRoom(WORKSPACE));
+    peers.push(directory);
+    await directory.synced;
+    upsertDirectoryEntry(directory.doc, {
+      uuid: "9f3d7c1e-5a82-4b06-9e17-3c48d05b6a2f",
+      title: "Real work",
+      tags: ["feature"],
+    });
+    await hub.flush();
+
+    // A fresh replica: its own local directory is empty, and says nothing.
+    const databasePath = tempDatabasePath();
+    const outcome = await importSeedDir(
+      starterDir(),
+      testConfig({
+        databasePath,
+        hubUrl: hubUrl(hub.port),
+        authSecret: TEST_SECRET,
+      }),
+      { ...group, docs: [first, second] },
+    );
+
+    expect(outcome.results).toEqual([]);
+    expect(outcome.sidebar).toBe(false);
+    expect(sidebarOf(databasePath)).toEqual({ groups: [], seeded: false });
+    // And the hub is untouched: the starter room was never written into.
+    const room = await peerClient(hub.port, roomForDoc(WORKSPACE, first));
+    peers.push(room);
+    await room.synced;
+    expect(getBlocks(room.doc)).toHaveLength(0);
   });
 
   it("adopts a sidebar that already holds a group rather than seeding beside it", async () => {

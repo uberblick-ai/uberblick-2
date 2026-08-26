@@ -33,14 +33,22 @@
  *    repeatable rather than a one-shot. A run that fails after the first
  *    document (a full disk, a refused log) leaves the second one missing, and
  *    the next `ub init` finishes it, then the sidebar, because "what is
- *    missing" is asked again every time. The same reading is what keeps the
- *    starter documents out of a workspace that is already somebody's: a corpus
- *    holding anything else is not one to write into. The caller holds `ub
- *    init`'s lock across the whole of it, because a read that decides a write
- *    is only as good as the window between the two: without it, two first-time
- *    runs on one machine both read an empty workspace and both write the same
- *    documents into it.
- * 4. **Curation is never undone.** The sidebar write refuses a sidebar that
+ *    missing" is asked again every time. The caller holds `ub init`'s lock
+ *    across the whole of it, because a read that decides a write is only as
+ *    good as the window between the two: without it, two first-time runs on one
+ *    machine both read an empty workspace and both write the same documents
+ *    into it.
+ * 4. **Somebody else's workspace is never written into, and two guards say so
+ *    at different distances.** The primary one is `maySeed` in `init.ts`:
+ *    naming a workspace with `--workspace` is *joining* one that exists
+ *    elsewhere, and this is not called at all for it. The reading below is the
+ *    second, and it is local-only and therefore only ever about what this
+ *    machine has downloaded. The authoritative one is inside `importSeedDir`,
+ *    which settles first and refuses a hydrated directory naming anything but
+ *    the starter documents — because a replica bound to a workspace it has
+ *    never synced reads an empty directory here and would otherwise seed into a
+ *    real corpus.
+ * 5. **Curation is never undone.** The sidebar write refuses a sidebar that
  *    holds a group or carries the seed marker (see `seed.ts`), so an unpinned
  *    starter document stays unpinned, a reordered group stays reordered, and a
  *    deleted group stays deleted however often `ub init` is run afterwards.
@@ -114,14 +122,24 @@ function pinnedUuids(starters: SeedDoc[]): string[] {
  * because two questions have to be answered before anything is written: whether
  * the starter documents are already here, and whether anything *else* is. A
  * workspace holding other documents — one joined from a remote, one that
- * predates this feature — is left exactly as it is. Read and write both happen
- * under the caller's init lock.
+ * predates this feature — is left exactly as it is. This read is a fast path,
+ * not the guarantee: `importSeedDir` asks the second question again once the
+ * directory has hydrated, and refuses there. Read and write both happen under
+ * the caller's init lock.
  *
  * A workspace already holding both documents still goes through the importer,
  * because the sidebar may be the part that is missing: an init interrupted
  * between the documents and the pins, or a workspace seeded before pinning
- * existed, is repaired by the next run. The importer writes nothing for a uuid
- * it finds, so the repair costs a hydration and changes no document.
+ * existed, is repaired by the next run. The importer writes nothing new for a
+ * uuid it finds (beyond the set-once `createdAt` backfill on a stub that
+ * predates timestamps), so the repair costs a hydration and changes no
+ * document.
+ *
+ * That repair is deliberately invisible in the report. The returned titles are
+ * documents *created*, and a run that only wrote the pins created none: what
+ * `ub init` prints describes the workspace a user is about to open, and the
+ * sidebar it names is there either way. Announcing a repair would be announcing
+ * an implementation detail of a previous run's failure.
  *
  * Offline-first like every other write: the documents and the pins land in the
  * local update log whether or not a hub answers, and reach the hub when one
