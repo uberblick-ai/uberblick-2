@@ -213,9 +213,10 @@ auth in the spike itself.
   tables, never synced and never rebuilt from documents. Closed list, not a
   general licence for server-side state: the workspace registry and its
   credentials, nothing else. Unlike the derived indexes above they cannot be
-  rebuilt. Why merging cannot express a revocation, and what losing these
-  tables costs, is reference material — see #84 until it lands in the
-  architecture doc.
+  rebuilt. Why this cannot live in a synced document — the hub must decide before it
+  admits a connection, and the party being revoked is the one who controls
+  whether its own replica is current — and what losing these tables costs, is
+  reference material — see #84 until it lands in the architecture doc.
 - Identity is UUIDs everywhere; titles and paths are display data. On
   conflict, `meta.title` in the doc is authoritative; the directory stub is a
   cache repaired on write/connect.
