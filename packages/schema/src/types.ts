@@ -13,6 +13,7 @@ export const BLOCK_TYPES = [
   "mermaid",
   "list-item",
   "quote",
+  "table",
 ] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];
@@ -27,9 +28,9 @@ export function isBlockType(value: string): value is BlockType {
  * The block types whose text is prose: they carry the inline mark set, and the
  * markdown reader resolves inline syntax inside them.
  *
- * The complement is source text — `code` and `mermaid` — which carries only the
- * `comment` anchor. Everything that has to tell the two apart asks here, so the
- * distinction is stated once.
+ * The complement is source text — `code`, `mermaid` and `table` — which carries
+ * only the `comment` anchor. Everything that has to tell the two apart asks
+ * here, so the distinction is stated once.
  */
 export const PROSE_BLOCK_TYPES = [
   "paragraph",

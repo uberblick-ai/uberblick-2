@@ -48,6 +48,7 @@ import {
   sameInlineMarks,
 } from "./marks.js";
 import { listNumbers } from "./lists.js";
+import { parseGfmTable } from "./table.js";
 import { MAX_LIST_INDENT } from "./types.js";
 import type {
   Block,
@@ -644,6 +645,10 @@ function renderBlock(
         .split("\n")
         .map((line) => `> ${line}`.trimEnd())
         .join("\n");
+    case "table":
+      // The source *is* the markdown: a table goes out exactly as it is stored,
+      // down to the spacing someone lined its pipes up with.
+      return block.text;
     case "paragraph":
       return renderInline(inline);
   }
@@ -665,7 +670,8 @@ function renderAnnotationComment(
  *
  * headings → `#`×level, paragraphs → their text, code → a fenced block tagged
  * with its language, mermaid → a ```mermaid fence, list items → a `- `/`1. `
- * line indented by their level, quotes → `> ` on every line.
+ * line indented by their level, quotes → `> ` on every line, tables → their
+ * source verbatim.
  *
  * Blocks are separated by a blank line, except two adjacent list items: a blank
  * line between them is what makes a reader render the list *loose*, so a run of
@@ -1491,6 +1497,34 @@ const LIST_LINE = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?[ \t]*$/;
 /** `> `, indented no further than a paragraph may be. */
 const QUOTE_LINE = /^ {0,3}>[ \t]?(.*)$/;
 
+/** An ATX heading, a fence of either character, an HTML comment — block *starts*. */
+const HEADING_LINE = /^#{1,6}\s/;
+const FENCE_LINE = /^(?:`{3,}|~{3,})/;
+const COMMENT_LINE = /^<!--/;
+
+/**
+ * Whether `line` starts a block, in the sense that matters to a table: a table
+ * ends where another block begins, and every one of these begins one.
+ *
+ * This is the reader's knowledge, not the table parser's. `parseGfmTable` knows
+ * tables — to it a heading or a quote is a perfectly good one-column row — so
+ * the question of what else a line could be has to be asked out here, where the
+ * rest of the document's vocabulary lives. The list is exactly what the loop
+ * below recognises, HTML comments included: anything this reader would take as
+ * its own block after the table has to end the table, or the two disagree and
+ * the comment — an exported annotation, say — is stored as a row.
+ */
+function startsBlock(line: string): boolean {
+  const trimmed = line.trim();
+  return (
+    QUOTE_LINE.test(line) ||
+    LIST_LINE.test(line) ||
+    HEADING_LINE.test(trimmed) ||
+    FENCE_LINE.test(trimmed) ||
+    COMMENT_LINE.test(trimmed)
+  );
+}
+
 /** How wide a tab is, counted to the next stop rather than as four columns. */
 const TAB_WIDTH = 4;
 
@@ -1513,8 +1547,9 @@ function advanceColumn(text: string, column: number): number {
 /**
  * Parse markdown into the pieces needed to build a document: title, tags, links
  * and a flat block list. Handles frontmatter, ATX headings, fenced code (with
- * language), mermaid fences, list items and block quotes; everything else
- * becomes a paragraph, with its inline formatting read into `inline`.
+ * language), mermaid fences, list items, block quotes and GFM tables;
+ * everything else becomes a paragraph, with its inline formatting read into
+ * `inline`.
  *
  * Title precedence: frontmatter `title`, else a leading level-1 heading — which
  * is then *consumed*, so the title is not duplicated as a block. Any other
@@ -1579,6 +1614,52 @@ export function importMarkdown(markdown: string): ImportedDoc {
       // A blank line ends a paragraph but not a list: a blank line between
       // items is a loose list, still one list.
       flush();
+      continue;
+    }
+
+    // A table is two lines before it is anything — a header row and a delimiter
+    // row — so it is recognised with a lookahead, and by the same parser that
+    // draws one: it is the parser that knows which pipes are structure and which
+    // are somebody's `\|`. Its lines are then taken verbatim, because the block
+    // stores GFM source.
+    //
+    // A delimiter row that is also a list line loses to the list. `- | -` is
+    // both — a one-hyphen delimiter row is legal GFM — and reading it as a
+    // delimiter would swallow the paragraph above it into a table nobody wrote,
+    // while reading it as the list item it looks like costs the reader nothing.
+    const delimiterLine = lines[i + 1] ?? "";
+    if (
+      parseGfmTable(`${line}\n${delimiterLine}`) !== null &&
+      LIST_LINE.exec(delimiterLine) === null
+    ) {
+      flush();
+      openItems = [];
+      const table = [line, delimiterLine];
+      let j = i + 2;
+      // Where the table ends is two questions, and they are asked in this
+      // order. First: does this line *start another block*? The parser cannot
+      // answer that — it knows tables, and a heading, a quote, a fence or a
+      // list item is a fact about the document around one; to `parseGfmTable`
+      // every one of them is a perfectly good one-column row, so asking it
+      // first swallows the rest of the document up to the next blank line.
+      // Then, and only then: does the block still parse as one table? That is
+      // the parser's own boundary, and asking it keeps the reader from storing
+      // source it would itself read differently.
+      //
+      // The blank line is tested here rather than left to the parser because a
+      // *trailing* one is trimmed off any source before it is parsed; inside the
+      // block, the parser rejects it as the table-ender it is.
+      while (
+        j < lines.length &&
+        (lines[j] ?? "").trim() !== "" &&
+        !startsBlock(lines[j] ?? "") &&
+        parseGfmTable([...table, lines[j] ?? ""].join("\n")) !== null
+      ) {
+        table.push(lines[j] ?? "");
+        j += 1;
+      }
+      i = j - 1;
+      blocks.push({ type: "table", text: table.join("\n") });
       continue;
     }
 

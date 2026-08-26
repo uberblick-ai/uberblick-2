@@ -8,6 +8,7 @@ import {
   importMarkdown,
   initDoc,
   listNumbers,
+  parseGfmTable,
   setTags,
 } from "../src/index.js";
 
@@ -452,6 +453,192 @@ describe("lists and quotes", () => {
       { type: "list-item", text: "b", list: "bullet", indent: 0 },
       { type: "paragraph", text: "Prose." },
       { type: "list-item", text: "c", list: "bullet", indent: 0 },
+    ]);
+  });
+
+  it("reads a table's source as one block, and writes it back verbatim", () => {
+    const source = [
+      "| name | count |",
+      "| :--- | ----: |",
+      "| alpha | 1 |",
+      "| beta  | 2 |",
+      "",
+      "After the table.",
+      "",
+    ].join("\n");
+
+    const imported = importMarkdown(source);
+    expect(imported.blocks).toEqual([
+      {
+        type: "table",
+        text: [
+          "| name | count |",
+          "| :--- | ----: |",
+          "| alpha | 1 |",
+          "| beta  | 2 |",
+        ].join("\n"),
+      },
+      { type: "paragraph", text: "After the table." },
+    ]);
+
+    // Verbatim, down to the spacing someone lined the pipes up with: the block
+    // stores GFM source, so the export has nothing to decide.
+    expect(exportMarkdown(docFrom(source), { frontmatter: false })).toBe(source);
+  });
+
+  /**
+   * A table is a header row *and* a delimiter row. Pipes alone are prose — a
+   * paragraph mentioning `a | b` must not become a table, or an agent's
+   * `edit_block` would silently change a block's type on the next import.
+   */
+  it("takes pipes without a delimiter row as the prose they are", () => {
+    expect(importMarkdown("a | b\nc | d").blocks).toEqual([
+      { type: "paragraph", text: "a | b\nc | d" },
+    ]);
+    expect(parseGfmTable("| a | b |\n| --- |")).toBeNull();
+    expect(parseGfmTable("| a | b |")).toBeNull();
+
+    // …and the cells a reader would expect, escaped pipes included.
+    expect(parseGfmTable("| a | b |\n| --- | :-: |\n| 1 \\| 2 |")).toEqual({
+      header: ["a", "b"],
+      align: [null, "center"],
+      // Short rows are padded to the header, which is GFM's own rule.
+      rows: [["1 | 2", ""]],
+    });
+  });
+
+  /**
+   * A blank line ends a table, so one inside the source means the text is not
+   * one table. Filtering blank lines out instead made the prose after them body
+   * rows of a table it was never part of.
+   */
+  it("ends a table at a blank line rather than reading past it", () => {
+    expect(parseGfmTable("| h |\n| - |\n\nprose")).toBeNull();
+
+    // The reader splits there, so the prose is the paragraph it always was.
+    expect(importMarkdown("| h |\n| - |\n\nprose\n").blocks).toEqual([
+      { type: "table", text: "| h |\n| - |" },
+      { type: "paragraph", text: "prose" },
+    ]);
+  });
+
+  /**
+   * Where a table ends is the parser's question, so the reader asks the parser
+   * rather than keeping a rule of its own. A pipe-less line is a one-column row
+   * to `parseGfmTable`, and a reader that required a pipe would end the block
+   * one line early — storing source that then parses differently from how it
+   * was read.
+   */
+  it("takes the same body rows the parser does", () => {
+    const source = "| h |\n| - |\nvalue";
+    expect(importMarkdown(`${source}\n`).blocks).toEqual([
+      { type: "table", text: source },
+    ]);
+    expect(parseGfmTable(source)?.rows).toEqual([["value"]]);
+  });
+
+  /**
+   * …but a line that starts another block is not a row, however happily the
+   * table parser would read it as one. A table ends where the next block
+   * begins, blank line or no blank line, and only the reader knows what else a
+   * line could be — to `parseGfmTable`, `> quote` is a fine one-column row.
+   */
+  it("ends a table where the next block begins", () => {
+    const table = { type: "table", text: "| h |\n| - |" };
+    for (const [starter, expected] of [
+      ["> quote", { type: "quote", text: "quote" }],
+      ["# Heading", { type: "heading", text: "Heading", level: 1 }],
+      ["- item", { type: "list-item", text: "item", list: "bullet", indent: 0 }],
+      ["1. item", { type: "list-item", text: "item", list: "ordered", indent: 0 }],
+    ] as const) {
+      expect(
+        importMarkdown(`| h |\n| - |\n${starter}\n`).blocks,
+        starter,
+      ).toEqual([table, expected]);
+    }
+
+    // A fence too, and its body is the fence's, not the table's.
+    expect(importMarkdown("| h |\n| - |\n```ts\nx\n```\n").blocks).toEqual([
+      table,
+      { type: "code", text: "x", language: "ts" },
+    ]);
+
+    // …and an HTML comment, which this reader takes as its own block: an
+    // exported annotation sitting under a table must not become a row of it.
+    expect(
+      importMarkdown('| h |\n| - |\n<!-- annotation a range=0-1 x: "y" -->\n')
+        .blocks,
+    ).toEqual([table]);
+  });
+
+  /**
+   * The pipes that make a table are *structural* ones. A `\|` is a pipe in
+   * somebody's prose, and a reader that counted it would take a paragraph plus
+   * a line of hyphens — a setext heading, in any other reader — as a
+   * single-column table, swallowing the paragraph into it.
+   */
+  it("does not count an escaped pipe as table structure", () => {
+    expect(parseGfmTable("a \\| b\n---")).toBeNull();
+    // Prose, and prose keeps its backslash: `\|` is not one of the escapes the
+    // inline reader resolves, so the text is the line.
+    expect(importMarkdown("a \\| b\n---").blocks).toEqual([
+      { type: "paragraph", text: "a \\| b\n---" },
+    ]);
+
+    // The same line with a real pipe in it is a table, one column wide.
+    expect(parseGfmTable("| a \\| b |\n| --- |")).toEqual({
+      header: ["a | b"],
+      align: [null],
+      rows: [],
+    });
+  });
+
+  /**
+   * Backslashes escape in pairs, so the parity of the run in front of a pipe is
+   * what decides it: one backslash escapes the pipe into the cell, two are an
+   * escaped backslash and the pipe after them separates. Reading only the
+   * character in front of the pipe joins two cells into one and loses a column.
+   */
+  it("reads an escaped backslash before a pipe as a separator, not an escape", () => {
+    // `| a\\| b |` — a cell ending in a backslash, then a real separator.
+    expect(parseGfmTable("| a\\\\| b |\n| --- | --- |")).toEqual({
+      header: ["a\\\\", "b"],
+      align: [null, null],
+      rows: [],
+    });
+
+    // Three backslashes: a pair, then one that escapes the pipe — one cell.
+    expect(parseGfmTable("| a\\\\\\| b |\n| --- |")).toEqual({
+      header: ["a\\\\| b"],
+      align: [null],
+      rows: [],
+    });
+
+    // …and a row *ending* in an escaped backslash still ends with structure,
+    // so the trailing pipe is decoration rather than an empty cell.
+    expect(parseGfmTable("| a | b\\\\|\n| --- | --- |")).toEqual({
+      header: ["a", "b\\\\"],
+      align: [null, null],
+      rows: [],
+    });
+  });
+
+  /**
+   * `- | -` is both a legal one-hyphen delimiter row (GFM's own example writes
+   * `:-: | -----------:`) and a list item, and a table read swallows the
+   * paragraph above it into a block nobody wrote. The list read costs nothing,
+   * so the list wins.
+   */
+  it("reads a delimiter row that is also a list line as the list item it looks like", () => {
+    expect(importMarkdown("a | b\n- | -\n").blocks).toEqual([
+      { type: "paragraph", text: "a | b" },
+      { type: "list-item", text: "| -", list: "bullet", indent: 0 },
+    ]);
+
+    // A delimiter row no list could claim still opens a table, one hyphen and
+    // all — the length of the runs was never what made it one.
+    expect(importMarkdown("a | b\n:-: | -\n").blocks).toEqual([
+      { type: "table", text: "a | b\n:-: | -" },
     ]);
   });
 

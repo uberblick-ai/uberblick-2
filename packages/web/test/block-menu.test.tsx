@@ -199,6 +199,7 @@ describe("the registry", () => {
       "Bullet list",
       "Numbered list",
       "Code",
+      "Table",
       "Mermaid",
     ]);
   });

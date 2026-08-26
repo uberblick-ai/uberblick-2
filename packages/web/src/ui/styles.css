@@ -1631,6 +1631,74 @@ h3.ub-heading {
   font-style: italic;
 }
 
+/* ---- the table block (#59) ----
+
+   Two representations of one text: the drawing, and the GFM source it was drawn
+   from. The source is hidden until the caret is in the block — a class the
+   editing plugin puts there (editor/table.ts) — so a reader sees a table and an
+   editor sees markdown, with no mode to remember.
+
+   Source that does not parse as a table keeps the source visible instead
+   (`data-parsed="false"`): a half-typed table must never look like an empty box
+   with the reader's text hidden inside it. */
+.ub-table {
+  margin: 0.7em 0;
+  position: relative;
+}
+
+.ub-table-render {
+  overflow-x: auto;
+  cursor: text;
+}
+
+.ub-table table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+.ub-table th,
+.ub-table td {
+  border: 1px solid var(--border);
+  padding: 0.3rem 0.55rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ub-table th {
+  background: var(--muted);
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.ub-table td {
+  color: var(--prose-text);
+}
+
+.ub-table-source {
+  display: none;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted-foreground);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.ub-table.ub-table-editing .ub-table-source,
+.ub-table[data-parsed="false"] .ub-table-source {
+  display: block;
+}
+
+.ub-table.ub-table-editing .ub-table-render,
+.ub-table[data-parsed="false"] .ub-table-render {
+  display: none;
+}
+
 .ub-code,
 .ub-mermaid pre {
   background: var(--muted);

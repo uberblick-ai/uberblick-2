@@ -18,6 +18,7 @@ import { GitHubRefs } from "./github-refs.js";
 import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
 import { paletteExtensions } from "./nodes.js";
+import { TableBlocks } from "./table.js";
 import { AgentTypingTheater } from "./typing-theater.js";
 import type { AgentTypingOptions } from "./typing-theater.js";
 
@@ -75,6 +76,9 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // bindings refuse everywhere else, so the core keymap still owns those keys
     // in every other block — plus the numbers an ordered item is drawn with.
     ListBlocks,
+    // …and the table block's own two: the class that opens a table's source
+    // under the caret, and the typed and pasted doors a table comes in through.
+    TableBlocks,
     Collaboration.configure({
       fragment: options.fragment,
       awareness: options.awareness ?? null,

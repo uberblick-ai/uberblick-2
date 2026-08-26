@@ -1,5 +1,5 @@
 /**
- * The editor palette: six custom block nodes, six marks, nothing else.
+ * The editor palette: seven custom block nodes, six marks, nothing else.
  *
  * The marks live in marks.ts — the five inline ones (`bold`, `italic`, `strike`,
  * `inlineCode`, `link`) plus the `comment` anchor defined below. StarterKit is
@@ -12,6 +12,7 @@
  *   <mermaid   id="…">        Y.XmlText
  *   <list-item id="…" list="bullet" indent="1">  Y.XmlText
  *   <quote     id="…">        Y.XmlText
+ *   <table     id="…">        Y.XmlText (GFM source)
  *
  * A list is a *run* of adjacent `list-item` blocks, exactly as markdown means
  * it — no `bulletList` wrapper, no nested `listItem` tree. Stock Tiptap's list
@@ -58,6 +59,7 @@ import {
   mermaidChrome,
   sourceBlockView,
 } from "./source-chrome.js";
+import { tableBlockView } from "./table.js";
 
 /**
  * The stable block id, assigned by `BlockIds` (see block-ids.ts) and owned by
@@ -317,6 +319,45 @@ export const Mermaid = Node.create({
 });
 
 /**
+ * A GFM table, stored as source and drawn as a table.
+ *
+ * A source block like `code` and `mermaid` — the node spec is theirs, and
+ * everything that makes it look like a table lives in the NodeView (table.ts).
+ * Stock Tiptap's table extensions are rejected: their nested cell tree has no
+ * block-scoped text for `edit_block` to work on.
+ */
+export const Table = Node.create({
+  name: "table",
+  group: "block",
+  content: "text*",
+  marks: COMMENT_MARK,
+  code: true,
+  defining: true,
+  whitespace: "pre",
+  addAttributes() {
+    return { id: idAttribute };
+  },
+  parseHTML() {
+    return [{ tag: "div[data-block-type=table]", preserveWhitespace: "full" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return [
+      "div",
+      mergeAttributes(
+        { class: "ub-table", "data-block-type": "table" },
+        HTMLAttributes,
+      ),
+      ["pre", {}, 0],
+    ];
+  },
+  addNodeView() {
+    return tableBlockView;
+  },
+  // See CodeBlock: Enter is handled by the core keymap, driven by `code: true`,
+  // so a newline in the source is a newline and never a new block.
+});
+
+/**
  * The annotation anchor.
  *
  * `excludes` is left at its ProseMirror default — "exclusive with marks of the
@@ -379,6 +420,7 @@ export const paletteExtensions = [
   Mermaid,
   ListItem,
   Quote,
+  Table,
   CommentMark,
   ...inlineMarkExtensions,
 ];
