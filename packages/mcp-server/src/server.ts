@@ -6,9 +6,12 @@
  * owns the process — signals, stdio, exit codes — which is what makes this
  * usable from tests over an in-memory transport.
  *
- * Nothing here awaits the hub. The store is opened, the log is replayed, and
- * the server is ready to serve; the hub connection happens in the background
- * and its absence changes no tool's answer except `sync_status`.
+ * Building the server awaits nothing: the store is opened, the log is replayed,
+ * and the hub connection happens in the background, where its absence changes no
+ * tool's answer except `sync_status`. `connect` awaits one thing before it
+ * serves — the sidebar's one-time migration, which settles first so it decides
+ * from the whole workspace rather than from this machine's log alone. That wait
+ * is bounded and does not exist when no hub is configured.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -16,6 +19,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
 import { Replicas } from "./replica.js";
+import { seedSidebarOnce } from "./sidebar-tools.js";
 import { MirrorStore } from "./store.js";
 import { registerTools } from "./tools.js";
 
@@ -69,6 +73,14 @@ export function createMcpServer(
     replicas,
     store,
     async connect(transport: Transport) {
+      // The one-time migration out of tag-derived navigation, before the
+      // transport is attached so no tool can read a sidebar it has not decided
+      // about yet — and here rather than inside a tool, because a read must not
+      // write. It settles first (bounded; instant with no hub), is guarded by a
+      // flag in the sidebar doc so it runs once per workspace rather than once
+      // per start, and never throws: a refused append is already the replica
+      // set's sticky persistence failure. See ./sidebar-tools.ts.
+      await seedSidebarOnce(replicas);
       await server.connect(transport);
       log.info("serving", {
         workspace: config.workspaceId,

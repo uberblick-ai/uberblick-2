@@ -43,8 +43,15 @@ titles, so renaming a document breaks nothing.
 
 ## Workspace
 
-The tenancy segment of a room name. One configured workspace for now, `main`, so
-that a hosted hub with many workspaces never needs a room migration.
+The tenancy segment of a room name, and a uuid — optionally decorated for display
+as `<slug>-<uuid>`, with the slug parsed off before the id reaches a room, a
+token claim or the SQLite filename. There is no default workspace and nothing to
+create: several coexist on one hub with separate corpora, and a workspace's rooms
+exist the moment something opens one.
+
+Separation is namespacing for one trusted user, not a security boundary — one
+signing secret still mints a token for any workspace, so it separates corpora,
+not people; real isolation waits on per-workspace auth (issue #84).
 
 ## Room
 

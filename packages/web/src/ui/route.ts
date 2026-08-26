@@ -59,14 +59,19 @@ export type Route =
   | { kind: "invalid"; reason: string; workspace: Workspace | null };
 
 /**
- * Canonical UUID shape. Matched case-insensitively — a *shape* check only.
+ * Canonical UUID shape — lowercase, and a *shape* check only.
+ *
+ * Lowercase-strict on purpose: the workspace segment is (schema owns that
+ * rule), and one address spelling its two uuids by two different rules was an
+ * inconsistency nobody could explain (#196). A shouted uuid is still not a bad
+ * link — {@link parseRoute} folds it and {@link canonicalPath} redirects to the
+ * folded spelling — because document uuids are generated lowercase, so an
+ * upper-case link is a mis-spelling of a lowercase identity, not a second one.
  *
  * The version and variant nibbles are left unconstrained so a document whose
- * uuid came from somewhere other than `crypto.randomUUID` still opens. This is
- * the *document* segment; the workspace segment has its own rule, and schema
- * owns it.
+ * uuid came from somewhere other than `crypto.randomUUID` still opens.
  */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * One path segment, percent-decoding tolerated.
@@ -150,20 +155,23 @@ export function parseRoute(pathname: string, configured: string | null): Route {
     };
   }
 
-  // Case-preserving on purpose. Only the *shape* is normalised away; the uuid
-  // itself is an opaque identity. Room names, directory keys and `meta.uuid`
-  // are all case-sensitive, and nothing on the way in — the importer included —
-  // lower-cases them, so folding the case here would point an upper-case
-  // document's link at a room that does not exist, where it would wait for a
-  // sync that can never arrive.
-  if (!UUID.test(uuid)) {
+  // Folded, then matched against the one lowercase rule the workspace segment
+  // already answers to. Room names, directory keys and `meta.uuid` are all
+  // case-sensitive, but every uuid that reaches them is lowercase —
+  // `crypto.randomUUID` writes them and nothing upper-cases them afterwards —
+  // so a shouted link names the lowercase document, and `canonicalPath` puts
+  // that spelling in the address bar the way it does a trailing slash. The
+  // rejection message keeps the spelling as typed: it is about the link on
+  // screen.
+  const canonical = uuid.toLowerCase();
+  if (!UUID.test(canonical)) {
     return {
       kind: "invalid",
       reason: `“${uuid}” is not a document uuid.`,
       workspace,
     };
   }
-  return { kind: "doc", workspace, uuid };
+  return { kind: "doc", workspace, uuid: canonical };
 }
 
 /**

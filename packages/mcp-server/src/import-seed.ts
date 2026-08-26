@@ -11,9 +11,7 @@
 
 import { resolveMcpConfig } from "./config.js";
 import { log } from "./log.js";
-import { Replicas } from "./replica.js";
-import { MirrorStore } from "./store.js";
-import { importSeedDocs, readSeedDocs } from "./seed.js";
+import { SEED_DIR, importSeedDir } from "./seed.js";
 import type { SeedImport } from "./seed.js";
 
 /** Whether every document is accounted for. Skips mean it is not. */
@@ -53,19 +51,9 @@ function report(results: SeedImport[], hub: string): boolean {
 }
 
 async function main(): Promise<void> {
-  const config = resolveMcpConfig();
-  const store = new MirrorStore(config.databasePath, config.workspaceId);
-  const replicas = new Replicas(config, store);
-
-  try {
-    const docs = readSeedDocs();
-    const results = await importSeedDocs(replicas, docs);
-    if (!report(results, replicas.sync.state().status)) {
-      process.exitCode = 1;
-    }
-  } finally {
-    replicas.destroy();
-    store.close();
+  const { results, hub } = await importSeedDir(SEED_DIR, resolveMcpConfig());
+  if (!report(results, hub)) {
+    process.exitCode = 1;
   }
 }
 

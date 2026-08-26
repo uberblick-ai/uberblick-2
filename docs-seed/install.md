@@ -31,6 +31,11 @@ tenant isolation. Every client on your machines shares one signing secret, and
 anyone holding it can read and write everything. That is the deliberate shape of
 the current system, not a gap waiting on a patch.
 
+A second workspace changes nothing about that: workspace separation is
+namespacing for one trusted user, not a security boundary — the same secret mints
+a token for any workspace — and real isolation waits on per-workspace auth (issue
+#84).
+
 ## Prerequisites
 
 - `git`.
