@@ -16,6 +16,11 @@
  * block is a text block with a fancy renderer, never a different storage shape —
  * and they carry no inline marks, only `comment`.
  *
+ * `list-item` and `quote` are prose blocks like any other, and flat like every
+ * other: a list is a *run* of adjacent list-item elements carrying `list` and
+ * `indent` attributes, exactly markdown's own model. Nothing nests, so nothing
+ * here walks a tree.
+ *
  * Every read in this module is mark-blind: `text` and `rev` are plain text, so
  * formatting a range never invalidates a prepared edit. `getBlockInline` is the
  * one read that sees marks.
@@ -36,18 +41,39 @@ import {
   readInlineRuns,
 } from "./marks.js";
 import { blockRev } from "./rev.js";
-import { isBlockType } from "./types.js";
+import {
+  MAX_LIST_INDENT,
+  isBlockType,
+  isListStyle,
+  isProseBlockType,
+} from "./types.js";
 import type {
   Block,
   BlockInput,
   BlockType,
   HeadingLevel,
   InlineRun,
+  ListIndent,
+  ListStyle,
 } from "./types.js";
 
 const DIFF_DELETE = -1;
 const DIFF_EQUAL = 0;
 const DIFF_INSERT = 1;
+
+/**
+ * A list indent the model can hold: a whole number of levels, 0 to
+ * {@link MAX_LIST_INDENT}. Anything else is clamped rather than refused — an
+ * indent is presentation, and a document that arrived with a deeper one still
+ * has to be readable.
+ */
+function normalizeIndent(indent: number | undefined): ListIndent {
+  if (indent === undefined) return 0;
+  const rounded = Math.trunc(indent);
+  if (rounded < 0) return 0;
+  if (rounded > MAX_LIST_INDENT) return MAX_LIST_INDENT as ListIndent;
+  return rounded as ListIndent;
+}
 
 function normalizeLevel(level: number | undefined): HeadingLevel {
   if (level === undefined) return 1;
@@ -186,6 +212,18 @@ function levelOf(element: Y.XmlElement): HeadingLevel {
   return Number.isNaN(parsed) ? 1 : normalizeLevel(parsed);
 }
 
+/** A list item's marker. An unset or unreadable attribute reads as a bullet. */
+function listOf(element: Y.XmlElement): ListStyle {
+  const raw = element.getAttribute("list");
+  return raw !== undefined && isListStyle(raw) ? raw : "bullet";
+}
+
+function indentOf(element: Y.XmlElement): ListIndent {
+  const raw = element.getAttribute("indent");
+  const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
+  return Number.isNaN(parsed) ? 0 : normalizeIndent(parsed);
+}
+
 function toBlock(element: Y.XmlElement): Block {
   const type = elementType(element);
   const id = element.getAttribute("id") ?? "";
@@ -197,6 +235,18 @@ function toBlock(element: Y.XmlElement): Block {
   if (type === "code") {
     const language = element.getAttribute("language") ?? "";
     return { id, type, text, rev: blockRev({ type, text, language }), language };
+  }
+  if (type === "list-item") {
+    const list = listOf(element);
+    const indent = indentOf(element);
+    return {
+      id,
+      type,
+      text,
+      rev: blockRev({ type, text, list, indent }),
+      list,
+      indent,
+    };
   }
   return { id, type, text, rev: blockRev({ type, text }) };
 }
@@ -264,9 +314,7 @@ export function getBlocksWithInline(
  */
 function inlineOf(input: BlockInput): readonly InlineRun[] | null {
   if (input.inline === undefined) return null;
-  return input.type === "paragraph" || input.type === "heading"
-    ? input.inline
-    : null;
+  return isProseBlockType(input.type) ? input.inline : null;
 }
 
 function buildElement(id: string, input: BlockInput): Y.XmlElement {
@@ -282,6 +330,12 @@ function buildElement(id: string, input: BlockInput): Y.XmlElement {
   }
   if (input.type === "code" && input.language !== undefined) {
     element.setAttribute("language", input.language);
+  }
+  if (input.type === "list-item") {
+    // Both attributes always, so a list item never depends on a reader's
+    // default: the run's shape is what the document says it is.
+    element.setAttribute("list", input.list ?? "bullet");
+    element.setAttribute("indent", String(normalizeIndent(input.indent)));
   }
   element.insert(0, [
     new Y.XmlText(inlineOf(input) === null ? (input.text ?? "") : ""),
@@ -417,6 +471,10 @@ export interface BlockTypeAttrs {
   level?: HeadingLevel;
   /** Code language for the new type. Carried over when the old block was code. */
   language?: string;
+  /** List marker for the new type. Carried over when the old block was a list item. */
+  list?: ListStyle;
+  /** List indent for the new type. Carried over when the old block was a list item. */
+  indent?: number;
 }
 
 /**
@@ -477,7 +535,7 @@ export function setBlockType(
     // Refused before anything is written: nothing to roll back, and the caller
     // still has the block it started with. Every formatting key counts, not only
     // the ones this package knows — see `marksOtherThanComment`.
-    if (newType === "code" || newType === "mermaid") {
+    if (!isProseBlockType(newType)) {
       const marks = marksOtherThanComment(textOf(old));
       if (marks.length > 0) {
         throw new MarksNotAllowedError(blockId, newType, marks);
@@ -488,6 +546,9 @@ export function setBlockType(
       attrs.level ?? (oldType === "heading" ? levelOf(old) : undefined);
     const language =
       attrs.language ?? (oldType === "code" ? old.getAttribute("language") : undefined);
+    const list = attrs.list ?? (oldType === "list-item" ? listOf(old) : undefined);
+    const indent =
+      attrs.indent ?? (oldType === "list-item" ? indentOf(old) : undefined);
 
     const replacement = new Y.XmlElement(newType);
     replacement.setAttribute("id", blockId);
@@ -496,6 +557,10 @@ export function setBlockType(
     }
     if (newType === "code" && language !== undefined) {
       replacement.setAttribute("language", language);
+    }
+    if (newType === "list-item") {
+      replacement.setAttribute("list", list ?? "bullet");
+      replacement.setAttribute("indent", String(normalizeIndent(indent)));
     }
     replacement.insert(0, [new Y.XmlText()]);
     fragment.insert(index + 1, [replacement]);

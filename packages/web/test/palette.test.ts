@@ -17,6 +17,7 @@ import * as Y from "yjs";
 import {
   COMMENT_MARK,
   INLINE_MARKS,
+  PROSE_BLOCK_TYPES,
   appendBlock,
   getBlocks,
   getBlocksFragment,
@@ -34,16 +35,25 @@ import { plainText } from "../src/editor/ytext.js";
 import { mountEditor } from "./helpers.js";
 
 describe("the palette is exactly the schema's block types", () => {
-  it("declares four block nodes, six marks, and nothing else", () => {
+  it("declares the schema's block nodes, six marks, and nothing else", () => {
     expect(Object.keys(uberblickSchema.nodes).sort()).toEqual([
       "code",
       "doc",
       "heading",
+      "list-item",
       "mermaid",
       "paragraph",
+      "quote",
       "text",
     ]);
-    expect(BLOCK_NODE_NAMES).toEqual(["paragraph", "heading", "code", "mermaid"]);
+    expect(BLOCK_NODE_NAMES).toEqual([
+      "paragraph",
+      "heading",
+      "code",
+      "mermaid",
+      "list-item",
+      "quote",
+    ]);
     // The closed mark set: the schema package's five inline marks, plus the
     // annotation anchor.
     expect(Object.keys(uberblickSchema.marks).sort()).toEqual(
@@ -51,7 +61,9 @@ describe("the palette is exactly the schema's block types", () => {
     );
 
     // Stated the other way round, because a node or mark that quietly exists is
-    // one the editor could normalise foreign content into.
+    // one the editor could normalise foreign content into. The list nodes are
+    // the pointed ones: the palette's list is a *run of blocks* (#59), so the
+    // wrapper-and-tree spelling stock Tiptap ships must not exist here.
     for (const absent of [
       "bulletList",
       "orderedList",
@@ -73,17 +85,19 @@ describe("the palette is exactly the schema's block types", () => {
   it("allows the comment mark inside code and mermaid blocks, and nothing else there", () => {
     // A `marks: ""` node spec would make y-prosemirror throw while building the
     // node — and its catch block deletes the Y.XmlText from the document.
-    for (const name of ["code", "mermaid", "paragraph", "heading"]) {
+    for (const name of BLOCK_NODE_NAMES) {
       const type = uberblickSchema.nodes[name];
       expect(type).toBeDefined();
       expect(type?.allowsMarkType(uberblickSchema.marks[COMMENT_MARK]!)).toBe(true);
     }
 
-    // Inline marks are prose only: a source block's text is source.
+    // Inline marks are prose only: a source block's text is source. The split is
+    // prose vs source, which is why a list item and a quote take the whole set.
     for (const mark of INLINE_MARKS) {
       const type = uberblickSchema.marks[mark]!;
-      expect(uberblickSchema.nodes.paragraph?.allowsMarkType(type), mark).toBe(true);
-      expect(uberblickSchema.nodes.heading?.allowsMarkType(type), mark).toBe(true);
+      for (const prose of PROSE_BLOCK_TYPES) {
+        expect(uberblickSchema.nodes[prose]?.allowsMarkType(type), mark).toBe(true);
+      }
       expect(uberblickSchema.nodes.code?.allowsMarkType(type), mark).toBe(false);
       expect(uberblickSchema.nodes.mermaid?.allowsMarkType(type), mark).toBe(false);
     }

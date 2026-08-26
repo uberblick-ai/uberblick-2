@@ -13,13 +13,15 @@
  * invalidate an edit a caller has already prepared.
  */
 
-import type { BlockType, HeadingLevel } from "./types.js";
+import type { BlockType, HeadingLevel, ListIndent, ListStyle } from "./types.js";
 
 export interface RevInput {
   type: BlockType;
   text: string;
   level?: HeadingLevel | undefined;
   language?: string | undefined;
+  list?: ListStyle | undefined;
+  indent?: ListIndent | undefined;
 }
 
 function fnv1a32(input: string): number {
@@ -53,6 +55,8 @@ export function blockRev(input: RevInput): string {
     input.type,
     input.level ?? null,
     input.language ?? null,
+    input.list ?? null,
+    input.indent ?? null,
     input.text,
   ]);
   return `${hex8(fnv1a32(canonical))}${hex8(djb2(canonical))}`;

@@ -24,8 +24,11 @@ const UUID = "11111111-1111-4111-8111-111111111111";
 
 /** Expected block, with the rev the reader should have computed for it. */
 function withRev(block: Omit<Block, "rev">): Block {
-  const { type, text, level, language } = block;
-  return { ...block, rev: blockRev({ type, text, level, language }) };
+  const { type, text, level, language, list, indent } = block;
+  return {
+    ...block,
+    rev: blockRev({ type, text, level, language, list, indent }),
+  };
 }
 
 function seeded(): Y.Doc {
@@ -98,6 +101,41 @@ describe("document round-trip", () => {
       withRev({ id: mermaid, type: "mermaid", text: "graph TD\n  A-->B" }),
     ]);
     expect(new Set([h1, p, code, mermaid]).size).toBe(4);
+  });
+
+  /**
+   * A list is a *run* of blocks, not a tree: what makes two items one list is
+   * that they are adjacent, and each carries its own marker and depth. So the
+   * attributes have to survive a read the way a heading's level does, and the
+   * indent has to be clamped to what the model holds rather than refused.
+   */
+  it("stores list items as flat blocks carrying their marker and depth", () => {
+    const doc = seeded();
+    const first = appendBlock(doc, { type: "list-item", text: "alpha" });
+    const nested = appendBlock(doc, {
+      type: "list-item",
+      text: "beta",
+      list: "ordered",
+      indent: 2,
+    });
+    const deep = appendBlock(doc, { type: "list-item", indent: 9 });
+    const quote = appendBlock(doc, { type: "quote", text: "said someone" });
+
+    expect(getBlocks(doc)).toEqual([
+      withRev({ id: first, type: "list-item", text: "alpha", list: "bullet", indent: 0 }),
+      withRev({ id: nested, type: "list-item", text: "beta", list: "ordered", indent: 2 }),
+      withRev({ id: deep, type: "list-item", text: "", list: "bullet", indent: 3 }),
+      withRev({ id: quote, type: "quote", text: "said someone" }),
+    ]);
+
+    // The marker and the depth are part of the block's identity for an
+    // optimistic write: an item that moved a level is not the item that was read.
+    expect(getBlock(doc, first)?.rev).not.toBe(
+      blockRev({ type: "list-item", text: "alpha", list: "bullet", indent: 1 }),
+    );
+    expect(getBlock(doc, first)?.rev).not.toBe(
+      blockRev({ type: "list-item", text: "alpha", list: "ordered", indent: 0 }),
+    );
   });
 
   it("inserts at the start, after a block, and at the end", () => {

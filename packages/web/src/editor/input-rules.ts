@@ -1,5 +1,6 @@
 /**
- * Block-level markdown input rules: `# `, `## `, `### `, ```` ``` ````.
+ * Block-level markdown input rules: `# `, `## `, `### `, `> `, `- `, `1. `,
+ * ```` ``` ````.
  *
  * Type the prefix at the start of an empty paragraph and the block becomes that
  * type. Which prefixes exist is not decided here — every one comes from the
@@ -59,9 +60,12 @@ import { retypeBlockInTransaction } from "./retype.js";
  *
  * Exact equality against the block's whole content, not a prefix match: it is
  * what makes a mid-text `#` impossible to fire on, and it is the honest reading
- * of "at the start of an empty paragraph". A block type whose markdown prefix is
- * a *pattern* rather than a literal (an ordered list's `1. `) is when this grows
- * a second registry field; none of the palette's types is one.
+ * of "at the start of an empty paragraph".
+ *
+ * Every trigger is a literal, the ordered list's `1. ` included: typing `7. `
+ * writes `7. `, because the number is not stored — a run of items numbers itself
+ * on export — and the way to reach item seven is to press Enter six times. A
+ * registry field for *patterns* would buy nothing else.
  */
 export function entryForTrigger(text: string): BlockMenuEntry | null {
   return BLOCK_MENU_ENTRIES.find((entry) => entry.trigger === text) ?? null;

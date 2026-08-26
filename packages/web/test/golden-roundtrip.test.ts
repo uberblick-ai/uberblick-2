@@ -36,12 +36,14 @@ interface Built {
     paragraph: string;
     code: string;
     mermaid: string;
+    item: string;
+    quote: string;
   };
   threadId: string;
 }
 
 /**
- * All four block types, known ids, one annotation and all five inline marks —
+ * Every block type, known ids, one annotation and all five inline marks —
  * created by the schema package, never by the editor. The paragraph's plain text
  * is exactly "The quick brown fox jumps." whatever the marks do to it.
  */
@@ -75,13 +77,20 @@ function buildDocument(): Built {
     type: "mermaid",
     text: "graph TD;\n  A-->B;",
   });
+  const item = appendBlock(ydoc, {
+    type: "list-item",
+    text: "one point",
+    list: "ordered",
+    indent: 2,
+  });
+  const quote = appendBlock(ydoc, { type: "quote", text: "as someone said" });
 
   // "quick" in the paragraph.
   const annotation = createAnnotation(ydoc, paragraph, 4, 9, "tester", "why quick?");
 
   return {
     ydoc,
-    ids: { heading, paragraph, code, mermaid },
+    ids: { heading, paragraph, code, mermaid, item, quote },
     threadId: annotation.id,
   };
 }
@@ -150,23 +159,30 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     const editor = mount(ydoc);
 
     const doc = editor.state.doc;
-    expect(doc.childCount).toBe(4);
-    expect([0, 1, 2, 3].map((i) => doc.child(i).type.name)).toEqual([
+    const indexes = [0, 1, 2, 3, 4, 5];
+    expect(doc.childCount).toBe(6);
+    expect(indexes.map((i) => doc.child(i).type.name)).toEqual([
       "heading",
       "paragraph",
       "code",
       "mermaid",
+      "list-item",
+      "quote",
     ]);
-    expect([0, 1, 2, 3].map((i) => doc.child(i).attrs.id)).toEqual([
+    expect(indexes.map((i) => doc.child(i).attrs.id)).toEqual([
       ids.heading,
       ids.paragraph,
       ids.code,
       ids.mermaid,
+      ids.item,
+      ids.quote,
     ]);
 
     // Attributes arrive verbatim, as the strings the schema wrote.
     expect(doc.child(0).attrs.level).toBe("3");
     expect(doc.child(2).attrs.language).toBe("ts");
+    expect(doc.child(4).attrs.list).toBe("ordered");
+    expect(doc.child(4).attrs.indent).toBe("2");
 
     // Text survives, newlines included.
     expect(doc.child(2).textContent).toBe("const answer = 42;\nreturn answer;");
@@ -221,7 +237,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     expect(after.map((block) => block.nodeName)).toEqual(
       before.map((block) => block.nodeName),
     );
-    expect(after).toHaveLength(4);
+    expect(after).toHaveLength(6);
 
     // Identity and attributes: byte-identical, including value *types*.
     expect(after.map((block) => block.attributes)).toEqual(
@@ -231,11 +247,17 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     expect(after[1]?.attributes).toEqual({ id: ids.paragraph });
     expect(after[2]?.attributes).toEqual({ id: ids.code, language: "ts" });
     expect(after[3]?.attributes).toEqual({ id: ids.mermaid });
+    expect(after[4]?.attributes).toEqual({
+      id: ids.item,
+      list: "ordered",
+      indent: "2",
+    });
+    expect(after[5]?.attributes).toEqual({ id: ids.quote });
 
     // Only the edited block's text changed.
-    expect(after[0]?.text).toBe(before[0]?.text);
-    expect(after[2]?.text).toBe(before[2]?.text);
-    expect(after[3]?.text).toBe(before[3]?.text);
+    for (const index of [0, 2, 3, 4, 5]) {
+      expect(after[index]?.text).toBe(before[index]?.text);
+    }
     expect(after[1]?.text).toBe("The quick brown fox jumps. Then it stopped.");
 
     // The annotation is still anchored, on the same characters.
@@ -279,11 +301,15 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       [ids.paragraph, "paragraph"],
       [ids.code, "code"],
       [ids.mermaid, "mermaid"],
+      [ids.item, "list-item"],
+      [ids.quote, "quote"],
     ]);
     expect(blocks[0]?.level).toBe(3);
     expect(blocks[2]?.language).toBe("ts");
     expect(blocks[2]?.text).toBe("const answer = 42;\nreturn answer;");
     expect(blocks[3]?.text).toBe("graph TD;\n  A-->B;");
+    expect(blocks[4]).toMatchObject({ list: "ordered", indent: 2, text: "one point" });
+    expect(blocks[5]?.text).toBe("as someone said");
   });
 
   it("splits a paragraph on Enter into two valid blocks with a fresh id", () => {
@@ -303,6 +329,8 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       "paragraph",
       "code",
       "mermaid",
+      "list-item",
+      "quote",
     ]);
 
     // First half keeps the original id; the second half is a new block.
@@ -343,7 +371,15 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       getBlocksFragment(ydoc)
         .toArray()
         .map((child) => (child instanceof Y.XmlElement ? child.nodeName : "#other")),
-    ).toEqual(["heading", "paragraph", "paragraph", "code", "mermaid"]);
+    ).toEqual([
+      "heading",
+      "paragraph",
+      "paragraph",
+      "code",
+      "mermaid",
+      "list-item",
+      "quote",
+    ]);
   });
 });
 

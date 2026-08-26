@@ -21,13 +21,18 @@
 import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import { BLOCK_TYPES } from "@uberblick/schema";
-import type { BlockType, HeadingLevel } from "@uberblick/schema";
+import type { BlockType, HeadingLevel, ListStyle } from "@uberblick/schema";
+import { renderableIndent } from "./nodes.js";
 
 export interface RetypeAttrs {
   /** Heading level, 1–6. Ignored for other types. */
   level?: HeadingLevel;
   /** Code language. Ignored for other types. */
   language?: string;
+  /** List marker. Ignored for other types. */
+  list?: ListStyle;
+  /** List depth, 0–3. Ignored for other types. */
+  indent?: number;
 }
 
 function attrString(value: unknown): string | null {
@@ -95,6 +100,14 @@ export function retypeBlockInTransaction(
       attrs.language ??
       (currentType === "code" ? attrString(node.attrs.language) : null);
   }
+  if (type === "list-item") {
+    const wasItem = currentType === "list-item";
+    next.list =
+      attrs.list ?? (wasItem ? attrString(node.attrs.list) ?? "bullet" : "bullet");
+    next.indent = String(
+      attrs.indent ?? (wasItem ? renderableIndent(node.attrs.indent) : 0),
+    );
+  }
 
   // Both sides normalised to `string | null`: an absent attribute reads as
   // `undefined` on a ProseMirror node but `null` in `next`, and comparing those
@@ -102,7 +115,9 @@ export function retypeBlockInTransaction(
   const unchanged =
     currentType === type &&
     (next.level ?? null) === attrString(node.attrs.level) &&
-    (next.language ?? null) === attrString(node.attrs.language);
+    (next.language ?? null) === attrString(node.attrs.language) &&
+    (next.list ?? null) === attrString(node.attrs.list) &&
+    (next.indent ?? null) === attrString(node.attrs.indent);
   if (unchanged) return false;
 
   if (!nodeType.validContent(node.content)) return false;

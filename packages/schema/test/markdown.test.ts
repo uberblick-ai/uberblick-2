@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   appendBlock,
+  createAnnotation,
   exportMarkdown,
   getBlocks,
   importMarkdown,
   initDoc,
+  listNumbers,
   setTags,
 } from "../src/index.js";
 
@@ -240,5 +242,323 @@ describe("markdown round-trip", () => {
     initDoc(doc, { uuid: UUID, title: "Headings" });
     appendBlock(doc, { type: "heading", text: "One\nline", level: 2 });
     expect(exportMarkdown(doc, { frontmatter: false })).toBe("## One line\n");
+  });
+});
+
+/**
+ * Lists and quotes are the flat model's whole claim about GFM: a list is a run
+ * of adjacent `list-item` blocks and a quote is one block, so the trip out and
+ * back has to be exact in *both* directions — the markdown a reader wrote, and
+ * the blocks an agent reads.
+ */
+describe("lists and quotes", () => {
+  const LIST_SOURCE = [
+    "- alpha",
+    "- beta",
+    "    - nested one",
+    "    - nested two",
+    "1. first",
+    "2. second",
+    "    1. sub",
+    "",
+    "> a quote",
+    "> second line",
+    "",
+    "Plain paragraph.",
+    "",
+  ].join("\n");
+
+  it("reads a list into flat blocks, depth from the source's own indentation", () => {
+    expect(importMarkdown(LIST_SOURCE).blocks).toEqual([
+      { type: "list-item", text: "alpha", list: "bullet", indent: 0 },
+      { type: "list-item", text: "beta", list: "bullet", indent: 0 },
+      { type: "list-item", text: "nested one", list: "bullet", indent: 1 },
+      { type: "list-item", text: "nested two", list: "bullet", indent: 1 },
+      { type: "list-item", text: "first", list: "ordered", indent: 0 },
+      { type: "list-item", text: "second", list: "ordered", indent: 0 },
+      { type: "list-item", text: "sub", list: "ordered", indent: 1 },
+      { type: "quote", text: "a quote\nsecond line" },
+      { type: "paragraph", text: "Plain paragraph." },
+    ]);
+  });
+
+  /**
+   * Two spaces, four spaces, `*`, `+`, `1)` — all of them are GFM, and an agent
+   * writing markdown by hand will use whichever it likes. Depth is relative, so
+   * every one of them means the same list.
+   */
+  it("reads every marker and any indent unit as the same depth", () => {
+    expect(
+      importMarkdown(["* alpha", "  + nested", "  + also", "1) numbered"].join("\n"))
+        .blocks,
+    ).toEqual([
+      { type: "list-item", text: "alpha", list: "bullet", indent: 0 },
+      { type: "list-item", text: "nested", list: "bullet", indent: 1 },
+      { type: "list-item", text: "also", list: "bullet", indent: 1 },
+      { type: "list-item", text: "numbered", list: "ordered", indent: 0 },
+    ]);
+
+    // Deeper than the model holds is clamped, not refused.
+    const deep = importMarkdown(
+      ["- a", "  - b", "    - c", "      - d", "        - e"].join("\n"),
+    );
+    expect(deep.blocks.map((block) => block.indent)).toEqual([0, 1, 2, 3, 3]);
+  });
+
+  /**
+   * Depth is not "further right than the line above": an item is nested only
+   * when it reaches the column where the item above it starts its *content* —
+   * marker column, plus the marker, plus the spaces after it. Reading a
+   * relative column instead invents nesting a reader never wrote, and the
+   * export then writes a different list back out.
+   */
+  it("nests only an item that reaches the parent's content column", () => {
+    // One space in is still a sibling: `- a` starts its content at column 2.
+    expect(
+      importMarkdown(["- a", " - b", "   - c"].join("\n")).blocks.map(
+        (block) => block.indent,
+      ),
+    ).toEqual([0, 0, 1]);
+
+    // An ordered marker is wider, so its children start further in: two spaces
+    // do not reach `1. a`'s content column of three.
+    expect(
+      importMarkdown(["1. a", "  - b", "    - c"].join("\n")).blocks.map(
+        (block) => block.indent,
+      ),
+    ).toEqual([0, 0, 1]);
+
+    // …and what this writer emits comes back as what it meant, which is the
+    // property the four-space unit exists for.
+    const nested = ["- a", "    - b", "        - c"].join("\n");
+    expect(importMarkdown(nested).blocks.map((block) => block.indent)).toEqual([
+      0, 1, 2,
+    ]);
+    expect(exportMarkdown(docFrom(nested), { frontmatter: false })).toBe(
+      `${nested}\n`,
+    );
+  });
+
+  it("exports a run of items as one tight, correctly nested list", () => {
+    const doc = docFrom(LIST_SOURCE);
+    const exported = exportMarkdown(doc, { frontmatter: false });
+    expect(exported).toBe(LIST_SOURCE);
+
+    // …and the second trip changes nothing, blocks or bytes.
+    expect(importMarkdown(exported).blocks).toEqual(
+      importMarkdown(LIST_SOURCE).blocks,
+    );
+    expect(exportMarkdown(docFrom(exported), { frontmatter: false })).toBe(
+      exported,
+    );
+  });
+
+  /**
+   * The numbers are display: the model stores "ordered" and nothing else, so
+   * the writer counts. A run that changes style, or a level that is re-entered,
+   * starts again at one — which is what the markdown means anyway.
+   */
+  it("numbers ordered items per level, restarting where the run does", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Numbers" });
+    for (const [text, list, indent] of [
+      ["one", "ordered", 0],
+      ["one.one", "ordered", 1],
+      ["one.two", "ordered", 1],
+      ["two", "ordered", 0],
+      ["bullet", "bullet", 0],
+      ["one again", "ordered", 0],
+    ] as const) {
+      appendBlock(doc, { type: "list-item", text, list, indent });
+    }
+    appendBlock(doc, { type: "paragraph", text: "After." });
+    appendBlock(doc, { type: "list-item", text: "fresh", list: "ordered" });
+
+    expect(exportMarkdown(doc, { frontmatter: false })).toBe(
+      [
+        "1. one",
+        "    1. one.one",
+        "    2. one.two",
+        "2. two",
+        "- bullet",
+        "1. one again",
+        "",
+        "After.",
+        "",
+        "1. fresh",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  /**
+   * A nested bullet is *inside* the ordered item above it, so it ends nothing
+   * the enclosing list was counting — the parent after it is item two. The
+   * editor draws the same numbers from the same rule (`listNumbers`), which is
+   * what keeps the markers a reader sees and the markdown they export in step.
+   */
+  it("keeps an outer ordered run counting across a nested bullet", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Mixed" });
+    for (const [text, list, indent] of [
+      ["parent", "ordered", 0],
+      ["child", "bullet", 1],
+      ["parent two", "ordered", 0],
+      ["child two", "bullet", 1],
+      ["parent three", "ordered", 0],
+    ] as const) {
+      appendBlock(doc, { type: "list-item", text, list, indent });
+    }
+
+    expect(exportMarkdown(doc, { frontmatter: false })).toBe(
+      [
+        "1. parent",
+        "    - child",
+        "2. parent two",
+        "    - child two",
+        "3. parent three",
+        "",
+      ].join("\n"),
+    );
+    expect(
+      listNumbers(getBlocks(doc).map(({ type, list, indent }) => ({ type, list, indent }))),
+    ).toEqual([1, null, 2, null, 3]);
+  });
+
+  it("carries inline marks through both directions", () => {
+    const source = ["- an *emphatic* item", "", "> a **loud** quote", ""].join(
+      "\n",
+    );
+    const imported = importMarkdown(source);
+    expect(imported.blocks[0]?.inline).toEqual([
+      { text: "an ", marks: {} },
+      { text: "emphatic", marks: { italic: true } },
+      { text: " item", marks: {} },
+    ]);
+    expect(imported.blocks[1]?.inline).toEqual([
+      { text: "a ", marks: {} },
+      { text: "loud", marks: { bold: true } },
+      { text: " quote", marks: {} },
+    ]);
+    expect(exportMarkdown(docFrom(source), { frontmatter: false })).toBe(source);
+  });
+
+  it("keeps a blank line inside a list from ending it", () => {
+    expect(
+      importMarkdown(["- a", "", "- b", "", "Prose.", "", "- c"].join("\n"))
+        .blocks,
+    ).toEqual([
+      { type: "list-item", text: "a", list: "bullet", indent: 0 },
+      { type: "list-item", text: "b", list: "bullet", indent: 0 },
+      { type: "paragraph", text: "Prose." },
+      { type: "list-item", text: "c", list: "bullet", indent: 0 },
+    ]);
+  });
+
+  /**
+   * An annotation must not change a document's shape. Exported as HTML comments,
+   * a thread on a list item would otherwise be a block between two items —
+   * blank lines and all — which ends the list, and the child of an annotated
+   * parent would come back at depth zero.
+   */
+  /**
+   * The indent is the item's *content column*, not a fixed unit: `100. ` is
+   * five columns wide, so four spaces would put the comment outside the item
+   * for any reader that counts columns — this one's trim-based comment handling
+   * would go on working and hide it.
+   */
+  it("indents an annotated item's comment to that item's content column", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Wide markers" });
+    let hundredth = "";
+    for (let n = 1; n <= 100; n += 1) {
+      hundredth = appendBlock(doc, {
+        type: "list-item",
+        text: `item ${n}`,
+        list: "ordered",
+      });
+    }
+    createAnnotation(doc, hundredth, 0, 4, "reviewer", "why 100?");
+
+    const lines = exportMarkdown(doc, {
+      frontmatter: false,
+      annotations: "html-comments",
+    }).split("\n");
+    expect(lines[0]).toBe("1. item 1");
+    expect(lines[99]).toBe("100. item 100");
+    expect(lines[100]).toMatch(/^ {5}<!-- annotation .*why 100\?/);
+
+    // …and the run is still one run of a hundred items.
+    const blocks = importMarkdown(lines.join("\n")).blocks;
+    expect(blocks).toHaveLength(100);
+    expect(
+      blocks.every(
+        (block) => block.type === "list-item" && block.indent === 0,
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a list intact across an annotated item's exported comment", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Annotated" });
+    const parent = appendBlock(doc, { type: "list-item", text: "parent" });
+    const child = appendBlock(doc, {
+      type: "list-item",
+      text: "child",
+      indent: 1,
+    });
+    appendBlock(doc, { type: "paragraph", text: "After." });
+    createAnnotation(doc, parent, 0, 6, "reviewer", "why parent?");
+    createAnnotation(doc, child, 0, 5, "reviewer", "why child?");
+
+    const exported = exportMarkdown(doc, {
+      frontmatter: false,
+      annotations: "html-comments",
+    });
+    // Each comment sits inside the item it is about — a comment carries a
+    // thread id, not a block id, so the block it follows is the whole of its
+    // attribution — and indented to that item's content column it is that
+    // item's content, so the run holds. `- ` is two columns, and the child's
+    // marker starts four columns in, so its content column is six.
+    const lines = exported.split("\n");
+    expect(lines[0]).toBe("- parent");
+    expect(lines[1]).toMatch(/^ {2}<!-- annotation .*why parent\?/);
+    expect(lines[2]).toBe("    - child");
+    expect(lines[3]).toMatch(/^ {6}<!-- annotation .*why child\?/);
+    expect(lines[4]).toBe("");
+    expect(lines[5]).toBe("After.");
+
+    expect(importMarkdown(exported).blocks).toEqual([
+      { type: "list-item", text: "parent", list: "bullet", indent: 0 },
+      { type: "list-item", text: "child", list: "bullet", indent: 1 },
+      { type: "paragraph", text: "After." },
+    ]);
+  });
+
+  /**
+   * A tab advances to the next tab stop, so a tab in column two is worth two
+   * columns and not four. Expanding every tab to four spaces measures a deeper
+   * indent than the author typed and nests items they wrote as siblings.
+   */
+  it("measures a tab to the next tab stop, not as four columns", () => {
+    expect(
+      importMarkdown(["- a", "    - b", "  \t- c"].join("\n")).blocks.map(
+        (block) => block.indent,
+      ),
+    ).toEqual([0, 1, 1]);
+  });
+
+  it("reads an empty item and an empty quote line without losing the block", () => {
+    expect(importMarkdown(["-", "> "].join("\n")).blocks).toEqual([
+      { type: "list-item", text: "", list: "bullet", indent: 0 },
+      { type: "quote", text: "" },
+    ]);
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Empty" });
+    appendBlock(doc, { type: "list-item" });
+    appendBlock(doc, { type: "quote", text: "line\n\nlast" });
+    expect(exportMarkdown(doc, { frontmatter: false })).toBe(
+      ["-", "", "> line", ">", "> last", ""].join("\n"),
+    );
   });
 });

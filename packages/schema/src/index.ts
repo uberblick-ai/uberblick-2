@@ -5,9 +5,9 @@
  *   - `meta`        Y.Map: uuid, title, tags, links-by-UUID
  *   - `blocks`      Y.XmlFragment: one Y.XmlElement per block, each holding a
  *                   single Y.XmlText of plain-text source
- *                   (types: paragraph, heading, code, mermaid), formatted by
- *                   the closed inline-mark set (bold, italic, strike,
- *                   inlineCode, link) on prose blocks
+ *                   (types: paragraph, heading, code, mermaid, list-item,
+ *                   quote), formatted by the closed inline-mark set (bold,
+ *                   italic, strike, inlineCode, link) on prose blocks
  *   - `annotations` Y.Map of thread JSON, anchored by `comment` formatting
  *                   marks on the block's text
  *
@@ -75,6 +75,9 @@ export {
 } from "./annotations.js";
 export type { CommentRun } from "./annotations.js";
 
+export { listNumbers } from "./lists.js";
+export type { ListMarkerInput } from "./lists.js";
+
 export { exportMarkdown, importMarkdown } from "./markdown.js";
 export type {
   ExportMarkdownOptions,
@@ -141,7 +144,17 @@ export type {
   StaleBlockDetails,
 } from "./errors.js";
 
-export { BLOCK_TYPES, INLINE_MARKS, isBlockType, isInlineMark } from "./types.js";
+export {
+  BLOCK_TYPES,
+  INLINE_MARKS,
+  LIST_STYLES,
+  MAX_LIST_INDENT,
+  PROSE_BLOCK_TYPES,
+  isBlockType,
+  isInlineMark,
+  isListStyle,
+  isProseBlockType,
+} from "./types.js";
 export type {
   Annotation,
   AnnotationComment,
@@ -156,5 +169,8 @@ export type {
   InlineMarkName,
   InlineMarkSet,
   InlineRun,
+  ListIndent,
+  ListStyle,
+  ProseBlockType,
   SidebarGroup,
 } from "./types.js";

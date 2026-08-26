@@ -683,6 +683,36 @@ describe("inline marks in the document", () => {
   });
 
   /**
+   * The other half of the same rule: `list-item` and `quote` are prose, so they
+   * take the inline set and the anchor alike. The split is prose vs source, not
+   * paragraph vs everything else.
+   */
+  it("gives list items and quotes the full inline set, and the anchor", () => {
+    for (const type of ["list-item", "quote"] as const) {
+      const doc = seeded();
+      const id = appendBlock(doc, {
+        type,
+        inline: [
+          { text: "a ", marks: {} },
+          { text: "loud", marks: { bold: true } },
+          { text: " point", marks: {} },
+        ],
+      });
+      expect(getBlockText(doc, id), type).toBe("a loud point");
+      expect(getBlockInline(doc, id), type).toEqual([
+        { text: "a ", marks: {} },
+        { text: "loud", marks: { bold: true } },
+        { text: " point", marks: {} },
+      ]);
+
+      const thread = createAnnotation(doc, id, 2, 6, "reviewer", "why loud?");
+      expect(listAnnotationRanges(doc, id), type).toEqual([
+        { threadId: thread.id, start: 2, end: 6 },
+      ]);
+    }
+  });
+
+  /**
    * The refusal that keeps the two halves of the model consistent. Marks a source
    * block cannot hold must not get there by the back door, and `setBlockType`
    * cannot silently drop them either — its whole contract is that it preserves
