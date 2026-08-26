@@ -239,9 +239,10 @@ file contains only Claude coordinator machinery and does not restate either.
    two plain sentences on what the issue is and why it is next, plus the direct
    GitHub URL (from `gh issue view <n> --json url`).
 
-   Prompt the implementer named by the claim: spawn an Opus sub-agent
-   (`model: opus`, `isolation: worktree`) by default, or use the Herdr skill to
-   dispatch a Codex session with the issue URL. The brief is decision-complete
+   The brief instructs the implementer to read `AGENTS.md` first, before any
+   repository change. Prompt the implementer named by the claim: spawn an
+   Opus sub-agent (`model: opus`, `isolation: worktree`) by default, or use
+   the Herdr skill to dispatch a Codex session with the issue URL. The brief is decision-complete
    but pulled, not pushed: pass the full issue body and applicable CLAUDE.md
    invariants, and instruct the agent to start by reading the product docs its
    Pointers cite through the uberblick MCP tools — `get_doc` on each cited

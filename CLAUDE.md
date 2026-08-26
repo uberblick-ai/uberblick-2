@@ -34,6 +34,7 @@ Rule: no hardcoded hub addresses anywhere except the in-code fallback default.
 
 ## Orchestration policy
 
+`AGENTS.md` is the canonical agent-neutral workflow for every implementer lane.
 Work in this repo is always done by isolated implementer agents — Opus
 sub-agents by default, or a Codex session dispatched through Herdr under the
 same claim/handoff/review rules; Fable coordinates, validates and merges and

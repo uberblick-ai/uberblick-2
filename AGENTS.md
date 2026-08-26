@@ -18,8 +18,8 @@ from GitHub alone, without terminal history or a local worktree.
 
 Implementation runs in one of two lanes: an isolated Opus sub-agent by
 default, or a Codex session dispatched through Herdr. Before prompting either
-implementer, the coordinator adds `in-progress`
-and posts the claim defined by `.github/ISSUE_SPEC.md`. It records the branch,
+implementer, the coordinator adds `in-progress` and posts the claim defined by
+`.github/ISSUE_SPEC.md`. It records the branch,
 implementer type, and implementer session or agent id so reviewers can prove
 that they did not author the diff.
 
@@ -36,9 +36,8 @@ claim-before-prompt write and the implementer's first push.
 
 ## Implementation
 
-Treat the issue body and coordinator comments as the authoritative
-requirements, constraints, and acceptance criteria. Use your own engineering
-judgment for
+Treat the issue body and coordinator comments as the authoritative requirements,
+constraints, and acceptance criteria. Use your own engineering judgment for
 implementation details, test names, and small design choices explicitly left
 open. If the brief conflicts with the code, is unsafe, or requires unnecessary
 complexity, stop and record the discrepancy on GitHub rather than silently
@@ -47,9 +46,11 @@ deviating.
 For a newly claimed issue, start from fresh `origin/main` in an isolated
 worktree. For a fix-up or handover, continue the claimed branch in a new
 isolated worktree without rebasing or force-pushing. Never share another
-agent's worktree. Keep the change inside the issue's declared footprint and
-prefer the least code that defends the contract. Add contract or invariant
-tests, not tests of implementation trivia. Use the documented `mise` tasks for
+agent's worktree. Only the current claim holder writes to a claimed branch. A
+handover first records the new implementer in a claim. Keep the change inside
+the issue's declared footprint and prefer the least code that defends the
+contract. Add contract or invariant tests, not tests of implementation
+trivia. Use the documented `mise` tasks for
 the issue's validation, including lint, typecheck, and tests where applicable.
 
 Commit and push a feature branch, then open a PR against `main` whose body
@@ -59,8 +60,10 @@ commit to `main` and never merge your own PR.
 Before announcing completion, post the PR handoff defined by
 `.github/ISSUE_SPEC.md`, including its KISS/overtesting self-review.
 
-Only after that durable comment may a Herdr notification carry the PR URL and
-exact head SHA. Polling GitHub is the fallback when the doorbell is unavailable.
+Only after that durable comment may the implementer notify the coordinator. A
+Codex Herdr message carries the PR URL and exact head SHA; for an Opus
+sub-agent, its return to the coordinator is that notification. Polling GitHub
+is the fallback when the doorbell is unavailable.
 
 ## Review and coordination
 
@@ -73,5 +76,4 @@ reviewing session on the PR.
 Coordinators advance open PRs before dispatching new issues, reconstruct
 claims and progress from GitHub, and re-read the issue and PR threads before
 every ruling. They record validation and finding dispositions on the PR; merge
-authority
-comes from CLAUDE.md.
+authority comes from CLAUDE.md.

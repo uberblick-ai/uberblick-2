@@ -87,8 +87,8 @@ Claimed: feat/mcp-server
 Implementer: opus a12a538d
 ```
 
-`Implementer` is `<opus|codex> <session-or-agent id>`. Write the claim before
-prompting the implementer. Completion is a PR comment recording what changed,
+`Implementer` is `<opus|codex> <session-or-agent id>`. Completion is a PR
+comment recording what changed,
 how it was verified, unresolved blockers, risks, or findings, and the
 KISS/overtesting self-review. Head SHA, check state, and timing remain derived
 from the PR rather than copied into the durable record. Recovery and
