@@ -20,9 +20,14 @@ file does not restate it.
   edit feature code in the main checkout — it may hold the user's uncommitted
   work; worktrees only.
 - The agent that wrote a diff never reviews it authoritatively. You validate
-  against the acceptance criteria, and the external round goes to an agent that
-  did not implement the PR — a Codex-implemented PR gets a Copilot/Opus reader,
-  never the Codex session that wrote it.
+  against the acceptance criteria, and the external round goes to a session
+  that did not write the diff. Where CLAUDE.md's gate list makes a Codex round
+  mandatory, a Codex-implemented PR does not satisfy it by substituting a
+  different reviewer type: it goes to a *different* Codex session where one is
+  available, and only otherwise to an independent Opus reviewer — either way
+  you record on the PR which session read it. (Codex implementers are
+  currently confined to tier-2 `web`/`cli` issues by the owner's pilot scope,
+  so the mandatory gate rarely fires on their PRs.)
 - **GitHub is the source of truth for coordination state; Herdr is a
   doorbell.** Every durable thing — claim, decision, handoff, finding
   disposition, gate result — is written to GitHub before the message that
@@ -253,9 +258,11 @@ file does not restate it.
    spec's claim comment before you prompt any agent. **Announce the work to
    the user** in your visible output: one or two plain sentences on what the
    issue is and why it's next, plus the direct GitHub URL (from
-   `gh issue view <n> --json url`). Then spawn an Opus sub-agent whose brief
-   is decision-complete but pulled, not pushed: pass the full issue body and
-   the applicable CLAUDE.md invariants, and instruct the agent to START by
+   `gh issue view <n> --json url`). Then prompt the implementer the claim
+   names — spawn an Opus sub-agent, or dispatch the Codex session — with a
+   brief that is decision-complete but pulled, not pushed: pass the full issue
+   body and the applicable CLAUDE.md invariants, and instruct the agent to
+   START by
    reading the product docs its Pointers cite through the uberblick MCP tools
    — `get_doc` on each cited uuid, `search` for what the issue did not
    anticipate — before any implementation or repository changes. You inline

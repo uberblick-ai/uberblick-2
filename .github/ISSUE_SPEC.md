@@ -84,23 +84,32 @@ the implementer it dispatched to:
 
 ```
 Claimed: feat/mcp-server
-Implementer: opus
+Implementer: opus a12a538d
 ```
 
-`Implementer` names the agent type (`opus`, `codex`) — who wrote the diff has
-to be readable without asking, because an implementer never reviews its own
+`Implementer` is the agent type (`opus`, `codex`) plus the session or agent
+id — the coordinator's agent id, or the Herdr session id for a Codex lane.
+Type alone cannot tell two Codex sessions apart, and the reviewing session must
+be distinguishable from the authoring one: an implementer never reviews its own
 PR authoritatively. The claim comment is written **before** the implementing
 agent is prompted: a session that dies between the two must leave the claim
 behind, not the work.
 
-Recovery rule: an issue carrying `in-progress` is stale, and may be reclaimed,
-when its named branch has no live worktree **and** no open PR **and** the claim
-comment is older than 30 minutes. The grace window exists because the claim now
-precedes the worktree: without it a parallel coordinator can reclaim an issue in
-the seconds between the two writes. Liveness for `Implementer: codex` is the
-branch on `origin` or the PR — never a terminal pane, which no other session can
-see. Claims live on GitHub, not in any session's memory, so a crashed session
-never strands an issue.
+Recovery rule — one predicate, checkable by any session from GitHub alone. An
+issue carrying `in-progress` is stale, and may be reclaimed, when **all** of:
+
+- no open PR for the named branch;
+- no commit on the branch at `origin` newer than the claim comment;
+- the claim comment is older than 30 minutes.
+
+Local worktrees and terminal panes are deliberately not part of it: they are
+invisible to every session but one, so a rule that consults them cannot be
+evaluated by the coordinator that needs it. A dead agent holding a stale
+worktree is therefore reclaimable like any other. The 30-minute window is what
+the claim-before-prompt ordering costs: it keeps a parallel coordinator from
+reclaiming in the seconds between the claim and the first push. Claims live on
+GitHub, not in any session's memory, so a crashed session never strands an
+issue.
 
 The completion handoff is a comment on the **PR**, not the issue: what
 changed, how it was verified, and what is unresolved — blockers, accepted

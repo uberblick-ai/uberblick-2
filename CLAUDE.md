@@ -48,10 +48,10 @@ implementation (or Workflow pipelines for fan-out), then validate their output
    implementation loop may pick up must conform to `.github/ISSUE_SPEC.md`
    (`Depends-on`/`Touches` header, runnable acceptance criteria, explicit
    out-of-scope); the `ready` label asserts conformance and eligibility.
-2. **Branch + sub-agents.** Implementation happens on a feature branch
-   (`feat/<slug>`, `fix/<slug>`), written by Opus sub-agents coordinated by
-   Fable with decision-complete briefs. Never commit feature work directly to
-   `main`.
+2. **Branch + implementer agents.** Implementation happens on a feature branch
+   (`feat/<slug>`, `fix/<slug>`), written by isolated implementer agents
+   coordinated by Fable with decision-complete briefs. Never commit feature
+   work directly to `main`.
 3. **PR.** Open a PR against `main` linked to the issue (`Closes #N`), with a
    body stating what changed and how it was verified.
 4. **Gates — all of them, before merge:**
