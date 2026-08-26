@@ -1,0 +1,112 @@
+/* Tailwind v4, for app CHROME only (#27).
+ *
+ * The product's surfaces — editor, sidebar, reading layout — are plain CSS and
+ * stay that way (`styles.css`). Tailwind is here for one job: to let us vendor
+ * shadcn/ui components (`ui/shadcn/`) over Radix primitives, so the menus,
+ * popovers and dialogs the design needs are standard mature open source rather
+ * than hand-built. Coexistence, not a rewrite.
+ *
+ * Three things make that coexistence safe, and each is load-bearing:
+ *
+ * 1. **No preflight.** The layers are imported one by one below, deliberately
+ *    skipping `tailwindcss/preflight.css`. Preflight zeroes heading and
+ *    paragraph margins, strips list markers and resets buttons — globally. On
+ *    this app that is not a reset, it is a redesign of the editor and the
+ *    sidebar. The handful of preflight rules the vendored components actually
+ *    rely on are restored at the bottom of this file, scoped to those
+ *    components by their `data-slot` attributes.
+ *
+ * 2. **Everything Tailwind emits is layered; `styles.css` is not.** Unlayered
+ *    declarations outrank layered ones no matter what order the files load in,
+ *    so no Tailwind default can reach an existing `.ub-*` rule — including
+ *    Tailwind's own `--font-sans`, which loses to the Geist stack in
+ *    `styles.css` by the same rule.
+ *
+ * 3. **One source of truth for colour.** The `@theme inline` block below maps
+ *    shadcn's canonical token names onto the custom properties that already
+ *    exist in `styles.css` (they were kept shadcn-canonical in #34 for exactly
+ *    this). It *defines* nothing: every value on the right-hand side is a
+ *    `var()` at an existing token. Light and dark therefore come for free —
+ *    `styles.css` flips those properties under `prefers-color-scheme`, and the
+ *    components re-resolve with them.
+ *
+ * Not everything can go through `@theme`, and the exceptions are deliberate:
+ *
+ * - **Radius and shadow are read directly.** `styles.css` already owns
+ *   properties named `--radius-sm` and `--shadow-*`, and those are exactly
+ *   Tailwind's own theme namespaces — a theme entry pointing a name at itself
+ *   is a cycle. So the components spell them `rounded-(--radius-sm)` and
+ *   `shadow-(--shadow-float)`: the same tokens, read one step more directly.
+ * - **Type is inherited, not bridged.** `--font-sans` collides the same way,
+ *   and does not need bridging: `:root` sets `font-family` to the Geist stack,
+ *   a portalled surface is a child of `<body>`, and inheritance does the rest.
+ *   The one thing that does not inherit is a `<button>`, which the base layer
+ *   below fixes.
+ */
+
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* Tell Tailwind where class names live. Automatic detection would sweep the
+   whole package; the vendored components and their demo are the only files
+   that carry utilities, and naming them keeps a stray string in an editor
+   plugin from generating CSS. */
+@source "./shadcn";
+@source "../dev";
+
+/* The bridge. Left side: what shadcn's markup asks for. Right side: what this
+   product already is. No colour is defined here. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  /* The product has no separate popover surface, and inventing one would be a
+     new palette value. A popover *is* a card that floats. */
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  /* Not a shadcn name. The amber is the product's accent, and chrome that
+     wants it should not have to reach past the theme for it. */
+  --color-brand: var(--brand);
+}
+
+@layer base {
+  /* The only preflight this app takes, and only where the vendored components
+     are. `data-slot` is on every shadcn v4 element, so this reaches them and
+     nothing else: a portalled menu is a sibling of `.ub-app`, not a child, and
+     no `.ub-*` rule can style it.
+     - `font: inherit` because a <button> does not inherit type from its
+       ancestors, and every trigger is one.
+     - `margin: 0` because a dialog's title is an <h2> and its description a
+       <p>, and the UA margins on those are prose margins. */
+  [data-slot] {
+    box-sizing: border-box;
+    font: inherit;
+    margin: 0;
+  }
+
+  /* And the button reset, for the same reason: a trigger or a close control
+     that nobody handed a product class to should be the label, not the
+     operating system's grey lozenge. Layered, so `.ub-tool` and every other
+     `.ub-*` button style still wins — which is what makes `asChild` on an
+     existing control work. */
+  button[data-slot] {
+    border: 0;
+    background: none;
+    color: inherit;
+  }
+}

@@ -1,4 +1,10 @@
-/* Plain CSS, no framework.
+/* The product's own surfaces — editor, sidebar, reading layout — in plain CSS.
+ * No framework reaches any of them. The app *also* loads Tailwind, for the
+ * vendored shadcn chrome and for nothing else (#27); everything that framework
+ * emits sits inside a cascade layer, and nothing here does, so no Tailwind
+ * default can outrank a rule in this file. `ui/tailwind.css` is the other half
+ * of that arrangement, and it reads its colours from the token block below
+ * rather than declaring any of its own.
  *
  * Colors live in the token block below and nowhere else: every rule reads a
  * custom property. Dark is the default (`:root`); light overrides inside the
@@ -66,6 +72,16 @@
 
   --radius: 0.625rem;
   --radius-sm: calc(var(--radius) - 4px);
+
+  /* The three floating-surface values, each of which was written out at more
+     than one call site before the vendored shadcn chrome needed them too (#27).
+     A popover that floats over the prose has to be the *same* lift as the block
+     menu and the comment composer, and a modal the same scrim as the settings
+     dialog — two spellings would read as two surfaces. Theme-invariant: black
+     over a light ground and black over a dark one are both "less light here".*/
+  --shadow-float: 0 8px 24px oklch(0 0 0 / 25%);
+  --shadow-modal: 0 12px 32px rgb(0 0 0 / 0.28);
+  --scrim: rgb(0 0 0 / 0.45);
 
   /* The reading measure. Prose wider than ~75ch is hard to track back to the
      next line, so the content column is capped here and centred in whatever
@@ -774,7 +790,7 @@ body {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: rgb(0 0 0 / 0.45);
+  background: var(--scrim);
 }
 
 .ub-settings {
@@ -786,7 +802,7 @@ body {
   border-radius: var(--radius);
   background: var(--card);
   color: var(--card-foreground);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+  box-shadow: var(--shadow-modal);
   font-size: 0.85rem;
 }
 
@@ -1178,7 +1194,7 @@ body {
   border-radius: var(--radius-sm);
   background: var(--card);
   color: var(--card-foreground);
-  box-shadow: 0 8px 24px oklch(0 0 0 / 25%);
+  box-shadow: var(--shadow-float);
   font-size: 0.85rem;
 }
 
@@ -1864,7 +1880,7 @@ h3.ub-heading {
   color: var(--card-foreground);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 8px 24px oklch(0 0 0 / 25%);
+  box-shadow: var(--shadow-float);
   font-size: 0.85rem;
   line-height: 1.45;
 }
@@ -2240,7 +2256,7 @@ h3.ub-heading {
   border-radius: var(--radius);
   /* The same lift as the comment composer — both are cards floating over the
      prose, and two different shadows would read as two different surfaces. */
-  box-shadow: 0 8px 24px oklch(0 0 0 / 25%);
+  box-shadow: var(--shadow-float);
 }
 
 .ub-blockmenu-search {
