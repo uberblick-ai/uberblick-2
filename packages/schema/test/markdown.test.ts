@@ -508,6 +508,36 @@ describe("lists and quotes", () => {
   });
 
   /**
+   * A blank line ends a table, so one inside the source means the text is not
+   * one table. Filtering blank lines out instead made the prose after them body
+   * rows of a table it was never part of.
+   */
+  it("ends a table at a blank line rather than reading past it", () => {
+    expect(parseGfmTable("| h |\n| - |\n\nprose")).toBeNull();
+
+    // The reader splits there, so the prose is the paragraph it always was.
+    expect(importMarkdown("| h |\n| - |\n\nprose\n").blocks).toEqual([
+      { type: "table", text: "| h |\n| - |" },
+      { type: "paragraph", text: "prose" },
+    ]);
+  });
+
+  /**
+   * Where a table ends is the parser's question, so the reader asks the parser
+   * rather than keeping a rule of its own. A pipe-less line is a one-column row
+   * to `parseGfmTable`, and a reader that required a pipe would end the block
+   * one line early — storing source that then parses differently from how it
+   * was read.
+   */
+  it("takes the same body rows the parser does", () => {
+    const source = "| h |\n| - |\nvalue";
+    expect(importMarkdown(`${source}\n`).blocks).toEqual([
+      { type: "table", text: source },
+    ]);
+    expect(parseGfmTable(source)?.rows).toEqual([["value"]]);
+  });
+
+  /**
    * The pipes that make a table are *structural* ones. A `\|` is a pipe in
    * somebody's prose, and a reader that counted it would take a paragraph plus
    * a line of hyphens — a setext heading, in any other reader — as a

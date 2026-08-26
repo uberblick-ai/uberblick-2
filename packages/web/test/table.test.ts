@@ -193,6 +193,12 @@ describe("the table block", () => {
       caret(editor, 1, 0);
       expect(paste("a | b\nc | d")).toBe(false);
       expect(getBlocks(ydoc)[1]?.type).toBe("paragraph");
+
+      // A clipboard that merely *starts* with a table is a document: taking it
+      // would store the prose under it as rows of a table nobody wrote, so it
+      // falls through to the ordinary paste and stays the blocks it is.
+      expect(paste(`${HEADER}\n${DELIMITER}\n\nprose after it\n`)).toBe(false);
+      expect(getBlocks(ydoc)[1]?.type).toBe("paragraph");
     } finally {
       editor.destroy();
     }

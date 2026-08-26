@@ -282,9 +282,10 @@ function convertToTable(
  * as the markdown input rules. A paragraph carrying any mark is left alone —
  * see {@link carriesMarks}.
  *
- * **Pasted** is GFM table text on the clipboard. It is handled here rather than
- * left to ProseMirror's plain-text parser, which folds the newlines out of it
- * and hands back a single line of pipes.
+ * **Pasted** is a clipboard that is *exactly* one GFM table. It is handled here
+ * rather than left to ProseMirror's plain-text parser, which folds the newlines
+ * out of it and hands back a single line of pipes — but a clipboard that merely
+ * begins with a table is a document, and falls through to the ordinary paste.
  */
 export function tableFromTextPlugin(): Plugin {
   return new Plugin({
@@ -336,8 +337,13 @@ export function tableFromTextPlugin(): Plugin {
 
       handlePaste(view, event) {
         const text = event.clipboardData?.getData("text/plain") ?? "";
-        const lines = text.replace(/\r\n?/g, "\n").replace(/\s+$/, "").split("\n");
-        if (!opensTable(lines[0] ?? "", lines[1] ?? "")) return false;
+        const source = text.replace(/\r\n?/g, "\n").replace(/\s+$/, "");
+        // The *whole* clipboard has to be one table, not merely start as one.
+        // A table with prose under it is a document, and swallowing that prose
+        // into the block would store it as rows of a table nobody wrote — so it
+        // falls through to the ordinary paste, which keeps it as the blocks it
+        // is. `parseGfmTable` is the same rule the renderer and the reader use.
+        if (parseGfmTable(source) === null) return false;
 
         const $from = view.state.selection.$from;
         if ($from.depth !== 1) return false;
@@ -351,7 +357,7 @@ export function tableFromTextPlugin(): Plugin {
         const blockId = block.attrs.id;
         if (typeof blockId !== "string" || blockId === "") return false;
 
-        return convertToTable(view, blockId, null, lines.join("\n"));
+        return convertToTable(view, blockId, null, source);
       },
     },
   });

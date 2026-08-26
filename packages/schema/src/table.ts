@@ -131,14 +131,17 @@ export function parseGfmTable(source: string): GfmTable | null {
   if (delimiters.cells.length !== header.cells.length) return null;
   if (!delimiters.cells.every((cell) => DELIMITER_CELL.test(cell))) return null;
 
-  const rows = lines
-    .slice(2)
-    .filter((line) => line.trim() !== "")
-    .map((line) => {
-      const { cells } = scanRow(line);
-      // Short rows are padded and long ones truncated, which is what GFM does.
-      return header.cells.map((_, column) => cells[column] ?? "");
-    });
+  const body = lines.slice(2);
+  // A blank line ends a table, so one *inside* the source means this is not one
+  // table: taking the lines after it as rows would render a following paragraph
+  // as a row of a table it was never part of. Trailing blanks are already gone.
+  if (body.some((line) => line.trim() === "")) return null;
+
+  const rows = body.map((line) => {
+    const { cells } = scanRow(line);
+    // Short rows are padded and long ones truncated, which is what GFM does.
+    return header.cells.map((_, column) => cells[column] ?? "");
+  });
 
   return {
     header: header.cells,

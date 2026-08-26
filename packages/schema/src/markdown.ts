@@ -1605,10 +1605,18 @@ export function importMarkdown(markdown: string): ImportedDoc {
       openItems = [];
       const table = [line, delimiterLine];
       let j = i + 2;
+      // Where the table ends is the parser's question too, so it is the parser
+      // that answers it: a line joins the block while the block still parses as
+      // one table. A rule of its own — "the line has a pipe in it", say — would
+      // disagree with `parseGfmTable`, which reads a pipe-less line as a
+      // one-column row, and the block would then hold source it does not parse.
+      // The blank line is tested here rather than left to the parser only
+      // because a *trailing* one is trimmed off any source before it is parsed;
+      // inside the block, the parser rejects it as the table-ender it is.
       while (
         j < lines.length &&
         (lines[j] ?? "").trim() !== "" &&
-        (lines[j] ?? "").includes("|")
+        parseGfmTable([...table, lines[j] ?? ""].join("\n")) !== null
       ) {
         table.push(lines[j] ?? "");
         j += 1;
