@@ -38,7 +38,9 @@ import { ThreadsPane } from "./ThreadsPane.js";
 import { workspaceTags } from "./tags.js";
 import { focusThread } from "./threads.js";
 import type { SelectThread, ThreadFocus } from "./threads.js";
+import { AllDocsPane } from "./AllDocsPane.js";
 import {
+  allPath,
   canonicalPath,
   docIsHydrated,
   docPath,
@@ -187,8 +189,9 @@ export function RoutePane({
   return (
     <EditorPane
       connection={connection}
-      // Only `list` and `doc` reach here; both carry the workspace the address
-      // spelled, which is what a copied link has to keep.
+      // Only `list` and `doc` reach here — the shell renders the corpus
+      // listing itself — and both carry the workspace the address spelled,
+      // which is what a copied link has to keep.
       segment={route.workspace.segment}
       author={author}
       knownTags={knownTags}
@@ -422,15 +425,23 @@ export function App(): ReactElement {
   );
 
   /**
-   * Pin the open document, or unpin it: the keyboard-reachable path into the
-   * sidebar, from the one place that is always about the document on screen.
-   * Which group and which position are the drag's business — this only decides
-   * that the document belongs in the sidebar at all.
+   * Pin a document, or unpin it — one write, two callers: the header's control
+   * for the document on screen, and a row of the corpus listing (#118). Which
+   * group and which position are the drag's business; this only decides that
+   * the document belongs in the sidebar at all.
    */
+  const onTogglePinDoc = useCallback(
+    (uuid: string) => {
+      if (sidebar === null) return;
+      togglePin(sidebar.ydoc, uuid);
+    },
+    [sidebar],
+  );
+  /** The keyboard-reachable path in, from the place that is always about the
+      open document. */
   const onTogglePin = useCallback(() => {
-    if (sidebar === null || selected === null) return;
-    togglePin(sidebar.ydoc, selected);
-  }, [sidebar, selected]);
+    if (selected !== null) onTogglePinDoc(selected);
+  }, [onTogglePinDoc, selected]);
 
   /** Opening a document is navigating to it. There is nothing else to update. */
   const segment = workspace?.segment ?? null;
@@ -440,6 +451,11 @@ export function App(): ReactElement {
     },
     [navigate, segment],
   );
+
+  /** Going to the listing is navigating to it, like opening a document. */
+  const onOpenAll = useCallback(() => {
+    if (segment !== null) navigate(allPath(segment));
+  }, [navigate, segment]);
 
   /**
    * A create needs the new document's Y.Doc *before* React has mounted the
@@ -467,7 +483,10 @@ export function App(): ReactElement {
     initDoc(handle.connection.ydoc, { uuid, title: "" });
     // A document with no blocks has nowhere to put the caret, so seed one.
     appendBlock(handle.connection.ydoc, { type: "paragraph", text: "" });
-    upsertDirectoryEntry(directory.ydoc, { uuid, title: "" });
+    // Stamped once, here, because this is the moment the document is created
+    // and nothing else knows it: the stub carries `createdAt` from then on (the
+    // schema keeps the first one), which is what the "Created" sort reads.
+    upsertDirectoryEntry(directory.ydoc, { uuid, title: "", createdAt: Date.now() });
     pending.current?.release();
     pending.current = { room, release: handle.release };
     onSelect(uuid);
@@ -548,20 +567,36 @@ export function App(): ReactElement {
             selected={selected}
             onSelect={onSelect}
             onCreate={onCreate}
+            onOpenAll={onOpenAll}
+            allOpen={route.kind === "all"}
             onOpenSettings={() => setSettingsOpen(true)}
           />
         )}
-        <RoutePane
-          route={route}
-          configured={hubReady}
-          connection={doc}
-          meta={meta}
-          author={identity.name}
-          knownTags={knownTags}
-          archived={archived}
-          onRestore={onRestore}
-          onSelectThread={onFocusThread}
-        />
+        {/* The corpus listing is its own address (#118), and the only pane
+            that is about the workspace rather than about one document — so it
+            takes the pane rather than passing four more props through
+            `RoutePane`, which exists to say what a *document* address resolves
+            to. */}
+        {route.kind === "all" ? (
+          <AllDocsPane
+            entries={entries}
+            groups={sidebarGroups}
+            onSelect={onSelect}
+            onTogglePin={sidebar !== null ? onTogglePinDoc : null}
+          />
+        ) : (
+          <RoutePane
+            route={route}
+            configured={hubReady}
+            connection={doc}
+            meta={meta}
+            author={identity.name}
+            knownTags={knownTags}
+            archived={archived}
+            onRestore={onRestore}
+            onSelectThread={onFocusThread}
+          />
+        )}
         {/* The outline and the threads rail stack in one right column. Both
             sections render nothing when they have nothing to show, so the rail
             hides itself when it is empty (`.ub-rail:empty`) rather than leaving
