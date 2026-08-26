@@ -206,6 +206,21 @@ auth in the spike itself.
 - SQLite indexes (FTS5, tags, links) are derived and rebuildable — never
   authoritative.
 - All document state lives in the Y.Doc, never in server-side tables.
+- **Document state syncs; auth state decides.** Anything that has to merge
+  between copies and keep working offline is document state, and it lives in a
+  Y.Doc. Anything that has to be correct in one place at one time — which
+  workspaces this hub serves, which credentials may open them, which have been
+  revoked — is hub state, and it lives in the hub's own SQLite tables. It is
+  never synced, never merged, and never rebuilt from documents. The reason is
+  that merging cannot express a revocation: CRDT merges are unions or
+  last-write-wins, so a client that never receives the revocation is just a
+  client with older data, which is exactly the state it wants to be in. Access
+  control you can wait out is not access control. This is a closed list, not a
+  general licence for server-side state: the hub's authoritative tables are the
+  workspace registry and its credentials, and nothing else. Unlike the derived
+  indexes above they cannot be rebuilt, so losing them means issuing a new
+  credential to every machine, browser and agent — back them up with the
+  documents.
 - Identity is UUIDs everywhere; titles and paths are display data. On
   conflict, `meta.title` in the doc is authoritative; the directory stub is a
   cache repaired on write/connect.
