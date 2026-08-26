@@ -23,7 +23,7 @@
  * hub, and in `e2e/deep-link.spec.ts` in a real browser.
  */
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { ReactElement } from "react";
@@ -97,21 +97,55 @@ function Probe({ configured }: { configured: readonly string[] }): ReactElement 
     <WorkspaceSwitcher
       workspaces={workspaceList(configured, current)}
       current={current}
+      docs={0}
       onSwitch={(segment) => navigate(`/${segment}`)}
     />
   );
 }
 
-function switcher(host: HTMLElement): HTMLSelectElement {
-  return host.querySelector<HTMLSelectElement>(".ub-workspace") as HTMLSelectElement;
+/** The sidebar's header control — what the reader sees before opening it. */
+function trigger(host: HTMLElement): HTMLButtonElement {
+  return host.querySelector<HTMLButtonElement>(".ub-workspace") as HTMLButtonElement;
 }
 
-function options(host: HTMLElement): string[] {
-  return [...host.querySelectorAll("option")].map((option) => option.value);
+/**
+ * Open the menu from the keyboard.
+ *
+ * Enter on the trigger rather than a synthetic pointer sequence: Radix opens on
+ * both, and only one of them is a thing jsdom has.
+ */
+function open(host: HTMLElement): void {
+  act(() => {
+    trigger(host).focus();
+    trigger(host).dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+  });
+}
+
+/** The menu is portalled to <body>, so it is read from the document. */
+function items(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>("[data-slot=dropdown-menu-item]")];
+}
+
+/** The workspaces the menu offers, in order — the disabled items are not ones. */
+function offered(): string[] {
+  return items()
+    .filter((item) => item.getAttribute("data-disabled") === null)
+    .map((item) => item.textContent ?? "");
+}
+
+/** jsdom has neither, and Radix's floating surface uses both. */
+class FakeResizeObserver {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
 }
 
 describe("switching workspace is navigating to it", () => {
   beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    Element.prototype.scrollIntoView = function scrollIntoView() {};
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
       true;
     window.history.replaceState(null, "", `/${UBERBLICK}`);
@@ -123,12 +157,12 @@ describe("switching workspace is navigating to it", () => {
     const root = createRoot(host);
     act(() => root.render(<Probe configured={CONFIGURED} />));
 
-    expect(options(host)).toEqual([UBERBLICK, ABLAUF]);
-    expect(switcher(host).value).toBe(UBERBLICK);
+    expect(trigger(host).textContent).toContain(UBERBLICK);
+    open(host);
+    expect(offered()).toEqual([`${UBERBLICK}0 docs`, ABLAUF]);
 
     act(() => {
-      switcher(host).value = ABLAUF;
-      switcher(host).dispatchEvent(new Event("change", { bubbles: true }));
+      items().find((item) => item.textContent === ABLAUF)?.click();
     });
 
     // The address moved, and it is the *list* of the other workspace — not the
@@ -138,7 +172,7 @@ describe("switching workspace is navigating to it", () => {
       kind: "list",
       workspace: ablauf,
     });
-    expect(switcher(host).value).toBe(ABLAUF);
+    expect(trigger(host).textContent).toContain(ABLAUF);
 
     act(() => root.unmount());
     host.remove();
@@ -161,21 +195,24 @@ describe("switching workspace is navigating to it", () => {
       uuid,
     });
     // Unconfigured, and still on the menu — with the configured one beside it.
-    expect(options(host)).toEqual([UBERBLICK, ABLAUF]);
-    expect(switcher(host).value).toBe(ABLAUF);
+    open(host);
+    expect(offered()).toEqual([UBERBLICK, `${ABLAUF}0 docs`]);
 
     act(() => root.unmount());
     host.remove();
   });
 
-  it("shows a label rather than a control when there is nowhere else to go", () => {
+  it("names the workspace it is at when that is the only one there is", () => {
+    // A menu of one still opens — it is also where the workspace-management
+    // items live (#74) — but the reader is told where they are without it.
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
     act(() => root.render(<Probe configured={[]} />));
 
-    expect(host.querySelector(".ub-workspace")).toBeNull();
-    expect(host.textContent).toBe(`workspace ${UBERBLICK}`);
+    expect(trigger(host).textContent).toContain(UBERBLICK);
+    open(host);
+    expect(offered()).toEqual([`${UBERBLICK}0 docs`]);
 
     act(() => root.unmount());
     host.remove();

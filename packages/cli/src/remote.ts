@@ -87,11 +87,12 @@ import {
   writeUserConfig,
 } from "./config.js";
 import type { ResolvedConfig } from "./config.js";
+import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
-import { trustLocalConfig } from "./mise-config.js";
 import { processIo } from "./io.js";
+import { trustLocalConfig } from "./mise-config.js";
 import { remoteInitCommand, remoteUpdateCommand } from "./remote-init.js";
 import { publishOwnerOnly, removeQuietly } from "./safe-write.js";
 import { ORIGIN_LABELS } from "./status.js";
@@ -123,6 +124,9 @@ options for promote and join:
                          configured is tried first, and a terminal is prompted
                          with the input hidden. Never pass a secret as an
                          argument.
+
+options:
+  -h, --help             show this help; after a command, that command's help
 `;
 
 /**
@@ -711,10 +715,66 @@ interface BridgeFlags {
   secretFile: string | undefined;
 }
 
+/** Exported so the two bridge helps can be checked against their parser. */
+export const REMOTE_BRIDGE_OPTIONS = {
+  "secret-file": { type: "string" },
+} as const;
+
+/** The paragraph both bridge helps end on: how the credential is supplied. */
+const SECRET_FILE_NOTE = `  --secret-file <path>  read the remote's signing secret from a file only you
+                        can read (mode 0600). Without it the secret already
+                        configured is tried first, and a terminal is prompted
+                        with the input hidden.
+  -h, --help            show this help
+
+Never pass a secret as an argument: it would be in the shell history and in
+every process listing on the machine.
+`;
+
+export const REMOTE_PROMOTE_HELP = `usage: ub remote promote <url> [--secret-file <path>]
+
+Move this populated workspace onto an empty remote hub: every local document is
+pushed, the endpoint is then repointed at <url>, and the credential that reached
+it is stored. Refuses when the remote already holds documents, so it can never
+merge two corpora by accident.
+
+operands:
+  <url>                 the remote endpoint, ws:// or wss:// (an https:// or
+                        http:// address is accepted and normalized)
+
+options:
+${SECRET_FILE_NOTE}`;
+
+export const REMOTE_JOIN_HELP = `usage: ub remote join <url-with-workspace-id> [--secret-file <path>]
+
+Bind this machine to a workspace that already lives on a remote hub, whatever is
+here already: the remote's documents are hydrated into that workspace's local
+replica, the endpoint and the binding are stored, and so is the credential that
+reached it. No \`ub init\` is needed first.
+
+It never merges and never seeds. A workspace already on this machine is a
+different id with its own replica: it keeps its documents and its
+\`ub workspace list\` entry, and \`ub workspace use <id> --user\` switches back.
+Nothing is written into the joined workspace either — its documents arrive over
+the wire.
+
+operands:
+  <url-with-workspace-id>
+                        the endpoint with the workspace id as its last path
+                        segment, like wss://hub.example.ts.net/ws/<workspace-id>.
+                        \`ub remote init\` prints it, and \`ub status\` on the
+                        machine that has the workspace names the id. ws:// or
+                        wss:// (an https:// or http:// address is accepted and
+                        normalized); a URL without an id is refused before
+                        anything is written
+
+options:
+${SECRET_FILE_NOTE}`;
+
 function parseBridgeFlags(argv: string[]): BridgeFlags {
   const { values, positionals } = parseArgs({
     args: argv,
-    options: { "secret-file": { type: "string" } },
+    options: REMOTE_BRIDGE_OPTIONS,
     allowPositionals: true,
   });
   if (positionals.length !== 1) {
@@ -727,9 +787,6 @@ function parseBridgeFlags(argv: string[]): BridgeFlags {
   return { url: normalizeRemoteUrl(url), secretFile: values["secret-file"] };
 }
 
-const JOIN_USAGE =
-  "usage: ub remote join <url>/<workspace-id> [--secret-file <path>]\n";
-
 interface JoinFlags {
   /** The endpoint, with the workspace id taken off it. */
   endpoint: string;
@@ -741,7 +798,10 @@ interface JoinFlags {
 function parseJoinFlags(argv: string[]): JoinFlags {
   const { values, positionals } = parseArgs({
     args: argv,
-    options: { "secret-file": { type: "string" } },
+    // The same surface `promote` parses, and the one `REMOTE_JOIN_HELP` is
+    // checked against: a flag added here and not to the help fails in
+    // `help.test.ts` rather than in somebody's terminal.
+    options: REMOTE_BRIDGE_OPTIONS,
     allowPositionals: true,
   });
   const [url, ...rest] = positionals;
@@ -800,7 +860,27 @@ function showRemote(io: Io): number {
 
 // --- ub remote set ---------------------------------------------------------
 
+export const REMOTE_SET_HELP = `usage: ub remote set <url>
+
+Point the clients at an endpoint, by writing it to the user config. Moves no
+documents: whatever the current hub holds stays there, and this machine's
+replica keeps whatever it has already logged.
+
+operands:
+  <url>             the endpoint, ws:// or wss:// (an https:// or http://
+                    address is accepted and normalized)
+
+options:
+  -h, --help        show this help
+
+Use \`ub remote promote <url>\` or \`ub remote join <url>\` when the documents
+have to move with the endpoint. A layer above the user config — HUB_URL, or a
+directory file — still wins, and this says so when it does.
+`;
+
 function setCommand(argv: string[], io: Io): number {
+  if (takeHelp(argv, io, REMOTE_SET_HELP)) return 0;
+
   const [value, ...rest] = argv;
   if (value === undefined || rest.length > 0) {
     io.err("usage: ub remote set <url>\n");
@@ -1013,6 +1093,8 @@ function foreignDocs(
 // --- ub remote promote -----------------------------------------------------
 
 async function promoteCommand(argv: string[], io: Io): Promise<number> {
+  if (takeHelp(argv, io, REMOTE_PROMOTE_HELP)) return 0;
+
   let flags: BridgeFlags;
   try {
     flags = parseBridgeFlags(argv);
@@ -1192,13 +1274,18 @@ async function promoteCommand(argv: string[], io: Io): Promise<number> {
  * so there is nothing to compare, nothing to merge, and nothing to seed.
  */
 async function joinCommand(argv: string[], io: Io): Promise<number> {
+  // First statement, before the URL is even looked at: `ub remote join <url>
+  // -h` is somebody asking what the form is, and answering it by refusing the
+  // form they got wrong would be the joke this help exists to stop.
+  if (takeHelp(argv, io, REMOTE_JOIN_HELP)) return 0;
+
   let flags: JoinFlags;
   try {
     flags = parseJoinFlags(argv);
   } catch (error) {
     io.err(
       `ub remote join: ${error instanceof Error ? error.message : String(error)}\n\n` +
-        JOIN_USAGE,
+        "usage: ub remote join <url-with-workspace-id> [--secret-file <path>]\n",
     );
     return 2;
   }
@@ -1420,14 +1507,11 @@ export async function remoteCommand(
   argv: string[],
   io: Io = processIo,
 ): Promise<number> {
+  // The subcommand first, so `ub remote promote --help` reaches the help of the
+  // leaf it names rather than being answered by the group. A group's own
+  // argument is that one word, so only that word can ask for help — an unknown
+  // command is still an unknown command, `--help` after it or not.
   const [sub, ...rest] = argv;
-  if (sub === undefined) {
-    return showRemote(io);
-  }
-  if (sub === "--help" || sub === "-h" || sub === "help") {
-    io.out(REMOTE_HELP);
-    return 0;
-  }
   if (sub === "init") {
     return await remoteInitCommand(rest, io);
   }
@@ -1442,6 +1526,13 @@ export async function remoteCommand(
   }
   if (sub === "join") {
     return await joinCommand(rest, io);
+  }
+  if (sub === undefined) {
+    return showRemote(io);
+  }
+  if (sub === "help" || sub === "--help" || sub === "-h") {
+    io.out(REMOTE_HELP);
+    return 0;
   }
   io.err(`ub remote: unknown command ${JSON.stringify(sub)}\n\n${REMOTE_HELP}`);
   return 2;

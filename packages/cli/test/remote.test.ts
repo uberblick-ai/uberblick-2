@@ -945,7 +945,7 @@ describe("ub remote join", () => {
     expect(run.stderr).toContain(because);
     // The expected form, in the refusal itself.
     expect(run.stderr).toContain("wss://hub.example.ts.net/ws/<workspace-id>");
-    expect(run.stderr).toContain("usage: ub remote join <url>/<workspace-id>");
+    expect(run.stderr).toContain("usage: ub remote join <url-with-workspace-id>");
     expect(existsSync(join(box.configHome, "uberblick", "config.json"))).toBe(false);
     expect(existsSync(join(box.configHome, "uberblick", "credentials.json"))).toBe(
       false,

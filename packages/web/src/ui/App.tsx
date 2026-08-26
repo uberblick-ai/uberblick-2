@@ -14,8 +14,6 @@ import { createPortal } from "react-dom";
 import {
   appendBlock,
   directoryRoom,
-  getMeta,
-  getMetaMap,
   initDoc,
   restoreDirectoryEntry,
   roomForDoc,
@@ -25,11 +23,11 @@ import {
 import type { DocMeta } from "@uberblick/schema";
 import { configuredWorkspaces, hubUrl } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
+import { watchDocumentStub } from "../collab/directory-stub.js";
 import { randomIdentity } from "../collab/identity.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { DocChrome } from "./DocChrome.js";
 import { Sidebar, togglePin } from "./Sidebar.js";
-import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { SettingsDialog } from "./SettingsDialog.js";
@@ -38,7 +36,9 @@ import { ThreadsPane } from "./ThreadsPane.js";
 import { workspaceTags } from "./tags.js";
 import { focusThread } from "./threads.js";
 import type { SelectThread, ThreadFocus } from "./threads.js";
+import { AllDocsPane } from "./AllDocsPane.js";
 import {
+  allPath,
   canonicalPath,
   docIsHydrated,
   docPath,
@@ -49,6 +49,7 @@ import {
 } from "./route.js";
 import type { Route } from "./route.js";
 import {
+  useAgentSessions,
   useArchived,
   useDirectory,
   useDocMeta,
@@ -57,6 +58,7 @@ import {
   usePresence,
   useRoom,
   useRoomStatus,
+  useSetting,
   useSidebar,
   useStoredFlag,
   useThreads,
@@ -187,8 +189,9 @@ export function RoutePane({
   return (
     <EditorPane
       connection={connection}
-      // Only `list` and `doc` reach here; both carry the workspace the address
-      // spelled, which is what a copied link has to keep.
+      // Only `list` and `doc` reach here — the shell renders the corpus
+      // listing itself — and both carry the workspace the address spelled,
+      // which is what a copied link has to keep.
       segment={route.workspace.segment}
       author={author}
       knownTags={knownTags}
@@ -372,6 +375,15 @@ export function App(): ReactElement {
    * awareness map is what keeps those two views of the same fact identical.
    */
   const presence = usePresence(chromeRoom);
+  /**
+   * The agent sessions the user menu counts, and the colour this session is
+   * seen in. Both are workspace-wide facts about *this client*, so they are
+   * read here beside the rest of the shell's state: the directory is the room
+   * every session joins, and the colour is one setting with two readers (the
+   * menu's swatches, and the chip in the header).
+   */
+  const agentSessions = useAgentSessions(directory);
+  const presenceColor = useSetting("presenceColor") ?? identity.color;
 
   /**
    * A drawer over an empty rail is a panel of nothing. The rail can empty out
@@ -422,15 +434,23 @@ export function App(): ReactElement {
   );
 
   /**
-   * Pin the open document, or unpin it: the keyboard-reachable path into the
-   * sidebar, from the one place that is always about the document on screen.
-   * Which group and which position are the drag's business — this only decides
-   * that the document belongs in the sidebar at all.
+   * Pin a document, or unpin it — one write, two callers: the header's control
+   * for the document on screen, and a row of the corpus listing (#118). Which
+   * group and which position are the drag's business; this only decides that
+   * the document belongs in the sidebar at all.
    */
+  const onTogglePinDoc = useCallback(
+    (uuid: string) => {
+      if (sidebar === null) return;
+      togglePin(sidebar.ydoc, uuid);
+    },
+    [sidebar],
+  );
+  /** The keyboard-reachable path in, from the place that is always about the
+      open document. */
   const onTogglePin = useCallback(() => {
-    if (sidebar === null || selected === null) return;
-    togglePin(sidebar.ydoc, selected);
-  }, [sidebar, selected]);
+    if (selected !== null) onTogglePinDoc(selected);
+  }, [onTogglePinDoc, selected]);
 
   /** Opening a document is navigating to it. There is nothing else to update. */
   const segment = workspace?.segment ?? null;
@@ -440,6 +460,11 @@ export function App(): ReactElement {
     },
     [navigate, segment],
   );
+
+  /** Going to the listing is navigating to it, like opening a document. */
+  const onOpenAll = useCallback(() => {
+    if (segment !== null) navigate(allPath(segment));
+  }, [navigate, segment]);
 
   /**
    * A create needs the new document's Y.Doc *before* React has mounted the
@@ -467,7 +492,19 @@ export function App(): ReactElement {
     initDoc(handle.connection.ydoc, { uuid, title: "" });
     // A document with no blocks has nowhere to put the caret, so seed one.
     appendBlock(handle.connection.ydoc, { type: "paragraph", text: "" });
-    upsertDirectoryEntry(directory.ydoc, { uuid, title: "" });
+    // Stamped here, because this is the moment the document is created and
+    // nothing else knows it: the stub carries `createdAt` from then on (the
+    // schema keeps the first one), which is what the "Created" sort reads.
+    // Creating is also the document's first change, and it opens the stamping
+    // window the first edits then fall inside — the same pair `create_doc`
+    // writes on the MCP side.
+    const createdAt = Date.now();
+    upsertDirectoryEntry(directory.ydoc, {
+      uuid,
+      title: "",
+      createdAt,
+      updatedAt: createdAt,
+    });
     pending.current?.release();
     pending.current = { room, release: handle.release };
     onSelect(uuid);
@@ -475,24 +512,14 @@ export function App(): ReactElement {
 
   /**
    * The directory stub is a cache; `meta.title` in the document is
-   * authoritative. Repair the stub whenever the open document's title changes,
-   * which is the "repaired on write/connect" half of that invariant.
+   * authoritative. Repair the stub for as long as the document is open — the
+   * "repaired on write/connect" half of that invariant — and stamp `updatedAt`
+   * on the changes this client makes. See `collab/directory-stub.ts` for the
+   * rule and for why an update that merely arrived stamps nothing.
    */
   useEffect(() => {
     if (doc === null || directory === null) return;
-    const meta = getMetaMap(doc.ydoc);
-    const repair = (): void => {
-      const current = getMeta(doc.ydoc);
-      if (current.uuid === "") return;
-      upsertDirectoryEntry(directory.ydoc, {
-        uuid: current.uuid,
-        title: current.title,
-        tags: current.tags,
-      });
-    };
-    repair();
-    meta.observe(repair);
-    return () => meta.unobserve(repair);
+    return watchDocumentStub(doc.ydoc, directory.ydoc);
   }, [doc, directory]);
 
   return (
@@ -513,11 +540,6 @@ export function App(): ReactElement {
           {collapsed ? "»" : "«"}
         </button>
         <span className="ub-brand">uberblick</span>
-        <WorkspaceSwitcher
-          workspaces={workspaces}
-          current={workspace}
-          onSwitch={onSwitchWorkspace}
-        />
         {/* The open document's breadcrumb, and the activity and connection
             pills. The document's room when there is one, the directory's when
             there is not: one shared socket, so it is the same truth about the
@@ -534,7 +556,9 @@ export function App(): ReactElement {
           syncOpen={syncOpen}
           onToggleSync={onToggleSync}
         />
-        <span className="ub-me" style={{ borderColor: identity.color }}>
+        {/* The colour the picker chose, which is also the colour peers see this
+            session in — one reading of one setting (#74). */}
+        <span className="ub-me" style={{ borderColor: presenceColor }}>
           {identity.name}
         </span>
       </header>
@@ -545,23 +569,45 @@ export function App(): ReactElement {
             sidebar={sidebar}
             groups={sidebarGroups}
             entries={entries}
+            workspaces={workspaces}
+            workspace={workspace}
+            onSwitchWorkspace={onSwitchWorkspace}
+            identity={identity}
+            agentSessions={agentSessions}
             selected={selected}
             onSelect={onSelect}
             onCreate={onCreate}
+            onOpenAll={onOpenAll}
+            allOpen={route.kind === "all"}
             onOpenSettings={() => setSettingsOpen(true)}
           />
         )}
-        <RoutePane
-          route={route}
-          configured={hubReady}
-          connection={doc}
-          meta={meta}
-          author={identity.name}
-          knownTags={knownTags}
-          archived={archived}
-          onRestore={onRestore}
-          onSelectThread={onFocusThread}
-        />
+        {/* The corpus listing is its own address (#118), and the only pane
+            that is about the workspace rather than about one document — so it
+            takes the pane rather than passing four more props through
+            `RoutePane`, which exists to say what a *document* address resolves
+            to. */}
+        {route.kind === "all" ? (
+          <AllDocsPane
+            connection={directory}
+            entries={entries}
+            groups={sidebarGroups}
+            onSelect={onSelect}
+            onTogglePin={sidebar !== null ? onTogglePinDoc : null}
+          />
+        ) : (
+          <RoutePane
+            route={route}
+            configured={hubReady}
+            connection={doc}
+            meta={meta}
+            author={identity.name}
+            knownTags={knownTags}
+            archived={archived}
+            onRestore={onRestore}
+            onSelectThread={onFocusThread}
+          />
+        )}
         {/* The outline and the threads rail stack in one right column. Both
             sections render nothing when they have nothing to show, so the rail
             hides itself when it is empty (`.ub-rail:empty`) rather than leaving

@@ -530,16 +530,17 @@ so a hostile build has no credentials of ours to exfiltrate.
 across the repo; it gives us stable native `fetch`/WebStreams, and `tsx` is the
 only TypeScript loader we need.
 
-**SQLite: `node:sqlite` in the MCP server, better-sqlite3 under the hub.** The
-MCP server's local mirror uses Node's built-in `node:sqlite` — same file format,
-same synchronous API shape, nothing to compile at install time. The hub reaches
-SQLite through `@hocuspocus/extension-sqlite`, which brings better-sqlite3 with
-it, so the native module is still in the tree (pinned to `^12`: that is the line
-publishing prebuilt binaries for Node 26's ABI, and older majors fall back to
-compiling from source, which needs a C++ toolchain on every machine and in CI).
-pnpm 10 blocks install scripts by default, so `better-sqlite3` (and `esbuild`)
-are listed under `onlyBuiltDependencies` in `pnpm-workspace.yaml`; bumping the
-major means re-checking that prebuilds exist for the Node we pin.
+**SQLite: `node:sqlite`, everywhere.** Both stores — the MCP server's local
+mirror and the hub's document persistence — use Node's built-in `node:sqlite`:
+ordinary SQLite files, a synchronous API, and nothing to compile at install
+time. The hub used to reach SQLite through `@hocuspocus/extension-sqlite`,
+which brought the better-sqlite3 native addon with it; the extension was a
+two-column adapter the hub already had to subclass, so it now owns that adapter
+(`packages/hub/src/persistence.ts`) and the addon is gone. Same table, same
+queries, same Yjs v1 bytes, so databases written by the extension open in place
+— `packages/hub/test/fixtures/extension-sqlite.sqlite` is one of them, kept as a
+test input. Nothing in the tree builds a native addon now; `onlyBuiltDependencies`
+in `pnpm-workspace.yaml` is down to `esbuild`.
 
 **One copy of yjs.** `yjs`, `y-protocols` and `y-prosemirror` keep module-level
 state and use `instanceof` across the doc boundary, so a duplicate silently

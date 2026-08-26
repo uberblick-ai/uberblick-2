@@ -416,10 +416,13 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       // a side effect happened to fire.
       const directory = replicas.directory();
       if (getDirectoryEntry(directory.doc, uuid) === null) {
+        const now = Date.now();
         upsertDirectoryEntry(directory.doc, {
           uuid,
           title,
           ...(tags === undefined ? {} : { tags }),
+          createdAt: now,
+          updatedAt: now,
         });
       }
 
@@ -466,7 +469,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Every document in the workspace, from the synced directory document — never from locally observed creations. " +
         "A fresh replica lists the whole corpus once the directory room has synced.\n\n" +
         "`pinned` says whether the sidebar carries the document as an entry point — derived from the sidebar doc, " +
-        "read with get_sidebar. Unpinned documents are fully alive; the flag separates entry points from the long tail.",
+        "read with get_sidebar. Unpinned documents are fully alive; the flag separates entry points from the long tail.\n\n" +
+        "`createdAt` and `updatedAt` are epoch milliseconds, present only where known — sort keys, not history. " +
+        "`updatedAt` is deliberately coarse: a server re-stamps it at most once every few minutes of observed edits, " +
+        "immediately on a title or tag change. Both come from the clock of whichever replica wrote them, so treat them " +
+        "as approximate, and expect either to be missing on a stub written before they existed.",
       inputSchema: {
         tag: z.string().min(1).optional().describe("Only documents carrying this tag."),
         include_deleted: z.boolean().optional(),

@@ -28,6 +28,12 @@
 export const SETTINGS_KEY = "uberblick.settings.v1";
 
 /**
+ * How the app picks its token set: the system's preference, or the override
+ * this browser was told to keep (#74).
+ */
+export type Appearance = "system" | "light" | "dark";
+
+/**
  * Every local setting there is. New consumers add a field here and a default
  * below; nothing else in the app may reach for localStorage to store one.
  */
@@ -43,12 +49,25 @@ export interface Settings {
    * connected state survives a reload without asking GitHub again.
    */
   githubLogin: string | null;
+  /**
+   * The presence colour this browser picked, `#rrggbb`, or null for the random
+   * one the tab was given (#74).
+   *
+   * The one field here that leaves the machine, and deliberately: it is
+   * published in awareness, because a colour peers cannot see is not a presence
+   * colour. Nothing else here may grow that property without saying so.
+   */
+  presenceColor: string | null;
+  /** The appearance override, or null to follow the system's preference (#74). */
+  appearance: Appearance | null;
 }
 
 /** What every field reads as when storage holds nothing usable for it. */
 const DEFAULTS: Readonly<Settings> = {
   githubToken: null,
   githubLogin: null,
+  presenceColor: null,
+  appearance: null,
 };
 
 type Listener = () => void;
@@ -58,6 +77,22 @@ const listeners = new Set<Listener>();
 /** A stored string, or the default for a field that holds anything else. */
 function storedString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+/**
+ * A stored presence colour, or null for anything else.
+ *
+ * Validated rather than merely typed, because this is the field that gets
+ * *published*: y-prosemirror accepts `#rrggbb` and warns on everything else, so
+ * a hand-edited blob must not become a peer's broken cursor.
+ */
+function storedColor(value: unknown): string | null {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : null;
+}
+
+/** A stored appearance, or null — which reads as "follow the system". */
+function storedAppearance(value: unknown): Appearance | null {
+  return value === "light" || value === "dark" || value === "system" ? value : null;
 }
 
 /**
@@ -88,6 +123,8 @@ function readAll(): Settings {
   return {
     githubToken: storedString(stored.githubToken),
     githubLogin: storedString(stored.githubLogin),
+    presenceColor: storedColor(stored.presenceColor),
+    appearance: storedAppearance(stored.appearance),
   };
 }
 

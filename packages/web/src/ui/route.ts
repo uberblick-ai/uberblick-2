@@ -15,8 +15,9 @@
  * typed: the slug is display, so nothing here rewrites somebody's spelling of
  * their own workspace. Only {@link Workspace.uuid} reaches a room key.
  *
- * Hand-rolled on purpose (#68). There are two routes; a router library would be
- * a new runtime dependency buying nothing but indirection.
+ * Hand-rolled on purpose (#68). There are three routes — the workspace, one
+ * document, and the whole corpus listed (`/<workspace>/all`, #118); a router
+ * library would be a new runtime dependency buying nothing but indirection.
  *
  * The address bar is the selection. Nothing else stores "which document is
  * open": the sidebar navigates, Back navigates, a pasted link navigates, and
@@ -55,8 +56,18 @@ export type Route =
   | { kind: "no-workspace"; reason: "absent" }
   | { kind: "no-workspace"; reason: "invalid"; configured: string }
   | { kind: "list"; workspace: Workspace }
+  | { kind: "all"; workspace: Workspace }
   | { kind: "doc"; workspace: Workspace; uuid: string }
   | { kind: "invalid"; reason: string; workspace: Workspace | null };
+
+/**
+ * The one reserved second segment: the whole corpus, listed (#118).
+ *
+ * It can never collide with a document, because the other thing a second
+ * segment may be is a uuid and no uuid spells a word. Reserved rather than
+ * derived, so the listing has an address to be linked to and returned to.
+ */
+export const ALL_SEGMENT = "all";
 
 /**
  * Canonical UUID shape — lowercase, and a *shape* check only.
@@ -145,8 +156,8 @@ export function parseRoute(pathname: string, configured: string | null): Route {
     };
   }
 
-  const uuid = segments[1];
-  if (uuid === undefined) return { kind: "list", workspace };
+  const second = segments[1];
+  if (second === undefined) return { kind: "list", workspace };
   if (segments.length > 2) {
     return {
       kind: "invalid",
@@ -163,11 +174,12 @@ export function parseRoute(pathname: string, configured: string | null): Route {
   // that spelling in the address bar the way it does a trailing slash. The
   // rejection message keeps the spelling as typed: it is about the link on
   // screen.
-  const canonical = uuid.toLowerCase();
+  const canonical = second.toLowerCase();
+  if (canonical === ALL_SEGMENT) return { kind: "all", workspace };
   if (!UUID.test(canonical)) {
     return {
       kind: "invalid",
-      reason: `“${uuid}” is not a document uuid.`,
+      reason: `“${second}” is not a document uuid.`,
       workspace,
     };
   }
@@ -218,6 +230,11 @@ export function docPath(segment: string, uuid: string): string {
   return `/${segment}/${uuid}`;
 }
 
+/** The path of the workspace's "All docs" listing (#118). */
+export function allPath(segment: string): string {
+  return `/${segment}/${ALL_SEGMENT}`;
+}
+
 /**
  * The address `route` should be shown at, or `null` to leave the URL alone.
  *
@@ -230,6 +247,8 @@ export function canonicalPath(route: Route): string | null {
   switch (route.kind) {
     case "list":
       return `/${route.workspace.segment}`;
+    case "all":
+      return allPath(route.workspace.segment);
     case "doc":
       return docPath(route.workspace.segment, route.uuid);
     default:

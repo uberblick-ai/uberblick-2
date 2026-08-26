@@ -1,4 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  // The recipe for `test/fixtures/extension-sqlite.sqlite` imports the two
+  // packages this hub no longer depends on. It is kept so the fixture is
+  // reproducible from a checkout that still has them, and is never run — or
+  // typechecked — here.
+  "exclude": ["test/fixtures/make-legacy.ts"]
 }

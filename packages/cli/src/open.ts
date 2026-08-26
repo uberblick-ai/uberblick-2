@@ -60,6 +60,7 @@ import type { Hub } from "@uberblick/hub";
 import { createHub, resolveHubConfig } from "@uberblick/hub";
 import { DEFAULT_HUB_URL, resolveMcpConfig } from "@uberblick/mcp-server";
 import { resolveConfig } from "./config.js";
+import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import {
@@ -607,17 +608,18 @@ function openBrowser(url: string, env: NodeJS.ProcessEnv, io: Io): void {
 interface Options {
   port: number;
   browser: boolean;
-  help: boolean;
 }
+
+/** Exported so the help above can be checked against the parser it describes. */
+export const OPEN_OPTIONS = {
+  browser: { type: "boolean" },
+  port: { type: "string" },
+} as const;
 
 function parseOptions(argv: string[]): Options {
   const { values, positionals } = parseArgs({
     args: argv,
-    options: {
-      browser: { type: "boolean" },
-      port: { type: "string" },
-      help: { type: "boolean", short: "h" },
-    },
+    options: OPEN_OPTIONS,
     allowNegative: true,
     allowPositionals: true,
   });
@@ -632,7 +634,7 @@ function parseOptions(argv: string[]): Options {
       throw new Error(`--port must be an integer in 1..65535, got ${JSON.stringify(raw)}`);
     }
   }
-  return { port, browser: values.browser ?? true, help: values.help ?? false };
+  return { port, browser: values.browser ?? true };
 }
 
 /** What this command started, and is therefore responsible for stopping. */
@@ -709,16 +711,14 @@ export async function openCommand(
   argv: string[],
   io: Io = processIo,
 ): Promise<number> {
+  if (takeHelp(argv, io, OPEN_HELP)) return 0;
+
   let options: Options;
   try {
     options = parseOptions(argv);
   } catch (error) {
     io.err(`ub open: ${message(error)}\n\n${OPEN_HELP}`);
     return 2;
-  }
-  if (options.help) {
-    io.out(OPEN_HELP);
-    return 0;
   }
 
   const resolved = resolveConfig();
