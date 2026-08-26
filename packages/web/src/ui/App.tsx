@@ -14,8 +14,6 @@ import { createPortal } from "react-dom";
 import {
   appendBlock,
   directoryRoom,
-  getMeta,
-  getMetaMap,
   initDoc,
   restoreDirectoryEntry,
   roomForDoc,
@@ -25,6 +23,7 @@ import {
 import type { DocMeta } from "@uberblick/schema";
 import { configuredWorkspaces, hubUrl } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
+import { watchDocumentStub } from "../collab/directory-stub.js";
 import { randomIdentity } from "../collab/identity.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { DocChrome } from "./DocChrome.js";
@@ -483,10 +482,19 @@ export function App(): ReactElement {
     initDoc(handle.connection.ydoc, { uuid, title: "" });
     // A document with no blocks has nowhere to put the caret, so seed one.
     appendBlock(handle.connection.ydoc, { type: "paragraph", text: "" });
-    // Stamped once, here, because this is the moment the document is created
-    // and nothing else knows it: the stub carries `createdAt` from then on (the
+    // Stamped here, because this is the moment the document is created and
+    // nothing else knows it: the stub carries `createdAt` from then on (the
     // schema keeps the first one), which is what the "Created" sort reads.
-    upsertDirectoryEntry(directory.ydoc, { uuid, title: "", createdAt: Date.now() });
+    // Creating is also the document's first change, and it opens the stamping
+    // window the first edits then fall inside — the same pair `create_doc`
+    // writes on the MCP side.
+    const createdAt = Date.now();
+    upsertDirectoryEntry(directory.ydoc, {
+      uuid,
+      title: "",
+      createdAt,
+      updatedAt: createdAt,
+    });
     pending.current?.release();
     pending.current = { room, release: handle.release };
     onSelect(uuid);
@@ -494,24 +502,14 @@ export function App(): ReactElement {
 
   /**
    * The directory stub is a cache; `meta.title` in the document is
-   * authoritative. Repair the stub whenever the open document's title changes,
-   * which is the "repaired on write/connect" half of that invariant.
+   * authoritative. Repair the stub for as long as the document is open — the
+   * "repaired on write/connect" half of that invariant — and stamp `updatedAt`
+   * on the changes this client makes. See `collab/directory-stub.ts` for the
+   * rule and for why an update that merely arrived stamps nothing.
    */
   useEffect(() => {
     if (doc === null || directory === null) return;
-    const meta = getMetaMap(doc.ydoc);
-    const repair = (): void => {
-      const current = getMeta(doc.ydoc);
-      if (current.uuid === "") return;
-      upsertDirectoryEntry(directory.ydoc, {
-        uuid: current.uuid,
-        title: current.title,
-        tags: current.tags,
-      });
-    };
-    repair();
-    meta.observe(repair);
-    return () => meta.unobserve(repair);
+    return watchDocumentStub(doc.ydoc, directory.ydoc);
   }, [doc, directory]);
 
   return (
