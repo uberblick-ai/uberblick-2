@@ -308,10 +308,11 @@ down, so simply changing `HUB_URL` strands them.
 **On the remote host** — a Linux box in your tailnet — one command from your own
 machine stands the hub and the web client up:
 `ub remote init <ssh-target>`, which [REMOTE.md](REMOTE.md) describes in full. It
-clones `main` onto the host and installs a timer that keeps it there, so **anyone
-who can merge to `main` can run code on that host within five minutes**
-(`--no-auto-update` opts out). Every command below runs on one of *your*
-computers, not there. The hub it starts is empty.
+clones `main` onto the host and builds from it; **the host never updates
+itself** — `ub remote update <ssh-target>` deploys `origin/main` onto it when you
+mean to, and a change to wire semantics must update the clients in the same
+sitting. Every command below runs on one of *your* computers, not there. The hub
+it starts is empty.
 
 **On the computer that already has your documents**, with `mise run hub` still
 running so the browser-created ones can be collected:
