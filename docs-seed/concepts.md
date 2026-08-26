@@ -32,4 +32,4 @@ documents disagree about a word, this one is what they meant.
 
 ## Tags
 
-A document carries exactly one of five tags, and the web client groups the corpus by them: start-here, feature, verify, reference and implementation-reference.
+A document carries exactly one of five tags: `start-here`, `feature`, `verify`, `reference` and `implementation-reference`. They name the document's neighbourhood — the breadcrumb and the identity badge read them — and they do not order the sidebar, which is the curated `_sidebar` document.

@@ -140,10 +140,40 @@ const tasks = new Set(
 
 for (const file of [...seedFiles, "README.md"]) {
   const text = readFileSync(join(SEED_DIR, file), "utf8");
-  for (const match of text.matchAll(/\bmise run ([A-Za-z0-9_-]+)/g)) {
+  // `\s+`, not a space: a seed document wraps, and `mise run\ntest` is still a
+  // command the reader will type.
+  for (const match of text.matchAll(/\bmise run\s+([A-Za-z0-9_-]+)/g)) {
     if (!tasks.has(match[1])) {
       fail(file, `names \`mise run ${match[1]}\`, which mise.toml does not define`);
     }
+  }
+}
+
+// --- 3. the README table names every document, and only those --------------
+
+// The table is where an issue author looks a uuid up. A row that has lost its
+// document sends them to a `get_doc` that fails; a document with no row is
+// invisible to anyone who does not run `list_docs` first.
+const readme = readFileSync(join(SEED_DIR, "README.md"), "utf8");
+const rows = new Map(
+  [...readme.matchAll(/^\| (.+?) \| `([0-9a-f-]{36})` \|/gm)].map((m) => [
+    m[2],
+    m[1],
+  ]),
+);
+
+for (const [uuid, file] of uuids) {
+  const fields = frontmatter(readFileSync(join(SEED_DIR, file), "utf8"));
+  const title = fields?.get("title");
+  if (!rows.has(uuid)) {
+    fail("README.md", `no table row for ${title} (${uuid}), which ${file} carries`);
+  } else if (rows.get(uuid) !== title) {
+    fail("README.md", `row for ${uuid} says "${rows.get(uuid)}", ${file} says "${title}"`);
+  }
+}
+for (const [uuid, title] of rows) {
+  if (!uuids.has(uuid)) {
+    fail("README.md", `table row "${title}" (${uuid}) has no seed document`);
   }
 }
 

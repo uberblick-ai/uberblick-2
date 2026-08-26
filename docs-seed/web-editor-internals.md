@@ -10,20 +10,9 @@ is `packages/web/src`.
 
 ## Three rules the node definitions exist to satisfy
 
-- Every node declares an `id` attribute, because y-prosemirror strips any
-
-   attribute the schema does not declare.
-
-- Attribute values stay strings, verbatim. `level`, `indent` and `list` are
-
-   compared with strict inequality when the fragment is diffed, so normalising
-   them in the schema would rewrite the document on load. Clamping happens at
-   render time only.
-
-- Every node allows the `comment` mark, source blocks included, because a
-
-   text node that refuses a mark makes y-prosemirror delete the Y.XmlText
-   rather than drop the mark.
+- Every node declares an `id` attribute, because y-prosemirror strips any attribute the schema does not declare.
+- Attribute values stay strings, verbatim. `level`, `indent` and `list` are compared with strict inequality when the fragment is diffed, so normalising them in the schema would rewrite the document on load. Clamping happens at render time only.
+- Every node allows the `comment` mark, source blocks included, because a text node that refuses a mark makes y-prosemirror delete the Y.XmlText rather than drop the mark.
 
 There is no StarterKit. The ProseMirror schema is built from exactly the seven
 block nodes, the five inline marks and the comment mark, so nothing the schema

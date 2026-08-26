@@ -45,6 +45,14 @@ continuation, so a wrapped item comes back as an item plus an indented
 paragraph, and emphasis spanning the wrap comes back escaped. Long lines are
 the price of a snapshot that round-trips.
 
+**One deliberate divergence, until #195.** A seed file is otherwise byte-for-byte
+its document's `export_markdown` plus the `links` line. The exception is inline
+marks: no MCP tool can write one — `insert_block` and `edit_block` take plain
+text — so text an agent wrote or rejoined through the tools carries no code
+spans in the live document, while the seed file carries them so a *new*
+workspace boots with them. Same words either way. Today that is the Concepts
+tags paragraph and three spans in Architecture's admission list.
+
 `scripts/docs-seed-check.mjs` — run by `mise run test` — fails when a file
 lacks its uuid, title or tag, when a uuid is malformed or claimed twice, when a
 link names no seed document, or when a document tells the reader to run a

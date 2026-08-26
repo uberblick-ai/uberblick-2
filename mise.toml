@@ -82,7 +82,7 @@ wait
 """
 
 [tasks.import-seed]
-description = "One-time import of docs-seed/*.md into the system (idempotent by frontmatter uuid)"
+description = "Boot a workspace's product docs from docs-seed/*.md (idempotent by frontmatter uuid; never overwrites an existing one)"
 # Writes through the MCP server's own replicas and update log, so it works with
 # no hub: the docs land locally and sync when one is reachable.
 run = "fnox exec --if-missing warn -- pnpm --filter @uberblick/mcp-server run import-seed"

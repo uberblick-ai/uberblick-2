@@ -48,21 +48,9 @@ authoritative for its own contract.
 
 ### The three invariants
 
-- The key the hub verifies with is selected by the room, never by the claim —
-
-   and it is a key the client could only have obtained by being provisioned for
-   that room's workspace.
-
-- Authorization is a property of the live connection, not of the handshake
-
-   that started it: the hub keeps the decision it admitted each connection
-   under, re-checks it, re-leases it, and closes it when the registry says the
-   grant is gone.
-
-- No message is applied under an authorization the hub is not currently
-
-   holding: every frame passes a per-connection state gate that waits for a
-   binding in progress and refuses one that failed.
+- The key the hub verifies with is selected by the room, never by the claim — and it is a key the client could only have obtained by being provisioned for that room's workspace.
+- Authorization is a property of the live connection, not of the handshake that started it: the hub keeps the decision it admitted each connection under, re-checks it, re-leases it, and closes it when the registry says the grant is gone.
+- No message is applied under an authorization the hub is not currently holding: every frame passes a per-connection state gate that waits for a binding in progress and refuses one that failed.
 
 ### Key hierarchy
 
@@ -119,46 +107,14 @@ refusal. It performs no writes, no randomness and no I/O beyond synchronous
 registry reads, which is what makes it exhaustively testable while it is dark.
 
 - Parse the room to a workspace uuid. Not a room, refuse.
-- Reject `typ` other than `room`, and reject `scope: "admin"` outright — admin
-
-   authority never rides a websocket connection.
-
-- Read `kid` from the unverified payload as a lookup key only, never as
-
-   authority.
-
-- Select the key. A null `kid` selects the root secret. Otherwise load the
-
-   credential row and require, as verification preconditions, that it exists,
-   that its workspace equals the room's, that it is not revoked, that it has
-   not expired, and that its `key_version` equals the workspace's current one.
-   Then derive `K_c` from the root secret and the row's own fields.
-
-- Verify the signature under the selected key. Everything after this point is
-
-   authenticated.
-
-- Clamp the lifetime regardless of what was claimed: reject a lifetime over
-
-   fifteen minutes, an `iat` more than sixty seconds in the future, or an
-   expired token. Token lifetime is the hub's property, not a minter's
-   courtesy — every MCP server mints locally, so without a ceiling a
-   compromised machine mints a decade-long token. Then cross-check the
-   workspace claim against the room.
-
-- Registry existence. A root-signed connection to an unregistered workspace
-
-   carries a registration request that activation discharges idempotently; a
-   credential-signed one is refused.
-
-- Effective scope is the minimum of the row's scope and the claim for a
-
-   credential, and the claim for a root-signed token.
-
-- Return the effective scope, never the raw claim — a gate keyed off the raw
-
-   claim would let a read-write claim signed with a read-only credential slip
-   past the awareness restriction.
+- Reject `typ` other than `room`, and reject `scope: "admin"` outright — admin authority never rides a websocket connection.
+- Read `kid` from the unverified payload as a lookup key only, never as authority.
+- Select the key. A null `kid` selects the root secret. Otherwise load the credential row and require, as verification preconditions, that it exists, that its workspace equals the room's, that it is not revoked, that it has not expired, and that its `key_version` equals the workspace's current one. Then derive `K_c` from the root secret and the row's own fields.
+- Verify the signature under the selected key. Everything after this point is authenticated.
+- Clamp the lifetime regardless of what was claimed: reject a lifetime over fifteen minutes, an `iat` more than sixty seconds in the future, or an expired token. Token lifetime is the hub's property, not a minter's courtesy — every MCP server mints locally, so without a ceiling a compromised machine mints a decade-long token. Then cross-check the workspace claim against the room.
+- Registry existence. A root-signed connection to an unregistered workspace carries a registration request that activation discharges idempotently; a credential-signed one is refused.
+- Effective scope is the minimum of the row's scope and the claim for a credential, and the claim for a root-signed token.
+- Return the effective scope, never the raw claim — a gate keyed off the raw claim would let a read-write claim signed with a read-only credential slip past the awareness restriction.
 
 Signature verification precedes the registry gate deliberately: it makes
 root-signed auto-registration reachable and removes an unauthenticated

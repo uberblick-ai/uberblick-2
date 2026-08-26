@@ -233,9 +233,12 @@ deployed client reads its workspaces at runtime from the served
 deployment its workspaces is an environment variable and a container recreate,
 never a bundle rebuild.
 
-`mise run import-seed` is the one-time import of `docs-seed/` into the system.
-After it, the product docs live in the documents, and are read and written
-through the MCP tools rather than by editing the seed files.
+`mise run import-seed` boots a workspace's product docs from `docs-seed/`.
+Live docs are authoritative for an initialized workspace; `docs-seed/` is the
+current bootstrap snapshot for a *new* one; re-import never overwrites an
+existing uuid. So the seed files are current rather than frozen — a
+status-quo-changing PR refreshes the doc's seed file before merge, and updates
+the live doc through the MCP tools after.
 
 ## The `ub` command line
 
