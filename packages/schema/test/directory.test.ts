@@ -227,4 +227,103 @@ describe("directory doc", () => {
     getDirectoryMap(dir).set(BETA, { title: 42, tags: "nope" });
     expect(listDirectory(dir)).toEqual([{ uuid: BETA, title: "", tags: [] }]);
   });
+
+  it("sets createdAt once and keeps it through rename, delete and restore", () => {
+    const dir = new Y.Doc();
+    upsertDirectoryEntry(dir, {
+      uuid: ALPHA,
+      title: "Alpha",
+      createdAt: 1_000,
+    });
+    // A later writer offering a different creation time does not get to move
+    // it: created-at is a fact about the document, written once.
+    upsertDirectoryEntry(dir, {
+      uuid: ALPHA,
+      title: "Alpha, renamed",
+      createdAt: 9_000,
+    });
+    expect(getDirectoryEntry(dir, ALPHA)?.createdAt).toBe(1_000);
+
+    tombstoneDirectoryEntry(dir, ALPHA);
+    expect(getDirectoryEntry(dir, ALPHA)?.createdAt).toBe(1_000);
+    restoreDirectoryEntry(dir, ALPHA);
+    expect(getDirectoryEntry(dir, ALPHA)?.createdAt).toBe(1_000);
+  });
+
+  it("backfills createdAt onto an entry that never had one", () => {
+    const dir = new Y.Doc();
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha" });
+    expect(getDirectoryEntry(dir, ALPHA)?.createdAt).toBeUndefined();
+
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha", createdAt: 500 });
+    expect(getDirectoryEntry(dir, ALPHA)?.createdAt).toBe(500);
+  });
+
+  it("takes a given updatedAt and carries the stored one forward otherwise", () => {
+    const dir = new Y.Doc();
+    upsertDirectoryEntry(dir, {
+      uuid: ALPHA,
+      title: "Alpha",
+      createdAt: 1_000,
+      updatedAt: 1_000,
+    });
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha", updatedAt: 2_000 });
+    expect(getDirectoryEntry(dir, ALPHA)?.updatedAt).toBe(2_000);
+
+    // A writer fixing a title must not silently erase the freshness stamp.
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha, renamed" });
+    expect(getDirectoryEntry(dir, ALPHA)).toEqual({
+      uuid: ALPHA,
+      title: "Alpha, renamed",
+      tags: [],
+      createdAt: 1_000,
+      updatedAt: 2_000,
+    });
+
+    tombstoneDirectoryEntry(dir, ALPHA);
+    expect(getDirectoryEntry(dir, ALPHA)?.updatedAt).toBe(2_000);
+    restoreDirectoryEntry(dir, ALPHA);
+    expect(getDirectoryEntry(dir, ALPHA)?.updatedAt).toBe(2_000);
+  });
+
+  it("converges last-write-wins when two replicas stamp the same entry", () => {
+    const [a, b] = replicaPair((dir) => {
+      upsertDirectoryEntry(dir, {
+        uuid: ALPHA,
+        title: "Alpha",
+        createdAt: 1_000,
+        updatedAt: 1_000,
+      });
+    });
+
+    // Two servers observing the same document, each on its own clock. The later
+    // reading does not win — the later Yjs update does. That is the accepted
+    // contract for a cache-quality field, not an accident.
+    upsertDirectoryEntry(a, { uuid: ALPHA, title: "Alpha", updatedAt: 5_000 });
+    upsertDirectoryEntry(b, { uuid: ALPHA, title: "Alpha", updatedAt: 4_000 });
+    syncDocs(a, b);
+
+    const winner = getDirectoryEntry(a, ALPHA);
+    expect(getDirectoryEntry(b, ALPHA)).toEqual(winner);
+    expect([4_000, 5_000]).toContain(winner?.updatedAt);
+    // Whichever write won, created-at survives it untouched.
+    expect(winner?.createdAt).toBe(1_000);
+  });
+
+  it("ignores a malformed timestamp written by a foreign client", () => {
+    const dir = new Y.Doc();
+    getDirectoryMap(dir).set(ALPHA, {
+      title: "Alpha",
+      tags: [],
+      createdAt: "yesterday",
+      updatedAt: Number.NaN,
+    });
+    // Missing, not zero: a client sorting on these must handle absence anyway,
+    // and inventing an epoch date would sort a live document to 1970.
+    expect(getDirectoryEntry(dir, ALPHA)).toEqual({
+      uuid: ALPHA,
+      title: "Alpha",
+      tags: [],
+    });
+  });
 });

@@ -629,11 +629,26 @@ export class Replicas {
   }
 
   /**
-   * Bring the directory stub back in line with the document.
+   * Bring the directory stub back in line with the document, and stamp it.
    *
    * `meta.title` in the doc is authoritative; the stub is a cache. A tombstone
    * is left alone — `upsertDirectoryEntry` keeps it sticky, but rewriting it on
    * every observed update would churn the directory for nothing.
+   *
+   * Timestamps ride the same write, on this server's own clock:
+   *
+   * - `createdAt` is set once. Passing it on every repair costs nothing (the
+   *   schema keeps the existing one) and is what backfills a stub written
+   *   before the field existed, on the first change anyone observes.
+   * - `updatedAt` is stamped when the metadata actually changed — that write is
+   *   happening anyway — and otherwise only once the stored stamp is older than
+   *   `updatedAtCoarsenessMs`. A burst of edits to one document therefore costs
+   *   one directory update per window, not one per keystroke.
+   *
+   * The stamp read back is whatever the directory holds, so a second replica
+   * that has already stamped this window suppresses this one's write too. Two
+   * replicas that stamp concurrently converge last-write-wins on the entry,
+   * which is the accepted outcome for a cache-quality field.
    */
   private repairStub(meta: DocMeta): void {
     const directory = this.directory();
@@ -641,17 +656,23 @@ export class Replicas {
     if (stub?.deleted === true) {
       return;
     }
-    if (
-      stub !== null &&
-      stub.title === meta.title &&
-      sameSet(stub.tags, meta.tags)
-    ) {
+    const now = Date.now();
+    const metaChanged =
+      stub === null ||
+      stub.title !== meta.title ||
+      !sameSet(stub.tags, meta.tags);
+    const staleStamp =
+      stub?.updatedAt === undefined ||
+      now - stub.updatedAt >= this.config.updatedAtCoarsenessMs;
+    if (!metaChanged && !staleStamp && stub.createdAt !== undefined) {
       return;
     }
     upsertDirectoryEntry(directory.doc, {
       uuid: meta.uuid,
       title: meta.title,
       tags: meta.tags,
+      createdAt: now,
+      ...(metaChanged || staleStamp ? { updatedAt: now } : {}),
     });
   }
 

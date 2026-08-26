@@ -120,6 +120,7 @@ export interface TestConfigOptions {
   compactAfter?: number;
   reconcileRetryMs?: number;
   cursorTtlMs?: number;
+  updatedAtCoarsenessMs?: number;
 }
 
 /**
@@ -148,6 +149,9 @@ export function testConfig(options: TestConfigOptions = {}): McpConfig {
     // not wait out a production pause for it. Tests about the pacing itself set
     // this deliberately.
     reconcileRetryMs: options.reconcileRetryMs ?? 0,
+    // The production window, on purpose: the coarseness is the contract, and a
+    // suite that wants to cross it moves the clock rather than shrinking it.
+    updatedAtCoarsenessMs: options.updatedAtCoarsenessMs ?? 5 * 60_000,
   };
 }
 

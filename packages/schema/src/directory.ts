@@ -3,16 +3,25 @@
  *
  * Discovery is itself a synced doc: one Y.Doc per workspace, in the well-known
  * room `<workspaceId>/_directory` (see `rooms.ts`), holding a Y.Map of
- * uuid → {title, tags, deleted?} stubs. It travels over the same sync channel
- * as every other document, so a fresh client with empty local state learns the
- * corpus by joining one more room. There is no other discovery mechanism —
- * never enumerate locally-observed creations.
+ * uuid → {title, tags, deleted?, createdAt?, updatedAt?} stubs. It travels over
+ * the same sync channel as every other document, so a fresh client with empty
+ * local state learns the corpus by joining one more room. There is no other
+ * discovery mechanism — never enumerate locally-observed creations.
  *
  * The stub is a cache, not the truth: `meta.title` inside the document itself
  * is authoritative, and the stub is repaired on write and on connect.
  *
  * Entries are whole-object writes, so concurrent upserts to the same uuid
  * converge last-write-wins per key while different uuids never conflict.
+ *
+ * `createdAt` and `updatedAt` are epoch milliseconds read from the clock of
+ * whichever replica wrote them, and they are cache-quality like the rest of the
+ * stub: freshness hints good enough to sort a listing, never history and never
+ * an audit trail. Two replicas stamping concurrently converge on whichever
+ * update Yjs orders last — not on the later wall-clock reading — and a replica
+ * with a skewed clock writes skewed stamps. Both fields are optional: an entry
+ * written before they existed simply has none, so anything sorting on them must
+ * tolerate `undefined` rather than assume a number.
  */
 
 import type * as Y from "yjs";
@@ -25,6 +34,15 @@ interface StoredEntry {
   title: string;
   tags: string[];
   deleted?: boolean;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+/** A stored epoch-millisecond stamp, or undefined when absent or malformed. */
+function readStamp(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 export function getDirectoryMap(dirDoc: Y.Doc): Y.Map<unknown> {
@@ -38,15 +56,47 @@ function readStored(value: unknown): StoredEntry | null {
     ? candidate.tags.filter((tag): tag is string => typeof tag === "string")
     : [];
   const title = typeof candidate.title === "string" ? candidate.title : "";
-  return candidate.deleted === true
-    ? { title, tags, deleted: true }
-    : { title, tags };
+  const createdAt = readStamp(candidate.createdAt);
+  const updatedAt = readStamp(candidate.updatedAt);
+  return {
+    title,
+    tags,
+    ...(candidate.deleted === true ? { deleted: true as const } : {}),
+    ...(createdAt === undefined ? {} : { createdAt }),
+    ...(updatedAt === undefined ? {} : { updatedAt }),
+  };
+}
+
+/**
+ * Carry the timestamps of an entry that is being rewritten.
+ *
+ * Every writer here replaces the whole object, so a stamp that is not copied
+ * forward is a stamp that is erased.
+ */
+function withStamps(next: StoredEntry, from: StoredEntry | null): StoredEntry {
+  return {
+    ...next,
+    ...(from?.createdAt === undefined ? {} : { createdAt: from.createdAt }),
+    ...(from?.updatedAt === undefined ? {} : { updatedAt: from.updatedAt }),
+  };
 }
 
 export interface DirectoryUpsert {
   uuid: string;
   title: string;
   tags?: string[];
+  /**
+   * When the document was created, epoch ms. Set once: an entry that already
+   * carries one keeps it, so passing this on every write is safe — and is how a
+   * stub written before the field existed gets backfilled.
+   */
+  createdAt?: number;
+  /**
+   * When the document was last seen to change, epoch ms. Written when given and
+   * carried forward untouched otherwise, so a writer that only means to fix a
+   * title does not have to know the freshness stamp in order to preserve it.
+   */
+  updatedAt?: number;
 }
 
 /**
@@ -72,10 +122,15 @@ export function upsertDirectoryEntry(
   const docs = getDirectoryMap(dirDoc);
   dirDoc.transact(() => {
     const existing = readStored(docs.get(entry.uuid));
-    const next: StoredEntry =
-      existing?.deleted === true
-        ? { title: entry.title, tags: [...(entry.tags ?? [])], deleted: true }
-        : { title: entry.title, tags: [...(entry.tags ?? [])] };
+    const createdAt = existing?.createdAt ?? entry.createdAt;
+    const updatedAt = entry.updatedAt ?? existing?.updatedAt;
+    const next: StoredEntry = {
+      title: entry.title,
+      tags: [...(entry.tags ?? [])],
+      ...(existing?.deleted === true ? { deleted: true as const } : {}),
+      ...(createdAt === undefined ? {} : { createdAt }),
+      ...(updatedAt === undefined ? {} : { updatedAt }),
+    };
     docs.set(entry.uuid, next);
   });
 }
@@ -88,11 +143,17 @@ export function tombstoneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
   const docs = getDirectoryMap(dirDoc);
   dirDoc.transact(() => {
     const existing = readStored(docs.get(uuid));
-    docs.set(uuid, {
-      title: existing?.title ?? "",
-      tags: existing?.tags ?? [],
-      deleted: true,
-    } satisfies StoredEntry);
+    docs.set(
+      uuid,
+      withStamps(
+        {
+          title: existing?.title ?? "",
+          tags: existing?.tags ?? [],
+          deleted: true,
+        },
+        existing,
+      ) satisfies StoredEntry,
+    );
   });
 }
 
@@ -123,16 +184,30 @@ export function restoreDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
     return;
   }
   dirDoc.transact(() => {
-    docs.set(uuid, {
-      title: existing.title,
-      tags: existing.tags,
-    } satisfies StoredEntry);
+    docs.set(
+      uuid,
+      withStamps(
+        { title: existing.title, tags: existing.tags },
+        existing,
+      ) satisfies StoredEntry,
+    );
   });
 }
 
 export interface ListDirectoryOptions {
   /** Include tombstoned entries. Default false. */
   includeDeleted?: boolean;
+}
+
+function toEntry(uuid: string, stored: StoredEntry): DirectoryEntry {
+  return {
+    uuid,
+    title: stored.title,
+    tags: stored.tags,
+    ...(stored.deleted === true ? { deleted: true as const } : {}),
+    ...(stored.createdAt === undefined ? {} : { createdAt: stored.createdAt }),
+    ...(stored.updatedAt === undefined ? {} : { updatedAt: stored.updatedAt }),
+  };
 }
 
 /** One entry by uuid, or null when unknown. Tombstones are returned as-is. */
@@ -142,9 +217,7 @@ export function getDirectoryEntry(
 ): DirectoryEntry | null {
   const stored = readStored(getDirectoryMap(dirDoc).get(uuid));
   if (stored === null) return null;
-  return stored.deleted === true
-    ? { uuid, title: stored.title, tags: stored.tags, deleted: true }
-    : { uuid, title: stored.title, tags: stored.tags };
+  return toEntry(uuid, stored);
 }
 
 /**
@@ -161,11 +234,7 @@ export function listDirectory(
     const stored = readStored(value);
     if (stored === null) continue;
     if (stored.deleted === true && !includeDeleted) continue;
-    out.push(
-      stored.deleted === true
-        ? { uuid, title: stored.title, tags: stored.tags, deleted: true }
-        : { uuid, title: stored.title, tags: stored.tags },
-    );
+    out.push(toEntry(uuid, stored));
   }
   out.sort((a, b) => {
     if (a.title !== b.title) return a.title < b.title ? -1 : 1;

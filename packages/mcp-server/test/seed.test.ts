@@ -18,6 +18,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import type { Hub } from "@uberblick/hub";
 import {
   getBlocks,
+  getDirectoryMap,
   getMeta,
   roomForDoc,
   tombstoneDirectoryEntry,
@@ -192,6 +193,47 @@ describe("seed import", () => {
       expect(doc.blocks).toHaveLength(overview?.blocks.length ?? -1);
     } finally {
       await rig.close();
+    }
+  });
+
+  // Sorting a listing by age is the whole reason the stamps exist, and a
+  // corpus that arrived through the importer rather than through create_doc
+  // must be sortable too.
+  it("stamps createdAt on import, and a re-run backfills a stub without one", async () => {
+    const databasePath = tempDatabasePath();
+    await runImport(databasePath);
+    const uuid = seedUuid("overview.md");
+
+    const rig = await startServer(testConfig({ databasePath }));
+    let stamped: number;
+    try {
+      const listed = await rig.ok("list_docs");
+      for (const entry of listed.docs) {
+        expect(entry.createdAt).toEqual(expect.any(Number));
+      }
+      stamped = listed.docs.find((entry: any) => entry.uuid === uuid).createdAt;
+      // Strip the stamps the way a stub written before the fields existed would
+      // have them: nothing at all.
+      getDirectoryMap(rig.instance.replicas.directory().doc).set(uuid, {
+        title: "Overview",
+        tags: [],
+      });
+    } finally {
+      await rig.close();
+    }
+
+    await runImport(databasePath);
+
+    const after = await startServer(testConfig({ databasePath }));
+    try {
+      const listed = await after.ok("list_docs");
+      const entry = listed.docs.find((row: any) => row.uuid === uuid);
+      // Backfilled, not restored: the importer stamps the time it noticed, so
+      // the value is new. The point is that the field is no longer missing.
+      expect(entry.createdAt).toEqual(expect.any(Number));
+      expect(entry.createdAt).toBeGreaterThanOrEqual(stamped);
+    } finally {
+      await after.close();
     }
   });
 
