@@ -17,10 +17,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { createHub, silentLogger } from "@uberblick/hub";
+import { hubDatabasePath } from "@uberblick/hub/config";
 import { credentialsPath, resolveConfig, userConfigPath, writeCredentials } from "../src/config.js";
 import { doctorReport } from "../src/doctor.js";
 import { statusReport } from "../src/status.js";
-import { REPO_ROOT, removeTempDirs, runUb, sandbox } from "./helpers.js";
+import { REPO_ROOT, removeTempDirs, runUbAsync, sandbox } from "./helpers.js";
 
 const WORKSPACE = "0d4a1e7c-2b93-4f18-9a55-6c7e8d1b2f30";
 
@@ -87,6 +89,51 @@ describe("a fresh Mac", () => {
     expect(statSync(path).mode & 0o777).toBe(0o600);
     // The directory the CLI created for it. Another account being able to
     // enter it is how a file at 0600 stops being the whole answer.
+    expect(statSync(macRoot(root)).mode & 0o077).toBe(0);
+  });
+
+  it("stays owner-only when the hub is the first writer", async () => {
+    // Whoever creates the tree decides what it is: `mkdirSync` applies its mode
+    // only to directories it creates, so an `Uberblick/` made at the umask by
+    // the hub would still be group-readable when `ub init` later writes
+    // credentials.json into it with `mode: 0o700`.
+    const root = home();
+    const env = macEnv(root);
+    const hub = await createHub({
+      port: 0,
+      databasePath: hubDatabasePath(env, "darwin"),
+      authSecret: "storage-ordering-test-secret",
+      log: silentLogger,
+    });
+    await hub.stop();
+
+    expect(statSync(join(macRoot(root), "data", "hub.sqlite")).mode & 0o777).toBe(
+      0o600,
+    );
+    expect(statSync(join(macRoot(root), "data")).mode & 0o077).toBe(0);
+    expect(statSync(macRoot(root)).mode & 0o077).toBe(0);
+
+    writeCredentials({ signingSecret: "ordering-secret" }, env, "darwin");
+    expect(statSync(macRoot(root)).mode & 0o077).toBe(0);
+  });
+
+  it("stays owner-only when a workspace replica is the first writer", async () => {
+    const root = home();
+    const env = macEnv(root, { WORKSPACE_ID: WORKSPACE });
+    const { report } = await statusReport({ env, cwd: root, platform: "darwin" });
+
+    // 0600 because the replica is the whole corpus. The chmod happens before
+    // the WAL exists, so the files SQLite creates beside it inherit the mode.
+    expect(statSync(report.storage.workspace).mode & 0o777).toBe(0o600);
+    for (const directory of [
+      join(macRoot(root), "data", "workspaces"),
+      join(macRoot(root), "data"),
+      macRoot(root),
+    ]) {
+      expect(statSync(directory).mode & 0o077).toBe(0);
+    }
+
+    writeCredentials({ signingSecret: "ordering-secret" }, env, "darwin");
     expect(statSync(macRoot(root)).mode & 0o077).toBe(0);
   });
 
@@ -242,13 +289,15 @@ describe("state in both roots", () => {
 // --- the XDG machine every contributor is on ---------------------------------
 
 describe("`ub status` on an XDG machine", () => {
-  it("reports a storage object with the resolved paths, and no secret", () => {
+  it("reports a storage object with the resolved paths, and no secret", async () => {
     const box = sandbox({
       credentials: { signingSecret: "storage-test-secret-91af3c" },
       userConfig: { workspace: WORKSPACE, hubUrl: "ws://127.0.0.1:9/dead" },
     });
 
-    const run = runUb(["status", "--json"], box);
+    // Async, not `runUb`: this suite owns an in-process hub in the ordering
+    // test above, and spawnSync would block the event loop it runs on.
+    const run = await runUbAsync(["status", "--json"], box);
     expect(run.status).toBe(0);
     const report = JSON.parse(run.stdout);
 
@@ -262,9 +311,9 @@ describe("`ub status` on an XDG machine", () => {
     expect(run.output).not.toContain("storage-test-secret-91af3c");
   });
 
-  it("names the data root once in the human output", () => {
+  it("names the data root once in the human output", async () => {
     const box = sandbox({ userConfig: { workspace: WORKSPACE } });
-    const run = runUb(["status"], box);
+    const run = await runUbAsync(["status"], box);
 
     expect(run.status).toBe(0);
     const named = run.stdout
@@ -289,8 +338,9 @@ describe("the development tasks", () => {
     expect(setting?.[1]).toBeDefined();
     expect(setting?.[1]).toContain("{{config_root}}");
     expect(setting?.[1]).toMatch(/\.sqlite$/);
-    // In the `[env]` block, so every task in the checkout inherits it — the
-    // review image and the e2e harness included.
+    // In the `[env]` block, so every task in the checkout inherits it, the e2e
+    // harness included. (The Docker review container runs `pnpm` directly, with
+    // no mise, and needs nothing: no suite there opens a default database.)
     expect(mise.indexOf("HUB_DB_PATH")).toBeGreaterThan(mise.indexOf("[env]"));
     expect(mise.indexOf("HUB_DB_PATH")).toBeLessThan(mise.indexOf("[tasks."));
   });

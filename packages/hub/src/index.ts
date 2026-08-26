@@ -28,6 +28,7 @@ export {
 export type { HubConfig } from "./config.js";
 export {
   AmbiguousStorageError,
+  createDataDirectory,
   MAC_ROOT_DISPLAY,
   resolveStorage,
   WORKSPACE_DATABASE_FILE,

@@ -8,6 +8,8 @@
  */
 
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { InvalidWorkspaceIdError } from "@uberblick/schema";
@@ -74,7 +76,10 @@ describe("resolveMcpConfig", () => {
     // one file whichever layout is in force — two replicas of one corpus would
     // converge with neither. `platform` is a parameter so this holds on the
     // machine running the tests.
-    const macHome = "/tmp/uberblick-config-test-home";
+    // A real temp directory rather than a fixed `/tmp` path: a leftover
+    // `~/.config/uberblick` under a shared name would flip this to the legacy
+    // layout, and two runs would fight over the same one.
+    const macHome = mkdtempSync(join(tmpdir(), "uberblick-mac-home-"));
     const expected = join(
       macHome,
       "Library",
@@ -90,6 +95,8 @@ describe("resolveMcpConfig", () => {
     expect(
       defaultDatabasePath(`uberblick-${WORKSPACE}`, { HOME: macHome }, "darwin"),
     ).toBe(expected);
+    // Resolution reads; it never creates. Nothing to clean up but the shell.
+    rmSync(macHome, { recursive: true, force: true });
   });
 
   it("lets UBERBLICK_DB name the file outright, on either layout", () => {

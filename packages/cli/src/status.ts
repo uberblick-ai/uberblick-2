@@ -17,8 +17,8 @@
  */
 
 import { parseArgs } from "node:util";
+import { hubDatabasePath } from "@uberblick/hub/config";
 import type { StorageLayout } from "@uberblick/hub/storage";
-import { hubDatabasePath } from "@uberblick/hub";
 import {
   collectSyncStatus,
   createMcpServer,

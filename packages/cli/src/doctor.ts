@@ -514,7 +514,14 @@ export async function doctorReport(
         version: cliVersion(),
         ok: false,
         checks: [
-          fail("storage-layout", thrown.message, thrown.remedy),
+          // The error's own message sends a person to `ub doctor`; this *is*
+          // `ub doctor`, so it states the roots and lets the remedy line do the
+          // rest.
+          fail(
+            "storage-layout",
+            `${thrown.macRoot} and the legacy ${thrown.legacyConfigDir} / ${thrown.legacyDataDir} both hold uberblick state`,
+            thrown.remedy,
+          ),
           ...AFTER_STORAGE.map((name) =>
             skipped(
               name,

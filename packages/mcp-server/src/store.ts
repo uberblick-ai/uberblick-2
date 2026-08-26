@@ -39,9 +39,10 @@
  * applied everything up to `seq` cannot miss an earlier row appearing later.
  */
 
-import { mkdirSync } from "node:fs";
+import { chmodSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { createDataDirectory } from "@uberblick/hub/storage";
 import type {
   SQLInputValue,
   SQLOutputValue,
@@ -300,11 +301,21 @@ export class MirrorStore {
 
   constructor(databasePath: string, workspaceId: string) {
     this.databasePath = databasePath;
-    if (databasePath !== ":memory:") {
-      mkdirSync(dirname(databasePath), { recursive: true });
+    // Owner-only: this replica holds the whole corpus, and it is as often as
+    // not the first thing to create the user's data tree — a directory left at
+    // the umask here is one `ub init` then writes credentials.json into.
+    const durable = databasePath !== ":memory:";
+    const fresh = durable && !existsSync(databasePath);
+    if (durable) {
+      createDataDirectory(dirname(databasePath));
     }
 
     this.db = new DatabaseSync(databasePath);
+    // Only a file this constructor created, and before the WAL exists, so the
+    // -wal and -shm files SQLite creates beside it inherit the same mode.
+    if (fresh) {
+      chmodSync(databasePath, 0o600);
+    }
     // WAL so a reader never blocks the writer, and a busy timeout so a second
     // MCP server instance waits its turn instead of failing the tool call.
     this.db.exec("PRAGMA journal_mode = WAL");

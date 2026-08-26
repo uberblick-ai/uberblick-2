@@ -41,9 +41,9 @@
  * question. They are applied by their own packages, above this default.
  */
 
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 /** Which of the three layouts resolution landed on. Stable: `--json` prints it. */
 export type StorageLayout = "mac" | "xdg" | "legacy-xdg";
@@ -105,6 +105,36 @@ function trimmed(value: string | undefined): string | null {
 }
 
 /**
+ * An `XDG_*` value, or null when there is none to honour.
+ *
+ * The XDG base directory spec says a relative value "must be ignored", and it
+ * is right: resolving one against the working directory would put a machine's
+ * config and databases in as many places as the command is started from — and
+ * on a Mac, a stray relative value would silently take an installation off the
+ * layout it is actually living in. Ignored means *unset*, so such a value is
+ * not an override either.
+ */
+function xdgDir(value: string | undefined): string | null {
+  const text = trimmed(value);
+  return text === null || !isAbsolute(text) ? null : text;
+}
+
+/**
+ * Create a directory in the user's storage tree, owner-only, parents included.
+ *
+ * The first writer is whoever runs first — the hub opening `hub.sqlite`, a
+ * replica opening its workspace file, `ub init` writing `credentials.json` —
+ * and `mkdirSync` applies its mode only to directories it creates. So a
+ * process that made `Uberblick/` at the umask's 0755 would leave every later
+ * `mode: 0o700` a no-op on a directory anyone can already read. One helper, so
+ * that whichever of them is first creates the same thing. (`0o700` is safe
+ * under any umask: a umask can only clear permission bits, never add them.)
+ */
+export function createDataDirectory(path: string): void {
+  mkdirSync(path, { recursive: true, mode: 0o700 });
+}
+
+/**
  * The home directory, from the environment being resolved rather than from the
  * process. On POSIX `os.homedir()` reads exactly this variable; taking it from
  * the environment argument is what makes a resolution against a throwaway home
@@ -115,9 +145,9 @@ function home(env: NodeJS.ProcessEnv): string {
 }
 
 function xdgLayout(env: NodeJS.ProcessEnv): StoragePaths {
-  const configHome = trimmed(env.XDG_CONFIG_HOME) ?? join(home(env), ".config");
+  const configHome = xdgDir(env.XDG_CONFIG_HOME) ?? join(home(env), ".config");
   const dataHome =
-    trimmed(env.XDG_DATA_HOME) ?? join(home(env), ".local", "share");
+    xdgDir(env.XDG_DATA_HOME) ?? join(home(env), ".local", "share");
   const dataDir = join(dataHome, XDG_DIR);
   return {
     layout: "xdg",
@@ -204,7 +234,8 @@ export class AmbiguousStorageError extends Error {
   constructor(mac: StoragePaths, legacy: StoragePaths) {
     super(
       `refusing to guess where uberblick's files are: ${mac.configDir} and the ` +
-        `legacy ${legacy.configDir} / ${legacy.dataDir} both hold state`,
+        `legacy ${legacy.configDir} / ${legacy.dataDir} both hold state — run ` +
+        "`ub doctor`, which names both roots and the way out",
     );
     this.name = "AmbiguousStorageError";
     this.macRoot = mac.configDir;
@@ -232,7 +263,7 @@ export function resolveStorage(options: StorageOptions = {}): StoragePaths {
   // XDG_DATA_HOME must not leave the config in Application Support and the
   // databases somewhere else.
   const explicit =
-    trimmed(env.XDG_CONFIG_HOME) !== null || trimmed(env.XDG_DATA_HOME) !== null;
+    xdgDir(env.XDG_CONFIG_HOME) !== null || xdgDir(env.XDG_DATA_HOME) !== null;
   if (platform !== "darwin" || explicit) {
     return xdg;
   }

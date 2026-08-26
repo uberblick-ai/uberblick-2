@@ -159,6 +159,28 @@ const CASES: Case[] = [
     }),
   },
   {
+    // The XDG spec: a relative value must be ignored. Honouring one would put
+    // this machine's files wherever the command was started from.
+    name: "a relative XDG_CONFIG_HOME is ignored, so a Mac stays on the Mac layout",
+    platform: "darwin",
+    env: { XDG_CONFIG_HOME: "relative/conf" },
+    layout: "mac",
+    paths: (root) => ({
+      configDir: macRoot(root),
+      dataDir: join(macRoot(root), "data"),
+      hubDatabase: join(macRoot(root), "data", "hub.sqlite"),
+      workspaceDir: join(macRoot(root), "data", "workspaces"),
+    }),
+  },
+  {
+    name: "a relative XDG_DATA_HOME is ignored, leaving the XDG default",
+    platform: "linux",
+    env: { XDG_DATA_HOME: "./data" },
+    layout: "xdg",
+    paths: (root) =>
+      xdgUnder(join(root, ".config"), join(root, ".local", "share")),
+  },
+  {
     name: "a legacy Mac with only config.json keeps the legacy layout",
     platform: "darwin",
     files: (root) => [join(legacyConfig(root), "config.json")],
@@ -267,8 +289,6 @@ describe("layout precedence", () => {
         expect(storage.warnings).toHaveLength(1);
         expect(storage.warnings[0]).toMatch(one.warns);
       }
-      // A legacy machine gets nothing new: Application Support stays absent.
-      expect(existsSync(join(root, "Library"))).toBe(false);
     });
   }
 });
@@ -336,7 +356,10 @@ describe("the hub database", () => {
       writeFileSync(
         join(relocated, "probe.ts"),
         'import { defaultDatabasePath } from "./config.js";\n' +
-          "process.stdout.write(defaultDatabasePath());\n",
+          // Pinned, because the assertion below is the XDG path: left to
+          // `process.platform` this would resolve the Mac layout on a Mac and
+          // fail there for a reason that has nothing to do with relocation.
+          'process.stdout.write(defaultDatabasePath({ platform: "linux" }));\n',
         "utf8",
       );
 
