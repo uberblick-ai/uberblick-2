@@ -206,21 +206,16 @@ auth in the spike itself.
 - SQLite indexes (FTS5, tags, links) are derived and rebuildable — never
   authoritative.
 - All document state lives in the Y.Doc, never in server-side tables.
-- **Document state syncs; auth state decides.** Anything that has to merge
-  between copies and keep working offline is document state, and it lives in a
-  Y.Doc. Anything that has to be correct in one place at one time — which
-  workspaces this hub serves, which credentials may open them, which have been
-  revoked — is hub state, and it lives in the hub's own SQLite tables. It is
-  never synced, never merged, and never rebuilt from documents. The reason is
-  that merging cannot express a revocation: CRDT merges are unions or
-  last-write-wins, so a client that never receives the revocation is just a
-  client with older data, which is exactly the state it wants to be in. Access
-  control you can wait out is not access control. This is a closed list, not a
-  general licence for server-side state: the hub's authoritative tables are the
-  workspace registry and its credentials, and nothing else. Unlike the derived
-  indexes above they cannot be rebuilt, so losing them means issuing a new
-  credential to every machine, browser and agent — back them up with the
-  documents.
+- **Document state syncs; auth state decides.** State that must merge between
+  copies and survive offline lives in a Y.Doc. State that must be correct in
+  one place at one time — which workspaces this hub serves, which credentials
+  may open them, which have been revoked — lives in the hub's own SQLite
+  tables, never synced and never rebuilt from documents. Closed list, not a
+  general licence for server-side state: the workspace registry and its
+  credentials, nothing else. Unlike the derived indexes above they cannot be
+  rebuilt. Why merging cannot express a revocation, and what losing these
+  tables costs, is reference material — see #84 until it lands in the
+  architecture doc.
 - Identity is UUIDs everywhere; titles and paths are display data. On
   conflict, `meta.title` in the doc is authoritative; the directory stub is a
   cache repaired on write/connect.
@@ -277,13 +272,20 @@ explicitly says so. It contains:
    architecture. Written for LLMs: front-loaded summaries, stable terminology,
    links by UUID.
 
-Changes do not live in the docs. Anything describing a delta — bugs, planned
-work, proposals — is extracted to GitHub issues/projects/PRs. When work merges
-and the status quo shifts, the doc is updated to the new status quo. Docs
-answer "what is true now"; GitHub answers "what is changing." Issues carry
-implementation detail only — what, runnable acceptance criteria, scope; shared
-context and knowledge live in the docs, cited from issue Pointers by title and
-UUID, never restated into issue bodies.
+**Three sources, three questions.** CLAUDE.md answers *what binds you* — rules,
+constraints, and decided architecture stated as prohibition. It is loaded
+unconditionally into every agent, so anything an agent must not violate belongs
+here even if it never opens a doc; a rule you might not read is not a rule.
+The documents answer *what is true* — the status quo, and decisions already
+taken that are not yet code, where the doc says so explicitly. GitHub answers
+*what is changing* — the work itself.
+
+When a decision has both a mechanism and a plan to build it, they split: the
+mechanism and its reasoning go in a doc, and the issues carry the work — what
+to implement, runnable acceptance criteria, scope, sequencing. Shared context
+is cited from issue Pointers by title and UUID, never restated into issue
+bodies, because a design copied into an issue body ages the moment the issue
+closes. Bugs, proposals and planned work are GitHub's, never a doc's.
 
 **Agent workflow:** read the relevant docs → compare against the code → the gap
 is the work → do the work via a GitHub-style change → update the doc to the new
