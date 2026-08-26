@@ -1,11 +1,12 @@
 /**
  * The v0 MCP tool set.
  *
- * Nineteen tools and no more: create_doc, get_doc, list_docs, search,
+ * Twenty-one tools and no more: create_doc, get_doc, list_docs, search,
  * backlinks, edit_block, insert_block, delete_block, set_tags, set_links,
- * archive_doc, restore_doc, annotate, export_markdown, sync_status, and the
+ * archive_doc, restore_doc, annotate, export_markdown, sync_status, the
  * four sidebar tools registered from ./sidebar-tools.ts — get_sidebar,
- * pin_doc, unpin_doc, sidebar_group. There is
+ * pin_doc, unpin_doc, sidebar_group — and the two feedback tools registered
+ * from ./feedback-tools.ts, rate_doc and feedback_report. There is
  * deliberately no whole-document write — every content change names one block
  * — no markdown-import tool, because markdown is an export format, and no hard
  * delete: archive_doc tombstones the directory stub and leaves every byte of
@@ -62,6 +63,7 @@ import type {
   HeadingLevel,
 } from "@uberblick/schema";
 import { z } from "zod";
+import { registerFeedbackTools, recordDocUsage } from "./feedback-tools.js";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
 import type { Replica, Replicas } from "./replica.js";
@@ -443,13 +445,20 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       title: "Read a document",
       description:
         "Read a document's metadata, its blocks and its annotation threads. " +
-        "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.",
+        "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
+        "Reading a document records it as used by this session in the workspace's `_feedback` document — once per " +
+        "document per session, however often you read it, so re-reading costs nothing. The first read of a " +
+        "document you have not rated also answers with a one-line `feedback` reminder that rate_doc exists; it is " +
+        "advisory, never a failure, and never required.",
       inputSchema: { uuid: uuidArg },
     },
     guarded(async ({ uuid }) => {
       await replicas.settle();
       const replica = requireDoc(uuid);
       const meta = getMeta(replica.doc);
+      // After the read succeeded, and best-effort: telemetry must never cost an
+      // agent the document it asked for. See ./feedback-tools.ts.
+      const nudge = recordDocUsage(replicas, uuid);
       return json({
         ...meta,
         room: replica.room,
@@ -457,6 +466,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         annotations: listAnnotations(replica.doc).map((annotation) =>
           annotationJson(replica, annotation),
         ),
+        ...(nudge === null ? {} : { feedback: nudge }),
       });
     }),
   );
@@ -910,5 +920,16 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     guarded,
     json,
     error: (code, message, detail) => new ToolError(code, message, detail),
+  });
+
+  // Usage and helpfulness telemetry, on the same terms: ./feedback-tools.ts
+  // borrows the identity check so a verdict names a document that exists, and
+  // the durability responder so rate_doc reports `{applied, synced}` like every
+  // other write.
+  registerFeedbackTools(server, replicas, {
+    requireStub,
+    durability,
+    guarded,
+    json,
   });
 }

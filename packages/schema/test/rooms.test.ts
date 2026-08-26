@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   DIRECTORY_SUFFIX,
+  FEEDBACK_SUFFIX,
   InvalidRoomError,
   InvalidWorkspaceIdError,
   SIDEBAR_SUFFIX,
   directoryRoom,
+  feedbackRoom,
   parseRoom,
   parseWorkspaceId,
   roomForDoc,
@@ -62,6 +64,8 @@ describe("room names", () => {
     expect(directoryRoom(WORKSPACE)).toBe(`${WORKSPACE}/${DIRECTORY_SUFFIX}`);
     expect(SIDEBAR_SUFFIX).toBe("_sidebar");
     expect(sidebarRoom(WORKSPACE)).toBe(`${WORKSPACE}/${SIDEBAR_SUFFIX}`);
+    expect(FEEDBACK_SUFFIX).toBe("_feedback");
+    expect(feedbackRoom(WORKSPACE)).toBe(`${WORKSPACE}/${FEEDBACK_SUFFIX}`);
   });
 
   it("keeps the slug out of the room name, so both spellings name one room", () => {

@@ -27,8 +27,10 @@ import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import {
   DIRECTORY_SUFFIX,
+  FEEDBACK_SUFFIX,
   SIDEBAR_SUFFIX,
   directoryRoom,
+  feedbackRoom,
   getBlocks,
   getBlocksFragment,
   getDirectoryEntry,
@@ -55,10 +57,11 @@ const LOG_ORIGIN = Symbol("uberblick/log");
 export interface Replica {
   /** `<workspaceId>/<uuid>`, or one of the workspace's well-known rooms. */
   readonly room: string;
-  /** The document uuid, or `_directory` / `_sidebar`. */
+  /** The document uuid, or `_directory` / `_sidebar` / `_feedback`. */
   readonly id: string;
   readonly isDirectory: boolean;
   readonly isSidebar: boolean;
+  readonly isFeedback: boolean;
   readonly doc: Y.Doc;
   readonly awareness: Awareness;
   /** The highest log sequence applied to this replica. */
@@ -181,6 +184,10 @@ export class Replicas {
     // reads it, so curation made elsewhere is in hand before this replica acts
     // on the absence of it.
     this.sidebar();
+    // And the feedback doc: every get_doc reports usage into it, and a report
+    // read from a room attached only at the moment of asking would answer from
+    // this machine's log alone.
+    this.feedback();
     for (const pending of this.store.pendingRooms()) {
       this.adoptRoom(pending.room);
     }
@@ -246,6 +253,17 @@ export class Replicas {
     );
   }
 
+  /**
+   * The workspace's feedback replica — the usage and helpfulness telemetry doc,
+   * hydrated, logged and synced exactly like the directory and the sidebar.
+   */
+  feedback(): Replica {
+    return this.ensureRoom(
+      feedbackRoom(this.config.workspaceId),
+      FEEDBACK_SUFFIX,
+    );
+  }
+
   /** The replica for one document, hydrated from the log and attached to the hub. */
   replica(uuid: string): Replica {
     return this.ensureRoom(roomForDoc(this.config.workspaceId, uuid), uuid);
@@ -279,6 +297,7 @@ export class Replicas {
       id,
       isDirectory: id === DIRECTORY_SUFFIX,
       isSidebar: id === SIDEBAR_SUFFIX,
+      isFeedback: id === FEEDBACK_SUFFIX,
       doc,
       awareness,
       lastSeq: 0,
@@ -412,10 +431,11 @@ export class Replicas {
       this.reconcileDirectory();
       return;
     }
-    // The sidebar holds uuids, not blocks and not metadata: there is no stub to
-    // repair and nothing to index. Falling through would ask a document-shaped
-    // question of a doc that is not one.
-    if (replica.isSidebar) {
+    // The sidebar holds uuids and the feedback doc holds events — neither has
+    // blocks or metadata, so there is no stub to repair and nothing to index.
+    // Falling through would ask a document-shaped question of a doc that is not
+    // one.
+    if (replica.isSidebar || replica.isFeedback) {
       return;
     }
     this.repairDuplicates(replica);

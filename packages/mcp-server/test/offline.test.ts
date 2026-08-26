@@ -54,11 +54,13 @@ describe("with the hub stopped", () => {
       "delete_block",
       "edit_block",
       "export_markdown",
+      "feedback_report",
       "get_doc",
       "get_sidebar",
       "insert_block",
       "list_docs",
       "pin_doc",
+      "rate_doc",
       "restore_doc",
       "search",
       "set_links",
@@ -276,11 +278,15 @@ describe("with the hub stopped", () => {
     expect(missing.payload.error).toBe("doc_not_found");
     // A typo must not create an empty document on the hub.
     const status = await rig.ok("sync_status", {});
-    // The two well-known rooms and nothing else: discovery and curation are
-    // synced docs, attached from boot.
+    // The well-known rooms and nothing else: discovery, curation and usage
+    // telemetry are synced docs, attached from boot.
     expect(
       status.rooms.map((room: { room: string }) => room.room),
-    ).toEqual([`${WORKSPACE}/_directory`, `${WORKSPACE}/_sidebar`]);
+    ).toEqual([
+      `${WORKSPACE}/_directory`,
+      `${WORKSPACE}/_sidebar`,
+      `${WORKSPACE}/_feedback`,
+    ]);
   });
 
 });
