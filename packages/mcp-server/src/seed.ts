@@ -451,11 +451,16 @@ export async function importSeedDir(
     const docs = readSeedDocs(dir);
     if (starter !== null) {
       // Before the first write, and after the directory has had its bounded
-      // chance to arrive from the hub — the two-pass hydration `importSeedDocs`
-      // relies on, paid here so the decision is made on the same state.
+      // chance to arrive from the hub — the same two-pass hydration
+      // `importSeedDocs` relies on, paid here so the decision is made on the
+      // state the writes will be made on. `settle` is the whole wait: it waits
+      // for every attached room to go quiet, the directory included, and skips
+      // the wait entirely when the hub is unreachable. A second `waitForQuiet`
+      // here would buy nothing and would repeat the full connect timeout
+      // offline, with `ub init`'s seed lock held. It also throws on a poisoned
+      // replica before returning, so health is asserted before this reads
+      // anything.
       await replicas.settle();
-      await replicas.sync.waitForQuiet();
-      replicas.assertHealthy();
       if (!holdsOnlyStarters(replicas, docs)) {
         log.warn("not seeding a starter layout into a workspace in use", {
           workspace: config.workspaceId,
