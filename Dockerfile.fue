@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1.7
+
+# A machine that has never seen this repository, so the first-user experience
+# can be executed rather than reasoned about.
+#
+# What is installed here is exactly what README "Getting it running" calls the
+# prerequisites — git and mise, and the `curl`/`ca-certificates` that fetching
+# mise itself needs. No Node, no pnpm, no fnox, no age key, no secrets, nothing
+# from this repository. Everything else has to come from the documented install
+# path below, which is why deleting a step from it breaks this build.
+#
+# Same standing rule as Dockerfile.review: no build secrets, no host mounts, no
+# privileged mode, no Docker socket. The build stage has network — installing a
+# toolchain and a lockfile needs a registry — and `mise run fue` then runs the
+# assertions with `--network none`, which is where the offline-first promise is
+# actually tested.
+FROM debian:bookworm-slim
+
+#
+# `libatomic1` is the one addition, and it is base-OS runtime, not ours: the
+# official Node tarball mise downloads links against it, and `debian:*-slim`
+# ships without it. Any desktop or CI image a person actually installs on has it
+# — this image is more bare than a real machine, not less.
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        ca-certificates curl git libatomic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# A normal user account, because that is who installs this: mise installs per
+# user, and a root-only path would prove nothing about anybody's laptop.
+RUN useradd --create-home --shell /bin/bash fue
+USER fue
+ENV HOME=/home/fue
+ENV PATH=/home/fue/.local/bin:$PATH
+
+RUN curl --fail --silent --show-error --location https://mise.run | sh \
+    && mise --version
+
+# "Copy the source in" stands in for the README's `git clone`: this proves the
+# working tree in front of you, which is the tree whose install path is being
+# changed. Dockerfile.fue.dockerignore decides what counts as a clean checkout —
+# in particular no `mise.local.toml`, whose signing secret would hand the image
+# a configuration a new user has to generate.
+WORKDIR /home/fue/uberblick
+COPY --chown=fue:fue . .
+
+# The documented install path, verbatim from README "Getting it running" and
+# `docs-seed/install.md`, unattended. This is the line under test.
+RUN mise trust && mise run setup -- --yes
+
+# Deliberately the only thing the assertion container does. `mise exec` is what
+# the README tells anyone without an activated shell to use, and it is what puts
+# `ub` on PATH here.
+CMD ["mise", "exec", "--", "node", "scripts/fue-assert.mjs"]

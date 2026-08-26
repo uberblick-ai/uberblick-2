@@ -44,7 +44,7 @@ describe("the update log", () => {
       });
 
       // A second handle on the same file sees only committed data.
-      const reader = new MirrorStore(databasePath);
+      const reader = new MirrorStore(databasePath, WORKSPACE);
       try {
         const room = `${WORKSPACE}/${doc.uuid}`;
         const logged = reader.updatesAfter(room, 0);

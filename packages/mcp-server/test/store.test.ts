@@ -22,7 +22,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { getBlocks, getMeta } from "@uberblick/schema";
 import { MirrorStore } from "../src/store.js";
-import { removeTempDirs, tempDatabasePath } from "./helpers.js";
+import { WORKSPACE, removeTempDirs, tempDatabasePath } from "./helpers.js";
 
 /** The document `fixtures/make-legacy.ts` wrote, and what it wrote about it. */
 const LEGACY = {
@@ -40,7 +40,7 @@ const FIXTURE = join(
 const stores: MirrorStore[] = [];
 
 function store(databasePath: string): MirrorStore {
-  const opened = new MirrorStore(databasePath);
+  const opened = new MirrorStore(databasePath, WORKSPACE);
   stores.push(opened);
   return opened;
 }

@@ -10,10 +10,12 @@
  * reason to run it by hand.
  */
 
+import { doctorCommand } from "./doctor.js";
 import { initCommand } from "./init.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
+import { openCommand } from "./open.js";
 import { remoteCommand } from "./remote.js";
 import { serveCommand } from "./serve.js";
 import { statusCommand } from "./status.js";
@@ -26,7 +28,10 @@ usage: ub <command> [options]
 
 commands:
   init [options]         identity, workspace and a local development signing secret
+  open [options]         serve the web app and a hub in the foreground, and
+                         open the browser (--no-browser, --port <n>)
   status [--json]        workspace, hub, credential, database and sync state
+  doctor [--json]        check the local stack against its known failure modes
   workspace [command]    which workspace this directory works in
   remote [command]       the endpoint documents sync with, and the one-time bridges
   mcp install [target]   register uberblick with an MCP client
@@ -58,6 +63,8 @@ mcp install options:
   --user            write the per-user config
   --print           print the snippet to paste; write nothing
   --force           replace an existing "uberblick" entry, backing the file up
+  --workspace <id>  register a second entry pinned to this workspace instead
+  --name <label>    call that entry "uberblick-<label>" (default: its slug)
   -- <command>      register this command instead of uberblick's own
 
 options:
@@ -83,11 +90,17 @@ export async function runCli(
   if (command === "init") {
     return await initCommand(rest, io);
   }
+  if (command === "open") {
+    return await openCommand(rest, io);
+  }
   if (command === "status") {
     return await statusCommand(rest, io);
   }
+  if (command === "doctor") {
+    return await doctorCommand(rest, io);
+  }
   if (command === "workspace") {
-    return workspaceCommand(rest, io);
+    return await workspaceCommand(rest, io);
   }
   if (command === "remote") {
     return await remoteCommand(rest, io);

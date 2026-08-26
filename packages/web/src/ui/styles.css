@@ -277,6 +277,33 @@ body {
   white-space: nowrap;
 }
 
+/* Pin / unpin the open document (#115), beside the breadcrumb because that is
+   where the document's own context is. The word is fixed and the mark carries
+   the state, so pinning moves nothing in the header. */
+.ub-pin-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  padding: 0.1rem 0.35rem;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.ub-pin-toggle:hover {
+  color: var(--foreground);
+}
+
+.ub-pin-toggle[aria-pressed="true"] {
+  color: var(--brand);
+  border-color: var(--border);
+}
+
 /* Right-anchored, and the pills grow leftwards into the gap: the activity pill
    is first in the group, so a session arriving or leaving never moves the
    connection pill or the presence chip beside it. */
@@ -485,13 +512,22 @@ body {
   margin-top: 0.5rem;
 }
 
-/* The whole header is the toggle, so the hit target matches the row. */
+/* The header is a row: the toggle fills it, and the two group actions sit at
+   its end. */
 .ub-group-head {
+  display: flex;
+  align-items: center;
+}
+
+/* The label row is the toggle *and* the group's drag handle — the row you see
+   is the row you drag (#115). */
+.ub-group-toggle {
   display: flex;
   align-items: center;
   /* Tight: the mark belongs to the label it discloses, not beside it. */
   gap: 0.25rem;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   text-align: left;
   background: none;
   border: 0;
@@ -505,8 +541,16 @@ body {
   color: var(--muted-foreground);
 }
 
-.ub-group-head:hover {
+.ub-group-toggle:hover {
   color: var(--foreground);
+}
+
+/* A named group can be named anything, and the sidebar is 16rem wide. */
+.ub-group-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* One shape, one transform. The path is drawn pointing right and turns a
@@ -524,13 +568,115 @@ body {
   transition: transform 160ms ease;
 }
 
-.ub-group-head[aria-expanded="true"] .ub-group-caret {
+.ub-group-toggle[aria-expanded="true"] .ub-group-caret {
   transform: rotate(90deg);
 }
 
 .ub-group-count {
   margin-left: auto;
   letter-spacing: normal;
+}
+
+/* Rename and delete. Quiet until the row is hovered — and until anything in it
+   takes focus, which is what keeps them reachable from the keyboard rather than
+   from the pointer alone. */
+.ub-group-act {
+  flex: none;
+  border: 0;
+  background: none;
+  border-radius: var(--radius-sm);
+  padding: 0.15rem 0.3rem;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.ub-group-head:hover .ub-group-act,
+.ub-group-head:focus-within .ub-group-act {
+  opacity: 1;
+}
+
+.ub-group-act:hover {
+  color: var(--foreground);
+  background: var(--accent);
+}
+
+/* Renaming happens in place, in the header the name is read in. */
+.ub-group-rename {
+  flex: 1;
+  min-width: 0;
+  margin: 0.25rem 0.4rem;
+  padding: 0 0.2rem;
+  background: transparent;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ub-group-add {
+  align-self: flex-start;
+  margin-top: 0.35rem;
+  border: 0;
+  background: none;
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.4rem;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.ub-group-add:hover {
+  color: var(--foreground);
+  background: var(--accent);
+}
+
+.ub-group-add:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* ---- sidebar drop slots (#115) ---- */
+
+/* One insertion point. It has height so it can be aimed at, and negative
+   margins so having one between every pair of rows does not space the list out.
+   Out of the pointer's way entirely until a drag it could accept is in flight:
+   the list carries what kind that is, and only the matching slots take the
+   pointer — a document dragged over the space between two groups means nothing,
+   and must not light up there. */
+.ub-drop-slot {
+  height: 0.5rem;
+  margin: -0.25rem 0;
+  border-radius: 2px;
+  pointer-events: none;
+  /* Above the rows it overlaps. The negative margins put half of the slot
+     inside its neighbours' padding, and hit testing would otherwise hand that
+     half to whichever row was painted last — the strip the reader is aiming at
+     would take the drop only along its middle line. */
+  position: relative;
+  z-index: 1;
+}
+
+/* The slots between documents live in list items of their own, which carry no
+   marker and none of the row padding. */
+.ub-drop-row {
+  list-style: none;
+}
+
+.ub-list[data-dragging="doc"] .ub-group-body .ub-drop-slot,
+.ub-list[data-dragging="group"] > .ub-drop-slot {
+  pointer-events: auto;
+}
+
+.ub-drop-slot[data-over="true"] {
+  background: var(--brand);
 }
 
 /* ---- editor pane ---- */
@@ -1582,6 +1728,107 @@ h3.ub-heading {
   white-space: nowrap;
 }
 
+/* The hovercard on a reference (#175). A tooltip in a portal on <body>, so it
+   escapes the editor's overflow and cannot be clipped by a scrolling pane; it
+   holds nothing focusable, which is what keeps Tab order the prose's own.
+
+   The same card surface and lift as the block menu and the comment composer —
+   three things floating over the prose should read as one kind of thing. */
+.ub-hovercard {
+  position: fixed;
+  z-index: 7;
+  width: 22rem;
+  max-width: calc(100vw - 1rem);
+  padding: 0.6rem 0.7rem;
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px oklch(0 0 0 / 25%);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.ub-hovercard-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* The chip carries the state in colour *and* in a word: colour alone is not a
+   statement a reader who cannot see it can read. GitHub's purple has no
+   counterpart in this palette, so merged takes the info hue — the point is
+   that the three states are three colours, not that they are GitHub's. */
+.ub-hovercard-state {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid currentcolor;
+}
+
+.ub-hovercard-state-open {
+  color: var(--status-success);
+  background: var(--status-success-subtle);
+}
+
+.ub-hovercard-state-merged {
+  color: var(--status-info);
+  background: var(--status-info-subtle);
+}
+
+.ub-hovercard-state-closed {
+  color: var(--destructive);
+  background: var(--destructive-subtle);
+}
+
+.ub-hovercard-ref {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.ub-hovercard-title {
+  margin-top: 0.35rem;
+  font-weight: 500;
+}
+
+.ub-hovercard-meta,
+.ub-hovercard-size {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.ub-hovercard-avatar {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+
+.ub-hovercard-size {
+  font-family: var(--font-mono);
+}
+
+.ub-hovercard-adds {
+  color: var(--status-success);
+}
+
+.ub-hovercard-dels {
+  color: var(--destructive);
+}
+
+/* No token: one line saying where one goes. The card never asks for it here —
+   entry, validation and removal are Settings → Connections and nowhere else. */
+.ub-hovercard-hint {
+  color: var(--muted-foreground);
+}
+
 /* ---- foreign-content fallback ---- */
 
 /* Loud comes from the ground and the 2px border; the prose stays
@@ -1808,6 +2055,7 @@ h3.ub-heading {
 @media (prefers-reduced-motion: reduce) {
   .ub-group-caret,
   .ub-group-body,
+  .ub-group-act,
   .ub-copy,
   .ub-gutter-add {
     transition: none;

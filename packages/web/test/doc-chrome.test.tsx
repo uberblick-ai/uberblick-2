@@ -122,6 +122,8 @@ function Chrome({ fix }: { fix: Fixture }): ReactElement {
         connection={fix.connection}
         presence={presence}
         meta={getMeta(fix.ydoc)}
+        pinned={false}
+        onTogglePin={null}
         threads={[]}
         threadsOpen={false}
         onToggleThreads={() => {}}

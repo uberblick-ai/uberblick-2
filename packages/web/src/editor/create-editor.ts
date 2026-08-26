@@ -12,6 +12,8 @@ import { BlockIds } from "./block-ids.js";
 import { ChangedBlockMarks } from "./changed-marks.js";
 import type { ChangedBlocks } from "./changed-blocks.js";
 import { Collaboration } from "./collaboration.js";
+import { GitHubHovercards } from "./github-hovercard.js";
+import type { GitHubHovercardOptions } from "./github-hovercard.js";
 import { GitHubRefs } from "./github-refs.js";
 import { BlockInputRules } from "./input-rules.js";
 import { paletteExtensions } from "./nodes.js";
@@ -50,6 +52,11 @@ export interface CreateEditorOptions {
   typing?: Partial<
     Pick<AgentTypingOptions, "reducedMotion" | "random" | "now">
   >;
+  /**
+   * The GitHub hovercard's hover-intent delay, so a test need not wait it out.
+   * Defaults to the real one.
+   */
+  hovercard?: Partial<GitHubHovercardOptions>;
 }
 
 export function createUberblickEditor(options: CreateEditorOptions): Editor {
@@ -70,6 +77,10 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // Presentation over state that is already true, like the two below it: the
     // stored text of a pasted GitHub link stays the full URL.
     GitHubRefs,
+    // Reads the same references the decoration draws, and nothing else: the
+    // card is fetched on hover, shown in a portal, and never touches the
+    // document (#175).
+    GitHubHovercards.configure(options.hovercard ?? {}),
     ChangedBlockMarks.configure({ marks: options.changed ?? null }),
     // After the changed-block marker, and reading the same tracker: the gutter
     // line says *that* a block changed the moment it does, whatever the

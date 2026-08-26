@@ -20,8 +20,15 @@
  * The switcher (#151) is here for the same reason: that two configured
  * workspaces are two corpora is a claim about rooms and a hub, and jsdom has
  * neither. What the list *means* is pinned in `test/workspaces.test.tsx`.
+ *
+ * And the served configuration (#189), because the deployed client is the one
+ * this repository keeps getting wrong: a real bundle, a real fetch of
+ * `/uberblick-config.json`, and a workspace the build was never told about.
+ * Where the value comes from is pinned in `test/hub-config.test.ts`; that a
+ * whole browser then opens the right corpus is only provable here.
  */
 
+import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { startHarness } from "./harness.js";
@@ -105,6 +112,9 @@ async function createDoc(page: Page, title: string): Promise<string> {
   }
 
   await page.locator(".ub-title").fill(title);
+  // Pinned, because the sidebar lists what is pinned and nothing else (#115) —
+  // and this is how the *other* context navigates to it.
+  await page.locator(".ub-pin-toggle").click();
   await expect(docButton(page, title)).toBeVisible();
   return uuid;
 }
@@ -261,11 +271,48 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
   // Synced *and* empty — the difference between a corpus this hub kept to
   // itself and a directory that simply had not arrived yet.
   await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
-  await expect(page.locator(".ub-empty")).toHaveText("No documents yet.");
+  // The sidebar is per workspace like every other room, so the second one has
+  // nothing pinned in it — not even the document just made in the first.
+  await expect(page.locator(".ub-empty")).toContainText("Nothing pinned yet");
   await expect(docButton(page, title)).toHaveCount(0);
 
   // And back: the first workspace is exactly where it was left.
   await switcher.selectOption(ws());
   await expect(page).toHaveURL(new RegExp(`/${ws()}$`));
   await expect(docButton(page, title)).toBeVisible();
+});
+
+test("the served configuration names the workspaces, and the build's define is only the fallback", async ({
+  browser,
+}) => {
+  // A deployed host answers `/uberblick-config.json`; the dev server does not,
+  // so this browser context answers it instead. Everything downstream is real:
+  // the bundle reads it, dials the endpoint it names, and joins the rooms of a
+  // workspace this build was never told about.
+  const served = [`served-${randomUUID()}`, randomUUID()];
+  const context = await browser.newContext();
+  contexts.push(context);
+  await context.route("**/uberblick-config.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ hubUrl: harness().hubUrl, workspaces: served }),
+    });
+  });
+  const page = await context.newPage();
+  await page.goto(harness().appUrl);
+
+  // `/` opens the *served* list's first entry — not the `WORKSPACE_ID` the
+  // bundle carries, which is what every other test in this file redirects to.
+  await expect(page).toHaveURL(new RegExp(`/${served[0]}$`));
+  expect(openPath(page)).not.toBe(`/${ws()}`);
+  await expect(page.locator(".ub-workspace option")).toHaveText(served);
+
+  // The endpoint came out of the same document: an empty corpus that reports
+  // itself *synced* is a hub that answered, not a socket that never opened.
+  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+
+  // And the menu navigates, exactly as it does for a configured build.
+  await page.locator(".ub-workspace").selectOption(served[1] as string);
+  await expect(page).toHaveURL(new RegExp(`/${served[1]}$`));
 });

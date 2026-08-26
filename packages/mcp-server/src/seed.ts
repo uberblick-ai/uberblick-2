@@ -297,7 +297,7 @@ export async function importSeedDir(
   dir: string,
   config: McpConfig,
 ): Promise<{ results: SeedImport[]; hub: string }> {
-  const store = new MirrorStore(config.databasePath);
+  const store = new MirrorStore(config.databasePath, config.workspaceId);
   const replicas = new Replicas(config, store);
   try {
     const results = await importSeedDocs(replicas, readSeedDocs(dir));

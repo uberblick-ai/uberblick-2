@@ -36,6 +36,21 @@ case "$HUB_AUTH_TOKEN" in
     ;;
 esac
 
+# WEB_WORKSPACES is substituted *inside* the JSON string Caddy responds with
+# (see the Caddyfile), so a quote or a backslash in it does not merely produce a
+# malformed document: it closes the string and appends whatever follows as
+# further JSON. A second `hubUrl` key added that way wins, and the browser dials
+# the hub it names. Workspace ids are uuids, optionally slug-decorated, so the
+# character set that can express every legitimate value has no quoting in it at
+# all — and refusing the rest here is what keeps that injection impossible
+# rather than merely unlikely.
+case "${WEB_WORKSPACES-}" in
+  *[!A-Za-z0-9,-]*)
+    printf 'WEB_WORKSPACES may only contain A-Z a-z 0-9 , - : it is substituted into the JSON configuration document Caddy serves, where a quote or a backslash would let the value inject further keys — including one that retargets the browser at another hub. A workspace id is a uuid, optionally prefixed with a display slug.\n' >&2
+    exit 1
+    ;;
+esac
+
 token_digest=$(printf '%s' "$HUB_AUTH_TOKEN" | sha256sum)
 HUB_AUTH_TOKEN_DIGEST=${token_digest%% *}
 export HUB_AUTH_TOKEN_DIGEST

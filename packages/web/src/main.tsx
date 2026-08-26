@@ -1,11 +1,11 @@
 /**
  * @uberblick/web — browser entry point.
  *
- * The hub endpoint comes from a document this origin serves (see config.ts), so
- * the read is started here, before React mounts — the earliest moment there is.
- * It gates the first *connect*, not the render: `useHubEndpoint` holds room
- * acquisition until it settles, because a room acquired early would dial the
- * fallback and stay there.
+ * The hub endpoint and the workspaces come from a document this origin serves
+ * (see config.ts), so the read is started here, before React mounts — the
+ * earliest moment there is. It gates the first *connect*, not the render:
+ * `useHubEndpoint` holds room acquisition until it settles, because a room
+ * acquired early would dial the fallback and stay there.
  *
  * StrictMode is deliberately absent. Its double-invoked effects open every
  * WebSocket, IndexedDB replica and ProseMirror binding twice, which for a
@@ -15,7 +15,7 @@
  */
 
 import { createRoot } from "react-dom/client";
-import { resolveHubUrl } from "./config.js";
+import { resolveClientConfig } from "./config.js";
 import { App } from "./ui/App.js";
 import "./ui/styles.css";
 
@@ -26,6 +26,6 @@ if (!container) {
 
 // Memoised in config.ts, and it never rejects — the hook below joins this same
 // read rather than starting a second one.
-void resolveHubUrl();
+void resolveClientConfig();
 
 createRoot(container).render(<App />);

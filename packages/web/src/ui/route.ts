@@ -4,11 +4,12 @@
  * The first segment *is* the workspace — this client is not configured for one
  * and cannot enumerate them. A link carries the workspace it belongs to, which
  * is what makes a pasted link from somebody else's workspace open that
- * workspace rather than the wrong document in this one. The build-time
- * `WORKSPACE_ID` (mise `[env]` in dev) only answers the one address that names
- * no workspace, `/`. `WORKSPACES` is a menu of places to go (see
- * {@link workspaceList}) and no more: an address outside the list still opens
- * its own workspace, and an address inside it is read exactly like any other.
+ * workspace rather than the wrong document in this one. The configured
+ * workspaces (the served document's, else the build's defines — see
+ * `config.ts`) only answer the one address that names no workspace, `/`, and
+ * are otherwise a menu of places to go (see {@link workspaceList}): an address
+ * outside the list still opens its own workspace, and an address inside it is
+ * read exactly like any other.
  *
  * The segment may be decorated — `uberblick-<uuid>` — and is kept exactly as
  * typed: the slug is display, so nothing here rewrites somebody's spelling of
@@ -44,10 +45,11 @@ export interface Workspace {
  * does not also empty the sidebar.
  *
  * `no-workspace` carries *why* there is none, because the two causes have
- * different fixes: a build with no `WORKSPACE_ID` at all needs one, while a
- * build carrying a value that is not a workspace id — the legacy `main`, say —
- * needs that value replaced. Telling a developer the build "carries none" when
- * it carries a rejected one sends them looking in the wrong place.
+ * different fixes: a client configured with no workspace at all needs one,
+ * while one configured with a value that is not a workspace id — the legacy
+ * `main`, say — needs that value replaced. Telling a developer the client
+ * "carries none" when it carries a rejected one sends them looking in the wrong
+ * place.
  */
 export type Route =
   | { kind: "no-workspace"; reason: "absent" }
@@ -57,14 +59,19 @@ export type Route =
   | { kind: "invalid"; reason: string; workspace: Workspace | null };
 
 /**
- * Canonical UUID shape. Matched case-insensitively — a *shape* check only.
+ * Canonical UUID shape — lowercase, and a *shape* check only.
+ *
+ * Lowercase-strict on purpose: the workspace segment is (schema owns that
+ * rule), and one address spelling its two uuids by two different rules was an
+ * inconsistency nobody could explain (#196). A shouted uuid is still not a bad
+ * link — {@link parseRoute} folds it and {@link canonicalPath} redirects to the
+ * folded spelling — because document uuids are generated lowercase, so an
+ * upper-case link is a mis-spelling of a lowercase identity, not a second one.
  *
  * The version and variant nibbles are left unconstrained so a document whose
- * uuid came from somewhere other than `crypto.randomUUID` still opens. This is
- * the *document* segment; the workspace segment has its own rule, and schema
- * owns it.
+ * uuid came from somewhere other than `crypto.randomUUID` still opens.
  */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * One path segment, percent-decoding tolerated.
@@ -93,10 +100,10 @@ function readWorkspace(segment: string): Workspace | null {
 /**
  * Resolve a pathname.
  *
- * `configured` is the build-time workspace, or null when the build carries
- * none — it answers `/` and nothing else. A value that is not a workspace id is
- * treated as no workspace at all, which is what a misconfigured build has; the
- * route says which of the two it was.
+ * `configured` is the default workspace — the first one this client is
+ * configured with — or null when it has none. It answers `/` and nothing else.
+ * A value that is not a workspace id is treated as no workspace at all, which
+ * is what a misconfigured build has; the route says which of the two it was.
  */
 export function parseRoute(pathname: string, configured: string | null): Route {
   const parts = pathname.split("/");
@@ -148,30 +155,33 @@ export function parseRoute(pathname: string, configured: string | null): Route {
     };
   }
 
-  // Case-preserving on purpose. Only the *shape* is normalised away; the uuid
-  // itself is an opaque identity. Room names, directory keys and `meta.uuid`
-  // are all case-sensitive, and nothing on the way in — the importer included —
-  // lower-cases them, so folding the case here would point an upper-case
-  // document's link at a room that does not exist, where it would wait for a
-  // sync that can never arrive.
-  if (!UUID.test(uuid)) {
+  // Folded, then matched against the one lowercase rule the workspace segment
+  // already answers to. Room names, directory keys and `meta.uuid` are all
+  // case-sensitive, but every uuid that reaches them is lowercase —
+  // `crypto.randomUUID` writes them and nothing upper-cases them afterwards —
+  // so a shouted link names the lowercase document, and `canonicalPath` puts
+  // that spelling in the address bar the way it does a trailing slash. The
+  // rejection message keeps the spelling as typed: it is about the link on
+  // screen.
+  const canonical = uuid.toLowerCase();
+  if (!UUID.test(canonical)) {
     return {
       kind: "invalid",
       reason: `“${uuid}” is not a document uuid.`,
       workspace,
     };
   }
-  return { kind: "doc", workspace, uuid };
+  return { kind: "doc", workspace, uuid: canonical };
 }
 
 /**
  * The workspaces to offer, in the order they were configured, with the one the
  * address names always among them.
  *
- * `configured` is the raw `WORKSPACES` value — decorated ids separated by
- * commas. An entry that is not a workspace id is dropped rather than shown: a
- * typo in a config list is not somewhere anyone can go, and offering it would
- * put the invalid-link screen behind a menu item.
+ * `configured` is the resolved workspace list — the served document's, else the
+ * build's defines (see `config.ts`). An entry that is not a workspace id is
+ * dropped rather than shown: a typo in a config list is not somewhere anyone
+ * can go, and offering it would put the invalid-link screen behind a menu item.
  *
  * Deduplicated by uuid, because `<slug>-<uuid>` and `<uuid>` are one workspace
  * and a second entry would be another way to sit where you already are.
@@ -182,12 +192,12 @@ export function parseRoute(pathname: string, configured: string | null): Route {
  * arrived by a link can see where they are — and get back to a configured one.
  */
 export function workspaceList(
-  configured: string,
+  configured: readonly string[],
   current: Workspace | null,
 ): Workspace[] {
   const list: Workspace[] = [];
   const seen = new Set<string>();
-  for (const entry of configured.split(",")) {
+  for (const entry of configured) {
     const parsed = readWorkspace(entry.trim());
     if (parsed === null || seen.has(parsed.uuid)) continue;
     seen.add(parsed.uuid);

@@ -112,7 +112,10 @@ describe("an address names a document, the list, or neither", () => {
   });
 
   it("calls a first segment that is not a workspace id an invalid link", () => {
-    for (const bad of ["other", "main", `${WS}x`, `foo--${WS}`]) {
+    // `WS.toUpperCase()` is there because the case rule is the same one the
+    // document segment now answers to: a workspace id is lowercase, and a
+    // shouted one is not a workspace this client can fold into an id it knows.
+    for (const bad of ["other", "main", `${WS}x`, `foo--${WS}`, WS.toUpperCase()]) {
       const parsed = parseRoute(`/${bad}/${UUID}`, CONFIGURED);
       expect(parsed.kind).toBe("invalid");
       expect(parsed.kind === "invalid" && parsed.reason).toContain(bad);
@@ -150,24 +153,21 @@ describe("an address names a document, the list, or neither", () => {
     expect(route(`/${WS}/`)).toEqual({ kind: "list", workspace });
   });
 
-  it("accepts an upper-case uuid and round-trips it byte for byte", () => {
-    // The shape is checked case-insensitively; the identity is opaque. Folding
-    // the case would aim the link at a room nobody stored under that name —
-    // room keys, directory keys and `meta.uuid` are all case-sensitive, and the
-    // importer does not normalise them — so the document would wait forever.
+  it("folds a shouted document uuid to the document it names, and says so in the address bar", () => {
+    // One case rule for both uuids in an address (#196): the workspace segment
+    // is lowercase-only, and the document segment now is too. Rejecting the
+    // shouted spelling would break links that predate the rule, so it resolves
+    // — document uuids are generated lowercase, so an upper-case one is a
+    // mis-spelling of a lowercase identity, not an identity of its own.
     const shouted = UUID.toUpperCase();
-    expect(route(`/${WS}/${shouted}`)).toEqual({
-      kind: "doc",
-      workspace,
-      uuid: shouted,
-    });
-    // URL → room → URL, unchanged at every hop.
-    expect(canonicalPath(route(`/${WS}/${shouted}`))).toBe(`/${WS}/${shouted}`);
-    expect(docPath(WS, shouted)).toBe(`/${WS}/${shouted}`);
-    expect(roomForDoc(WS, shouted)).toBe(`${WS}/${shouted}`);
-    // And it is the same document to the hydration gate, which compares exactly.
-    expect(docIsHydrated(shouted, meta(shouted))).toBe(true);
-    expect(docIsHydrated(shouted, meta(UUID))).toBe(false);
+    expect(route(`/${WS}/${shouted}`)).toEqual({ kind: "doc", workspace, uuid: UUID });
+    // The redirect: `canonicalPath` hands back the folded address, which the app
+    // replaces the URL with — the same treatment a trailing slash gets.
+    expect(canonicalPath(route(`/${WS}/${shouted}`))).toBe(`/${WS}/${UUID}`);
+    // And the room that address opens is the one the document was stored under,
+    // which is the whole reason the fold happens before the room key is built.
+    expect(roomForDoc(WS, UUID)).toBe(`${WS}/${UUID}`);
+    expect(docIsHydrated(UUID, meta(UUID))).toBe(true);
   });
 
   it("leaves an address it cannot resolve exactly as it was opened", () => {
@@ -538,22 +538,22 @@ describe("an address that resolves to no document says which one, and why", () =
     expect(paneText({ kind: "doc", workspace, uuid: UUID }, meta(UUID))).toBe("");
   });
 
-  it("says where to find a workspace id when the build carries none", () => {
+  it("says where to find a workspace id when the client is configured with none", () => {
     const text = paneText({ kind: "no-workspace", reason: "absent" }, null);
     expect(text).toContain("No workspace");
     // Web cannot enumerate workspaces, so it names the command that can.
     expect(text).toContain("ub status");
-    expect(text).toContain("built without one to fall back to");
+    expect(text).toContain("configured with none to fall back to");
   });
 
-  it("names the rejected value when the build carries one that is not an id", () => {
-    // The misconfigured build — a stale `WORKSPACE_ID=main`. Saying the build
-    // carries none would send the developer looking for a value that is there.
+  it("names the rejected value when the configured one is not an id", () => {
+    // The misconfigured client — a stale `WORKSPACE_ID=main`. Saying it carries
+    // none would send the developer looking for a value that is there.
     const text = paneText(
       { kind: "no-workspace", reason: "invalid", configured: "main" },
       null,
     );
-    expect(text).toContain("built with main, which is not a workspace id");
+    expect(text).toContain("configured with main, which is not a workspace id");
   });
 
   it("tells a malformed link apart from a missing one", () => {

@@ -25,6 +25,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@uberblick/hub':
+        specifier: workspace:*
+        version: link:../hub
       '@uberblick/mcp-server':
         specifier: workspace:*
         version: link:../mcp-server
@@ -41,9 +44,6 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
-      '@uberblick/hub':
-        specifier: workspace:*
-        version: link:../hub
       tsx:
         specifier: ^4.23.12
         version: 4.23.12

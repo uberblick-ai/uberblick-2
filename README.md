@@ -94,6 +94,7 @@ mise run lint         # Biome lint across the workspace (no formatter)
 mise run typecheck    # tsc --noEmit across all packages
 mise run test         # all test suites
 mise run e2e          # browser proof points (Playwright, Chromium, on demand)
+mise run fue          # the documented install path, executed on a clean machine
 REVIEW_SHA=<commit> mise run review  # immutable Docker review of one commit
 ```
 
@@ -192,20 +193,24 @@ directory at `<workspaceId>/_directory`), the token claim is scoped to it, and
 the local database is `<uuid>.sqlite`. There is nothing to create and nothing to
 migrate — a workspace is a uuid, and its rooms exist the moment something opens
 one. What it is *not* is tenancy: one shared secret still mints a token for any
-workspace, so this separates corpora, not people.
+workspace, so this separates corpora, not people — namespacing for one trusted
+user, with real isolation waiting on per-workspace auth (#84).
 
 Give a second project its own workspace by pinning it in that checkout, which is
-what `./uberblick.json` is for — committable, and never secrets. Once #162 lands
-that is one command:
+what `./uberblick.json` is for — committable, and never secrets. That is one
+command, run in the checkout:
 
 ```
 ub workspace use ablauf-$(uuidgen | tr A-Z a-z)
 ```
 
-Until then, edit the `workspace` field of `./uberblick.json` in place (creating
-the file with that one field if it does not exist). Write the field, never the
-file: a `hubUrl` beside it — or a field a later version of `ub` writes — is not
-this change's to drop.
+`ub workspace` on its own prints the workspace in force and which config layer
+chose it; `ub workspace list` shows the workspaces this machine has a database
+for, so `use` also takes a unique uuid prefix from that list. `use` writes
+`./uberblick.json` — the directory binding — and regenerates this checkout's
+derived `mise.local.toml` with it, so the mise tasks serve the workspace the
+directory is bound to; `--user` binds the machine instead, by writing the user
+config the way `ub init` does.
 
 `ub mcp install` then registers the plain `ub mcp serve`, which resolves that
 workspace from the directory it runs in. Where a client config spawns the server
@@ -222,6 +227,12 @@ per machine — and it is a *menu*, not an authority: switching workspaces is
 navigating to `/<workspace>`, and a link into an unlisted workspace still opens
 it. With none set, the switcher is the plain workspace label it has always been.
 
+Both `WORKSPACE_ID` and `WORKSPACES` are the *dev server's* answer only. A
+deployed client reads its workspaces at runtime from the served
+`/uberblick-config.json`, beside its hub endpoint — see REMOTE.md — so giving a
+deployment its workspaces is an environment variable and a container recreate,
+never a bundle rebuild.
+
 `mise run import-seed` is the one-time import of `docs-seed/` into the system.
 After it, the product docs live in the documents, and are read and written
 through the MCP tools rather than by editing the seed files.
@@ -235,8 +246,12 @@ the checkout does:
 
 ```
 ub init            # identity, workspace, signing secret
+ub open            # serve the web app and a hub, and open the browser
 ub status          # workspace, hub, credential, sync state
 ub status --json   # the same, as one JSON object
+ub workspace       # the workspace in force, and which layer chose it
+ub workspace list  # workspaces this machine has a database for
+ub workspace use   # bind this directory to a workspace (--user: this machine)
 ub remote          # the endpoint in force, and what sharing it buys
 ub mcp install     # register uberblick with an MCP client
 ub mcp serve       # the stdio entry point for an MCP client
@@ -370,8 +385,9 @@ is committable, and the stored signing secret is deliberately withheld from a
 repository-chosen hub, so clients pointed there would dial it with no credential
 at all.
 
-A deployed web client does not read any of these: it resolves its endpoint at
-runtime from the served `/uberblick-config.json`. A checkout's `mise run web`
+A deployed web client does not read any of these: it resolves its endpoint — and
+its workspaces — at runtime from the served `/uberblick-config.json`. A
+checkout's `mise run web`
 still takes `HUB_URL` from mise's environment, so point a development build at a
 remote hub with `HUB_URL=… mise run web`.
 
@@ -399,6 +415,44 @@ the server keeps its environment-only contract — no flags, no config file — 
 a client's spawn line never has to change again when internals move. This
 checkout's `.mcp.json` is the one place that still names a spawn of its own,
 for the reasons given above, and `ub mcp install` generates it.
+
+## The first-user proof
+
+`mise run fue` is the install section above, executed. It builds
+`Dockerfile.fue` — Debian with git and mise on it and nothing else, no Node, no
+pnpm, no age key, no secrets — copies the working tree in, and runs
+`mise trust && mise run setup -- --yes` verbatim. Then, in a container started
+with `--network none`, `scripts/fue-assert.mjs` checks what a new user was
+promised:
+
+- `ub status` exits 0, names the workspace `ub init` just generated, and reports
+  a signing secret — the `fnox --if-missing warn` path, which is every
+  contributor's path.
+- `list_docs` answers over `ub mcp serve`, spoken as a real client speaks it:
+  newline-delimited JSON-RPC on stdio. An empty corpus passes; so does one with
+  starter documents in it.
+- `mise run dev` — the command a new user is actually given, not the two halves
+  it is made of — brings up a hub that accepts this machine's own credential (the
+  port alone would pass with a secret nothing can authenticate with) and a web
+  server that answers `/` with the app, is served the workspace `/` redirects
+  into, and answers the workspace address itself rather than a 404.
+- Ctrl-C then stops everything it started: `dev` exits 130 and both ports come
+  free, which is what its `trap 'kill 0'` is there for.
+
+Two properties make it worth its runtime, about 70 seconds cold. The install
+half is the only thing with network, so everything asserted is asserted offline:
+local-first is tested by taking the wire away. And nothing is stubbed — delete a
+step from `mise run setup` and the build fails at it, which is exactly what
+should happen when the documented path and the real one drift apart. Failure
+prints one line naming the first broken step.
+
+It runs on demand, like `mise run e2e`, and never in per-PR CI. Same standing
+rule as the review image: no secrets, no host mounts, no privileged mode, no
+Docker socket. The build context is the working tree filtered by
+`Dockerfile.fue.dockerignore`, which is stricter than the review runner's
+`.dockerignore` — `mise.local.toml`, `uberblick.json` and every local database
+are excluded, because a proof that runs on state `ub init` was supposed to
+create proves nothing.
 
 ## Review isolation
 
@@ -507,4 +561,7 @@ log is the authoritative replica, so no secret means no sync, not no service
 (`sync_status` reports `hub.status: "disabled"`). `WORKSPACE_ID` it does
 require — with none set it exits non-zero, naming `ub init` — and it reads
 `UBERBLICK_DB` (default `$XDG_DATA_HOME/uberblick/<workspaceUuid>.sqlite`, keyed
-by the bare uuid so both spellings of a workspace hydrate one file).
+by the bare uuid so both spellings of a workspace hydrate one file). A database
+records the workspace it holds, so pointing `UBERBLICK_DB` at another
+workspace's file makes the server exit non-zero naming both ids and the path
+rather than merging two corpora into one index.

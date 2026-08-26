@@ -19,8 +19,10 @@
  *   at config time (fnox supplies them in the real task), so setting them here
  *   before `createServer` is what points the browser at *this* hub with a token
  *   it accepts. No committed `.env`, no second copy of that wiring. The dev
- *   server serves no `/uberblick-config.json`, so the client falls back to that
- *   injected value — the same path `mise run dev` takes.
+ *   server serves no `/uberblick-config.json`, so the client falls back to those
+ *   injected values — the same path `mise run dev` takes. A deployed host does
+ *   serve that document, and the one spec that proves it fulfils the request in
+ *   its own browser context (see deep-link.spec.ts).
  *
  * The hub is startable and stoppable on its own: the offline proof point needs
  * the hub gone while the browser stays up, and back on the same port and
@@ -68,6 +70,12 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export interface Harness {
   /** Where the browser goes. The dev server's real, ephemeral address. */
   readonly appUrl: string;
+  /**
+   * This run's hub, as a client dials it. The bundle already carries it as its
+   * fallback; a test that serves a configuration document has to name it there
+   * too, because that document supplies the endpoint as well as the workspaces.
+   */
+  readonly hubUrl: string;
   /** The workspace as the bundle spells it — what `/` redirects to. */
   readonly workspace: string;
   /** The same workspace, bare. Room keys and token claims carry only this. */
@@ -109,7 +117,8 @@ export async function startHarness(): Promise<Harness> {
     // bundle's baked-in HUB_URL keeps pointing at the hub across a restart.
     const port = hub.port;
 
-    process.env.HUB_URL = `ws://127.0.0.1:${port}`;
+    const hubUrl = `ws://127.0.0.1:${port}`;
+    process.env.HUB_URL = hubUrl;
     process.env.HUB_AUTH_TOKEN = SECRET;
     // The one address that names no workspace, `/`, resolves through this — the
     // same define `mise run web` supplies from mise `[env]`.
@@ -142,6 +151,7 @@ export async function startHarness(): Promise<Harness> {
 
     return {
       appUrl,
+      hubUrl,
       workspace: WORKSPACE,
       workspaceUuid: WORKSPACE_UUID,
       secondWorkspace: SECOND,

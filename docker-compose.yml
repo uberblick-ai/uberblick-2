@@ -32,6 +32,14 @@ services:
       # `[env]`, MCP clients), and inheriting a developer's `ws://localhost:1234`
       # here would silently serve it to every visitor.
       HUB_URL: "${WEB_HUB_URL:-wss://${TAILSCALE_HOST:?set TAILSCALE_HOST in .env}/ws}"
+      # The workspaces Caddy serves in that same document — a comma-separated
+      # list, and its first entry is what `https://<host>/` opens. Renamed on
+      # the way in for the same reason as HUB_URL: `WORKSPACES` already means
+      # "the workspaces my local tools offer" (mise `[env]`). Empty by default,
+      # because a workspace id is a uuid per installation and there is nothing
+      # sensible to guess: the host is given its own with `WEB_WORKSPACES` in
+      # `.env`.
+      WORKSPACES: "${WEB_WORKSPACES:-}"
     ports:
       - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:443:443"
     restart: unless-stopped

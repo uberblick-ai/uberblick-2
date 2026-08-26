@@ -18,11 +18,12 @@ import {
   getMeta,
   getMetaMap,
   listDirectory,
+  readSidebar,
 } from "@uberblick/schema";
-import type { DirectoryEntry, DocMeta } from "@uberblick/schema";
+import type { DirectoryEntry, DocMeta, SidebarGroup } from "@uberblick/schema";
 import { acquireRoom } from "../collab/rooms.js";
 import type { RoomConnection, RoomStatus } from "../collab/rooms.js";
-import { resolveHubUrl } from "../config.js";
+import { resolveClientConfig } from "../config.js";
 import { getSetting, subscribeSettings } from "../settings.js";
 import type { Settings } from "../settings.js";
 import { AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
@@ -39,22 +40,25 @@ import { observeThreads } from "./threads.js";
 import type { ThreadView } from "./threads.js";
 
 /**
- * Whether the hub endpoint is known yet.
+ * Whether the client configuration — the hub endpoint and the workspaces — is
+ * known yet.
  *
  * The gate every `useRoom` call sits behind. Resolution is one same-origin
  * `fetch`, so it does not hold up the render — but it must hold up the first
  * *connect*: a room acquired before it settles dials whatever the fallback is
- * and stays there for the session, since the shared socket is built once.
+ * and stays there for the session, since the shared socket is built once. It
+ * also gates the *workspaces*, which come out of the same read: they say which
+ * rooms there are to join at all.
  *
- * Never false forever: `resolveHubUrl` always resolves, falling back rather
- * than rejecting, so a deployment with no config document simply becomes ready
- * one tick later.
+ * Never false forever: `resolveClientConfig` always resolves, falling back
+ * rather than rejecting, so a deployment with no config document simply becomes
+ * ready one tick later.
  */
 export function useHubEndpoint(): boolean {
   const [ready, setReady] = useState(false);
   useEffect(() => {
     let live = true;
-    void resolveHubUrl().then(() => {
+    void resolveClientConfig().then(() => {
       if (live) setReady(true);
     });
     return () => {
@@ -131,6 +135,34 @@ export function useDirectory(connection: RoomConnection | null): DirectoryEntry[
     return () => map.unobserve(read);
   }, [connection]);
   return entries;
+}
+
+/**
+ * The sidebar's groups and their pinned uuids, live — the `_sidebar` doc as
+ * `readSidebar` reports it (#115).
+ *
+ * Subscribed on the *document* rather than on a type, which is the one place
+ * here that does that. The sidebar's state is spread over three top-level types
+ * and one nested array per group (see `packages/schema/src/sidebar.ts`), so a
+ * per-type observer would have to be torn down and rebuilt every time a group
+ * was created — and a group created remotely would arrive with nobody watching
+ * its pins. The doc's `update` event covers all of it, local and remote alike,
+ * and the read behind it is a walk over a handful of uuids.
+ */
+export function useSidebar(connection: RoomConnection | null): SidebarGroup[] {
+  const [groups, setGroups] = useState<SidebarGroup[]>([]);
+  useEffect(() => {
+    if (connection === null) {
+      setGroups([]);
+      return;
+    }
+    const { ydoc } = connection;
+    const read = (): void => setGroups(readSidebar(ydoc));
+    read();
+    ydoc.on("update", read);
+    return () => ydoc.off("update", read);
+  }, [connection]);
+  return groups;
 }
 
 /**
