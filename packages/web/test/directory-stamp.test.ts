@@ -228,23 +228,34 @@ describe("directory stamps from the web", () => {
     });
   });
 
-  it("converges last-write-wins when a second replica stamps the same entry", () => {
-    // Two writers on one cache-quality field, no arbitration and no new
-    // mechanism: entries are whole-object writes, so the winner is whichever
-    // update Yjs orders last — not the later wall-clock reading.
-    const web = new Y.Doc();
-    upsertDirectoryEntry(web, { uuid: UUID, title: "Shared", createdAt: T0 });
-    const mcp = new Y.Doc();
-    Y.applyUpdate(mcp, Y.encodeStateAsUpdate(web));
+  it("stands down for a window another replica has already stamped", () => {
+    // The stamp read back is whatever the *directory* holds, not what this
+    // client last wrote — so a window paid for by the MCP replica suppresses
+    // this client's write too, and two writers on one document cost the
+    // workspace one bump per window between them rather than one each.
+    const client = rig("Shared");
+    const block = appendBlock(client.doc, { type: "paragraph", text: "" });
 
-    upsertDirectoryEntry(web, { uuid: UUID, title: "Shared", updatedAt: T0 + 2_000 });
-    upsertDirectoryEntry(mcp, { uuid: UUID, title: "Shared", updatedAt: T0 + 1_000 });
+    // The other replica edits the same document from its side and stamps; the
+    // stamp reaches this client over the directory room like any other update.
+    vi.setSystemTime(T0 + WINDOW);
+    upsertDirectoryEntry(client.peer, {
+      uuid: UUID,
+      title: "Shared",
+      updatedAt: T0 + WINDOW,
+    });
+    const afterTheirStamp = client.crossed();
 
-    Y.applyUpdate(web, Y.encodeStateAsUpdate(mcp));
-    Y.applyUpdate(mcp, Y.encodeStateAsUpdate(web));
+    // A local edit a full window past this client's own last stamp, but inside
+    // theirs: nothing to say, so nothing is written.
+    vi.setSystemTime(T0 + WINDOW + 1_000);
+    type(client, block, "", "x");
+    expect(stub(client).updatedAt).toBe(T0 + WINDOW);
+    expect(client.crossed()).toBe(afterTheirStamp);
 
-    const settled = getDirectoryEntry(web, UUID);
-    expect(getDirectoryEntry(mcp, UUID)).toEqual(settled);
-    expect([T0 + 1_000, T0 + 2_000]).toContain(settled?.updatedAt);
+    // The next window is this client's to stamp again.
+    vi.setSystemTime(T0 + WINDOW * 2);
+    type(client, block, "x", "xy");
+    expect(stub(client).updatedAt).toBe(T0 + WINDOW * 2);
   });
 });
