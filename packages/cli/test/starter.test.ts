@@ -9,7 +9,15 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -235,6 +243,55 @@ it("does not duplicate a document when two ub init runs race", async () => {
       expect(doc.blocks).toHaveLength(source.blocks.length);
     }
   }, race);
+});
+
+it("seeds the workspace this machine ends up configured for, or none", async () => {
+  // What to seed is decided when the seed lock is taken, not remembered from
+  // the write phase: an `ub init --workspace` joining a workspace by id can
+  // publish it in between, and the starter documents would then land in a
+  // workspace nothing on this machine points at — invisible to every tool,
+  // and never finished by a later run.
+  //
+  // The gap is made observable rather than waited out. `ub init` runs `mise
+  // trust` between releasing the init lock and taking the seed lock, so a
+  // `mise` on PATH that reports when it starts and waits to be let go holds
+  // the run open exactly there.
+  const box = sandbox({ checkout: true });
+  const bin = join(box.cwd, "bin");
+  const trusting = join(box.cwd, "trusting");
+  const release = join(box.cwd, "release");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(
+    join(bin, "mise"),
+    `#!/bin/sh\ntouch "${trusting}"\nwhile [ ! -f "${release}" ]; do sleep 0.02; done\n`,
+  );
+  chmodSync(join(bin, "mise"), 0o755);
+
+  const running = runUbAsync(["init", "--yes", "--no-mcp"], box, {
+    HUB_URL: DEAD_HUB_URL,
+    PATH: `${bin}:/usr/bin:/bin`,
+  });
+  while (!existsSync(trusting)) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  // Somebody joins a workspace by id while this run is held there.
+  writeFileSync(
+    join(box.configHome, "uberblick", "config.json"),
+    `${JSON.stringify({ workspace: OWNED_WORKSPACE }, null, 2)}\n`,
+  );
+  writeFileSync(release, "");
+
+  const run = await running;
+  expect(run.status, run.output).toBe(0);
+  // The machine is configured for the workspace that was joined, and nothing
+  // was written into the one this run had settled on a moment earlier.
+  expect(workspace(box)).toBe(OWNED_WORKSPACE);
+  const stored = join(box.dataHome, "uberblick");
+  const databases = existsSync(stored)
+    ? readdirSync(stored).filter((file) => file.endsWith(".sqlite"))
+    : [];
+  expect(databases).toEqual([]);
+  expect(run.stderr).toContain("no starter documents were written");
 });
 
 it("ships the templates inside the package", () => {

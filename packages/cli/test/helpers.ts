@@ -183,6 +183,10 @@ export function runUbAsync(
   // budget before it can honestly refuse, which is longer than any other `ub`
   // invocation takes.
   timeoutMs = 25_000,
+  // Everything the run has said on stderr so far, on every chunk. How a test
+  // waits for the run to reach a point it announces — a lock it has started
+  // waiting for — instead of guessing at it with a sleep.
+  onStderr: (stderr: string) => void = () => {},
 ): Promise<Run> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [UB_BIN, ...args], {
@@ -197,6 +201,7 @@ export function runUbAsync(
     });
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString("utf8");
+      onStderr(stderr);
     });
     child.on("error", reject);
     // `close`, not `exit`: both pipes have to be drained before the output is
