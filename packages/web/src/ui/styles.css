@@ -2387,8 +2387,9 @@ h3.ub-heading {
   opacity: 1;
 }
 
-/* What the dot means, for anyone who cannot see a colour. In the entry's own
-   text so it lands in the accessible name; off-screen rather than
+/* Content for a screen reader and nobody else: what the outline's dot means
+   for anyone who cannot see a colour, and the list container each run of list
+   items is announced inside (editor/list-keys.ts). Off-screen rather than
    `display: none`, which would take it out of the accessibility tree too. */
 .ub-sr-only {
   position: absolute;

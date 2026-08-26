@@ -166,6 +166,12 @@ export interface LockOptions {
   path?: string;
   /** How long to wait for a holder before giving up. Zero tries exactly once. */
   waitMs?: number;
+  /**
+   * Called once, when this process has found the lock held and is about to
+   * wait for it. A run that stops for seconds says why rather than looking
+   * wedged; a caller that does not wait ({@link waitMs} zero) never calls it.
+   */
+  onWait?: (path: string) => void;
 }
 
 /**
@@ -182,6 +188,7 @@ export async function acquireInitLock(
   const path = options.path ?? initLockPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const deadline = Date.now() + (options.waitMs ?? WAIT_TIMEOUT_MS);
+  let announced = false;
 
   for (;;) {
     try {
@@ -241,6 +248,10 @@ export async function acquireInitLock(
           "for it to finish and run `ub init` again — or, if nothing is " +
           `running, remove it: rm -- ${shellQuote(path)}`,
       );
+    }
+    if (!announced) {
+      announced = true;
+      options.onWait?.(path);
     }
     await sleep(RETRY_MS);
   }

@@ -9,8 +9,10 @@
  * from: with none in force, `ub init` generates it and asks only for an
  * optional display slug, storing `<slug>-<uuid>` (or the bare uuid when the
  * answer is empty). With one in force it is offered as the default, so a second
- * run changes nothing. Nothing guesses a workspace anywhere else — the MCP
- * server refuses to start without one.
+ * run changes nothing. Two first-time runs at once settle on one workspace
+ * rather than two: a uuid a run generated is a proposal, and whichever run
+ * publishes second adopts the one already on disk. Nothing guesses a workspace
+ * anywhere else — the MCP server refuses to start without one.
  *
  * **The starter documents.** A workspace holding nothing but the two documents
  * in `templates/` is topped up with whatever of them is missing, through the
@@ -55,6 +57,7 @@ import {
   readCredentials,
   readUserConfig,
   resolveConfig,
+  userConfigPath,
   writeCredentials,
   writeUserConfig,
 } from "./config.js";
@@ -266,6 +269,11 @@ export async function initCommand(
   // *yet*, so the emptiness `starter.ts` reads would be the wrong answer. The
   // rest of the decision is read from the workspace itself, not from this run.
   const maySeed = flags.workspace === undefined;
+  // Whether the workspace below is this run's own invention. A generated uuid is
+  // a proposal until it is published, and the write phase treats it as one — see
+  // the claim under the lock.
+  const generatingWorkspace =
+    inForceWorkspace === null && flags.workspace === undefined;
 
   // A pipe is not a person: it gets the defaults rather than a blocked prompt.
   const interactive = !flags.yes && process.stdin.isTTY === true;
@@ -352,7 +360,13 @@ export async function initCommand(
   // somebody to type their name is a lock held for as long as they are at lunch.
   let lock: InitLock;
   try {
-    lock = await acquireInitLock();
+    lock = await acquireInitLock(process.env, {
+      // Seconds of silence with nothing on the terminal is indistinguishable
+      // from a wedged command. Only ever printed when something is actually
+      // being waited for.
+      onWait: (path) =>
+        io.err(`ub init: waiting for another \`ub init\` to finish (${path})\n`),
+    });
   } catch (error) {
     io.err(`ub init: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
@@ -385,6 +399,32 @@ export async function initCommand(
     const current = readUserConfig();
     for (const warning of current.warnings) {
       warnings.add(warning);
+    }
+    // A uuid this run generated is claimed the way the signing secret is: the
+    // loser adopts the winner's. Another `ub init` may have published a
+    // workspace while this one was waiting for the lock, and writing a second
+    // uuid over it would leave this machine's configuration naming one
+    // workspace while the run that got there first — the one holding the seed
+    // lock — writes the starter documents into another.
+    const settled = generatingWorkspace
+      ? trimmed(current.config.workspace)
+      : null;
+    if (settled !== null) {
+      // Adopting is reading a workspace out of a file, so it is held to what
+      // every other reader of that file holds it to — the shared rule, plus
+      // the one thing that rule does not cover, which is whether the value can
+      // be put into the derived TOML at all. A file this command cannot read
+      // is not one it may invent a workspace over: it throws with the message
+      // the next `ub init` would give for the same file, rather than
+      // publishing a value that would make a later run, a seed or a report
+      // fail somewhere less obvious.
+      const label = `"workspace" in ${userConfigPath()}`;
+      parseWorkspaceId(settled, label);
+      const settledUnsafe = tomlUnsafeReason(settled);
+      if (settledUnsafe !== null) {
+        throw new Error(`${label} cannot be used because ${settledUnsafe}`);
+      }
+      workspace = settled;
     }
     configPath = writeUserConfig({
       ...current.raw,
@@ -518,7 +558,22 @@ export async function initCommand(
   }
   if (seedLock !== null) {
     try {
-      starter = await seedStarterDocs(mcpEnv);
+      // Which workspace to seed is read here, under the seed lock, rather than
+      // remembered from the write phase: an `ub init --workspace` may have
+      // settled a different one in between, and writing the starter documents
+      // into the workspace this run had in hand would leave a corpus nothing on
+      // this machine points at. A workspace somebody named by id is not this
+      // run's to seed either — that is what `--workspace` opting out means.
+      const configured = trimmed(readUserConfig().config.workspace);
+      if (configured !== persistedWorkspace) {
+        warnings.add(
+          `this machine is configured for ${configured ?? "no workspace"} now, ` +
+            `not ${persistedWorkspace} — another \`ub init\` settled that ` +
+            "while this one was running, so no starter documents were written",
+        );
+      } else {
+        starter = await seedStarterDocs(mcpEnv);
+      }
     } catch (error) {
       warnings.add(
         `${error instanceof Error ? error.message : String(error)} — the ` +

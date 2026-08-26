@@ -14,6 +14,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -312,11 +313,19 @@ describe("ub init", () => {
     // secret, with no timing involved. What this defends is the property under
     // real concurrency: every process exits 0 (an exclusive create that threw
     // EEXIST at the caller would not), and the pair on disk agrees afterwards.
+    //
+    // Each attempt joins a workspace by id, which is the one way to tell `ub
+    // init` not to seed the starter corpus. That seed spends a hub's whole
+    // connect-and-sync budget per attempt against a hub no test starts —
+    // seconds this test's subject has no stake in, and what put 24 spawned
+    // processes over the 30s budget on CI. The starter corpus under concurrent
+    // runs is `starter.test.ts`'s subject, and it is tested there.
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const box = sandbox({ checkout: true });
+      const workspace = randomUUID();
       const runs = await Promise.all(
         Array.from({ length: 6 }, () =>
-          runUbAsync(["init", "--yes"], box, WITHOUT_MISE),
+          runUbAsync(["init", "--yes", "--workspace", workspace], box, WITHOUT_MISE),
         ),
       );
       for (const run of runs) {
@@ -325,6 +334,7 @@ describe("ub init", () => {
 
       const authority = storedSecret(box);
       expect(derivedSecret(box)).toBe(authority);
+      expect(derivedWorkspace(box)).toBe(userConfig(box).workspace);
       // Exactly one secret survives: neither process printed its own, and the
       // one on disk is the one both of them now describe.
       for (const run of runs) {
@@ -354,6 +364,90 @@ describe("ub init", () => {
     expect(derivedSecret(box)).toBe(storedSecret(box));
     // And the lock it took in turn is not left behind.
     expect(existsSync(lock)).toBe(false);
+  });
+
+  it("adopts a workspace another init published while it waited for the lock", async () => {
+    // The workspace half of the claim the signing secret already makes: a uuid
+    // this run generated before the lock is a proposal, and one that arrived
+    // meanwhile wins. Losing this splits the machine in two — `config.json`
+    // naming the loser's workspace while the winner, which is also the run
+    // holding the seed lock, writes the starter documents into its own. The
+    // corpus is then in a workspace nothing on this machine points at.
+    //
+    // Held by hand, so the interleave is a fact: the run reads an empty
+    // configuration, blocks on the lock, and the workspace it has to adopt is
+    // published underneath it before it is let go.
+    const box = sandbox({ checkout: true });
+    const lock = join(box.configHome, "uberblick", ".init.lock");
+    mkdirSync(dirname(lock), { recursive: true });
+    writeFileSync(lock, "999999\n");
+
+    // No sleep: the run says when it starts waiting for the lock, and that
+    // line is proof it has already read the configuration — a workspace
+    // published before then would have been in force rather than adopted, and
+    // this would be passing for a lesser reason on a slow machine.
+    let waiting = false;
+    const running = runUbAsync(
+      ["init", "--yes"],
+      box,
+      WITHOUT_MISE,
+      undefined,
+      (stderr) => {
+        waiting ||= stderr.includes("waiting for another `ub init`");
+      },
+    );
+    while (!waiting) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    writeFileSync(
+      join(box.configHome, "uberblick", "config.json"),
+      `${JSON.stringify({ workspace: JOINED }, null, 2)}\n`,
+    );
+    rmSync(lock);
+
+    const run = await running;
+    expect(run.status, run.output).toBe(0);
+    expect(userConfig(box).workspace).toBe(JOINED);
+    expect(derivedWorkspace(box)).toBe(JOINED);
+    // And the report describes the machine rather than the intention.
+    expect(run.stdout).toContain(JOINED);
+  });
+
+  it("refuses a workspace it cannot read, rather than inventing one over it", async () => {
+    // The other side of adopting: what arrives under the lock is a value out
+    // of a file, and it is held to the rule every reader of that file applies.
+    // Writing an unusable workspace on would put it into `config.json` and the
+    // derived mise config, where the next run — or a seed, or a report — is
+    // where it would finally go wrong.
+    const box = sandbox({ checkout: true });
+    const config = join(box.configHome, "uberblick", "config.json");
+    const lock = join(box.configHome, "uberblick", ".init.lock");
+    mkdirSync(dirname(lock), { recursive: true });
+    writeFileSync(lock, "999999\n");
+
+    let waiting = false;
+    const running = runUbAsync(
+      ["init", "--yes"],
+      box,
+      WITHOUT_MISE,
+      undefined,
+      (stderr) => {
+        waiting ||= stderr.includes("waiting for another `ub init`");
+      },
+    );
+    while (!waiting) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    writeFileSync(config, `${JSON.stringify({ workspace: "a/b" }, null, 2)}\n`);
+    rmSync(lock);
+
+    const run = await running;
+    expect(run.status).not.toBe(0);
+    // Named by file, the way every other reader of it reports the same value.
+    expect(run.stderr).toContain(config);
+    // And nothing was written on top of it.
+    expect(userConfig(box).workspace).toBe("a/b");
+    expect(existsSync(localConfigPath(box))).toBe(false);
   });
 
   it("never removes a lock it did not create, however old that lock is", () => {
