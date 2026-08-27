@@ -29,13 +29,13 @@ write secrets to `.env` files or commit plaintext tokens.
 Config: `HUB_AUTH_TOKEN` stays encrypted in fnox. `HUB_URL` is plaintext
 config (default `ws://localhost:1234`) — an endpoint is not a secret, and
 contributors without the age key must still be able to run the stack — but
-that default lives **in code**, never in the committed mise `[env]` or a task
-`env`: mise's environment is ambient for every process born in an activated
-checkout and outranks this machine's user config, so a committed endpoint
-silently redirects `ub` and the MCP server at a local hub (#376). A checkout
-that must dial elsewhere gets `HUB_URL` from the gitignored `mise.local.toml`
-that `ub init` derives. The hub binds `PORT` (default 1234); `HUB_URL` is
-client-side only.
+that default lives **in code**, never in the committed mise `[env]` (ambient
+for every process in an activated checkout, and it outranks this machine's user
+config, so a committed endpoint silently redirects `ub` and the MCP server at a
+local hub — #376) or a task `env` (which outranks the derived `mise.local.toml`
+and would strand a joined checkout). A checkout that must dial elsewhere gets
+`HUB_URL` from the gitignored `mise.local.toml` that `ub init` derives. The hub
+binds `PORT` (default 1234); `HUB_URL` is client-side only.
 Rule: no hardcoded hub addresses anywhere except the in-code fallback default.
 
 ## Orchestration policy

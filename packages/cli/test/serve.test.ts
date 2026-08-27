@@ -170,13 +170,13 @@ describe("ub mcp serve", () => {
     }
   });
 
-  // The shape of the 2026-08-27 island incident (#376): a client spawned this
-  // from a checkout directory, the checkout's mise `[env]` exported a localhost
-  // `HUB_URL`, and the environment layer outranks the endpoint this machine was
-  // promoted to — so writes reported `synced` against a hub nobody meant. What
-  // the wrapper owes a client is that the working directory chooses nothing:
-  // with no `HUB_URL` in the environment, the endpoint is the user config's,
-  // whether it is spawned inside a checkout or anywhere else.
+  // What the wrapper owes a client: with no `HUB_URL` in the environment — the
+  // layer that outranks it — the endpoint is the user config's, and it survives
+  // the exec into the server the client actually talks to. `checkout: true` is
+  // documentation of the spawn shape, a `cwd` inside a repository; nothing on
+  // this path reads it, which is the point. Worth pinning because of #376,
+  // where an ambient `HUB_URL` from the checkout's own mise config replaced
+  // this answer for every process spawned there.
   it("dials the user config's endpoint when a client spawns it inside a checkout", async () => {
     const box = sandbox({
       checkout: true,
