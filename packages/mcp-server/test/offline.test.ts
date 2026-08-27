@@ -8,6 +8,7 @@
  */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { BLOCK_TYPES } from "@uberblick/schema";
 import {
   removeTempDirs,
   startServer,
@@ -66,6 +67,7 @@ describe("with the hub stopped", () => {
       "set_description",
       "set_links",
       "set_tags",
+      "set_title",
       "sidebar_group",
       "sync_status",
       "unpin_doc",
@@ -74,6 +76,20 @@ describe("with the hub stopped", () => {
     // The staleness guarantee is local-replica-only, and edit_block says so.
     const edit = tools.find((tool) => tool.name === "edit_block");
     expect(edit?.description).toContain("no cross-replica compare-and-swap");
+
+    // And so is the mark boundary: a splice that touches a mark's edge
+    // re-anchors it, which is damage no error reports. An agent only learns
+    // that here, so the sentence and its repair are part of the contract.
+    expect(edit?.description).toContain("touches a mark's edge re-anchors it");
+    expect(edit?.description).toContain("delete_block plus insert_block");
+
+    // insert_block accepts every block type the schema owns, so its
+    // description has to name every one of them — the list went stale once
+    // already, which is why it is generated from BLOCK_TYPES and pinned here.
+    const insert = tools.find((tool) => tool.name === "insert_block");
+    for (const type of BLOCK_TYPES) {
+      expect(insert?.description).toContain(type);
+    }
   });
 
   it("serves the whole tool set", async () => {

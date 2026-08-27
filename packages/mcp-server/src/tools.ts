@@ -1,18 +1,18 @@
 /**
  * The v0 MCP tool set.
  *
- * Twenty-two tools and no more: create_doc, get_doc, list_docs, search,
+ * Twenty-three tools and no more: create_doc, get_doc, list_docs, search,
  * backlinks, edit_block, insert_block, delete_block, set_tags, set_links,
- * set_description, archive_doc, restore_doc, annotate, export_markdown,
- * sync_status, the four sidebar tools registered from ./sidebar-tools.ts —
- * get_sidebar, pin_doc, unpin_doc, sidebar_group — and the two feedback tools
- * registered from ./feedback-tools.ts, rate_doc and feedback_report. There is
- * deliberately no whole-document write — every content change names one block
- * — no markdown-import tool, because markdown is an export format, and no hard
- * delete: archive_doc tombstones the directory stub and leaves every byte of
- * the document where it was. An archived document is read-only rather than
- * gone — every mutator goes through `requireWritableDoc`, which refuses one
- * and names restore_doc.
+ * set_title, set_description, archive_doc, restore_doc, annotate,
+ * export_markdown, sync_status, the four sidebar tools registered from
+ * ./sidebar-tools.ts — get_sidebar, pin_doc, unpin_doc, sidebar_group — and
+ * the two feedback tools registered from ./feedback-tools.ts, rate_doc and
+ * feedback_report. There is deliberately no whole-document write — every
+ * content change names one block — no markdown-import tool, because markdown
+ * is an export format, and no hard delete: archive_doc tombstones the
+ * directory stub and leaves every byte of the document where it was. An
+ * archived document is read-only rather than gone — every mutator goes through
+ * `requireWritableDoc`, which refuses one and names restore_doc.
  *
  * Every handler starts with `replicas.settle()`: replay the log tail (another
  * MCP instance may have written since the last call) and, on boot or after a
@@ -55,6 +55,7 @@ import {
   setDescription,
   setLinks,
   setTags,
+  setTitle,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -220,6 +221,24 @@ const ARCHIVED_IS_READ_ONLY =
   "moment of the call. It is refusal-at-call, not a cross-replica lock — an edit made on a replica that has not seen " +
   "the archive yet is an ordinary CRDT write and merges normally when the two replicas meet.";
 
+/**
+ * What a splice costs the marks already in a block — the boundary that is
+ * mechanically fine and semantically wrong, so it has to be said rather than
+ * left to be discovered in a damaged document.
+ */
+const MARKS_ANCHOR_TO_POSITIONS =
+  "Marks anchor to positions in the block's text, not to the words they cover, and this tool writes text " +
+  "without ever writing a mark. A splice strictly inside unmarked text leaves every mark — inline formatting " +
+  "and annotation anchors alike — exactly where it was. A splice that touches a mark's edge re-anchors it: " +
+  "rewrite a bolded term, or the separator between two marked ones, and the mark can open mid-word, swallow " +
+  "the punctuation beside it, or spread over text nobody formatted. The marks survived; the formatting is now " +
+  "wrong, and nothing here detects that.\n\n" +
+  "So edit a block that carries formatting only where the changed range lies strictly inside unmarked text. " +
+  "For anything else — a marked span itself, or a range whose edges touch one — delete_block plus insert_block " +
+  "is the repair: it writes plain text, losing the formatting instead of corrupting it. Check the result with " +
+  "export_markdown, where a mark whose edges are whitespace, or that has swallowed a `, ` or an ` and `, is the " +
+  "damage showing.";
+
 /** The same narrowing for the mutators that do not restate it in full. */
 const SYNCED_IS_ACKNOWLEDGED =
   "`synced` here means hub-acknowledged, not hub-stored — see sync_status for the exact claim and its crash window.";
@@ -269,6 +288,20 @@ const descriptionArg = z
     `a description is at most ${MAX_DESCRIPTION_LENGTH} characters — one or two sentences, not a summary`,
   )
   .describe(DESCRIPTION_IS_FOR_CHOOSING);
+
+/**
+ * A title, trimmed before it is measured — the same discipline
+ * {@link descriptionArg} has, and for the same reason: `"   "` would otherwise
+ * be a legal title, stored in the document, cached in the stub, and answered
+ * with by every discovery surface. Length is not bounded, because nothing
+ * bounds a title anywhere else; emptiness is the only thing that makes a
+ * document unfindable in a listing.
+ */
+const titleArg = z
+  .string()
+  .trim()
+  .min(1, "a title cannot be empty or whitespace")
+  .describe("Display title. Identity is the document's UUID, never this.");
 
 const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
@@ -635,12 +668,12 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       title: "Edit one block",
       description:
         "Replace one block's text by diff-and-splice: only the characters that actually changed are touched, " +
-        "so a concurrent human edit elsewhere in the block survives and every formatting mark — inline " +
-        "formatting and annotation anchors alike — stays put.\n\n" +
+        "so a concurrent human edit elsewhere in the block survives.\n\n" +
+        MARKS_ANCHOR_TO_POSITIONS +
+        "\n\n" +
         "Plain text, both ways: `old_text` and `new_text` are the block's text with no markdown in it, the text " +
-        "get_doc returns. Inline formatting is not spelled out there and cannot be changed here; spliced-in text " +
-        "inherits the formatting of the character to its left, and `rev` ignores marks, so formatting a range " +
-        "never makes a prepared edit stale.\n\n" +
+        "get_doc returns. Spliced-in text inherits the formatting of the character to its left, and `rev` " +
+        "ignores marks, so formatting a range never makes a prepared edit stale.\n\n" +
         "Pass `old_text` (and the `rev` from get_doc) to assert what you are editing. If either is stale the edit is " +
         "refused and the error carries `currentText` and `currentRev` to re-diff against.\n\n" +
         "Scope of that guarantee, stated plainly: it is a check against THIS replica at the moment of the call. " +
@@ -682,7 +715,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       title: "Insert a block",
       description:
         "Insert one block after `after_block_id`, or at the top of the document when it is omitted. " +
-        "Block types are paragraph, heading, code and mermaid — the editor's whole palette.\n\n" +
+        `Block types are the closed set the schema owns — ${BLOCK_TYPES.join(", ")} — which is the editor's ` +
+        "whole palette too. Nothing nests: a list is a run of adjacent list-item blocks, and a table's text is " +
+        "GFM table source, so every block has one text an agent can edit.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED,
@@ -769,6 +804,32 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const replica = requireWritableDoc(uuid);
       setLinks(replica.doc, links);
       return json({ uuid, links, ...durability(replica) });
+    }),
+  );
+
+  server.registerTool(
+    "set_title",
+    {
+      title: "Rename a document",
+      description:
+        "Replace the document's title. A title is rewritten rather than patched, so there is nothing to splice " +
+        "here and no `old_text` to assert. Identity is the uuid and a rename never touches it, so every link, " +
+        "backlink and annotation survives one.\n\n" +
+        "`meta.title` in the document is authoritative and the directory stub caches it. This writes the " +
+        "document and the stub follows in the same call, so the next list_docs, search and get_sidebar answer " +
+        "with the new title without opening a single document room.\n\n" +
+        "An empty title, and a title of nothing but whitespace, are both refused: a document nobody can name is " +
+        "a document nobody can pick out of a listing.\n\n" +
+        ARCHIVED_IS_READ_ONLY +
+        "\n\n" +
+        SYNCED_IS_ACKNOWLEDGED,
+      inputSchema: { uuid: uuidArg, title: titleArg },
+    },
+    guarded(async ({ uuid, title }) => {
+      await replicas.settle();
+      const replica = requireWritableDoc(uuid);
+      setTitle(replica.doc, title);
+      return json({ uuid, title, ...durability(replica) });
     }),
   );
 
