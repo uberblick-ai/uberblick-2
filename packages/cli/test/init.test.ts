@@ -67,13 +67,17 @@ function userConfig(box: Sandbox): Record<string, unknown> {
  * `ub init --mcp` prints; it never registers. The only way to see the
  * difference is with a vendor CLI reachable, so this one exists to be found and
  * left alone — the assertion is that its record never appears.
+ *
+ * The record is written by the shell's own redirection, not by `touch`: the run
+ * that finds this stub has the stub's directory as its whole PATH, so an
+ * external `touch` could never run and the assertion could never fail.
  */
 function stubClaude(box: Sandbox): { dir: string; record: string } {
   const dir = join(box.cwd, "..", "stub-claude");
   const program = join(dir, "claude");
   const record = join(dir, "record");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(program, `#!/bin/sh\ntouch "${record}"\n`, "utf8");
+  writeFileSync(program, `#!/bin/sh\n: > "${record}"\n`, "utf8");
   chmodSync(program, 0o755);
   return { dir, record };
 }

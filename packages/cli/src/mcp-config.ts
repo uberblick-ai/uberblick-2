@@ -11,8 +11,8 @@
  * vendor's own CLI or prints a snippet for somebody to paste, so the only
  * question this module asks of an existing file is {@link presence}: is our
  * entry there, and is it the one we would register. `JSON.parse` and a scan for
- * the one TOML header we own are enough for that — a file nothing splices needs
- * no byte-preserving splicer.
+ * every TOML spelling of the key we own are enough for that — a file nothing
+ * splices needs no byte-preserving splicer.
  *
  * **Nothing echoes a value back.** {@link presence} answers with one of four
  * words and never with anything it read. A config file is exactly where
@@ -164,8 +164,8 @@ export function presence(file: TargetFile, entry: Entry): Presence {
   }
   if (file.format === "toml") {
     const table = tomlTable(text, entry.name);
-    if (table === null) return "absent";
-    return table === tomlBlock(entry).trim() ? "ours" : "foreign";
+    if (table !== null) return table === tomlBlock(entry).trim() ? "ours" : "foreign";
+    return mentionsServer(text, entry.name) ? "foreign" : "absent";
   }
   let registered: unknown;
   try {
@@ -231,10 +231,12 @@ function jsonMatches(held: unknown, entry: Entry): boolean {
  */
 function tableKey(line: string): string[] | null {
   const match = /^\[\s*([^[\]]+?)\s*\]\s*(?:#.*)?$/.exec(line.trim());
-  if (match === null) return null;
-  return (match[1] as string)
-    .split(".")
-    .map((part) => part.trim().replace(/^(["'])(.*)\1$/, "$2"));
+  return match === null ? null : dottedKey(match[1] as string);
+}
+
+/** The parts of a dotted key, unquoted: `mcp_servers."uberblick"` is two. */
+function dottedKey(text: string): string[] {
+  return text.split(".").map((part) => part.trim().replace(/^(["'])(.*)\1$/, "$2"));
 }
 
 /**
@@ -245,6 +247,36 @@ function ownedBy(line: string, name: string): number | null {
   const key = tableKey(line);
   if (key === null || key[0] !== "mcp_servers" || key[1] !== name) return null;
   return key.length - 2;
+}
+
+/**
+ * Whether anything in `text` defines or touches `mcp_servers.<name>` in some
+ * spelling other than the table above.
+ *
+ * A header is not the only way to write the key: `uberblick = { … }` under
+ * `[mcp_servers]`, a dotted `mcp_servers.uberblick.command = …` anywhere, and a
+ * lone `[mcp_servers.uberblick.env]` are all definitions of it, and all of them
+ * read as "nothing there" to a scan that looks only for the header — which
+ * would run `codex mcp add`, whose duplicate add exits 0 and replaces what it
+ * found. So this walks the file's table context and answers for any of them.
+ * A false positive costs somebody one manual paste; a false negative costs them
+ * their entry, which is why the doubtful answer is the positive one.
+ */
+function mentionsServer(text: string, name: string): boolean {
+  let table: string[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("[")) {
+      if (ownedBy(line, name) !== null) return true;
+      table = tableKey(line) ?? [];
+      continue;
+    }
+    const equals = line.indexOf("=");
+    if (equals === -1 || line.startsWith("#")) continue;
+    const key = [...table, ...dottedKey(line.slice(0, equals))];
+    if (key[0] === "mcp_servers" && key[1] === name) return true;
+  }
+  return false;
 }
 
 /**

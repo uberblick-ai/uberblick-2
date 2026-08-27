@@ -448,6 +448,49 @@ describe("ub mcp install, and what is registered already", () => {
     expect(existsSync(stub.record)).toBe(false);
   });
 
+  /**
+   * The same entry, written without the header the scan looks for. TOML spells
+   * one key several ways, and each of these defines `mcp_servers.uberblick` —
+   * so reading any of them as "nothing there" would point `codex mcp add` at
+   * somebody's entry and let its duplicate add replace it.
+   */
+  const UNHEADED = [
+    {
+      what: "an inline table under `[mcp_servers]`",
+      before:
+        '[mcp_servers]\nuberblick = { command = "somebody-elses", args = ["serve"], ' +
+        `env = { API_TOKEN = "${SECRET}" } }\n`,
+    },
+    {
+      what: "dotted keys at the root",
+      before:
+        'model = "gpt-5"\nmcp_servers.uberblick.command = "somebody-elses"\n' +
+        `mcp_servers.uberblick.args = ["serve"]\nmcp_servers.uberblick.env.API_TOKEN = "${SECRET}"\n`,
+    },
+    {
+      what: "a bare `env` sub-table",
+      before: `[mcp_servers.uberblick.env]\nAPI_TOKEN = "${SECRET}"\n`,
+    },
+  ];
+
+  it.each(UNHEADED)("refuses $what", ({ before }) => {
+    const box = sandbox();
+    const home = codexHome(box);
+    const path = join(home, "config.toml");
+    writeFileSync(path, before, "utf8");
+    const stub = stubVendor(box, "codex");
+
+    const run = runUb(["mcp", "install", "codex", "--user"], box, {
+      ...stub.env,
+      CODEX_HOME: home,
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toMatch(/something other than this/);
+    expect(run.output).not.toContain(SECRET);
+    expect(read(path)).toBe(before);
+    expect(existsSync(stub.record)).toBe(false);
+  });
+
   it("refuses an entry it did not write, prints the snippet, and quotes nothing", () => {
     const box = sandbox();
     const path = join(box.cwd, ".mcp.json");
