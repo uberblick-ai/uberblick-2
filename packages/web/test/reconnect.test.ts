@@ -104,12 +104,18 @@ const WAIT_TIMEOUT_MS = 20_000;
 /**
  * Vitest's own budget per test.
  *
- * Above the waits any one test here makes in sequence, on purpose: whichever
- * timeout fires first is the one that explains the failure, and "test timed
- * out" explains nothing. The same number as packages/mcp-server's, because
- * there is nothing about these tests that deserves a different one.
+ * The rule: above the longest chain of named waits a test here makes in
+ * sequence, so whichever timeout fires first is the one that can explain the
+ * failure. "Test timed out" explains nothing; "timed out waiting for the second
+ * close to reach the tab" is a diagnosis.
+ *
+ * The chain that sets the number is "repairs a document close that arrives
+ * during the forced-drop cooldown": eight waits end to end — two in
+ * `seedDocument`, four in the test body, two in `expectLiveWrite` — at
+ * WAIT_TIMEOUT_MS each. Change either constant and check that this one is still
+ * the larger.
  */
-const TEST_TIMEOUT_MS = 120_000;
+const TEST_TIMEOUT_MS = 180_000;
 
 async function waitFor(
   label: string,
