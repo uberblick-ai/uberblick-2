@@ -38,7 +38,9 @@ async function main(): Promise<void> {
 
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
-  // An MCP client closes stdin to say it is done with the server.
+  // An MCP client closes stdin to say it is done with the server. Redirected
+  // non-pipe inputs report EOF as `end` without necessarily reporting `close`.
+  process.stdin.on("end", () => shutdown("stdin-end"));
   process.stdin.on("close", () => shutdown("stdin-close"));
 
   await instance.connect(new StdioServerTransport());
