@@ -104,23 +104,27 @@ const WAIT_TIMEOUT_MS = 20_000;
 /**
  * The one deadline that has to outlast a repair rather than interrupt it.
  *
- * Leaving a room and re-joining it travel the same socket, and the hub retires
- * the leaving connection asynchronously — it echoes the close, then finishes
- * the teardown a few turns later. A re-join that overtakes that teardown is
- * answered by the connection on its way out: the handshake completes, the tab
- * reads "synced", and the hub is left holding no live connection for the room,
- * so nothing written by anyone else arrives. The tab repairs this itself, but
- * only through the socket's message-reconnect check — Hocuspocus forces a
- * reconnect after `messageReconnectTimeout` (30s) of silence, and every room
- * re-joins on the next `open`.
+ * What is measured, and all that is claimed here: when a room is released and
+ * re-joined in the same tick — a document switch, a StrictMode remount — the
+ * re-joined room sometimes goes quiet. It reports "synced" within
+ * milliseconds, and then neither is anything another client writes delivered
+ * to it, nor does the hub acknowledge anything it writes, until the provider
+ * repairs itself. Rare (single-digit occurrences in thousands of cycles) and
+ * not load-dependent — idle machines produce it too. *Why* the hub stops
+ * serving a room it has just been re-joined on is #402's question, not this
+ * file's; the wait below depends only on the two observables above.
  *
- * Thirty seconds is therefore the floor for any wait that can be crossed by
- * that repair, and WAIT_TIMEOUT_MS is below it: measured under parallel load,
- * the repair lands at ~31s, which is why this suite failed in the review
- * container roughly one run in a few hundred re-joins with a live write that
- * would have arrived a second later. This is the repair window plus the same
- * kind of margin WAIT_TIMEOUT_MS gives an ordinary condition — not a guess at
- * how slow a machine is.
+ * The repair is the socket's message-reconnect check: Hocuspocus runs
+ * `checkConnection` every `messageReconnectTimeout / 10` (3s), forces a
+ * reconnect once `messageReconnectTimeout` (30s) has passed without a message,
+ * takes up to two close attempts to get there, and then still owes a reconnect
+ * delay and a fresh handshake — end to end, 30.4s to 33.3s across every
+ * instrumented recovery. So 30s is a floor rather than the number, and
+ * WAIT_TIMEOUT_MS is under it either way: the step this replaces went red on a
+ * live write that would have landed a second or two later. 45s is that
+ * measured band plus ~12s, the same kind of margin WAIT_TIMEOUT_MS gives an
+ * ordinary condition — not a guess at how slow a machine is, and not
+ * trimmable to the 31s that a single run happens to show.
  */
 const REJOIN_REPAIR_TIMEOUT_MS = 45_000;
 
@@ -342,12 +346,13 @@ it("leaves the socket alone when it is the client that leaves a room", async () 
   const second = await openTab(room, hub.port);
   await waitFor("the re-joined room to sync", () => second.latest().synced);
 
-  // "Synced" is the handshake, and after a re-join the handshake can be
-  // answered by the connection the hub is still tearing down — see
-  // REJOIN_REPAIR_TIMEOUT_MS. What gates a live write is the hub having a live
-  // connection for this room, and the tab can prove that without asking the hub
-  // directly: write something, and wait for the acknowledgement to come back.
-  // An ack is a message the hub only sends over a connection it still holds.
+  // "Synced" is the handshake alone, and a re-joined room can report it and
+  // still be unserved — see REJOIN_REPAIR_TIMEOUT_MS and #402. What gates a
+  // live write is the hub actually serving this room, and the tab can prove
+  // that without asking the hub directly: write something, and wait for the
+  // acknowledgement to come back. An ack is a message the hub only sends over
+  // a connection it is still serving, and it stops in the same window live
+  // delivery does.
   insertBlock(second.connection.ydoc, null, { type: "paragraph", text: "re-joined" });
   await waitFor(
     "the hub to acknowledge a write from the re-joined room",
