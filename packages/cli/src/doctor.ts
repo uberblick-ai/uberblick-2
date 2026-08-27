@@ -26,10 +26,12 @@
  * MCP server is offline-first by construction, so that is a supported state and
  * not a defect.
  *
- * `--json` prints exactly one object to stdout and nothing else; warnings and
- * the MCP server's own logging go to stderr. No check ever prints the signing
- * secret: that one is configured, and which layer it came from, is the whole of
- * what is said about it.
+ * `--json` prints exactly one object to stdout and nothing else — the report,
+ * or the failure envelope in ./failure.ts when there is no report to give;
+ * warnings and the MCP server's own logging go to stderr. A *failed check* is
+ * neither: it is an answer, carried by `ok: false` and the exit code. No check
+ * ever prints the signing secret: that one is configured, and which layer it
+ * came from, is the whole of what is said about it.
  */
 
 import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
@@ -49,6 +51,7 @@ import type { McpConfig } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import type { ResolvedConfig } from "./config.js";
 import { readCredentials, resolveConfig } from "./config.js";
+import { reportFailure, wantsJson } from "./failure.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
@@ -717,20 +720,26 @@ export async function doctorCommand(
 ): Promise<number> {
   if (takeHelp(argv, io, DOCTOR_HELP)) return 0;
 
-  let json = false;
+  // Before the parser, so a run that asked for JSON and then mistyped a flag is
+  // refused in JSON — see ./failure.ts.
+  const json = wantsJson(argv);
   try {
-    json =
-      parseArgs({
-        args: argv,
-        options: DOCTOR_OPTIONS,
-        allowPositionals: false,
-      }).values.json === true;
+    parseArgs({ args: argv, options: DOCTOR_OPTIONS, allowPositionals: false });
   } catch (error) {
-    io.err(`ub doctor: ${message(error)}\n`);
-    return 2;
+    return reportFailure(io, { json, command: "ub doctor", code: "invalid_arguments", error });
   }
 
-  const { report, warnings } = await doctorReport();
+  // A failed *check* is not this: the report is the answer and `ok: false`
+  // carries it. This is `ub doctor` unable to produce a report at all, which is
+  // the one thing its reader cannot tell from silence.
+  let collected: Awaited<ReturnType<typeof doctorReport>>;
+  try {
+    collected = await doctorReport();
+  } catch (error) {
+    return reportFailure(io, { json, command: "ub doctor", code: "command_failed", error });
+  }
+
+  const { report, warnings } = collected;
   for (const warning of warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }

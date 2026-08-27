@@ -7,9 +7,10 @@
  * and gives the hub a bounded chance to answer: a status command that reported
  * only the configuration would say "fine" while nothing syncs.
  *
- * `--json` prints exactly one object to stdout and nothing else. Warnings,
- * diagnostics and the MCP server's own logging all go to stderr, so the JSON
- * stays parseable by a pipe.
+ * `--json` prints exactly one object to stdout and nothing else — the report
+ * when there is one, the failure envelope in ./failure.ts when there is not, so
+ * a pipe parses one representation either way. Warnings, diagnostics and the
+ * MCP server's own logging all go to stderr.
  *
  * No secret is ever printed. `credentialPresent` is the whole of what this
  * command says about the hub signing secret. The `storage` object is
@@ -27,6 +28,7 @@ import {
 import type { SyncStatus } from "@uberblick/mcp-server";
 import type { CredentialOrigin, Origin } from "./config.js";
 import { resolveConfig } from "./config.js";
+import { reportFailure, wantsJson } from "./failure.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
@@ -242,20 +244,27 @@ export async function statusCommand(
 ): Promise<number> {
   if (takeHelp(argv, io, STATUS_HELP)) return 0;
 
-  let json = false;
+  // Read before the parser rather than out of it, so that a run which asked for
+  // JSON and then mistyped a flag is refused *in JSON* — see ./failure.ts.
+  const json = wantsJson(argv);
   try {
-    json =
-      parseArgs({
-        args: argv,
-        options: STATUS_OPTIONS,
-        allowPositionals: false,
-      }).values.json === true;
+    parseArgs({ args: argv, options: STATUS_OPTIONS, allowPositionals: false });
   } catch (error) {
-    io.err(`ub status: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 2;
+    return reportFailure(io, { json, command: "ub status", code: "invalid_arguments", error });
   }
 
-  const { report, warnings } = await statusReport();
+  // Resolution refuses on an unconfigured workspace and on a Mac holding state
+  // in two roots, and the database can fail to open. Reported here rather than
+  // thrown at the process, because a `--json` reader is owed the answer in the
+  // representation it asked for.
+  let collected: Awaited<ReturnType<typeof statusReport>>;
+  try {
+    collected = await statusReport();
+  } catch (error) {
+    return reportFailure(io, { json, command: "ub status", code: "command_failed", error });
+  }
+
+  const { report, warnings } = collected;
   for (const warning of warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }

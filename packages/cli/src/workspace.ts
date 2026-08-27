@@ -37,6 +37,7 @@ import { defaultDatabasePath } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";
 import { resolveConfig, userConfigPath, writeUserConfig } from "./config.js";
+import { reportFailure, wantsJson } from "./failure.js";
 import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
@@ -224,25 +225,25 @@ options:
 function listCommand(argv: string[], io: Io): number {
   if (takeHelp(argv, io, WORKSPACE_LIST_HELP)) return 0;
 
-  let json = false;
+  // Before the parser, so a run that asked for JSON and then mistyped a flag is
+  // refused in JSON — see ./failure.ts.
+  const json = wantsJson(argv);
+  const command = "ub workspace list";
   try {
-    json =
-      parseArgs({
-        args: argv,
-        options: WORKSPACE_LIST_OPTIONS,
-        allowPositionals: false,
-      }).values.json === true;
+    parseArgs({ args: argv, options: WORKSPACE_LIST_OPTIONS, allowPositionals: false });
   } catch (error) {
-    io.err(`ub workspace list: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 2;
+    return reportFailure(io, { json, command, code: "invalid_arguments", error });
   }
 
   let listed: { entries: WorkspaceEntry[]; warnings: string[] };
   try {
     listed = listWorkspaces();
   } catch (error) {
-    io.err(`ub workspace list: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 1;
+    // A short list is not a harmless one (see `listWorkspaces`), so this is a
+    // refusal rather than an empty array — and in `--json` it has to *look*
+    // like one, or a reader takes "nothing here" from a directory it could not
+    // read.
+    return reportFailure(io, { json, command, code: "command_failed", error });
   }
   const { entries, warnings } = listed;
   warn(io, warnings);

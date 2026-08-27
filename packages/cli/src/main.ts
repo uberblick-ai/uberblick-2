@@ -10,6 +10,22 @@
 import { runCli } from "./cli.js";
 import { stopWhenDrained } from "./exit.js";
 
+// A reader that hung up is not a failure worth reporting — there is nobody left
+// to report it to. Without this, `ub status --json | head -1` on a report that
+// outgrows the pipe buffer dies of an unhandled EPIPE, printing a Node stack
+// trace over the caller's stderr and exiting 1: a crash where the caller did
+// something ordinary and deliberate. So a vanished reader is swallowed and the
+// process exits with the status the command had already reached — the exit
+// status reports what `ub` did, never what its reader did. Anything else on
+// these streams still throws, because it is not this.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code !== "EPIPE" && error.code !== "ERR_STREAM_DESTROYED") {
+      throw error;
+    }
+  });
+}
+
 // `process.exitCode`, never `process.exit`: exit() tears the process down at
 // once, and a write to a pipe is asynchronous, so `ub status --json | …` would
 // hand its reader truncated JSON as soon as the report outgrew the pipe buffer.

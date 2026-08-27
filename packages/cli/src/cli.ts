@@ -8,6 +8,10 @@
  * `mcp serve` is missing from the help on purpose: it is the stdio line an MCP
  * client's config points at, written there by machine, and a human has no
  * reason to run it by hand.
+ *
+ * A command that offers `--json` puts exactly one JSON value on stdout whether
+ * it answers or fails, and the exit status decides which — ./failure.ts owns
+ * that shape, README's "Machine output" section states the policy.
  */
 
 import { doctorCommand } from "./doctor.js";

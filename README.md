@@ -280,6 +280,7 @@ ub init            # identity, workspace, signing secret
 ub open            # serve the web app and a hub, and open the browser
 ub status          # workspace, hub, credential, sync state
 ub status --json   # the same, as one JSON object
+ub doctor          # check the local stack against its known failure modes
 ub workspace       # the workspace in force, and which layer chose it
 ub workspace list  # workspaces this machine has a database for
 ub workspace use   # make a workspace this machine's default
@@ -327,6 +328,55 @@ that needs its own workspace pins `WORKSPACE_ID` in the project MCP entry the
 client already reads, which arrives as the environment — the layer that already
 wins. Nothing committable ever carries an endpoint or a credential, so the
 signing secret in `credentials.json` applies to whichever hub *you* configured.
+
+### Machine output, and what the exit status means
+
+The rule for every command that offers `--json`, and the forward policy for any
+that gains one: **a recognized `--json` run puts exactly one JSON value on
+stdout — success or failure alike — and the exit status is the authoritative
+outcome.** stderr carries only what the result cannot: warnings, and the MCP
+server's own logging. So a script parses one representation and branches on one
+number, and never scrapes prose to find out that something went wrong.
+
+| Exit | Means |
+| --- | --- |
+| `0` | the command did what it was asked; stdout holds the result |
+| `1` | operational — it could not produce a result here and now, or `ub doctor` found a failing check |
+| `2` | usage — the invocation was refused; repeating it unchanged cannot help |
+
+A failure prints one object with a single `error` key, which is also the
+discriminator: a result never has one.
+
+```json
+{
+  "error": {
+    "code": "command_failed",
+    "category": "operational",
+    "message": "WORKSPACE_ID is not set. …",
+    "command": "ub status"
+  }
+}
+```
+
+`category` is the closed axis and pins the exit class — `usage` is 2,
+`operational` is 1. `code` names the same failure more finely and is additive:
+new codes may appear inside an existing category as `ub` learns to tell failures
+apart, so switch on `category` and keep a default branch for `code`. `message`
+is the sentence the human mode prints, and the four fields above are the whole
+envelope — never an exception's `stack` or `cause`, which is where a path or a
+value nobody vetted would ride out to a caller. No failure carries the signing
+secret; nothing does.
+
+A failing `ub doctor` *check* is not a failure in this sense: the report is the
+answer, `ok: false` carries it, and the checks stay where a caller can read
+them. A reader that hangs up is not one either — `ub` stops writing and exits
+with the status the command had reached, rather than crashing over a pipe the
+caller closed on purpose.
+
+Two boundaries. `ub mcp install --print` is a client-configuration snippet to
+paste, not a result, so it is not a `--json` mode and has no envelope. And
+`--json` is not added to a command without a consumer that needs it: there is no
+global `--json` switch and no plan for one.
 
 ### Where your files live
 
