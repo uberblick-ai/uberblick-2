@@ -141,8 +141,14 @@ export function readSeedDocs(dir: string): SeedDoc[] {
     if (parsed.title === "") {
       throw new Error(`${file}: no \`title\` in frontmatter`);
     }
-    const description = parsed.description;
-    if (description === undefined) {
+    // Trimmed here rather than by the importer, and measured after: the reader
+    // is a lossless converter that gives back what the file said, while *this*
+    // path holds a template to the same bar `create_doc` and `set_description`
+    // hold an agent to. Quoted padding — `description: "   "` — is the only
+    // spelling that reaches here untrimmed, and it is no more a description
+    // than an absent line is.
+    const description = parsed.description?.trim();
+    if (description === undefined || description === "") {
       throw new Error(
         `${file}: no \`description\` in frontmatter. Every document written here ` +
           `arrives described, so a fresh workspace's own documents never ask their ` +

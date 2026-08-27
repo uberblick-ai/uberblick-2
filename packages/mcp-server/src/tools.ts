@@ -1254,7 +1254,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         frontmatter: z
           .boolean()
           .optional()
-          .describe("Emit a YAML frontmatter block with uuid, title and tags. Default true."),
+          .describe(
+            "Emit a YAML frontmatter block with uuid, title, tags and — when the document has one — description. " +
+              "Default true.",
+          ),
         annotations: z
           .enum(["html-comments", "drop"])
           .optional()
