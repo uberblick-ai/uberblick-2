@@ -11,7 +11,13 @@
  *
  * Every test drives a real server over a real websocket with a real provider
  * and asserts what was observed — never a mock of it, which would only pin this
- * file's idea of the library. Each names the library file and line it pins;
+ * file's idea of the library. Every barrier a test waits on is an event, never
+ * an elapsed duration: a sleep long enough to be reliable today is the flake
+ * that fails a merge gate on a loaded machine tomorrow (#359). Where the event
+ * a test needs is a frame *arriving* — which fires no hook, because the frame
+ * is still queued — it wraps the library's own `handleMessage` entry point as a
+ * pass-through counter (`frameBarrier` below); the real handler still handles
+ * every frame. Each names the library file and line it pins;
  * those line numbers are from the TypeScript sources shipped inside
  * `@hocuspocus/server@4.6.0` (`node_modules/@hocuspocus/server/src/…`), so a
  * bump is also an invitation to re-read them.
@@ -23,11 +29,11 @@
 
 import { randomUUID } from "node:crypto";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import type { ServerConfiguration } from "@hocuspocus/server";
+import type { Hocuspocus, ServerConfiguration } from "@hocuspocus/server";
 import { Server } from "@hocuspocus/server";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { sleep, TEXT_KEY, waitUntil } from "./helpers.js";
+import { TEXT_KEY, waitUntil } from "./helpers.js";
 
 /** What `onAuthenticate` returns here, so a hook can tell the clients apart. */
 type Context = { name: string };
@@ -111,6 +117,47 @@ function gate() {
   return { opened, open };
 }
 
+/** Anything the server hands an incoming websocket frame to. */
+type FrameSink = { handleMessage: (data: Uint8Array) => void };
+
+/**
+ * Resolve once `count` frames have reached the server on this connection.
+ *
+ * `handleMessage` is the library's own entry point for an incoming frame —
+ * `ClientConnection.ts:571` before a connection is established,
+ * `Connection.ts:245` after — and both queue the frame synchronously, so a
+ * wrapper that delegates first and counts second reports arrival exactly. That
+ * arrival is the only observable a test holding the server mid-flight has: a
+ * frame sitting in a queue has fired no hook yet, which is the whole point of
+ * the state being held.
+ */
+function frameBarrier(target: FrameSink, count: number): Promise<void> {
+  const handle = target.handleMessage.bind(target);
+  let seen = 0;
+  return new Promise((resolve) => {
+    target.handleMessage = (data: Uint8Array) => {
+      handle(data);
+      if (++seen === count) resolve();
+    };
+  });
+}
+
+/** The same barrier for the next client to connect, which has no object yet. */
+function frameBarrierForNextClient(
+  hocuspocus: Hocuspocus<Context>,
+  count: number,
+): Promise<void> {
+  const accept = hocuspocus.handleConnection.bind(hocuspocus);
+  return new Promise((resolve) => {
+    hocuspocus.handleConnection = (...args: Parameters<typeof accept>) => {
+      hocuspocus.handleConnection = accept;
+      const client = accept(...args);
+      void frameBarrier(client, count).then(resolve);
+      return client;
+    };
+  });
+}
+
 describe("ClientConnection.ts:427 — the pre-auth queue drains before `connected`", () => {
   /**
    * A provider sends its token and then its first sync message without waiting
@@ -129,16 +176,19 @@ describe("ClientConnection.ts:427 — the pre-auth queue drains before `connecte
   it("hands queued client messages to the connection before the hook runs", async () => {
     const events: string[] = [];
     const room = randomUUID();
+    const syncFrameQueued = gate();
 
-    const { port } = await startServer({
+    const { port, hocuspocus } = await startServer({
       onConnect: async () => {
         events.push("onConnect");
       },
       onAuthenticate: async () => {
         events.push("onAuthenticate");
-        // Long enough that the client's sync frame is certainly queued behind
-        // the handshake rather than racing it.
-        await sleep(50);
+        // Hold the handshake open until the client's sync frame has actually
+        // reached the server, so the queue this test is about certainly has
+        // something in it. Waiting for the frame rather than for a duration is
+        // what makes "queued behind the handshake" a fact instead of a bet.
+        await syncFrameQueued.opened;
         return { name: "queued" };
       },
       beforeHandleMessage: async () => {
@@ -148,6 +198,10 @@ describe("ClientConnection.ts:427 — the pre-auth queue drains before `connecte
         events.push("connected");
       },
     });
+
+    // Frame one is the token, frame two the sync step the provider sends
+    // straight after it without waiting to be authenticated.
+    void frameBarrierForNextClient(hocuspocus, 2).then(syncFrameQueued.open);
 
     connect({ port, room });
     await waitUntil("the connected hook to run", () =>
@@ -192,24 +246,31 @@ describe("MessageReceiver.ts:157 — the token dispatch is fire-and-forget", () 
       },
     });
 
-    const client = connect({ port, room });
-    await client.synced;
+    // The gate is released in `finally` because the failure this test exists to
+    // report — a bump that awaits the dispatch — would otherwise leave the hook
+    // blocked forever and hang teardown instead of failing here, by name.
+    try {
+      const client = connect({ port, room });
+      await client.synced;
 
-    client.provider.sendToken();
-    await waitUntil("the onTokenSync hook to be entered", () => entered);
+      client.provider.sendToken();
+      await waitUntil("the onTokenSync hook to be entered", () => entered);
 
-    client.text.insert(0, "written mid-refresh");
-    await waitUntil(
-      "the update to reach the server document",
-      () =>
-        hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString() ===
-        "written mid-refresh",
-    );
+      client.text.insert(0, "written mid-refresh");
+      await waitUntil(
+        "the update to reach the server document",
+        () =>
+          hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString() ===
+          "written mid-refresh",
+      );
 
-    expect(released, "the hook was still running when the update landed").toBe(
-      false,
-    );
-    held.open();
+      expect(
+        released,
+        "the hook was still running when the update landed",
+      ).toBe(false);
+    } finally {
+      held.open();
+    }
   });
 });
 
@@ -218,27 +279,39 @@ describe("Connection.ts:208 — close() clears neither the queue nor the in-flig
    * `Connection.close()` removes the connection from the document and sends a
    * close frame. It does not touch `messageQueue`, and it cannot interrupt the
    * `processMessages()` loop already awaiting a hook (`Connection.ts:252-302`);
-   * the queue is emptied only when a *handler* throws, at `:296`. So a message
-   * received before the close is still applied after it — and still fans out to
-   * everyone else.
+   * the queue is emptied only when a *handler* throws, at `:296`. So both halves
+   * survive the close: the message the loop is holding, and every message that
+   * queued up behind it — each still applied, and still fanned out to everyone
+   * else.
+   *
+   * Both halves are asserted because they fail independently: a bump could
+   * start draining the queue on close while still finishing the message in
+   * flight, and a test that sent only one message would call that unchanged.
    *
    * That is the boundary any "close this connection now" story has to be
    * written against: closing is not revoking. A bump that starts discarding the
    * queue would silently drop writes a client believes it sent, so this test is
    * as much a warning as a pin.
    */
-  it("applies a message that was in flight when the connection was closed", async () => {
+  it("applies both the message in flight and the one queued behind it when the connection is closed", async () => {
     const room = randomUUID();
     let armed = false;
     let closed = false;
+    const secondUpdateWanted = gate();
 
     const { port, hocuspocus } = await startServer({
       onAuthenticate: async ({ token }) => ({ name: token }),
       beforeHandleMessage: async ({ context, connection }) => {
         if (!armed || context.name !== "closing") return;
         armed = false;
-        closed = true;
+        // The loop is now holding the first update. Ask the test for a second
+        // one and wait for it to land in `messageQueue` behind the first, so
+        // the close below happens with one message in flight and one queued.
+        const queuedBehind = frameBarrier(connection, 1);
+        secondUpdateWanted.open();
+        await queuedBehind;
         connection.close({ code: 1000, reason: "characterization" });
+        closed = true;
       },
     });
 
@@ -256,16 +329,18 @@ describe("Connection.ts:208 — close() clears neither the queue nor the in-flig
     await Promise.all([closing.synced, observer.synced]);
 
     armed = true;
-    closing.text.insert(0, "sent as the socket closed");
+    closing.text.insert(0, "in flight");
+    await secondUpdateWanted.opened;
+    closing.text.insert(closing.text.length, ", and queued behind it");
 
     await waitUntil(
-      "the observer to see the write from the closed connection",
-      () => observer.text.toString() === "sent as the socket closed",
+      "the observer to see both writes from the closed connection",
+      () => observer.text.toString() === "in flight, and queued behind it",
     );
 
     expect(closed).toBe(true);
     expect(hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString()).toBe(
-      "sent as the socket closed",
+      "in flight, and queued behind it",
     );
   });
 });
@@ -348,8 +423,14 @@ describe("MessageReceiver.ts:72-110 — awareness has no readOnly check", () => 
     const reader = connect({ port, room, token: "read-only" });
     await reader.synced;
 
-    reader.provider.setAwarenessField("name", "the read-only client");
+    // The order of these two lines is the proof, and the reason nothing here
+    // waits out a timer to call the document empty. Both frames leave on the
+    // same socket, and the server drains one connection's queue strictly in
+    // order (`Connection.ts:252-302`): the update goes first, so the awareness
+    // state showing up on the server is proof that the update ahead of it has
+    // already been handled — and refused.
     reader.text.insert(0, "SMUGGLED");
+    reader.provider.setAwarenessField("name", "the read-only client");
 
     const document = hocuspocus.documents.get(room);
     await waitUntil(
@@ -360,10 +441,8 @@ describe("MessageReceiver.ts:72-110 — awareness has no readOnly check", () => 
         ),
     );
 
-    // The update had a whole round trip's worth of time to land, and did not:
-    // the client holds text the server refused, from the same connection whose
+    // The client holds text the server refused, from the same connection whose
     // awareness it just accepted.
-    await sleep(200);
     expect(reader.text.toString()).toBe("SMUGGLED");
     expect(document?.getText(TEXT_KEY).toString()).toBe("");
   });

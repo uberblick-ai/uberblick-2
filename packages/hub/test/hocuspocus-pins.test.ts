@@ -110,6 +110,19 @@ describe("@hocuspocus/* is pinned to an exact version", () => {
       specifiers.push(`${named[1]}: ${specifier[1]}`);
     }
 
+    // pnpm mirrors `pnpm-workspace.yaml`'s overrides into the lockfile's own
+    // top-level `overrides:` block, and that copy is half of what
+    // `--frozen-lockfile` compares: a range restored there is a range the
+    // next install would honour, so it has to fail here by name too.
+    const mirrored = /^overrides:\n((?:[ \t]+\S.*\n)+)/m.exec(lock)?.[1] ?? "";
+    expect(
+      mirrored,
+      "the lockfile mirrors the workspace overrides; @hocuspocus/common must " +
+        `read exactly ${PINNED} there as well as in pnpm-workspace.yaml.`,
+    ).toMatch(
+      new RegExp(`^\\s*['"]?@hocuspocus/common['"]?:\\s*${PINNED}\\s*$`, "m"),
+    );
+
     expect(specifiers.length).toBeGreaterThan(0);
     expect(
       specifiers.filter((entry) => !entry.endsWith(`: ${PINNED}`)),
