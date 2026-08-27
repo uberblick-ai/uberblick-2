@@ -23,6 +23,14 @@
  * and nothing here waits out a duration in the hope that what it is about to
  * assert would have happened by now: every step waits for an event.
  *
+ * Holding a wave is also how its *width* is observed. A suspended mint is a
+ * room the gate admitted — the slot is held until the hub answers, and the
+ * answer cannot come while the token is half made — so the mints a held wave
+ * piles up are the in-flight count, read at the same boundary. Convergence
+ * alone cannot see this: the ceiling is only one above the bound and the hub
+ * terminates a socket that *exceeds* it, so a gate that admitted one room too
+ * many would still sync every room and still never be terminated.
+ *
  * The last suite is the other half of pacing a corpus: what a caller may call
  * hydrated. A queue drained in waves takes one round trip per wave and a settle
  * is one budget, so the wait ends where it promised to and says the drain is
@@ -232,6 +240,22 @@ function watchTokenGate(): () => string[] {
   return () => [...opened];
 }
 
+/**
+ * Wait for a held wave to reach the mint, and assert the gate let exactly
+ * `bound` rooms through while the rest stayed queued.
+ *
+ * The wait is for *at least* `bound`, so a gate that admits one too many fails
+ * the count instead of hanging on a number it will never show. The flush that
+ * follows is what makes the count final: every admission granted in the tick
+ * that pumped the queue has its token call chained onto an already-resolved
+ * promise, so after the microtask queue drains, one room too many has arrived.
+ */
+async function heldMintsSettleAt(wave: string, bound: number): Promise<void> {
+  await waitUntil(`${wave} to reach the mint`, () => mints.held() >= bound);
+  await flush();
+  expect(mints.held(), `rooms admitted at once on ${wave}`).toBe(bound);
+}
+
 /** A fresh room with something in it, attached to the hub. Returns its name. */
 function attach(sync: HubSync, text: string): string {
   const room = `${WORKSPACE}/${randomUUID()}`;
@@ -288,6 +312,9 @@ describe("bounded room attach", () => {
     rooms.push(first);
     await waitUntil("the first room to sync", () => sync.isRoomQuiet(first));
 
+    // The whole corpus arrives at once, with every mint from here suspended:
+    // the wave stops at the gate and stays there to be counted.
+    mints.hold();
     const wave: string[] = [];
     for (let index = 0; index < ROOM_COUNT; index += 1) {
       wave.push(attach(sync, `room ${index}`));
@@ -302,6 +329,12 @@ describe("bounded room attach", () => {
       expect(sync.isRoomQuiet(room)).toBe(false);
     }
 
+    // Exactly the bound, and the other nine wait: twelve rooms all asking at
+    // once is the burst the bound exists for, and this is the assertion that
+    // fails if the gate is ever one room wider than it says it is.
+    await heldMintsSettleAt("the first attach wave", CLIENT_BOUND);
+
+    mints.releaseAll();
     await waitUntil("every room to sync on the first connection", () =>
       rooms.every((room) => sync.isRoomQuiet(room)),
     );
@@ -313,13 +346,20 @@ describe("bounded room attach", () => {
     expect(terminations()).toEqual([]);
 
     // The stampede this exists for: the hub goes away and comes back, and
-    // every provider re-sends its token at once on the new connection.
+    // every provider re-sends its token at once on the new connection. Held
+    // again, because a re-authenticating corpus is the same burst and has to
+    // be paced to the same width — a bound that only held on a first attach
+    // would leave the reconnect breaching the ceiling.
+    mints.hold();
     await hubs.shift()?.stop();
     await waitUntil("the rooms to lose sync with the hub that went away", () =>
       rooms.some((room) => !sync.isRoomQuiet(room)),
     );
 
     await startHub({ port, databasePath: database });
+    await heldMintsSettleAt("the reconnect wave", CLIENT_BOUND);
+
+    mints.releaseAll();
     await waitUntil("every room to sync again after the restart", () =>
       rooms.every((room) => sync.isRoomQuiet(room)),
     );
