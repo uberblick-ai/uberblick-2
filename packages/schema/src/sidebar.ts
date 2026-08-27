@@ -11,13 +11,34 @@
  * list of references, so nothing here can change, hide or delete a document.
  * Unpinning and deleting a group are sidebar-only acts.
  *
- * Layout — four top-level keys, deliberately:
- *   - `groups`   Y.Map: groupId → Y.Map { name: string, docs: Y.Array<Pin> }
- *   - `order`    Y.Array<groupId>: the group order
- *   - `unpinned` Y.Map: `<uuid>#<clientID>` → number, unpin counters (below)
- *   - `flags`    Y.Map: set-once booleans about the sidebar itself (below)
+ * Layout — four fixed top-level keys, plus one array per group:
+ *   - `groups`    Y.Map: groupId → name, the group's only field
+ *   - `order`     Y.Array<groupId>: the group order
+ *   - `unpinned`  Y.Map: `<uuid>#<clientID>` → number, unpin counters (below)
+ *   - `flags`     Y.Map: set-once booleans about the sidebar itself (below)
+ *   - `pins:<id>` Y.Array<Pin>: one group's pins, a top-level type of its own
  *
  * A `Pin` is a plain `{ uuid, since }` object, never a nested Y type.
+ *
+ * A group's pins live in a *top-level* array named after the group rather than
+ * in a nested one stored under its id, and that is what makes creating a group
+ * convergent. A nested type has to be created by somebody: `groups.set(id, new
+ * Y.Map())` on two replicas is two writes of one key, so one map wins whole and
+ * every pin the loser held goes with it, silently. A top-level type is created
+ * by *name* — Yjs hands the same array to whoever asks for `pins:<groupId>`, on
+ * every replica, whether or not anyone has written to it — so two offline
+ * replicas can each create one group and pin into it, and the merge keeps both
+ * pins. A group is then a name in `groups`, an id in `order` and an array
+ * reached by name: three writes that merge, none that replaces.
+ *
+ * Two replicas creating one group under *different* names still resolve that
+ * one key by clientID, and deliberately so: a name is a string both sides can
+ * see and correct, not a container holding somebody's pins.
+ *
+ * The cost is that a top-level type cannot be removed. {@link deleteGroup}
+ * empties the array instead, so a long-lived sidebar carries one spent array
+ * per group ever deleted — a handful of empty arrays, in exchange for never
+ * losing a pin.
  *
  * The order is an array of *ids*, not of the groups themselves, because Yjs has
  * no move: reordering is delete-then-insert. Moving a plain value rewrites
@@ -118,22 +139,18 @@
  * writes with ids of its own choosing rather than generated ones (see
  * {@link createGroup}), and the two runs merge into one sidebar instead of two.
  *
- * The boundary of that trick, stated because sharing an id is not the same as
- * merging: a group is a nested Y.Map stored under its id, and two concurrent
- * creates of one id are two writes of one key, so one map wins whole and the
- * loser's `docs` — every pin in it — goes with it. Two runs that wrote the same
- * pins lose nothing, which is the migration's case: both sides read the same
- * directory and produce the same groups. Two replicas creating one group from
- * *different* state do lose one side's pins, silently. Repairing that is a
- * layout change — {@link https://github.com/uberblick-ai/uberblick-2/issues/210}
- * — not something a caller can work around, so a caller choosing an id should
- * be choosing it for content both sides agree on.
+ * Sharing an id is enough because a group's fields merge rather than replace
+ * each other — the name is a string, the pins are an array Yjs hands out by
+ * name — so two runs built from *different* state converge on one group holding
+ * both sides' pins. A caller that addresses groups by name rather than by id
+ * gets the same guarantee from {@link getOrCreateGroup}, which derives the id
+ * from the name so that two replicas naming one group write one group.
  */
 
-import * as Y from "yjs";
+import type * as Y from "yjs";
 import type { SidebarGroup } from "./types.js";
 
-/** The key of the sidebar's groupId → group Y.Map. */
+/** The key of the sidebar's groupId → name Y.Map. */
 export const SIDEBAR_GROUPS_KEY = "groups";
 
 /** The key of the sidebar's group-order Y.Array. */
@@ -148,8 +165,11 @@ export const SIDEBAR_FLAGS_KEY = "flags";
 /** The flag recording that the one-time tag-group migration has run. */
 const SEEDED_FLAG = "seeded";
 
-const NAME_KEY = "name";
-const DOCS_KEY = "docs";
+/** Prefixes the top-level array holding one group's pins. */
+const PINS_PREFIX = "pins:";
+
+/** Prefixes the id {@link getOrCreateGroup} derives from a group's name. */
+const NAME_ID_PREFIX = "name:";
 
 /** Separates the uuid from the client id in an `unpinned` key. */
 const CLIENT_SEPARATOR = "#";
@@ -160,9 +180,9 @@ interface Pin {
   since: number;
 }
 
-/** The groupId → group map inside a sidebar doc. */
-export function getSidebarGroups(sidebarDoc: Y.Doc): Y.Map<unknown> {
-  return sidebarDoc.getMap<unknown>(SIDEBAR_GROUPS_KEY);
+/** The groupId → name map inside a sidebar doc. A group's only field. */
+export function getSidebarGroups(sidebarDoc: Y.Doc): Y.Map<string> {
+  return sidebarDoc.getMap<string>(SIDEBAR_GROUPS_KEY);
 }
 
 /** The group-order array inside a sidebar doc. */
@@ -199,19 +219,22 @@ export function markSidebarSeeded(sidebarDoc: Y.Doc): void {
   getSidebarFlags(sidebarDoc).set(SEEDED_FLAG, true);
 }
 
-function groupById(sidebarDoc: Y.Doc, groupId: string): Y.Map<unknown> | null {
-  const group = getSidebarGroups(sidebarDoc).get(groupId);
-  return group instanceof Y.Map ? (group as Y.Map<unknown>) : null;
+/** A group's name, or null when the sidebar holds no such group. */
+function groupName(sidebarDoc: Y.Doc, groupId: string): string | null {
+  const name = getSidebarGroups(sidebarDoc).get(groupId);
+  return typeof name === "string" ? name : null;
 }
 
-function pinsOf(group: Y.Map<unknown>): Y.Array<Pin> | null {
-  const docs = group.get(DOCS_KEY);
-  return docs instanceof Y.Array ? (docs as Y.Array<Pin>) : null;
-}
-
-function nameOf(group: Y.Map<unknown>): string {
-  const name = group.get(NAME_KEY);
-  return typeof name === "string" ? name : "";
+/**
+ * One group's pins, as a top-level array named after the group.
+ *
+ * Reached by name and never stored under a key, which is what lets two replicas
+ * create one group without either side's pins being replaced — see the header.
+ * The array exists as soon as it is asked for, on every replica, so this needs
+ * no create step and cannot return null.
+ */
+function pinsOfGroup(sidebarDoc: Y.Doc, groupId: string): Y.Array<Pin> {
+  return sidebarDoc.getArray<Pin>(`${PINS_PREFIX}${groupId}`);
 }
 
 /** A stored pin, or null when the value is not one. */
@@ -246,7 +269,7 @@ function orderedGroupIds(sidebarDoc: Y.Doc): string[] {
   const out: string[] = [];
   for (const id of getSidebarOrder(sidebarDoc).toArray()) {
     if (typeof id !== "string" || seen.has(id)) continue;
-    if (groupById(sidebarDoc, id) === null) continue;
+    if (groupName(sidebarDoc, id) === null) continue;
     seen.add(id);
     out.push(id);
   }
@@ -269,13 +292,7 @@ function removeAll(array: Y.Array<string>, value: string): void {
 
 /** Every group's pin array, in stored order. */
 function allPinLists(sidebarDoc: Y.Doc): Y.Array<Pin>[] {
-  const out: Y.Array<Pin>[] = [];
-  for (const id of orderedGroupIds(sidebarDoc)) {
-    const group = groupById(sidebarDoc, id);
-    const pins = group === null ? null : pinsOf(group);
-    if (pins !== null) out.push(pins);
-  }
-  return out;
+  return orderedGroupIds(sidebarDoc).map((id) => pinsOfGroup(sidebarDoc, id));
 }
 
 /** Remove every pin of `uuid`, hidden ones included. The caller transacts. */
@@ -335,7 +352,12 @@ function unpinCeiling(sidebarDoc: Y.Doc, uuid: string): number {
  * caller passes one when two replicas may make the *same* group independently —
  * the one-time migration does, because a generated id would give each replica
  * its own copy of every group, and a merge would show both. With one id they
- * write the same group instead, and it merges into one.
+ * write the same group, and the two creates merge into one holding both sides'
+ * pins: the name is a plain string and the pins are a top-level array reached
+ * by name, so nothing here replaces anything (see the header).
+ *
+ * Creating a group that is already there is therefore not an error and not a
+ * duplicate: it asserts the name and leaves the position and the pins alone.
  */
 export function createGroup(
   sidebarDoc: Y.Doc,
@@ -344,14 +366,42 @@ export function createGroup(
   id: string = crypto.randomUUID(),
 ): string {
   sidebarDoc.transact(() => {
-    const group = new Y.Map<unknown>();
-    getSidebarGroups(sidebarDoc).set(id, group);
-    group.set(NAME_KEY, name);
-    group.set(DOCS_KEY, new Y.Array<Pin>());
+    getSidebarGroups(sidebarDoc).set(id, name);
     const order = getSidebarOrder(sidebarDoc);
-    order.insert(clampIndex(index, order.length), [id]);
+    if (!order.toArray().includes(id)) {
+      order.insert(clampIndex(index, order.length), [id]);
+    }
   });
   return id;
+}
+
+/**
+ * The id of the group called `name`, creating it at `index` (default: last) if
+ * no group carries that name — for callers that address groups by name.
+ *
+ * The created id is derived from the name, so two replicas that each create
+ * "Reading" while out of contact write one group rather than two, and the merge
+ * holds both sides' pins. Where the derived id is already taken by a group that
+ * has since been renamed, this falls back to a generated id: two replicas can
+ * then still end up with two same-named groups, which is visible and repairable
+ * — the loss this trades away was neither.
+ */
+export function getOrCreateGroup(
+  sidebarDoc: Y.Doc,
+  name: string,
+  index?: number,
+): string {
+  for (const id of orderedGroupIds(sidebarDoc)) {
+    if (groupName(sidebarDoc, id) === name) return id;
+  }
+  const derived = `${NAME_ID_PREFIX}${name}`;
+  const free = groupName(sidebarDoc, derived) === null;
+  return createGroup(
+    sidebarDoc,
+    name,
+    index,
+    free ? derived : crypto.randomUUID(),
+  );
 }
 
 /** Rename a group, keeping its id and its pins. */
@@ -360,18 +410,25 @@ export function renameGroup(
   groupId: string,
   name: string,
 ): void {
-  groupById(sidebarDoc, groupId)?.set(NAME_KEY, name);
+  if (groupName(sidebarDoc, groupId) === null) return;
+  getSidebarGroups(sidebarDoc).set(groupId, name);
 }
 
 /**
  * Delete a group. Its pins go with it — the documents themselves are untouched,
  * because the sidebar only ever held their uuids.
+ *
+ * The group's array is emptied rather than removed, because a top-level type
+ * cannot be removed: leaving the pins there would hand them back to whoever
+ * created the same id next.
  */
 export function deleteGroup(sidebarDoc: Y.Doc, groupId: string): void {
-  if (groupById(sidebarDoc, groupId) === null) return;
+  if (groupName(sidebarDoc, groupId) === null) return;
   sidebarDoc.transact(() => {
     getSidebarGroups(sidebarDoc).delete(groupId);
     removeAll(getSidebarOrder(sidebarDoc), groupId);
+    const pins = pinsOfGroup(sidebarDoc, groupId);
+    pins.delete(0, pins.length);
   });
 }
 
@@ -393,9 +450,9 @@ export function pinDoc(
   uuid: string,
   index?: number,
 ): void {
-  const group = groupById(sidebarDoc, groupId);
-  const pins = group === null ? null : pinsOf(group);
-  if (pins === null || visiblePin(sidebarDoc, uuid) !== null) return;
+  if (groupName(sidebarDoc, groupId) === null) return;
+  if (visiblePin(sidebarDoc, uuid) !== null) return;
+  const pins = pinsOfGroup(sidebarDoc, groupId);
   const since = unpinLevel(sidebarDoc, uuid);
   sidebarDoc.transact(() => {
     removePinEverywhere(sidebarDoc, uuid);
@@ -438,10 +495,10 @@ export function moveDoc(
   toGroupId: string,
   index?: number,
 ): void {
-  const group = groupById(sidebarDoc, toGroupId);
-  const pins = group === null ? null : pinsOf(group);
-  const moving = pins === null ? null : visiblePin(sidebarDoc, uuid);
-  if (pins === null || moving === null) return;
+  if (groupName(sidebarDoc, toGroupId) === null) return;
+  const moving = visiblePin(sidebarDoc, uuid);
+  if (moving === null) return;
+  const pins = pinsOfGroup(sidebarDoc, toGroupId);
   sidebarDoc.transact(() => {
     removePinEverywhere(sidebarDoc, uuid);
     pins.insert(clampIndex(index, pins.length), [moving]);
@@ -454,7 +511,7 @@ export function moveGroup(
   groupId: string,
   index?: number,
 ): void {
-  if (groupById(sidebarDoc, groupId) === null) return;
+  if (groupName(sidebarDoc, groupId) === null) return;
   sidebarDoc.transact(() => {
     const order = getSidebarOrder(sidebarDoc);
     removeAll(order, groupId);
@@ -473,17 +530,17 @@ export function readSidebar(sidebarDoc: Y.Doc): SidebarGroup[] {
   const seen = new Set<string>();
   const out: SidebarGroup[] = [];
   for (const id of orderedGroupIds(sidebarDoc)) {
-    const group = groupById(sidebarDoc, id);
-    if (group === null) continue;
+    const name = groupName(sidebarDoc, id);
+    if (name === null) continue;
     const docs: string[] = [];
-    for (const item of pinsOf(group)?.toArray() ?? []) {
+    for (const item of pinsOfGroup(sidebarDoc, id).toArray()) {
       const pin = readPin(item);
       if (pin === null || seen.has(pin.uuid)) continue;
       if (pin.since < (levels.get(pin.uuid) ?? 0)) continue;
       seen.add(pin.uuid);
       docs.push(pin.uuid);
     }
-    out.push({ id, name: nameOf(group), docs });
+    out.push({ id, name, docs });
   }
   return out;
 }
