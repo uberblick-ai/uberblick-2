@@ -81,6 +81,8 @@ import {
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError, failureContract, guarded } from "./failures.js";
+import { strictInput } from "./inputs.js";
+import type { ToolMode } from "./inputs.js";
 import { log } from "./log.js";
 import type { Replica, Replicas } from "./replica.js";
 
@@ -389,6 +391,38 @@ const SIDEBAR_SHAPE =
   "tombstoned but still pinned) or `unknown` (no directory entry at all — a document nothing can resolve, left " +
   "visible so it can be unpinned).";
 
+/**
+ * `sidebar_group`'s three shapes, stated once for the boundary and for
+ * `tools/list`.
+ *
+ * `action` already said which one a call means; what it did not say is that the
+ * other actions' fields are then wrong rather than spare. A `rename` carrying
+ * an `index` used to move nothing and say nothing — the handler simply read the
+ * fields its branch wanted — so a caller that meant to move a group and typed
+ * the wrong action was told it had succeeded.
+ */
+const SIDEBAR_GROUP_MODES: readonly ToolMode[] = [
+  {
+    title: "rename",
+    when: { field: "action", is: "rename" },
+    requires: ["name"],
+    forbids: ["index"],
+  },
+  { title: "move", when: { field: "action", is: "move" }, forbids: ["name"] },
+  {
+    title: "delete",
+    when: { field: "action", is: "delete" },
+    forbids: ["name", "index"],
+  },
+];
+
+/** What `sidebar_group` says about its three shapes, in the words an agent reads. */
+const SIDEBAR_GROUP_SHAPES =
+  "`action` picks one of three shapes and each takes only its own field: `rename` needs `name` and refuses " +
+  "`index`, `move` takes `index` (omitted: last) and refuses `name`, `delete` takes neither. A field belonging " +
+  "to another action is refused at the input boundary before the sidebar is touched, rather than ignored — so a " +
+  "call that says two things is a failure you can see, not a silent half-success.";
+
 export function registerSidebarTools(
   server: McpServer,
   replicas: Replicas,
@@ -404,7 +438,7 @@ export function registerSidebarTools(
         "links and backlinks; they are simply not entry points.\n\n" +
         SIDEBAR_SHAPE +
         failureContract("get_sidebar"),
-      inputSchema: {},
+      inputSchema: strictInput({}),
     },
     guarded("get_sidebar", async () => {
       await replicas.settle();
@@ -429,11 +463,11 @@ export function registerSidebarTools(
         "positions in the target group after the document has been taken out of it.\n\n" +
         SIDEBAR_SHAPE +
         failureContract("pin_doc"),
-      inputSchema: {
+      inputSchema: strictInput({
         uuid: z.uuid().describe("Document UUID."),
         group: groupArg,
         index: indexArg,
-      },
+      }),
     },
     guarded("pin_doc", async ({ uuid, group, index }) => {
       await replicas.settle();
@@ -469,11 +503,11 @@ export function registerSidebarTools(
         "one place to remove it from. `unpinned` is false when the document was not pinned to begin with.\n\n" +
         SIDEBAR_SHAPE +
         failureContract("unpin_doc"),
-      inputSchema: {
+      inputSchema: strictInput({
         // No directory check: a pin whose document nothing can resolve is
         // exactly the one that most needs removing.
         uuid: z.uuid().describe("Document UUID."),
-      },
+      }),
     },
     guarded("unpin_doc", async ({ uuid }) => {
       await replicas.settle();
@@ -496,21 +530,29 @@ export function registerSidebarTools(
     {
       title: "Rename, delete or move a sidebar group",
       description:
-        "Manage the groups themselves. `rename` needs `name`; `move` takes `index` (omitted: last); `delete` " +
-        "removes the group and its pins — the documents are untouched, because the group only ever held their " +
-        "uuids, and they stay reachable through list_docs and search.\n\n" +
+        "Manage the groups themselves. `delete` removes the group and its pins — the documents are untouched, " +
+        "because the group only ever held their uuids, and they stay reachable through list_docs and search.\n\n" +
+        SIDEBAR_GROUP_SHAPES +
+        "\n\n" +
         "There is no create action: pin_doc creates a group by naming one that does not exist, which is how a " +
         "group comes into being with something in it rather than empty.\n\n" +
         SIDEBAR_SHAPE +
         failureContract("sidebar_group"),
-      inputSchema: {
-        action: z
-          .enum(["rename", "delete", "move"])
-          .describe("What to do with the group."),
-        group: groupArg,
-        name: z.string().min(1).optional().describe("The new name. rename only."),
-        index: indexArg,
-      },
+      inputSchema: strictInput(
+        {
+          action: z
+            .enum(["rename", "delete", "move"])
+            .describe("What to do with the group."),
+          group: groupArg,
+          name: z
+            .string()
+            .min(1)
+            .optional()
+            .describe("The new name. rename only, and required there."),
+          index: indexArg,
+        },
+        SIDEBAR_GROUP_MODES,
+      ),
     },
     guarded("sidebar_group", async ({ action, group, name, index }) => {
       await replicas.settle();
@@ -525,13 +567,12 @@ export function registerSidebarTools(
       }
       let renamed = target.name;
       if (action === "rename") {
-        if (name === undefined) {
-          throw new ToolError("invalid_arguments", "rename needs a `name`", {
-            group,
-          });
-        }
-        renameGroup(sidebar.doc, target.id, name);
-        renamed = name;
+        // `rename` without a `name` never reaches here: the input boundary
+        // refuses it — see {@link SIDEBAR_GROUP_MODES}. TypeScript reads the
+        // field as optional because the object declares it once for all three
+        // actions, which is what this assertion stands in for.
+        renamed = name as string;
+        renameGroup(sidebar.doc, target.id, renamed);
       } else if (action === "delete") {
         deleteGroup(sidebar.doc, target.id);
       } else {

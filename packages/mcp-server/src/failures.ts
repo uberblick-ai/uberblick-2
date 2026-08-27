@@ -40,7 +40,10 @@
  * plain-text validation error, before any code here runs and therefore before
  * anything durable could change. That class is documented rather than wrapped —
  * disguising it as a handler failure would make a boundary rejection look like
- * a call that got somewhere.
+ * a call that got somewhere. It covers every wrong argument, including the ones
+ * that are individually well-formed but do not add up to a call: ./inputs.ts
+ * states each multiplexed tool's valid shapes in the schema itself, so no
+ * handler here is left holding an arguments complaint of its own.
  *
  * Nothing here promises a rollback, and nothing here reconciles: a call that
  * touched several rooms reports what is durable and names the call that
@@ -206,13 +209,6 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Call get_sidebar for the group ids that exist. pin_doc is what brings a group into being, by naming one " +
       "that does not exist yet.",
-  },
-  invalid_arguments: {
-    recoveryClass: "manual",
-    guidance:
-      "The arguments are each valid but do not add up to a call this tool can make — `message` says which. " +
-      "Repeating them unchanged fails the same way, and no re-read changes that: correct the arguments named in " +
-      "`message` and call again.",
   },
 };
 
