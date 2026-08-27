@@ -275,7 +275,7 @@ describe("ub workspace use", () => {
 describe("ub workspace use and the derived mise config", () => {
   it("moves the derived WORKSPACE_ID, keeps every other derived value, and names both files", () => {
     // The mise tasks read this file and nothing else, so a binding that stops at
-    // `./uberblick.json` leaves `mise run web` and `mise run import-seed` serving
+    // `./uberblick.json` leaves `mise run web` and the hub serving
     // the workspace this directory used to be bound to — silently.
     const box = initialisedCheckout(OTHER);
     // A line README tells people to add to exactly this `[env]`. It is not one

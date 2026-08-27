@@ -45,7 +45,7 @@ WORKDIR /home/fue/uberblick
 COPY --chown=fue:fue . .
 
 # The documented install path, verbatim from README "Getting it running" and
-# `docs-seed/install.md`, unattended. This is the line under test.
+# the live *Install and run* document, unattended. This is the line under test.
 RUN mise trust && mise run setup -- --yes
 
 # Deliberately the only thing the assertion container does. `mise exec` is what
