@@ -34,6 +34,7 @@ import type { DirectoryEntry } from "@uberblick/schema";
 import { allPath, canonicalPath, parseRoute } from "../src/ui/route.js";
 import { AllDocsPane, sortDirectory } from "../src/ui/AllDocsPane.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
+import { relativeAge } from "../src/editor/github-hovercard.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const ONE = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
@@ -157,6 +158,16 @@ function rowTitles(host: HTMLElement): string[] {
   );
 }
 
+/** Change a controlled input through the native setter, like a keystroke. */
+function typeInto(input: HTMLInputElement, value: string): void {
+  const native = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  native?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 function sortButton(host: HTMLElement, label: string): HTMLButtonElement {
   const found = [...host.querySelectorAll<HTMLButtonElement>(".ub-all-sort")].find(
     (button) => button.textContent === label,
@@ -177,6 +188,29 @@ function chosenSort(host: HTMLElement): string | null {
 function entry(over: Partial<DirectoryEntry> & { uuid: string }): DirectoryEntry {
   return { title: "", tags: [], ...over };
 }
+
+describe("relative changed time", () => {
+  const NOW = Date.UTC(2026, 7, 27, 12);
+  const ago = (milliseconds: number): string =>
+    new Date(NOW - milliseconds).toISOString();
+
+  it.each([
+    ["just now", new Date(NOW + 60_000).toISOString()],
+    ["20 minutes ago", ago(20 * 60_000)],
+    ["1 hour ago", ago(60 * 60_000)],
+    ["1 day ago", ago(24 * 60 * 60_000)],
+    ["2 days ago", ago(2 * 24 * 60 * 60_000)],
+    ["1 week ago", ago(7 * 24 * 60 * 60_000)],
+    ["2 months ago", ago(60 * 24 * 60 * 60_000)],
+    ["1 year ago", ago(365 * 24 * 60 * 60_000)],
+  ])("formats %s", (expected, iso) => {
+    expect(relativeAge(iso, NOW)).toBe(expected);
+  });
+
+  it("refuses an unusable value", () => {
+    expect(relativeAge("not-a-date", NOW)).toBe("");
+  });
+});
 
 describe("the sort", () => {
   const stamped = [
@@ -307,6 +341,72 @@ describe("the listing", () => {
     expect(rows[1]?.textContent).toContain("—");
     expect(rows[2]?.querySelectorAll("time")).toHaveLength(0);
     expect(rows[2]?.textContent).toContain("—");
+  });
+  it("filters live directory stubs by title or hidden description", async () => {
+    const peer = peerOf(directoryDoc());
+    upsertDirectoryEntry(peer, {
+      uuid: ONE,
+      title: "Overview",
+      description: "A concealed lighthouse phrase",
+    });
+    upsertDirectoryEntry(peer, { uuid: TWO, title: "Editing" });
+
+    const host = await openApp(allPath(WORKSPACE));
+    const search = host.querySelector<HTMLInputElement>(".ub-all-search");
+    if (search === null) throw new Error("search field missing");
+    await act(async () => {
+      typeInto(search, "LIGHTHOUSE");
+    });
+    expect(rowTitles(host)).toEqual(["Overview"]);
+    expect(host.querySelector(".ub-all-row")?.textContent).not.toContain(
+      "concealed lighthouse",
+    );
+
+    await act(async () => {
+      upsertDirectoryEntry(peer, {
+        uuid: ONE,
+        title: "Overview",
+        description: "No longer a match",
+      });
+      upsertDirectoryEntry(peer, {
+        uuid: TWO,
+        title: "Editing",
+        description: "Lighthouse moved here",
+      });
+    });
+    expect(rowTitles(host)).toEqual(["Editing"]);
+
+    await act(async () => {
+      typeInto(search, "missing");
+    });
+    expect(host.querySelector(".ub-all > .ub-empty")?.textContent).toBe(
+      "No documents match your search.",
+    );
+
+    await act(async () => {
+      typeInto(search, "");
+    });
+    expect(rowTitles(host)).toEqual(["Editing", "Overview"]);
+  });
+
+  it("renders an SVG pin whose active state follows the existing toggle", async () => {
+    const peer = peerOf(directoryDoc());
+    upsertDirectoryEntry(peer, { uuid: ONE, title: "Overview" });
+
+    const host = await openApp(allPath(WORKSPACE));
+    const pin = host.querySelector<HTMLButtonElement>(".ub-all-pin");
+    const icon = pin?.querySelector("svg");
+    expect(pin?.getAttribute("aria-label")).toBe("Pin to the sidebar");
+    expect(pin?.getAttribute("title")).toBe("Pin to the sidebar");
+    expect(pin?.getAttribute("aria-pressed")).toBe("false");
+    expect(icon).not.toBeNull();
+    expect(icon?.querySelector("path")?.getAttribute("fill")).toBe("none");
+    expect(pin?.textContent).not.toMatch(/[◆◇]/u);
+
+    await act(async () => pin?.click());
+    expect(pin?.getAttribute("aria-label")).toBe("Unpin from the sidebar");
+    expect(pin?.getAttribute("aria-pressed")).toBe("true");
+    expect(icon?.querySelector("path")?.getAttribute("fill")).toBe("currentColor");
   });
 });
 

@@ -89,6 +89,9 @@ test("the entry opens the listing, and it holds what another browser created", a
   await entry.click();
   await expect(reader).toHaveURL(new RegExp(`/${harness().workspace}/all$`));
   await expect(listedTitles(reader)).toHaveText([later, earlier]);
+  const pin = reader.getByRole("button", { name: "Pin to the sidebar" }).first();
+  await expect(pin).toHaveAttribute("aria-pressed", "false");
+  await expect(pin.locator("svg")).toBeVisible();
 
   // And the address is a link: a fresh browser goes straight there.
   const linked = await openApp(browser);

@@ -202,6 +202,7 @@ export function refFacts(
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
+const WEEK = 7 * DAY;
 const MONTH = 30 * DAY;
 const YEAR = 365 * DAY;
 
@@ -215,11 +216,13 @@ export function relativeAge(iso: string, now: number = Date.now()): string {
       ? [Math.floor(ago / MINUTE), "minute"]
       : ago < DAY
         ? [Math.floor(ago / HOUR), "hour"]
-        : ago < MONTH
+        : ago < WEEK
           ? [Math.floor(ago / DAY), "day"]
-          : ago < YEAR
-            ? [Math.floor(ago / MONTH), "month"]
-            : [Math.floor(ago / YEAR), "year"];
+          : ago < MONTH
+            ? [Math.floor(ago / WEEK), "week"]
+            : ago < YEAR
+              ? [Math.floor(ago / MONTH), "month"]
+              : [Math.floor(ago / YEAR), "year"];
   if (amount < 1) return "just now";
   return `${amount} ${unit}${amount === 1 ? "" : "s"} ago`;
 }

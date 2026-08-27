@@ -20,10 +20,11 @@
  * stamped is not the oldest document, it is the one with no answer.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
+import { relativeAge } from "../editor/github-hovercard.js";
 import { useRoomStatus } from "./hooks.js";
 
 /** How the listing is ordered. */
@@ -136,6 +137,37 @@ function Stamp({ at }: { at: number | undefined }): ReactElement {
   );
 }
 
+/** The changing stamp uses the same coarse clock language as GitHub cards. */
+function ChangedStamp({
+  at,
+  now,
+}: {
+  at: number | undefined;
+  now: number;
+}): ReactElement {
+  const stamp = usableStamp(at);
+  if (stamp === undefined) return <span className="ub-all-stamp ub-muted">—</span>;
+  const iso = new Date(stamp).toISOString();
+  return (
+    <time className="ub-all-stamp" dateTime={iso}>
+      {relativeAge(iso, now)}
+    </time>
+  );
+}
+
+function PinIcon({ active }: { active: boolean }): ReactElement {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="ub-all-pin-icon">
+      <path
+        d="M9 3h6l-1 6 3 3v2h-4v7l-2-2v-5H7v-2l3-3-1-6Z"
+        fill={active ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function AllDocsPane({
   connection,
   entries,
@@ -159,16 +191,42 @@ export function AllDocsPane({
 }): ReactElement {
   const status = useRoomStatus(connection);
   const [sort, choose] = useStoredSort();
+  const [query, setQuery] = useState("");
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const pinned = useMemo(
     () => new Set(groups.flatMap((group) => group.docs)),
     [groups],
   );
-  const rows = useMemo(() => sortDirectory(entries, sort), [entries, sort]);
+  const rows = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    const matches =
+      needle === ""
+        ? entries
+        : entries.filter(
+            (entry) =>
+              entry.title.toLocaleLowerCase().includes(needle) ||
+              (entry.description ?? "").toLocaleLowerCase().includes(needle),
+          );
+    return sortDirectory(matches, sort);
+  }, [entries, query, sort]);
 
   return (
     <section className="ub-pane">
       <div className="ub-column ub-all">
         <h1 className="ub-all-heading">All docs</h1>
+        <label className="ub-all-search-label">
+          <span>Search documents</span>
+          <input
+            type="search"
+            className="ub-all-search"
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+          />
+        </label>
         {/* The column heads *are* the sort controls: one row of labels, and
             clicking one is asking for that order. The grid is declared once
             (see styles.css) and shared with every row, so changing the sort
@@ -192,9 +250,11 @@ export function AllDocsPane({
              Before that this client has simply not heard yet — and a workspace
              full of documents would be told it has none. */
           <p className="ub-muted ub-empty">
-            {status.synced
-              ? "No documents in this workspace yet."
-              : "Nothing here yet — the directory has not synced on this client."}
+            {entries.length > 0
+              ? "No documents match your search."
+              : status.synced
+                ? "No documents in this workspace yet."
+                : "Nothing here yet — the directory has not synced on this client."}
           </p>
         ) : (
           <ul className="ub-all-rows">
@@ -209,7 +269,7 @@ export function AllDocsPane({
                   <span className="ub-all-title">
                     {entry.title === "" ? <em>Untitled</em> : entry.title}
                   </span>
-                  <Stamp at={entry.updatedAt} />
+                  <ChangedStamp at={entry.updatedAt} now={now} />
                   <Stamp at={entry.createdAt} />
                 </button>
                 {/* The same gesture as the header's Pin control, on the one
@@ -233,9 +293,7 @@ export function AllDocsPane({
                     }
                     onClick={() => onTogglePin(entry.uuid)}
                   >
-                    <span aria-hidden="true">
-                      {pinned.has(entry.uuid) ? "◆" : "◇"}
-                    </span>
+                    <PinIcon active={pinned.has(entry.uuid)} />
                   </button>
                 )}
               </li>
