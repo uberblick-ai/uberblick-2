@@ -21,11 +21,22 @@
  * database it may not match. `node:sqlite`'s backup API reads a consistent
  * snapshot through an open connection — WAL included — and writes one file.
  *
- * **A database another process has open is a refusal, not a race.** Before
- * copying, each source is opened in `locking_mode = EXCLUSIVE` with no busy
- * timeout: a hub, an MCP client or the web app holding it open makes that fail,
+ * **A database another process has open is a refusal, not a race.** Each source
+ * is opened in `locking_mode = EXCLUSIVE` with no busy timeout before it is
+ * copied: a hub, an MCP client or the web app holding it open makes that fail,
  * and the run stops naming the file. That lock is also what makes the copy
  * provably free of a concurrent writer.
+ *
+ * **The checks that can refuse a source run read-only, first.** Closing a
+ * read-write connection to a database whose last writer crashed makes SQLite
+ * fold the leftover `-wal` into the file. That is content-preserving and it is
+ * what any reader does — `ub status` included — but it is still a write, so it
+ * must not happen to a database this command is about to refuse *for some other
+ * file's sake*. Integrity and the workspace claim are therefore read through a
+ * read-only connection, which replays the same uncheckpointed data into a
+ * private page cache and leaves the file alone; only a source that is actually
+ * being copied is ever opened read-write. Reports say "content unchanged"
+ * rather than "unchanged" for that reason.
  *
  * **The receipt is what makes the result unambiguous.** After a migration both
  * roots hold uberblick files, which is the one configuration `resolveStorage`
@@ -60,6 +71,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { DatabaseSync, backup } from "node:sqlite";
 import { parseArgs } from "node:util";
 import type { StoragePaths } from "@uberblick/hub/storage";
+import type { MigrationReceipt } from "@uberblick/hub/storage";
 import {
   AmbiguousStorageError,
   MAC_ROOT_DISPLAY,
@@ -67,6 +79,7 @@ import {
   WORKSPACE_DATABASE_FILE,
   createDataDirectory,
   macStorage,
+  readMigrationReceipt,
   resolveStorage,
 } from "@uberblick/hub/storage";
 import { takeHelp } from "./help.js";
@@ -81,18 +94,20 @@ const OWNER_ONLY = 0o600;
 const SQLITE_MAGIC = "SQLite format 3\0";
 
 /**
- * Pages per step of a backup: enough that every database here is one step.
+ * How often to wake the event loop while a backup is running.
  *
- * Not a tuning knob, a correctness one. Node schedules a backup's *next* step
- * from a handle that does not wake an idle event loop, so in a process holding
- * any other pending timer — a test runner's timeout, a supervisor's — each step
- * waits for that timer to fire, and a copy that takes milliseconds takes as long
- * as whatever else was scheduled. One step for the whole file is also what
- * SQLite's own one-shot backup does, and there is nothing to yield to anyway:
- * the source is held exclusively for the duration either way. A billion pages
- * is four terabytes at the default page size.
+ * Node resolves `backup()` from a handle that does not itself wake an idle
+ * event loop, so a process blocked waiting on some *other* timer does not
+ * advance the copy until that timer fires: a two-page backup with a 20 s timer
+ * pending takes 20,020 ms. A timer of our own bounds that wait to one tick. It
+ * is unref'd, so it can never be the reason a process stays alive.
+ *
+ * Raising `rate` so the whole file copies in one step does **not** avoid it —
+ * measured 20,014 ms against 20,020 ms for the default — because the stall is
+ * in the wake-up, not the number of steps. So the rate is left at the default:
+ * with the loop awake, a 4 MB database copies in 20 ms either way.
  */
-const ALL_PAGES = 1_000_000_000;
+const BACKUP_WAKE_MS = 1;
 
 /** The two files the config root holds. Everything else is a database. */
 const CONFIG_FILE = "config.json";
@@ -120,24 +135,6 @@ export interface Refusal {
   remedy: string;
 }
 
-/**
- * What a completed migration recorded: where the files came from, and what was
- * written. A re-run checks the target against it — see {@link verifyReceipt} —
- * and a person can check a copy by hand with `shasum -a 256`.
- */
-export interface Receipt {
-  version: 1;
-  migratedAt: string;
-  from: { configDir: string; dataDir: string };
-  files: {
-    kind: CopyKind;
-    source: string;
-    target: string;
-    bytes: number;
-    sha256: string;
-  }[];
-}
-
 /** Stable strings: `--json` prints them and a script will branch on them. */
 export type MigrationState =
   | "ready"
@@ -157,14 +154,14 @@ export interface MigrationPlan {
   hub: string | null;
   refusals: Refusal[];
   /** Present only for `already-migrated`. */
-  receipt?: Receipt;
+  receipt?: MigrationReceipt;
 }
 
 export interface MigrationReport extends MigrationPlan {
   version: string;
   dryRun: boolean;
   /** What was actually written, once a migration ran. Empty otherwise. */
-  migrated: Receipt["files"];
+  migrated: MigrationReceipt["files"];
 }
 
 // --- refusals ----------------------------------------------------------------
@@ -190,6 +187,14 @@ const CLOSE_CLIENTS =
 
 // --- reading the source ------------------------------------------------------
 
+/**
+ * Used to prove a staged copy matches what was read, and for nothing else.
+ *
+ * Deliberately not recorded in the receipt: a digest nothing verifies later is
+ * dead weight, and one of the files here is `credentials.json` — publishing a
+ * hash of a file whose whole content is a secret buys an offline oracle and no
+ * safety.
+ */
 function digest(contents: Buffer): string {
   return createHash("sha256").update(contents).digest("hex");
 }
@@ -204,6 +209,12 @@ function digest(contents: Buffer): string {
 function looksLikeSqlite(path: string): boolean {
   let fd: number;
   try {
+    // A directory opens happily and then fails the *read* with EISDIR, so the
+    // question "is this a regular file" has to be asked first: `--hub-db`
+    // pointed at a directory is a wrong path, not a crash.
+    if (!statSync(path).isFile()) {
+      return false;
+    }
     fd = openSync(path, "r");
   } catch {
     return false;
@@ -329,7 +340,7 @@ export function planMigration(options: MigrateOptions = {}): MigrationPlan {
     if (!migrated) {
       return plan;
     }
-    const receipt = readReceipt(to);
+    const receipt = readMigrationReceipt(to);
     if (receipt === null) {
       return refusedPlan(to, {
         reason: `${join(to, MIGRATION_RECEIPT)} records a completed migration but could not be read`,
@@ -521,24 +532,6 @@ function suppliedOrLayoutHub(
 
 // --- the receipt -------------------------------------------------------------
 
-function readReceipt(root: string): Receipt | null {
-  try {
-    const parsed: unknown = JSON.parse(
-      readFileSync(join(root, MIGRATION_RECEIPT), "utf8"),
-    );
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      !Array.isArray((parsed as Receipt).files)
-    ) {
-      return null;
-    }
-    return parsed as Receipt;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * The recorded files a completed migration's target no longer holds.
  *
@@ -547,7 +540,7 @@ function readReceipt(root: string): Receipt | null {
  * have happened is a recorded file *disappearing*, because then "already
  * migrated" would be a claim about a corpus that is no longer all there.
  */
-function verifyReceipt(root: string, receipt: Receipt): string[] {
+function verifyReceipt(root: string, receipt: MigrationReceipt): string[] {
   return receipt.files
     .filter((file) => !existsSync(join(root, file.target)))
     .map((file) => file.target);
@@ -569,7 +562,7 @@ function writeAll(fd: number, contents: Buffer): void {
  * Bytes rather than a parsed round trip: `config.json` may hold fields this
  * version does not know about, and re-serialising would quietly drop them.
  */
-function stageFile(source: string, destination: string): { bytes: number; sha256: string } {
+function stageFile(source: string, destination: string): { bytes: number } {
   const contents = readFileSync(source);
   const fd = openSync(destination, "wx", OWNER_ONLY);
   try {
@@ -578,15 +571,14 @@ function stageFile(source: string, destination: string): { bytes: number; sha256
     closeSync(fd);
   }
   const written = readFileSync(destination);
-  const sha256 = digest(contents);
-  if (digest(written) !== sha256) {
+  if (digest(written) !== digest(contents)) {
     throw new Refused(
       `the copy of ${source} does not match what was read`,
       "nothing was published. Try again; if it repeats, the destination " +
         "filesystem is the thing to look at",
     );
   }
-  return { bytes: contents.length, sha256 };
+  return { bytes: contents.length };
 }
 
 /** Row counts per table, without interpreting a single one of them. */
@@ -636,6 +628,31 @@ function integrityOf(db: DatabaseSync, path: string): void {
 }
 
 /**
+ * Run SQLite work against a file, turning any failure into a refusal.
+ *
+ * `integrity_check` and the row counts read pages, so a corrupt database raises
+ * `SQLITE_CORRUPT` from whichever statement happens to touch the damage. Left
+ * alone that reaches the user as a bare "database disk image is malformed" with
+ * no path and nothing to do about it — and, not being a {@link Refused}, as a
+ * thrown exception rather than a refusal with an exit code.
+ */
+function refusing<T>(path: string, work: () => T): T {
+  try {
+    return work();
+  } catch (error) {
+    if (error instanceof Refused) {
+      throw error;
+    }
+    throw new Refused(
+      `${path} could not be read by SQLite: ${message(error)}`,
+      "nothing was published and nothing was changed. A database SQLite " +
+        "cannot read has to be dealt with before it can be moved; the " +
+        "original is still where it was",
+    );
+  }
+}
+
+/**
  * Open a source database exclusively, or refuse.
  *
  * `locking_mode = EXCLUSIVE` with no busy timeout is the whole check: in WAL
@@ -671,42 +688,80 @@ function openExclusively(path: string): DatabaseSync {
 }
 
 /**
+ * The checks that can refuse a source, run without writing to it.
+ *
+ * Read-only, and that is the whole point: closing a *read-write* connection to
+ * a database whose last writer crashed makes SQLite fold the leftover
+ * write-ahead log into the file, so running these checks read-write would
+ * modify every source examined before whichever source turns out to be the
+ * reason to refuse. A read-only connection reads that same uncheckpointed data
+ * — the `-wal` is replayed into a private page cache — and leaves the database
+ * file byte for byte as it found it.
+ */
+function inspectSource(copy: PlannedCopy): string | null {
+  let db: DatabaseSync;
+  try {
+    db = new DatabaseSync(copy.source, { readOnly: true });
+  } catch (error) {
+    throw new Refused(
+      `${copy.source} could not be opened: ${message(error)}`,
+      "nothing was published. Check that the file is yours and readable",
+    );
+  }
+  try {
+    return refusing(copy.source, () => {
+      integrityOf(db, copy.source);
+      const claim = recordedWorkspace(db);
+      if (copy.kind === "workspace" && claim !== null && claim !== copy.workspace) {
+        throw new Refused(
+          `${copy.source} is the replica of workspace ${claim}, which its filename does not name`,
+          "one database holds one workspace. Rename it to " +
+            `${claim}.sqlite, or move it aside — a file copied under the wrong ` +
+            "name would serve two corpora as one",
+        );
+      }
+      return claim;
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
  * Copy one database through SQLite and verify the copy against the original.
  *
- * The original is held exclusively throughout, so the two row counts are taken
- * of a file nothing can be writing to — which is what makes comparing them mean
- * anything.
+ * Two connections, in this order: a read-only one for the checks that can
+ * refuse (see {@link inspectSource}), then the exclusive one that does the
+ * copying. Only the second can be refused for the file being in use, and only
+ * the second can write to it — so a run that stops because some *other*
+ * database is open has read these and modified none of them.
+ *
+ * The row counts are taken on the exclusive connection rather than the
+ * read-only one, so the file they describe is the file being copied, with
+ * nothing able to write to it in between.
  */
 async function stageDatabase(
   copy: PlannedCopy,
   destination: string,
-): Promise<{ bytes: number; sha256: string }> {
+): Promise<{ bytes: number }> {
+  const claim = inspectSource(copy);
+
   const source = openExclusively(copy.source);
-  let claim: string | null = null;
   let counts: Record<string, number>;
   try {
-    integrityOf(source, copy.source);
-    claim = recordedWorkspace(source);
-    if (
-      copy.kind === "workspace" &&
-      claim !== null &&
-      claim !== copy.workspace
-    ) {
-      throw new Refused(
-        `${copy.source} is the replica of workspace ${claim}, which its filename does not name`,
-        "one database holds one workspace. Rename it to " +
-          `${claim}.sqlite, or move it aside — a file copied under the wrong ` +
-          "name would serve two corpora as one",
-      );
-    }
-    counts = tableCounts(source);
+    counts = refusing(copy.source, () => tableCounts(source));
+    // A timer of our own for as long as the copy runs — see BACKUP_WAKE_MS.
+    const wake = setInterval(() => {}, BACKUP_WAKE_MS);
+    wake.unref();
     try {
-      await backup(source, destination, { rate: ALL_PAGES });
+      await backup(source, destination);
     } catch (error) {
       throw new Refused(
         `copying ${copy.source} failed: ${message(error)}`,
         "nothing was published and the original is untouched",
       );
+    } finally {
+      clearInterval(wake);
     }
   } finally {
     source.close();
@@ -719,8 +774,8 @@ async function stageDatabase(
 
   const copied = new DatabaseSync(destination);
   try {
-    integrityOf(copied, destination);
-    const copiedCounts = tableCounts(copied);
+    refusing(destination, () => integrityOf(copied, destination));
+    const copiedCounts = refusing(destination, () => tableCounts(copied));
     for (const [table, rows] of Object.entries(counts)) {
       if (copiedCounts[table] !== rows) {
         throw new Refused(
@@ -730,7 +785,7 @@ async function stageDatabase(
         );
       }
     }
-    if (recordedWorkspace(copied) !== claim) {
+    if (refusing(destination, () => recordedWorkspace(copied)) !== claim) {
       throw new Refused(
         `the copy of ${copy.source} does not record the workspace the original does`,
         "nothing was published. The original is untouched",
@@ -743,8 +798,7 @@ async function stageDatabase(
     copied.close();
   }
 
-  const contents = readFileSync(destination);
-  return { bytes: contents.length, sha256: digest(contents) };
+  return { bytes: statSync(destination).size };
 }
 
 function message(error: unknown): string {
@@ -782,12 +836,14 @@ export async function runMigration(
   const parent = dirname(plan.to);
   const created = missingAncestors(parent);
   createDataDirectory(parent);
+  const prefix = `.${basename(plan.to)}.`;
+  sweepStaging(parent, prefix);
   const staging = join(
     parent,
-    `.${basename(plan.to)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
+    `${prefix}${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
   );
   createDataDirectory(staging);
-  const files: Receipt["files"] = [];
+  const files: MigrationReceipt["files"] = [];
   try {
     for (const copy of plan.copies) {
       const destination = join(staging, copy.target);
@@ -800,11 +856,10 @@ export async function runMigration(
         source: copy.source,
         target: copy.target,
         bytes: written.bytes,
-        sha256: written.sha256,
       });
     }
 
-    const receipt: Receipt = {
+    const receipt: MigrationReceipt = {
       version: 1,
       migratedAt: new Date().toISOString(),
       from,
@@ -851,7 +906,47 @@ function removeIfEmpty(directories: string[]): void {
   }
 }
 
-function stageReceipt(staging: string, receipt: Receipt): void {
+/**
+ * Remove staging directories a previous run died inside.
+ *
+ * A run killed between staging `credentials.json` and publishing leaves a
+ * hidden directory holding a copy of the signing secret, and nothing would ever
+ * come back for it. Only directories whose recorded pid is gone are swept, so a
+ * second `ub storage migrate` running right now keeps its own.
+ */
+function sweepStaging(parent: string, prefix: string): void {
+  let names: string[];
+  try {
+    names = readdirSync(parent);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith(prefix) || !name.endsWith(".tmp")) {
+      continue;
+    }
+    const pid = Number(name.slice(prefix.length).split(".")[0]);
+    // Strictly positive: `process.kill(0, …)` addresses the whole process
+    // group, which is not a question anyone here means to ask.
+    if (!Number.isInteger(pid) || pid <= 0) {
+      continue;
+    }
+    try {
+      // Signal 0 tests for the process without touching it. EPERM means it is
+      // alive and someone else's; only ESRCH — no such process — is ours to
+      // clean up after.
+      process.kill(pid, 0);
+      continue;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+        continue;
+      }
+    }
+    rmSync(join(parent, name), { recursive: true, force: true });
+  }
+}
+
+function stageReceipt(staging: string, receipt: MigrationReceipt): void {
   const path = join(staging, MIGRATION_RECEIPT);
   const fd = openSync(path, "wx", OWNER_ONLY);
   try {
@@ -899,10 +994,19 @@ function renderRefusals(refusals: Refusal[]): string {
   return text;
 }
 
-/** The retained originals, and the sentence that has to come with them. */
+/**
+ * The retained originals, and the sentence that has to come with them.
+ *
+ * "content unchanged" rather than "unchanged": copying a database means opening
+ * it, and closing a read-write connection to one whose last writer crashed
+ * makes SQLite fold the leftover write-ahead log into the file. No row changes
+ * — it is the same fold `ub status` performs on the same file — but the bytes
+ * do, and a report that claimed otherwise would be wrong for exactly the
+ * machines this command exists for.
+ */
 function renderSources(from: { configDir: string; dataDir: string }): string {
   return (
-    "\nThe originals are retained, unchanged and no longer read:\n" +
+    "\nThe originals are retained, content unchanged, and no longer read:\n" +
     `  ${from.configDir}\n  ${from.dataDir}\n` +
     "Check the migrated copies first — `ub status`, `ub doctor`,\n" +
     "`ub workspace list` — and only then remove them yourself. Nothing here\n" +

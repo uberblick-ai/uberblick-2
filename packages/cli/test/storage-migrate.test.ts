@@ -20,16 +20,19 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  closeSync,
   copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -213,6 +216,25 @@ function tree(root: string): string[] {
  * suite's "no write-ahead log was copied" assertions about files the suite
  * itself created. Closing a read-write connection cleans them up.
  */
+/**
+ * A pid that is certainly not in use: spawn a process and wait for it to exit.
+ *
+ * Picking a number and hoping is how a sweep test starts passing for the wrong
+ * reason on a busy machine.
+ */
+async function deadPid(): Promise<number> {
+  const child = spawn(process.execPath, ["-e", ""]);
+  await new Promise((resolve) => child.on("close", resolve));
+  return child.pid as number;
+}
+
+/** A file's digest, or "absent". For "this did not change" on one path. */
+function digestOf(path: string): string {
+  return existsSync(path)
+    ? createHash("sha256").update(readFileSync(path)).digest("hex")
+    : "absent";
+}
+
 function rowsIn(path: string, table: string): number {
   const db = new DatabaseSync(path);
   try {
@@ -450,6 +472,43 @@ describe("a database another process has open", () => {
   });
 });
 
+// --- what a refusal does to the sources it never copied -----------------------
+
+describe("a refusal during inspection", () => {
+  it("leaves a crashed replica's write-ahead log exactly as it was", async () => {
+    // The two halves of the fixture: one replica a client is holding open, and
+    // one left dirty by a killed writer. The held one sorts first, so the run
+    // refuses before it ever reaches the crashed one — which is the case that
+    // would otherwise be silently checkpointed by being looked at.
+    const box = legacy({ workspaces: [] });
+    mkdirSync(box.dataDir, { recursive: true });
+    const held = join(box.dataDir, `${WORKSPACE}.sqlite`);
+    const crashed = join(box.dataDir, `${OTHER_WORKSPACE}.sqlite`);
+    replica(held, WORKSPACE);
+    await spawnFixture("write-and-die.mjs", [crashed, "40", OTHER_WORKSPACE], null);
+
+    expect(existsSync(`${crashed}-wal`)).toBe(true);
+    const walBefore = digestOf(`${crashed}-wal`);
+    const dbBefore = digestOf(crashed);
+
+    const holder = await spawnFixture("hold-database.mjs", [held], "open");
+    let report: MigrationReport;
+    try {
+      report = await runMigration(darwin(box));
+    } finally {
+      holder.kill();
+    }
+
+    expect(report.state).toBe("refused");
+    expect(refusalText(report)).toContain(held);
+    // Byte for byte, the database *and* its uncheckpointed log: the checks that
+    // could have refused this file read it without writing to it.
+    expect(digestOf(crashed)).toBe(dbBefore);
+    expect(digestOf(`${crashed}-wal`)).toBe(walBefore);
+    expect(existsSync(box.mac)).toBe(false);
+  });
+});
+
 // --- the hub database --------------------------------------------------------
 
 describe("the hub database, which is never guessed at", () => {
@@ -494,6 +553,29 @@ describe("the hub database, which is never guessed at", () => {
       matches: /not a SQLite database/,
     },
     {
+      name: "a database that fails SQLite's integrity check",
+      hubDb: (box) => {
+        const path = join(box.home, "checkout", "damaged.sqlite");
+        hubDatabase(path, Array.from({ length: 200 }, (_, i) => `room-${i}`));
+        // Scribbled well past the header, so it still opens and still passes
+        // the magic-bytes check: the damage is only found by looking.
+        const fd = openSync(path, "r+");
+        writeSync(fd, Buffer.alloc(1024, 0x5a), 0, 1024, 4096 * 3 + 100);
+        closeSync(fd);
+        return path;
+      },
+      matches: /fails SQLite's integrity check/,
+    },
+    {
+      name: "a directory rather than a file",
+      hubDb: (box) => {
+        const path = join(box.home, "checkout", "not-a-file");
+        mkdirSync(path, { recursive: true });
+        return path;
+      },
+      matches: /not a SQLite database/,
+    },
+    {
       name: "the file the migration would write",
       hubDb: (box) => join(box.mac, "data", "hub.sqlite"),
       matches: /is the file the migration would write/,
@@ -513,17 +595,18 @@ describe("the hub database, which is never guessed at", () => {
   for (const one of refusals) {
     it(`refuses ${one.name}, before anything is published`, async () => {
       const box = legacy(one.layoutHub === undefined ? {} : { hub: one.layoutHub });
+      // After the case has planted whatever it is about to be refused for, so
+      // that what is compared is the run's doing and nothing else.
+      const hubDb = one.hubDb(box);
       const before = tree(box.home);
 
-      const report = await runMigration(darwin(box, { hubDb: one.hubDb(box) }));
+      const report = await runMigration(darwin(box, { hubDb }));
 
       expect(report.state).toBe("refused");
       expect(refusalText(report)).toMatch(one.matches);
       expect(report.refusals[0]?.remedy).toBeTruthy();
       expect(existsSync(box.mac)).toBe(false);
-      // Only what the case itself wrote into the fixture home changed.
-      expect(tree(box.configDir)).toEqual(tree(box.configDir));
-      expect(before.length).toBeGreaterThan(0);
+      expect(tree(box.home)).toEqual(before);
     });
   }
 });
@@ -654,6 +737,50 @@ describe("what refuses, and what each refusal says", () => {
     expect(run.status).toBe(1);
     expect(run.stdout).toMatch(/refused/);
     expect(run.stdout).toMatch(/not macOS/);
+  });
+});
+
+// --- what a killed run leaves behind ------------------------------------------
+
+describe("staging left by a run that died", () => {
+  /** A staging directory of the shape a killed run leaves, holding a secret. */
+  function stale(box: Legacy, pid: number): string {
+    const path = join(dirname(box.mac), `.Uberblick.${pid}.abc123def456.tmp`);
+    mkdirSync(path, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      join(path, "credentials.json"),
+      `${JSON.stringify({ signingSecret: SECRET })}\n`,
+      "utf8",
+    );
+    return path;
+  }
+
+  it("sweeps it, because it holds a copy of the signing secret", async () => {
+    const box = legacy();
+    // pid 1 is init: it exists, so use a pid nothing can be using. A freshly
+    // created and reaped child's pid is the closest thing to a guarantee.
+    const dead = await deadPid();
+    const left = stale(box, dead);
+
+    const report = await runMigration(darwin(box));
+
+    expect(report.state).toBe("ready");
+    expect(existsSync(left)).toBe(false);
+    // And the publication still happened, in the same parent directory.
+    expect(readdirSync(dirname(box.mac))).toEqual(["Uberblick"]);
+  });
+
+  it("leaves one whose process is still running alone", async () => {
+    const box = legacy();
+    // This process is alive by definition, and stands in for a second
+    // `ub storage migrate` copying right now: sweeping its staging would pull
+    // the files out from under a run that is going to publish them.
+    const live = stale(box, process.pid);
+
+    const report = await runMigration(darwin(box));
+
+    expect(report.state).toBe("ready");
+    expect(existsSync(join(live, "credentials.json"))).toBe(true);
   });
 });
 

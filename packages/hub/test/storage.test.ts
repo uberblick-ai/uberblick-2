@@ -51,6 +51,27 @@ function seed(path: string): void {
   writeFileSync(path, "", "utf8");
 }
 
+/** What `ub storage migrate` writes when it finishes. */
+function seedReceipt(root: string, contents: unknown): void {
+  mkdirSync(macRoot(root), { recursive: true });
+  writeFileSync(
+    join(macRoot(root), MIGRATION_RECEIPT),
+    typeof contents === "string" ? contents : JSON.stringify(contents),
+    "utf8",
+  );
+}
+
+function receiptFor(root: string): unknown {
+  return {
+    version: 1,
+    migratedAt: new Date().toISOString(),
+    from: { configDir: legacyConfig(root), dataDir: legacyData(root) },
+    files: [
+      { kind: "config", source: join(legacyConfig(root), "config.json"), target: "config.json", bytes: 3 },
+    ],
+  };
+}
+
 function macRoot(root: string): string {
   return join(root, "Library", "Application Support", "Uberblick");
 }
@@ -330,6 +351,44 @@ describe("state in both roots", () => {
     );
   });
 
+  // A receipt is only ever consulted about a root that already holds state, and
+  // only when it parses as a complete one. Both halves matter: the marker is
+  // what repoints every client, so a stray or hand-made file must not do it.
+  it("ignores a receipt in a root that holds nothing else", () => {
+    const root = home();
+    seed(join(legacyConfig(root), "config.json"));
+    seed(join(legacyData(root), `${WORKSPACE}.sqlite`));
+    // Only the marker — the files it claims to describe are gone, or were never
+    // there. Honouring it would point this machine at an empty corpus while
+    // every document sat in the legacy root.
+    seedReceipt(root, receiptFor(root));
+
+    const storage = resolveStorage({ env: { HOME: root }, platform: "darwin" });
+
+    expect(storage.layout).toBe("legacy-xdg");
+    expect(storage.workspaceDir).toBe(legacyData(root));
+  });
+
+  for (const [name, contents] of [
+    ["truncated", '{"version":1,"files":'],
+    ["empty", ""],
+    ["an empty inventory", '{"version":1,"migratedAt":"t","from":{"configDir":"a","dataDir":"b"},"files":[]}'],
+    ["a future version", '{"version":2,"migratedAt":"t","from":{"configDir":"a","dataDir":"b"},"files":[{"kind":"config","source":"a","target":"config.json","bytes":1}]}'],
+  ] as [string, string][]) {
+    it(`refuses rather than honouring a receipt that is ${name}`, () => {
+      const root = home();
+      seed(join(legacyConfig(root), "config.json"));
+      seed(join(macRoot(root), "config.json"));
+      seedReceipt(root, contents);
+
+      // Both roots hold state and nothing here can say which is live, which is
+      // the safe answer: a refusal names both and opens neither.
+      expect(() => resolveStorage({ env: { HOME: root }, platform: "darwin" })).toThrow(
+        AmbiguousStorageError,
+      );
+    });
+  }
+
   // The one case where two populated roots is an answer rather than a
   // question: `ub storage migrate` copies rather than moves, so the originals
   // are still there on purpose, and the receipt it leaves says which root is
@@ -340,7 +399,7 @@ describe("state in both roots", () => {
     seed(join(legacyConfig(root), "config.json"));
     seed(join(legacyData(root), `${WORKSPACE}.sqlite`));
     seed(join(macRoot(root), "config.json"));
-    seed(join(macRoot(root), MIGRATION_RECEIPT));
+    seedReceipt(root, receiptFor(root));
 
     const storage = resolveStorage({ env: { HOME: root }, platform: "darwin" });
 

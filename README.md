@@ -355,6 +355,9 @@ the new root is published in one atomic step.
 
 **Nothing is deleted.** The originals stay exactly where they were, which is what
 makes the move reversible: remove the new root and the old layout is live again.
+Their *content* is untouched; a database whose last writer was killed has its
+leftover write-ahead log folded in when the copy opens it, which is the same
+thing `ub status` does to the same file and changes no row.
 Once `ub status`, `ub doctor` and `ub workspace list` all read the new copies —
 they will, and `ub doctor`'s `storage-layout` line then says `mac` — removing the
 originals is yours to do by hand. Re-running the command reports "already

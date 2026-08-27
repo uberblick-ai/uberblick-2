@@ -41,7 +41,7 @@
  * question. They are applied by their own packages, above this default.
  */
 
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
@@ -86,11 +86,90 @@ const MAC_DIR = "Uberblick";
  * reversible — so afterwards *both* roots hold uberblick files, which is
  * exactly the configuration this module otherwise refuses to guess about. This
  * file is the answer somebody already gave: the Mac root is live, the legacy
- * pair is a retained original. Presence is the whole signal; nothing here opens
- * or parses it, because a resolution that could fail to parse would be a
- * machine that cannot find its own documents.
+ * pair is a retained original.
+ *
+ * **It is never the whole reason to pick a root.** A receipt is only ever
+ * consulted about a Mac root that *already holds state on its own*, and it is
+ * parsed rather than merely counted: a root holding nothing but this file —
+ * because someone copied the marker, or deleted the files around it, or wrote
+ * one by hand — would otherwise point every client at an empty corpus while the
+ * documents sat in the legacy root. Anything that does not parse as a complete
+ * receipt is not one, and resolution falls back to refusing, which is safe.
  */
 export const MIGRATION_RECEIPT = "migration.json";
+
+/**
+ * What a completed migration wrote, as far as anything reading it cares.
+ *
+ * Declared here rather than in the cli because two things depend on the shape:
+ * resolution, which will not honour a malformed one, and `ub storage migrate`,
+ * which writes it and checks a destination against it. One definition, so those
+ * two cannot drift into disagreeing about what a receipt is.
+ */
+export interface MigrationReceipt {
+  version: 1;
+  migratedAt: string;
+  /** The legacy roots the files came from. */
+  from: { configDir: string; dataDir: string };
+  files: {
+    kind: string;
+    source: string;
+    /** Relative to the root the receipt sits in. */
+    target: string;
+    bytes: number;
+  }[];
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string" && value !== "";
+}
+
+/**
+ * Read and validate the receipt in a root, or null when there is not one.
+ *
+ * Strict on purpose, and safe *because* it is strict: every caller treats null
+ * as "this is not a migrated root", and the two that matter then refuse rather
+ * than guess. A half-written or hand-edited receipt is exactly the case where
+ * nothing should be inferred.
+ */
+export function readMigrationReceipt(configDir: string): MigrationReceipt | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(join(configDir, MIGRATION_RECEIPT), "utf8"));
+  } catch {
+    // Absent, unreadable, or not JSON. None of them is a receipt.
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  const receipt = parsed as Partial<MigrationReceipt>;
+  const from = receipt.from;
+  if (
+    receipt.version !== 1 ||
+    !isString(receipt.migratedAt) ||
+    typeof from !== "object" ||
+    from === null ||
+    !isString(from.configDir) ||
+    !isString(from.dataDir) ||
+    !Array.isArray(receipt.files) ||
+    receipt.files.length === 0
+  ) {
+    return null;
+  }
+  for (const file of receipt.files) {
+    if (
+      typeof file !== "object" ||
+      file === null ||
+      !isString(file.target) ||
+      !isString(file.source) ||
+      typeof file.bytes !== "number"
+    ) {
+      return null;
+    }
+  }
+  return receipt as MigrationReceipt;
+}
 
 /**
  * How the Mac root is written in prose — a remedy line, a document. The
@@ -319,13 +398,16 @@ export function resolveStorage(options: StorageOptions = {}): StoragePaths {
   if (!holdsState(xdg)) {
     return mac;
   }
-  // A completed migration is the one case where both roots holding files is not
-  // an ambiguity: somebody ran `ub storage migrate`, which copied rather than
-  // moved so that the originals stay as a rollback.
-  if (existsSync(join(mac.configDir, MIGRATION_RECEIPT))) {
-    return { ...mac, warnings: [migratedWarning(mac, xdg)] };
-  }
   if (holdsState(mac)) {
+    // Both roots hold files. A completed migration is the one case where that
+    // is an answer rather than a question: it copied rather than moved, so the
+    // originals stay as a rollback. The receipt has to be a *valid* one, and
+    // the root has to hold state of its own — a root with nothing in it but a
+    // marker is not a migrated installation, whatever the marker says.
+    const receipt = readMigrationReceipt(mac.configDir);
+    if (receipt !== null) {
+      return { ...mac, warnings: [migratedWarning(mac, xdg)] };
+    }
     throw new AmbiguousStorageError(mac, xdg);
   }
   return { ...xdg, layout: "legacy-xdg", warnings: [migrationWarning(mac, xdg)] };
