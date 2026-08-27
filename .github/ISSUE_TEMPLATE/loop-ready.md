@@ -5,7 +5,9 @@ about: Work item the implementation loop can pick up. Contract: .github/ISSUE_SP
 
 Depends-on:
 Touches:
-Priority: normal
+
+<!-- Set the organization Issue Field `Priority` during triage. Do not write
+     priority into the issue body. Missing Priority is untriaged/ineligible. -->
 
 ## What
 

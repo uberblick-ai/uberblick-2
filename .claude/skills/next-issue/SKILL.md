@@ -45,7 +45,10 @@ file contains only Claude coordinator machinery and does not restate either.
    on `main` governs from the next invocation onward.
    Then `gh issue list --state open`, `gh pr list --state open`, and
    for each open PR its checks and reviews. Reconcile claims using the stale
-   predicate in `AGENTS.md`.
+   predicate in `AGENTS.md`. Resolve the organization's Issue Field named
+   `Priority` and read each open issue's field value through GitHub's issue
+   field API. Do not substitute a Projects-only field, label, body line, or
+   locally remembered value; do not hard-code field or option ids.
 
 2. **Advance open PRs first** — an open PR is closer to value than a new
    dispatch, and this includes PRs that predate the loop. For each, drive the
@@ -222,11 +225,19 @@ file contains only Claude coordinator machinery and does not restate either.
    answers before you report the stack serving the new `main`. A fresh hub
    store is fine: replicas rehydrate it over sync.
 
-3. **Lint `ready` issues** against the spec's checklist. Failures: comment
-   exactly what's missing, remove `ready`, skip.
+3. **Lint `ready` issues** against the spec's checklist, including the
+   structured `Priority` field and the ban on legacy body `Priority:` lines.
+   Failures: comment exactly what's missing, remove `ready`, skip. A missing
+   or unknown Priority is untriaged; never infer `Medium` or edit it on the
+   owner's behalf.
 
 4. **Compute the eligible set and order it** per the spec's scheduling
-   semantics (deps closed, unclaimed; topology → Priority → number).
+   semantics (valid structured Priority, deps closed, unclaimed; topology →
+   `Urgent` → `High` → `Medium` → `Low` → number). Before any claim, print a
+   read-only scheduling table with issue, Priority, dependency/claim result,
+   eligibility, and exclusion reason. Treat this as the dry run: if the table
+   cannot account for every open issue, dispatch nothing until observation is
+   repaired. The loop reads scheduling authority; it never reprioritizes.
 
 5. **Conflict analysis.** Apply the spec's scheduling rules (schema serializes
    globally; expected file-level overlap decides, not the `Touches` sets). Cap

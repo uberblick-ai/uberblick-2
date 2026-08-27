@@ -28,15 +28,25 @@ Touches: mcp-server, schema
   `schema`, `web` — the live directory listing is authoritative, this sentence
   is not), plus `repo` (root config, CI, top-level docs).
   Grammar: `^Touches: [a-z0-9-]+(, [a-z0-9-]+)*$`, every name from that list.
-- **`Priority`** — optional third line. `high`, `normal`, or `low`; absent
-  means `normal`. Grammar when present: `^Priority: (high|normal|low)$`.
-  A reprioritizing pass edits this line; everything else about order is
-  derived.
+
+Priority never appears in the issue body. The organization Issue Field named
+`Priority` is the sole scheduling authority; a body line beginning
+`Priority:` is nonconforming legacy input.
+
+### Structured Priority
+
+- Allowed values are `Urgent`, `High`, `Medium`, and `Low`. Missing means
+  **untriaged and ineligible**, never implicit `Medium`.
+- The coordinator sets or changes Priority from recorded owner intent.
+  `Urgent` requires explicit owner authorization. The implementation loop
+  reads Priority but never invents or changes it.
+- Priority is independent of lifecycle labels and dependency/claim state. It
+  orders work only after those eligibility checks have passed.
 
 ### Scheduling semantics
 
-- **Eligible** = labeled `ready` AND every `Depends-on` issue is closed AND
-  not claimed.
+- **Eligible** = labeled `ready` AND carrying a valid structured `Priority`
+  AND every `Depends-on` issue is closed AND not claimed.
 - Parallelism is judged at **file** level, not `Touches`-set level: overlapping
   `Touches` sets do not by themselves queue. From the issues' scope and
   Pointers the loop forms an expectation of which files each will edit, and
@@ -48,8 +58,8 @@ Touches: mcp-server, schema
   requires.
 - `schema` in `Touches` **serializes globally** — it is the keystone package;
   nothing else is dispatched while a schema-touching issue is in flight.
-- Order among eligible issues: dependency topology, then `Priority`
-  (high → normal → low), then ascending issue number.
+- Order among eligible issues: dependency topology, then structured `Priority`
+  (`Urgent` → `High` → `Medium` → `Low`), then ascending issue number.
 
 ### Gate check
 
@@ -63,7 +73,7 @@ the issue was mis-scoped or the agent scope-crept. The resolution is explicit
 | Label | Meaning | Set by |
 |---|---|---|
 | *(none)* | Draft — invisible to the loop | — |
-| `ready` | Spec-complete; the loop may claim it | Human (or agent with human sign-off) |
+| `ready` | Spec-complete; eligibility still requires Priority, closed dependencies, and no active claim | Human (or agent with human sign-off) |
 | `in-progress` | Claimed; branch named in a comment | Loop |
 | `needs-decision` | Parked on a question only a human can answer | Loop |
 
@@ -169,11 +179,13 @@ An issue labeled `ready` must pass all of:
 
 1. `Depends-on` line present, first-section, matching the grammar above.
 2. `Touches` line present, matching the grammar, every name valid.
-3. `Priority` line, when present, matches its grammar.
-4. All five `##` sections present: What, Why, Acceptance criteria,
+3. No body line begins `Priority:`.
+4. The organization Issue Field `Priority` is exactly one of `Urgent`, `High`,
+   `Medium`, or `Low`; missing is untriaged and fails lint.
+5. All five `##` sections present: What, Why, Acceptance criteria,
    Out of scope, Pointers.
-5. At least one `- [ ]` checkbox under Acceptance criteria.
-6. Out of scope and Pointers are non-empty (explicit `None.` is acceptable).
+6. At least one `- [ ]` checkbox under Acceptance criteria.
+7. Out of scope and Pointers are non-empty (explicit `None.` is acceptable).
 
 Sizing and decision-completeness are judgment calls, not lintable — the
 coordinator applies them when granting or revoking `ready`.

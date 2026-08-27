@@ -48,7 +48,9 @@ implementation (or Workflow pipelines for fan-out), then validate their output
    what, why, acceptance criteria. No issue, no branch. Issues the
    implementation loop may pick up must conform to `.github/ISSUE_SPEC.md`
    (`Depends-on`/`Touches` header, runnable acceptance criteria, explicit
-   out-of-scope); the `ready` label asserts conformance and eligibility.
+   out-of-scope). The `ready` label asserts specification conformance; actual
+   eligibility additionally requires structured Priority, closed dependencies,
+   and no active claim as defined by the spec.
 2. **Branch + implementer agents.** Implementation happens on a feature branch
    (`feat/<slug>`, `fix/<slug>`), written by isolated implementer agents
    coordinated by Fable with decision-complete briefs. Never commit feature
