@@ -236,23 +236,6 @@ interface Entry {
 
 const entries = new Map<string, Entry>();
 
-/**
- * The rooms this tab holds open, each with its un-acknowledged backlog.
- *
- * The only un-synced signal the browser has without asking the hub: a backlog
- * belongs to a live provider, and nothing anywhere persists an acknowledged
- * watermark. A room that is not in this map is therefore *unreadable*, never
- * clean — which is the distinction `forget.ts` renders as "unknown" rather than
- * "none" before it deletes anything.
- */
-export function openRoomBacklog(): Map<string, number> {
-  const backlog = new Map<string, number>();
-  for (const [room, entry] of entries) {
-    backlog.set(room, entry.connection.status.unsyncedChanges);
-  }
-  return backlog;
-}
-
 function openRoom(room: string, identity: AwarenessUser): Entry {
   const ydoc = new Y.Doc();
   const socket = sharedSocket();

@@ -89,16 +89,13 @@
   --radius: 0.625rem;
   --radius-sm: calc(var(--radius) - 4px);
 
-  /* The three floating-surface values, each of which was written out at more
-     than one call site before the vendored shadcn chrome needed the lift too
-     (#27). A popover that floats over the prose has to be the *same* lift as
-     the block menu and the comment composer, and the settings dialog names its
-     scrim here rather than inlining it — two spellings would read as two
-     surfaces. Theme-invariant: black over a light ground and black over a dark
-     one are both "less light here".*/
+  /* The floating-surface lift, written out at more than one call site before
+     the vendored shadcn chrome needed it too (#27). A popover that floats over
+     the prose has to be the *same* lift as the block menu and the comment
+     composer — two spellings would read as two surfaces. Theme-invariant:
+     black over a light ground and black over a dark one are both "less light
+     here".*/
   --shadow-float: 0 8px 24px oklch(0 0 0 / 25%);
-  --shadow-modal: 0 12px 32px rgb(0 0 0 / 0.28);
-  --scrim: rgb(0 0 0 / 0.45);
 
   /* The reading measure. Prose wider than ~75ch is hard to track back to the
      next line, so the content column is capped here and centred in whatever
@@ -486,25 +483,6 @@ body {
   margin-top: auto;
   padding-top: 0.5rem;
   border-top: 1px solid var(--border);
-}
-
-.ub-settings-open {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  width: 100%;
-  padding: 0.3rem 0.4rem;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--muted-foreground);
-  font: inherit;
-  cursor: pointer;
-}
-
-.ub-settings-open:hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
 }
 
 /* ---- the sidebar's two anchored menus (#74, design 1c) ----
@@ -988,151 +966,6 @@ body {
   .ub-rail-open .ub-outline {
     display: none;
   }
-}
-
-/* ---- local settings (#176) ---- */
-
-/* The scrim. `fixed`, over the viewport rather than over `.ub-body` — the
-   header is not part of the body, and a scrim that stopped short of it would
-   leave live controls above a dialog that is supposed to own the screen. The
-   dialog is portalled to `document.body` for the same reason. */
-.ub-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  background: var(--scrim);
-}
-
-.ub-settings {
-  width: min(32rem, 100%);
-  max-height: 100%;
-  overflow-y: auto;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--card);
-  color: var(--card-foreground);
-  box-shadow: var(--shadow-modal);
-  font-size: 0.85rem;
-}
-
-.ub-settings-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.ub-settings-scope {
-  margin: 0 0 1rem;
-}
-
-.ub-settings-section + .ub-settings-section {
-  margin-top: 1.25rem;
-}
-
-.ub-settings-section-title {
-  margin: 0 0 0.5rem;
-  font-size: 0.8rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted-foreground);
-}
-
-/* One entry in a section. A bordered card, so the next connection is a sibling
-   and needs no new layout. */
-.ub-setting {
-  padding: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.ub-setting + .ub-setting {
-  margin-top: 0.5rem;
-}
-
-.ub-setting-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.ub-setting-title {
-  margin: 0;
-  font-size: 0.9rem;
-  font-weight: 500;
-}
-
-.ub-setting-state {
-  color: var(--status-success);
-}
-
-.ub-setting-copy {
-  margin: 0.4rem 0 0;
-  line-height: 1.45;
-}
-
-.ub-setting-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-top: 0.6rem;
-}
-
-.ub-setting-input {
-  flex: 1;
-  font: inherit;
-  font-size: 0.8rem;
-  padding: 0.25rem 0.4rem;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-sm);
-  background: var(--background);
-  color: var(--foreground);
-}
-
-.ub-setting-error {
-  margin: 0.5rem 0 0;
-  color: var(--destructive);
-}
-
-/* One cached workspace inside the Storage entry (#198). */
-.ub-forget {
-  margin-top: 0.6rem;
-  padding: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.ub-forget-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.ub-forget-name {
-  font-size: 0.75rem;
-  word-break: break-all;
-}
-
-/* A gate that is not yet satisfied still has to look like one. */
-.ub-forget .ub-tool:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-/* The cost, stated above the field that accepts it — see `unsyncedSentence`. */
-.ub-forget-cost {
-  padding: 0.4rem 0.5rem;
-  border-left: 2px solid var(--destructive);
-  background: var(--destructive-subtle);
-  color: var(--foreground);
 }
 
 /* ---- the sync detail panel (#72, design surface 1e's right column) ---- */
@@ -1780,16 +1613,6 @@ body {
 .ub-tool-on {
   background: var(--brand-subtle);
   border-color: var(--brand);
-  color: var(--foreground);
-}
-
-/* The destructive tool button — the workspace forget (#198). Same construction
-   as `.ub-tool-on` and for the same reason: the accent carries the border and
-   the wash, while the label stays `--foreground`, which is the only pair that
-   holds its contrast in both themes. */
-.ub-tool-danger {
-  background: var(--destructive-subtle);
-  border-color: var(--destructive);
   color: var(--foreground);
 }
 
