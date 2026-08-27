@@ -12,8 +12,9 @@
  * payload; that the three tailscale failure modes are told apart; that nothing
  * scheduled is installed on the host, updates being deliberate; that the
  * signing secret is in no argument vector and on neither stream; that a failed
- * `up` persists nothing; which way the workspace hands off; and that a second
- * run is a no-op.
+ * `up` persists nothing; that a failed step is reported in the vendor's own
+ * words, bounded; which way the workspace hands off; and that a second run is
+ * a no-op.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -84,6 +85,8 @@ interface Host {
   facts?: Record<string, string>;
   /** Extra `case` clauses for the ssh stub, matched before the defaults. */
   ssh?: string;
+  /** Extra `case` clauses for the gh stub, matched before the defaults. */
+  gh?: string;
   /** The body of `gh api …/keys`. */
   keys?: string;
 }
@@ -142,7 +145,7 @@ function harness(host: Host = {}, box: Sandbox = sandbox({ credentials: { signin
   writeFileSync(join(behavior, "ssh.sh"), sshBehavior(host), "utf8");
   writeFileSync(
     join(behavior, "gh.sh"),
-    `case "$*" in\n  *keys*) printf '%s\\n' '${host.keys ?? "[]"}' ;;\nesac\n`,
+    `case "$*" in\n${host.gh ?? ""}\n  *keys*) printf '%s\\n' '${host.keys ?? "[]"}' ;;\nesac\n`,
     "utf8",
   );
   writeFileSync(
@@ -394,6 +397,57 @@ describe("ub remote init", () => {
     expect(await init(rig)).toBe(1);
     expect(rig.err()).toContain("hub | boom");
     expect(existsSync(join(rig.box.configHome, "uberblick", "config.json"))).toBe(false);
+  });
+
+  it("reports a failed vendor step in the vendor's own last words", async () => {
+    const rig = harness({
+      gh: `  *"deploy-key add"*)
+    i=1
+    while [ $i -le 6 ]; do echo "boom $i" >&2; i=$((i + 1)); done
+    exit 1 ;;`,
+    });
+    expect(await init(rig)).toBe(1);
+    // The tail, because what a vendor says last is what went wrong.
+    expect(rig.err()).toContain("gh repo deploy-key add exited 1: boom 4\nboom 5\nboom 6");
+    expect(rig.err()).not.toContain("boom 3");
+
+    // And one enormous line is cut to its end rather than pasted whole.
+    const long = "x".repeat(2000);
+    const loud = harness({
+      gh: `  *"deploy-key add"*) printf '%s\\n' '${long}' >&2; exit 1 ;;`,
+    });
+    expect(await init(loud)).toBe(1);
+    const reported = loud.err()
+      .split("\n")
+      .find((line) => line.includes("exited 1")) as string;
+    expect(reported).not.toContain(long);
+    expect(reported).toContain(`…${"x".repeat(500)}`);
+    expect(reported.length).toBeLessThan(600);
+  });
+
+  it("names the usual causes when the deploy key is refused", async () => {
+    const rig = harness({
+      gh: `  *"deploy-key add"*) echo "HTTP 403: Resource not accessible by personal access token" >&2; exit 1 ;;`,
+    });
+    expect(await init(rig)).toBe(1);
+    expect(rig.err()).toContain("Resource not accessible by personal access token");
+    expect(rig.err()).toMatch(/admin rights on the repository/);
+    expect(rig.err()).toMatch(/GH_TOKEN.*GITHUB_TOKEN/);
+    // And the host is not touched further.
+    expect(rig.labels().join("\n")).not.toContain("uberblick:clone");
+  });
+
+  it("has no signing secret to quote back, whatever a vendor prints", async () => {
+    const rig = harness({
+      // The worst case: a failing vendor that echoes the variable it inherited.
+      gh: `  *"deploy-key add"*) printf 'token=%s\\n' "\${HUB_AUTH_TOKEN:-<unset>}" >&2; exit 1 ;;`,
+    });
+    // The shape `fnox exec` leaves: exported here, so inherited by default.
+    rig.env.HUB_AUTH_TOKEN = SECRET;
+    expect(await init(rig)).toBe(1);
+    // The echo did reach the report — and found nothing to echo.
+    expect(rig.err()).toContain("token=<unset>");
+    expect(rig.output()).not.toContain(SECRET);
   });
 
   it("persists the endpoint when this workspace holds no documents", async () => {
