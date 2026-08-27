@@ -473,7 +473,7 @@ async function bindCheck(
 
 // --- MCP wiring --------------------------------------------------------------
 
-/** Every file `ub mcp install` knows how to write, in the order it prefers them. */
+/** Every scope `ub mcp install` can target, in the order it prefers them. */
 const SCOPES: Scope[] = ["project", "user"];
 
 function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
@@ -620,7 +620,7 @@ export const DOCTOR_HELP = `usage: ub doctor [--json]
 Check the local stack against its known failure modes — configuration, the
 signing secret and its file mode, the database, whether the hub is reachable
 and agrees with this machine's clock, and the MCP client configs
-\`ub mcp install\` writes. Reads only; it fixes nothing and names what to run
+\`ub mcp install\` targets. Reads only; it fixes nothing and names what to run
 instead.
 
 options:

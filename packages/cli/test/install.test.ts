@@ -422,6 +422,32 @@ describe("ub mcp install, and what is registered already", () => {
     expect(existsSync(stub.record)).toBe(false);
   });
 
+  it("refuses a `[mcp_servers.uberblick]` that is spelled another way", () => {
+    // A quoted key, spaces inside the brackets and a trailing comment are one
+    // table spelled four ways, and reading any of them as "nothing there" would
+    // run `codex mcp add` — whose duplicate add exits 0 and replaces what it
+    // finds. A header this cannot compare byte for byte is somebody else's.
+    const box = sandbox();
+    const home = codexHome(box);
+    const path = join(home, "config.toml");
+    const before =
+      '[ mcp_servers."uberblick" ] # theirs\ncommand = "somebody-elses"\n' +
+      `args = ["serve"]\n\n[mcp_servers."uberblick".env]\nAPI_TOKEN = "${SECRET}"\n`;
+    writeFileSync(path, before, "utf8");
+    const stub = stubVendor(box, "codex");
+
+    const run = runUb(["mcp", "install", "codex", "--user"], box, {
+      ...stub.env,
+      CODEX_HOME: home,
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toMatch(/something other than this/);
+    expect(run.output).not.toContain(SECRET);
+    expect(run.output).not.toContain("somebody-elses");
+    expect(read(path)).toBe(before);
+    expect(existsSync(stub.record)).toBe(false);
+  });
+
   it("refuses an entry it did not write, prints the snippet, and quotes nothing", () => {
     const box = sandbox();
     const path = join(box.cwd, ".mcp.json");

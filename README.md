@@ -308,10 +308,11 @@ Inside a checkout prefer `mise run init` over calling `ub init` directly: the
 task wraps it in `fnox exec`, which is how a decryptable secret becomes visible
 to it in the first place. Every question `ub init` asks has a flag (`--name`,
 `--color`, `--workspace`, `--yes`), and a non-interactive stdin takes the
-defaults rather than blocking, so it needs no TTY. `--mcp` runs `ub mcp install`
-with its defaults when `ub init` finishes, and `--no-mcp` says not to mention it;
-a refusal there is a warning rather than a failed bootstrap, because everything
-`ub init` was asked to settle has been settled by then.
+defaults rather than blocking, so it needs no TTY. `--mcp` ends by printing what
+`ub mcp install --print` prints — the snippet and the file it goes in — and
+`--no-mcp` says not to mention it. A bootstrap never registers a server with
+somebody's agent on its own, even with a vendor CLI installed: running
+`claude mcp add` is `ub mcp install`, asked for on purpose.
 
 Configuration is JSON and every layer is optional — absent configuration is a
 default, never an error — with one exception: the **workspace** has no default.

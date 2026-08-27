@@ -220,17 +220,54 @@ function jsonMatches(held: unknown, entry: Entry): boolean {
 }
 
 /**
+ * A plain table header's dotted key, or null when the line is not one.
+ *
+ * `[mcp_servers.uberblick]`, `[mcp_servers."uberblick"]`, `[ mcp_servers.uberblick ]`
+ * and `[mcp_servers.uberblick] # note` are one table spelled four ways, and an
+ * exact-string match reads three of them as "no entry here" — which would send
+ * `codex mcp add` at a file that already has one, to replace it. An
+ * array-of-tables header (`[[…]]`) is deliberately not one of these: it names
+ * something else.
+ */
+function tableKey(line: string): string[] | null {
+  const match = /^\[\s*([^[\]]+?)\s*\]\s*(?:#.*)?$/.exec(line.trim());
+  if (match === null) return null;
+  return (match[1] as string)
+    .split(".")
+    .map((part) => part.trim().replace(/^(["'])(.*)\1$/, "$2"));
+}
+
+/**
+ * How many key parts a header adds under `[mcp_servers.<name>]` — 0 for the
+ * table itself, 1 for its `env` sub-table — or null for any other table.
+ */
+function ownedBy(line: string, name: string): number | null {
+  const key = tableKey(line);
+  if (key === null || key[0] !== "mcp_servers" || key[1] !== name) return null;
+  return key.length - 2;
+}
+
+/**
  * The lines `[mcp_servers.<name>]` owns — its keys and its `env` sub-table —
  * trimmed, or null when the header is not there.
+ *
+ * Only a header found here is compared, and the comparison is byte for byte
+ * against what `codex mcp add` writes: a table spelled any other way is
+ * therefore `foreign` rather than `absent`, which is the conservative answer.
+ * Refusing a registration this cannot prove is ours costs somebody one manual
+ * paste; treating it as absent costs them their entry.
  */
 function tomlTable(text: string, name: string): string | null {
   const lines = text.split("\n");
-  const start = lines.findIndex((line) => line.trim() === `[mcp_servers.${name}]`);
+  const start = lines.findIndex((line) => ownedBy(line, name) === 0);
   if (start === -1) return null;
   let end = start + 1;
   while (end < lines.length) {
-    const line = (lines[end] as string).trim();
-    if (line.startsWith("[") && !line.startsWith(`[mcp_servers.${name}.`)) break;
+    const line = lines[end] as string;
+    if (line.trimStart().startsWith("[")) {
+      const depth = ownedBy(line, name);
+      if (depth === null || depth === 0) break;
+    }
     end += 1;
   }
   return lines.slice(start, end).join("\n").trim();
