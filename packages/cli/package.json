@@ -24,7 +24,7 @@
     "@uberblick/schema": "workspace:*"
   },
   "devDependencies": {
-    "@hocuspocus/provider": "^4.6.0",
+    "@hocuspocus/provider": "4.6.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/node": "^26.2.0",
     "yjs": "catalog:",
