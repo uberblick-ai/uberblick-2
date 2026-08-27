@@ -41,7 +41,11 @@
  * `Y.applyUpdate`. Yjs v1, matching the one-encoding-everywhere invariant.
  */
 
-import type { Hocuspocus, onStoreDocumentPayload } from "@hocuspocus/server";
+import type {
+  Hocuspocus,
+  WebSocketLike,
+  onStoreDocumentPayload,
+} from "@hocuspocus/server";
 import { Server } from "@hocuspocus/server";
 import { parseRoom } from "@uberblick/schema";
 import type { HubConfig } from "./config.js";
@@ -79,11 +83,29 @@ export interface Hub {
    */
   flush(): Promise<void>;
   /**
-   * Quiesce connections, flush, unload documents, close the database. Rejects
-   * unless the hub's state is known to be on disk when it returns — a failed
-   * store, before or during teardown, or a teardown that did not finish inside
-   * the shutdown timeout. The resources are released either way, so a caller
-   * can exit on the rejection rather than because of it.
+   * Quiesce connections, flush, close every client websocket, unload documents,
+   * close the database. Rejects unless the hub's state is known to be on disk
+   * when it returns — a failed store, before or during teardown, or a teardown
+   * that did not finish inside the shutdown timeout. The resources are released
+   * either way, so a caller can exit on the rejection rather than because of it.
+   *
+   * **What a client sees.** A socket holding at least one room is sent a `1001`
+   * close frame and reports itself disconnected within ~5–10ms, which is what
+   * makes an in-process stop as legible as a killed process — see
+   * {@link openSockets} for why that is not what Hocuspocus does on its own. A
+   * client whose upgrade is in flight, or accepted but not yet upgraded, when
+   * `stop()` is called is refused within ~5ms by the `httpServer.close()` that
+   * runs first, so it never lands on a dead socket either.
+   *
+   * **The one exception**, a boundary rather than a bug: a socket holding *no*
+   * room — never authenticated, token refused, every room detached — is sent no
+   * frame, because Hocuspocus exposes a socket only through
+   * `Connection.webSocket`. Hocuspocus' own connection timeout ends it instead,
+   * with code `4408`, no later than about 60s after it connected; the port is
+   * released immediately either way. Reaching those sockets would mean tracking
+   * raw ones from `onUpgrade`, where a socket can only be destroyed and not
+   * closed — trading a 60s wait for an abrupt reset, on a connection that by
+   * definition holds no client state — so it is not done.
    */
   stop(): Promise<void>;
 }
@@ -286,6 +308,55 @@ async function flushPendingStores(
 
   log({ event: "hub.flush", documents: pending.length });
   await Promise.all(pending);
+}
+
+/** WebSocket "going away": the hub is leaving, this client did nothing wrong. */
+const GOING_AWAY = 1001;
+
+/**
+ * The websockets the hub is currently holding, one entry per socket.
+ *
+ * Hocuspocus' `closeConnections()` closes *rooms*: it sends each connection an
+ * in-band close message and drops it from its document, and leaves the socket
+ * underneath open. A client therefore hears nothing it can act on when a hub
+ * stops in-process — every room dead, no close frame, nothing that will ever
+ * offer a token again — until its own dead-connection timer fires some thirty
+ * seconds later, where a `SIGKILL`ed hub is noticed in milliseconds. Sending
+ * the frame is what makes `stop()`'s "quiesce connections" true for the client
+ * as well as for the server.
+ *
+ * The sockets are read back from the documents, so this must run *before* the
+ * rooms are closed: closing one removes the connection that names its socket.
+ * One client on three documents is three connections over one socket, hence the
+ * Set. A socket holding no room is not reachable here at all; {@link Hub.stop}
+ * states what that costs.
+ */
+function openSockets(hocuspocus: Hocuspocus<HubContext>): Set<WebSocketLike> {
+  const sockets = new Set<WebSocketLike>();
+  for (const document of hocuspocus.documents.values()) {
+    for (const connection of document.getConnections()) {
+      sockets.add(connection.webSocket);
+    }
+  }
+  return sockets;
+}
+
+/** Send each collected socket the close frame. Never fails a shutdown. */
+function closeSockets(sockets: Set<WebSocketLike>, log: HubLogger): void {
+  let closed = 0;
+  for (const socket of sockets) {
+    try {
+      socket.close(GOING_AWAY, "hub shutting down");
+      closed += 1;
+    } catch (error) {
+      // A socket that went away between the two steps is already gone, and
+      // releasing one is never the reason a shutdown reports failure.
+      log({ event: "hub.stop.socketCloseFailed", error: String(error) });
+    }
+  }
+  if (closed > 0) {
+    log({ event: "hub.stop.socketsClosed", sockets: closed });
+  }
 }
 
 async function withTimeout(
@@ -589,6 +660,10 @@ export async function createHub(config: HubConfig): Promise<Hub> {
   let stopping: Promise<void> | undefined;
 
   const runStop = async (): Promise<void> => {
+    // Collected before the rooms are closed, because closing one removes the
+    // connection that names its socket. See openSockets.
+    const sockets = openSockets(hocuspocus);
+
     // Quiesce first. Closing the socket and the open connections is what makes
     // the flush below final: while clients can still send updates — or connect —
     // a document can go dirty again after it was stored, and the write that
@@ -606,6 +681,11 @@ export async function createHub(config: HubConfig): Promise<Hub> {
       failure = error;
     }
 
+    // The rooms are closed and what they held is on disk: tell the clients.
+    // Before the teardown rather than after it, so a shutdown that stalls
+    // unloading documents still does not leave anyone on a dead socket.
+    closeSockets(sockets, log);
+
     // destroy() closes every connection and waits for the documents to unload.
     // It can only wait forever if a document refuses to unload — which is
     // exactly what a failing store makes it do — so bound it rather than
@@ -620,8 +700,10 @@ export async function createHub(config: HubConfig): Promise<Hub> {
       });
     });
 
-    // Sockets that never saw the close frame would otherwise keep the HTTP
-    // server's handle (and the port) alive.
+    // Plain HTTP keep-alive connections only: Node stops tracking a socket the
+    // moment it is upgraded, so this reaches no websocket, and the port is
+    // released by `httpServer.close()` above either way. It is kept because a
+    // request that never upgraded is otherwise free to hold its socket open.
     server.httpServer.closeAllConnections?.();
 
     closeDatabase();
