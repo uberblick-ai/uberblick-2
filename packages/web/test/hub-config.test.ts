@@ -92,7 +92,7 @@ function serving(...answers: Array<{ status?: number; body: string }>): {
  * `WORKSPACE_ID` and `WORKSPACES` come from the environment vite was started
  * in, and a contributor's machine has its own ids. What these tests pin is the
  * precedence — that every unusable answer lands on the *same* built-in list —
- * not what one developer's `mise.local.toml` happens to say.
+ * not what one developer's configuration happens to say.
  */
 async function builtInWorkspaces(): Promise<readonly string[]> {
   const { workspaces } = await readClientConfig(

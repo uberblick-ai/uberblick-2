@@ -38,12 +38,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
-import {
-  bridgeConfig,
-  liveDocs,
-  resolveMcpConfig,
-  syncWorkspace,
-} from "@uberblick/mcp-server";
+import { resolveMcpConfig } from "@uberblick/mcp-server";
 import type { McpConfig } from "@uberblick/mcp-server";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
@@ -617,19 +612,6 @@ async function ask(io: Io, question: string): Promise<string | null> {
   }
 }
 
-/**
- * How many documents this machine holds.
- *
- * The local update log alone — sync is switched off for this reading, so it
- * costs no hub round trip. That is also its limit, and the caller says so: a
- * document a browser wrote to a local hub and no MCP session ever pulled down
- * is not in the log and is not counted.
- */
-async function localDocumentCount(base: McpConfig): Promise<number> {
-  const corpus = await syncWorkspace(bridgeConfig(base, { authSecret: null }));
-  return liveDocs(corpus).length;
-}
-
 export async function remoteInitCommand(
   argv: string[],
   io: Io = processIo,
@@ -927,37 +909,13 @@ export async function remoteInitCommand(
   // string is compared by two machines, and only the uuid is the identity.
   const joinUrl = `${endpoint}/${base.workspaceId}`;
 
-  const held = await localDocumentCount(base);
-  if (held > 0) {
-    report +=
-      `\nThis workspace holds ${held} document${held === 1 ? "" : "s"}, so the ` +
-      "endpoint was left alone — `ub remote set` moves nothing. Move them onto " +
-      "the new hub with:\n\n" +
-      `  ub remote promote ${endpoint}\n` +
-      "\nAfter that, bind another machine to this workspace with:\n\n" +
-      `  ub remote join ${joinUrl}\n`;
-    io.out(report);
-    return 0;
-  }
-
   const persistence = setRemote(endpoint, { env });
   for (const warning of persistence.warnings) io.err(`ub: warning: ${warning}\n`);
   report +=
-    `\nThis workspace holds no documents, so the endpoint is now ${endpoint}\n` +
+    `\nThe endpoint is now ${endpoint}\n` +
     persistence.written.map((path) => `  wrote ${path}\n`).join("") +
-    "(counted from the local update log: a document a browser wrote to a local " +
-    "hub and no MCP session ever pulled down is not visible to it.)\n" +
-    "\nBind another machine to this workspace with:\n\n" +
+    "\nBind this or another machine to this workspace with:\n\n" +
     `  ub remote join ${joinUrl}\n`;
-  if (persistence.outrankedBy !== null) {
-    io.out(report);
-    io.err(
-      `ub remote init: ${persistence.outrankedBy.layer} names ` +
-        `${persistence.outrankedBy.endpoint}, so the clients will keep dialling ` +
-        "that one.\n",
-    );
-    return 1;
-  }
   io.out(report);
   return 0;
 }

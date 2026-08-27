@@ -5,13 +5,14 @@ import { defineConfig } from "vitest/config";
 /**
  * Client configuration reaches the bundle through `define`.
  *
- * `HUB_URL` and `WORKSPACE_ID` are plaintext config, both written into the
- * derived `mise.local.toml` by `ub init` — the committed `mise.toml` carries no
- * endpoint (#376), so a checkout that has joined nothing falls back to the
- * `ws://localhost:1234` below. `HUB_AUTH_TOKEN` is a real secret decrypted by
- * `fnox exec`, which the `mise run web` task already wraps this command in. All
- * three are read here, at config time, from the task's environment — never from
- * a committed `.env`.
+ * `HUB_URL` and `WORKSPACE_ID` are plaintext config, put into this command's
+ * environment by `ub env`, which the `mise run web` task wraps it in: they are
+ * this machine's own configuration, resolved by `ub` from `config.json`. The
+ * committed `mise.toml` carries no endpoint (#376), so a checkout that has
+ * joined nothing falls back to the `ws://localhost:1234` below.
+ * `HUB_AUTH_TOKEN` is a real secret decrypted by `fnox exec`, which wraps that
+ * in turn. All three are read here, at config time, from the task's environment
+ * — never from a committed `.env`.
  *
  * `HUB_URL`, `WORKSPACE_ID` and `WORKSPACES` are *defaults*, not the answer.
  * The client prefers the hub endpoint

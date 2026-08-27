@@ -170,13 +170,12 @@ describe("ub mcp serve", () => {
     }
   });
 
-  // What the wrapper owes a client: with no `HUB_URL` in the environment — the
-  // layer that outranks it — the endpoint is the user config's, and it survives
-  // the exec into the server the client actually talks to. `checkout: true` is
-  // documentation of the spawn shape, a `cwd` inside a repository; nothing on
-  // this path reads it, which is the point. Worth pinning because of #376,
-  // where an ambient `HUB_URL` from the checkout's own mise config replaced
-  // this answer for every process spawned there.
+  // What the wrapper owes a client: the endpoint is the user config's, and it
+  // survives the exec into the server the client actually talks to.
+  // `checkout: true` is documentation of the spawn shape, a `cwd` inside a
+  // repository; nothing on this path reads it, which is the point. Worth
+  // pinning because of #376, where an ambient `HUB_URL` from the checkout's own
+  // mise config replaced this answer for every process spawned there.
   it("dials the user config's endpoint when a client spawns it inside a checkout", async () => {
     const box = sandbox({
       checkout: true,
@@ -205,15 +204,15 @@ describe("ub mcp serve", () => {
     const box = sandbox({
       userConfig: {
         workspace: `serve-${WORKSPACE}`,
-        hubUrl: "ws://ignored:1",
+        hubUrl: DEAD_HUB_URL,
         signingSecret: "cli-serve-misplaced-secret",
       },
       credentials: { signingSecret: "cli-serve-signing-secret" },
     });
 
-    // The environment override has to survive the exec: this is the value the
-    // server must report, not the one in the user config.
-    const session = await connect(box, { HUB_URL: DEAD_HUB_URL });
+    // And the ambient `HUB_URL` does not survive it: the user config's endpoint
+    // is what the server must report, whatever the process was started with.
+    const session = await connect(box, { HUB_URL: "ws://ambient.invalid:1" });
     try {
       const result = await session.client.callTool({
         name: "sync_status",

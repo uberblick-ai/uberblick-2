@@ -13,7 +13,14 @@
  */
 
 import { type SpawnSyncReturns, spawn, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -133,6 +140,28 @@ export function sandbox(files: SandboxFiles = {}): Sandbox {
   return { cwd, configHome, dataHome, env };
 }
 
+/**
+ * Point this sandbox's machine at an endpoint, the way `ub remote join` leaves
+ * it.
+ *
+ * The endpoint has one authority — this machine's `config.json` — so a test
+ * that needs a run to dial an ephemeral port writes it there. `HUB_URL` in the
+ * environment is not a layer and is not read (#385).
+ */
+export function pointAt(box: Sandbox, hubUrl: string): void {
+  const path = join(box.configHome, "uberblick", "config.json");
+  mkdirSync(dirname(path), { recursive: true });
+  let current: Record<string, unknown> = {};
+  try {
+    current = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  } catch {
+    // Absent, which is the ordinary case for a fresh sandbox.
+  }
+  writeFileSync(path, `${JSON.stringify({ ...current, hubUrl }, null, 2)}\n`, {
+    mode: 0o600,
+  });
+}
+
 export interface Run {
   status: number | null;
   stdout: string;
@@ -174,7 +203,7 @@ export function runUb(
 /**
  * Which `ub` command a run was, for a diagnostic — the subcommand path only.
  *
- * Never the whole argument list: `ub remote set` takes a URL, and the URLs the
+ * Never the whole argument list: `ub remote join` takes a URL, and the URLs the
  * remote suite feeds it carry passwords and tokens on purpose. A message that
  * echoed argv would print one into CI output the first time a machine was slow,
  * which is the leak those very tests exist to forbid.

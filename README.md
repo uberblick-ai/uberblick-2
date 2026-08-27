@@ -69,17 +69,15 @@ There are two ways to have one, and they do not fight:
   `fnox exec --if-missing warn` warns and leaves the variable alone, and
   `ub init` writes 32 random bytes to `credentials.json` (mode 0600) in this
   machine's config root — see [Where your files live](#where-your-files-live).
-  That file is the authority. Because mise tasks and `.mcp.json` inherit their environment from
-  mise rather than from `ub`, `ub init` also writes a gitignored
-  `mise.local.toml` **derived** from it: same value, one owner, rewritten
-  whenever the two drift, and restored with the same value if you delete it.
+  That file is the authority, and there is no copy of it anywhere else.
 
-So the precedence a mise task sees, highest first: a decryptable fnox secret,
-then the derived `mise.local.toml`, then `mise.toml`'s own `[env]`. Note that
-mise's `[env]` overrides an exported shell variable, so once `mise.local.toml`
-exists, `HUB_AUTH_TOKEN=… mise run hub` no longer overrides it — use `fnox`, or
-edit that file. `ub` itself resolves the other way round, environment first; see
-"The `ub` command line" below.
+A mise task reaches it the same way an MCP client's server does: every task that
+needs configuration wraps its command in `fnox exec -- ub env -- …`, and
+`ub env -- <command…>` execs the command under exactly the environment `ub`
+resolved. So the precedence a task sees is `ub`'s own, highest first: a
+decryptable fnox secret in the environment, then `credentials.json`. There is
+deliberately no bare `ub env` — printing that environment would print the
+secret.
 
 The secret is never printed — not by `ub init`, not by `ub status`, not by an
 error path. The most any of them says is where it came from.
@@ -87,8 +85,8 @@ error path. The most any of them says is where it came from.
 ## Running things
 
 mise tasks are the only supported entry points. Do not invoke `pnpm` directly —
-the tasks pin the toolchain and wrap commands in `fnox exec` so secrets are
-present.
+the tasks pin the toolchain and wrap commands in `fnox exec -- ub env --`, so
+the secret and this machine's own configuration are both present.
 
 ```
 mise run setup        # one-command bootstrap: toolchain, dependencies, `ub init`
@@ -234,8 +232,9 @@ else in the entry changes and nothing else is copied into it.
 
 To change this *machine's* default instead — what an unpinned entry, `ub status`
 and the mise tasks all resolve to — use `ub workspace use <id>`. It writes your
-`config.json` and regenerates this checkout's derived `mise.local.toml` with it,
-so `mise run web` and the hub follow the switch. `ub workspace` on its own
+`config.json`, and every reader follows it: the tasks run through `ub env`, so
+`mise run web` and the hub pick up the switch with nothing else to keep in step.
+`ub workspace` on its own
 prints the workspace in force and which layer chose it; `ub workspace list`
 shows the workspaces this machine has a database for, so `use` and
 `--workspace` both also take a unique uuid prefix from that list.
@@ -252,9 +251,9 @@ Either way it is the same server, the same hub and a different corpus.
 
 The web client takes one more value, `WORKSPACES`: a comma-separated list of the
 workspaces to offer in the topbar switcher, e.g.
-`WORKSPACES="uberblick-<uuid>,ablauf-<uuid>"`. Plaintext config like `HUB_URL`,
-so it belongs in mise's `[env]` — in `mise.local.toml`, since the ids are a uuid
-per machine — and it is a *menu*, not an authority: switching workspaces is
+`WORKSPACES="uberblick-<uuid>,ablauf-<uuid>"`. Plaintext config, exported for
+the run that needs it (`WORKSPACES=… mise run web`) since the ids are a uuid per
+machine, and it is a *menu*, not an authority: switching workspaces is
 navigating to `/<workspace>`, and a link into an unlisted workspace still opens
 it. With none set, the switcher is the plain workspace label it has always been.
 
@@ -317,54 +316,54 @@ Precedence, highest first:
 
 | Layer | Holds |
 | --- | --- |
-| environment (`WORKSPACE_ID`, `HUB_URL`, `HUB_AUTH_TOKEN`) | wins, so `HUB_URL=… ub mcp serve` keeps working — and so a project MCP entry's `WORKSPACE_ID` pin binds the repository it travels with |
-| `config.json` | per-user identity (display name, cursor colour), the workspace and the hub endpoint — what `ub init` writes. Which directory it is in is [the layout](#where-your-files-live) |
+| environment (`WORKSPACE_ID`, `HUB_AUTH_TOKEN`) | wins, so a project MCP entry's `WORKSPACE_ID` pin binds the repository it travels with, and `fnox exec` can supply the secret. **Not the endpoint** |
+| `config.json` | per-user identity (display name, cursor colour), the workspace and the hub endpoint — what `ub init` and `ub remote join` write. Which directory it is in is [the layout](#where-your-files-live) |
 | `credentials.json`, mode 0600, beside it | the hub signing secret. Never printed by any command, and refused outright — not merely warned about — if anyone but its owner can read it |
 | built-in defaults | hub `ws://localhost:1234`. No workspace: there is no default one |
 
-Three layers and no fourth. There is no per-directory config file: a repository
-that needs its own workspace pins `WORKSPACE_ID` in the project MCP entry the
-client already reads, which arrives as the environment — the layer that already
-wins. Nothing committable ever carries an endpoint or a credential, so the
-signing secret in `credentials.json` applies to whichever hub *you* configured.
-That is also why the committed `mise.toml` sets no `HUB_URL`: mise's `[env]` is
-ambient for every process born in an activated checkout — `ub` and the MCP
-server a client spawns included — and being the environment it would outrank
-the endpoint this machine chose. A per-checkout binding is still available,
-in the gitignored `mise.local.toml` that `ub init` derives.
+**The endpoint has one authority.** `HUB_URL` in the environment is not a layer:
+it is not read, and it is not passed on to anything `ub` spawns. Two ambient
+sources for an endpoint is what silently redirected a machine bound to a remote
+hub at a local one while its writes reported `synced` (#376) — so the value in
+`config.json` is the answer, and `ub remote join` is how it changes.
+
+There is no per-directory config file either: a repository that needs its own
+workspace pins `WORKSPACE_ID` in the project MCP entry the client already reads,
+which arrives as the environment. Nothing committable carries an endpoint or a
+credential, and a checkout is not a configuration layer — its tasks *consume*
+this machine's configuration through `ub env` rather than keeping a copy.
 
 ### Where your files live
 
-One layout per machine, **resolved rather than configured**, and nothing in it
-for you to create: `ub init` makes the directories it needs, and there is no
-workspace directory for you to make — a workspace is a uuid, and its replica is
-a file named after it.
+**One layout, on every platform**, resolved rather than configured, and nothing
+in it for you to create: `ub init` makes the directories it needs, and there is
+no workspace directory for you to make — a workspace is a uuid, and its replica
+is a file named after it.
 
-| Where | When |
+| Where | What |
 | --- | --- |
-| `~/Library/Application Support/Uberblick/` — `config.json`, `credentials.json`, `data/hub.sqlite`, `data/workspaces/<uuid>.sqlite` | macOS, with no `XDG_*` variable set and no uberblick files in the old locations. Apple's place for app-managed data, and the one a Homebrew or tarball upgrade cannot replace |
-| `$XDG_CONFIG_HOME/uberblick/` (config, credentials) and `$XDG_DATA_HOME/uberblick/` (`hub.sqlite`, `<uuid>.sqlite`) | everywhere that is not macOS — and anywhere you set either variable yourself, macOS included. Setting one moves the whole layout, never half of it |
-| the same XDG pair, on a Mac that already has files there | a machine older than the Mac layout keeps every path it had. It is told once, naming `ub storage migrate` (#249); nothing moves and nothing new is created until that lands |
+| `$XDG_CONFIG_HOME/uberblick/` — or `~/.config/uberblick/` | `config.json` and `credentials.json` |
+| `$XDG_DATA_HOME/uberblick/` — or `~/.local/share/uberblick/` | `hub.sqlite` and `<uuid>.sqlite`, one per workspace |
+
+The two variables are independent: each moves its own root and only that one,
+so setting `XDG_CONFIG_HOME` alone leaves the databases under
+`~/.local/share/uberblick`. A relative value is ignored, as the XDG spec
+requires. There is nothing to detect and nothing that can fail, so resolution
+cannot throw and no command has an opinion about which layout is in force.
 
 `ub status` names the data root; `ub status --json` carries a `storage` object
-with the layout (`mac`, `xdg`, `legacy-xdg`) and every resolved path — the
-directories and database files, never the credential. `HUB_DB_PATH` and
-`UBERBLICK_DB` name a database file outright and outrank all of it, which is
-what this checkout's mise tasks use: `[env] HUB_DB_PATH` points at a
-checkout-local file, so `mise run hub` never opens a packaged install's
-database.
-
-A Mac holding uberblick files in *both* roots is the one case with no answer.
-Nothing is opened and every command refuses, because choosing a root would hide
-whatever is in the other; `ub doctor` fails its `storage-layout` check naming
-both.
+with every resolved path — the directories and database files, never the
+credential. `HUB_DB_PATH` and `UBERBLICK_DB` name a database file outright and
+outrank all of it, which is what this checkout's mise tasks use:
+`[env] HUB_DB_PATH` points at a checkout-local file, so `mise run hub` never
+opens a packaged install's database.
 
 ### Going remote: local first, then a hub, then a second computer
 
 The normal journey is local first and remote later, and `ub remote` is the part
 that keeps a corpus from being left behind when the endpoint changes. Documents
 a browser created live only in the local hub until an MCP session pulls them
-down, so simply changing `HUB_URL` strands them.
+down, so an endpoint changed without them strands them.
 
 **On the remote host** — a Linux box in your tailnet — one command from your own
 machine stands the hub and the web client up:
@@ -372,34 +371,11 @@ machine stands the hub and the web client up:
 clones `main` onto the host and builds from it; **the host never updates
 itself** — `ub remote update <ssh-target>` deploys `origin/main` onto it when you
 mean to, and a change to wire semantics must update the clients in the same
-sitting. Every command below runs on one of *your* computers, not there. The hub
-it starts is empty.
+sitting. It ends by printing this machine's endpoint and the join URL, and
+persists the endpoint here.
 
-**On the computer that already has your documents**, with `mise run hub` still
-running so the browser-created ones can be collected:
-
-```
-ub remote promote wss://<host>.ts.net/ws
-```
-
-That reads the whole local workspace through the local hub into the update log,
-looks at the target with a throwaway client that writes nothing, uploads, and
-then opens the target *again* as a fresh client and compares what it finds with
-what you hold — in both directions, tombstones included, and by content rather
-than by name. Only if that matches is the endpoint persisted. "Verified" here
-means the hub acknowledged the writes and a fresh client read them back; it does
-not mean the hub has flushed them to disk.
-
-It refuses if the local hub is not running, because documents a browser made
-live only there until an MCP session pulls them down. It refuses if the target
-accepted the connection but never finished serving its directory — what such a
-hub holds is unknown, which is not the same as holding nothing. And it refuses
-without writing anything if the target holds documents this workspace has never
-heard of, naming both counts. A shared uuid is not that: it is one document's
-lineage on two hubs, which Yjs merges, so rerunning finishes an interrupted
-promotion rather than colliding with it.
-
-**On a second computer**, one command, whatever is on that machine already:
+**On every computer**, including this one, one command binds a machine to the
+workspace, whatever is on it already:
 
 ```
 ub remote join wss://<host>.ts.net/ws/<workspace id> \
@@ -410,7 +386,8 @@ That URL is what `ub remote init` prints: the endpoint with the workspace id as
 its **last path segment**. Two journeys, two verbs, and that is the whole of the
 command surface — a *new* workspace is `ub init` (which seeds starter
 documents), and a workspace that already exists somewhere is `ub remote join`
-(which seeds nothing; the documents arrive over the wire). The id has to travel,
+(which seeds nothing). There is no operator suite beside them: nothing that
+repoints the clients without moving anything. The id has to travel,
 because a workspace id is a uuid and `ub init` generates a *new* one: a machine
 that invented its own would join the remote hub and find nothing of yours on it,
 the rooms being keyed by a different id. Carrying it in the URL is what makes it
@@ -420,41 +397,41 @@ one paste instead of two.
 state** — no prior `ub init` is needed, and one that has run is not in the way.
 It hydrates the full remote directory and every live document into that
 workspace's replica, verifies it by the same read-back, and only then persists
-the endpoint and the binding. An unreachable or auth-rejecting remote leaves
-your configuration exactly as it was, and a URL missing its workspace id, or
-carrying something that is not one, is refused before anything is written, with
-the expected form in the message.
+the endpoint and the binding. A replica this machine already holds for that id
+is attached rather than replaced: the two reconcile as CRDTs — what the local
+log holds goes up, what the hub holds comes down, and nothing on either side is
+discarded — which is how the machine that ran `ub remote init` joins its own
+populated workspace. An unreachable or auth-rejecting remote leaves your
+configuration exactly as it was, and a URL missing its workspace id, or carrying
+something that is not one, is refused before anything is written, with the
+expected form in the message.
 
-A workspace that was already on this machine stays. It is never merged into the
-joined one and never moved: `ub workspace list` shows both, and
+A workspace on this machine under a *different* id stays. It is never merged
+into the joined one and never moved: `ub workspace list` shows both, and
 `ub workspace use <id>` switches back. The endpoint is machine-wide,
 though, so after a join that workspace syncs with the remote hub too, under its
 own rooms.
 
 Inside a clone, `mise trust && mise run setup -- --yes` first and then the join
-gives you `mise run web` against the remote hub: the join rewrites the derived
-`mise.local.toml`, so the mise tasks follow the workspace and the endpoint it
-persisted.
+gives you `mise run web` against the remote hub: the tasks run through
+`ub env`, so they follow the workspace and the endpoint the join persisted with
+nothing written into the checkout.
 
 The secret that reached the remote replaces whatever this machine had, in
 `credentials.json` at mode 0600, and the command says it is doing so. That is
 the whole point on a second machine: a locally generated secret is *random*, and
 the remote verifies with the first machine's.
 
-**What "persisted" covers, and what outranks it.** The endpoint — and, after a
-`join`, the workspace binding with it — goes into your `config.json`, which is
-where `ub`, `ub mcp serve` and the MCP server it spawns resolve them. That file
-is the *second* layer: `HUB_URL` in the environment beats it. When it does,
-these commands say so rather than reporting a switch that did not happen —
-`ub remote set` exits non-zero, and after a bridge the report says the documents
-moved but names the endpoint still in force.
+**What "persisted" covers.** The endpoint — and, after a `join`, the workspace
+binding with it — goes into your `config.json`, which is the only place `ub`,
+`ub mcp serve`, the MCP server it spawns and every checkout task running under
+`ub env` resolve them from. Nothing outranks it, so a report naming the endpoint
+is naming the one in force. A *workspace* can still be outranked, by
+`WORKSPACE_ID` in the environment — a project MCP entry's pin — and `join` says
+so when it is.
 
 A deployed web client does not read any of these: it resolves its endpoint — and
-its workspaces — at runtime from the served `/uberblick-config.json`. A
-checkout's `mise run web` still takes `HUB_URL` from mise's environment, which
-`ub init`, `ub workspace use` and `ub remote join` keep in step by rewriting the
-derived `mise.local.toml`; point a development build somewhere else for one run
-with `HUB_URL=… mise run web`.
+its workspaces — at runtime from the served `/uberblick-config.json`.
 
 Archived documents travel as directory state — a tombstone replicates and stays
 a tombstone — but their content is not moved: "every live document" is what a
@@ -467,9 +444,7 @@ Never as an argument: a command line is in every `ps` listing and every shell
 history. Neither the secret nor a token signed with it is printed by any of
 these commands.
 
-`ub remote set <url>` is the third verb, and it moves nothing — the right one
-only when there is nothing to move; it takes a bare endpoint, with no workspace
-id, because it changes no binding. `ub remote` with no remote configured says
+`ub remote` with no remote configured says
 so and exits 0; with one, it prints the endpoint and states the boundary you
 actually get: the served web bundle carries the shared signing secret, so
 reaching the app is the same as holding the credential, and the deployment is
@@ -516,8 +491,9 @@ It runs on demand, like `mise run e2e`, and never in per-PR CI. Same standing
 rule as the review image: no secrets, no host mounts, no privileged mode, no
 Docker socket. The build context is the working tree filtered by
 `Dockerfile.fue.dockerignore`, which is stricter than the review runner's
-`.dockerignore` — `mise.local.toml` and every local database are excluded, because a proof that runs on state `ub init` was supposed to
-create proves nothing.
+`.dockerignore` — every local database and every local config file is excluded,
+because a proof that runs on state `ub init` was supposed to create proves
+nothing.
 
 ## Review isolation
 
@@ -610,9 +586,9 @@ Secrets live in `fnox.toml`, age-encrypted and safe to commit. The private key
 is expected at `~/.config/fnox/age.txt` and never in the repo. Only real
 secrets go there: plaintext local defaults such as `HUB_DB_PATH` live in
 `mise.toml`'s `[env]` block. `HUB_URL` deliberately does not — that block is
-ambient for everything in a checkout and outranks your `config.json`, so its
-`ws://localhost:1234` default lives in the clients' code instead, and a
-per-checkout endpoint lives in the derived `mise.local.toml`.
+ambient for everything in a checkout, so its `ws://localhost:1234` default lives
+in the clients' code instead, and the endpoint a machine actually dials comes
+from its own `config.json` through `ub env`.
 
 Contributors without the age key are not blocked. The task wrappers pass
 `fnox exec --if-missing warn` explicitly, so a secret fnox cannot decrypt logs a

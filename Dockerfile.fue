@@ -38,9 +38,9 @@ RUN curl --fail --silent --show-error --location https://mise.run | sh \
 
 # "Copy the source in" stands in for the README's `git clone`: this proves the
 # working tree in front of you, which is the tree whose install path is being
-# changed. Dockerfile.fue.dockerignore decides what counts as a clean checkout —
-# in particular no `mise.local.toml`, whose signing secret would hand the image
-# a configuration a new user has to generate.
+# changed. Dockerfile.fue.dockerignore decides what counts as a clean checkout:
+# nothing a local run creates — no databases, no `.env`, no local mise config —
+# may hand the image a configuration a new user has to generate.
 WORKDIR /home/fue/uberblick
 COPY --chown=fue:fue . .
 

@@ -12,16 +12,16 @@
  *
  * Four decisions are load-bearing:
  *
- * 1. **It starts a hub only when it has to.** A hub answering at the resolved
- *    `HUB_URL` — a remote one after `ub remote set`, or one somebody started
+ * 1. **It starts a hub only when it has to.** A hub answering at the configured
+ *    endpoint — a remote one after `ub remote join`, or one somebody started
  *    with `mise run hub` — is used as it is, and Ctrl-C leaves it running. Only
  *    a *local* endpoint with nothing answering gets a hub of our own, started
  *    in this process with {@link createHub} so that stopping it is the same
  *    flush-then-close the hub's own `main.ts` performs.
  *
  * 2. **It reconciles the two halves of the port configuration**, which is the
- *    asymmetry `ub doctor` explains: the hub binds `HUB_HOST`:`PORT` and never
- *    reads `HUB_URL`, while every client dials `HUB_URL`. A hub started here
+ *    asymmetry `ub doctor` explains: the hub binds `HUB_HOST`:`PORT`, while
+ *    every client dials the configured endpoint. A hub started here
  *    exists to answer the bundle this command is serving, so it binds the
  *    endpoint the bundle will dial. A `PORT` that disagrees is a warning naming
  *    both, never a silent bind of a socket nobody will connect to.
@@ -429,8 +429,8 @@ function whyNotStartable(hubUrl: string, parsed: URL): string | null {
   if (parsed.protocol !== "ws:") {
     return (
       `${preamble}a hub started here speaks plain ws:// on loopback, so it would ` +
-      `never answer ${parsed.protocol}// — start one yourself, or set HUB_URL to ` +
-      "a ws:// endpoint"
+      `never answer ${parsed.protocol}// — start one yourself, or configure a ` +
+      "ws:// endpoint"
     );
   }
   if (parsed.port === "" || Number(parsed.port) === 0) {
@@ -469,8 +469,8 @@ async function ensureHub(
   const endpoint = endpointOf(hubUrl);
   if (endpoint === null) {
     throw new Error(
-      `HUB_URL is ${JSON.stringify(hubUrl)}, which is not a websocket endpoint — ` +
-        "set it to a ws:// or wss:// URL",
+      `the configured endpoint ${JSON.stringify(hubUrl)} is not a websocket ` +
+        "endpoint — it has to be a ws:// or wss:// URL",
     );
   }
   // It parses, because `endpointOf` just parsed it too — but this keeps the
@@ -518,14 +518,14 @@ async function ensureHub(
     throw new Error(refusal);
   }
 
-  // The hub binds HUB_HOST:PORT and never reads HUB_URL, so the two are only
-  // ever in step because somebody kept them there. A hub started here exists to
+  // The hub binds HUB_HOST:PORT and never reads the endpoint, so the two are
+  // only ever in step because somebody kept them there. A hub started here exists to
   // answer the bundle this command serves, so the endpoint wins — and a PORT
   // that disagrees is said out loud rather than silently obeyed.
   const bind = hubBind(resolved);
   if (bind.raw !== null && bind.port !== endpoint.port) {
     io.err(
-      `ub: warning: PORT is ${JSON.stringify(bind.raw)} but HUB_URL dials port ` +
+      `ub: warning: PORT is ${JSON.stringify(bind.raw)} but the configured endpoint dials port ` +
         `${endpoint.port}; the hub started here binds ${endpoint.port}, because ` +
         "that is what the web app dials. `ub doctor` explains the two settings.\n",
     );

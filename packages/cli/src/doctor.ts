@@ -2,11 +2,10 @@
  * `ub doctor` — the local stack's documented failure modes, run as checks.
  *
  * Each check answers one question somebody would otherwise answer by finding,
- * reading and translating prose: which storage layout is in force, is a
- * workspace configured, is a signing secret usable, can the database be
- * written, does a hub answer, is this machine's clock close enough to the
- * hub's, do the two port settings agree, who holds the
- * port, is any MCP client wired up. Three of the
+ * reading and translating prose: is a workspace configured, is a signing secret
+ * usable, can the database be written, does a hub answer, is this machine's
+ * clock close enough to the hub's, do the endpoint and the hub's port agree,
+ * who holds the port, is any MCP client wired up. Three of the
  * hub-side failures present identically as "offline" in the web UI, which is
  * the reason this command exists — it names the cause and the fix.
  *
@@ -39,12 +38,6 @@ import {
   CLOCK_SKEW_SECONDS,
   MAX_TOKEN_LIFETIME_SECONDS,
 } from "@uberblick/hub/token";
-import type { StoragePaths } from "@uberblick/hub/storage";
-import {
-  AmbiguousStorageError,
-  MAC_ROOT_DISPLAY,
-  resolveStorage,
-} from "@uberblick/hub/storage";
 import type { McpConfig } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import type { ResolvedConfig } from "./config.js";
@@ -112,46 +105,13 @@ function skipped(name: string, reason: string, remedy: string | null = null): Ch
 const WORKSPACE_REMEDY =
   "`ub init` creates a workspace; `ub workspace use <id>` adopts an existing one";
 
-/** install.md: "set `PORT` for the hub and `HUB_URL` for the clients together." */
-const PORT_REMEDY =
-  "set PORT for the hub and HUB_URL for the clients together — the hub binds HUB_HOST:PORT and never reads HUB_URL";
-
-// --- storage layout ----------------------------------------------------------
-
 /**
- * Which of the three storage layouts is in force, and the refusal when that
- * cannot be answered.
- *
- * A Mac holding uberblick state in *both* `~/Library/Application Support` and
- * the legacy XDG defaults is the one configuration this command cannot report
- * around: every other check would have to open a file in one root or the
- * other, and choosing would hide a corpus. So it is a failure with both roots
- * named, and every check below it is skipped rather than run against a guess.
+ * The hub's bind address and the endpoint the clients dial are two settings, and
+ * only one of them is an environment variable: the endpoint lives in this
+ * machine's config, written by `ub init` or `ub remote join`.
  */
-function storageCheck(storage: StoragePaths): Check {
-  const where = `config ${storage.configDir}, data ${storage.dataDir}`;
-  if (storage.layout === "legacy-xdg") {
-    return {
-      name: "storage-layout",
-      status: "pass",
-      reason: `${storage.layout} — ${where}`,
-      remedy: `\`ub storage migrate\` (#249) will move these under ${MAC_ROOT_DISPLAY}; nothing has moved yet, and nothing new was created`,
-    };
-  }
-  return pass("storage-layout", `${storage.layout} — ${where}`);
-}
-
-/** The checks that need a resolved layout — every one of them, in order. */
-const AFTER_STORAGE = [
-  "workspace",
-  "credential",
-  "database",
-  "hub",
-  "clock",
-  "port",
-  "bind",
-  "mcp",
-] as const;
+const PORT_REMEDY =
+  "the hub binds HUB_HOST:PORT — set PORT to the port the configured endpoint dials, or point this machine at the hub you meant with `ub remote join <endpoint>/<workspace-id>`";
 
 // --- workspace ---------------------------------------------------------------
 
@@ -200,9 +160,8 @@ function modeOf(path: string): string {
 function credentialCheck(
   resolved: ResolvedConfig | null,
   env: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform,
 ): Check {
-  const credentials = readCredentials(env, platform);
+  const credentials = readCredentials(env);
   if (credentials.exposed) {
     return fail(
       "credential",
@@ -338,7 +297,7 @@ async function hubCheck(
     "hub",
     `nothing answered ${config.hubUrl}`,
     local
-      ? "start a hub with `ub open --no-browser` — if one is running, the port check says whether HUB_URL disagrees with the port it bound"
+      ? "start a hub with `ub open --no-browser` — if one is running, the port check says whether the configured endpoint disagrees with the port it bound"
       : "check that the deployment is running and that this machine can reach it — nothing is listening at that address from here",
   );
 }
@@ -415,8 +374,8 @@ function portCheck(
   if (endpoint === null) {
     return fail(
       "port",
-      `HUB_URL is ${JSON.stringify(config.hubUrl)}, which is not a websocket URL`,
-      "set HUB_URL to a ws:// or wss:// endpoint",
+      `the configured endpoint ${JSON.stringify(config.hubUrl)} is not a websocket URL`,
+      "give this machine a ws:// or wss:// endpoint with `ub remote join <endpoint>/<workspace-id>`",
     );
   }
   if (!isLocalHost(endpoint.host)) {
@@ -430,18 +389,21 @@ function portCheck(
     return fail(
       "port",
       `PORT is ${JSON.stringify(bind.raw)}, which is not a port number`,
-      "set PORT to an integer in 0..65535, and HUB_URL to the same port",
+      "set PORT to an integer in 0..65535 — the same port the configured endpoint dials",
     );
   }
   if (bind.port !== endpoint.port) {
     const source = bind.raw === null ? "the built-in default" : "PORT";
     return fail(
       "port",
-      `the hub binds ${bind.host}:${bind.port} (${source}) but HUB_URL dials port ${endpoint.port}`,
+      `the hub binds ${bind.host}:${bind.port} (${source}) but the configured endpoint dials port ${endpoint.port}`,
       PORT_REMEDY,
     );
   }
-  return pass("port", `HUB_URL and the hub's bind address agree on port ${bind.port}`);
+  return pass(
+    "port",
+    `the configured endpoint and the hub's bind address agree on port ${bind.port}`,
+  );
 }
 
 /**
@@ -505,7 +467,7 @@ async function bindCheck(
     return skipped(
       "bind",
       `${address} is held by something that speaks the protocol but did not serve this workspace with our credential`,
-      "if it is your hub, give it and this machine the same signing secret; if it is not, set PORT for the hub and HUB_URL for the clients together",
+      `if it is your hub, give it and this machine the same signing secret; if it is not, ${PORT_REMEDY}`,
     );
   }
   return fail(
@@ -571,8 +533,6 @@ function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
 export interface DoctorOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
-  /** `process.platform` by default; injected so the Mac layout is testable. */
-  platform?: NodeJS.Platform;
 }
 
 /** Run every check without printing anything. Exported for tests. */
@@ -581,42 +541,7 @@ export async function doctorReport(
 ): Promise<{ report: DoctorReport; warnings: string[] }> {
   const env = options.env ?? process.env;
   const cwd = options.cwd ?? process.cwd();
-  const platform = options.platform ?? process.platform;
   const warnings: string[] = [];
-
-  // Before anything reads a file: which root the files are in. An ambiguous
-  // answer stops the report here — nothing below it may open a database.
-  let storage: StoragePaths;
-  try {
-    storage = resolveStorage({ env, platform });
-  } catch (thrown) {
-    if (!(thrown instanceof AmbiguousStorageError)) {
-      throw thrown;
-    }
-    return {
-      warnings,
-      report: {
-        version: cliVersion(),
-        ok: false,
-        checks: [
-          // The error's own message sends a person to `ub doctor`; this *is*
-          // `ub doctor`, so it states the roots and lets the remedy line do the
-          // rest.
-          fail(
-            "storage-layout",
-            `${thrown.macRoot} and the legacy ${thrown.legacyConfigDir} / ${thrown.legacyDataDir} both hold uberblick state`,
-            thrown.remedy,
-          ),
-          ...AFTER_STORAGE.map((name) =>
-            skipped(
-              name,
-              "the storage layout is ambiguous, so nothing was resolved and no database was opened",
-            ),
-          ),
-        ],
-      },
-    };
-  }
 
   // Resolution itself can refuse — a workspace id that is not a uuid is a
   // configuration error, and a command whose job is to report configuration
@@ -624,7 +549,7 @@ export async function doctorReport(
   let resolved: ResolvedConfig | null = null;
   let error: string | null = null;
   try {
-    resolved = resolveConfig({ env, platform });
+    resolved = resolveConfig({ env });
     warnings.push(...resolved.warnings);
   } catch (thrown) {
     error = message(thrown);
@@ -633,7 +558,7 @@ export async function doctorReport(
   let config: McpConfig | null = null;
   if (resolved !== null) {
     try {
-      config = resolveMcpConfig(resolved.env, platform);
+      config = resolveMcpConfig(resolved.env);
     } catch (thrown) {
       error = message(thrown);
     }
@@ -646,9 +571,8 @@ export async function doctorReport(
     config === null ? async () => "disabled" : hubProber(config);
 
   const checks: Check[] = [
-    storageCheck(storage),
     workspaceCheck(resolvedEnv, resolved, config, error),
-    credentialCheck(resolved, resolvedEnv, platform),
+    credentialCheck(resolved, resolvedEnv),
     databaseCheck(config),
     await hubCheck(config, endpoint, dial),
     await clockCheck(config),

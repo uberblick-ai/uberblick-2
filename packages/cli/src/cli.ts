@@ -11,6 +11,7 @@
  */
 
 import { doctorCommand } from "./doctor.js";
+import { envCommand } from "./env.js";
 import { initCommand } from "./init.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
@@ -33,8 +34,10 @@ commands:
   status [--json]        workspace, hub, credential, database and sync state
   doctor [--json]        check the local stack against its known failure modes
   workspace [command]    which workspace is in force, and how to change it
-  remote [command]       the endpoint documents sync with, and the one-time bridges
+  remote [command]       the endpoint documents sync with, and the one-time bridge
   mcp install [target]   register uberblick with an MCP client
+  env -- <command...>    run a command with uberblick's configuration in its
+                         environment
 
 workspace commands:
   workspace              the workspace in force, and which layer chose it
@@ -46,8 +49,6 @@ remote commands:
   remote                 the endpoint in force and what sharing it buys
   remote init <target>   stand up the remote hub + web stack on a tailnet host
   remote update <target> deploy origin/main onto that host now
-  remote set <url>       point the clients at an endpoint; moves nothing
-  remote promote <url>   move this populated workspace onto an empty remote hub
   remote join <url>/<id> bind this machine to the remote workspace the URL names
 
 init options:
@@ -120,6 +121,9 @@ export async function runCli(
   }
   if (command === "remote") {
     return await remoteCommand(rest, io);
+  }
+  if (command === "env") {
+    return await envCommand(rest, io);
   }
   if (command === "mcp") {
     const [subcommand, ...args] = rest;

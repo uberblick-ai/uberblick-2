@@ -9,7 +9,7 @@
  * the shutdown can also be logged and bounded.
  */
 
-import { resolveHubConfig, storageWarnings } from "./config.js";
+import { resolveHubConfig } from "./config.js";
 import { stderrLogger } from "./log.js";
 import { createHub } from "./server.js";
 
@@ -17,11 +17,6 @@ const SIGNALS = ["SIGTERM", "SIGINT"] as const;
 
 async function main(): Promise<void> {
   const config = resolveHubConfig();
-  // The one line a legacy macOS install gets, said where the person starting
-  // the hub will see it. Empty in every other case, `HUB_DB_PATH` included.
-  for (const warning of storageWarnings()) {
-    stderrLogger({ event: "hub.storage", warning });
-  }
   const hub = await createHub(config);
 
   let shuttingDown = false;

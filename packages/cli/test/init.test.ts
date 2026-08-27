@@ -4,13 +4,12 @@
  * never regenerated behind somebody's back.
  *
  * These spawn the real binary in a throwaway XDG home whose working directory
- * looks like a checkout, because the derived `mise.local.toml` and the file modes
- * are the contract — not a function's return value.
+ * looks like a checkout, because the file modes are the contract — not a
+ * function's return value.
  *
- * What is deliberately NOT here: `mise trust` succeeding (mise need not exist in
- * a review container, and the failure path is tested instead), and the full
- * `mise run setup` → `mise run dev` → hub handshake, which needs a toolchain and
- * long-running servers. Those are the scripted probe in the pull request.
+ * What is deliberately NOT here: the full `mise run setup` → `mise run dev` →
+ * hub handshake, which needs a toolchain and long-running servers. That is the
+ * scripted probe in the pull request.
  */
 
 import { spawnSync } from "node:child_process";
@@ -19,18 +18,15 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
-  lstatSync,
   mkdirSync,
   readFileSync,
   rmSync,
   statSync,
-  symlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { MARKER } from "../src/mise-config.js";
 import {
   REPO_ROOT,
   removeTempDirs,
@@ -65,25 +61,6 @@ function userConfig(box: Sandbox): Record<string, unknown> {
   ) as Record<string, unknown>;
 }
 
-function localConfigPath(box: Sandbox): string {
-  return join(box.cwd, "mise.local.toml");
-}
-
-function derivedSecret(box: Sandbox): string | null {
-  const text = readFileSync(localConfigPath(box), "utf8");
-  return /^HUB_AUTH_TOKEN = "([^"\n]+)"$/m.exec(text)?.[1] ?? null;
-}
-
-/** mise is not on this PATH, which makes the trust step's failure path testable. */
-const WITHOUT_MISE = { PATH: "/usr/bin:/bin" };
-
-/**
- * U+007F, written as an escape so it is visible in this source rather than an
- * invisible byte. It is the character `JSON.stringify` leaves raw and TOML
- * forbids raw — the reason values are checked before the derived file is written.
- */
-const DELETE = "\u007f";
-
 const hasGit = spawnSync("git", ["--version"]).status === 0;
 
 /** A workspace id, as `ub init` generates one: a bare lowercase uuid. */
@@ -92,16 +69,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** A workspace somebody else already owns, joined by id. */
 const JOINED = "7c2b91d4-3e05-4a68-9f31-b0d5e6a71c82";
 
-/** The workspace id in the derived mise config, or null when there is none. */
-function derivedWorkspace(box: Sandbox): string | null {
-  const text = readFileSync(localConfigPath(box), "utf8");
-  return /^WORKSPACE_ID = "([^"\n]+)"$/m.exec(text)?.[1] ?? null;
-}
-
 describe("ub init", () => {
-  it("generates an owner-only secret, mirrors it into the checkout, prints none of it", () => {
+  it("generates an owner-only secret and prints none of it", () => {
     const box = sandbox({ checkout: true });
-    const run = runUb(["init", "--yes"], box, WITHOUT_MISE);
+    const run = runUb(["init", "--yes"], box);
     expect(run.status).toBe(0);
 
     // At least 32 random bytes, over the alphabet `remote-compose.sh` accepts
@@ -110,17 +81,10 @@ describe("ub init", () => {
     expect(secret).toMatch(/^[A-Za-z0-9._-]+$/);
     expect(Buffer.from(secret, "base64url").length).toBeGreaterThanOrEqual(32);
 
-    // The authority is 0600, and so is the file derived from it.
     expect(statSync(credentialsPath(box)).mode & 0o777).toBe(0o600);
-    expect(statSync(localConfigPath(box)).mode & 0o777).toBe(0o600);
-    expect(readFileSync(localConfigPath(box), "utf8").startsWith(MARKER)).toBe(
-      true,
-    );
-    expect(derivedSecret(box)).toBe(secret);
-    // One workspace, agreed between `ub` and every mise task — and generated
-    // here, because nothing else in the system will invent one.
+    // One workspace, generated here because nothing else in the system will
+    // invent one.
     expect(userConfig(box).workspace).toMatch(UUID);
-    expect(derivedWorkspace(box)).toBe(userConfig(box).workspace);
     // It is in the report too, so the id is not something to go looking for.
     expect(run.stdout).toContain(userConfig(box).workspace as string);
 
@@ -137,45 +101,24 @@ describe("ub init", () => {
     // A workspace id is an identity, and a second run is not a second
     // workspace: the one in force is what a re-run confirms.
     const box = sandbox({ checkout: true });
-    expect(runUb(["init", "--yes"], box, WITHOUT_MISE).status).toBe(0);
+    expect(runUb(["init", "--yes"], box).status).toBe(0);
     const first = userConfig(box).workspace as string;
     expect(first).toMatch(UUID);
 
-    expect(runUb(["init", "--yes"], box, WITHOUT_MISE).status).toBe(0);
+    expect(runUb(["init", "--yes"], box).status).toBe(0);
     expect(userConfig(box).workspace).toBe(first);
-    expect(derivedWorkspace(box)).toBe(first);
   });
 
   it("is a no-op for the secret on a second run", () => {
     const box = sandbox({ checkout: true });
-    expect(runUb(["init", "--yes"], box, WITHOUT_MISE).status).toBe(0);
+    expect(runUb(["init", "--yes"], box).status).toBe(0);
     const first = storedSecret(box);
 
-    const again = runUb(["init", "--yes"], box, WITHOUT_MISE);
+    const again = runUb(["init", "--yes"], box);
     expect(again.status).toBe(0);
     expect(storedSecret(box)).toBe(first);
     expect(again.stdout).toMatch(/credential\s+already on this machine/);
     expect(again.output).not.toContain(first);
-  });
-
-  it("rebuilds the derived config from the authority — same value, not a new one", () => {
-    const box = sandbox({ checkout: true });
-    expect(runUb(["init", "--yes"], box, WITHOUT_MISE).status).toBe(0);
-    const secret = storedSecret(box);
-
-    // Deleted: regenerated from the authority, which is what "derived" means.
-    rmSync(localConfigPath(box));
-    expect(runUb(["init", "--yes"], box, WITHOUT_MISE).status).toBe(0);
-    expect(derivedSecret(box)).toBe(secret);
-    expect(storedSecret(box)).toBe(secret);
-
-    // Drifted: the authority wins, rather than two files disagreeing quietly.
-    writeFileSync(
-      localConfigPath(box),
-      `${MARKER}\n[env]\nHUB_AUTH_TOKEN = "stale-value"\n`,
-    );
-    expect(runUb(["init", "--yes"], box, WITHOUT_MISE).status).toBe(0);
-    expect(derivedSecret(box)).toBe(secret);
   });
 
   it("generates nothing when the environment already supplies a secret", () => {
@@ -183,14 +126,10 @@ describe("ub init", () => {
     // `fnox exec`, so a decryptable secret arrives exactly like this one.
     const supplied = "environment-supplied-signing-secret-4c19";
     const box = sandbox({ checkout: true });
-    const run = runUb(["init", "--yes"], box, {
-      ...WITHOUT_MISE,
-      HUB_AUTH_TOKEN: supplied,
-    });
+    const run = runUb(["init", "--yes"], box, { HUB_AUTH_TOKEN: supplied });
 
     expect(run.status).toBe(0);
     expect(existsSync(credentialsPath(box))).toBe(false);
-    expect(existsSync(localConfigPath(box))).toBe(false);
     expect(run.stdout).toMatch(/credential\s+supplied by the environment/);
     expect(run.output).not.toContain(supplied);
   });
@@ -206,46 +145,24 @@ describe("ub init", () => {
       credentialsMode: 0o644,
     });
 
-    const run = runUb(["init", "--yes"], box, WITHOUT_MISE);
+    const run = runUb(["init", "--yes"], box);
     expect(run.status).toBe(0);
     expect(statSync(credentialsPath(box)).mode & 0o777).toBe(0o600);
     expect(storedSecret(box)).toBe(secret);
     expect(run.output).not.toContain(secret);
   });
 
-  it("leaves a mise.local.toml somebody else wrote alone, and says what to do", () => {
-    const box = sandbox({ checkout: true });
-    const foreign = "[env]\nMY_OWN_SETTING = \"1\"\n";
-    writeFileSync(localConfigPath(box), foreign);
-
-    const run = runUb(["init", "--yes"], box, WITHOUT_MISE);
-    expect(run.status).toBe(0);
-    expect(readFileSync(localConfigPath(box), "utf8")).toBe(foreign);
-    expect(run.stderr).toMatch(/was not written by `ub init`/);
-    expect(run.output).not.toContain(storedSecret(box));
-  });
-
-  it("names the command to run when mise cannot be reached", () => {
-    // An untrusted config file is a hard error for every mise task in the
-    // directory, so a `mise trust` that did not happen has to be said out loud.
-    const box = sandbox({ checkout: true });
-    const run = runUb(["init", "--yes"], box, WITHOUT_MISE);
-    expect(run.status).toBe(0);
-    expect(run.stderr).toMatch(/mise trust .*mise\.local\.toml/);
-  });
-
   it("needs no TTY: takes flags, and defaults rather than prompting", () => {
     const box = sandbox({ checkout: true });
     // No `--yes`, stdin a pipe: this must complete rather than block on input.
     // With nobody to ask for a display slug, the id is the bare uuid.
-    expect(runUb(["init"], box, WITHOUT_MISE).status).toBe(0);
+    expect(runUb(["init"], box).status).toBe(0);
     expect(userConfig(box).workspace).toMatch(UUID);
 
     const decorated = `team-b-${JOINED}`;
     const flagged = runUb(
       ["init", "--name", "Ada", "--color", "#0675c9", "--workspace", decorated],
       box,
-      WITHOUT_MISE,
     );
     expect(flagged.status).toBe(0);
     expect(userConfig(box)).toMatchObject({
@@ -253,9 +170,6 @@ describe("ub init", () => {
       color: "#0675c9",
       workspace: decorated,
     });
-    // Stored and mirrored exactly as typed: the slug is display, and nothing
-    // rewrites somebody's spelling of their own workspace.
-    expect(derivedWorkspace(box)).toBe(decorated);
   });
 
   it("refuses an answer it cannot write safely, without printing the secret", () => {
@@ -272,7 +186,7 @@ describe("ub init", () => {
       ["init", "--yes", "--workspace", `${JOINED}-trailing`],
       ["init", "--yes", "--mcp", "--no-mcp"],
     ]) {
-      const run = runUb(argv, box, WITHOUT_MISE);
+      const run = runUb(argv, box);
       expect(run.status).toBe(2);
       expect(run.stdout).toBe("");
       expect(run.output).not.toContain(secret);
@@ -280,7 +194,7 @@ describe("ub init", () => {
 
     // The rejection is the shared rule's, so it names the source and states the
     // real constraints rather than a rule this command invented.
-    const named = runUb(["init", "--yes", "--workspace", "a/b"], box, WITHOUT_MISE);
+    const named = runUb(["init", "--yes", "--workspace", "a/b"], box);
     expect(named.stderr).toMatch(/--workspace must be a workspace id/);
     expect(named.stderr).toMatch(/<slug>-<uuid>/);
   });
@@ -291,21 +205,16 @@ describe("ub init", () => {
     // command refuses. The slug is display, so the spelling is kept verbatim.
     for (const workspace of [JOINED, `uberblick-${JOINED}`, `team-b-${JOINED}`]) {
       const box = sandbox({ checkout: true });
-      const run = runUb(["init", "--yes", "--workspace", workspace], box, WITHOUT_MISE);
+      const run = runUb(["init", "--yes", "--workspace", workspace], box);
       expect(run.status, run.stderr).toBe(0);
       expect(userConfig(box).workspace).toBe(workspace);
-
-      const local = readFileSync(localConfigPath(box), "utf8");
-      expect(local).toContain(`WORKSPACE_ID = ${JSON.stringify(workspace)}`);
-      // And the file is still readable by the reader that has to rebuild it.
-      expect(derivedSecret(box)).toBe(storedSecret(box));
     }
   });
 
-  it("keeps the authority and the derived file agreeing under concurrent runs", async () => {
+  it("leaves one signing secret and one workspace under concurrent runs", async () => {
     // Several fresh `ub init`s at the same moment — a `mise run setup` and an
-    // editor's MCP client, say. Last-write-wins would leave one of them having
-    // written a derived file for a secret that is no longer the authority's.
+    // editor's MCP client, say. Last-write-wins would leave one of them
+    // convinced of a secret that is no longer the one on disk.
     //
     // Six at a time rather than two, though being honest about what this can
     // prove: node's startup dominates each run, so the microseconds where the
@@ -332,7 +241,7 @@ describe("ub init", () => {
       const workspace = randomUUID();
       const runs = await Promise.all(
         Array.from({ length: 6 }, () =>
-          runUbAsync(["init", "--yes", "--workspace", workspace], box, WITHOUT_MISE),
+          runUbAsync(["init", "--yes", "--workspace", workspace], box),
         ),
       );
       for (const run of runs) {
@@ -340,8 +249,7 @@ describe("ub init", () => {
       }
 
       const authority = storedSecret(box);
-      expect(derivedSecret(box)).toBe(authority);
-      expect(derivedWorkspace(box)).toBe(userConfig(box).workspace);
+      expect(userConfig(box).workspace).toBe(workspace);
       // Exactly one secret survives: neither process printed its own, and the
       // one on disk is the one both of them now describe.
       for (const run of runs) {
@@ -359,16 +267,15 @@ describe("ub init", () => {
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
 
-    const running = runUbAsync(["init", "--yes"], box, WITHOUT_MISE);
+    const running = runUbAsync(["init", "--yes"], box);
     await sleep(400);
     // Still waiting: nothing has been written, because nothing may be.
     expect(existsSync(credentialsPath(box))).toBe(false);
-    expect(existsSync(localConfigPath(box))).toBe(false);
 
     rmSync(lock);
     const run = await running;
     expect(run.status, run.output).toBe(0);
-    expect(derivedSecret(box)).toBe(storedSecret(box));
+    expect(existsSync(credentialsPath(box))).toBe(true);
     // And the lock it took in turn is not left behind.
     expect(existsSync(lock)).toBe(false);
   });
@@ -397,7 +304,7 @@ describe("ub init", () => {
     const running = runUbAsync(
       ["init", "--yes"],
       box,
-      WITHOUT_MISE,
+      {},
       undefined,
       (stderr) => {
         waiting ||= stderr.includes("waiting for another `ub init`");
@@ -413,7 +320,6 @@ describe("ub init", () => {
     const run = await running;
     expect(run.status, run.output).toBe(0);
     expect(userConfig(box).workspace).toBe(JOINED);
-    expect(derivedWorkspace(box)).toBe(JOINED);
     // And the report describes the machine rather than the intention.
     expect(run.stdout).toContain(JOINED);
   });
@@ -421,9 +327,9 @@ describe("ub init", () => {
   it("refuses a workspace it cannot read, rather than inventing one over it", async () => {
     // The other side of adopting: what arrives under the lock is a value out
     // of a file, and it is held to the rule every reader of that file applies.
-    // Writing an unusable workspace on would put it into `config.json` and the
-    // derived mise config, where the next run — or a seed, or a report — is
-    // where it would finally go wrong.
+    // Writing an unusable workspace on would put it into `config.json`, where
+    // the next run — or a seed, or a report — is where it would finally go
+    // wrong.
     const box = sandbox({ checkout: true });
     const config = join(box.configHome, "uberblick", "config.json");
     const lock = join(box.configHome, "uberblick", ".init.lock");
@@ -434,7 +340,7 @@ describe("ub init", () => {
     const running = runUbAsync(
       ["init", "--yes"],
       box,
-      WITHOUT_MISE,
+      {},
       undefined,
       (stderr) => {
         waiting ||= stderr.includes("waiting for another `ub init`");
@@ -450,7 +356,6 @@ describe("ub init", () => {
     expect(run.stderr).toContain(config);
     // And nothing was written on top of it.
     expect(userConfig(box).workspace).toBe("a/b");
-    expect(existsSync(localConfigPath(box))).toBe(false);
   });
 
   it("never removes a lock it did not create, however old that lock is", () => {
@@ -476,7 +381,6 @@ describe("ub init", () => {
       utimesSync(lock, when, when);
 
       const run = runUb(["init", "--yes"], box, {
-        ...WITHOUT_MISE,
         XDG_CONFIG_HOME: configHome,
       });
       expect(run.status).toBe(1);
@@ -495,82 +399,14 @@ describe("ub init", () => {
       expect(existsSync(join(configHome, "uberblick", "credentials.json"))).toBe(
         false,
       );
-      expect(existsSync(localConfigPath(box))).toBe(false);
     }
-  });
-
-  it("refuses a value that could never reach the derived config", () => {
-    // U+007F is what `JSON.stringify` leaves raw and TOML forbids raw, so a
-    // value carrying one would produce a mise.local.toml that takes every task
-    // in the directory down. Since a workspace id is `[a-z0-9-]`, the shared
-    // rule now catches this first — the TOML guard in mise-config.ts stays for
-    // the other value that file carries, the signing secret — and either way
-    // nothing is written.
-    const box = sandbox({ checkout: true });
-    const run = runUb(
-      ["init", "--yes", "--workspace", `${JOINED}${DELETE}`],
-      box,
-      WITHOUT_MISE,
-    );
-    expect(run.status).toBe(2);
-    expect(run.stderr).toMatch(/--workspace must be a workspace id/);
-    expect(existsSync(localConfigPath(box))).toBe(false);
-  });
-
-  it("keeps a path out of the file it writes, however that path is spelled", () => {
-    // The authority's path is attacker-influenced (XDG_CONFIG_HOME), the derived
-    // file is TOML, and `ub init` asks mise to TRUST it — so a newline in that
-    // path must not be able to add a line to it. It is not interpolated at all.
-    const box = sandbox({ checkout: true });
-    const evil = join(box.configHome, 'evil\nINJECTED = "yes"');
-    mkdirSync(evil, { recursive: true });
-
-    const run = runUb(["init", "--yes"], box, {
-      ...WITHOUT_MISE,
-      XDG_CONFIG_HOME: evil,
-    });
-    expect(run.status).toBe(0);
-
-    const local = readFileSync(localConfigPath(box), "utf8");
-    expect(local).not.toMatch(/INJECTED/);
-    expect(local).not.toContain(evil);
-    // Still a file whose one derived value reads back.
-    const secret = JSON.parse(
-      readFileSync(join(evil, ...CREDENTIALS), "utf8"),
-    ).signingSecret;
-    expect(derivedSecret(box)).toBe(secret);
-  });
-
-  it("leaves a mise.local.toml it cannot read, and one that is a symlink", () => {
-    // Failing open here means chmodding and truncating somebody else's file —
-    // or, through a symlink, writing the signing secret into whatever the link
-    // points at.
-    const unreadable = sandbox({ checkout: true });
-    writeFileSync(localConfigPath(unreadable), "[env]\nMINE = \"1\"\n");
-    chmodSync(localConfigPath(unreadable), 0o000);
-    const first = runUb(["init", "--yes"], unreadable, WITHOUT_MISE);
-    expect(first.status).toBe(0);
-    expect(first.stderr).toMatch(/was left alone: it could not be opened/);
-    expect(statSync(localConfigPath(unreadable)).mode & 0o777).toBe(0o000);
-
-    const linked = sandbox({ checkout: true });
-    const target = join(linked.cwd, "target.toml");
-    writeFileSync(target, "[env]\nMINE = \"1\"\n");
-    symlinkSync(target, localConfigPath(linked));
-    const second = runUb(["init", "--yes"], linked, WITHOUT_MISE);
-    expect(second.status).toBe(0);
-    expect(second.stderr).toMatch(/was left alone: it is a symbolic link/);
-    // The link is intact and its target never saw the secret.
-    expect(lstatSync(localConfigPath(linked)).isSymbolicLink()).toBe(true);
-    expect(readFileSync(target, "utf8")).toBe("[env]\nMINE = \"1\"\n");
-    expect(readFileSync(target, "utf8")).not.toContain(storedSecret(linked));
   });
 
   it("repairs the mode of a config.json that was left readable", () => {
     const box = sandbox({ checkout: true, userConfig: { workspace: JOINED } });
     chmodSync(join(box.configHome, "uberblick", "config.json"), 0o644);
 
-    expect(runUb(["init", "--yes"], box, WITHOUT_MISE).status).toBe(0);
+    expect(runUb(["init", "--yes"], box).status).toBe(0);
     expect(
       statSync(join(box.configHome, "uberblick", "config.json")).mode & 0o077,
     ).toBe(0);
@@ -578,10 +414,10 @@ describe("ub init", () => {
 
   it("offers the MCP wiring, and honours --no-mcp instead of blocking", () => {
     const box = sandbox({ checkout: true });
-    const offered = runUb(["init", "--yes"], box, WITHOUT_MISE);
+    const offered = runUb(["init", "--yes"], box);
     expect(offered.stdout).toMatch(/ub mcp install/);
 
-    const declined = runUb(["init", "--yes", "--no-mcp"], box, WITHOUT_MISE);
+    const declined = runUb(["init", "--yes", "--no-mcp"], box);
     expect(declined.status).toBe(0);
     expect(declined.stdout).not.toMatch(/ub mcp install/);
     expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
@@ -590,7 +426,6 @@ describe("ub init", () => {
     // reachable, so this is the file-editing path, in the sandbox's own
     // directory rather than anywhere on the developer's machine.
     const asked = runUb(["init", "--yes", "--mcp"], box, {
-      ...WITHOUT_MISE,
       PATH: "/nonexistent-for-tests",
     });
     expect(asked.status).toBe(0);
@@ -601,20 +436,19 @@ describe("ub init", () => {
     expect(registered.mcpServers.uberblick.args).toEqual(["mcp", "serve"]);
   });
 
-  it("writes no derived config outside a checkout", () => {
-    // An installed `ub` with no checkout still initialises: the derived file
-    // exists for mise's benefit, and there is no mise here.
+  it("initialises outside a checkout, and names no contributor task there", () => {
+    // An installed `ub` with no checkout still initialises. The mise tasks only
+    // exist inside one, so they are not offered as a next step.
     const box = sandbox();
-    const run = runUb(["init", "--yes"], box, WITHOUT_MISE);
+    const run = runUb(["init", "--yes"], box);
     expect(run.status).toBe(0);
-    expect(existsSync(localConfigPath(box))).toBe(false);
     expect(storedSecret(box)).toMatch(/^[A-Za-z0-9._-]+$/);
     expect(run.stdout).not.toMatch(/mise run dev/);
   });
 
   it.skipIf(!hasGit)("leaves a checkout with nothing for git to report", () => {
-    // The real `.gitignore`, so this fails if the ignore rule for the derived
-    // config is ever dropped — that file carries the signing secret.
+    // The real `.gitignore`: `ub init` writes nothing into a checkout, and this
+    // is what would catch it if that ever changed.
     const box = sandbox({ checkout: true });
     copyFileSync(join(REPO_ROOT, ".gitignore"), join(box.cwd, ".gitignore"));
     const git = (...args: string[]): void => {
@@ -636,8 +470,7 @@ describe("ub init", () => {
       "checkout",
     );
 
-    expect(runUb(["init", "--yes"], box, WITHOUT_MISE).status).toBe(0);
-    expect(existsSync(localConfigPath(box))).toBe(true);
+    expect(runUb(["init", "--yes"], box).status).toBe(0);
 
     const status = spawnSync("git", ["status", "--porcelain"], {
       cwd: box.cwd,
@@ -646,17 +479,16 @@ describe("ub init", () => {
     expect(status.stdout).toBe("");
   });
 
-  it("keeps both files owner-only under a umask that would widen them", () => {
-    // `mode:` on a write is subject to the umask, so both files are chmodded
+  it("keeps the credential owner-only under a umask that would widen it", () => {
+    // `mode:` on a write is subject to the umask, so the file is chmodded
     // afterwards. Prove it with the widest umask a system will accept.
     const box = sandbox({ checkout: true });
     const previous = process.umask(0o000);
     try {
-      expect(runUb(["init", "--yes"], box, WITHOUT_MISE).status).toBe(0);
+      expect(runUb(["init", "--yes"], box).status).toBe(0);
     } finally {
       process.umask(previous);
     }
     expect(statSync(credentialsPath(box)).mode & 0o077).toBe(0);
-    expect(statSync(localConfigPath(box)).mode & 0o077).toBe(0);
   });
 });

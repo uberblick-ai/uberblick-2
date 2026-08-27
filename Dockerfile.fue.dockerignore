@@ -16,8 +16,8 @@ node_modules
 dist
 **/dist
 
-# Local state `ub init`, the hub and the MCP mirror create. A new machine has
-# none of it.
+# Local state a run on this machine creates — the hub's and the MCP mirror's
+# databases, a developer's own mise config. A new machine has none of it.
 mise.local.toml
 .mise.local.toml
 data

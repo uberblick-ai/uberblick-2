@@ -1,15 +1,12 @@
 /**
- * The storage layout: which root a machine's files are in, and who decides.
+ * The storage layout: where a machine's files are, and what may move them.
  *
- * Table-driven, because the whole contract is a table — platform and
- * environment in, four paths out — and because the case that matters most is
- * the one nobody runs day to day: a Mac. `process.platform` is a parameter of
- * {@link resolveStorage} exactly so this suite can resolve as Darwin on the
- * Linux box that runs it, without a mock anywhere near the production code.
+ * There is one layout, so the contract is a small table — environment in, four
+ * paths out — plus the two properties that make "one layout" a fact rather than
+ * a claim: it does not consult the platform, and resolving creates nothing.
  *
  * Every case resolves against a throwaway `HOME`. A test that read the
- * developer's real one would be a test of the developer's machine — and on a
- * Mac, of whether they happen to have `~/.config/uberblick`.
+ * developer's real one would be a test of the developer's machine.
  */
 
 import { spawnSync } from "node:child_process";
@@ -19,8 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { defaultDatabasePath } from "../src/config.js";
-import type { StorageLayout } from "../src/storage.js";
-import { AmbiguousStorageError, resolveStorage } from "../src/storage.js";
+import { resolveStorage } from "../src/storage.js";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -41,68 +37,16 @@ function home(): string {
   return dir;
 }
 
-function seed(path: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, "", "utf8");
-}
-
-function macRoot(root: string): string {
-  return join(root, "Library", "Application Support", "Uberblick");
-}
-
-function legacyConfig(root: string): string {
-  return join(root, ".config", "uberblick");
-}
-
-function legacyData(root: string): string {
-  return join(root, ".local", "share", "uberblick");
-}
-
-describe("the Mac layout", () => {
-  it("puts config, credentials and both databases under Application Support", () => {
-    const root = home();
-    const storage = resolveStorage({ env: { HOME: root }, platform: "darwin" });
-    const app = macRoot(root);
-
-    expect(storage.layout).toBe("mac");
-    expect(storage.configDir).toBe(app);
-    expect(join(storage.configDir, "config.json")).toBe(join(app, "config.json"));
-    expect(join(storage.configDir, "credentials.json")).toBe(
-      join(app, "credentials.json"),
-    );
-    expect(storage.dataDir).toBe(join(app, "data"));
-    expect(storage.hubDatabase).toBe(join(app, "data", "hub.sqlite"));
-    expect(join(storage.workspaceDir, `${WORKSPACE}.sqlite`)).toBe(
-      join(app, "data", "workspaces", `${WORKSPACE}.sqlite`),
-    );
-    expect(storage.warnings).toEqual([]);
-  });
-
-  it("creates nothing: resolution is paths, never directories", () => {
-    const root = home();
-    resolveStorage({ env: { HOME: root }, platform: "darwin" });
-    expect(existsSync(join(root, "Library"))).toBe(false);
-  });
-});
-
-// --- precedence --------------------------------------------------------------
-
 interface Case {
   name: string;
-  platform: NodeJS.Platform;
   /** `HOME` is added by the runner; this is everything else. */
   env?: NodeJS.ProcessEnv;
-  /** Files to create under the throwaway home before resolving. */
-  files?: (root: string) => string[];
-  layout: StorageLayout;
   paths: (root: string) => {
     configDir: string;
     dataDir: string;
     hubDatabase: string;
     workspaceDir: string;
   };
-  /** A fragment every warning line must contain, or none expected. */
-  warns?: RegExp;
 }
 
 function xdgUnder(configHome: string, dataHome: string) {
@@ -115,234 +59,125 @@ function xdgUnder(configHome: string, dataHome: string) {
   };
 }
 
+function defaults(root: string) {
+  return xdgUnder(join(root, ".config"), join(root, ".local", "share"));
+}
+
 const CASES: Case[] = [
   {
-    name: "Linux with no overrides keeps the XDG defaults",
-    platform: "linux",
-    layout: "xdg",
-    paths: (root) =>
-      xdgUnder(join(root, ".config"), join(root, ".local", "share")),
+    name: "no overrides gives the XDG defaults under HOME",
+    paths: defaults,
   },
   {
-    name: "Linux honours an explicit XDG_CONFIG_HOME and XDG_DATA_HOME",
-    platform: "linux",
+    name: "an explicit XDG_CONFIG_HOME and XDG_DATA_HOME are honoured",
     env: { XDG_CONFIG_HOME: "/srv/conf", XDG_DATA_HOME: "/srv/data" },
-    layout: "xdg",
     paths: () => xdgUnder("/srv/conf", "/srv/data"),
   },
   {
-    // The whole layout, not half of it: config in Application Support and
-    // databases in /srv would be one installation split across two roots.
-    name: "an explicit XDG_CONFIG_HOME takes a Mac off Application Support entirely",
-    platform: "darwin",
+    // One variable moves its own half; the other keeps its default. Both are
+    // still the same layout — there is no second one to fall back to.
+    name: "XDG_CONFIG_HOME alone moves only the config root",
     env: { XDG_CONFIG_HOME: "/srv/conf" },
-    layout: "xdg",
     paths: (root) => xdgUnder("/srv/conf", join(root, ".local", "share")),
   },
   {
-    name: "an explicit XDG_DATA_HOME does the same on a Mac",
-    platform: "darwin",
-    env: { XDG_DATA_HOME: "/srv/data" },
-    layout: "xdg",
-    paths: (root) => xdgUnder(join(root, ".config"), "/srv/data"),
-  },
-  {
     name: "an empty XDG variable is not an override",
-    platform: "darwin",
     env: { XDG_CONFIG_HOME: "  " },
-    layout: "mac",
-    paths: (root) => ({
-      configDir: macRoot(root),
-      dataDir: join(macRoot(root), "data"),
-      hubDatabase: join(macRoot(root), "data", "hub.sqlite"),
-      workspaceDir: join(macRoot(root), "data", "workspaces"),
-    }),
+    paths: defaults,
   },
   {
     // The XDG spec: a relative value must be ignored. Honouring one would put
     // this machine's files wherever the command was started from.
-    name: "a relative XDG_CONFIG_HOME is ignored, so a Mac stays on the Mac layout",
-    platform: "darwin",
+    name: "a relative XDG_CONFIG_HOME is ignored",
     env: { XDG_CONFIG_HOME: "relative/conf" },
-    layout: "mac",
-    paths: (root) => ({
-      configDir: macRoot(root),
-      dataDir: join(macRoot(root), "data"),
-      hubDatabase: join(macRoot(root), "data", "hub.sqlite"),
-      workspaceDir: join(macRoot(root), "data", "workspaces"),
-    }),
+    paths: defaults,
   },
   {
-    name: "a relative XDG_DATA_HOME is ignored, leaving the XDG default",
-    platform: "linux",
+    name: "a relative XDG_DATA_HOME is ignored",
     env: { XDG_DATA_HOME: "./data" },
-    layout: "xdg",
-    paths: (root) =>
-      xdgUnder(join(root, ".config"), join(root, ".local", "share")),
-  },
-  {
-    name: "a legacy Mac with only config.json keeps the legacy layout",
-    platform: "darwin",
-    files: (root) => [join(legacyConfig(root), "config.json")],
-    layout: "legacy-xdg",
-    paths: (root) =>
-      xdgUnder(join(root, ".config"), join(root, ".local", "share")),
-    warns: /ub storage migrate/,
-  },
-  {
-    name: "a legacy Mac with only credentials.json keeps the legacy layout",
-    platform: "darwin",
-    files: (root) => [join(legacyConfig(root), "credentials.json")],
-    layout: "legacy-xdg",
-    paths: (root) =>
-      xdgUnder(join(root, ".config"), join(root, ".local", "share")),
-    warns: /ub storage migrate/,
-  },
-  {
-    name: "a legacy Mac with only a hub database keeps the legacy layout",
-    platform: "darwin",
-    files: (root) => [join(legacyData(root), "hub.sqlite")],
-    layout: "legacy-xdg",
-    paths: (root) =>
-      xdgUnder(join(root, ".config"), join(root, ".local", "share")),
-    warns: /ub storage migrate/,
-  },
-  {
-    name: "a legacy Mac with only a workspace replica keeps the legacy layout",
-    platform: "darwin",
-    files: (root) => [join(legacyData(root), `${WORKSPACE}.sqlite`)],
-    layout: "legacy-xdg",
-    paths: (root) =>
-      xdgUnder(join(root, ".config"), join(root, ".local", "share")),
-    warns: /ub storage migrate/,
-  },
-  {
-    name: "a legacy Mac with state in both old roots keeps the legacy layout",
-    platform: "darwin",
-    files: (root) => [
-      join(legacyConfig(root), "config.json"),
-      join(legacyConfig(root), "credentials.json"),
-      join(legacyData(root), "hub.sqlite"),
-      join(legacyData(root), `${WORKSPACE}.sqlite`),
-    ],
-    layout: "legacy-xdg",
-    paths: (root) =>
-      xdgUnder(join(root, ".config"), join(root, ".local", "share")),
-    warns: /ub storage migrate/,
-  },
-  {
-    // Directories with our names in them, holding nothing of ours: a note, a
-    // backup, a database that is not a workspace replica. A fresh Mac.
-    name: "files that are not ours do not make an old root count",
-    platform: "darwin",
-    files: (root) => [
-      join(legacyConfig(root), "notes.txt"),
-      join(legacyConfig(root), "config.json.bak"),
-      join(legacyData(root), "scratch.sqlite"),
-      join(legacyData(root), "not-a-uuid.sqlite"),
-    ],
-    layout: "mac",
-    paths: (root) => ({
-      configDir: macRoot(root),
-      dataDir: join(macRoot(root), "data"),
-      hubDatabase: join(macRoot(root), "data", "hub.sqlite"),
-      workspaceDir: join(macRoot(root), "data", "workspaces"),
-    }),
-  },
-  {
-    // Explicit beats detected: someone who set the variables asked for these
-    // paths, and does not need to be told about a layout they overrode.
-    name: "an explicit XDG_CONFIG_HOME silences the legacy warning",
-    platform: "darwin",
-    env: { XDG_CONFIG_HOME: "/srv/conf", XDG_DATA_HOME: "/srv/data" },
-    files: (root) => [join(legacyConfig(root), "config.json")],
-    layout: "xdg",
-    paths: () => xdgUnder("/srv/conf", "/srv/data"),
+    paths: defaults,
   },
 ];
 
-describe("layout precedence", () => {
+describe("the layout", () => {
   for (const one of CASES) {
     it(one.name, () => {
       const root = home();
-      for (const file of one.files?.(root) ?? []) {
-        seed(file);
-      }
-
-      const storage = resolveStorage({
-        env: { HOME: root, ...one.env },
-        platform: one.platform,
-      });
-
-      expect(storage.layout).toBe(one.layout);
+      const storage = resolveStorage({ env: { HOME: root, ...one.env } });
       const expected = one.paths(root);
+
       expect(storage.configDir).toBe(expected.configDir);
       expect(storage.dataDir).toBe(expected.dataDir);
       expect(storage.hubDatabase).toBe(expected.hubDatabase);
       expect(storage.workspaceDir).toBe(expected.workspaceDir);
-
-      if (one.warns === undefined) {
-        expect(storage.warnings).toEqual([]);
-      } else {
-        // One warning, however many old files there are: a machine is told
-        // where it lives once, not once per file somebody left behind.
-        expect(storage.warnings).toHaveLength(1);
-        expect(storage.warnings[0]).toMatch(one.warns);
-      }
+      expect(join(storage.workspaceDir, `${WORKSPACE}.sqlite`)).toBe(
+        join(expected.dataDir, `${WORKSPACE}.sqlite`),
+      );
     });
   }
+
+  it("creates nothing: resolution is paths, never directories", () => {
+    const root = home();
+    resolveStorage({ env: { HOME: root } });
+    expect(existsSync(join(root, ".config"))).toBe(false);
+    expect(existsSync(join(root, ".local"))).toBe(false);
+  });
 });
 
-// --- the refusal -------------------------------------------------------------
-
-describe("state in both roots", () => {
-  it("refuses to guess, and names both roots", () => {
-    const root = home();
-    seed(join(legacyConfig(root), "config.json"));
-    seed(join(macRoot(root), "config.json"));
-
-    let thrown: unknown;
-    try {
-      resolveStorage({ env: { HOME: root }, platform: "darwin" });
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toBeInstanceOf(AmbiguousStorageError);
-    const refusal = thrown as AmbiguousStorageError;
-    expect(refusal.message).toContain(macRoot(root));
-    expect(refusal.message).toContain(legacyConfig(root));
-    expect(refusal.message).toContain(legacyData(root));
-    expect(refusal.remedy).toMatch(/ub storage migrate/);
-  });
-
-  it("refuses on a legacy database beside a new-root config too", () => {
-    const root = home();
-    seed(join(legacyData(root), `${WORKSPACE}.sqlite`));
-    seed(join(macRoot(root), "data", "hub.sqlite"));
-    expect(() => resolveStorage({ env: { HOME: root }, platform: "darwin" })).toThrow(
-      AmbiguousStorageError,
+/**
+ * The same answer on macOS as on Linux — the whole of "one layout".
+ *
+ * `resolveStorage` takes no platform, so the only honest way to ask is to run
+ * it in a process that *believes* it is on one: a child that redefines
+ * `process.platform` before importing the module. A parameter would be a
+ * parameter someone could pass differently.
+ */
+describe("platform independence", () => {
+  function resolvedOn(platform: NodeJS.Platform, root: string): string {
+    const probe = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "--eval",
+        `Object.defineProperty(process, "platform", { value: ${JSON.stringify(platform)} });\n` +
+          `const { resolveStorage } = await import(${JSON.stringify(join(PACKAGE_ROOT, "src", "storage.ts"))});\n` +
+          "process.stdout.write(JSON.stringify(resolveStorage()));\n",
+        "--input-type=module",
+      ],
+      {
+        cwd: PACKAGE_ROOT,
+        env: { PATH: process.env.PATH ?? "", HOME: root },
+        encoding: "utf8",
+      },
     );
+    expect(probe.status, probe.stderr).toBe(0);
+    return probe.stdout;
+  }
+
+  it("resolves the same paths on darwin and on linux", () => {
+    const root = home();
+    const onLinux = resolvedOn("linux", root);
+    expect(JSON.parse(onLinux)).toEqual(resolveStorage({ env: { HOME: root } }));
+    expect(resolvedOn("darwin", root)).toBe(onLinux);
+    expect(onLinux).not.toContain("Application Support");
   });
 });
 
 // --- the hub's own default ---------------------------------------------------
 
 describe("the hub database", () => {
-  it("is the user's, on both layouts", () => {
+  it("is the user's", () => {
     const root = home();
-    expect(defaultDatabasePath({ env: { HOME: root }, platform: "linux" })).toBe(
+    expect(defaultDatabasePath({ env: { HOME: root } })).toBe(
       join(root, ".local", "share", "uberblick", "hub.sqlite"),
-    );
-    expect(defaultDatabasePath({ env: { HOME: root }, platform: "darwin" })).toBe(
-      join(macRoot(root), "data", "hub.sqlite"),
     );
   });
 
   it(
     "does not move when the package does",
     () => {
-      // The reason this issue exists: a Homebrew or tarball upgrade replaces
+      // The reason this module exists: a Homebrew or tarball upgrade replaces
       // program files, so a database resolved from the package's own location
       // is a database an upgrade deletes. Proving that means *relocating the
       // package* — a copy of the module under a directory that is not the
@@ -356,10 +191,7 @@ describe("the hub database", () => {
       writeFileSync(
         join(relocated, "probe.ts"),
         'import { defaultDatabasePath } from "./config.js";\n' +
-          // Pinned, because the assertion below is the XDG path: left to
-          // `process.platform` this would resolve the Mac layout on a Mac and
-          // fail there for a reason that has nothing to do with relocation.
-          'process.stdout.write(defaultDatabasePath({ platform: "linux" }));\n',
+          "process.stdout.write(defaultDatabasePath());\n",
         "utf8",
       );
 

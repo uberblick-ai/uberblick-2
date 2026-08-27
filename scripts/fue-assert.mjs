@@ -337,6 +337,28 @@ async function get(path, accept) {
 }
 
 async function main() {
+  // 0. `ub` itself, before anything asks it a question. Every task in the
+  //    checkout runs its command through `ub env --`, so a `mise run dev` on a
+  //    machine where the install did not put `ub` on PATH fails at the wrapper
+  //    with nothing said about the endpoint or the secret — and the first
+  //    honest report of that belongs here, ahead of the tasks.
+  await assert("`ub` is on PATH after the documented install", async () => {
+    const found = await run("sh", ["-c", "command -v ub"]);
+    if (found.code !== 0 || found.stdout.trim() === "") {
+      throw new Error(
+        "`ub` is not on PATH after `mise run setup`, so every mise task that " +
+          "wraps its command in `ub env --` would fail before it started",
+      );
+    }
+    const version = await run("ub", ["--version"]);
+    if (version.code !== 0) {
+      throw new Error(
+        `\`ub --version\` exited ${version.code}: ${firstLine(version.stderr)}`,
+      );
+    }
+    process.stdout.write(`fue:   ub at ${found.stdout.trim()}\n`);
+  });
+
   // 1. The command a new user runs first to find out whether any of this
   //    worked. It has to exit 0 and name the workspace `ub init` just made.
   const report = await assert("`ub status` names the fresh workspace", async () => {
