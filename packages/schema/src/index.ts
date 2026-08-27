@@ -125,6 +125,7 @@ export {
   SIDEBAR_UNPINNED_KEY,
   createGroup,
   deleteGroup,
+  getOrCreateGroup,
   getSidebarFlags,
   getSidebarGroups,
   getSidebarOrder,

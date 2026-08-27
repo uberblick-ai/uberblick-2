@@ -35,7 +35,13 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Hub } from "@uberblick/hub";
-import { createHub, mintToken, silentLogger } from "@uberblick/hub";
+import {
+  createHub,
+  importRootSecret,
+  MAX_TOKEN_LIFETIME_SECONDS,
+  mintToken,
+  silentLogger,
+} from "@uberblick/hub";
 import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
 import {
   appendBlock,
@@ -174,10 +180,13 @@ async function openRoom(
   const provider = new HocuspocusProvider({
     url: url(hub),
     name: room,
-    token: await mintToken(secret, {
+    token: await mintToken(await importRootSecret(secret), {
+      typ: "room",
       sub: "test-web-client",
       workspace: WORKSPACE,
       scope: "read-write",
+      kid: null,
+      lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
     }),
     document: doc,
   });

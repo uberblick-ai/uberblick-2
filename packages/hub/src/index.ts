@@ -36,5 +36,20 @@ export {
 export type { StorageLayout, StorageOptions, StoragePaths } from "./storage.js";
 export { silentLogger, stderrLogger } from "./log.js";
 export type { HubLogger, HubLogRecord } from "./log.js";
-export { isTokenScope, mintToken, TOKEN_SCOPES, verifyToken } from "./token.js";
-export type { TokenClaims, TokenRequest, TokenScope } from "./token.js";
+// The credential half of the token module is deliberately absent here: nothing
+// outside the hub issues or derives one, and the entry point is the surface the
+// other packages import.
+export {
+  importRootSecret,
+  isTokenScope,
+  MAX_TOKEN_LIFETIME_SECONDS,
+  mintToken,
+  TOKEN_SCOPES,
+  verifyToken,
+} from "./token.js";
+export type {
+  TokenClaims,
+  TokenRequest,
+  TokenScope,
+  TokenType,
+} from "./token.js";

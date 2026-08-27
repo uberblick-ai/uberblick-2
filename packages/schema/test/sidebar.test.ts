@@ -5,6 +5,7 @@ import {
   createGroup,
   deleteGroup,
   getBlocks,
+  getOrCreateGroup,
   getSidebarUnpinned,
   initDoc,
   isSidebarSeeded,
@@ -363,6 +364,87 @@ describe("sidebar doc", () => {
     pinDoc(a, work, ALPHA);
     syncDocs(a, b);
     expect(readSidebar(b)).toEqual([{ id: work, name: "Work", docs: [ALPHA] }]);
+  });
+});
+
+/**
+ * Two replicas making "the same" group while out of contact.
+ *
+ * The layout's reason for existing: a group's fields have to merge rather than
+ * replace each other, or the replica whose create loses takes its pins down
+ * with it — silently, which is the one thing a sidebar must never do.
+ */
+describe("creating one group on two replicas", () => {
+  const PINNED = "5e1d0000-0000-4000-8000-000000000002";
+
+  it.each(CLIENT_ORDERS)(
+    "keeps both sides' pins when both create the same id (clients %i, %i)",
+    (first, second) => {
+      const a = new Y.Doc();
+      a.clientID = first;
+      const b = new Y.Doc();
+      b.clientID = second;
+
+      // Neither replica has seen the other, so both write the same group id.
+      createGroup(a, "Pinned", undefined, PINNED);
+      pinDoc(a, PINNED, ALPHA);
+      createGroup(b, "Pinned", undefined, PINNED);
+      pinDoc(b, PINNED, BETA);
+      syncDocs(a, b);
+
+      expect(readSidebar(a)).toEqual(readSidebar(b));
+      const groups = readSidebar(a);
+      expect(groups).toHaveLength(1);
+      expect(groups[0]?.id).toBe(PINNED);
+      expect(groups[0]?.name).toBe("Pinned");
+      // Which pin sorts first is Yjs's tie-break between two blind inserts;
+      // that neither is lost is the rule.
+      expect([...(groups[0]?.docs ?? [])].sort()).toEqual([ALPHA, BETA]);
+    },
+  );
+
+  it.each(CLIENT_ORDERS)(
+    "keeps both sides' pins when both name the same group (clients %i, %i)",
+    (first, second) => {
+      const a = new Y.Doc();
+      a.clientID = first;
+      const b = new Y.Doc();
+      b.clientID = second;
+
+      // A caller that addresses groups by name gets the same guarantee: the id
+      // comes from the name, so two replicas write one group.
+      const here = getOrCreateGroup(a, "Reading");
+      const there = getOrCreateGroup(b, "Reading");
+      expect(here).toBe(there);
+      pinDoc(a, here, ALPHA);
+      pinDoc(b, there, BETA);
+      syncDocs(a, b);
+
+      expect(readSidebar(a)).toEqual(readSidebar(b));
+      const groups = readSidebar(a);
+      expect(groups).toHaveLength(1);
+      expect(groups[0]?.name).toBe("Reading");
+      expect([...(groups[0]?.docs ?? [])].sort()).toEqual([ALPHA, BETA]);
+
+      // The "get" half: a name already on the sidebar is never created twice.
+      expect(getOrCreateGroup(a, "Reading")).toBe(here);
+      expect(readSidebar(a)).toHaveLength(1);
+    },
+  );
+
+  it("gives a deleted group's id no pins when it is created again", () => {
+    // A group's pins outlive the group as a top-level array, which is the one
+    // hazard of reaching them by name: deleting has to empty it, or the next
+    // group created under that id would inherit somebody else's curation.
+    const doc = new Y.Doc();
+    const work = createGroup(doc, "Work");
+    pinDoc(doc, work, ALPHA);
+    deleteGroup(doc, work);
+
+    createGroup(doc, "Work again", undefined, work);
+    expect(readSidebar(doc)).toEqual([
+      { id: work, name: "Work again", docs: [] },
+    ]);
   });
 });
 
