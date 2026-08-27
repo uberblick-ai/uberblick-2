@@ -16,7 +16,7 @@
  * be made by hand.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -45,7 +45,14 @@ describe("the room-grammar validator", () => {
     const roots = readdirSync(join(repoRoot, "packages"), { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && entry.name !== "schema")
       .map((entry) => join(repoRoot, "packages", entry.name));
-    roots.push(join(repoRoot, "scripts"));
+    // Hard-coded because it is not a package: named explicitly so a rename
+    // shows up here as a missing root rather than as a silently unscanned tree.
+    const scripts = join(repoRoot, "scripts");
+    expect(
+      existsSync(scripts),
+      "the scripts/ scan root moved or was removed",
+    ).toBe(true);
+    roots.push(scripts);
 
     const files = roots.flatMap(sourceFiles);
     // A scan that found nothing to scan would pass silently forever.
