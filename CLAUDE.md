@@ -129,6 +129,15 @@ implementation (or Workflow pipelines for fan-out), then validate their output
   Copilot/Codex finding; and any change to the process itself — `.github/`
   spec/workflow files or `.claude/skills/` (a bug in the loop's own rules
   multiplies into everything it merges).
+- **Release 1 (#379) — delegated approval, one program.** A PR that closes a
+  child of #379 does not park `needs-human`: the coordinator applies
+  `human-approved` with a provenance comment citing the owner's directive of
+  2026-08-27 ("all work on the release 1 can be approved without a human - the
+  rule does not apply for 379 and its children") and executes the merge as tier
+  2. Every other gate is unchanged — immutable review at the merge head, CI,
+  Copilot, the Codex round where the gate list calls for one, acceptance
+  validation, zero unaddressed remarks, merge report. The exception names #379
+  and lapses when #379 closes; no other tier trigger changes.
 - **`packages/cli` — tiered from the diff, not the package name** (owner
   decision, 2026-08-24). A diff that adds or changes the user-facing command
   surface — new subcommands, a changed user↔uberblick interaction, anything
@@ -215,30 +224,43 @@ the fallback, which is exactly why CI is high priority.
 ## Hosted future (directional — shapes cheap-now choices only)
 
 The hub will eventually be hosted commercially with multiple workspaces and
-multiple user accounts (OAuth sessions). Spike consequences, nothing more:
+multiple user accounts — real user auth, OAuth, with Firebase Auth a named
+candidate. Spike consequences, nothing more:
 rooms carry `workspaceId` from day one; the auth token is claims-shaped
-(`{typ, sub, workspace, scope, kid, iat, exp}`, HMAC-signed with a dev secret
-for now) rather than an opaque shared string, and is sent via Hocuspocus's auth
-message, never in the WebSocket URL query string; awareness identity should
-derive from token claims eventually, not self-assertion. No OAuth, permissions, or multi-user
-auth in the spike itself.
+(`{typ, sub, workspace, scope, kid, iat, exp}`, HMAC-signed with the single
+shared secret release 1 keeps) rather than an opaque shared string, and is sent
+via Hocuspocus's auth message, never in the WebSocket URL query string;
+awareness identity should derive from token claims eventually, not
+self-assertion. No OAuth, permissions, or multi-user auth in the spike itself.
+
+Release 1's recorded security boundary is the tailnet: every client holds that
+one signing secret, so the deployment is supported only on a private Tailscale
+network (REMOTE.md) — an unguessable hostname is not a boundary. Build real
+auth when the trigger fires: the first non-owner person or untrusted device on
+the tailnet, or any exposure beyond it.
 
 ## Invariants
+
+Release 1 (#379) is a flag day, and only release 1: no backward compatibility,
+no data migration and no legacy detection anywhere — storage, config,
+deployment, wire — and it stands up a fresh hub and a fresh workspace.
 
 - SQLite indexes (FTS5, tags, links) are derived and rebuildable — never
   authoritative.
 - All document state lives in the Y.Doc, never in server-side tables.
 - **Document state syncs; auth state decides.** State that must merge between
   copies and survive offline lives in a Y.Doc. State that must be correct in
-  one place at one time — which workspaces this hub serves, which credentials
-  may open them, which have been revoked — lives in the hub's own SQLite
-  tables, never synced and never rebuilt from documents. Closed list, not a
-  general licence for server-side state: the workspace registry and its
-  credentials, nothing else. Unlike the derived indexes above they cannot be
-  rebuilt. Why this cannot live in a synced document — the hub must decide before it
-  admits a connection, and the party being revoked is the one who controls
-  whether its own replica is current — and what losing these tables costs, is
-  reference material — see #84 until it lands in the architecture doc.
+  one place at one time — which workspaces a hub serves, which credentials open
+  them, which have been revoked — belongs in the hub's own SQLite tables, never
+  synced and never rebuilt from documents: the hub must decide before it admits
+  a connection, and the party being revoked is the one who controls whether its
+  own replica is current. Closed list, not a general licence for server-side
+  state: the workspace registry and its credentials, nothing else. That list is
+  empty today — release 1 keeps the shared secret, and the registry and its
+  credential ladder are deferred with #388 — so the invariant binds whatever
+  auth is built next rather than code that exists. Unlike the derived indexes
+  above such tables cannot be rebuilt; what losing them costs is reference
+  material — see #84 until it lands in the architecture doc.
 - Identity is UUIDs everywhere; titles and paths are display data. On
   conflict, `meta.title` in the doc is authoritative; the directory stub is a
   cache repaired on write/connect.
