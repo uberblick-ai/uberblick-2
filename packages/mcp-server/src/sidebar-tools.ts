@@ -326,6 +326,7 @@ export function placeInGroup(
   groupId: string,
   uuid: string,
   index: number | undefined,
+  error: SidebarToolContext["error"],
 ): { moved: boolean; position: number } {
   const sidebar = replicas.sidebar();
   const moved = readSidebar(sidebar.doc).some((group) =>
@@ -333,10 +334,19 @@ export function placeInGroup(
   );
   if (moved) moveDoc(sidebar.doc, uuid, groupId, index);
   else pinDoc(sidebar.doc, groupId, uuid, index);
-  const target = readSidebar(sidebar.doc).find(
-    (group) => group.id === groupId,
-  );
-  return { moved, position: target?.docs.indexOf(uuid) ?? -1 };
+  const target = readSidebar(sidebar.doc).find((group) => group.id === groupId);
+  // A concurrent sidebar_group delete, arriving between the write and this
+  // read, is the way this happens. Saying "gone" is the only honest answer:
+  // a sentinel position would be echoed to the caller as if it were a place.
+  if (target === undefined) {
+    throw error(
+      "group_not_found",
+      `Sidebar group ${groupId} disappeared while ${uuid} was being pinned into it — ` +
+        "read get_sidebar and pin it again",
+      { group: groupId, uuid, applied: false, synced: false },
+    );
+  }
+  return { moved, position: target.docs.indexOf(uuid) };
 }
 
 /** The sidebar as an agent reads it: stored order, titles from the directory. */
@@ -439,7 +449,13 @@ export function registerSidebarTools(
       const groups = readSidebar(sidebar.doc);
       const target = findGroup(groups, group);
       const groupId = target?.id ?? createGroup(sidebar.doc, group);
-      const { moved } = placeInGroup(replicas, groupId, uuid, index);
+      const { moved } = placeInGroup(
+        replicas,
+        groupId,
+        uuid,
+        index,
+        context.error,
+      );
       return context.json({
         uuid,
         group: { id: groupId, name: target?.name ?? group },

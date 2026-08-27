@@ -619,16 +619,24 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         CREATE_DOC_DURABILITY +
         "\n\n" +
         SYNCED_MEANS,
-      inputSchema: {
-        title: titleArg,
-        description: descriptionArg,
-        tags: z.array(z.string().min(1)).optional(),
-        blocks: z
-          .array(blockInputSchema)
-          .optional()
-          .describe("Initial blocks, in order."),
-        sidebar: sidebarPlacementArg,
-      },
+      // A whole object rather than the raw shape every other tool passes, so
+      // that `.strict()` applies to the top level too: `{sidebar: {...},
+      // pinned: true}` must be refused wherever the redundant key sits, and a
+      // stripped one would be an input the caller believes it sent. It also
+      // advertises `additionalProperties: false`, so a client sees the rule
+      // before it sends anything.
+      inputSchema: z
+        .object({
+          title: titleArg,
+          description: descriptionArg,
+          tags: z.array(z.string().min(1)).optional(),
+          blocks: z
+            .array(blockInputSchema)
+            .optional()
+            .describe("Initial blocks, in order."),
+          sidebar: sidebarPlacementArg,
+        })
+        .strict(),
     },
     guarded(async ({ title, description, tags, blocks, sidebar }) => {
       await replicas.settle();
@@ -669,6 +677,13 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
        * so the directory is where a document write can fail. The recorded
        * failure is the first refused append, so a room written before it — this
        * stage's own, when the two names differ — did reach the log.
+       *
+       * The boundary: a second room failing inside this same call (another
+       * document syncing while it ran) is the one case where the sticky failure
+       * names a room this stage did not write, so the stage's own append is
+       * reported durable without having been re-checked. `RECOVERY.other` is
+       * why that is survivable — it tells the caller to re-verify with
+       * list_docs and get_sidebar rather than trust `completed`.
        */
       const stage = (
         purpose: string,
@@ -706,15 +721,23 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       };
 
       stage("document", replica, () => {
-        initDoc(replica.doc, {
-          uuid,
-          title,
-          description,
-          ...(tags === undefined ? {} : { tags }),
+        // One transaction, so the document's room is ONE append: without it the
+        // metadata and each initial block are separate updates, and a refusal
+        // on the third block would leave the first two — and the directory stub
+        // the observer repaired from them — durable, under an error that says
+        // nothing survived. The stage boundary this call reports is only true
+        // if the write underneath it is atomic in the log.
+        replica.doc.transact(() => {
+          initDoc(replica.doc, {
+            uuid,
+            title,
+            description,
+            ...(tags === undefined ? {} : { tags }),
+          });
+          for (const block of blocks ?? []) {
+            appendBlock(replica.doc, toBlockInput(block));
+          }
         });
-        for (const block of blocks ?? []) {
-          appendBlock(replica.doc, toBlockInput(block));
-        }
       });
 
       // Observing the document's own update repairs the stub, but a brand-new
@@ -743,6 +766,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
             group.id,
             uuid,
             sidebar.group.position,
+            toolError,
           );
           placement = { group: { id: group.id, name: group.name }, position };
         });

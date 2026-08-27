@@ -29,7 +29,7 @@ import {
   WORKSPACE,
 } from "./helpers.js";
 import type { PeerClient, Rig } from "./helpers.js";
-import type { MirrorStore } from "../src/store.js";
+import type { MirrorStore, UpdateOrigin } from "../src/store.js";
 
 const rigs: Rig[] = [];
 const stores: MirrorStore[] = [];
@@ -54,8 +54,23 @@ async function server(
   return rig;
 }
 
-function failingStore(databasePath: string): FailingStore {
-  const store = new FailingStore(databasePath, WORKSPACE);
+/** A failing store that also counts the appends it let through, by room. */
+class CountingStore extends FailingStore {
+  readonly appends = new Map<string, number>();
+
+  override appendUpdate(
+    room: string,
+    payload: Uint8Array,
+    origin: UpdateOrigin,
+  ): number {
+    const seq = super.appendUpdate(room, payload, origin);
+    this.appends.set(room, (this.appends.get(room) ?? 0) + 1);
+    return seq;
+  }
+}
+
+function failingStore(databasePath: string): CountingStore {
+  const store = new CountingStore(databasePath, WORKSPACE);
   stores.push(store);
   return store;
 }
@@ -118,6 +133,8 @@ describe("the placement input", () => {
       { sidebar: { pinned: true } },
       // A name is not an id: create_doc never brings a group into being.
       { sidebar: { group: { name: "Start here" } } },
+      // And the same redundancy at the top level, where the input is strict too.
+      { pinned: true },
     ];
     for (const placement of refused) {
       const result = await rig.call("create_doc", {
@@ -315,17 +332,39 @@ describe("with no hub", () => {
 });
 
 describe("a create that gets part-way", () => {
-  it("creates nothing when the document's own room refuses", async () => {
+  it("writes the document in one append, so a refusal leaves nothing behind", async () => {
     const databasePath = tempDatabasePath();
     const store = failingStore(databasePath);
     const rig = await server(databasePath, store);
     const group = await groupWith(rig, "Anchor");
 
-    store.failRoom = (room) => !room.startsWith(`${WORKSPACE}/_`);
+    // Metadata and every initial block are ONE append to the document's room.
+    // Two would leave a moment where the title is durable and a block is not,
+    // and `completed: []` below would be a lie about exactly that moment.
+    const healthy = await rig.ok("create_doc", {
+      title: "Whole or nothing",
+      description: "A test document.",
+      blocks: [
+        { type: "paragraph", text: "one" },
+        { type: "paragraph", text: "two" },
+        { type: "paragraph", text: "three" },
+      ],
+    });
+    expect(store.appends.get(`${WORKSPACE}/${healthy.uuid}`)).toBe(1);
+
+    // So the only place a document write can fail is that one append, and it
+    // takes the whole document with it.
+    store.failRoom = (room) =>
+      room !== `${WORKSPACE}/${healthy.uuid}` &&
+      !room.startsWith(`${WORKSPACE}/_`);
     store.failing = true;
     const refused = await rig.call("create_doc", {
       title: "Nothing survives",
       description: "A test document.",
+      blocks: [
+        { type: "paragraph", text: "one" },
+        { type: "paragraph", text: "two" },
+      ],
       sidebar: { group: { id: group } },
     });
 
@@ -339,6 +378,23 @@ describe("a create that gets part-way", () => {
       `${WORKSPACE}/${refused.payload.uuid}`,
     );
     expect(refused.payload.recovery).toContain("create_doc again");
+
+    // `completed: []` is a claim about the log, so a healed restart must find
+    // no document, no stub in list_docs and no pin.
+    await rig.close();
+    rigs.length = 0;
+    store.failing = false;
+    const restarted = await server(databasePath);
+    expect(
+      (await restarted.call("get_doc", { uuid: refused.payload.uuid })).isError,
+    ).toBe(true);
+    const docs = (await restarted.ok("list_docs")).docs;
+    expect(docs.some((doc: any) => doc.uuid === refused.payload.uuid)).toBe(
+      false,
+    );
+    expect(shape(await restarted.ok("get_sidebar"))).toEqual([
+      ["Start here", ["Anchor"]],
+    ]);
   });
 
   it("keeps the document when the directory refuses, and says so", async () => {
