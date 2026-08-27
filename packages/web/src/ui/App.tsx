@@ -34,7 +34,7 @@ import { ThreadsPane } from "./ThreadsPane.js";
 import { workspaceTags } from "./tags.js";
 import { focusThread } from "./threads.js";
 import type { SelectThread, ThreadFocus } from "./threads.js";
-import { AllDocsPane } from "./AllDocsPane.js";
+import { DocumentList } from "../shell/DocumentList.js";
 import {
   allPath,
   canonicalPath,
@@ -187,9 +187,9 @@ export function RoutePane({
   return (
     <EditorPane
       connection={connection}
-      // Only `list` and `doc` reach here — the shell renders the corpus
-      // listing itself — and both carry the workspace the address spelled,
-      // which is what a copied link has to keep.
+      // Only `doc` reaches here — the shell renders the corpus journey itself
+      // (#406) — and it carries the workspace the address spelled, which is
+      // what a copied link has to keep.
       segment={route.workspace.segment}
       author={author}
       knownTags={knownTags}
@@ -577,13 +577,15 @@ export function App(): ReactElement {
             allOpen={route.kind === "all"}
           />
         )}
-        {/* The corpus listing is its own address (#118), and the only pane
-            that is about the workspace rather than about one document — so it
-            takes the pane rather than passing four more props through
-            `RoutePane`, which exists to say what a *document* address resolves
-            to. */}
-        {route.kind === "all" ? (
-          <AllDocsPane
+        {/* The corpus journey (#406): both addresses that name the workspace
+            rather than a document — `/<workspace>`, the first screen of a
+            session, and `/<workspace>/all` — are the document list. It is the
+            only pane that is about the workspace rather than about one
+            document, so it takes the pane rather than passing four more props
+            through `RoutePane`, which exists to say what a *document* address
+            resolves to. */}
+        {route.kind === "all" || route.kind === "list" ? (
+          <DocumentList
             connection={directory}
             entries={entries}
             groups={sidebarGroups}

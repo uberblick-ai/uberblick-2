@@ -2312,9 +2312,10 @@ h3.ub-heading {
   padding: 0.4rem;
 }
 
-/* ---- all docs (#118) ------------------------------------------------------
-   The corpus listing and its fixed sidebar entry. Self-contained: nothing here
-   touches the tokens or the rules above, and nothing above knows about it. */
+/* ---- the document list (#118, #406) ---------------------------------------
+   The corpus listing and the sidebar's fixed entry into it. Self-contained:
+   nothing here touches the tokens or the rules above, and nothing above knows
+   about it. */
 
 /* The sidebar's fixed entry. It lives in the footer, below the line the
    curated groups end at, and shares the footer's row shape with the user card
@@ -2344,27 +2345,24 @@ h3.ub-heading {
   font-weight: 500;
 }
 
-/* One grid, declared once and shared by the column heads and every row, so
-   re-sorting moves the rows and nothing else. */
-.ub-all {
-  --all-columns: minmax(0, 1fr) 7rem 7rem;
-  --all-pin: 1.75rem;
+.ub-docs {
+  --docs-pin: 1.75rem;
   gap: 0.5rem;
 }
 
-.ub-all-heading {
+.ub-docs-heading {
   font-size: 1.4rem;
   margin: 0;
 }
 
-.ub-all-search-label {
+.ub-docs-search-label {
   display: grid;
   gap: 0.25rem;
   color: var(--muted-foreground);
   font-size: 0.8rem;
 }
 
-.ub-all-search {
+.ub-docs-search {
   width: min(24rem, 100%);
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--border);
@@ -2374,67 +2372,42 @@ h3.ub-heading {
   font: inherit;
 }
 
-/* The same box the rows lay their columns out in. A row's grid is measured
-   inside `.ub-all-open`'s padding, so a head grid without it would compute
-   wider columns and every column after the first would sit a few pixels off
-   the values it names. The pin column has no head, so the heads keep clear of
-   it too — its width plus the row's gap. */
-.ub-all-head {
-  display: grid;
-  grid-template-columns: var(--all-columns);
-  gap: 0.75rem;
-  padding-left: 0.4rem;
-  padding-right: calc(0.4rem + var(--all-pin) + 0.25rem);
-  border-bottom: 1px solid var(--border);
-}
-
-/* A column head that is also the sort control. The pressed one is the only
-   thing that changes when the order does — the labels never move. */
-.ub-all-sort {
-  text-align: left;
-  /* No horizontal padding: the head's own padding is what lines the labels up
-     with the values, and the control shows its state in weight and colour
-     rather than in a box, so it has nothing to inset. */
-  padding: 0.35rem 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--muted-foreground);
-  font: inherit;
+/* What the field looks at, in the field's own voice — one line under it, the
+   size of the label above it. */
+.ub-docs-scope {
+  margin: 0;
   font-size: 0.8rem;
-  cursor: pointer;
 }
 
-.ub-all-sort:hover {
-  color: var(--foreground);
+/* Its own class rather than the sidebar's `.ub-empty`: two components on one
+   screen now, and a page with two elements of the same name is a page whose
+   selectors are ambiguous — for a stylesheet and for a test alike. */
+.ub-docs-empty {
+  padding: 0.4rem;
 }
 
-.ub-all-sort[aria-pressed="true"] {
-  color: var(--foreground);
-  font-weight: 500;
-}
-
-.ub-all-rows {
+.ub-docs-rows {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.ub-all-row {
+/* The pin sits beside the row rather than inside it, so the whole of the row
+   is the open target and the pin is still its own control. Aligned to the top,
+   because a row is as tall as its description and tags make it. */
+.ub-docs-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--all-pin);
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr) var(--docs-pin);
+  align-items: start;
   gap: 0.25rem;
 }
 
-.ub-all-open {
+.ub-docs-open {
   display: grid;
-  grid-template-columns: var(--all-columns);
-  gap: 0.75rem;
-  align-items: baseline;
+  gap: 0.15rem;
   width: 100%;
   text-align: left;
-  padding: 0.35rem 0.4rem;
+  padding: 0.4rem;
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
@@ -2443,29 +2416,74 @@ h3.ub-heading {
   cursor: pointer;
 }
 
-.ub-all-open:hover {
+.ub-docs-open:hover {
   background: var(--accent);
   color: var(--accent-foreground);
 }
 
-/* A long title is cut, never wrapped: a row that grows taller would move every
+/* Title, group and age on one baseline, with the age pushed to the end. */
+.ub-docs-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+/* A long title is cut, never wrapped: a row that grew taller would move every
    row below it the moment a document is renamed somewhere else. */
-.ub-all-title {
+.ub-docs-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Stamps are machine-flavoured, like the room keys and the sync detail. */
-.ub-all-stamp {
+/* Where the sidebar carries this document. Quiet — it is context for the
+   title, not a second title. */
+.ub-docs-group {
+  flex: none;
+  font-size: 0.78rem;
+  color: var(--muted-foreground);
+}
+
+/* Machine facts in the machine face, like the room keys and the sync detail. */
+.ub-docs-age {
+  margin-left: auto;
+  flex: none;
   font-family: var(--font-mono);
   font-size: 0.78rem;
   color: var(--muted-foreground);
 }
 
+/* One line of it: the description is here so a match on it is visible, and a
+   paragraph would turn the listing into a page of prose. */
+.ub-docs-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  color: var(--muted-foreground);
+}
+
+/* The chips the document header already uses, on one line that scrolls rather
+   than wrapping — same promise the header's strip makes. */
+.ub-docs-tags {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  font-size: 0.78rem;
+}
+
+.ub-docs-tags::-webkit-scrollbar {
+  display: none;
+}
+
 /* Quiet until the row is hovered or something in it has focus — the same
    restraint the group actions in the sidebar show. */
-.ub-all-pin {
+.ub-docs-pin {
+  margin-top: 0.3rem;
   padding: 0.25rem;
   border: 0;
   border-radius: var(--radius-sm);
@@ -2476,18 +2494,18 @@ h3.ub-heading {
   opacity: 0;
 }
 
-.ub-all-pin-icon {
+.ub-docs-pin-icon {
   display: block;
   width: 1rem;
   height: 1rem;
 }
 
-.ub-all-row:hover .ub-all-pin,
-.ub-all-row:focus-within .ub-all-pin,
-.ub-all-pin[aria-pressed="true"] {
+.ub-docs-row:hover .ub-docs-pin,
+.ub-docs-row:focus-within .ub-docs-pin,
+.ub-docs-pin[aria-pressed="true"] {
   opacity: 1;
 }
 
-.ub-all-pin:hover {
+.ub-docs-pin:hover {
   color: var(--foreground);
 }
