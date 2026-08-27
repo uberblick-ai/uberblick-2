@@ -20,6 +20,7 @@ export type { Hub, HubContext } from "./server.js";
 export {
   DEFAULT_HOST,
   DEFAULT_PORT,
+  MAX_PENDING_DOCUMENTS,
   defaultDatabasePath,
   hubDatabasePath,
   resolveHubConfig,

@@ -902,7 +902,14 @@ export class Replicas {
         // Cleared only once the wait is over — a caller joining this settle is
         // waiting for exactly that, and a caller arriving after it should not
         // repeat it.
-        this.settleNeeded = false;
+        //
+        // Unless the corpus is still joining the hub: rooms attach in waves and
+        // a settle is one wave's budget, so a fresh client's queue outlasts it.
+        // Hydration is not complete while rooms are still queued, and the wait
+        // does not grow to cover them — this call keeps the budget it promised
+        // and the settle stays owed, so the next call resumes the drain instead
+        // of answering from a corpus that never finished arriving.
+        this.settleNeeded = this.sync.isDraining();
       }
     }
 

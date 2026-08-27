@@ -79,6 +79,8 @@ describe("token minting sites", () => {
     "packages/hub/test/helpers.ts",
     "packages/hub/test/token.test.ts",
     "packages/mcp-server/src/sync.ts",
+    // Wraps the real mint to hold a token call in flight — no minting site of its own.
+    "packages/mcp-server/test/attach-bound.test.ts",
     "packages/mcp-server/test/helpers.ts",
     "packages/web/e2e/chrome.spec.ts",
     "packages/web/scripts/agent-cursor-demo.ts",

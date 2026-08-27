@@ -32,6 +32,33 @@ import { resolveStorage } from "./storage.js";
 export const DEFAULT_PORT = 1234;
 export const DEFAULT_HOST = "127.0.0.1";
 
+/**
+ * How many documents one websocket may have in flight through authentication.
+ *
+ * A **memory-amplification guard, not a capacity knob.** Hocuspocus counts, per
+ * connection, the documents whose `onAuthenticate` has not completed
+ * (`ClientConnection.getPendingDocumentCount`): each one holds its own message
+ * queue and hook payload, so a client that names hundreds of rooms before any
+ * of them authenticates makes the hub allocate hundreds of those. Past the cap
+ * Hocuspocus does not refuse the document — it `terminate()`s the whole socket,
+ * taking every healthy room on it down with the greedy one. That is why raising
+ * this number is never the fix for a client that attaches too fast: it only
+ * moves the cliff. The client-side bound is the real guard —
+ * `MAX_CONCURRENT_ROOM_ATTACHES` in `packages/mcp-server/src/sync.ts` keeps our
+ * own attach/auth concurrency far below this, on first attach and on every
+ * reconnect. This number is stated here so the hub owns its ceiling rather than
+ * inheriting whatever a library upgrade decides, and it is the library's own
+ * 4.6.0 default: nothing we run comes near it.
+ *
+ * Its two siblings — `maxUnauthenticatedQueueSize` (5 MiB) and
+ * `maxUnauthenticatedQueueMessages` (1000) — stay at their defaults. They bound
+ * *bytes and messages* buffered before auth, which is a property of how much a
+ * client sends per room, not of how many rooms it opens; we have no measurement
+ * saying either default is wrong, and an unmeasured number in the config is a
+ * number nobody can defend later.
+ */
+export const MAX_PENDING_DOCUMENTS = 100;
+
 export interface HubConfig {
   /**
    * Port to bind. `0` binds an ephemeral port — read the real one back from
@@ -57,6 +84,14 @@ export interface HubConfig {
    */
   debounce?: number;
   maxDebounce?: number;
+  /**
+   * The pending-document ceiling, defaulting to {@link MAX_PENDING_DOCUMENTS}.
+   *
+   * A test seam, not an operator dial: the only caller that sets it is the one
+   * proving the MCP client stays below a ceiling, which needs a ceiling small
+   * enough to breach in a few rooms rather than a hundred.
+   */
+  maxPendingDocuments?: number;
   /**
    * How long `stop()` waits for Hocuspocus to drain its documents before it
    * gives up and closes the socket anyway (ms). The flush has already run by

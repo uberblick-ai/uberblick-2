@@ -51,14 +51,72 @@ import type { AwarenessUser } from "./identity.js";
  */
 export const WEB_CLIENT = "web";
 
+/**
+ * The shared socket's reconnect band.
+ *
+ * A hub restart should be picked up in seconds, not half a minute: the
+ * library's default backoff climbs to 30s.
+ *
+ * Randomized, because release 1 is three clients — two Macs and the agent
+ * machine — against one remote hub, plus however many tabs the owner has open.
+ * They lose the hub together and come back together, so a deterministic ladder
+ * has all of them redialling in the same millisecond, every time. `jitter: true`
+ * is the retry library's full-jitter strategy: attempt *n* waits a uniform draw
+ * from `[minDelay, min(delay * factor^(n-1), maxDelay)]`. The randomness is the
+ * library's own `Math.random` — `HocuspocusProviderWebsocket` forwards only
+ * these fields to it, so there is no source to inject, and this band is what a
+ * test can pin instead.
+ *
+ * `minDelay` is not decorative: Hocuspocus defaults it to 1000, and the retry
+ * library validates `delay >= minDelay` on every `connect()` regardless of
+ * jitter — leave it out and each attempt rejects with "delay cannot be less
+ * than minDelay" instead of dialling. Half the delay, so the first retry — the
+ * one every client makes together — already spreads.
+ */
+export const SOCKET_BACKOFF = {
+  delay: 250,
+  minDelay: 125,
+  factor: 2,
+  maxDelay: 2_000,
+  jitter: true,
+} as const;
+
 let socket: HocuspocusProviderWebsocket | null = null;
 
 /** Set while a forced drop is in flight, so the `disconnect` handler re-dials. */
 let redialAfterDrop = false;
 
-/** One forced drop per this window: a hub that keeps closing us must not spin. */
-const FORCED_DROP_COOLDOWN_MS = 5_000;
+/**
+ * One forced drop per window: a hub that keeps closing us must not spin.
+ *
+ * A band rather than a number, drawn per drop. Release 1 is three clients
+ * against one remote hub, and a hub that closes documents closes them for all
+ * three at once — a fixed 5s window had every tab redialling in the same
+ * millisecond, wave after wave, for as long as the hub kept doing it.
+ *
+ * The maximum stays at the 5s this used to be, because
+ * `packages/web/test/reconnect.test.ts` derives its deadlines from it: a
+ * suppressed close waits out at most one window before the trailing drop, and
+ * lengthening that would invalidate the derivation rather than the test.
+ */
+export const FORCED_DROP_COOLDOWN = { minMs: 2_500, maxMs: 5_000 } as const;
+
+/**
+ * How long the next forced-drop window lasts: a uniform draw from
+ * {@link FORCED_DROP_COOLDOWN}. The source is a parameter rather than a bare
+ * `Math.random` so a test can state the band's ends instead of sampling it.
+ */
+export function forcedDropCooldownMs(random: () => number = Math.random): number {
+  const { minMs, maxMs } = FORCED_DROP_COOLDOWN;
+  return Math.round(minMs + (maxMs - minMs) * random());
+}
+
 let lastForcedDrop = 0;
+/**
+ * The window the last drop opened. Only read after a drop has set it — the
+ * band's maximum is a safe standing value until then.
+ */
+let forcedDropWindowMs: number = FORCED_DROP_COOLDOWN.maxMs;
 
 /** A drop asked for during the cooldown, waiting for the window to end. */
 let pendingDrop: ReturnType<typeof setTimeout> | null = null;
@@ -75,19 +133,7 @@ function sharedSocket(): HocuspocusProviderWebsocket {
     // Resolved before the first render (see main.tsx), so it is a plain read
     // here — the socket is created by a React effect, long after startup.
     url: hubUrl(),
-    // A hub restart should be picked up in seconds, not half a minute: the
-    // default backoff climbs to 30s. Deterministic, like the MCP server's —
-    // one tab dialling a local hub has nothing to spread out.
-    //
-    // `minDelay` is not decorative and not about jitter: Hocuspocus defaults it
-    // to 1000, and the retry library validates `delay >= minDelay` on every
-    // `connect()` regardless of jitter — leave it out and each attempt rejects
-    // with "delay cannot be less than minDelay" instead of dialling. Lower it
-    // with `delay`, never past it.
-    delay: 250,
-    minDelay: 250,
-    maxDelay: 2_000,
-    jitter: false,
+    ...SOCKET_BACKOFF,
   });
   created.on("disconnect", () => {
     if (!redialAfterDrop) return;
@@ -125,18 +171,21 @@ function dropSocket(): void {
   if (current.status !== WebSocketStatus.Connected) return;
 
   const sinceLastDrop = Date.now() - lastForcedDrop;
-  if (sinceLastDrop < FORCED_DROP_COOLDOWN_MS) {
+  // The window the last drop drew, not a fresh draw: the check and the trailing
+  // timer below have to agree about when this one ends.
+  if (sinceLastDrop < forcedDropWindowMs) {
     // One trailing drop covers every close suppressed in this window.
     if (pendingDrop !== null) return;
     pendingDrop = setTimeout(() => {
       pendingDrop = null;
       dropSocket();
-    }, FORCED_DROP_COOLDOWN_MS - sinceLastDrop);
+    }, forcedDropWindowMs - sinceLastDrop);
     return;
   }
 
   cancelPendingDrop();
   lastForcedDrop = Date.now();
+  forcedDropWindowMs = forcedDropCooldownMs();
   redialAfterDrop = true;
   current.disconnect();
 }
