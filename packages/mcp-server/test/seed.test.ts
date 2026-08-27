@@ -108,7 +108,7 @@ function writeCorpus(): string {
   for (const [file, uuid, title, extra] of files) {
     writeFileSync(
       join(dir, file),
-      `---\nuuid: ${uuid}\ntitle: ${title}\ntags: [reference]\n${extra}---\n\n` +
+      `---\nuuid: ${uuid}\ntitle: ${title}\ndescription: What ${title} is for.\ntags: [reference]\n${extra}---\n\n` +
         `## ${title}\n\nOne paragraph in ${title}.\n`,
     );
   }
@@ -175,7 +175,7 @@ describe("seed import", () => {
     const phrase = "quarrelsome zeppelin";
     writeFileSync(
       join(dir, "extra.md"),
-      `---\nuuid: ${extra}\ntitle: Extra\ntags: [reference]\n---\n\n` +
+      `---\nuuid: ${extra}\ntitle: Extra\ndescription: One more document.\ntags: [reference]\n---\n\n` +
         `A ${phrase} landed here.\n`,
     );
     await runImport(databasePath, dir);
@@ -350,7 +350,7 @@ describe("seed import", () => {
     const write = (body: string, tags: string): void => {
       writeFileSync(
         join(dir, "doc.md"),
-        `---\nuuid: ${uuid}\ntitle: Imported once\ntags: [${tags}]\n---\n\n${body}`,
+        `---\nuuid: ${uuid}\ntitle: Imported once\ndescription: Written once, then left alone.\ntags: [${tags}]\n---\n\n${body}`,
       );
     };
 
@@ -478,7 +478,7 @@ describe("seed import", () => {
     const uuid = "2c9e5b71-8d34-4a6f-9e12-7f0b3a4d8c56";
     writeFileSync(
       join(dir, "diagram.md"),
-      `---\nuuid: ${uuid}\ntitle: Diagram\ntags: [reference]\n---\n\n` +
+      `---\nuuid: ${uuid}\ntitle: Diagram\ndescription: A document with both kinds of fence.\ntags: [reference]\n---\n\n` +
         "## Flow\n\n```\ngit clone git@example.com:uberblick.git\n```\n\n" +
         "```mermaid\ngraph TD\n  a[Agent] --> h[Hub]\n```\n",
     );
@@ -525,7 +525,7 @@ describe("starter sidebar seed", () => {
     ]) {
       writeFileSync(
         join(dir, `${title}.md`),
-        `---\nuuid: ${uuid}\ntitle: ${title}\ntags: [start-here]\n---\n\nOne paragraph.\n`,
+        `---\nuuid: ${uuid}\ntitle: ${title}\ndescription: The ${title} starter document.\ntags: [start-here]\n---\n\nOne paragraph.\n`,
       );
     }
     return dir;

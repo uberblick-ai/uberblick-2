@@ -1,6 +1,7 @@
 ---
 uuid: d7ddd0b1-fee9-4ef0-8f1e-42882f925c31
 title: How to Use It
+description: The shortest path from an empty workspace to useful work — open the editor, connect an agent over MCP, and organize documents with links and sidebar groups.
 tags:
   - start-here
 links:

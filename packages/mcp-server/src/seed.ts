@@ -20,7 +20,8 @@
  *    any tool's write does. Nothing here touches the derived index tables.
  * 2. **Identity comes from the file.** The frontmatter `uuid` is what makes a
  *    re-run recognise a document it already wrote. A file without one is an
- *    error — this reader never invents identity.
+ *    error — this reader never invents identity. So is a file without a
+ *    `description:`, for the reason {@link readSeedDocs} states.
  * 3. **Write-once by construction.** A uuid that already exists is never
  *    written again, not even when the template has changed. After the first
  *    write the document belongs to whoever edits it, and this reader cannot
@@ -53,6 +54,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
+  MAX_DESCRIPTION_LENGTH,
   appendBlock,
   createGroup,
   getDirectoryEntry,
@@ -73,9 +75,18 @@ import { log } from "./log.js";
 import { Replicas } from "./replica.js";
 import { MirrorStore } from "./store.js";
 
-/** A parsed seed file: an {@link ImportedDoc} that is guaranteed to have identity. */
+/**
+ * A parsed seed file: an {@link ImportedDoc} that is guaranteed to have identity
+ * and a description.
+ */
 export interface SeedDoc extends ImportedDoc {
   uuid: string;
+  /**
+   * What the document is for, from the file's `description:` frontmatter line.
+   * Required, unlike everywhere else a description is optional — see
+   * {@link readSeedDocs}.
+   */
+  description: string;
   /** The source file name, for reporting. Never part of the document. */
   file: string;
 }
@@ -104,14 +115,51 @@ export interface SeedImport {
   synced: boolean;
 }
 
-/** Read and parse every markdown template in `dir`, sorted by name. */
+/**
+ * The `description:` line of a template's frontmatter, or undefined when the
+ * file has none.
+ *
+ * Read here rather than by `importMarkdown` because a description is a rule of
+ * *this* path, not of markdown: the schema's reader is a general converter that
+ * takes files as it finds them, and it ignores frontmatter keys it does not
+ * know — so the line is invisible to it and the document body is unaffected.
+ * Quotes are stripped the way the schema's own scalars are, and the value is one
+ * line: a description is one or two sentences, and a template that needs a YAML
+ * block for it is a template with the wrong text in it.
+ */
+function frontmatterDescription(markdown: string): string | undefined {
+  const lines = markdown.split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") return undefined;
+  for (let i = 1; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    if (line.trim() === "---") return undefined;
+    const match = /^description\s*:\s*(.*)$/.exec(line);
+    if (match === null) continue;
+    const raw = (match[1] ?? "").trim();
+    const quoted = /^(["'])(.*)\1$/.exec(raw);
+    const value = (quoted?.[2] ?? raw).trim();
+    return value === "" ? undefined : value;
+  }
+  return undefined;
+}
+
+/**
+ * Read and parse every markdown template in `dir`, sorted by name.
+ *
+ * A file missing its `uuid`, `title` or `description` is an error rather than a
+ * document written without one. Identity is the first two's reason; the
+ * description's is that a document nobody has described nudges every agent that
+ * writes to it (`descriptionHint`), and a workspace's own starter documents are
+ * the last place to start that from.
+ */
 export function readSeedDocs(dir: string): SeedDoc[] {
   const files = readdirSync(dir)
     .filter((file) => file.endsWith(".md"))
     .sort();
 
   return files.map((file) => {
-    const parsed = importMarkdown(readFileSync(join(dir, file), "utf8"));
+    const source = readFileSync(join(dir, file), "utf8");
+    const parsed = importMarkdown(source);
     if (parsed.uuid === undefined) {
       throw new Error(
         `${file}: no \`uuid\` in frontmatter. Identity is UUIDs and the importer ` +
@@ -121,7 +169,21 @@ export function readSeedDocs(dir: string): SeedDoc[] {
     if (parsed.title === "") {
       throw new Error(`${file}: no \`title\` in frontmatter`);
     }
-    return { ...parsed, uuid: parsed.uuid, file };
+    const description = frontmatterDescription(source);
+    if (description === undefined) {
+      throw new Error(
+        `${file}: no \`description\` in frontmatter. Every document written here ` +
+          `arrives described, so a fresh workspace's own documents never ask their ` +
+          `first agent to backfill one.`,
+      );
+    }
+    if (description.length > MAX_DESCRIPTION_LENGTH) {
+      throw new Error(
+        `${file}: the \`description\` is ${description.length} characters, over the ` +
+          `${MAX_DESCRIPTION_LENGTH} every write boundary holds a description to.`,
+      );
+    }
+    return { ...parsed, uuid: parsed.uuid, description, file };
   });
 }
 
@@ -207,7 +269,12 @@ function applySeed(
     return { ...identity, action: "unchanged", reason: null };
   }
 
-  initDoc(doc, { uuid: seed.uuid, title: seed.title, tags: seed.tags });
+  initDoc(doc, {
+    uuid: seed.uuid,
+    title: seed.title,
+    description: seed.description,
+    tags: seed.tags,
+  });
   for (const block of seed.blocks) {
     appendBlock(doc, toBlockInput(block));
   }
@@ -221,10 +288,13 @@ function applySeed(
 
   // Discovery is a synced doc, so being discoverable is an explicit write here —
   // the way `create_doc` does it — not a side effect of having been observed.
+  // The description is cached in the stub for the same reason `create_doc`
+  // caches it: a listing answers with it without opening the room.
   const now = Date.now();
   upsertDirectoryEntry(directory.doc, {
     uuid: seed.uuid,
     title: seed.title,
+    description: seed.description,
     tags: seed.tags,
     createdAt: now,
     updatedAt: now,

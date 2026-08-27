@@ -30,12 +30,17 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   createMcpServer,
   importSeedDir,
+  readSeedDocs,
   resolveMcpConfig,
 } from "@uberblick/mcp-server";
 import {
+  directoryRoom,
+  getDirectoryEntry,
+  getMeta,
   importMarkdown,
   isSidebarSeeded,
   readSidebar,
+  roomForDoc,
   sidebarRoom,
 } from "@uberblick/schema";
 import type { SidebarGroup } from "@uberblick/schema";
@@ -63,11 +68,15 @@ const TEMPLATES = [
     file: "welcome-to-uberblick.md",
     title: "Welcome to Überblick",
     uuid: "2d56b281-5614-43bd-b8d8-edd1c270a85a",
+    description:
+      "What Überblick is and how a fresh workspace works — local-first documents shared by you and the agents you connect. Read How to Use It next.",
   },
   {
     file: "how-to-use-it.md",
     title: "How to Use It",
     uuid: "d7ddd0b1-fee9-4ef0-8f1e-42882f925c31",
+    description:
+      "The shortest path from an empty workspace to useful work — open the editor, connect an agent over MCP, and organize documents with links and sidebar groups.",
   },
 ];
 
@@ -85,6 +94,9 @@ const OWNED_WORKSPACE = "b7e9c130-6a48-4f21-9d3c-8e05a2b6f741";
 /** One for a workspace whose documents landed but whose sidebar did not. */
 const UNPINNED_WORKSPACE = "c4a1e582-70b3-4d9f-8a26-1fb3d0c95e84";
 
+/** And one seeded straight through the importer, to write into. */
+const DESCRIBED_WORKSPACE = "9d3b6f27-1c84-4a05-b7e9-2f61c8d05a3b";
+
 /** `ub init` on a machine with no hub and nothing to install. */
 function init(target: Sandbox = box): Run {
   const run = runUb(["init", "--yes", "--no-mcp"], target, {
@@ -100,18 +112,19 @@ function workspace(target: Sandbox = box): string {
 }
 
 /**
- * The workspace's sidebar, replayed from the update log alone.
+ * One of the workspace's rooms, replayed from the update log alone.
  *
  * No MCP server is constructed and no hub is dialled: this opens the SQLite
- * mirror read-only, applies what the log holds for the `_sidebar` room to a
- * bare Y.Doc, and reads it with the same schema functions every client uses.
- * That is the state a first-ever web client would sync down, which is exactly
- * what `ub init` has to have written by the time it returns.
+ * mirror read-only, applies what the log holds for the room to a bare Y.Doc,
+ * and hands it back to be read with the same schema functions every client
+ * uses. That is the state a first-ever web client would sync down, which is
+ * exactly what `ub init` has to have written by the time it returns — and it is
+ * the only reading that cannot be flattered by a later server's repairs.
  */
-function sidebarFromLog(target: Sandbox = box): {
-  groups: SidebarGroup[];
-  seeded: boolean;
-} {
+function replayRoom(
+  roomOf: (workspaceId: string) => string,
+  target: Sandbox = box,
+): Y.Doc {
   const config = resolveMcpConfig({
     WORKSPACE_ID: workspace(target),
     XDG_DATA_HOME: target.dataHome,
@@ -119,7 +132,7 @@ function sidebarFromLog(target: Sandbox = box): {
   const doc = new Y.Doc();
   const db = new DatabaseSync(config.databasePath, { readOnly: true });
   try {
-    const room = sidebarRoom(config.workspaceId);
+    const room = roomOf(config.workspaceId);
     // The snapshot first, then everything the log holds beyond it: compaction
     // deletes the updates a snapshot covers, and Yjs takes both regardless.
     for (const row of db
@@ -135,6 +148,15 @@ function sidebarFromLog(target: Sandbox = box): {
   } finally {
     db.close();
   }
+  return doc;
+}
+
+/** The workspace's sidebar, replayed from the update log alone. */
+function sidebarFromLog(target: Sandbox = box): {
+  groups: SidebarGroup[];
+  seeded: boolean;
+} {
+  const doc = replayRoom(sidebarRoom, target);
   return { groups: readSidebar(doc), seeded: isSidebarSeeded(doc) };
 }
 
@@ -207,6 +229,64 @@ it("seeds exactly the two starter documents, with their uuids, tags and links", 
       ]);
     }
   });
+});
+
+it("describes both starter documents, in the document and in the stub", () => {
+  // What this pins is the observable contract: from the log alone, both
+  // documents and both stubs are described by the time `ub init` returns.
+  // It does not pin which writer put the description in the stub — the seed's
+  // own `upsertDirectoryEntry` and `Replicas.repairStub`, which reconciles a
+  // stub from `meta.description`, both run inside that one process, and this
+  // assertion cannot tell them apart. Reading from the log keeps a *later*
+  // server's repair out of it, which is why no MCP server is constructed here.
+  const directory = replayRoom(directoryRoom);
+  for (const template of TEMPLATES) {
+    const doc = replayRoom((id) => roomForDoc(id, template.uuid));
+    expect(getMeta(doc).description).toBe(template.description);
+    expect(getDirectoryEntry(directory, template.uuid)?.description).toBe(
+      template.description,
+    );
+  }
+});
+
+it("leaves a freshly seeded document nothing to backfill", async () => {
+  // The point of the descriptions: a document that arrives described does not
+  // meet its first agent with a `descriptionHint` telling it to write one.
+  const seeded = sandbox({ userConfig: { workspace: DESCRIBED_WORKSPACE } });
+  await importSeedDir(
+    join(PACKAGE_ROOT, "templates"),
+    resolveMcpConfig({
+      WORKSPACE_ID: DESCRIBED_WORKSPACE,
+      XDG_DATA_HOME: seeded.dataHome,
+    }),
+  );
+
+  await withTools(async (call) => {
+    const result = await call("set_tags", {
+      uuid: PINS[0]!,
+      tags: ["start-here"],
+    });
+    expect(result.applied).toBe(true);
+    expect(result.descriptionHint).toBeUndefined();
+  }, seeded);
+});
+
+it("refuses a template that carries no description", () => {
+  // The same bar as a missing uuid or title: a starter document nobody has
+  // described is not one to write, so the reader stops rather than seeding it.
+  const stripped = join(sandbox().cwd, "no-description");
+  const { file } = TEMPLATES[0]!;
+  mkdirSync(stripped, { recursive: true });
+  const source = readFileSync(join(PACKAGE_ROOT, "templates", file), "utf8");
+  writeFileSync(
+    join(stripped, file),
+    source
+      .split("\n")
+      .filter((line) => !line.startsWith("description:"))
+      .join("\n"),
+  );
+
+  expect(() => readSeedDocs(stripped)).toThrow(/description/);
 });
 
 it("is adopted by an MCP server started afterwards, with no second group", async () => {
@@ -534,7 +614,7 @@ it("ships exactly the approved starter copy, frontmatter included", () => {
     );
     const other = TEMPLATES.find((one) => one !== template);
     expect(source).toBe(
-      `---\nuuid: ${template.uuid}\ntitle: ${template.title}\ntags:\n  - start-here\nlinks:\n  - ${other?.uuid}\n---\n\n${COPY[template.file]}`,
+      `---\nuuid: ${template.uuid}\ntitle: ${template.title}\ndescription: ${template.description}\ntags:\n  - start-here\nlinks:\n  - ${other?.uuid}\n---\n\n${COPY[template.file]}`,
     );
   }
 });
