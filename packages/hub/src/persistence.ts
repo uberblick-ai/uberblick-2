@@ -22,9 +22,10 @@
  * writers would meet each other's locks.
  */
 
-import { mkdirSync } from "node:fs";
+import { chmodSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
+import { createDataDirectory } from "./storage.js";
 import type {
   Extension,
   onLoadDocumentPayload,
@@ -122,13 +123,26 @@ export class HubDatabase implements Extension {
     if (this.db !== undefined) {
       throw new Error("HubDatabase.open: already open");
     }
-    if (!isEphemeralDatabase(this.databasePath)) {
-      mkdirSync(dirname(this.databasePath), { recursive: true });
+    // Owner-only, and created here because the hub is often the first thing to
+    // touch the user's data tree: a directory it left world-readable would
+    // still be world-readable when `ub init` writes credentials.json into the
+    // same tree, where `mode: 0o700` on an existing directory does nothing.
+    const durable = !isEphemeralDatabase(this.databasePath);
+    const fresh = durable && !existsSync(this.databasePath);
+    if (durable) {
+      createDataDirectory(dirname(this.databasePath));
     }
 
     const db = new DatabaseSync(this.databasePath, {
       timeout: BUSY_TIMEOUT_MS,
     });
+    // Only a file this open created: the mode of a database somebody already
+    // has is theirs to choose, and tightening it under them is not this
+    // constructor's business. Before any schema is written, so that a journal
+    // or WAL file SQLite creates alongside inherits the same permissions.
+    if (fresh) {
+      chmodSync(this.databasePath, 0o600);
+    }
     try {
       db.exec(SCHEMA);
       this.statements = {

@@ -12,15 +12,21 @@
  * would offer the whole LAN a hub that trusts anyone holding it. A hosted
  * deployment opts in with `HUB_HOST=0.0.0.0`.
  *
+ * `HUB_DB_PATH` names the SQLite file outright. With none set the hub opens
+ * `hub.sqlite` in the user's data root — see `@uberblick/hub/storage` — and
+ * never a path inside the installed package, which an upgrade replaces. Every
+ * mise task in this checkout sets `HUB_DB_PATH` to a checkout-local file, so
+ * development never touches the packaged user's database.
+ *
  * `HUB_AUTH_TOKEN` is the HMAC secret for {@link mintToken}/{@link verifyToken},
  * delivered by `fnox exec` (see the `mise run hub` task). There is no fallback:
  * a hub with no secret would accept anything, so an absent secret is a startup
  * error, not a warning.
  */
 
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { HubLogger } from "./log.js";
+import type { StorageOptions } from "./storage.js";
+import { resolveStorage } from "./storage.js";
 
 /** The only hardcoded address-ish defaults in the repo. */
 export const DEFAULT_PORT = 1234;
@@ -59,15 +65,54 @@ export interface HubConfig {
   shutdownTimeoutMs?: number;
 }
 
-const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+/**
+ * `hub.sqlite` in the user's data root — see `@uberblick/hub/storage` for which
+ * root that is on which platform.
+ *
+ * Derived from the *user*, never from where this package sits: a Homebrew or
+ * tarball upgrade replaces program files, so a database under the install
+ * directory is a database an upgrade can delete. Nothing here reads
+ * `import.meta.url` or `process.cwd()`, which is what makes the answer the same
+ * from any directory and from any copy of the package.
+ *
+ * This checkout's mise tasks set `HUB_DB_PATH` to a checkout-local file, so
+ * development never opens the packaged user's database.
+ */
+export function defaultDatabasePath(options: StorageOptions = {}): string {
+  return resolveStorage(options).hubDatabase;
+}
 
 /**
- * `packages/hub/data/hub.sqlite`, resolved from this module rather than from
- * `process.cwd()` so the hub writes to the same file whatever directory it is
- * started from. `data/` is gitignored.
+ * The database a hub started with this environment opens: `HUB_DB_PATH` when it
+ * names one, and {@link defaultDatabasePath} otherwise. `ub status` reports it,
+ * so the rule lives here rather than in two places that could disagree.
  */
-export function defaultDatabasePath(): string {
-  return join(packageRoot, "data", "hub.sqlite");
+export function hubDatabasePath(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const configured = env.HUB_DB_PATH?.trim();
+  return configured === undefined || configured === ""
+    ? defaultDatabasePath({ env, platform })
+    : configured;
+}
+
+/**
+ * The storage layout's own notes, for the hub to log at startup — the one
+ * legacy-macOS line, or nothing.
+ *
+ * Empty whenever `HUB_DB_PATH` names the database, because then the layout is
+ * not what this hub opened and a note about it would be noise. It is also why
+ * this is a function rather than a field on {@link HubConfig}: the config is
+ * what tests construct by hand, and a warning list is not something a caller
+ * should have to supply.
+ */
+export function storageWarnings(env: NodeJS.ProcessEnv = process.env): string[] {
+  const configured = env.HUB_DB_PATH?.trim();
+  if (configured !== undefined && configured !== "") {
+    return [];
+  }
+  return resolveStorage({ env }).warnings;
 }
 
 function parsePort(raw: string | undefined): number {
@@ -98,15 +143,11 @@ export function resolveHubConfig(
   }
 
   const host = env.HUB_HOST?.trim();
-  const databasePath = env.HUB_DB_PATH?.trim();
 
   return {
     port: parsePort(env.PORT),
     address: host === undefined || host === "" ? DEFAULT_HOST : host,
-    databasePath:
-      databasePath === undefined || databasePath === ""
-        ? defaultDatabasePath()
-        : databasePath,
+    databasePath: hubDatabasePath(env),
     authSecret,
   };
 }
