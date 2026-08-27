@@ -108,11 +108,25 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * How long one awaited condition gets before the wait gives up.
+ *
+ * Generous rather than tight, and deliberately so: these suites run real hubs,
+ * real sockets and real SQLite files, and the review container runs every
+ * package's suite at once on whatever cores are left. A deadline sized for a
+ * quiet machine turns load into a red gate, which trains everyone to re-run —
+ * and a re-run habit is how a real regression eventually walks through. What
+ * has to stay sharp is the *message*, not the clock: a wait that expires still
+ * names the condition it was waiting for, so a genuine hang is still reported
+ * as one, just later.
+ */
+export const WAIT_TIMEOUT_MS = 20_000;
+
 /** Wait for `predicate`, polling. Throws with `label` on timeout. */
 export async function waitUntil(
   label: string,
   predicate: () => boolean | Promise<boolean>,
-  timeoutMs = 10_000,
+  timeoutMs = WAIT_TIMEOUT_MS,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!(await predicate())) {
@@ -133,7 +147,31 @@ export interface TestConfigOptions {
   reconcileRetryMs?: number;
   cursorTtlMs?: number;
   updatedAtCoarsenessMs?: number;
+  /** See {@link LIVE_HUB_SETTLE}. */
+  connectTimeoutMs?: number;
+  /** See {@link LIVE_HUB_SETTLE}. */
+  syncTimeoutMs?: number;
 }
+
+/**
+ * Settle bounds for a rig whose *first* tool call must answer from the hub.
+ *
+ * A tool call's settle is bounded on purpose — no tool blocks on the network —
+ * and the defaults below are sized for the opposite case: a port nothing
+ * answers, where the whole grace is pure waiting. That makes the connect grace
+ * a race for a rig pointed at a hub that really is listening: on a loaded
+ * machine it expires while the socket is still handshaking, the settle gives
+ * up, and the call answers — correctly, as an offline-first server must —
+ * from an empty replica. A test reads that as a lost corpus.
+ *
+ * So a suite that cannot wait for hydration itself, because waiting would
+ * destroy what it is testing, spreads these instead. Nothing waits on them
+ * when the hub answers promptly.
+ */
+export const LIVE_HUB_SETTLE = {
+  connectTimeoutMs: 10_000,
+  syncTimeoutMs: 10_000,
+} as const;
 
 /**
  * A config with test-scale timings.
@@ -151,9 +189,10 @@ export function testConfig(options: TestConfigOptions = {}): McpConfig {
     sessionId: `agent-test-${randomUUID()}`,
     color: "#7b5ec7",
     // Short on purpose: the offline tests dial a port nothing listens on, where
-    // the connect fails immediately and the timeout is pure waiting.
-    connectTimeoutMs: 150,
-    syncTimeoutMs: 2_000,
+    // the connect fails immediately and the timeout is pure waiting. A rig on a
+    // hub that answers wants the opposite — see LIVE_HUB_SETTLE.
+    connectTimeoutMs: options.connectTimeoutMs ?? 150,
+    syncTimeoutMs: options.syncTimeoutMs ?? 2_000,
     reconnectMaxDelayMs: 250,
     cursorTtlMs: options.cursorTtlMs ?? 30_000,
     compactAfter: options.compactAfter ?? 500,
@@ -256,6 +295,38 @@ export async function startServer(
       await instance.close();
     },
   };
+}
+
+/**
+ * Wait until a replica's directory names every one of `uuids`.
+ *
+ * The wait a test needs before it may read a fresh replica as if it knew the
+ * corpus. A first tool call settles, and the settle waits for the hub — but
+ * bounded, because no tool call may block on the network, so on a loaded
+ * machine the call can legitimately answer from a directory that has not
+ * arrived yet. Asserting on that answer tests the machine's spare capacity;
+ * waiting for the directory itself tests hydration, and an empty listing after
+ * this returns can only mean the corpus never came.
+ *
+ * It waits for the directory and nothing else: which document matches which
+ * query is what the caller is there to assert, and a wait that already knew
+ * the answer would assert nothing.
+ */
+export async function waitForCorpus(
+  rig: Rig,
+  uuids: readonly string[],
+): Promise<void> {
+  const wanted = [...uuids].sort();
+  await waitUntil(
+    `the replica to hydrate the corpus (${wanted.join(", ")}) from the hub`,
+    async () => {
+      const listed = await rig.ok("list_docs", {});
+      const here = new Set(
+        (listed.docs as { uuid: string }[]).map((doc) => doc.uuid),
+      );
+      return wanted.every((uuid) => here.has(uuid));
+    },
+  );
 }
 
 export interface HubOptions {

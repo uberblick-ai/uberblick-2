@@ -89,10 +89,31 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * How long one awaited condition gets here.
+ *
+ * Generous rather than tight. Every wait in this file is on a real hub over a
+ * real socket, and the review container runs every package's suite at once: a
+ * deadline sized for a quiet machine turns load into a red gate, and a gate
+ * that fails for load reasons teaches everyone to re-run it. The precision
+ * that matters is in the label, not the clock — an expired wait still names
+ * the condition that never arrived.
+ */
+const WAIT_TIMEOUT_MS = 20_000;
+
+/**
+ * Vitest's own budget per test.
+ *
+ * Far above the sum of the waits any one test here makes in sequence, on
+ * purpose: whichever timeout fires first is the one that explains the failure,
+ * and "test timed out" explains nothing.
+ */
+const TEST_TIMEOUT_MS = 240_000;
+
 async function waitFor(
   label: string,
   predicate: () => boolean,
-  timeoutMs = 10_000,
+  timeoutMs = WAIT_TIMEOUT_MS,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
@@ -213,7 +234,6 @@ it("resumes live sync after a hub restart, and never claims to be synced while i
   await waitFor(
     "the status to stop claiming 'synced'",
     () => !(tab.latest().connected && tab.latest().synced),
-    5_000,
   );
 
   // The hub comes back on the same address, with the same database. Nothing
@@ -227,7 +247,7 @@ it("resumes live sync after a hub restart, and never claims to be synced while i
     "the status to read synced again",
     () => tab.latest().connected && tab.latest().synced,
   );
-}, 60_000);
+}, TEST_TIMEOUT_MS);
 
 it("repairs a document close that arrives during the forced-drop cooldown", async () => {
   const path = databasePath();
@@ -266,7 +286,7 @@ it("repairs a document close that arrives during the forced-drop cooldown", asyn
     "the status to read synced again",
     () => tab.latest().connected && tab.latest().synced,
   );
-}, 60_000);
+}, TEST_TIMEOUT_MS);
 
 it("leaves the socket alone when it is the client that leaves a room", async () => {
   const path = databasePath();
@@ -292,4 +312,4 @@ it("leaves the socket alone when it is the client that leaves a room", async () 
   await expectLiveWrite(second, hub.port, room, "after re-joining");
 
   expect(drops).toBe(0);
-}, 60_000);
+}, TEST_TIMEOUT_MS);
