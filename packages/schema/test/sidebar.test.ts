@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
+  SIDEBAR_GROUPS_KEY,
+  SIDEBAR_ORDER_KEY,
   appendBlock,
   createGroup,
   deleteGroup,
@@ -10,6 +12,7 @@ import {
   initDoc,
   isSidebarSeeded,
   markSidebarSeeded,
+  migrateLegacySidebar,
   moveDoc,
   moveGroup,
   pinDoc,
@@ -490,4 +493,140 @@ describe("migrating into the sidebar", () => {
     expect(readSidebar(doc)).toEqual([]);
     expect(isSidebarSeeded(doc)).toBe(true);
   });
+
+  it("brings a seeded group back under its constant id", () => {
+    // A seeded group's id is what tests, briefs and placements reference, so
+    // recreating one by name has to return the group rather than one that
+    // merely reads the same. Two replicas doing it converge on one group.
+    const a = new Y.Doc();
+    a.clientID = 1;
+    const b = new Y.Doc();
+    b.clientID = 2;
+
+    const here = getOrCreateGroup(a, "Start here", undefined, START_HERE);
+    const there = getOrCreateGroup(b, "Start here", undefined, START_HERE);
+    expect(here).toBe(START_HERE);
+    expect(there).toBe(START_HERE);
+    pinDoc(a, here, ALPHA);
+    pinDoc(b, there, BETA);
+    syncDocs(a, b);
+
+    expect(readSidebar(a)).toEqual(readSidebar(b));
+    expect(readSidebar(a)).toHaveLength(1);
+    expect([...(readSidebar(a)[0]?.docs ?? [])].sort()).toEqual([ALPHA, BETA]);
+  });
+
+  it("never takes a well-known id over from a group somebody renamed", () => {
+    const doc = new Y.Doc();
+    createGroup(doc, "Archive", undefined, START_HERE);
+
+    // The constant is held by a group that is no longer the seeded one, so the
+    // name gets an id of its own: two groups, both visible and repairable —
+    // never a rename of somebody's group as a side effect of a pin.
+    const recreated = getOrCreateGroup(doc, "Start here", undefined, START_HERE);
+    expect(recreated).not.toBe(START_HERE);
+    expect(readSidebar(doc).map((group) => group.name)).toEqual([
+      "Archive",
+      "Start here",
+    ]);
+  });
+});
+
+/**
+ * The layout that preceded this one: a group was a `Y.Map` under its id,
+ * holding `name` and a `docs` array of the same plain pins.
+ *
+ * Written the way the old module wrote it — the map into `groups` first, its
+ * fields after — so what these tests convert is the shape the live workspaces
+ * actually hold rather than a reconstruction of it.
+ */
+function legacyGroup(
+  doc: Y.Doc,
+  id: string,
+  name: string,
+  uuids: string[],
+): void {
+  doc.transact(() => {
+    const group = new Y.Map<unknown>();
+    doc.getMap<unknown>(SIDEBAR_GROUPS_KEY).set(id, group);
+    group.set("name", name);
+    const docs = new Y.Array<{ uuid: string; since: number }>();
+    group.set("docs", docs);
+    docs.push(uuids.map((uuid) => ({ uuid, since: 0 })));
+    doc.getArray<string>(SIDEBAR_ORDER_KEY).push([id]);
+  });
+}
+
+/**
+ * Converting a sidebar written before this layout existed.
+ *
+ * Not a hypothetical: shipping the layout without converting these documents
+ * made every group and every pin in the live workspaces invisible on the next
+ * start — nothing deleted, nothing readable (#350).
+ */
+describe("a sidebar written under the earlier layout", () => {
+  const WORK = "10000000-0000-4000-8000-000000000001";
+  const READING = "10000000-0000-4000-8000-000000000002";
+
+  it("reads as empty until it is converted, then reads as it was written", () => {
+    const doc = new Y.Doc();
+    legacyGroup(doc, WORK, "Work", [ALPHA, BETA]);
+    legacyGroup(doc, READING, "Reading", [GAMMA]);
+
+    // The whole bug in one assertion: the document is full, the sidebar empty.
+    expect(readSidebar(doc)).toEqual([]);
+
+    expect(migrateLegacySidebar(doc)).toBe(2);
+    expect(readSidebar(doc)).toEqual([
+      { id: WORK, name: "Work", docs: [ALPHA, BETA] },
+      { id: READING, name: "Reading", docs: [GAMMA] },
+    ]);
+  });
+
+  it("converts once, and leaves a converted sidebar untouched", () => {
+    const doc = new Y.Doc();
+    legacyGroup(doc, WORK, "Work", [ALPHA]);
+    const native = createGroup(doc, "Reading");
+    pinDoc(doc, native, BETA);
+    migrateLegacySidebar(doc);
+
+    let updates = 0;
+    doc.on("update", () => {
+      updates += 1;
+    });
+
+    // Every start after the first pays one map read and writes nothing: no
+    // duplicated pins, and no update for every other replica to merge.
+    expect(migrateLegacySidebar(doc)).toBe(0);
+    expect(updates).toBe(0);
+    expect(readSidebar(doc)).toEqual([
+      { id: WORK, name: "Work", docs: [ALPHA] },
+      { id: native, name: "Reading", docs: [BETA] },
+    ]);
+  });
+
+  it.each(CLIENT_ORDERS)(
+    "converges when two replicas convert the same document (clients %i, %i)",
+    (first, second) => {
+      // Every replica converts at start, so two of them out of contact doing it
+      // to one sidebar is the ordinary case rather than the exotic one.
+      const a = new Y.Doc();
+      a.clientID = first;
+      const b = new Y.Doc();
+      b.clientID = second;
+      legacyGroup(a, WORK, "Work", [ALPHA, BETA]);
+      syncDocs(a, b);
+
+      expect(migrateLegacySidebar(a)).toBe(1);
+      expect(migrateLegacySidebar(b)).toBe(1);
+      syncDocs(a, b);
+
+      expect(readSidebar(a)).toEqual(readSidebar(b));
+      // Both conversions wrote the same pins, so storage holds each uuid twice;
+      // the read rule keeps one, and the sidebar looks like nothing happened.
+      expect(readSidebar(a)).toEqual([
+        { id: WORK, name: "Work", docs: [ALPHA, BETA] },
+      ]);
+    },
+  );
 });

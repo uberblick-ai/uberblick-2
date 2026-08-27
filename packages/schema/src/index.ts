@@ -134,6 +134,7 @@ export {
   getSidebarUnpinned,
   isSidebarSeeded,
   markSidebarSeeded,
+  migrateLegacySidebar,
   moveDoc,
   moveGroup,
   pinDoc,

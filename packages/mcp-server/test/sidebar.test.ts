@@ -14,6 +14,8 @@
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
+  SIDEBAR_GROUPS_KEY,
+  SIDEBAR_ORDER_KEY,
   createGroup,
   isSidebarSeeded,
   pinDoc,
@@ -274,6 +276,9 @@ describe("the one-time seed", () => {
   const corpusUuid = (index: number): string =>
     `0000000${index}-1111-4222-8333-444444444444`;
 
+  /** The seed's own id for "Start here" — the constant other things reference. */
+  const START_HERE = "5e1d0000-0000-4000-8000-000000000001";
+
   /** The seeded sidebar, as every test here expects to find it. */
   const SEEDED: [string, (string | null)[]][] = [
     ["Start here", ["Overview", "Install and run"]],
@@ -430,5 +435,63 @@ describe("the one-time seed", () => {
     // adopted it instead of seeding four groups over the top.
     expect(shape(await fresh.ok("get_sidebar"))).toEqual([["Mine", ["Overview"]]]);
     expect(isSidebarSeeded(fresh.instance.replicas.sidebar().doc)).toBe(true);
+  });
+
+  it("restores a sidebar written under the earlier group layout", async () => {
+    // The shape a pre-#210 server wrote: a Y.Map under the group's id. The
+    // current reader wants a string there, so this workspace's whole sidebar —
+    // the seeded groups and everything curated since — read as empty from the
+    // first start on the new code (#350).
+    // Built in one session, the way the workspace itself was: the corpus and a
+    // sidebar, with the seed having had no chance to run over either.
+    const databasePath = tempDatabasePath();
+    const before = await server(databasePath);
+    const directory = before.instance.replicas.directory().doc;
+    for (const [index, [title, tags]] of CORPUS.entries()) {
+      upsertDirectoryEntry(directory, { uuid: corpusUuid(index), title, tags });
+    }
+    const sidebar = before.instance.replicas.sidebar().doc;
+    sidebar.transact(() => {
+      const groups = sidebar.getMap<unknown>(SIDEBAR_GROUPS_KEY);
+      const group = new Y.Map<unknown>();
+      groups.set(START_HERE, group);
+      group.set("name", "Start here");
+      const docs = new Y.Array<{ uuid: string; since: number }>();
+      group.set("docs", docs);
+      docs.push([{ uuid: corpusUuid(3), since: 0 }]);
+      sidebar.getArray<string>(SIDEBAR_ORDER_KEY).push([START_HERE]);
+    });
+    expect((await before.ok("get_sidebar")).groups).toEqual([]);
+    await before.close();
+    rig = null;
+
+    // Restarted on this code, the curation is back — same id, same pin — and
+    // the tag seed, which had a fully tagged corpus to work from, adopts it
+    // instead of writing its four groups over the top.
+    const after = await server(databasePath);
+    expect(await after.ok("get_sidebar")).toMatchObject({
+      groups: [
+        {
+          id: START_HERE,
+          name: "Start here",
+          docs: [{ uuid: corpusUuid(3), title: "Overview", status: "ok" }],
+        },
+      ],
+    });
+    expect(isSidebarSeeded(after.instance.replicas.sidebar().doc)).toBe(true);
+  });
+
+  it("pins a seeded group's name back into its constant id", async () => {
+    const seeded = await server(await corpusDatabase());
+    await seeded.ok("sidebar_group", { action: "delete", group: "Start here" });
+
+    // A group recreated by name has to come back as the group it was: the
+    // seeded ids are what create_doc placements and briefs reference, and a
+    // fresh random id for the same name orphans every one of them.
+    const pinned = await seeded.ok("pin_doc", {
+      uuid: corpusUuid(3),
+      group: "Start here",
+    });
+    expect(pinned.group).toEqual({ id: START_HERE, name: "Start here" });
   });
 });

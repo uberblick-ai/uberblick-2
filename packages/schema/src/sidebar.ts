@@ -35,6 +35,13 @@
  * one key by clientID, and deliberately so: a name is a string both sides can
  * see and correct, not a container holding somebody's pins.
  *
+ * That layout replaced an earlier one — a group was a `Y.Map` under its id,
+ * holding `name` and `docs` — and a document written that way reads as *empty*
+ * here, because a group's name has to be a string. {@link
+ * migrateLegacySidebar} converts such a document in place, keeping ids, names
+ * and pins; it runs at MCP server start and is the one place in this module
+ * that knows the old shape.
+ *
  * The cost is that a top-level type cannot be removed. {@link deleteGroup}
  * empties the array instead, so a long-lived sidebar carries one spent array
  * per group ever deleted — a handful of empty arrays, in exchange for never
@@ -152,9 +159,19 @@
  * both sides' pins. A caller that addresses groups by name rather than by id
  * gets the same guarantee from {@link getOrCreateGroup}, which derives the id
  * from the name so that two replicas naming one group write one group.
+ *
+ * A group with a well-known id — the seeded ones — is the same rule with the
+ * constant supplied instead of derived: whoever recreates "Start here" by name
+ * writes the id the seed wrote, so a group that came back under a name comes
+ * back under its identity too, and id-based references still find it. Passing
+ * that constant is the caller's job, because the ids belong to what seeded them
+ * rather than to the layout.
  */
 
-import type * as Y from "yjs";
+// A value import, for one reason: {@link migrateLegacySidebar} recognises a
+// group written under the earlier layout by its type. Nothing here constructs a
+// Y type — creating one under a key is the loss this layout exists to avoid.
+import * as Y from "yjs";
 import type { SidebarGroup } from "./types.js";
 
 /** The key of the sidebar's groupId → name Y.Map. */
@@ -395,22 +412,31 @@ export function createGroup(
  * has since been renamed, this falls back to a generated id: two replicas can
  * then still end up with two same-named groups, which is visible and repairable
  * — the loss this trades away was neither.
+ *
+ * `wellKnownId` is the id to create the group under when the caller has a
+ * constant for this name — the seeded groups do. Recreating one of those by
+ * name then converges on the id the seed wrote and other things reference,
+ * rather than on a fresh one that reads the same and matches nothing.
  */
 export function getOrCreateGroup(
   sidebarDoc: Y.Doc,
   name: string,
   index?: number,
+  wellKnownId?: string,
 ): string {
   for (const id of orderedGroupIds(sidebarDoc)) {
     if (groupName(sidebarDoc, id) === name) return id;
   }
-  const derived = `${NAME_ID_PREFIX}${name}`;
-  const free = groupName(sidebarDoc, derived) === null;
+  const preferred =
+    wellKnownId !== undefined && groupName(sidebarDoc, wellKnownId) === null
+      ? wellKnownId
+      : `${NAME_ID_PREFIX}${name}`;
+  const free = groupName(sidebarDoc, preferred) === null;
   return createGroup(
     sidebarDoc,
     name,
     index,
-    free ? derived : crypto.randomUUID(),
+    free ? preferred : crypto.randomUUID(),
   );
 }
 
@@ -556,4 +582,79 @@ export function readSidebar(sidebarDoc: Y.Doc): SidebarGroup[] {
     out.push({ id, name, docs });
   }
   return out;
+}
+
+/**
+ * Rewrite groups written under the earlier layout into this one, keeping their
+ * ids, their names and their pins. Returns how many were converted.
+ *
+ * Before the layout above, a group was a `Y.Map` stored under its id, holding
+ * `name` and a `docs` array of the same plain pins. This module reads a group's
+ * name as a string, so such a group is skipped on read and a sidebar full of
+ * them reads as empty — every group and every pin present in the document and
+ * invisible in every client. That is what happened to the live workspaces on
+ * 2026-08-27
+ * ({@link https://github.com/uberblick-ai/uberblick-2/issues/350}); this is the
+ * repair, and it reads the old shape in exactly one place so nothing else has
+ * to know two layouts.
+ *
+ * Safe to run on any sidebar, at any time, on every replica:
+ *
+ *   - **Idempotent.** A converted sidebar holds no `Y.Map` under a group id, so
+ *     a second run writes nothing at all.
+ *   - **Convergent.** Two replicas converting the same sidebar write the same
+ *     name (one string, both sides equal) and the same pins into the same
+ *     top-level array. Both sets of pins integrate, so a uuid can be stored
+ *     twice — which `readSidebar` already dedupes to its first occurrence in
+ *     stored order, the same occurrence on both, and the next write of that
+ *     document sweeps the shadowed copy. Nothing is lost and nothing needs
+ *     coordinating.
+ *   - **Additive.** Pins already in `pins:<id>` are kept and never duplicated,
+ *     so a group half-rebuilt by hand after the break keeps what was rebuilt.
+ *
+ * Two boundaries, both stated rather than handled. A legacy group whose `name`
+ * is not a string is left alone: it has nothing this layout could call a group,
+ * and inventing one would put a made-up name in a user's sidebar. And a pin
+ * written into the old nested map by a pre-#305 replica *after* the conversion
+ * integrates into a map that no longer exists, so it stays invisible — no such
+ * replica exists any more, and the sidebar itself is the record either way.
+ */
+export function migrateLegacySidebar(sidebarDoc: Y.Doc): number {
+  const groups = getSidebarGroups(sidebarDoc);
+  const legacy: [string, Y.Map<unknown>][] = [];
+  // Read as unknown: this map's declared value type is the *current* layout's
+  // name, and what is being looked for is precisely a value that is not one.
+  for (const [id, value] of groups.entries() as IterableIterator<
+    [string, unknown]
+  >) {
+    if (value instanceof Y.Map) legacy.push([id, value]);
+  }
+  if (legacy.length === 0) return 0;
+
+  // One transaction, so a converted sidebar reaches every other replica whole:
+  // never a name without the pins that belong to it.
+  let converted = 0;
+  sidebarDoc.transact(() => {
+    for (const [id, group] of legacy) {
+      const name = group.get("name");
+      if (typeof name !== "string") continue;
+      const pins = pinsOfGroup(sidebarDoc, id);
+      const held = new Set(
+        pins.toArray().map((item) => readPin(item)?.uuid ?? ""),
+      );
+      const docs = group.get("docs");
+      const carried: Pin[] = [];
+      for (const item of docs instanceof Y.Array ? docs.toArray() : []) {
+        const pin = readPin(item);
+        if (pin === null || held.has(pin.uuid)) continue;
+        held.add(pin.uuid);
+        carried.push(pin);
+      }
+      if (carried.length > 0) pins.insert(pins.length, carried);
+      // Last: the pins are read out of the old map before this replaces it.
+      groups.set(id, name);
+      converted += 1;
+    }
+  });
+  return converted;
 }

@@ -55,11 +55,20 @@
  *     hydrating from the log before the seed decides is what makes a second run
  *     rare in the first place.
  *
- * Sharing an id is what makes those two runs merge, and it has a boundary the
- * schema module's header states in full: concurrent creates of one group id are
- * two writes of one key, so one nested map wins whole. Identical runs lose
- * nothing, because both sides wrote the same pins; two replicas seeding from
- * *different* views of the directory can lose one side's. #210 is the layout fix.
+ * Sharing an id is what makes those two runs merge, and the layout is what
+ * makes sharing one safe: a group's name and its pins merge rather than
+ * replacing each other, so two replicas seeding from different views of the
+ * directory converge on one sidebar holding both sides' pins (#210).
+ *
+ * {@link seedSidebarOnce} carries one more boot-time repair, for the same
+ * reason and in the same place: a sidebar written under the layout that
+ * preceded #210 reads as *empty*, so
+ * {@link https://github.com/uberblick-ai/uberblick-2/issues/350} lost every
+ * group and pin in the live workspaces the moment a current binary came up.
+ * Schema's `migrateLegacySidebar` converts such a document in place — ids,
+ * names and pins kept — and it runs before the seed decides anything, because
+ * an unconverted legacy sidebar looks exactly like a workspace nobody has
+ * curated.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -68,9 +77,11 @@ import {
   createGroup,
   deleteGroup,
   getDirectoryEntry,
+  getOrCreateGroup,
   isSidebarSeeded,
   listDirectory,
   markSidebarSeeded,
+  migrateLegacySidebar,
   moveDoc,
   moveGroup,
   pinDoc,
@@ -108,6 +119,22 @@ const LEGACY_TAG_GROUPS = [
     id: "5e1d0000-0000-4000-8000-000000000004",
   },
 ] as const;
+
+/**
+ * The seeded groups by name — the well-known-group contract, in the one place
+ * that can enforce it.
+ *
+ * A seeded group's id is a constant that tests, briefs and issue text refer to.
+ * Deleting "Start here" and pinning into it again must therefore bring the
+ * *same* group back rather than a new one that merely reads the same: a
+ * name-recreated group under a fresh id orphans every reference to the
+ * constant, which is how the live workspace ended up with a "Start here" no
+ * seeded id matched. {@link getOrCreateGroup} takes the constant and converges
+ * on it.
+ */
+const WELL_KNOWN_GROUP_IDS = new Map<string, string>(
+  LEGACY_TAG_GROUPS.map((group) => [group.name, group.id]),
+);
 
 /**
  * Titles that lead their group in the seeded sidebar, in this order.
@@ -199,7 +226,9 @@ function seedFromTags(replicas: Replicas, sidebar: Replica): number {
 }
 
 /**
- * Run the one-time migration out of tag grouping, at server start.
+ * Bring the sidebar up to date at server start: convert a document written
+ * under the earlier group layout, then run the one-time migration out of tag
+ * grouping if this workspace still needs it.
  *
  * Called once, from `server.ts`, and never from a tool — see the header for why
  * a read must not write. It settles first, so the corpus it groups and the
@@ -227,9 +256,29 @@ export async function seedSidebarOnce(replicas: Replicas): Promise<void> {
   if (replicas.persistenceError() !== null) return;
 
   const sidebar = replicas.sidebar();
+
+  // First, because a sidebar written under the earlier layout reads as empty:
+  // without this, the checks below would take a workspace full of curation for
+  // a workspace with none. Converting is idempotent and convergent, so it costs
+  // one map read on every start after the first — see migrateLegacySidebar.
+  const converted = migrateLegacySidebar(sidebar.doc);
+  if (converted > 0) {
+    const failure = replicas.persistenceError();
+    log.info("restored sidebar groups written under the earlier layout", {
+      room: sidebar.room,
+      groups: converted,
+      applied: failure === null,
+      ...(failure === null
+        ? { synced: replicas.isRoomQuiet(sidebar.room) }
+        : { message: failure.message }),
+    });
+    if (failure !== null) return;
+  }
+
   if (isSidebarSeeded(sidebar.doc)) return;
 
-  if (readSidebar(sidebar.doc).length > 0) {
+  const adopted = readSidebar(sidebar.doc).length > 0;
+  if (adopted) {
     markSidebarSeeded(sidebar.doc);
   } else if (seedFromTags(replicas, sidebar) === 0) {
     // Nothing carries a legacy tag — an empty workspace, or one that never had
@@ -249,11 +298,18 @@ export async function seedSidebarOnce(replicas: Replicas): Promise<void> {
     });
     return;
   }
-  log.info("seeded the sidebar from the legacy tag groups", {
-    room: sidebar.room,
-    applied: true,
-    synced: replicas.isRoomQuiet(sidebar.room),
-  });
+  // Which of the two happened, because "seeded" over a sidebar that was merely
+  // adopted reads like curation was written over.
+  log.info(
+    adopted
+      ? "adopted the sidebar this workspace already had"
+      : "seeded the sidebar from the legacy tag groups",
+    {
+      room: sidebar.room,
+      applied: true,
+      synced: replicas.isRoomQuiet(sidebar.room),
+    },
+  );
 }
 
 /** Every uuid the sidebar pins, for `list_docs`' derived `pinned` flag. */
@@ -479,7 +535,17 @@ export function registerSidebarTools(
       const sidebar = replicas.sidebar();
       const groups = readSidebar(sidebar.doc);
       const target = findGroup(groups, group);
-      const groupId = target?.id ?? createGroup(sidebar.doc, group);
+      // Created by name, so two agents pinning into "Reading" while out of
+      // contact write one group — and a seeded name comes back under the id it
+      // was seeded with. See WELL_KNOWN_GROUP_IDS.
+      const groupId =
+        target?.id ??
+        getOrCreateGroup(
+          sidebar.doc,
+          group,
+          undefined,
+          WELL_KNOWN_GROUP_IDS.get(group),
+        );
       const { moved } = placeInGroup(replicas, groupId, uuid, index);
       return context.json({
         uuid,
