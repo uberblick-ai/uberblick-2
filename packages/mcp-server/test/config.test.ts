@@ -142,5 +142,5 @@ describe("the server process", () => {
     expect(run.code).not.toBe(0);
     expect(run.stderr).toMatch(/WORKSPACE_ID/);
     expect(run.stderr).toMatch(/ub init/);
-  }, 30_000);
+  });
 });

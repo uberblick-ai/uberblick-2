@@ -280,7 +280,7 @@ describe("synced", () => {
     // the whole of what `synced: true` claims, and the crash window is the gap
     // between the two — named in create_doc, edit_block and sync_status.
     expect(read?.blocks.map((block) => block.text)).toEqual([STORED]);
-  }, 45_000);
+  });
 
   // The behaviour above is Yjs and Hocuspocus being themselves; what this
   // package owes an agent is saying so where the agent reads. So the words are

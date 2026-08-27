@@ -14,6 +14,7 @@ import { appendBlock, getBlocks, getMeta, listDirectory } from "@uberblick/schem
 import type { Hub } from "@uberblick/hub";
 import {
   hubUrl,
+  LIVE_HUB_SETTLE,
   peerClient,
   removeTempDirs,
   startHub,
@@ -21,10 +22,11 @@ import {
   tempDatabasePath,
   testConfig,
   TEST_SECRET,
+  waitForCorpus,
   waitUntil,
   WORKSPACE,
 } from "./helpers.js";
-import type { PeerClient, Rig } from "./helpers.js";
+import type { PeerClient, Rig, TestConfigOptions } from "./helpers.js";
 
 const hubs: Hub[] = [];
 const rigs: Rig[] = [];
@@ -51,15 +53,13 @@ async function hub(options: { port?: number; databasePath?: string } = {}) {
 
 async function serverOn(
   port: number,
-  options: { databasePath?: string; authSecret?: string } = {},
+  options: Omit<TestConfigOptions, "hubUrl"> = {},
 ): Promise<Rig> {
   const rig = await startServer(
     testConfig({
+      ...options,
       authSecret: options.authSecret ?? TEST_SECRET,
       hubUrl: hubUrl(port),
-      ...(options.databasePath === undefined
-        ? {}
-        : { databasePath: options.databasePath }),
     }),
   );
   rigs.push(rig);
@@ -152,9 +152,18 @@ describe("hub sync", () => {
 
     // Empty local state, same hub. Everything it knows, it learns by syncing —
     // and everything it learns, it logs.
+    //
+    // Both halves are needed, and they cover different things. LIVE_HUB_SETTLE
+    // gives the settle room to finish, which is what fills the FTS index the
+    // search assertions below read; waiting for the directory is what makes an
+    // empty listing mean a real bug rather than a settle that gave up. Neither
+    // is the other's belt and braces — starve the sync grace and the searches
+    // go red with the directory in hand.
     const fresh = await serverOn(running.port, {
       databasePath: tempDatabasePath(),
+      ...LIVE_HUB_SETTLE,
     });
+    await waitForCorpus(fresh, [first.uuid, second.uuid]);
 
     const listed = await fresh.ok("list_docs", {});
     expect(
@@ -238,8 +247,13 @@ describe("hub sync", () => {
     // trigger the boot settle at once. Each must answer from the hydrated
     // corpus — a caller that sails past the in-flight settle would return an
     // empty directory or an empty index.
+    //
+    // The one rig here that cannot wait for hydration first: waiting would make
+    // these calls something other than first calls, which is the whole claim.
+    // So the settle gets room instead — see LIVE_HUB_SETTLE.
     const fresh = await serverOn(running.port, {
       databasePath: tempDatabasePath(),
+      ...LIVE_HUB_SETTLE,
     });
     const [docsA, docsB, hits, status] = await Promise.all([
       fresh.ok("list_docs", {}),

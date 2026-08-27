@@ -144,7 +144,7 @@ describe("the replica database", () => {
     expect(stderr).toContain(ALPHA);
     expect(stderr).toContain(BETA);
     expect(stderr).toContain(databasePath);
-  }, 30_000);
+  });
 
   it("keeps two pinned workspaces out of each other's search when they share UBERBLICK_DB", async () => {
     // The review scenario: one exported UBERBLICK_DB, two `.mcp.json` entries
@@ -185,7 +185,7 @@ describe("the replica database", () => {
     expect(fromBeta.hits.map((hit: { title: string }) => hit.title)).toEqual([
       "Beta plan",
     ]);
-  }, 30_000);
+  });
 
   it("adopts a database that predates the meta row, once", () => {
     const databasePath = tempDatabasePath();
