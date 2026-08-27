@@ -25,3 +25,9 @@ playwright-report
 .DS_Store
 .vite
 
+
+# A developer's derived mise config carries HUB_AUTH_TOKEN. It is gitignored,
+# so `mise run review` (which builds from `git archive`) never sees it — but a
+# plain `docker build` from a working checkout would otherwise bake the signing
+# secret into an image that is published publicly.
+mise.local.toml

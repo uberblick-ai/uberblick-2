@@ -1,0 +1,66 @@
+name: publish hub image
+
+# Publishes the Dockerfile's `hub` target to ghcr.io/uberblick-ai/uberblick-hub,
+# whose package visibility is public: anyone pulls it with no credential, no
+# login and no token. That is the point — the host experience this feeds is
+# "ensure a Docker daemon, pull, run", and a private registry would reintroduce
+# exactly the credential that direction exists to delete.
+#
+# No secrets, in the same sense as ci.yml: no repository secret, no age key, no
+# build secret and no build argument carrying one. The whole credential is the
+# automatic GITHUB_TOKEN, which `packages: write` scopes to this repository's
+# own packages. The hub target mounts nothing — the Dockerfile's only
+# `--mount=type=secret` belongs to the web bundle, which is a different target,
+# a different image and a different issue (#232).
+#
+# The hub image contains the repository working tree minus `.dockerignore`'s
+# exclusions, because the hub runs TypeScript source under tsx. Publishing it
+# publicly therefore makes those files public; `scripts/check-image-secrets.sh`
+# is what holds the line that no *credential* is among them, and it runs against
+# the pulled artefact on every push.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Serialised rather than cancelled: a run that is already pushing a `sha-` tag
+# should finish doing so. Two commits landing in quick succession then publish
+# in order, which is also the order the moving `main` tag should end up in.
+concurrency:
+  group: publish-hub
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: build and push the hub image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Before the check is trusted to pass, prove it can fail: it plants a
+      # credential in a throwaway image and demands a rejection. A secret scan
+      # that cannot fail is decoration, and this job's only other evidence that
+      # the published image is clean is that same scan passing.
+      - name: The secret check has teeth
+        run: scripts/check-image-secrets.sh --self-test
+
+      - name: Log in to ghcr.io
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+      # Builds `target: hub`, pushes `sha-<full sha>` (never overwritten — an
+      # existing one makes this a no-op that exits 0) and the moving `main`,
+      # prints the pushed digest, then pulls that digest back and scans it.
+      - name: Build, push and verify
+        run: scripts/publish-hub-image.sh "$GITHUB_SHA"
+
+      - name: Log out of ghcr.io
+        if: always()
+        run: docker logout ghcr.io

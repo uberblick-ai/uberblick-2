@@ -514,6 +514,36 @@ Docker socket. The build context is the working tree filtered by
 `.dockerignore` — `mise.local.toml` and every local database are excluded, because a proof that runs on state `ub init` was supposed to
 create proves nothing.
 
+## The published hub image
+
+Every commit on `main` builds the `Dockerfile`'s `hub` target and pushes it to
+`ghcr.io/uberblick-ai/uberblick-hub` (`.github/workflows/publish-hub.yml`). The
+package is **public**: `docker pull ghcr.io/uberblick-ai/uberblick-hub@sha256:…`
+needs no login, no token and no deploy key, which is the whole point — a host
+that has a Docker daemon and nothing else is the direction this feeds, and a
+private registry would reintroduce exactly the credential that direction exists
+to delete. Two tags per commit: an immutable `sha-<full commit sha>`, which the
+workflow never overwrites (a re-run on an already-published commit exits 0
+without pushing), and a moving `main`, which is a discovery pointer and never a
+runtime reference — the workflow prints the digest, and a deployment pins that.
+It needs no repository secret and no age key: the hub target mounts no build
+secret, and the automatic `GITHUB_TOKEN` scoped to `packages: write` is the
+entire credential.
+
+**What a public image discloses.** The hub runs TypeScript source under `tsx`,
+so `COPY . .` puts the repository working tree — minus `.dockerignore`'s
+exclusions — inside an image anyone can pull, which makes those files public
+while the repository itself is not (MIT is the plan). No *credential* is among
+them, and that is checked rather than asserted: `.git`, `.claude`, `.github`,
+`.env*`, `mise.local.toml` and every database file are excluded, `fnox.toml`
+ships age-encrypted and the key to it has never been in the repository, and
+`scripts/check-image-secrets.sh` scans the pulled artefact on every push for
+`age.txt`, a `credentials.json`, an age private key, a credential-shaped
+variable, and — where a machine holds the real signing secret — that exact
+value, which it never prints. Its `--self-test` plants a credential in a
+throwaway image and demands a rejection, so the workflow proves the scan can
+fail before it trusts it to pass.
+
 ## Review isolation
 
 `mise run review` resolves `REVIEW_SHA` to a commit, extracts that commit with

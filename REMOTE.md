@@ -258,6 +258,29 @@ Record the host name, date, browser/OS pairs, and pass/fail result for every
 step in issue #98. The physical two-computer checks are deployment evidence;
 they are not replaced by the repository's local test suite.
 
+## The published hub image
+
+Every commit on `main` publishes the `hub` target to
+`ghcr.io/uberblick-ai/uberblick-hub`, and the package is **public**: pulling
+`ghcr.io/uberblick-ai/uberblick-hub@sha256:…` takes no login, no token and no
+deploy key. Two tags per commit — an immutable `sha-<full commit sha>` that is
+never overwritten, and a moving `main` that is a discovery pointer only. Pin the
+digest the workflow prints, never the moving tag: it is the same split
+`ub remote update` already runs on, where `origin/main` is consulted and the
+immutable commit it resolved to is what gets recorded.
+
+Publishing that image publishes its contents — the hub runs TypeScript source
+under `tsx`, so it carries the repository working tree minus `.dockerignore`'s
+exclusions, `fnox.toml` among them, age-encrypted and undecryptable without a
+key that has never been in the repository. No credential is in there, and
+`scripts/check-image-secrets.sh` checks that over the pulled artefact on every
+push rather than leaving it asserted.
+
+This deployment still builds from the host's own checkout. Standing a host up
+from the published image instead — no git, no deploy key — is the host issue's
+work; see [README](README.md#the-published-hub-image) for what the workflow
+guarantees today.
+
 ## Operations
 
 ```sh
