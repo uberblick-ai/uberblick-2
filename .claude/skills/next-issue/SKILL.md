@@ -60,10 +60,11 @@ file contains only Claude coordinator machinery and does not restate either.
      out to review it, and never treat tests from a mutable shared checkout as
      review evidence. CLAUDE.md's review paragraph and README's "Review
      isolation" state what the runner refuses and why;
-   - run the verification container without network, and pass it no secrets,
-     host mounts, privileged mode or Docker socket. Keep the SHA-tagged image
-     long enough for the failure-path probes CLAUDE.md requires at stateful
-     boundaries, then remove it when the PR is settled;
+   - run the verification container without network, and pass no secrets, host
+     mounts, privileged mode or Docker socket to either the build or the
+     container. Keep the SHA-tagged image long enough for the failure-path
+     probes CLAUDE.md requires at stateful boundaries, then remove it when the
+     PR is settled;
    - record every gate result against the commit SHA it ran at — container
      review, CI, your acceptance validation, the Codex verdict where that gate
      applied, the Copilot state. Any new commit on the branch (fix-ups
