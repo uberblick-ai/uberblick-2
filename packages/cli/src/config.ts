@@ -1,9 +1,11 @@
 /**
  * Where `ub` gets its configuration.
  *
- * Precedence, highest first: the environment, `./uberblick.json` in the working
- * directory, the user's `config.json`, and the built-in defaults — which live
- * in `@uberblick/mcp-server`, not here.
+ * Precedence, highest first: the environment, the user's `config.json`, and the
+ * built-in defaults — which live in `@uberblick/mcp-server`, not here. Three
+ * layers and no fourth: a repository binds itself to a workspace by pinning
+ * `WORKSPACE_ID` in its project MCP entry (see `install.ts`), which arrives
+ * here as the environment — the layer that already wins.
  *
  * *Where* that `config.json` is belongs to `@uberblick/hub/storage`:
  * `$XDG_CONFIG_HOME/uberblick` on Linux and wherever XDG is set explicitly,
@@ -31,9 +33,9 @@
  * `HUB_AUTH_TOKEN` holds the hub's HMAC **signing secret**, not a token (see
  * `packages/hub/src/token.ts`). It is read from `credentials.json`, passed to the
  * server in its environment, and never printed. A `credentials.json` other users
- * can read is refused rather than used — see {@link credentialsAreExposed} — and
- * the secret is attached only to a hub the *user* chose, never to one a cloned
- * `./uberblick.json` chose — see {@link secretAppliesTo}.
+ * can read is refused rather than used — see {@link credentialsAreExposed}. Every
+ * endpoint layer left is one the user chose — their own environment or their own
+ * `config.json` — so the stored secret applies to whichever is in force.
  */
 
 import { mkdirSync, readFileSync, statSync } from "node:fs";
@@ -53,14 +55,11 @@ export const USER_CONFIG_FILE = "config.json";
 /** The hub signing secret and, later, remote tokens. Never committed. */
 export const CREDENTIALS_FILE = "credentials.json";
 
-/** Binds one checkout to one workspace. Committable, so never secrets. */
-export const DIRECTORY_FILE = "uberblick.json";
-
 /** The key holding the hub's HMAC signing secret in `credentials.json`. */
 const SIGNING_SECRET_KEY = "signingSecret";
 
 /** Which layer a resolved value came from. Stable strings: `--json` prints them. */
-export type Origin = "environment" | "directory file" | "user config" | "default";
+export type Origin = "environment" | "user config" | "default";
 
 /** Where a signing secret came from, or null when none is configured. */
 export type CredentialOrigin = "environment" | "credentials file";
@@ -84,7 +83,6 @@ export interface ResolvedConfig {
   paths: {
     userConfig: string;
     credentials: string;
-    directoryFile: string;
   };
   /**
    * The storage layout those paths came out of, and the hub and workspace
@@ -149,9 +147,9 @@ function trimmed(value: string | undefined): string | null {
  * No parser output reaches a warning, for any of these files. Node's
  * `JSON.parse` errors quote the source around the syntax error, so the message
  * for a file someone pasted a bare secret into *is* the secret — and that is not
- * only `credentials.json`: a secret misplaced in `./uberblick.json` or
- * `config.json` is exactly the mistake {@link warnAboutMisplacedSecret} exists
- * to catch, and a file that does not parse never reaches it. An `ub` warning may
+ * only `credentials.json`: a secret misplaced in `config.json` is exactly the
+ * mistake {@link warnAboutMisplacedSecret} exists to catch, and a file that does
+ * not parse never reaches it. An `ub` warning may
  * land in an MCP client's log, a screen-shared terminal or a CI transcript, so
  * the file's name is the whole of what is said about it.
  */
@@ -290,8 +288,8 @@ export function writeUserConfig(
 
 /**
  * A signing secret in a file that is not `credentials.json` is a mistake worth
- * naming: `./uberblick.json` is meant to be committed, and `config.json` is the
- * file `ub` will happily print fields from.
+ * naming: `config.json` is the file `ub` will happily print fields from, and it
+ * is not written with the mode a secret needs.
  */
 function warnAboutMisplacedSecret(
   source: Record<string, unknown> | null,
@@ -335,24 +333,6 @@ function credentialsAreExposed(path: string, warnings: string[]): boolean {
 }
 
 /**
- * Whether the stored secret belongs on this hub.
- *
- * `./uberblick.json` is committable, so a clone can carry one that points the
- * checkout at any endpoint its author likes. If the secret in the user's
- * `credentials.json` followed that URL, `ub status` in a freshly cloned
- * repository would hand a signed read-write token to a stranger's hub — no
- * prompt, no build step, just entering the directory.
- *
- * So the stored secret is scoped to hubs the *user* chose: the environment,
- * their own `config.json`, or the built-in default. `HUB_AUTH_TOKEN` in the
- * environment is itself a deliberate act and always applies, whatever chose the
- * URL, and that is the documented way to sync with a repository-chosen hub.
- */
-function secretAppliesTo(hubUrlOrigin: Origin): boolean {
-  return hubUrlOrigin !== "directory file";
-}
-
-/**
  * Read `credentials.json`.
  *
  * **`signingSecret` is the file's value whether or not the file is exposed.**
@@ -387,33 +367,14 @@ export function readCredentials(
   };
 }
 
-/**
- * The endpoint `./uberblick.json` pins, or null.
- *
- * Its own function because it answers a question resolution cannot: not "what
- * is in force" but "will anything I write to `config.json` take effect". The
- * directory file outranks the user config, so a command that persists an
- * endpoint has to say so rather than print a value that will be ignored — and
- * it cannot simply write *there* instead, because {@link secretAppliesTo}
- * withholds the stored secret from a repository-chosen hub, so an endpoint in
- * that file would authenticate against nothing.
- */
-export function directoryHubUrl(cwd: string = process.cwd()): string | null {
-  const path = join(cwd, DIRECTORY_FILE);
-  const warnings: string[] = [];
-  return stringField(readJsonObject(path, warnings), "hubUrl", path, warnings);
-}
-
 export interface ResolveOptions {
   env?: NodeJS.ProcessEnv;
-  cwd?: string;
   /** `process.platform` by default; injected so the Mac layout is testable. */
   platform?: NodeJS.Platform;
 }
 
 export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   const env = options.env ?? process.env;
-  const cwd = options.cwd ?? process.cwd();
   const platform = options.platform ?? process.platform;
   // Resolved once, and its warnings taken once: every path below comes out of
   // this, so asking the layout per file would say "you are on the legacy
@@ -424,12 +385,9 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   const paths = {
     userConfig: join(storage.configDir, USER_CONFIG_FILE),
     credentials: join(storage.configDir, CREDENTIALS_FILE),
-    directoryFile: join(cwd, DIRECTORY_FILE),
   };
 
   const userConfig = readJsonObject(paths.userConfig, warnings);
-  const directory = readJsonObject(paths.directoryFile, warnings);
-  warnAboutMisplacedSecret(directory, paths.directoryFile, warnings);
   warnAboutMisplacedSecret(userConfig, paths.userConfig, warnings);
 
   const workspace = pick([
@@ -437,11 +395,6 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
       origin: "environment",
       value: trimmed(env.WORKSPACE_ID),
       label: "WORKSPACE_ID",
-    },
-    {
-      origin: "directory file",
-      value: stringField(directory, "workspace", paths.directoryFile, warnings),
-      label: `"workspace" in ${paths.directoryFile}`,
     },
     {
       origin: "user config",
@@ -460,20 +413,16 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   const hubUrl = pick([
     { origin: "environment", value: trimmed(env.HUB_URL), label: "HUB_URL" },
     {
-      origin: "directory file",
-      value: stringField(directory, "hubUrl", paths.directoryFile, warnings),
-      label: `"hubUrl" in ${paths.directoryFile}`,
-    },
-    {
       origin: "user config",
       value: stringField(userConfig, "hubUrl", paths.userConfig, warnings),
       label: `"hubUrl" in ${paths.userConfig}`,
     },
   ]);
 
-  // Credentials are read last and from one file only. Nothing committable may
-  // carry a secret, so there is no directory-file layer here by design. An
-  // exposed file is refused outright: its one actionable message is the mode.
+  // Credentials are read last and from one file only: every layer above is one
+  // the user set on their own machine, so the secret applies to whichever
+  // endpoint they chose. An exposed file is refused outright — its one
+  // actionable message is the mode.
   const credentials = readCredentials(env, platform);
   warnings.push(...credentials.warnings);
   const secretFromFile = credentials.exposed ? null : credentials.signingSecret;
@@ -483,17 +432,8 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   let credentialOrigin: CredentialOrigin | null =
     secretFromEnv === null ? null : "environment";
   if (secret === null && secretFromFile !== null) {
-    if (secretAppliesTo(hubUrl.origin)) {
-      secret = secretFromFile;
-      credentialOrigin = "credentials file";
-    } else {
-      warnings.push(
-        `${paths.directoryFile} points this checkout at ${hubUrl.value}; the ` +
-          `signing secret in ${paths.credentials} was not attached to a ` +
-          "repository-chosen hub — export HUB_AUTH_TOKEN (or set HUB_URL " +
-          "yourself) to sync with it",
-      );
-    }
+    secret = secretFromFile;
+    credentialOrigin = "credentials file";
   }
 
   const resolvedEnv: NodeJS.ProcessEnv = { ...env };

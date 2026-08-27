@@ -157,7 +157,7 @@ class McpSession {
   constructor(clientInfo: { name: string; title?: string }) {
     sessions.add(this);
     this.child = spawn(process.execPath, [UB, "mcp", "serve"], {
-      // The agent's own directory, so no `uberblick.json` in the checkout can
+      // The agent's own directory, so nothing in the checkout can
       // steer it: everything it needs is in the environment below.
       cwd: agentState,
       stdio: ["pipe", "pipe", "pipe"],

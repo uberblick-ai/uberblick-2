@@ -55,10 +55,8 @@ export interface SandboxFiles {
   userConfig?: unknown;
   /** `$XDG_CONFIG_HOME/uberblick/credentials.json`. */
   credentials?: unknown;
-  /** `./uberblick.json` in the sandbox working directory. */
-  directoryFile?: unknown;
   /** Raw text instead of JSON, for the malformed-file cases. */
-  raw?: { userConfig?: string; credentials?: string; directoryFile?: string };
+  raw?: { userConfig?: string; credentials?: string };
   /**
    * Mode to force on credentials.json instead of the 0600 a correct install
    * has — how a test asks for a file `ub` is supposed to refuse.
@@ -74,7 +72,7 @@ export interface SandboxFiles {
 }
 
 export interface Sandbox {
-  /** The working directory `ub` runs in — where `./uberblick.json` lives. */
+  /** The working directory `ub` runs in. */
   cwd: string;
   configHome: string;
   dataHome: string;
@@ -103,7 +101,6 @@ export function sandbox(files: SandboxFiles = {}): Sandbox {
 
   const userConfigPath = join(configHome, "uberblick", "config.json");
   const credentialsPath = join(configHome, "uberblick", "credentials.json");
-  const directoryPath = join(cwd, "uberblick.json");
 
   if (files.checkout === true) {
     writeText(join(cwd, "mise.toml"), "[env]\n");
@@ -111,10 +108,8 @@ export function sandbox(files: SandboxFiles = {}): Sandbox {
   }
   if (files.userConfig !== undefined) writeJson(userConfigPath, files.userConfig);
   if (files.credentials !== undefined) writeJson(credentialsPath, files.credentials);
-  if (files.directoryFile !== undefined) writeJson(directoryPath, files.directoryFile);
   if (files.raw?.userConfig !== undefined) writeText(userConfigPath, files.raw.userConfig);
   if (files.raw?.credentials !== undefined) writeText(credentialsPath, files.raw.credentials);
-  if (files.raw?.directoryFile !== undefined) writeText(directoryPath, files.raw.directoryFile);
 
   // A credentials file others can read is refused, so the sandbox writes the
   // mode a correct install has — `writeFileSync` would leave it at the umask's

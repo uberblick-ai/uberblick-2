@@ -26,7 +26,7 @@ import {
 } from "@uberblick/mcp-server";
 import type { SyncStatus } from "@uberblick/mcp-server";
 import type { CredentialOrigin, Origin } from "./config.js";
-import { DIRECTORY_FILE, resolveConfig } from "./config.js";
+import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
@@ -94,7 +94,6 @@ export interface StatusReport {
 /** How an origin reads in the human output. Shared with `ub workspace`. */
 export const ORIGIN_LABELS: Record<Origin, string> = {
   environment: "environment",
-  "directory file": `./${DIRECTORY_FILE}`,
   "user config": "user config",
   default: "built-in default",
 };
@@ -103,7 +102,6 @@ export const ORIGIN_LABELS: Record<Origin, string> = {
 export async function statusReport(
   options: {
     env?: NodeJS.ProcessEnv;
-    cwd?: string;
     /** `process.platform` by default; injected so the Mac layout is testable. */
     platform?: NodeJS.Platform;
   } = {},

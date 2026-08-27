@@ -20,7 +20,6 @@ dist
 # none of it.
 mise.local.toml
 .mise.local.toml
-uberblick.json
 data
 **/data
 *.sqlite

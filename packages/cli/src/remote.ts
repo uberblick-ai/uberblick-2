@@ -79,7 +79,6 @@ import { parseWorkspaceId } from "@uberblick/schema";
 import {
   USER_CONFIG_FILE,
   credentialsPath,
-  directoryHubUrl,
   readCredentials,
   readUserConfig,
   resolveConfig,
@@ -148,16 +147,11 @@ const SHARING_BOUNDARY =
 /**
  * What outranks `config.json`, when something does.
  *
- * `config.json` is the *third* layer: the environment beats it, and so does a
- * committable `./uberblick.json`. Writing an endpoint there and reporting
- * success would be reporting a switch that did not happen — and after a
- * `promote` that is worse than useless, because the documents really did move
- * while every client keeps dialling the old hub.
- *
- * Writing to the higher layer instead is not the fix either. `./uberblick.json`
- * is committable, and {@link secretAppliesTo} deliberately withholds the stored
- * signing secret from a repository-chosen hub — so clients pointed there would
- * dial it with no credential at all. Naming what wins is the fix.
+ * `config.json` is the *second* layer: `HUB_URL` in the environment beats it.
+ * Writing an endpoint here and reporting success would be reporting a switch
+ * that did not happen — and after a `promote` that is worse than useless,
+ * because the documents really did move while every client keeps dialling the
+ * old hub. Naming what wins is the fix.
  *
  * Only a higher layer naming a *different* hub is any of this. One naming the
  * endpoint being written outranks nothing that matters: the value takes effect,
@@ -166,33 +160,24 @@ const SHARING_BOUNDARY =
  * hub it is joining. Same hub, not same spelling — see {@link sameEndpoint}.
  */
 interface Outranking {
-  /** `HUB_URL` or `./uberblick.json`. */
+  /** `HUB_URL` in the environment — the only layer above `config.json`. */
   layer: string;
   endpoint: string;
 }
 
 function outranking(
   resolved: ResolvedConfig,
-  cwd: string,
   /** The endpoint being written; a higher layer naming it is not a conflict. */
   requested: string,
 ): Outranking | null {
-  const found = (): Outranking | null => {
-    if (resolved.origins.hubUrl === "environment") {
-      const endpoint = resolved.env.HUB_URL?.trim();
-      return endpoint === undefined || endpoint === ""
-        ? null
-        : { layer: "HUB_URL in the environment", endpoint };
-    }
-    const pinned = directoryHubUrl(cwd);
-    return pinned === null
-      ? null
-      : { layer: `"hubUrl" in ./uberblick.json`, endpoint: pinned };
-  };
-  const outranked = found();
-  return outranked === null || sameEndpoint(outranked.endpoint, requested)
-    ? null
-    : outranked;
+  if (resolved.origins.hubUrl !== "environment") {
+    return null;
+  }
+  const endpoint = resolved.env.HUB_URL?.trim();
+  if (endpoint === undefined || endpoint === "" || sameEndpoint(endpoint, requested)) {
+    return null;
+  }
+  return { layer: "HUB_URL in the environment", endpoint };
 }
 
 /**
@@ -288,11 +273,9 @@ export function setRemote(
     /** The workspace to bind this machine to, or undefined to leave it alone. */
     workspace?: string | undefined;
     env?: NodeJS.ProcessEnv;
-    cwd?: string;
   } = {},
 ): RemotePersistence {
   const env = options.env ?? process.env;
-  const cwd = options.cwd ?? process.cwd();
   const secret = options.secret ?? null;
   const written: string[] = [];
   const warnings: string[] = [];
@@ -313,8 +296,8 @@ export function setRemote(
   const stored = readCredentials(env);
 
   // Read before anything is written, because it decides whether the credential
-  // may move: `config.json` is only the third layer, and when a higher one
-  // names a different hub *that* is the endpoint every client dials. Storing
+  // may move: `config.json` is only the second layer, and when `HUB_URL` in the
+  // environment names a different hub *that* is the endpoint every client dials. Storing
   // the target's secret anyway would leave the endpoint in force authenticated
   // with a credential that is not its own — the exact mismatch the ordering
   // below exists to prevent, arrived at from the other side. The endpoint is
@@ -323,9 +306,9 @@ export function setRemote(
   // the endpoint being written is not this and reads as null — see
   // {@link outranking}, or a second machine already pointed at the hub it is
   // joining would be refused the credential it went there to get.
-  // (Neither answer depends on the write: `HUB_URL` and `./uberblick.json` are
-  // untouched by it, and with neither present nothing outranks anything.)
-  const outrankedBy = outranking(resolveConfig({ env, cwd }), cwd, url);
+  // (The answer does not depend on the write: `HUB_URL` is untouched by it, and
+  // without it nothing outranks anything.)
+  const outrankedBy = outranking(resolveConfig({ env }), url);
   const newSecret = secret !== null && secret !== stored.signingSecret;
   if (newSecret && outrankedBy !== null) {
     warnings.push(
@@ -834,11 +817,7 @@ function showRemote(io: Io): number {
   }
 
   const source =
-    resolved.origins.hubUrl === "environment"
-      ? "HUB_URL"
-      : resolved.origins.hubUrl === "directory file"
-        ? "./uberblick.json"
-        : "user config";
+    resolved.origins.hubUrl === "environment" ? "HUB_URL" : "user config";
   let text = `remote        ${config.hubUrl} (${source})\n`;
   text += `workspace     ${config.workspaceId}\n`;
   text += `credential    ${
@@ -867,8 +846,8 @@ options:
   -h, --help        show this help
 
 Use \`ub remote promote <url>\` or \`ub remote join <url>\` when the documents
-have to move with the endpoint. A layer above the user config — HUB_URL, or a
-directory file — still wins, and this says so when it does.
+have to move with the endpoint. The layer above the user config — HUB_URL in
+the environment — still wins, and this says so when it does.
 `;
 
 function setCommand(argv: string[], io: Io): number {

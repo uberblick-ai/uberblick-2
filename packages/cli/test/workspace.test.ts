@@ -4,12 +4,12 @@
  *
  * Spawned, like the rest of the CLI suites: what is defended here is what a
  * process leaves behind — an exit code, a stream, and the bytes in
- * `./uberblick.json` — and none of that survives being called as a function.
+ * `config.json` — and none of that survives being called as a function.
  *
  * The one property worth more than the rest: `use` replaces a field, it does not
- * replace a file. Everything else its author put in `./uberblick.json` is still
- * there afterwards — and the derived `mise.local.toml`, which the mise tasks
- * actually read, follows the binding without losing the secret in it.
+ * replace a file. The identity and endpoint its author put in `config.json` are
+ * still there afterwards — and the derived `mise.local.toml`, which the mise
+ * tasks actually read, follows the binding without losing the secret in it.
  */
 
 import {
@@ -77,8 +77,10 @@ function withDatabase(box: { dataHome: string }, uuid: string): void {
   writeFileSync(join(dir, `${uuid}.sqlite`), "", "utf8");
 }
 
-function directoryFile(box: { cwd: string }): Record<string, unknown> {
-  return JSON.parse(readFileSync(join(box.cwd, "uberblick.json"), "utf8"));
+function userConfig(box: { configHome: string }): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"),
+  );
 }
 
 describe("ub workspace", () => {
@@ -88,18 +90,6 @@ describe("ub workspace", () => {
     const fromUser = runUb(["workspace"], sandbox({ userConfig: { workspace: WORKSPACE } }));
     expect(fromUser.status).toBe(0);
     expect(fromUser.stdout).toMatch(new RegExp(`workspace\\s+${WORKSPACE} \\(user config\\)`));
-
-    const fromDirectory = runUb(
-      ["workspace"],
-      sandbox({
-        userConfig: { workspace: UNRELATED },
-        directoryFile: { workspace: WORKSPACE },
-      }),
-    );
-    expect(fromDirectory.status).toBe(0);
-    expect(fromDirectory.stdout).toMatch(
-      new RegExp(`workspace\\s+${WORKSPACE} \\(\\./uberblick\\.json\\)`),
-    );
 
     const fromEnvironment = runUb(
       ["workspace"],
@@ -114,15 +104,14 @@ describe("ub workspace", () => {
 
   it("agrees with `ub status` on the value and the origin", () => {
     const box = sandbox({
-      userConfig: { workspace: UNRELATED },
-      directoryFile: { workspace: `docs-${WORKSPACE}`, hubUrl: DEAD_HUB_URL },
+      userConfig: { workspace: `docs-${WORKSPACE}`, hubUrl: DEAD_HUB_URL },
     });
     const report = JSON.parse(runUb(["status", "--json"], box).stdout);
     const shown = runUb(["workspace"], box).stdout;
 
     expect(report.workspace).toBe(`docs-${WORKSPACE}`);
-    expect(report.sources.workspace).toBe("directory file");
-    expect(shown).toMatch(new RegExp(`workspace\\s+docs-${WORKSPACE} \\(\\./uberblick\\.json\\)`));
+    expect(report.sources.workspace).toBe("user config");
+    expect(shown).toMatch(new RegExp(`workspace\\s+docs-${WORKSPACE} \\(user config\\)`));
     // The uuid, because the spelling hides it — what you quote to somebody else.
     expect(shown).toMatch(new RegExp(`uuid\\s+${WORKSPACE}`));
   });
@@ -170,26 +159,33 @@ describe("ub workspace list", () => {
 });
 
 describe("ub workspace use", () => {
-  it("creates ./uberblick.json, and `ub status` then names it", () => {
+  it("writes the user config with no --user, and `ub status` then names it", () => {
+    // There is one place a workspace preference lives. A repository that wants
+    // its own binds itself by pinning WORKSPACE_ID in its project MCP entry,
+    // which arrives as the environment and outranks this.
     const box = sandbox();
     const run = runUb(["workspace", "use", WORKSPACE], box);
-    expect(run.status).toBe(0);
-    expect(directoryFile(box)).toEqual({ workspace: WORKSPACE });
+    expect(run.status, run.output).toBe(0);
+    expect(userConfig(box)).toEqual({ workspace: WORKSPACE });
 
     const report = JSON.parse(runUb(["status", "--json"], box).stdout);
     expect(report.workspace).toBe(WORKSPACE);
-    expect(report.sources.workspace).toBe("directory file");
+    expect(report.sources.workspace).toBe("user config");
   });
 
   it("replaces the workspace field and leaves every other one alone", () => {
     const box = sandbox({
-      directoryFile: { workspace: UNRELATED, hubUrl: DEAD_HUB_URL, future: { a: 1 } },
+      userConfig: {
+        workspace: UNRELATED,
+        hubUrl: DEAD_HUB_URL,
+        displayName: "Ben",
+      },
     });
     expect(runUb(["workspace", "use", WORKSPACE], box).status).toBe(0);
-    expect(directoryFile(box)).toEqual({
+    expect(userConfig(box)).toEqual({
       workspace: WORKSPACE,
       hubUrl: DEAD_HUB_URL,
-      future: { a: 1 },
+      displayName: "Ben",
     });
   });
 
@@ -198,7 +194,7 @@ describe("ub workspace use", () => {
     const decorated = `docs-${WORKSPACE}`;
     const run = runUb(["workspace", "use", decorated], box);
     expect(run.status).toBe(0);
-    expect(directoryFile(box).workspace).toBe(decorated);
+    expect(userConfig(box).workspace).toBe(decorated);
 
     const shown = runUb(["workspace"], box).stdout;
     expect(shown).toMatch(new RegExp(`workspace\\s+${decorated}`));
@@ -215,7 +211,7 @@ describe("ub workspace use", () => {
 
     // Unique: `b7c` names exactly one of the three.
     expect(runUb(["workspace", "use", "b7c"], box).status).toBe(0);
-    expect(directoryFile(box).workspace).toBe(UNRELATED);
+    expect(userConfig(box).workspace).toBe(UNRELATED);
 
     // Ambiguous: both `4d8e…` uuids start with it, and the refusal names them.
     const ambiguous = runUb(["workspace", "use", "4d8e"], box);
@@ -235,7 +231,7 @@ describe("ub workspace use", () => {
     expect(notAUuid.stderr).toMatch(/is not a workspace id/);
 
     // The refusals changed nothing.
-    expect(directoryFile(box).workspace).toBe(UNRELATED);
+    expect(userConfig(box).workspace).toBe(UNRELATED);
   });
 
   it("takes a full uuid this machine has never heard of", () => {
@@ -243,22 +239,10 @@ describe("ub workspace use", () => {
     // next use. Refusing it would make `list` a gate on somebody else's corpus.
     const box = sandbox();
     expect(runUb(["workspace", "use", UNRELATED], box).status).toBe(0);
-    expect(directoryFile(box).workspace).toBe(UNRELATED);
+    expect(userConfig(box).workspace).toBe(UNRELATED);
   });
 
-  it("--user writes the user config and leaves ./uberblick.json absent", () => {
-    const box = sandbox({ userConfig: { workspace: UNRELATED, displayName: "Ben" } });
-    const run = runUb(["workspace", "use", "--user", WORKSPACE], box);
-    expect(run.status).toBe(0);
-    expect(existsSync(join(box.cwd, "uberblick.json"))).toBe(false);
-
-    const config = JSON.parse(
-      readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"),
-    );
-    expect(config).toEqual({ workspace: WORKSPACE, displayName: "Ben" });
-  });
-
-  it("--user refuses a user config that does not parse, rather than replacing it", () => {
+  it("refuses a user config that does not parse, rather than replacing it", () => {
     // The write republishes the whole file. Treating an unreadable one as empty
     // would drop the identity and endpoint in it, and the mistake would be
     // invisible: the command would report success.
@@ -266,7 +250,7 @@ describe("ub workspace use", () => {
     const box = sandbox({ raw: { userConfig: broken } });
     const path = join(box.configHome, "uberblick", "config.json");
 
-    const run = runUb(["workspace", "use", "--user", WORKSPACE], box);
+    const run = runUb(["workspace", "use", WORKSPACE], box);
     expect(run.status).not.toBe(0);
     expect(readFileSync(path, "utf8")).toBe(broken);
   });
@@ -275,8 +259,8 @@ describe("ub workspace use", () => {
 describe("ub workspace use and the derived mise config", () => {
   it("moves the derived WORKSPACE_ID, keeps every other derived value, and names both files", () => {
     // The mise tasks read this file and nothing else, so a binding that stops at
-    // `./uberblick.json` leaves `mise run web` and the hub serving
-    // the workspace this directory used to be bound to — silently.
+    // `config.json` leaves `mise run web` and the hub serving the workspace this
+    // machine used to default to — silently.
     const box = initialisedCheckout(OTHER);
     // A line README tells people to add to exactly this `[env]`. It is not one
     // of the three values `ub` owns, so a rewrite must leave it where it is.
@@ -303,25 +287,10 @@ describe("ub workspace use and the derived mise config", () => {
 
     // Both files, because both were written — a report naming one of them is
     // how somebody ends up debugging a task that serves the old workspace.
-    expect(run.stdout).toContain(join(box.cwd, "uberblick.json"));
-    expect(run.stdout).toContain(localConfigPath(box));
-  });
-
-  it("follows resolution rather than the file it wrote: --user under a directory file that outranks it", () => {
-    // `--user` binds the machine, and `./uberblick.json` still wins for this
-    // checkout. The derived file mirrors what `ub` resolves, so it keeps naming
-    // the directory file's workspace — and the precedence warning still fires.
-    const box = initialisedCheckout(OTHER);
-    writeFileSync(
-      join(box.cwd, "uberblick.json"),
-      `${JSON.stringify({ workspace: UNRELATED }, null, 2)}\n`,
-      "utf8",
+    expect(run.stdout).toContain(
+      join(box.configHome, "uberblick", "config.json"),
     );
-
-    const run = runUb(["workspace", "use", "--user", WORKSPACE], box, WITHOUT_MISE);
-    expect(run.status, run.output).toBe(0);
-    expect(localConfig(box)).toContain(`WORKSPACE_ID = "${UNRELATED}"`);
-    expect(run.stderr).toMatch(/takes precedence over/);
+    expect(run.stdout).toContain(localConfigPath(box));
   });
 
   it("moves the derived file even when the environment outranks the binding", () => {
@@ -367,12 +336,14 @@ describe("ub workspace use and the derived mise config", () => {
 
     const run = runUb(["workspace", "use", WORKSPACE], box, WITHOUT_MISE);
     expect(run.status, run.output).toBe(1);
-    expect(run.stderr).toContain(join(box.cwd, "uberblick.json"));
+    expect(run.stderr).toContain(
+      join(box.configHome, "uberblick", "config.json"),
+    );
     expect(run.stderr).toContain(localConfigPath(box));
     expect(localConfig(box)).toBe(foreign);
     // The binding did move, and the report says so without claiming the pair
     // agrees.
-    expect(directoryFile(box).workspace).toBe(WORKSPACE);
+    expect(userConfig(box).workspace).toBe(WORKSPACE);
     expect(run.stdout).not.toContain("mise config");
   });
 
@@ -386,7 +357,7 @@ describe("ub workspace use and the derived mise config", () => {
     const uninitialised = sandbox({ checkout: true });
     const run = runUb(["workspace", "use", WORKSPACE], uninitialised, WITHOUT_MISE);
     expect(run.status, run.output).toBe(0);
-    expect(directoryFile(uninitialised).workspace).toBe(WORKSPACE);
+    expect(userConfig(uninitialised).workspace).toBe(WORKSPACE);
     expect(existsSync(localConfigPath(uninitialised))).toBe(false);
     expect(run.stdout).not.toContain("mise config");
   });
@@ -402,13 +373,13 @@ describe("ub workspace use and the derived mise config", () => {
 
     const running = runUbAsync(["workspace", "use", WORKSPACE], box, WITHOUT_MISE);
     await new Promise((resolve) => setTimeout(resolve, 400));
-    expect(existsSync(join(box.cwd, "uberblick.json"))).toBe(false);
+    expect(userConfig(box).workspace).toBe(OTHER);
     expect(localConfig(box)).toContain(`WORKSPACE_ID = "${OTHER}"`);
 
     rmSync(lock);
     const run = await running;
     expect(run.status, run.output).toBe(0);
-    expect(directoryFile(box).workspace).toBe(WORKSPACE);
+    expect(userConfig(box).workspace).toBe(WORKSPACE);
     expect(localConfig(box)).toContain(`WORKSPACE_ID = "${WORKSPACE}"`);
     // And the lock it took in turn is not left behind.
     expect(existsSync(lock)).toBe(false);
@@ -432,7 +403,7 @@ describe("ub workspace use and the derived mise config", () => {
         expect(run.status, run.output).toBe(0);
       }
       expect(localConfig(box)).toContain(
-        `WORKSPACE_ID = "${directoryFile(box).workspace}"`,
+        `WORKSPACE_ID = "${userConfig(box).workspace}"`,
       );
     }
   });
@@ -447,7 +418,7 @@ describe("ub workspace help", () => {
     const help = runUb(["workspace", "--help"], sandbox());
     expect(help.status).toBe(0);
     expect(help.stdout).toMatch(/list \[--json\]/);
-    expect(help.stdout).toMatch(/use <id> \[--user\]/);
+    expect(help.stdout).toMatch(/use <id>/);
     expect(help.stdout).toMatch(/<slug>-<uuid>/);
     expect(help.stdout).toMatch(/prefix/);
   });

@@ -413,33 +413,6 @@ describe("ub remote", () => {
     expect(config.hubUrl).toBe("wss://hub.example.ts.net");
   });
 
-  it("never writes ./uberblick.json", async () => {
-    // It is committable, and `secretAppliesTo` withholds the stored secret from
-    // a repository-chosen hub — so an endpoint written there would be dialled
-    // with no credential at all.
-    const box = sandbox();
-    expect((await runUbAsync(["remote", "set", "wss://hub.example.ts.net"], box)).status).toBe(
-      0,
-    );
-    expect(existsSync(join(box.cwd, "uberblick.json"))).toBe(false);
-  });
-
-  it("says when ./uberblick.json outranks what it just wrote", async () => {
-    // A committable file pins the endpoint, and `secretAppliesTo` withholds the
-    // stored secret from a repository-chosen hub — so writing the endpoint
-    // *there* is not the fix, and printing the new one without saying this
-    // would be printing a value that does not take effect.
-    const box = sandbox({ directoryFile: { hubUrl: "ws://127.0.0.1:9999" } });
-
-    const run = await runUbAsync(["remote", "set", "wss://hub.example.ts.net"], box);
-    expect(run.status).toBe(1);
-    expect(run.stderr).toContain("./uberblick.json");
-    expect(run.stderr).toContain("ws://127.0.0.1:9999");
-    expect(run.stderr).toContain("outranks");
-    // It still wrote the file it was asked to write.
-    expect(persistedHubUrl(box)).toBe("wss://hub.example.ts.net");
-  });
-
   it("says when HUB_URL in the environment outranks what it just wrote", async () => {
     const box = sandbox();
     const run = await runUbAsync(["remote", "set", "wss://hub.example.ts.net"], box, {
@@ -460,7 +433,6 @@ describe("ub remote", () => {
       setRemote("wss://hub.example.ts.net", {
         secret: OTHER_SECRET,
         env: box.env,
-        cwd: box.cwd,
       }),
     ).toThrow();
     expect(storedSecret(box)).toBe(SECRET);
@@ -477,7 +449,6 @@ describe("ub remote", () => {
     const persistence = setRemote("wss://hub.example.ts.net", {
       secret: OTHER_SECRET,
       env: box.env,
-      cwd: box.cwd,
     });
 
     expect(storedSecret(box)).toBe(SECRET);
@@ -496,7 +467,6 @@ describe("ub remote", () => {
     const stored = setRemote("wss://hub.example.ts.net", {
       secret: OTHER_SECRET,
       env: agreeing.env,
-      cwd: agreeing.cwd,
     });
 
     expect(storedSecret(agreeing)).toBe(OTHER_SECRET);
@@ -512,7 +482,6 @@ describe("ub remote", () => {
     const spelled = setRemote("wss://hub.example.ts.net", {
       secret: OTHER_SECRET,
       env: slashed.env,
-      cwd: slashed.cwd,
     });
 
     expect(storedSecret(slashed)).toBe(OTHER_SECRET);

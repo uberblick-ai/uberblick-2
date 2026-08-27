@@ -171,14 +171,12 @@ describe("ub mcp serve", () => {
   });
 
   it("passes the resolved configuration through, warnings and all", async () => {
-    // A directory file that binds the workspace, a credential so the hub is
-    // enabled rather than disabled, and a secret in the committable file — which
-    // is refused with a warning, so resolution has something to write to stderr
-    // while stdout is carrying the protocol. The `HUB_URL` override below is
-    // also what lets the stored secret apply at all: it makes the hub the user's
-    // choice rather than the directory file's.
+    // A user config that names the workspace and an endpoint, a credential so
+    // the hub is enabled rather than disabled, and a secret misplaced in that
+    // same config — which is refused with a warning, so resolution has something
+    // to write to stderr while stdout is carrying the protocol.
     const box = sandbox({
-      directoryFile: {
+      userConfig: {
         workspace: `serve-${WORKSPACE}`,
         hubUrl: "ws://ignored:1",
         signingSecret: "cli-serve-misplaced-secret",
@@ -187,7 +185,7 @@ describe("ub mcp serve", () => {
     });
 
     // The environment override has to survive the exec: this is the value the
-    // server must report, not the one in the directory file.
+    // server must report, not the one in the user config.
     const session = await connect(box, { HUB_URL: DEAD_HUB_URL });
     try {
       const result = await session.client.callTool({
@@ -198,7 +196,7 @@ describe("ub mcp serve", () => {
       const status = JSON.parse(content[0]!.text);
 
       // The claim and the file are keyed by the uuid, never by the slug the
-      // directory file spelled it with.
+      // config spelled it with.
       expect(status.workspace).toBe(WORKSPACE);
       expect(status.hub.url).toBe(DEAD_HUB_URL);
       expect(status.database).toMatch(new RegExp(`${WORKSPACE}\\.sqlite$`));

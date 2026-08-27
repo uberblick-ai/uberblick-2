@@ -68,7 +68,7 @@ describe("a fresh Mac", () => {
       join(macRoot(root), "credentials.json"),
     );
 
-    const resolved = resolveConfig({ env, cwd: root, platform: "darwin" });
+    const resolved = resolveConfig({ env, platform: "darwin" });
     expect(resolved.storage.layout).toBe("mac");
     expect(resolved.paths.userConfig).toBe(join(macRoot(root), "config.json"));
     expect(resolved.paths.credentials).toBe(
@@ -120,7 +120,7 @@ describe("a fresh Mac", () => {
   it("stays owner-only when a workspace replica is the first writer", async () => {
     const root = home();
     const env = macEnv(root, { WORKSPACE_ID: WORKSPACE });
-    const { report } = await statusReport({ env, cwd: root, platform: "darwin" });
+    const { report } = await statusReport({ env, platform: "darwin" });
 
     // 0600 because the replica is the whole corpus. The chmod happens before
     // the WAL exists, so the files SQLite creates beside it inherit the mode.
@@ -143,7 +143,6 @@ describe("a fresh Mac", () => {
     // comes back at once.
     const { report } = await statusReport({
       env: macEnv(root, { WORKSPACE_ID: WORKSPACE }),
-      cwd: root,
       platform: "darwin",
     });
 
@@ -170,7 +169,6 @@ describe("a legacy Mac", () => {
 
     const resolved = resolveConfig({
       env: macEnv(root),
-      cwd: root,
       platform: "darwin",
     });
 
@@ -200,7 +198,6 @@ describe("a legacy Mac", () => {
 
     const { report, warnings } = await statusReport({
       env: macEnv(root, { WORKSPACE_ID: WORKSPACE }),
-      cwd: root,
       platform: "darwin",
     });
 
@@ -244,7 +241,6 @@ describe("state in both roots", () => {
 
     const { report } = await doctorReport({
       env: macEnv(root, { WORKSPACE_ID: WORKSPACE }),
-      cwd: root,
       platform: "darwin",
     });
 
@@ -282,7 +278,7 @@ describe("state in both roots", () => {
     seed(join(macRoot(root), "credentials.json"), "{}\n");
 
     expect(() =>
-      resolveConfig({ env: macEnv(root), cwd: root, platform: "darwin" }),
+      resolveConfig({ env: macEnv(root), platform: "darwin" }),
     ).toThrow(/refusing to guess/);
   });
 });

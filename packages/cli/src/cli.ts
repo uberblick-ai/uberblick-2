@@ -32,15 +32,15 @@ commands:
                          open the browser (--no-browser, --port <n>)
   status [--json]        workspace, hub, credential, database and sync state
   doctor [--json]        check the local stack against its known failure modes
-  workspace [command]    which workspace this directory works in
+  workspace [command]    which workspace is in force, and how to change it
   remote [command]       the endpoint documents sync with, and the one-time bridges
   mcp install [target]   register uberblick with an MCP client
 
 workspace commands:
   workspace              the workspace in force, and which layer chose it
   workspace list         workspaces this machine has a database for ([--json])
-  workspace use <id>     bind this directory to a workspace, by uuid,
-                         <slug>-<uuid> or a unique prefix (--user: this machine)
+  workspace use <id>     make a workspace this machine's default, by uuid,
+                         <slug>-<uuid> or a unique prefix
 
 remote commands:
   remote                 the endpoint in force and what sharing it buys
@@ -63,8 +63,9 @@ mcp install options:
   --user            write the per-user config
   --print           print the snippet to paste; write nothing
   --force           replace an existing "uberblick" entry, backing the file up
-  --workspace <id>  register a second entry pinned to this workspace instead
-  --name <label>    call that entry "uberblick-<label>" (default: its slug)
+  --workspace <id>  pin the entry to this workspace, as WORKSPACE_ID
+  --name <label>    pin a second entry called "uberblick-<label>" instead of
+                    the primary one; needs --workspace
   -- <command>      register this command instead of uberblick's own
 
 options:

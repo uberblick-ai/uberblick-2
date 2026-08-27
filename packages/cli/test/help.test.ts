@@ -41,7 +41,6 @@ import {
   WORKSPACE_LIST_HELP,
   WORKSPACE_LIST_OPTIONS,
   WORKSPACE_USE_HELP,
-  WORKSPACE_USE_OPTIONS,
 } from "../src/workspace.js";
 import type { Sandbox } from "./helpers.js";
 import { DEAD_HUB_URL, PACKAGE_ROOT, removeTempDirs, runUb, sandbox } from "./helpers.js";
@@ -83,7 +82,7 @@ const PATHS: Path[] = [
     children: ["list", "use"],
   },
   { argv: ["workspace", "list"], help: WORKSPACE_LIST_HELP, options: WORKSPACE_LIST_OPTIONS },
-  { argv: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: WORKSPACE_USE_OPTIONS },
+  { argv: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: {} },
   {
     argv: ["remote"],
     help: REMOTE_HELP,
