@@ -284,15 +284,6 @@ function warnAboutMisplacedSecret(
   }
 }
 
-/**
- * The signing secret is the one value in this layout another user on the machine
- * must not be able to read, so a file anyone else can read is refused, not
- * merely complained about — ssh's contract for a private key. Warning and then
- * using the secret anyway would leave the exposure in place and call it handled.
- *
- * Refusing is only the file layer: `HUB_AUTH_TOKEN` still wins and still works,
- * and with neither this machine is local-only, which is a supported state.
- */
 /** True when the file exists and no other user can read it. */
 export function isOwnerOnly(path: string): boolean {
   try {
@@ -302,6 +293,15 @@ export function isOwnerOnly(path: string): boolean {
   }
 }
 
+/**
+ * The signing secret is the one value in this layout another user on the machine
+ * must not be able to read, so a file anyone else can read is refused, not
+ * merely complained about — ssh's contract for a private key. Warning and then
+ * using the secret anyway would leave the exposure in place and call it handled.
+ *
+ * Refusing is only the file layer: `HUB_AUTH_TOKEN` still wins and still works,
+ * and with neither this machine is local-only, which is a supported state.
+ */
 function credentialsAreExposed(path: string, warnings: string[]): boolean {
   let mode: number;
   try {

@@ -235,10 +235,15 @@ name/color if prompted.
    appears on B without reloading and that B renders A's remote cursor or
    selection.
 2. **Local MCP to remote browser:** on the computer that launches the MCP
-   client, export `HUB_URL=wss://<TAILSCALE_HOST>/ws` before launching that
-   client. Its configured `HUB_AUTH_TOKEN` must equal the value in the remote
-   `.env`. Use `edit_block` on the open document and confirm the edit appears
-   live on B. `sync_status` must report the remote URL and a connected hub.
+   client, bind that machine first —
+   `ub remote join wss://<TAILSCALE_HOST>/ws/<workspace id>`, with
+   `--secret-file <path>` when it does not hold the remote's secret yet — which
+   persists the endpoint and the credential. An endpoint exported as `HUB_URL`
+   is not read at all. A `HUB_AUTH_TOKEN` in the client's own environment still
+   outranks the stored credential, so where one is set it must equal the value
+   in the remote `.env`. Then launch the client, use `edit_block` on the open
+   document and confirm the edit appears live on B. `sync_status` must report
+   the remote URL and a connected hub.
 3. **Offline convergence:** disconnect A from the network, then edit the same
    document on A and B (use different blocks for an unambiguous merge). Restore
    A's network. Confirm both browsers converge to the same text and neither
@@ -357,5 +362,5 @@ Nothing here prints the secret or a token signed with it.
 
 Archived documents replicate as directory state and stay archived; their content
 is not moved. Merging two independently populated workspaces is not supported:
-`join` never merges at all — the URL says which workspace it is about, and the
-others on the machine are left alone.
+the URL says which workspace `join` is about — that one's two replicas reconcile
+as CRDTs, and the others on the machine are left alone.

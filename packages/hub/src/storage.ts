@@ -9,9 +9,10 @@
  * platform branch, so a resolution has no `platform` to be told, cannot depend
  * on where the tests run, and cannot fail.
  *
- * Setting either variable is a deliberate act by an operator, so it moves the
- * *whole* layout rather than half of it: one installation, one pair of roots,
- * never a split.
+ * The two variables are resolved independently — each is honoured when it names
+ * an absolute directory and falls back to its own default otherwise — so
+ * setting `XDG_CONFIG_HOME` alone moves the config root and leaves the
+ * databases under `~/.local/share/uberblick`.
  *
  * **Nothing here creates anything.** Resolution is string joins; the writers
  * (`ub init`, the replicas, the hub) create directories when they write.

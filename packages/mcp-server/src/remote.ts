@@ -1,9 +1,11 @@
 /**
  * The two halves of a one-time bridge between a workspace and a hub.
  *
- * `ub remote join` and `ub remote init` are compositions of exactly two
- * operations, and both live here because both are about Y.Docs and hub
- * connections rather than about a command line:
+ * `ub remote join` is the one command that composes both: it reads the remote
+ * as a fresh client, refuses what it cannot verify, and only then attaches this
+ * machine's replica to it. Each half is also used alone — `ub doctor`'s hub
+ * probe inspects, `ub init`'s starter seed syncs. They live here because they
+ * are about Y.Docs and hub connections rather than about a command line:
  *
  * - {@link syncWorkspace} boots a real replica set over the mirror, hydrates it
  *   from a hub, and reports the corpus that ended up in the update log. It is
@@ -155,7 +157,7 @@ export interface Corpus {
    * enough. `waitForQuiet` returns identically when the directory went quiet
    * and when the clock ran out, and in the second case the connection is still
    * up — so `hub.status` says `connected` and `entries` is empty, which reads
-   * exactly like a blank hub ready to be promoted into. Deciding a refusal from
+   * exactly like a blank hub ready to be attached to. Deciding a refusal from
    * that would attach a populated mirror to a hub whose contents were never
    * read, and attaching is a merge.
    */
@@ -357,7 +359,7 @@ export async function inspectRemote(
     // different answers, and only one of them means the hub is empty. A
     // directory room that connected but never went quiet inside the sync budget
     // is the second, and reporting it as a corpus of zero documents is how a
-    // bridge would decide a populated hub was safe to promote into.
+    // bridge would decide a populated hub was safe to attach a mirror to.
     if (!sync.isRoomQuiet(dirRoom)) {
       return {
         hub: sync.state(),
@@ -484,13 +486,13 @@ function readCorpus(replicas: Replicas): Corpus {
  * Attach the mirror at `config.databasePath` to the hub at `config.hubUrl`,
  * hydrate everything, and report what the update log ends up holding.
  *
- * This is the one operation both bridge directions are built from, and it is
- * the same operation in both: attaching a replica to a hub reconciles the two,
- * so pointing a populated mirror at an empty hub uploads, and pointing an empty
- * mirror at a populated hub downloads. The direction is the caller's decision —
- * which is exactly why `promote` and `join` are separate verbs that each refuse
- * the ambiguous case, rather than one command inferring it from which side
- * happens to be empty.
+ * This has no direction of its own, because attaching a replica to a hub
+ * reconciles the two: a populated mirror against an empty hub uploads, an empty
+ * mirror against a populated hub downloads, and two populated sides merge as
+ * CRDTs with neither discarded. `ub remote join` relies on all three — the
+ * machine that ran `ub remote init` joins the workspace it already holds — so
+ * what is being joined is established by the caller, before this is called,
+ * rather than inferred here from which side happens to be empty.
  *
  * Hydration is the two-pass shape the seed import relies on and for the same
  * reason: the directory has to arrive before the documents it names can be

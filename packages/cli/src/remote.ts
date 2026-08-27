@@ -10,18 +10,22 @@
  * workspace that already lives on one, and hydrates it.
  *
  * There is no operator suite here: no verb that points the clients somewhere
- * without moving anything, and none that pushes a populated local workspace onto
- * an empty hub. Release 1 has one owner, one workspace, and `join`.
+ * without moving anything. Release 1 has one owner, one workspace, and `join`.
  *
- * **`join` binds; it does not merge, and it never seeds.** The URL carries the
- * workspace id, so nothing already on this machine is in the way: the id says
- * which rooms and which `<uuid>.sqlite` replica this is about, and a workspace
- * that was here first has a different id — it keeps its documents and its entry
- * in `ub workspace list`, and switching back to it is `ub workspace use`.
- * Nothing is written *into* a joined workspace either: its documents arrive over
- * the wire, and a starter document invented here is one the machine that owns
- * that workspace never asked for. With an id in hand there is no "is this side
- * empty" question left to get wrong, which is what makes one verb enough.
+ * **`join` binds one workspace; it never merges two, and it never seeds.** The
+ * URL carries the workspace id, so nothing already on this machine is in the
+ * way: the id says which rooms and which `<uuid>.sqlite` replica this is about,
+ * and a workspace that was here first has a different id — it keeps its
+ * documents and its entry in `ub workspace list`, and switching back to it is
+ * `ub workspace use`. For the id the URL *does* name, a replica this machine
+ * already holds is attached rather than replaced: {@link syncWorkspace}
+ * reconciles it with the remote as CRDTs, so the local log's updates go up, the
+ * hub's come down, and neither side is discarded — which is how the machine
+ * that ran `ub remote init` joins its own populated workspace. A machine
+ * holding nothing for that id simply hydrates. What is never written into a
+ * joined workspace is a starter document: one invented here is one the
+ * workspace's owner never asked for. With an id in hand there is no "is this
+ * side empty" question left to get wrong, which is what makes one verb enough.
  *
  * **Nothing is persisted before the far side is verified.** `join` finishes by
  * opening the remote through a *fresh* client — no mirror, no local state — and
@@ -568,11 +572,11 @@ here already: the remote's documents are hydrated into that workspace's local
 replica, the endpoint and the binding are stored, and so is the credential that
 reached it. No \`ub init\` is needed first.
 
-It never merges and never seeds. A workspace already on this machine is a
-different id with its own replica: it keeps its documents and its
-\`ub workspace list\` entry, and \`ub workspace use <id> --user\` switches back.
-Nothing is written into the joined workspace either — its documents arrive over
-the wire.
+It never merges two workspaces and it never seeds. A workspace already on this
+machine under a different id keeps its documents and its \`ub workspace list\`
+entry, and \`ub workspace use <id> --user\` switches back. A replica this machine
+already holds for *this* id is attached, not replaced: it and the remote
+reconcile as CRDTs, so neither side loses anything.
 
 operands:
   <url-with-workspace-id>

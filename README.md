@@ -345,10 +345,11 @@ is a file named after it.
 | `$XDG_CONFIG_HOME/uberblick/` — or `~/.config/uberblick/` | `config.json` and `credentials.json` |
 | `$XDG_DATA_HOME/uberblick/` — or `~/.local/share/uberblick/` | `hub.sqlite` and `<uuid>.sqlite`, one per workspace |
 
-Setting either variable moves the whole layout, never half of it; a relative
-value is ignored, as the XDG spec requires. There is nothing to detect and
-nothing that can fail, so resolution cannot throw and no command has an opinion
-about which layout is in force.
+The two variables are independent: each moves its own root and only that one,
+so setting `XDG_CONFIG_HOME` alone leaves the databases under
+`~/.local/share/uberblick`. A relative value is ignored, as the XDG spec
+requires. There is nothing to detect and nothing that can fail, so resolution
+cannot throw and no command has an opinion about which layout is in force.
 
 `ub status` names the data root; `ub status --json` carries a `storage` object
 with every resolved path — the directories and database files, never the
@@ -385,10 +386,8 @@ That URL is what `ub remote init` prints: the endpoint with the workspace id as
 its **last path segment**. Two journeys, two verbs, and that is the whole of the
 command surface — a *new* workspace is `ub init` (which seeds starter
 documents), and a workspace that already exists somewhere is `ub remote join`
-(which seeds nothing; the documents arrive over the wire). There is no operator
-suite beside them: nothing that repoints the clients without moving anything,
-and nothing that pushes a populated local workspace onto an empty hub. The id
-has to travel,
+(which seeds nothing). There is no operator suite beside them: nothing that
+repoints the clients without moving anything. The id has to travel,
 because a workspace id is a uuid and `ub init` generates a *new* one: a machine
 that invented its own would join the remote hub and find nothing of yours on it,
 the rooms being keyed by a different id. Carrying it in the URL is what makes it
@@ -398,13 +397,17 @@ one paste instead of two.
 state** — no prior `ub init` is needed, and one that has run is not in the way.
 It hydrates the full remote directory and every live document into that
 workspace's replica, verifies it by the same read-back, and only then persists
-the endpoint and the binding. An unreachable or auth-rejecting remote leaves
-your configuration exactly as it was, and a URL missing its workspace id, or
-carrying something that is not one, is refused before anything is written, with
-the expected form in the message.
+the endpoint and the binding. A replica this machine already holds for that id
+is attached rather than replaced: the two reconcile as CRDTs — what the local
+log holds goes up, what the hub holds comes down, and nothing on either side is
+discarded — which is how the machine that ran `ub remote init` joins its own
+populated workspace. An unreachable or auth-rejecting remote leaves your
+configuration exactly as it was, and a URL missing its workspace id, or carrying
+something that is not one, is refused before anything is written, with the
+expected form in the message.
 
-A workspace that was already on this machine stays. It is never merged into the
-joined one and never moved: `ub workspace list` shows both, and
+A workspace on this machine under a *different* id stays. It is never merged
+into the joined one and never moved: `ub workspace list` shows both, and
 `ub workspace use <id>` switches back. The endpoint is machine-wide,
 though, so after a join that workspace syncs with the remote hub too, under its
 own rooms.
