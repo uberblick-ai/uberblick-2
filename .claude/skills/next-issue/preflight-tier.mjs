@@ -3,7 +3,7 @@
  *
  * `preflight.md` next to this file renders the same table for the coordinator
  * that reads it; this file is the table a test can run. The two are checked
- * against each other in `packages/cli/test/preflight-tier.test.ts`, so the
+ * against each other in `preflight-tier.test.mjs` beside them, so the
  * procedure a coordinator follows and the routing this repository claims
  * cannot drift apart — which is the only reason an executable copy earns its
  * place.

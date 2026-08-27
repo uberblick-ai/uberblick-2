@@ -53,8 +53,8 @@ mechanical, local, easy to undo **and** understood. Everything else is bounded
 — and `uncertainty: high` then moves the tier one step up, which is what routes
 a genuinely ambiguous change to two challengers instead of one.
 `preflight-tier.mjs` beside this file is this table in executable form and
-`packages/cli/test/preflight-tier.test.ts` holds the two together; if you change
-one, change both.
+`preflight-tier.test.mjs` beside them holds the two together; if you change one,
+change both.
 
 Two things the table deliberately cannot see: `Touches`, and any keyword. A
 change proven mechanical by the grounding read is trivial even in `schema` — a

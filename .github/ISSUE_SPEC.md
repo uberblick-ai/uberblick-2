@@ -24,9 +24,9 @@ Touches: mcp-server, schema
   A missing line means *untriaged*, which is different from `none`
   (*consciously independent*); untriaged issues are never eligible.
 - **`Touches`** — mandatory. Comma-separated footprint names, lowercase: the
-  short names of directories under `packages/` (currently `hub`, `mcp-server`,
-  `schema`, `web` — the live directory listing is authoritative, this sentence
-  is not), plus `repo` (root config, CI, top-level docs).
+  short names of directories under `packages/` (currently `cli`, `hub`,
+  `mcp-server`, `schema`, `web` — the live directory listing is authoritative,
+  this sentence is not), plus `repo` (root config, CI, top-level docs).
   Grammar: `^Touches: [a-z0-9-]+(, [a-z0-9-]+)*$`, every name from that list.
 - **`Priority`** — optional third line. `high`, `normal`, or `low`; absent
   means `normal`. Grammar when present: `^Priority: (high|normal|low)$`.
@@ -47,7 +47,9 @@ Touches: mcp-server, schema
   gates re-run at the new head, which the commit-keyed gate rule already
   requires.
 - `schema` in `Touches` **serializes globally** — it is the keystone package;
-  nothing else is dispatched while a schema-touching issue is in flight.
+  nothing else is dispatched while a schema-touching issue is in flight. The
+  cost is stated rather than hidden: every other eligible issue waits for that
+  one, so a schema issue is scheduled knowing it stalls the queue.
 - Order among eligible issues: dependency topology, then `Priority`
   (high → normal → low), then ascending issue number.
 
@@ -93,6 +95,15 @@ how it was verified, unresolved blockers, risks, or findings, and the
 KISS/overtesting self-review. Head SHA, check state, and timing remain derived
 from the PR rather than copied into the durable record. Recovery and
 independent-review rules live only in `AGENTS.md`.
+
+What comes *before* a claim — the preflight tier table that decides how hard to
+challenge an issue, and its executable twin under
+`.claude/skills/next-issue/` — is deliberately not here and not in `AGENTS.md`.
+The ladder is Claude-loop machinery by design: `AGENTS.md` states that each
+coordinator's own procedure owns it, and `.agents/skills/next-issue/SKILL.md`
+is a Codex entry stub pointing back at `AGENTS.md`, not a second copy of that
+procedure. A future pass should not "fix" the asymmetry by hoisting the table
+into this spec.
 
 ## Body sections
 
