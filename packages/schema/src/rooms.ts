@@ -14,7 +14,7 @@
  * room name.
  */
 
-import { InvalidRoomError } from "./errors.js";
+import { InvalidRoomError, InvalidWorkspaceIdError } from "./errors.js";
 import { parseWorkspaceId } from "./workspace.js";
 
 /** The document-id slot the directory doc occupies inside a workspace. */
@@ -108,4 +108,87 @@ export function parseRoom(room: string): ParsedRoom {
   const uuid = room.slice(separatorIndex + 1);
   assertSegment(room, "document uuid", uuid);
   return { workspaceId: workspace.uuid, uuid, isDirectory: uuid === DIRECTORY_SUFFIX };
+}
+
+/**
+ * The document ids a canonical room may name besides a uuid.
+ *
+ * `_directory`, `_sidebar` and `_feedback` are real: {@link directoryRoom},
+ * {@link sidebarRoom} and {@link feedbackRoom} build them, and each has a
+ * consumer that opens it. Not the same consumers, though — the MCP replica set
+ * (`packages/mcp-server/src/replica.ts`) attaches all three, including
+ * `_feedback`; the web client attaches the directory and the sidebar only.
+ *
+ * `_settings` is a **reservation only** — no code creates it, nothing opens
+ * it, and there is deliberately no `settingsRoom` to call (#177). It is named
+ * here so that building it later is not a change to the room grammar, because
+ * the grammar sits on the hub's authentication path and that is not where a
+ * new well-known document should have to be introduced.
+ */
+const CANONICAL_DOCUMENT_IDS: ReadonlySet<string> = new Set([
+  DIRECTORY_SUFFIX,
+  SIDEBAR_SUFFIX,
+  FEEDBACK_SUFFIX,
+  "_settings",
+]);
+
+/**
+ * A document uuid: lowercase 8-4-4-4-12 hex.
+ *
+ * One case rule for both segments of a room name. The workspace segment has
+ * always been lowercase-only (see `workspace.ts`), and #196 pinned the
+ * document segment to the same rule — an upper-cased link is canonicalized
+ * down rather than opening a second room — because room names are
+ * case-sensitive keys and `A…`/`a…` would otherwise be two rooms holding one
+ * document. The version and variant nibbles are left unconstrained, exactly as
+ * they are for a workspace id, so an id minted somewhere other than
+ * `crypto.randomUUID` still passes.
+ */
+const DOCUMENT_UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Assert that a room name is *canonical*: structurally a room name, and its
+ * document segment either a uuid or one of the reserved names above.
+ *
+ * This is deliberately **not** part of {@link parseRoom}, which stays purely
+ * structural. The hub calls `parseRoom` on every authentication, so tightening
+ * it would not be a grammar tidy-up — it would silently become the enforcement
+ * change, refusing existing rooms on whatever deploy happened to pick it up,
+ * with no flag and no operator present. Keeping the closed grammar in a
+ * separate function is what lets the enforcement step turn it on deliberately,
+ * behind its own flag, and still claim that the flag off is behaviour-
+ * identical.
+ *
+ * Nothing in this repository calls it yet; #222 is the first and only caller.
+ *
+ * @throws InvalidRoomError when the name is not structurally a room name, or
+ * when its document segment is neither a lowercase uuid nor a reserved name.
+ * @throws InvalidWorkspaceIdError when the first segment is not a workspace id.
+ */
+export function assertCanonicalRoom(room: string): void {
+  const { uuid } = parseRoom(room);
+  if (!DOCUMENT_UUID.test(uuid) && !CANONICAL_DOCUMENT_IDS.has(uuid)) {
+    throw new InvalidRoomError(
+      room,
+      `the document segment ${JSON.stringify(uuid)} is neither a lowercase ` +
+        "uuid nor a reserved name",
+    );
+  }
+}
+
+/** Whether {@link assertCanonicalRoom} accepts `room`. */
+export function isCanonicalRoom(room: string): boolean {
+  try {
+    assertCanonicalRoom(room);
+    return true;
+  } catch (error) {
+    if (
+      error instanceof InvalidRoomError ||
+      error instanceof InvalidWorkspaceIdError
+    ) {
+      return false;
+    }
+    throw error;
+  }
 }
