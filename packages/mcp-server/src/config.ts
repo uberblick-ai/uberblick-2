@@ -22,8 +22,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveStorage } from "@uberblick/hub/storage";
 import { parseWorkspaceId } from "@uberblick/schema";
 
 /** The only hub address in this package. Matches mise's `HUB_URL` default. */
@@ -103,19 +103,16 @@ function hashToIndex(value: string, buckets: number): number {
   return Math.abs(hash) % buckets;
 }
 
-/** XDG data home, falling back to `~/.local/share`. */
-function dataHome(env: NodeJS.ProcessEnv): string {
-  const xdg = env.XDG_DATA_HOME?.trim();
-  return xdg === undefined || xdg === ""
-    ? join(homedir(), ".local", "share")
-    : xdg;
-}
-
 /**
- * `<data home>/uberblick/<workspaceUuid>.sqlite` — one database per user per
- * workspace. Two MCP server instances sharing it is the normal case, not an
- * edge case: the store runs in WAL with a busy timeout, and every tool call
- * polls the log tail before it serves.
+ * `<workspaceUuid>.sqlite` in the user's workspace directory — one database per
+ * user per workspace. Which directory that is on which platform belongs to
+ * `@uberblick/hub/storage`, so the cli, this server and the hub cannot drift
+ * into three answers; here it is `$XDG_DATA_HOME/uberblick`, on a fresh Mac
+ * `~/Library/Application Support/Uberblick/data/workspaces`.
+ *
+ * Two MCP server instances sharing one file is the normal case, not an edge
+ * case: the store runs in WAL with a busy timeout, and every tool call polls
+ * the log tail before it serves.
  *
  * Keyed by the bare uuid, never by a decorated spelling: `<slug>-<uuid>` and
  * `<uuid>` are one workspace, and they must hydrate one file — a slug-prefixed
@@ -125,10 +122,10 @@ function dataHome(env: NodeJS.ProcessEnv): string {
 export function defaultDatabasePath(
   workspaceId: string,
   env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): string {
   return join(
-    dataHome(env),
-    "uberblick",
+    resolveStorage({ env, platform }).workspaceDir,
     `${parseWorkspaceId(workspaceId).uuid}.sqlite`,
   );
 }
@@ -147,6 +144,7 @@ const MISSING_WORKSPACE =
 
 export function resolveMcpConfig(
   env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): McpConfig {
   const configured = trimmed(env.WORKSPACE_ID);
   if (configured === null) {
@@ -162,7 +160,8 @@ export function resolveMcpConfig(
     hubUrl: trimmed(env.HUB_URL) ?? DEFAULT_HUB_URL,
     authSecret: trimmed(env.HUB_AUTH_TOKEN),
     databasePath:
-      trimmed(env.UBERBLICK_DB) ?? defaultDatabasePath(workspaceId, env),
+      trimmed(env.UBERBLICK_DB) ??
+      defaultDatabasePath(workspaceId, env, platform),
     sessionId,
     color: AGENT_COLORS[hashToIndex(sessionId, AGENT_COLORS.length)] ?? "#7b5ec7",
     connectTimeoutMs: 1_500,

@@ -50,7 +50,8 @@ not a warning.
 ## What `ub init` does
 
 - Settles your **awareness identity**: the display name and cursor colour other
-  clients see. Written to `$XDG_CONFIG_HOME/uberblick/config.json`.
+  clients see. Written to `config.json` — see *Where your files live* below for
+  which directory that is.
 - Settles the **workspace**, which is the first segment of every room key and
   the name of the local SQLite file. A workspace id is a uuid, generated here
   when this machine has none; it may be decorated for display as
@@ -76,6 +77,37 @@ Every question has a flag — `--name`, `--color`, `--workspace` — and `--yes`
 takes all the defaults, so it needs no terminal to talk to. It finishes by
 offering to wire up an agent's MCP client: `--mcp` runs `ub mcp install` for you,
 `--no-mcp` says not to mention it.
+
+## Where your files live
+
+One layout per machine, and you create none of it: `ub init` makes the
+directories it needs. In particular there is no workspace directory to make — a
+workspace is a uuid, and its local replica is a file named after that uuid.
+
+- **macOS** — `~/Library/Application Support/Uberblick/`: `config.json`,
+  `credentials.json`, and under `data/`, the hub's `hub.sqlite` and one
+  `workspaces/<uuid>.sqlite` per workspace. This is where macOS keeps
+  app-managed data, and it survives an upgrade that replaces the program.
+- **Linux, and anywhere you set `XDG_CONFIG_HOME` or `XDG_DATA_HOME`
+  yourself** — `$XDG_CONFIG_HOME/uberblick/` holds `config.json` and
+  `credentials.json`; `$XDG_DATA_HOME/uberblick/` holds `hub.sqlite` and
+  `<uuid>.sqlite`. They default to `~/.config` and `~/.local/share`. Setting
+  either variable on a Mac moves the whole layout there, not half of it.
+- **A Mac that already has files in `~/.config/uberblick` or
+  `~/.local/share/uberblick`** keeps using them, exactly as they are, and says so
+  once. Nothing is moved, and no Application Support file is created. The warning
+  names `ub storage migrate`, a command that does not exist yet; until it does,
+  moving those files is a manual job and uberblick will not start it for you.
+
+`ub status` prints the data root, and `ub status --json` reports a `storage`
+object: the layout in force (`mac`, `xdg` or `legacy-xdg`) and the resolved
+config, data, hub and workspace-database paths. No credential value is printed,
+by any command.
+
+`HUB_DB_PATH` (the hub) and `UBERBLICK_DB` (a workspace replica) name a database
+file outright and outrank the layout. The checkout's mise tasks set
+`HUB_DB_PATH` to a file inside the checkout, so working on uberblick never opens
+the database an installed copy uses.
 
 ## Wiring up an MCP client
 
@@ -135,7 +167,8 @@ Two paths, and they do not fight:
   value overwrites `HUB_AUTH_TOKEN` in the task's environment, so it wins — and
   `ub init` generates nothing when it can already see a secret.
 - **Everyone else** gets a generated development secret: 32 random bytes written
-  to `$XDG_CONFIG_HOME/uberblick/credentials.json`, mode 0600. That file is the
+  to `credentials.json`, mode 0600, in the directory *Where your files live*
+  names for this machine. That file is the
   authority. Because mise tasks and `.mcp.json` inherit their environment from
   mise rather than from `ub`, `ub init` also writes a gitignored
   `mise.local.toml` derived from it — same value, one owner, rewritten if the two
@@ -238,5 +271,12 @@ bundle. The network is the whole of the access control until accounts land.
 - Port 1234 already in use: set `PORT` for the hub and `HUB_URL` for the clients
   together. The hub binds `HUB_HOST`:`PORT`, default `127.0.0.1:1234`, and never
   reads `HUB_URL`.
+- `refusing to guess where uberblick's files are`: a Mac with files in both
+  `~/Library/Application Support/Uberblick` and the older
+  `~/.config/uberblick` / `~/.local/share/uberblick`. Nothing is opened, because
+  choosing one would hide whatever is in the other. Keep one — move what you want
+  into the Application Support directory and remove the rest, or set
+  `XDG_CONFIG_HOME` and `XDG_DATA_HOME` to pin the old pair. `ub doctor` names
+  both roots under its `storage-layout` check.
 - To check the checkout itself rather than the stack: `mise run test` and
   `mise run typecheck`.

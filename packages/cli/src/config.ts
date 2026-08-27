@@ -2,8 +2,14 @@
  * Where `ub` gets its configuration.
  *
  * Precedence, highest first: the environment, `./uberblick.json` in the working
- * directory, `$XDG_CONFIG_HOME/uberblick/config.json`, and the built-in
- * defaults — which live in `@uberblick/mcp-server`, not here.
+ * directory, the user's `config.json`, and the built-in defaults — which live
+ * in `@uberblick/mcp-server`, not here.
+ *
+ * *Where* that `config.json` is belongs to `@uberblick/hub/storage`:
+ * `$XDG_CONFIG_HOME/uberblick` on Linux and wherever XDG is set explicitly,
+ * `~/Library/Application Support/Uberblick` on a fresh Mac, and the legacy XDG
+ * pair on a Mac that already had files there. This module reads and writes
+ * whichever root that resolves to and never picks one itself.
  *
  * What this module produces is an **environment**, not a config object. The MCP
  * server's interface is environment variables and nothing else (see
@@ -31,17 +37,15 @@
  */
 
 import { mkdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import type { StoragePaths } from "@uberblick/hub/storage";
+import { resolveStorage } from "@uberblick/hub/storage";
 import { parseWorkspaceId } from "@uberblick/schema";
 import {
   publishOwnerOnly,
   publishStaged,
   writeTempBeside,
 } from "./safe-write.js";
-
-/** The directory `ub`'s own files live in, under the XDG config home. */
-const CONFIG_DIR = "uberblick";
 
 /** Per-user identity, default workspace, remote endpoint. Not committed. */
 export const USER_CONFIG_FILE = "config.json";
@@ -82,22 +86,50 @@ export interface ResolvedConfig {
     credentials: string;
     directoryFile: string;
   };
+  /**
+   * The storage layout those paths came out of, and the hub and workspace
+   * database directories that go with them. Resolved once here so that a
+   * legacy-macOS installation says so exactly once, however many paths a
+   * command asks for.
+   */
+  storage: StoragePaths;
   /** Everything questionable about the configuration. For stderr, never stdout. */
   warnings: string[];
 }
 
-/** XDG config home, falling back to `~/.config` — the XDG default. */
-export function configHome(env: NodeJS.ProcessEnv = process.env): string {
-  const xdg = env.XDG_CONFIG_HOME?.trim();
-  return xdg === undefined || xdg === "" ? join(homedir(), ".config") : xdg;
+/**
+ * The directory `ub`'s own files live in: `$XDG_CONFIG_HOME/uberblick`, or
+ * `~/Library/Application Support/Uberblick` on a Mac that nothing overrides.
+ * `@uberblick/hub/storage` resolves that, for the hub and the MCP server as
+ * well as for this one — one layout, decided in one place.
+ *
+ * `platform` is a parameter for the same reason `env` is: the Mac layout has to
+ * be provable on the machine running the tests.
+ *
+ * @throws {AmbiguousStorageError} on a Mac holding state in two roots. `ub
+ * doctor` reports that as a failed `storage-layout` check; every other command
+ * refuses, which is the point — nothing opens a database until a human has said
+ * which root is the real one.
+ */
+export function configDir(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return resolveStorage({ env, platform }).configDir;
 }
 
-export function userConfigPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(configHome(env), CONFIG_DIR, USER_CONFIG_FILE);
+export function userConfigPath(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return join(configDir(env, platform), USER_CONFIG_FILE);
 }
 
-export function credentialsPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(configHome(env), CONFIG_DIR, CREDENTIALS_FILE);
+export function credentialsPath(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return join(configDir(env, platform), CREDENTIALS_FILE);
 }
 
 function message(error: unknown): string {
@@ -210,14 +242,17 @@ export interface UserConfig {
  * back as well as the fields it understands. Resolution stays in
  * {@link resolveConfig}, which needs origins and per-layer labels this does not.
  */
-export function readUserConfig(env: NodeJS.ProcessEnv = process.env): {
+export function readUserConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): {
   /** The file as parsed, or null when it is absent or unusable. */
   raw: Record<string, unknown> | null;
   config: UserConfig;
   warnings: string[];
 } {
   const warnings: string[] = [];
-  const path = userConfigPath(env);
+  const path = userConfigPath(env, platform);
   const raw = readJsonObject(path, warnings);
   return {
     raw,
@@ -245,8 +280,9 @@ export function readUserConfig(env: NodeJS.ProcessEnv = process.env): {
 export function writeUserConfig(
   config: Record<string, unknown>,
   env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): string {
-  const path = userConfigPath(env);
+  const path = userConfigPath(env, platform);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   publishOwnerOnly(path, serialize(config));
   return path;
@@ -326,7 +362,10 @@ function secretAppliesTo(hubUrlOrigin: Origin): boolean {
  * rewriting it, and rewriting it means keeping what it held: regenerating would
  * cut this machine off from every other client already holding that secret.
  */
-export function readCredentials(env: NodeJS.ProcessEnv = process.env): {
+export function readCredentials(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): {
   path: string;
   /** The file as parsed, or null when it is absent or unusable. */
   raw: Record<string, unknown> | null;
@@ -336,7 +375,7 @@ export function readCredentials(env: NodeJS.ProcessEnv = process.env): {
   warnings: string[];
 } {
   const warnings: string[] = [];
-  const path = credentialsPath(env);
+  const path = credentialsPath(env, platform);
   const exposed = credentialsAreExposed(path, warnings);
   const raw = readJsonObject(path, warnings);
   return {
@@ -368,16 +407,23 @@ export function directoryHubUrl(cwd: string = process.cwd()): string | null {
 export interface ResolveOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  /** `process.platform` by default; injected so the Mac layout is testable. */
+  platform?: NodeJS.Platform;
 }
 
 export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   const env = options.env ?? process.env;
   const cwd = options.cwd ?? process.cwd();
-  const warnings: string[] = [];
+  const platform = options.platform ?? process.platform;
+  // Resolved once, and its warnings taken once: every path below comes out of
+  // this, so asking the layout per file would say "you are on the legacy
+  // layout" as many times as this command reads a file.
+  const storage = resolveStorage({ env, platform });
+  const warnings: string[] = [...storage.warnings];
 
   const paths = {
-    userConfig: userConfigPath(env),
-    credentials: credentialsPath(env),
+    userConfig: join(storage.configDir, USER_CONFIG_FILE),
+    credentials: join(storage.configDir, CREDENTIALS_FILE),
     directoryFile: join(cwd, DIRECTORY_FILE),
   };
 
@@ -428,7 +474,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   // Credentials are read last and from one file only. Nothing committable may
   // carry a secret, so there is no directory-file layer here by design. An
   // exposed file is refused outright: its one actionable message is the mode.
-  const credentials = readCredentials(env);
+  const credentials = readCredentials(env, platform);
   warnings.push(...credentials.warnings);
   const secretFromFile = credentials.exposed ? null : credentials.signingSecret;
   const secretFromEnv = trimmed(env.HUB_AUTH_TOKEN);
@@ -469,6 +515,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
       credential: credentialOrigin,
     },
     paths,
+    storage,
     warnings,
   };
 }
@@ -496,8 +543,9 @@ function serialize(value: unknown): string {
 export function writeCredentials(
   credentials: Credentials,
   env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): string {
-  const path = credentialsPath(env);
+  const path = credentialsPath(env, platform);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   publishOwnerOnly(path, serialize(credentials));
   return path;
@@ -534,8 +582,9 @@ export function writeCredentials(
 export function claimSigningSecret(
   candidate: string,
   env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): string {
-  const path = credentialsPath(env);
+  const path = credentialsPath(env, platform);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 
   const staged = writeTempBeside(
@@ -548,7 +597,7 @@ export function claimSigningSecret(
 
   // Somebody else holds the name. Their secret is the one every other client on
   // this machine will use, so it becomes ours.
-  const existing = readCredentials(env);
+  const existing = readCredentials(env, platform);
   if (existing.signingSecret !== null) {
     return existing.signingSecret;
   }
@@ -556,11 +605,15 @@ export function claimSigningSecret(
   // none. One re-read anyway, and only when the file did not parse at all — the
   // shape a half-written file would have if some other writer ever produced one.
   if (existing.raw === null) {
-    const second = readCredentials(env);
+    const second = readCredentials(env, platform);
     if (second.signingSecret !== null) {
       return second.signingSecret;
     }
   }
-  writeCredentials({ ...existing.raw, [SIGNING_SECRET_KEY]: candidate }, env);
+  writeCredentials(
+    { ...existing.raw, [SIGNING_SECRET_KEY]: candidate },
+    env,
+    platform,
+  );
   return candidate;
 }

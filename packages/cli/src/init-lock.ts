@@ -11,7 +11,8 @@
  * `credentials.json` that already carries other keys.
  *
  * It is a lock file, not a lock service: `open(O_CREAT|O_EXCL)` on
- * `$XDG_CONFIG_HOME/uberblick/.init.lock`, and two rules keep that honest.
+ * `.init.lock` beside `credentials.json`, in whichever config root the storage
+ * layout resolved to, and two rules keep that honest.
  *
  * **It is bounded.** Waiting stops after {@link WAIT_TIMEOUT_MS} and `ub init`
  * says what is in the way rather than hanging on a terminal nobody is watching.

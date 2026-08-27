@@ -31,8 +31,9 @@
  */
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/hub/storage";
 import { defaultDatabasePath } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";
@@ -77,9 +78,6 @@ options:
   -h, --help             show this help; after a command, that command's help
 `;
 
-/** `<uuid>.sqlite` — the filenames `defaultDatabasePath` produces. */
-const DATABASE_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.sqlite$/;
-
 /** As much of a uuid as someone can have typed so far. */
 const UUID_PREFIX = /^[0-9a-f][0-9a-f-]*$/;
 
@@ -89,11 +87,13 @@ const UUID_LENGTH = 36;
 /**
  * Where `<uuid>.sqlite` files live.
  *
- * Asked of the module that owns the layout rather than restated here — the
- * answer wanted is the directory, so the uuid handed in is a placeholder.
+ * Asked of the module that owns the layout rather than restated here: it is
+ * `$XDG_DATA_HOME/uberblick` on an XDG machine and
+ * `~/Library/Application Support/Uberblick/data/workspaces` on a Mac, and this
+ * command has no business knowing which.
  */
 function databaseDirectory(env: NodeJS.ProcessEnv): string {
-  return dirname(defaultDatabasePath("00000000-0000-0000-0000-000000000000", env));
+  return resolveStorage({ env }).workspaceDir;
 }
 
 export interface WorkspaceEntry {
@@ -155,7 +155,7 @@ export function listWorkspaces(
     }
   }
   for (const name of names) {
-    const match = DATABASE_FILE.exec(name);
+    const match = WORKSPACE_DATABASE_FILE.exec(name);
     if (match?.[1] !== undefined) {
       uuids.add(match[1]);
     }
