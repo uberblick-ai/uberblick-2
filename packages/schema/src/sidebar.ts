@@ -38,7 +38,14 @@
  * The cost is that a top-level type cannot be removed. {@link deleteGroup}
  * empties the array instead, so a long-lived sidebar carries one spent array
  * per group ever deleted — a handful of empty arrays, in exchange for never
- * losing a pin.
+ * losing a pin. Emptying is not removal in the concurrent case, either: a pin
+ * another replica made into the group while it was being deleted integrates
+ * after the delete and stays in the array, invisible while no group carries
+ * the id, and back in the sidebar if that exact id is created again — routine
+ * once ids are derived from names ({@link getOrCreateGroup}). A pin
+ * *resurfaces*; none is lost. Whether that wants a generation stamp on pins or
+ * a record of spent ids is decided with the wiring, in
+ * {@link https://github.com/uberblick-ai/uberblick-2/issues/306}.
  *
  * The order is an array of *ids*, not of the groups themselves, because Yjs has
  * no move: reordering is delete-then-insert. Moving a plain value rewrites
@@ -368,6 +375,9 @@ export function createGroup(
   sidebarDoc.transact(() => {
     getSidebarGroups(sidebarDoc).set(id, name);
     const order = getSidebarOrder(sidebarDoc);
+    // The local repeat only: a replica creating this group concurrently cannot
+    // see this entry and inserts its own, which `orderedGroupIds` dedupes on
+    // read and the next `moveGroup` clears out of storage.
     if (!order.toArray().includes(id)) {
       order.insert(clampIndex(index, order.length), [id]);
     }
@@ -419,8 +429,11 @@ export function renameGroup(
  * because the sidebar only ever held their uuids.
  *
  * The group's array is emptied rather than removed, because a top-level type
- * cannot be removed: leaving the pins there would hand them back to whoever
- * created the same id next.
+ * cannot be removed — and emptying reaches only the pins this replica can see.
+ * A pin another replica made into the group concurrently integrates after the
+ * delete, survives in the array, and is back in the sidebar if that id is
+ * created again. See the header and
+ * {@link https://github.com/uberblick-ai/uberblick-2/issues/306}.
  */
 export function deleteGroup(sidebarDoc: Y.Doc, groupId: string): void {
   if (groupName(sidebarDoc, groupId) === null) return;
