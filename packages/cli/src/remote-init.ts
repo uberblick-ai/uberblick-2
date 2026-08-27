@@ -542,12 +542,65 @@ export interface RemoteInitDeps {
   reach?: Reach;
 }
 
-/** What a failed vendor command is reported as — never its own words. */
+/** How much of a vendor's own stderr a failure report carries. */
+const TAIL_LINES = 3;
+const TAIL_CHARS = 500;
+
+/**
+ * A vendor's output as text, never as terminal instructions: every control
+ * character but the newline removed.
+ *
+ * The host at the far end of `ssh` is chosen by whoever ran the command, but
+ * what it writes lands on this terminal, where an OSC or CSI sequence is a
+ * command rather than a diagnosis. Everything quoted from a vendor — the
+ * bounded tail below and the two sites that print a whole stderr — goes
+ * through here.
+ */
+function printable(text: string): string {
+  return text.replace(/\p{Cc}/gu, (character) => (character === "\n" ? character : ""));
+}
+
+/**
+ * The last few lines a vendor said on stderr, printable and bounded.
+ *
+ * These programs run locally under the caller's own credentials, and their
+ * diagnostics are the only place the cause of a failure is written — an exit
+ * status alone sends the reader to this file. The bound is against a vendor
+ * that hands back a whole build log.
+ *
+ * It is not a redaction: the signing secret does reach one vendor, on the
+ * stdin of the step that writes `.env`, and a host that echoed its stdin back
+ * would echo the secret. That one call site quotes nothing, which is why
+ * nothing here has to be scrubbed.
+ */
+function stderrTail(stderr: string): string {
+  const lines = printable(stderr)
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line !== "");
+  const tail = lines.slice(-TAIL_LINES).join("\n");
+  return tail.length > TAIL_CHARS ? `…${tail.slice(-TAIL_CHARS)}` : tail;
+}
+
+/** What a failed vendor command is reported as: its status, then its own words. */
 function failed(program: string, ran: Ran): string {
-  return ran.status === null
+  const reported = ran.status === null
     ? `${program} could not be run (is it installed?)`
     : `${program} exited ${ran.status}`;
+  const tail = stderrTail(ran.stderr);
+  return tail === "" ? reported : `${reported}: ${tail}`;
 }
+
+/**
+ * Where to look when adding the deploy key is refused: it is the one call here
+ * that needs more than read access, and the environment can supply a different
+ * login than the one `gh auth status` reports.
+ */
+const DEPLOY_KEY_HINT =
+  "The token needs admin rights on the repository — `Administration: write` " +
+  "for a fine-grained token, the `repo` scope for a classic one — and a " +
+  "`GH_TOKEN`/`GITHUB_TOKEN` in the environment replaces the `gh auth login` " +
+  "keyring login without saying so.\n";
 
 /** Ask for one value. Null when there is nobody to ask. */
 async function ask(io: Io, question: string): Promise<string | null> {
@@ -789,7 +842,10 @@ export async function remoteInitCommand(
         { env },
       );
       if (added.status !== 0) {
-        io.err(`ub remote init: ${failed("gh repo deploy-key add", added)}.\n`);
+        io.err(
+          `ub remote init: ${failed("gh repo deploy-key add", added)}.\n` +
+            DEPLOY_KEY_HINT,
+        );
         return 1;
       }
     } finally {
@@ -809,9 +865,11 @@ export async function remoteInitCommand(
     { env },
   );
   if (checkout.status !== 0) {
+    // The whole of what git said, then the verdict — `ub remote update`'s
+    // shape. A clone that is refused the deploy key says so five lines from
+    // the end, behind git's own boilerplate, so the tail alone loses it.
     io.err(
-      `ub remote init: ${failed(existing ? "git fetch on the host" : "git clone on the host", checkout)}.\n` +
-        (checkout.stderr.trim() === "" ? "" : `${checkout.stderr.trim()}\n`),
+      `${printable(checkout.stderr)}ub remote init: ${failed(existing ? "git fetch on the host" : "git clone on the host", checkout)}.\n`,
     );
     return 1;
   }
@@ -824,7 +882,12 @@ export async function remoteInitCommand(
     input: `# Written by \`ub remote init\`. Untracked, so updates never touch it.\nTAILSCALE_HOST=${magicDns}\nTAILSCALE_IP=${address}\nHUB_AUTH_TOKEN=${secret}\nWEB_WORKSPACES=${webWorkspace}\n`,
   });
   if (wrote.status !== 0) {
-    io.err(`ub remote init: ${failed("writing .env on the host", wrote)}.\n`);
+    // The one step handed the secret, and the only one whose words are not
+    // quoted: a host that echoed its stdin back on stderr would put the
+    // payload in this line. A shell's error message is not worth that.
+    io.err(
+      `ub remote init: ${failed("writing .env on the host", { ...wrote, stderr: "" })}.\n`,
+    );
     return 1;
   }
 
@@ -936,7 +999,9 @@ export async function remoteUpdateCommand(
   const ran = ssh(flags.target, updateScript(flags.dir), { env });
   if (ran.stdout !== "") io.out(ran.stdout);
   if (ran.status !== 0) {
-    io.err(`${ran.stderr}ub remote update: ${failed("remote-update.sh", ran)}.\n`);
+    // The whole log here rather than the tail `failed` quotes: a failed deploy
+    // is diagnosed from the build output, and this command runs one thing.
+    io.err(`${printable(ran.stderr)}ub remote update: ${failed("remote-update.sh", ran)}.\n`);
     return 1;
   }
   return 0;
