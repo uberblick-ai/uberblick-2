@@ -177,6 +177,23 @@ export function runUb(
 }
 
 /**
+ * Which `ub` command a run was, for a diagnostic — the subcommand path only.
+ *
+ * Never the whole argument list: `ub remote set` takes a URL, and the URLs the
+ * remote suite feeds it carry passwords and tokens on purpose. A message that
+ * echoed argv would print one into CI output the first time a machine was slow,
+ * which is the leak those very tests exist to forbid.
+ */
+function commandOf(args: string[]): string {
+  const path: string[] = [];
+  for (const token of args) {
+    if (token.startsWith("-") || path.length === 2) break;
+    path.push(token);
+  }
+  return path.join(" ");
+}
+
+/**
  * The same, without blocking — so a test can have two `ub` processes racing each
  * other, which is the only way to observe what concurrent runs do to a file they
  * both write.
@@ -213,13 +230,14 @@ export function runUbAsync(
     // `close`, not `exit`: both pipes have to be drained before the output is
     // complete, and a test asserting "the secret appears nowhere" on a truncated
     // capture would pass for the wrong reason.
-    child.on("close", (status, signal) => {
-      // Nothing else here has a handle on this child, so a signal means
-      // `spawn`'s own timeout killed it. Say which run ran out of time: a bare
-      // null status reads as a crash, and the assertion it fails then reports
-      // the wrong thing about a machine that was merely slow.
-      if (signal !== null) {
-        stderr += `\ntimed out waiting for \`ub ${args.join(" ")}\` to exit within ${timeoutMs}ms\n`;
+    child.on("close", (status) => {
+      // `killed` rather than a signal: `spawn`'s timeout is the only thing that
+      // kills this child, and a process that died of a signal nobody sent it
+      // crashed — reporting that as slowness would send the reader after the
+      // wrong bug. Say which run ran out of time, because a bare null status
+      // reads as a crash too.
+      if (child.killed) {
+        stderr += `\ntimed out waiting for \`ub ${commandOf(args)}\` to exit within ${timeoutMs}ms\n`;
       }
       resolve({ status, stdout, stderr, output: `${stdout}${stderr}` });
     });
