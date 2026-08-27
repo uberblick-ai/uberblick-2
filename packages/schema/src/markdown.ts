@@ -61,7 +61,10 @@ import type {
 } from "./types.js";
 
 export interface ExportMarkdownOptions {
-  /** Emit a `---` YAML frontmatter block with uuid, title and tags. Default true. */
+  /**
+   * Emit a `---` YAML frontmatter block with uuid, title, tags and — when the
+   * document has one — description. Default true.
+   */
   frontmatter?: boolean;
   /**
    * How to render annotation threads. `"html-comments"` emits one HTML comment
@@ -696,6 +699,11 @@ export function exportMarkdown(
       "---",
       `uuid: ${emitScalar(meta.uuid)}`,
       `title: ${emitScalar(meta.title)}`,
+      // No description means no line, not an empty one: absent is how `getMeta`,
+      // the reader below and the directory stub all spell "none".
+      ...(meta.description === null
+        ? []
+        : [`description: ${emitScalar(meta.description)}`]),
       `tags: [${meta.tags.map(emitScalar).join(", ")}]`,
       "---",
     ];
@@ -802,6 +810,12 @@ export interface ImportedDoc {
   /** Present only when the source carried a uuid in its frontmatter. */
   uuid?: string;
   /**
+   * What the document is for, present only when the source carried a non-blank
+   * `description` in its frontmatter. A blank one is no description, the same
+   * reading `getMeta` and the directory stub give it.
+   */
+  description?: string;
+  /**
    * Outbound links, present only when the source carried a `links` key. Values
    * are target document UUIDs — a link is never a path or a title, so nothing
    * here is resolved against titles or filenames.
@@ -841,6 +855,7 @@ function parseInlineList(value: string): string[] {
 interface Frontmatter {
   uuid?: string;
   title?: string;
+  description?: string;
   tags?: string[];
   links?: string[];
   /** Index of the first body line after the frontmatter block. */
@@ -898,6 +913,9 @@ function parseFrontmatter(lines: string[]): Frontmatter {
       result.uuid = parseScalar(value);
     } else if (key === "title") {
       result.title = parseScalar(value);
+    } else if (key === "description") {
+      const description = parseScalar(value);
+      if (description !== "") result.description = description;
     } else if (key === "tags" || key === "links") {
       const parsed = parseListValue(lines, i, end, value);
       if (key === "tags") {
@@ -1545,11 +1563,11 @@ function advanceColumn(text: string, column: number): number {
 }
 
 /**
- * Parse markdown into the pieces needed to build a document: title, tags, links
- * and a flat block list. Handles frontmatter, ATX headings, fenced code (with
- * language), mermaid fences, list items, block quotes and GFM tables;
- * everything else becomes a paragraph, with its inline formatting read into
- * `inline`.
+ * Parse markdown into the pieces needed to build a document: title,
+ * description, tags, links and a flat block list. Handles frontmatter, ATX
+ * headings, fenced code (with language), mermaid fences, list items, block
+ * quotes and GFM tables; everything else becomes a paragraph, with its inline
+ * formatting read into `inline`.
  *
  * Title precedence: frontmatter `title`, else a leading level-1 heading — which
  * is then *consumed*, so the title is not duplicated as a block. Any other
@@ -1772,6 +1790,7 @@ export function importMarkdown(markdown: string): ImportedDoc {
   // "this file declares no links".
   const result: ImportedDoc = { title, tags: front.tags ?? [], blocks };
   if (front.uuid !== undefined) result.uuid = front.uuid;
+  if (front.description !== undefined) result.description = front.description;
   if (front.links !== undefined) result.links = front.links;
   return result;
 }

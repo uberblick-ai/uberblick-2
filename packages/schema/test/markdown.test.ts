@@ -220,6 +220,57 @@ describe("markdown round-trip", () => {
     expect(exportMarkdown(empty, { frontmatter: false })).toBe("");
   });
 
+  // A description is required on create, so an export that dropped it made the
+  // round trip lossy for a field the system insists on — the seed reader refused
+  // its own export back. It travels as one frontmatter scalar under the rules
+  // `title` already has.
+  it("round-trips a description, quoted by the same scalar rules as a title", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, {
+      uuid: UUID,
+      title: "Schema",
+      description: 'What this is for: a "quoted" clause, and a colon.',
+      tags: [],
+    });
+    appendBlock(doc, { type: "paragraph", text: "Body." });
+
+    const exported = exportMarkdown(doc);
+    expect(exported).toBe(
+      [
+        "---",
+        `uuid: ${UUID}`,
+        "title: Schema",
+        'description: "What this is for: a \\"quoted\\" clause, and a colon."',
+        "tags: []",
+        "---",
+        "",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+    expect(importMarkdown(exported).description).toBe(
+      'What this is for: a "quoted" clause, and a colon.',
+    );
+
+    // No description is no line rather than an empty one, and the reader gives
+    // back no key — which is what the seed reader's refusal reads.
+    const plain = new Y.Doc();
+    initDoc(plain, { uuid: UUID, title: "Schema", tags: [] });
+    const plainExport = exportMarkdown(plain);
+    expect(plainExport).not.toContain("description:");
+    expect(importMarkdown(plainExport).description).toBeUndefined();
+
+    // A blank one is not a description either, so a hand-written template with
+    // an empty key is refused exactly like one with no key at all.
+    expect(
+      importMarkdown(
+        ["---", `uuid: ${UUID}`, "title: Schema", "description:", "---", ""].join(
+          "\n",
+        ),
+      ).description,
+    ).toBeUndefined();
+  });
+
   it("lengthens the fence when the code itself contains backticks", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Fences" });

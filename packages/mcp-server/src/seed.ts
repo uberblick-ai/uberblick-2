@@ -83,7 +83,7 @@ export interface SeedDoc extends ImportedDoc {
   uuid: string;
   /**
    * What the document is for, from the file's `description:` frontmatter line.
-   * Required, unlike everywhere else a description is optional — see
+   * Required here, unlike everywhere else a description is optional — see
    * {@link readSeedDocs}.
    */
   description: string;
@@ -116,34 +116,6 @@ export interface SeedImport {
 }
 
 /**
- * The `description:` line of a template's frontmatter, or undefined when the
- * file has none.
- *
- * Read here rather than by `importMarkdown` because a description is a rule of
- * *this* path, not of markdown: the schema's reader is a general converter that
- * takes files as it finds them, and it ignores frontmatter keys it does not
- * know — so the line is invisible to it and the document body is unaffected.
- * Quotes are stripped the way the schema's own scalars are, and the value is one
- * line: a description is one or two sentences, and a template that needs a YAML
- * block for it is a template with the wrong text in it.
- */
-function frontmatterDescription(markdown: string): string | undefined {
-  const lines = markdown.split(/\r?\n/);
-  if (lines[0]?.trim() !== "---") return undefined;
-  for (let i = 1; i < lines.length; i += 1) {
-    const line = lines[i] ?? "";
-    if (line.trim() === "---") return undefined;
-    const match = /^description\s*:\s*(.*)$/.exec(line);
-    if (match === null) continue;
-    const raw = (match[1] ?? "").trim();
-    const quoted = /^(["'])(.*)\1$/.exec(raw);
-    const value = (quoted?.[2] ?? raw).trim();
-    return value === "" ? undefined : value;
-  }
-  return undefined;
-}
-
-/**
  * Read and parse every markdown template in `dir`, sorted by name.
  *
  * A file missing its `uuid`, `title` or `description` is an error rather than a
@@ -169,7 +141,7 @@ export function readSeedDocs(dir: string): SeedDoc[] {
     if (parsed.title === "") {
       throw new Error(`${file}: no \`title\` in frontmatter`);
     }
-    const description = frontmatterDescription(source);
+    const description = parsed.description;
     if (description === undefined) {
       throw new Error(
         `${file}: no \`description\` in frontmatter. Every document written here ` +
