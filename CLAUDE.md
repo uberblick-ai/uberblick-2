@@ -98,7 +98,7 @@ implementation (or Workflow pipelines for fan-out), then validate their output
 
 ### Merge policy — the rules are the authority, not a session
 
-- **Tier 1 — self-merge.** `Touches ⊆ {repo, docs-seed}` and no new
+- **Tier 1 — self-merge.** `Touches ⊆ {repo}` and no new
   dependencies: the implementation loop merges as soon as all gates are green.
 - **Tier 2 — self-merge with evidence.** Feature packages (`hub`,
   `mcp-server`, `web`): all gates green **plus** a merge-report comment on the
@@ -301,6 +301,8 @@ closes. Bugs, proposals and planned work are GitHub's, never a doc's.
 is the work → do the work via a GitHub-style change → update the doc to the new
 status quo.
 
-Once the uberblick MCP server is registered (`.mcp.json`), read and update the
-product docs through its tools — never by editing `docs-seed/` files, which are
-only the one-time import source.
+The live uberblick workspace is the only home of these documents. `list_docs`
+is authoritative for what the corpus contains, and the MCP tools registered in
+`.mcp.json` are how it is read and written. There is no repository snapshot of
+it, no corpus import command, and no UUID table to keep in step — a document's
+uuid is discovered from `list_docs`.

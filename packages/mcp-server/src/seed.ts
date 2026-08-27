@@ -1,11 +1,15 @@
 /**
- * The one-time seed import: `docs-seed/*.md` → documents inside uberblick.
+ * Markdown templates → documents inside uberblick.
  *
- * This exists because of the dogfooding contract — the product's own docs live
- * in the product. It runs once; after it, `docs-seed/` is dead history and the
- * docs are edited through the MCP tools. Markdown is still export-only as a
- * *storage* rule: `importMarkdown` is the reader this import was built for, and
- * there is deliberately no import MCP tool.
+ * This is a *private* path, not a product surface. Its only caller is `ub
+ * init`, which writes the two starter templates that ship in
+ * `packages/cli/templates/` into a workspace that is nobody's yet. There is no
+ * general corpus import: no command, no `ub import`, and no MCP tool. The
+ * project's own documents live in the live workspace and are read and written
+ * through the MCP tools — `list_docs` is what enumerates them.
+ *
+ * Markdown is still export-only as a *storage* rule: `importMarkdown` is the
+ * reader this path was built for, and it is deliberately not exposed.
  *
  * Five properties worth stating, because they are what the implementation is
  * shaped around:
@@ -16,27 +20,27 @@
  *    any tool's write does. Nothing here touches the derived index tables.
  * 2. **Identity comes from the file.** The frontmatter `uuid` is what makes a
  *    re-run recognise a document it already wrote. A file without one is an
- *    error — the importer never invents identity.
- * 3. **One-time by construction.** A uuid that already exists is never written
- *    again, not even when the file has changed. After the import the document
- *    belongs to whoever edits it through the MCP tools, and this importer cannot
- *    tell a legitimately edited seed file from a legitimately edited *document* —
- *    so it does not guess, and a re-run cannot clobber real work. Ongoing
- *    docs-seed sync is not a feature; the file is dead history.
+ *    error — this reader never invents identity.
+ * 3. **Write-once by construction.** A uuid that already exists is never
+ *    written again, not even when the template has changed. After the first
+ *    write the document belongs to whoever edits it, and this reader cannot
+ *    tell an edited template from an edited *document* — so it does not guess,
+ *    and a re-run cannot clobber real work. That is also what makes `ub init`
+ *    idempotent.
  * 4. **A document it must not write is skipped, not written.** Two cases: a uuid
  *    the directory knows whose room has not reached this replica (writing it
  *    would put a second copy of every block into a room that already has one),
  *    and a uuid whose directory entry is tombstoned (a tombstone is sticky, so
  *    the document could never be listed again). Both report why and fail the
- *    command, which is the honest outcome.
+ *    call, which is the honest outcome.
  * 5. **A store that cannot log stops the run.** Health is asserted after every
- *    document and after the final wait, so a failing store can never let the
- *    import report success for writes the log refused.
+ *    document and after the final wait, so a failing store can never let this
+ *    report success for writes the log refused.
  *
- * Offline-first like everything else: with no hub it imports into the local log
+ * Offline-first like everything else: with no hub it writes into the local log
  * and the rooms stay pending until one appears. With a hub it waits for the
  * rooms to sync *before* deciding what exists, which is what keeps a second
- * machine's import from duplicating a corpus it has not downloaded yet.
+ * machine from duplicating a corpus it has not downloaded yet.
  *
  * {@link importSeedDir} takes an optional {@link StarterSeed} on top of that,
  * because a seeded workspace is a *first-open state* rather than a set of
@@ -47,8 +51,7 @@
  */
 
 import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   appendBlock,
   createGroup,
@@ -70,15 +73,6 @@ import { log } from "./log.js";
 import { Replicas } from "./replica.js";
 import { MirrorStore } from "./store.js";
 
-/** `docs-seed/` at the repo root — the only import source there is. */
-export const SEED_DIR = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "..",
-  "docs-seed",
-);
-
 /** A parsed seed file: an {@link ImportedDoc} that is guaranteed to have identity. */
 export interface SeedDoc extends ImportedDoc {
   uuid: string;
@@ -93,7 +87,7 @@ export interface SeedDoc extends ImportedDoc {
  * - `unchanged` — the uuid is already in the system, so nothing was written.
  *   This is the normal outcome of every run after the first, whatever the file
  *   says now.
- * - `skipped` — the importer refused, and `reason` says why. The command fails.
+ * - `skipped` — the importer refused, and `reason` says why.
  */
 export type SeedAction = "created" | "unchanged" | "skipped";
 
@@ -110,13 +104,10 @@ export interface SeedImport {
   synced: boolean;
 }
 
-/**
- * Read and parse every seed file in `dir`, sorted by name. `README.md`
- * documents the format and is not a document.
- */
-export function readSeedDocs(dir: string = SEED_DIR): SeedDoc[] {
+/** Read and parse every markdown template in `dir`, sorted by name. */
+export function readSeedDocs(dir: string): SeedDoc[] {
   const files = readdirSync(dir)
-    .filter((file) => file.endsWith(".md") && file !== "README.md")
+    .filter((file) => file.endsWith(".md"))
     .sort();
 
   return files.map((file) => {

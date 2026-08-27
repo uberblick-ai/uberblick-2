@@ -4,16 +4,15 @@
  * The authority for local configuration is this machine's
  * `{config,credentials}.json` — in `$XDG_CONFIG_HOME/uberblick` or, on a Mac,
  * `~/Library/Application Support/Uberblick`; `@uberblick/hub/storage` decides
- * — and `ub` reads it directly. The mise tasks do not: `mise run hub`,
- * `mise run web` and `mise run import-seed` inherit their environment from
- * mise, and the hub in particular refuses to start without `HUB_AUTH_TOKEN`.
- * (The committed `.mcp.json` no longer belongs on that list — it spawns
- * `ub mcp serve`, which resolves the configuration itself.) So `ub init` also
- * writes `mise.local.toml` — mise's conventional gitignored local config — as a
- * file **derived** from that authority: same value, one owner, rewritten
- * whenever it drifts. Delete it and rerun `ub init` and it comes back with the
- * same value; it is regenerated, not re-randomised, because the authority is
- * elsewhere.
+ * — and `ub` reads it directly. The mise tasks do not: `mise run hub` and
+ * `mise run web` inherit their environment from mise, and the hub in particular
+ * refuses to start without `HUB_AUTH_TOKEN`. (The committed `.mcp.json` no
+ * longer belongs on that list — it spawns `ub mcp serve`, which resolves the
+ * configuration itself.) So `ub init` also writes `mise.local.toml` — mise's
+ * conventional gitignored local config — as a file **derived** from that
+ * authority: same value, one owner, rewritten whenever it drifts. Delete it and
+ * rerun `ub init` and it comes back with the same value; it is regenerated, not
+ * re-randomised, because the authority is elsewhere.
  *
  * `ub init` is what *creates* it, and `ub workspace use` rewrites the one it
  * created — a binding the mise tasks never saw would leave them serving the

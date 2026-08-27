@@ -243,9 +243,9 @@ deployed client reads its workspaces at runtime from the served
 deployment its workspaces is an environment variable and a container recreate,
 never a bundle rebuild.
 
-`mise run import-seed` is the one-time import of `docs-seed/` into the system.
-After it, the product docs live in the documents, and are read and written
-through the MCP tools rather than by editing the seed files.
+The project's own documents live in the live uberblick workspace, not in this
+repository. `list_docs` enumerates them and the MCP tools read and write them;
+there is no corpus import command and no snapshot to keep in step.
 
 ## The `ub` command line
 
@@ -388,11 +388,12 @@ bare. Give it: a workspace id is a uuid and `ub init` with none in force
 generates a *new* one, so a machine that invented its own would join the remote
 hub and find nothing of yours on it — the rooms are keyed by a different id.
 
-`ub init` writes configuration and imports no documents, so a fresh checkout's
-workspace really is empty and `join` has nothing to duplicate — do not run
-`mise run import-seed` there, the product documents arrive over the wire. `join`
-hydrates the full remote directory and every live document into the local update
-log, verifies it by the same read-back, and only then persists the endpoint. An
+`ub init --workspace <id>` is joining a workspace that exists elsewhere, so it
+writes configuration and seeds no documents: the fresh checkout's workspace
+really is empty and `join` has nothing to duplicate. The documents arrive over
+the wire. `join` hydrates the full remote directory and every live document
+into the local update log, verifies it by the same read-back, and only then
+persists the endpoint. An
 unreachable or auth-rejecting remote leaves your configuration exactly as it
 was. It refuses a local workspace holding documents the remote has never heard
 of, naming both counts.
