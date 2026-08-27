@@ -160,6 +160,13 @@ export interface ClientOptions {
    * sits in front of the deployed hub.
    */
   headers?: Record<string, string>;
+  /**
+   * The provider's dead-connection timer, 30s by default: with no message for
+   * that long it closes the socket itself and reconnects. A test about what the
+   * *hub* tells a client sets it out of reach, so that passing cannot mean the
+   * client eventually timed itself out.
+   */
+  messageReconnectTimeout?: number;
 }
 
 export function createClient(options: ClientOptions): TestClient {
@@ -172,6 +179,11 @@ export function createClient(options: ClientOptions): TestClient {
     name: options.room,
     token: options.token,
     document: doc,
+    // The provider builds its socket from this same object, so the socket's
+    // options travel through it — its public type just does not say so.
+    ...(options.messageReconnectTimeout === undefined
+      ? {}
+      : { messageReconnectTimeout: options.messageReconnectTimeout }),
     ...(headers === undefined
       ? {}
       : {
