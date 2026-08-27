@@ -180,12 +180,10 @@ An issue labeled `ready` must pass all of:
 1. `Depends-on` line present, first-section, matching the grammar above.
 2. `Touches` line present, matching the grammar, every name valid.
 3. No body line begins `Priority:`.
-4. The organization Issue Field `Priority` is exactly one of `Urgent`, `High`,
-   `Medium`, or `Low`; missing is untriaged and fails lint.
-5. All five `##` sections present: What, Why, Acceptance criteria,
+4. All five `##` sections present: What, Why, Acceptance criteria,
    Out of scope, Pointers.
-6. At least one `- [ ]` checkbox under Acceptance criteria.
-7. Out of scope and Pointers are non-empty (explicit `None.` is acceptable).
+5. At least one `- [ ]` checkbox under Acceptance criteria.
+6. Out of scope and Pointers are non-empty (explicit `None.` is acceptable).
 
 Sizing and decision-completeness are judgment calls, not lintable — the
 coordinator applies them when granting or revoking `ready`.

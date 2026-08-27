@@ -225,11 +225,9 @@ file contains only Claude coordinator machinery and does not restate either.
    answers before you report the stack serving the new `main`. A fresh hub
    store is fine: replicas rehydrate it over sync.
 
-3. **Lint `ready` issues** against the spec's checklist, including the
-   structured `Priority` field and the ban on legacy body `Priority:` lines.
-   Failures: comment exactly what's missing, remove `ready`, skip. A missing
-   or unknown Priority is untriaged; never infer `Medium` or edit it on the
-   owner's behalf.
+3. **Lint `ready` issues** against the spec's checklist, including the ban on
+   legacy body `Priority:` lines. Failures: comment exactly what's missing,
+   remove `ready`, skip.
 
 4. **Compute the eligible set and order it** per the spec's scheduling
    semantics (valid structured Priority, deps closed, unclaimed; topology →
@@ -237,7 +235,9 @@ file contains only Claude coordinator machinery and does not restate either.
    read-only scheduling table with issue, Priority, dependency/claim result,
    eligibility, and exclusion reason. Treat this as the dry run: if the table
    cannot account for every open issue, dispatch nothing until observation is
-   repaired. The loop reads scheduling authority; it never reprioritizes.
+   repaired. A missing or unknown Priority is untriaged and ineligible; never
+   infer `Medium` or edit it on the owner's behalf. The loop reads scheduling
+   authority; it never reprioritizes.
 
 5. **Conflict analysis.** Apply the spec's scheduling rules (schema serializes
    globally; expected file-level overlap decides, not the `Touches` sets). Cap
