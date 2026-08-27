@@ -19,12 +19,16 @@
  * one is slow and the socket under it can die; and `getToken` is watched, which
  * is the library's own call into the token callable and the moment a provider
  * becomes free to send. Between them a token call's whole lifecycle — held
- * across a reconnect, held across a quarantine — is driven rather than raced.
+ * across a reconnect, held across a quarantine — is driven rather than raced,
+ * and nothing here waits out a duration in the hope that what it is about to
+ * assert would have happened by now: every step waits for an event.
  *
  * The last suite is the other half of pacing a corpus: what a caller may call
  * hydrated. A queue drained in waves takes one round trip per wave and a settle
  * is one budget, so the wait ends where it promised to and says the drain is
- * still going, rather than growing with the corpus or calling it complete.
+ * still going, rather than growing with the corpus or calling it complete. Its
+ * clock is a seam as well — a deadline is a clock reading, so the budget is
+ * spent by moving the clock rather than by measuring a loaded machine.
  */
 
 import { randomUUID } from "node:crypto";
@@ -39,10 +43,10 @@ import {
   hubUrl,
   LIVE_HUB_SETTLE,
   removeTempDirs,
-  sleep,
   tempDatabasePath,
   testConfig,
   TEST_SECRET,
+  WAIT_TIMEOUT_MS,
   waitUntil,
   WORKSPACE,
 } from "./helpers.js";
@@ -54,9 +58,14 @@ import {
  * generation scoping exists for: a socket can end while a slot's token is half
  * made. Holding the mint puts a test inside that window deliberately instead of
  * hoping to land in it.
+ *
+ * Releasing one hands back the mint's *own* completion, because the mint is
+ * asynchronous (WebCrypto, `packages/hub/src/token.ts`): a test that asserts on
+ * what a released call did — or did not — do waits for the moment its token
+ * exists, not for a duration it hopes is longer than the machine takes.
  */
 const mints = vi.hoisted(() => {
-  const suspended: Array<() => void> = [];
+  const suspended: Array<{ resume: () => void; finished: Promise<void> }> = [];
   let holding = false;
   return {
     /** Suspend every mint from here on. */
@@ -65,24 +74,45 @@ const mints = vi.hoisted(() => {
     },
     /** How many mint calls are suspended right now. */
     held: (): number => suspended.length,
-    /** Let the oldest suspended mint finish; the rest stay suspended. */
-    release: (): void => {
-      suspended.shift()?.();
+    /**
+     * Let the oldest suspended mint run, and resolve once it has finished. The
+     * rest stay suspended.
+     */
+    release: async (): Promise<void> => {
+      const mint = suspended.shift();
+      if (mint === undefined) {
+        return;
+      }
+      mint.resume();
+      await mint.finished;
     },
     /** Stop holding, and let everything suspended finish. */
     releaseAll: (): void => {
       holding = false;
-      for (const resume of suspended.splice(0)) {
-        resume();
+      for (const mint of suspended.splice(0)) {
+        mint.resume();
       }
     },
-    gate: async (): Promise<void> => {
+    /** Run one mint, suspended at its start while this suite is holding. */
+    run: async <T>(mint: () => Promise<T>): Promise<T> => {
       if (!holding) {
-        return;
+        return mint();
       }
-      await new Promise<void>((resolve) => {
-        suspended.push(resolve);
+      let resume!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
       });
+      let finish!: () => void;
+      const finished = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      suspended.push({ resume, finished });
+      await gate;
+      try {
+        return await mint();
+      } finally {
+        finish();
+      }
     },
   };
 });
@@ -91,12 +121,23 @@ vi.mock("@uberblick/hub/token", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@uberblick/hub/token")>();
   return {
     ...actual,
-    mintToken: async (...args: Parameters<typeof actual.mintToken>) => {
-      await mints.gate();
-      return actual.mintToken(...args);
-    },
+    mintToken: (...args: Parameters<typeof actual.mintToken>) =>
+      mints.run(() => actual.mintToken(...args)),
   };
 });
+
+/**
+ * Let every already-scheduled turn of the event loop run.
+ *
+ * `setImmediate` fires after the microtask queue has drained, so a continuation
+ * chained onto something that has already resolved has run by the time this
+ * returns — whatever else the machine is doing.
+ */
+function flush(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+}
 
 /**
  * Small enough that an unbounded client breaches it in one tick — and only one
@@ -334,20 +375,34 @@ describe("bounded room attach", () => {
       () => sync.state().status !== "connected",
     );
     await startHub({ port, databasePath: database });
+    // The queued room takes the only slot on the new connection and starts a
+    // mint of its own: two suspended mints, the stale one and this one.
     await waitUntil("the queued room to be admitted on the new connection", () =>
       mints.held() === 2,
     );
 
-    // Let the stale call finish minting. Its token is good and its provider is
-    // attached to a live socket — the only thing between it and the hub is that
-    // the slot it holds belongs to a connection that is gone.
-    mints.release();
-    await sleep(50);
+    // Let the stale call finish minting, and wait for that mint itself. Its
+    // token is good and its provider is attached to a live socket — the only
+    // thing between it and the hub is that the slot it holds belongs to a
+    // connection that is gone.
+    await mints.release();
+    await flush();
 
     // The contract: it cannot send. The one slot on this connection belongs to
     // the room admitted on it, and the stale call has to be re-admitted here
     // before anything of its leaves — which is what keeps a flapping socket
     // from carrying one connection's wave into the next one's count.
+    expect(gateOpened()).not.toContain(stale);
+
+    // The positive half, so the assertion above is not passing on a call that
+    // has simply not got there yet: the room admitted on *this* connection is
+    // released after the stale one and goes through — an event to wait for
+    // rather than a duration. The stale call's token was finished before this
+    // one began, so without the generation scoping it would be through first.
+    await mints.release();
+    await waitUntil("the room admitted on the new connection to send", () =>
+      gateOpened().includes(next),
+    );
     expect(gateOpened()).not.toContain(stale);
 
     mints.releaseAll();
@@ -416,10 +471,58 @@ describe("bounded room attach", () => {
   );
 });
 
-/** A budget large enough to measure, small enough to spend in a test. */
+/**
+ * The configured budget. Any number would do: it is spent by moving the clock
+ * the wait reads, not by waiting.
+ */
 const SETTLE_BUDGET_MS = 100;
 /** Rooms behind the one slot: a drain of several waves, at one wave per room. */
 const DRAIN_ROOMS = 8;
+
+/**
+ * `Date.now` under the test's control, frozen where it stands.
+ *
+ * The deadline is the whole contract here — "a call never waits past its
+ * configured budget while the settle stays owed" — and a deadline is a clock
+ * reading, not an elapsed duration. So the test moves the clock the wait reads
+ * instead of measuring milliseconds on a machine whose load it does not own:
+ * while the clock stands still no deadline can expire however long the process
+ * takes, and one advance of exactly one budget is what ends the wait.
+ */
+function frozenClock(): { advance: (ms: number) => void; restore: () => void } {
+  let now = Date.now();
+  const spy = vi.spyOn(Date, "now").mockImplementation(() => now);
+  return {
+    advance: (ms: number): void => {
+      now += ms;
+    },
+    restore: (): void => {
+      spy.mockRestore();
+    },
+  };
+}
+
+/**
+ * Await `promise`, failing by name rather than as a bare runner timeout.
+ *
+ * What {@link waitUntil} does for a condition, for a promise — and needed
+ * separately because `waitUntil` reads the very clock this suite is holding
+ * still. The deadline is a diagnostic, never the assertion: what is asserted is
+ * that the wait ends when the clock says its budget is spent, so this is the
+ * suite's own generous deadline and only decides how a hang is reported.
+ */
+function endsWithin<T>(label: string, promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const named = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`timed out waiting for ${label}`)),
+      WAIT_TIMEOUT_MS,
+    );
+  });
+  return Promise.race([promise, named]).finally(() => {
+    clearTimeout(timer);
+  });
+}
 
 describe("the settle budget", () => {
   it("ends at the configured budget and reports the drain unfinished", async () => {
@@ -452,15 +555,24 @@ describe("the settle budget", () => {
       mints.held() === 1,
     );
 
-    const started = Date.now();
-    await sync.waitForQuiet();
-    const waited = Date.now() - started;
+    const clock = frozenClock();
+    let returned = false;
+    const quiet = sync.waitForQuiet().then(() => {
+      returned = true;
+    });
 
-    // `syncTimeoutMs` is the whole budget, whatever the corpus is. A deadline
-    // multiplied by the queue depth would have waited eight of them here — and
-    // a hundred rooms would make an ordinary tool call wait a hundred.
-    expect(waited).toBeGreaterThanOrEqual(SETTLE_BUDGET_MS);
-    expect(waited).toBeLessThan(SETTLE_BUDGET_MS * 4);
+    // Nothing may end this wait but its own deadline: the drain is suspended,
+    // and the clock the deadline is read from is standing still.
+    await flush();
+    expect(returned).toBe(false);
+
+    // One budget, and the wait is over. `syncTimeoutMs` is the whole budget
+    // whatever the corpus is: a deadline multiplied by the queue depth would
+    // want eight of them here — this await would never come back — and a
+    // hundred rooms would make an ordinary tool call wait a hundred.
+    clock.advance(SETTLE_BUDGET_MS);
+    await endsWithin("the settle to end when its budget was spent", quiet);
+    clock.restore();
 
     // And nothing is called complete that is not: the drain is still going, and
     // every room still in it reports unsynced.
