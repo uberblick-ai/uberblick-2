@@ -18,8 +18,10 @@ import { upsertDirectoryEntry } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   FAILURE_CODES,
+  INTERNAL_ERROR_MESSAGE,
   MUTATING_TOOLS,
   READ_ONLY_TOOLS,
+  hydrationRecovery,
 } from "../src/failures.js";
 import { MirrorStore } from "../src/store.js";
 import type { SearchHit } from "../src/store.js";
@@ -101,8 +103,11 @@ const EXPECTED: Record<
     recoveryClass: "reread",
     detail: ["uuid", "inDirectory", "hub"],
   },
+  // `manual` because these servers run with no hub configured: a room that
+  // arrives over a connection cannot arrive over none. The class per hub state
+  // is its own table below.
   doc_not_hydrated: {
-    recoveryClass: "retry",
+    recoveryClass: "manual",
     detail: ["uuid", "inDirectory", "hub"],
   },
   doc_archived: { recoveryClass: "manual", detail: ["uuid", "archived"] },
@@ -141,8 +146,9 @@ describe("the failure contract", () => {
         `${name} is neither in MUTATING_TOOLS nor READ_ONLY_TOOLS`,
       ).toBe(true);
       expect(MUTATING_TOOLS.has(name) && READ_ONLY_TOOLS.has(name)).toBe(false);
-      // And every tool says so where an agent reads it: the floor in every
-      // description, the mutation half only where there is a write to report.
+      // And every tool names the shape it answers with — the machine contract,
+      // the mutation fields only where there is a write to report. The prose
+      // that explains them is carried once, in the server's instructions.
       expect(description, `${name} has no description`).toBeDefined();
       expect(description).toContain("recoveryClass");
       expect(description?.includes("`partial`")).toBe(MUTATING_TOOLS.has(name));
@@ -282,6 +288,12 @@ describe("the failure contract", () => {
     const stale = failures.get("stale_block");
     expect(stale.currentText).toBe("one");
     expect(stale.currentRev).toBeTruthy();
+
+    // An unmapped crash says one fixed thing. The exception's own text can hold
+    // a path, a query or a secret, so it goes to the log and not to the caller.
+    const crash = failures.get("internal_error");
+    expect(crash.message).toBe(INTERNAL_ERROR_MESSAGE);
+    expect(crash.message).not.toContain("exploded");
   });
 
   it("says a failed write changed nothing, and invents nothing for a read", async () => {
@@ -303,6 +315,49 @@ describe("the failure contract", () => {
     expect(read.payload.applied).toBeUndefined();
     expect(read.payload.partial).toBeUndefined();
     expect(read.payload.synced).toBeUndefined();
+
+    // Including the failure a read gets for somebody else's refused write: the
+    // fail-stop blocks reads too, and a read still has no write to report on.
+    const failing = await rigWith((path) => new FailingStore(path, WORKSPACE));
+    const doc = await seeded(failing.rig);
+    failing.store.failing = true;
+    const refusedWrite = await failing.rig.call("set_title", {
+      uuid: doc.uuid,
+      title: "Refused",
+    });
+    expect(refusedWrite.payload.error).toBe("persistence_failed");
+    expect(refusedWrite.payload.applied).toBe(false);
+    expect(refusedWrite.payload.partial).toBe(false);
+
+    const blockedRead = await failing.rig.call("get_doc", { uuid: doc.uuid });
+    expect(blockedRead.payload.error).toBe("persistence_failed");
+    expect(blockedRead.payload.room).toBeTruthy();
+    expect(blockedRead.payload.recoveryClass).toBe("manual");
+    expect(blockedRead.payload.applied).toBeUndefined();
+    expect(blockedRead.payload.partial).toBeUndefined();
+    expect(blockedRead.payload.synced).toBeUndefined();
+  });
+
+  it("makes doc_not_hydrated retryable only while a hub could still deliver the room", () => {
+    // The room arrives over a connection or not at all, so the class is a
+    // statement about the hub. `retry` where waiting works; `manual`, naming
+    // what a human must change, where the stub would otherwise dangle forever.
+    const expected: Record<string, string> = {
+      connected: "retry",
+      connecting: "retry",
+      "hub-down": "retry",
+      disabled: "manual",
+      "auth-failed": "manual",
+      quarantined: "manual",
+    };
+    for (const [status, recoveryClass] of Object.entries(expected)) {
+      const advice = hydrationRecovery(status);
+      expect(advice.recoveryClass, status).toBe(recoveryClass);
+      expect(advice.recovery.length).toBeGreaterThan(0);
+    }
+    // The two a caller cannot wait out say what to do instead.
+    expect(hydrationRecovery("disabled").recovery).toContain("dangling");
+    expect(hydrationRecovery("auth-failed").recovery).toContain("human");
   });
 
   it("names the durable half of a partial write, and promises no rollback", async () => {

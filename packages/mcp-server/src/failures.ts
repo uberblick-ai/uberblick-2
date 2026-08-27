@@ -15,18 +15,25 @@
  *   `synced`. A read-only tool's failure says none of the three: inventing them
  *   would be claiming knowledge of a write nobody attempted.
  * - **How to recover.** `recoveryClass` is one of `retry` (this same call,
- *   unchanged, can succeed later), `reread` (read current state and call again
- *   with it) or `manual` (a named repair — another tool, or a restart), and
+ *   unchanged, succeeds once a transient condition passes), `reread` (read
+ *   current state and call again with what it says) or `manual` (nothing the
+ *   caller can repeat helps until something changes: correct the arguments,
+ *   run a named repair tool, fix configuration, or restart the server), and
  *   `recovery` is the sentence saying what to do. A retry that cannot work is
  *   never labelled `retry`: `persistence_failed` is sticky until the process
- *   restarts, so it is `manual`.
+ *   restarts, so it is `manual`, and `doc_not_hydrated` is `retry` only while
+ *   a hub that could still deliver the room is in the picture — see
+ *   {@link hydrationRecovery}.
  *
  * Two classes sit deliberately outside the table.
  *
  * `internal_error` is the unclassified fallback. A handler that threw something
  * nobody mapped cannot honestly claim its write did not land, so it carries the
- * floor — `error` and `message` — and nothing else. Stamping `applied: false`
- * onto it would be the one lie this contract exists to prevent.
+ * floor — `error` and a fixed `message` — and nothing else. Stamping
+ * `applied: false` onto it would be the one lie this contract exists to
+ * prevent, and returning the exception's own text would ship whatever it
+ * happens to hold — a path, a SQL statement, a token — to the caller. The
+ * original goes to the log, on stderr, where an operator reads it.
  *
  * Arguments that do not match a tool's input schema never reach a handler at
  * all: the MCP SDK rejects them at the protocol boundary with its own
@@ -49,6 +56,14 @@ import {
 } from "@uberblick/schema";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
+
+/**
+ * What the caller is told when a handler threw something nobody mapped. Fixed
+ * on purpose — see {@link toFailure}; the exception itself goes to the log.
+ */
+export const INTERNAL_ERROR_MESSAGE =
+  "The tool failed for an unhandled reason. Nothing here says whether anything was written; check sync_status, " +
+  "re-read the document, and see this server's stderr log for the cause.";
 
 /** A tool failure with a stable machine-readable code. */
 export class ToolError extends Error {
@@ -75,6 +90,13 @@ export type RecoveryClass = "retry" | "reread" | "manual";
  * The tools that can change durable state, and therefore the tools whose
  * failures say what happened to the write.
  *
+ * The split is about what the CALLER asked for, which is what a failure has to
+ * report on. A read-only tool may still write something of its own — `get_doc`
+ * appends a usage event to the workspace's `_feedback` document, after the read
+ * has succeeded and with its own errors swallowed, so it can neither fail the
+ * call nor be the write a failure would be describing. Telemetry a caller did
+ * not ask for is not part of the contract it reads.
+ *
  * A hand-kept list on purpose: "does this tool write" is a fact about the tool,
  * not something to infer at runtime. {@link READ_ONLY_TOOLS} holds the other
  * half, and a contract test checks the two together against what the server
@@ -98,7 +120,11 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "rate_doc",
 ]);
 
-/** The tools that only read. Their failures invent no mutation state. */
+/**
+ * The tools the caller asks nothing of but an answer. Their failures invent no
+ * mutation state — see {@link MUTATING_TOOLS} for what "read-only" does and
+ * does not claim.
+ */
 export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "get_doc",
   "list_docs",
@@ -160,12 +186,14 @@ const RECOVERIES: Record<string, Recovery> = {
       "Nothing in this workspace answers to that uuid. Call list_docs or search to find the document — identity " +
       "is the uuid, never the title.",
   },
+  // The default, and the one row a throw site always replaces: whether waiting
+  // can work depends on the hub this replica has, so `requireDoc` derives the
+  // pair from the hub state it is already carrying. See {@link hydrationRecovery}.
   doc_not_hydrated: {
     recoveryClass: "retry",
     guidance:
       "The document is known but its room has not reached this replica yet, and nothing was written. Call again " +
-      "in a moment: sync_status says whether the hub is reachable, and a document that stays unhydrated is " +
-      "waiting on a reconnect or a restart.",
+      "in a moment; sync_status says whether the hub can still deliver it.",
   },
   doc_archived: {
     recoveryClass: "manual",
@@ -183,9 +211,70 @@ const RECOVERIES: Record<string, Recovery> = {
     recoveryClass: "manual",
     guidance:
       "The arguments are each valid but do not add up to a call this tool can make — `message` says which. " +
-      "Repeating them unchanged fails the same way; fix them and call again.",
+      "Repeating them unchanged fails the same way, and no re-read changes that: correct the arguments named in " +
+      "`message` and call again.",
   },
 };
+
+/**
+ * What to do about `doc_not_hydrated`, read from the hub this replica has.
+ *
+ * The room is missing, not lost: it arrives over the hub, or it does not
+ * arrive at all. So the class is a statement about the connection rather than
+ * about the document. `retry` while a hub that could still deliver it is in the
+ * picture — connected, connecting, or down and reconnecting on its own —
+ * because the same call then succeeds unchanged and nothing was written. Where
+ * no hub can deliver it — none configured, a credential the hub refused, a
+ * replica quarantined after a refused log write — waiting is advice that loops,
+ * so it is `manual` and says what a human has to change. In that state the
+ * directory stub stays dangling: an entry pointing at a room this replica will
+ * never receive.
+ */
+export function hydrationRecovery(hubStatus: string): {
+  recoveryClass: RecoveryClass;
+  recovery: string;
+} {
+  const stub =
+    "The document is known from the directory but its room has not reached this replica, and nothing was written. ";
+  switch (hubStatus) {
+    case "disabled":
+      return {
+        recoveryClass: "manual",
+        recovery:
+          `${stub}No hub is configured, so the room cannot arrive at all and this stub stays dangling: ` +
+          "configure the hub (HUB_AUTH_TOKEN, HUB_URL) and restart the MCP server. If the document is gone for " +
+          "good, archive_doc retires the stub — it needs only the directory.",
+      };
+    case "auth-failed":
+      return {
+        recoveryClass: "manual",
+        recovery:
+          `${stub}The hub rejected this replica's credential, so nothing will arrive until a human fixes it — ` +
+          "sync_status carries the reason. Retrying cannot help, and the stub stays dangling meanwhile.",
+      };
+    case "quarantined":
+      return {
+        recoveryClass: "manual",
+        recovery:
+          `${stub}This replica is quarantined after a refused write to the update log and receives nothing ` +
+          "until the process restarts. Restart the MCP server, then read again.",
+      };
+    case "hub-down":
+      return {
+        recoveryClass: "retry",
+        recovery:
+          `${stub}The hub is unreachable and this replica is reconnecting on its own, so the same call succeeds ` +
+          "once it is back. Call again in a moment; sync_status says whether it has returned.",
+      };
+    default:
+      return {
+        recoveryClass: "retry",
+        recovery:
+          `${stub}The hub can still deliver it — the room may be in flight. Call again in a moment; sync_status ` +
+          "says where the connection stands.",
+      };
+  }
+}
 
 /**
  * Every code this server can answer with, the unclassified fallback included.
@@ -197,33 +286,51 @@ export const FAILURE_CODES: readonly string[] = [
   "internal_error",
 ];
 
-/** The floor, in the words an agent reads. Carried by every tool. */
-const FAILURE_FLOOR =
-  "Failures: every failure this tool generates is JSON with a stable `error` code and a human `message`, and — " +
-  "wherever recovery is actionable — a `recoveryClass` of `retry` (this same call can succeed later), `reread` " +
-  "(read current state and call again with it) or `manual` (a named repair: another tool, or a restart), plus a " +
-  "`recovery` sentence saying what to do. Domain detail stays where it was: `stale_block` still carries " +
-  "`currentText` and `currentRev`, `persistence_failed` still names the `room`. `internal_error` is the one code " +
-  "with no class, because a handler that threw something unmapped cannot honestly say what to do about it. " +
-  "Arguments that do not match this schema never reach the tool at all: the MCP layer rejects them with its own " +
+/**
+ * The whole contract, in the words an agent reads — carried ONCE, in the
+ * server's `instructions` (see ./server.ts).
+ *
+ * Repeating a hundred and fifty words on all twenty-three tools cost every
+ * session tens of kilobytes of `tools/list` to say the same thing twenty-three
+ * times. The prose belongs where a client reads it once; the per-tool
+ * descriptions carry {@link failureContract}, which is the machine shape and
+ * nothing else.
+ */
+export const FAILURE_INSTRUCTIONS =
+  "Failures are JSON with a stable `error` code and a human `message`, and — wherever recovery is actionable — a " +
+  "`recoveryClass` and a `recovery` sentence saying what to do. `retry` means this same call succeeds once a " +
+  "transient condition passes; `reread` means read current state and call again with what it says; `manual` means " +
+  "nothing you can repeat helps until something changes — correct the arguments, run the repair tool the sentence " +
+  "names, fix configuration, or restart the server. A retry that cannot work is never labelled `retry`. Domain " +
+  "detail stays with its code: `stale_block` carries `currentText` and `currentRev`, so a stale edit is re-diffed " +
+  "without another read; `persistence_failed` names the `room`. A failure of a WRITING tool also says what became " +
+  "of the write: `applied` (everything it meant to write is durable in this server's update log), `partial` (only " +
+  "some of it is — `completed` names the rooms that are) and `synced`; `applied: false, partial: false` means " +
+  "nothing changed locally, and nothing is ever rolled back — a partial write is finished by following `recovery`. " +
+  "A failure of a reading tool carries none of those three: there was no write to report on. `internal_error` is " +
+  "the one code with no class and no detail — an unmapped crash cannot honestly say what it did — and arguments " +
+  "that do not match a tool's input schema never reach the tool at all: the MCP layer rejects them with its own " +
   "plain-text validation error, and nothing durable changes.";
 
-/** What a failing WRITE additionally owes its caller. */
+/** The machine shape, per tool — one sentence, no prose. */
+const FAILURE_FLOOR =
+  "Failures: JSON with `error`, `message` and, where recovery is actionable, `recoveryClass` " +
+  "(`retry`|`reread`|`manual`) and a `recovery` sentence.";
+
+/** What a failing WRITE additionally names. */
 const MUTATION_FLOOR =
-  "A failure here also says what happened to your write: `applied` (everything this call meant to write is " +
-  "durable in this server's update log), `partial` (only some of it is — `completed` names the rooms that are) " +
-  "and `synced`. `applied: false, partial: false` is the ordinary case and means nothing changed locally. " +
-  "Nothing is ever rolled back: a partial write is finished by following `recovery`, not undone.";
+  " A failure here also carries `applied`, `partial` and `synced`.";
 
 /**
- * The failure paragraphs for one tool's description, ready to append.
+ * The failure line for one tool's description, ready to append.
  *
  * Derived from {@link MUTATING_TOOLS} rather than written per tool, so a
- * mutating tool cannot document the read-only contract by accident.
+ * mutating tool cannot document the read-only contract by accident. The full
+ * contract this abbreviates is in {@link FAILURE_INSTRUCTIONS}.
  */
 export function failureContract(tool: string): string {
   return MUTATING_TOOLS.has(tool)
-    ? `\n\n${FAILURE_FLOOR}\n\n${MUTATION_FLOOR}`
+    ? `\n\n${FAILURE_FLOOR}${MUTATION_FLOOR}`
     : `\n\n${FAILURE_FLOOR}`;
 }
 
@@ -268,17 +375,14 @@ function stamped(
  */
 export function toFailure(tool: string, error: unknown): CallToolResult {
   if (error instanceof PersistenceError) {
-    // Fail-stop: every later call lands here too, until the server is restarted.
-    // The mutation state is spelled out rather than stamped, because this is the
-    // one failure a READ answers with as well — the log, not the tool, is what
-    // failed — and `applied: false` is the true statement in both cases.
+    // Fail-stop: every later call lands here too, until the server is restarted
+    // — reads included, because a replica ahead of its own log may not hand out
+    // what a restart will drop. The mutation state comes from the stamp like
+    // every other code's, so a READ that lands here still reports on no write.
     return stamped(tool, {
       error: "persistence_failed",
       message: error.message,
       room: error.room,
-      applied: false,
-      partial: false,
-      synced: false,
     });
   }
   if (error instanceof StaleBlockError) {
@@ -316,11 +420,12 @@ export function toFailure(tool: string, error: unknown): CallToolResult {
       ...error.detail,
     });
   }
+  // The exception's own text is for the operator, never for the caller: it can
+  // hold an absolute path, a SQL statement, or whatever a dependency put in it.
+  // stderr keeps the original; the client gets a sentence that says as much as
+  // is safe to say.
   log.error("tool call failed", error);
-  return stamped(tool, {
-    error: "internal_error",
-    message: error instanceof Error ? error.message : String(error),
-  });
+  return stamped(tool, { error: "internal_error", message: INTERNAL_ERROR_MESSAGE });
 }
 
 /**

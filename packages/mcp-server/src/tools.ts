@@ -70,7 +70,12 @@ import type {
 } from "@uberblick/schema";
 import { z } from "zod";
 import { registerFeedbackTools, recordDocUsage } from "./feedback-tools.js";
-import { ToolError, failureContract, guarded } from "./failures.js";
+import {
+  ToolError,
+  failureContract,
+  guarded,
+  hydrationRecovery,
+} from "./failures.js";
 import type { Replica, Replicas } from "./replica.js";
 import {
   pinnedUuids,
@@ -348,10 +353,20 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     if (getMeta(replica.doc).uuid !== "") {
       return replica;
     }
+    // Whether waiting can work is a fact about the hub, not about the document:
+    // a room arrives over a connection, so a replica with none is not waiting
+    // for anything. `hydrationRecovery` turns the hub state this failure is
+    // already carrying into the class and the sentence that go with it.
+    const hub = replicas.sync.state();
     throw new ToolError(
       "doc_not_hydrated",
       `Document ${uuid} is known but its room has not synced to this replica yet`,
-      { uuid, inDirectory: stub !== null, hub: replicas.sync.state() },
+      {
+        uuid,
+        inDirectory: stub !== null,
+        hub,
+        ...hydrationRecovery(hub.status),
+      },
     );
   };
 
