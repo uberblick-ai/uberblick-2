@@ -233,7 +233,120 @@ file contains only Claude coordinator machinery and does not restate either.
    work in flight — claimed issues plus unmerged PRs — at 6: the bottleneck is
    the gates, not implementation.
 
-6. **Dispatch.** For each issue to start, follow `AGENTS.md` for the claim,
+6. **Preflight — ground, classify, challenge, recheck.** Runs on every issue
+   selected in step 5, after conflict analysis and *before* the claim. This is
+   the loop's one cheap chance to be wrong: an objection raised here costs a
+   prompt, and the same objection after implementation costs a review wave, a
+   fix-up dispatch and a re-gate.
+
+   **Ground it at a commit.** `git fetch origin main` and record the exact
+   `origin/main` SHA you ground against — every later statement in the
+   preflight is a claim about that commit, not about your memory of the repo.
+   Against it, read what the issue targets: the current behavior, the modules,
+   interfaces, invariants and tests it lives in, related open issues and PRs,
+   and the files the change is likely to touch. Proportional, not exhaustive —
+   enough to fill the table below honestly, and no more. If `main` advances
+   while you are here, refresh only the grounding and the challenge the new
+   commits actually affect; a merge elsewhere in the tree does not invalidate a
+   challenge about this one.
+
+   **Classify from what the grounding found**, never from a package name, a
+   label or a keyword. Four axes, and only these four:
+
+   - **Materiality** — what the change decides. `mechanical`: no behavior or
+     contract choice is being made (a localized typo, routine documentation or
+     maintenance, an obvious isolated correction). `behavioral`: real
+     observable behavior with established patterns in this repo.
+     `architectural`: a public contract, schema, data shape or migration,
+     security/privacy, or concurrency semantics.
+   - **Uncertainty** — `high` when the grounding read left you unable to state
+     the outcome and the invariants it must hold.
+   - **Blast radius** — `wide` for cross-package or cross-repository contracts,
+     or for broad or ambiguous scope.
+   - **Reversibility** — `hard` when the choice is expensive to undo once
+     merged: persisted data, a published contract, a shape other work builds on.
+
+   | Materiality | Uncertainty | Blast radius | Reversibility | Tier | Challengers |
+   |---|---|---|---|---|---|
+   | mechanical | low | local | easy | trivial | 0 |
+   | mechanical | high | local | easy | bounded | 1 |
+   | behavioral | low | local | easy | bounded | 1 |
+   | behavioral | high | local | easy | substantial | 2 |
+   | behavioral | low | wide | easy | substantial | 2 |
+   | behavioral | low | local | hard | substantial | 2 |
+   | architectural | low | local | easy | substantial | 2 |
+
+   Read it as three rules. Substantial when the change is architectural, wide,
+   or hard to undo. Trivial only when it is mechanical, local, easy to undo
+   **and** understood. Everything else is bounded — and `uncertainty: high`
+   then moves the tier one step up, which is what routes a genuinely ambiguous
+   change to two challengers instead of one. `.claude/skills/next-issue/preflight-tier.mjs`
+   is this table in executable form and `packages/cli/test/preflight-tier.test.ts`
+   holds the two together; if you change one, change both.
+
+   Two things the table deliberately cannot see: `Touches`, and any keyword. A
+   change proven mechanical by the grounding read is trivial even in
+   `schema` — a proven fact outranks a package name — and an innocuous-looking
+   change nobody can state the outcome of is not trivial anywhere.
+
+   **Challenge.** A challenger pokes holes; it does not implement, and it does
+   not write code. Each runs in a fresh context that neither authored the issue
+   nor will implement it. For two-challenger cases prefer diverse perspectives
+   — a different model family, harness or approach — and where none is
+   available, two separate fresh contexts satisfy independence; say which you
+   got. The brief asks for risks, questions and alternatives:
+
+   - Is this the real problem, and is the issue's outcome the smallest viable
+     one? What would KISS/YAGNI cut?
+   - Does it split usefully into smaller issues?
+   - Is anything over-prescribed — mechanics stated where an outcome would do?
+   - Does it conflict with current behavior, the decided architecture, existing
+     tests, migrations, contracts, security or concurrency semantics, or work
+     already in flight?
+   - Which edge cases and simpler alternatives does the issue not mention?
+
+   For the trivial tier this is a brief code-grounded self-check instead, at
+   the same commit.
+
+   **Record it once.** One concise issue comment, before implementation, for
+   every one- and two-challenger case: the base SHA, the tier and one line of
+   rationale, how many challengers ran and how they were independent, the
+   material findings with their dispositions (or "none"), and proceed or stop.
+   Never transcripts, never timings, never round-by-round narration — one
+   comment, or the preflight becomes the thing it was meant to prevent. A
+   trivial self-check that found nothing writes no comment at all.
+
+   **Then the lifecycle.** Last thing before handing the issue to step 7,
+   re-read the issue, the current claims and `origin/main`; only one still
+   eligible and still unclaimed goes on to be claimed. Nothing here writes
+   `in-progress` — step 7's claim does, after this gate — so no preflight path
+   can leave that label on an issue nobody is implementing.
+
+   | Preflight result | Outcome | Labels | Claim | Comment |
+   |---|---|---|---|---|
+   | clear, and still eligible at the recheck | dispatch | `+in-progress` | yes | only if a challenger ran or the self-check found something |
+   | contract stale or incorrect, and the evidence corrects it | return-to-coordination | `−ready` | no | yes |
+   | a real product decision only the owner can make | park-needs-decision | `−ready`, `+needs-decision` | no | yes |
+   | claimed by someone else, or no longer eligible | requeue | — | no | no |
+
+   Which stop applies is the difference between evidence and authority. A
+   stale contract, a missing outcome or invariant, or a scope or splitting
+   decision the grounding read can settle goes back to coordination with the
+   evidence: `ready` comes off, the comment says what is wrong, and a corrected
+   body has to pass `.github/ISSUE_SPEC.md` and regain `ready` before any later
+   pickup. Only an unresolved *product* question — one the repository cannot
+   answer — takes `needs-decision`, with concrete options and your
+   recommendation per the spec's exit path.
+
+   **Findings are not requirements.** Material implementation risks and options
+   travel to the implementer in the brief, as options. They are never edited
+   into the issue body's acceptance criteria: an alternative written into the
+   contract becomes a requirement nobody chose, and out-of-scope prescription
+   is exactly what the challenge exists to remove.
+
+7. **Dispatch.** Only issues step 6 returned as *dispatch* reach here; the
+   others are already parked or requeued. For each, follow `AGENTS.md` for the
+   claim,
    implementer brief, worktree, validation, PR, handoff, and notification
    contract. **Announce the work to the user** in your visible output: one or
    two plain sentences on what the issue is and why it is next, plus the direct
@@ -262,7 +375,7 @@ file contains only Claude coordinator machinery and does not restate either.
    one agent only under the sizing exception in `.github/ISSUE_SPEC.md`; claim
    each separately and validate every issue independently.
 
-7. **Report.** End with a short status a human can skim: PRs advanced (which
+8. **Report.** End with a short status a human can skim: PRs advanced (which
    gate), issues dispatched / bounced / parked, what the loop is waiting on.
    Every issue or PR named in the status carries its direct GitHub URL —
    the reader clicks through, never hunts. Until #130 lands, print each
