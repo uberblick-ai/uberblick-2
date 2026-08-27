@@ -61,6 +61,27 @@ function userConfig(box: Sandbox): Record<string, unknown> {
   ) as Record<string, unknown>;
 }
 
+/**
+ * A `claude` on PATH that records having been run.
+ *
+ * `ub init --mcp` prints; it never registers. The only way to see the
+ * difference is with a vendor CLI reachable, so this one exists to be found and
+ * left alone — the assertion is that its record never appears.
+ *
+ * The record is written by the shell's own redirection, not by `touch`: the run
+ * that finds this stub has the stub's directory as its whole PATH, so an
+ * external `touch` could never run and the assertion could never fail.
+ */
+function stubClaude(box: Sandbox): { dir: string; record: string } {
+  const dir = join(box.cwd, "..", "stub-claude");
+  const program = join(dir, "claude");
+  const record = join(dir, "record");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(program, `#!/bin/sh\n: > "${record}"\n`, "utf8");
+  chmodSync(program, 0o755);
+  return { dir, record };
+}
+
 const hasGit = spawnSync("git", ["--version"]).status === 0;
 
 /** A workspace id, as `ub init` generates one: a bare lowercase uuid. */
@@ -422,18 +443,19 @@ describe("ub init", () => {
     expect(declined.stdout).not.toMatch(/ub mcp install/);
     expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
 
-    // Asked for outright, it delegates to `ub mcp install` — with no vendor CLI
-    // reachable, so this is the file-editing path, in the sandbox's own
-    // directory rather than anywhere on the developer's machine.
-    const asked = runUb(["init", "--yes", "--mcp"], box, {
-      PATH: "/nonexistent-for-tests",
-    });
+    // Asked for outright, it delegates to `ub mcp install` print-only — and the
+    // case that matters is a vendor CLI that *is* installed, because an empty
+    // PATH would pass whether the delegation prints or registers. With `claude`
+    // on PATH it must still print the snippet and never run it: registering a
+    // server inside somebody's agent is `ub mcp install`, not a side effect of
+    // a bootstrap. Nothing is written into the sandbox's directory either.
+    const claude = stubClaude(box);
+    const asked = runUb(["init", "--yes", "--mcp"], box, { PATH: claude.dir });
     expect(asked.status).toBe(0);
-    expect(asked.stdout).toMatch(/uberblick registered with claude/);
-    const registered = JSON.parse(
-      readFileSync(join(box.cwd, ".mcp.json"), "utf8"),
-    );
-    expect(registered.mcpServers.uberblick.args).toEqual(["mcp", "serve"]);
+    expect(asked.stdout).toContain('"uberblick"');
+    expect(asked.stderr).toMatch(/--print runs nothing/);
+    expect(existsSync(claude.record)).toBe(false);
+    expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
   });
 
   it("initialises outside a checkout, and names no contributor task there", () => {

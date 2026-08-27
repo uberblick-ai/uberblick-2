@@ -31,7 +31,7 @@
  * what is said about it.
  */
 
-import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
 import {
@@ -46,13 +46,7 @@ import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import type { Scope } from "./mcp-config.js";
-import {
-  DEFAULT_ENTRY,
-  TARGETS,
-  UnusableConfig,
-  inspect,
-  targetFile,
-} from "./mcp-config.js";
+import { DEFAULT_ENTRY, TARGETS, presence, targetFile } from "./mcp-config.js";
 import type { Endpoint, HubReach } from "./probes.js";
 import {
   dialHost,
@@ -479,7 +473,7 @@ async function bindCheck(
 
 // --- MCP wiring --------------------------------------------------------------
 
-/** Every file `ub mcp install` knows how to write, in the order it prefers them. */
+/** Every scope `ub mcp install` can target, in the order it prefers them. */
 const SCOPES: Scope[] = ["project", "user"];
 
 function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
@@ -492,39 +486,40 @@ function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
     for (const scope of SCOPES) {
       const file = targetFile(target, scope, cwd, env);
       looked += 1;
-      let text: string;
-      try {
-        text = readFileSync(file.path, "utf8");
-      } catch {
+      // The same presence probe `ub mcp install` decides with, so the two
+      // commands cannot disagree about what is wired up. Nothing is quoted back
+      // out of a config file — not its contents, and not a parser's complaint
+      // about them: a file that is there and will not read is named by path.
+      const found = presence(file, DEFAULT_ENTRY);
+      if (found === "absent") {
         continue;
       }
-      try {
-        const found = inspect(file.format, text, DEFAULT_ENTRY);
-        if (found.existing !== null) {
-          registered.push(`${target} (${scope}): ${file.path}`);
-          custom = custom || !found.matches;
-        }
-      } catch (error) {
-        // Never the file's own bytes, and never the parser's message: a client
-        // config is exactly where somebody keeps an API token.
-        unusable.push(
-          `${file.path} (${error instanceof UnusableConfig ? error.message : "could not be read"})`,
-        );
+      if (found === "unusable") {
+        unusable.push(file.path);
+        continue;
       }
+      registered.push(`${target} (${scope}): ${file.path}`);
+      custom = custom || found === "foreign";
     }
   }
 
+  // Reported whether or not something else is wired up: a config a command
+  // cannot read is a fact about this machine either way, and "no client
+  // registers uberblick" would be an answer this check does not have.
+  const unread =
+    unusable.length === 0 ? "" : `; could not read ${unusable.join(", ")}`;
   const first = registered[0];
   if (first !== undefined) {
     const note = custom ? ", running a command of its own rather than `ub mcp serve`" : "";
     const more = registered.length > 1 ? ` (and ${registered.length - 1} more)` : "";
-    return pass("mcp", `registered in ${first}${more}${note}`);
+    return pass("mcp", `registered in ${first}${more}${note}${unread}`);
   }
-  const refused = unusable.length === 0 ? "" : `; could not read ${unusable.join(", ")}`;
   return fail(
     "mcp",
-    `no MCP client registers uberblick — looked in ${looked} configs for claude, codex and cursor${refused}`,
-    "wire one up with `ub mcp install [claude|codex|cursor]`",
+    `no MCP client registers uberblick — looked in ${looked} configs for claude, codex and cursor${unread}`,
+    unusable.length === 0
+      ? "wire one up with `ub mcp install [claude|codex|cursor]`"
+      : "repair or move the file named above, then `ub mcp install [claude|codex|cursor]`",
   );
 }
 
@@ -625,7 +620,7 @@ export const DOCTOR_HELP = `usage: ub doctor [--json]
 Check the local stack against its known failure modes — configuration, the
 signing secret and its file mode, the database, whether the hub is reachable
 and agrees with this machine's clock, and the MCP client configs
-\`ub mcp install\` writes. Reads only; it fixes nothing and names what to run
+\`ub mcp install\` targets. Reads only; it fixes nothing and names what to run
 instead.
 
 options:

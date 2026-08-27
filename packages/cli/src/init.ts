@@ -171,8 +171,9 @@ options:
                      eight the web client uses, picked for you)
   --workspace <id>   the workspace to work in, as <uuid> or <slug>-<uuid>
                      (default: a fresh uuid, with the slug asked for)
-  --mcp, --no-mcp    whether to register uberblick with an MCP client — the
-                     question this ends on, answered up front
+  --mcp, --no-mcp    whether to end by printing the MCP client snippet to paste
+                     — the question this ends on, answered up front. It prints;
+                     registering a client is \`ub mcp install\`
   -h, --help         show this help
 
 The signing secret is generated only when none is visible, is written to
@@ -583,16 +584,15 @@ export async function initCommand(
   io.out(report);
 
   if (flags.mcp === true) {
-    // The wiring itself lives in `ub mcp install`; this only delegates to it
-    // with its defaults. A refusal there — an entry somebody else owns, a file
-    // that will not parse — is reported by that command and stays a warning
-    // here: everything `ub init` was asked to settle has been settled already,
-    // and failing a bootstrap over an unrelated config file would be wrong.
-    if ((await installCommand([], io)) !== 0) {
-      io.err(
-        "ub init: no MCP client configuration was written — see above, or run " +
-          "`ub mcp install --print` for the snippet to paste\n",
-      );
+    // The wiring itself lives in `ub mcp install`, and this delegates to it
+    // print-only: `--print` runs nothing, so a bootstrap never reaches for a
+    // vendor CLI and registers a server in somebody's agent as a side effect of
+    // `ub init` — with `claude` on PATH, no flag of it asked for that. What
+    // `--mcp` buys is being shown the snippet and where it goes; running the
+    // vendor is `ub mcp install`, on purpose. A nonzero answer is only a
+    // warning: everything `ub init` was asked to settle is settled already.
+    if ((await installCommand(["--print"], io)) !== 0) {
+      io.err("ub init: no MCP snippet was printed — see above\n");
     }
   }
   return 0;

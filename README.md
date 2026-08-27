@@ -141,37 +141,44 @@ redeploy does not replace the JavaScript a tab already loaded.
 ## The MCP server, as a client sees it
 
 `ub mcp install [target]` wires uberblick into an MCP client, so nobody has to
-hand-edit JSON. It knows `claude`, `codex` and `cursor`; `--project` writes the
+hand-edit JSON. It knows `claude`, `codex` and `cursor`; `--project` means the
 current directory's config and `--user` the per-user one; `--print` emits the
-snippet and writes nothing, which is also the answer for a client it does not
+snippet and runs nothing, which is also the answer for a client it does not
 know:
 
 ```
-ub mcp install claude --project     # this checkout's .mcp.json
-ub mcp install codex --user         # ~/.codex/config.toml
+ub mcp install claude --project     # runs `claude mcp add --scope project`
+ub mcp install codex --user         # runs `codex mcp add`
 ub mcp install cursor --print       # the snippet, on stdout
 ```
 
-Where the vendor ships its own installer — `claude mcp add`, `codex mcp add` for
-its global config — that is what runs, because the vendor knows its own file
-best; otherwise the documented config file is edited directly. A `--workspace`
-pin is the exception and is always written here, because whether a given vendor
-CLI takes an environment flag, and under which spelling, is not something to
-guess at. The report names which of the two happened. Either way the command
-reads the file first, so an unrelated server in it is left alone — byte for
-byte, since both formats are
-spliced as text rather than reparsed and re-emitted — a second run is a no-op
-that says "already installed", and an `uberblick` entry it did not write is
-reported next to what would replace it and left in place unless `--force` says
-otherwise. A file it changes is copied to a timestamped `.bak` beside it first,
-and it is read and written through one descriptor so the copy cannot be of a
-version that has already been replaced. Nothing prompts, so the whole command
-runs unattended.
+**It edits no config file.** Where the vendor ships its own installer —
+`claude mcp add`, `codex mcp add` — that is what runs, because the vendor knows
+its own file best, and the scope and any `--workspace` pin ride on the vendor's
+own flags (`-e KEY=value`, `--env KEY=VALUE`). Codex has no scope flag: which
+file it writes *is* the configuration directory it is handed, so `--project`
+points it at this checkout's `.codex`. Cursor, which ships no `mcp add`, gets
+the snippet and the path to paste it into, on exit 0, with nothing written — so
+does a target whose vendor CLI is not installed. A client `ub` has never heard of
+gets the same snippet and that client's own MCP configuration as the
+destination: there is no path to invent for a client nobody has described.
+Before it delegates, the command reads the target file for one answer: an entry
+that is already ours is a no-op that says "already installed", an entry somebody
+else wrote under the name `uberblick` is left exactly as it was with the snippet
+printed instead, a file that is there and cannot be read is refused by path —
+nothing is handed to a vendor CLI over a file whose contents nobody knows — and
+anything else is added.
+There is no `--force`, no backup and no rewrite — the file this command does not
+write is the file it cannot damage. Nothing prompts, so the whole command runs
+unattended.
 
-Reports name files, never their contents: a conflicting entry is shown with its
-command and the *names* of anything else it sets, with the values masked, and a
-file that will not parse is reported by path alone. Config files are where API
-tokens live.
+Reports name files, never their contents: a conflicting entry is reported by
+path with nothing of it quoted back, and a vendor CLI's own output is not
+relayed, because a client's diagnostics quote the config they just read. Config
+files are where API tokens live. The vendor is spawned without uberblick's own
+variables in its environment — no `HUB_*`, no `UBERBLICK_*`, no `WORKSPACE_ID` —
+because it has no use for them and `ub` is habitually run with a secret
+exported; the pin it does need rides in its argv.
 
 The installed line is always `ub mcp serve`. Which hub and which credential
 apply is resolved by `ub` — a client config that pinned either would be a second
@@ -192,17 +199,17 @@ and nothing else has to be told. Without `--workspace` the entry stays unpinned
 and follows this machine's default, which is the right answer for a repository
 that has no workspace of its own.
 
-Re-running with a different `--workspace` re-pins the entry in place, backing
-the file up first — the flag is the permission, so there is no `--force` to
-remember. It does not work in reverse: an install naming no `--workspace` leaves
-an existing pin alone rather than dropping it, because a repository quietly
-moved to another corpus is exactly what the pin is there to prevent.
+Re-pinning an entry that already exists is not this command's job any more: an
+entry pinned to another workspace is not the one it would register, so it is
+reported and the snippet printed, and the change is made in the client's own
+config or with the vendor's own command. That cuts both ways, which is the
+point — a repository quietly moved to another corpus is exactly what the pin is
+there to prevent.
 
 `.mcp.json` in this checkout is exactly that file, and it is generated rather
-than hand-maintained — `ub mcp install claude --project` writes it, and a test
-asserts the committed bytes are what doing so produces. It is deliberately
-unpinned: this repository works in whatever workspace `ub workspace use` last
-named.
+than hand-maintained — it is what `ub mcp install claude --print` emits, and a
+test asserts the committed bytes are that snippet. It is deliberately unpinned:
+this repository works in whatever workspace `ub workspace use` last named.
 
 For a standalone smoke test, `mise run mcp` runs the same server in the
 foreground.
@@ -226,9 +233,10 @@ checkout:
 ub mcp install claude --project --workspace ablauf-$(uuidgen | tr A-Z a-z)
 ```
 
-That writes `WORKSPACE_ID` into the `uberblick` entry of this directory's
-`.mcp.json`, and every agent session started here spawns through it. Nothing
-else in the entry changes and nothing else is copied into it.
+That registers `WORKSPACE_ID` on the `uberblick` entry of this directory's
+`.mcp.json` — through `claude mcp add -e`, which is the vendor's own way of
+saying it — and every agent session started here spawns through that entry.
+Nothing else is in it, and nothing else is copied into it.
 
 To change this *machine's* default instead — what an unpinned entry, `ub status`
 and the mise tasks all resolve to — use `ub workspace use <id>`. It writes your
@@ -300,10 +308,11 @@ Inside a checkout prefer `mise run init` over calling `ub init` directly: the
 task wraps it in `fnox exec`, which is how a decryptable secret becomes visible
 to it in the first place. Every question `ub init` asks has a flag (`--name`,
 `--color`, `--workspace`, `--yes`), and a non-interactive stdin takes the
-defaults rather than blocking, so it needs no TTY. `--mcp` runs `ub mcp install`
-with its defaults when `ub init` finishes, and `--no-mcp` says not to mention it;
-a refusal there is a warning rather than a failed bootstrap, because everything
-`ub init` was asked to settle has been settled by then.
+defaults rather than blocking, so it needs no TTY. `--mcp` ends by printing what
+`ub mcp install --print` prints — the snippet and the file it goes in — and
+`--no-mcp` says not to mention it. A bootstrap never registers a server with
+somebody's agent on its own, even with a vendor CLI installed: running
+`claude mcp add` is `ub mcp install`, asked for on purpose.
 
 Configuration is JSON and every layer is optional — absent configuration is a
 default, never an error — with one exception: the **workspace** has no default.
@@ -455,7 +464,7 @@ supported only on a private network until accounts land (#84). There is no
 the server keeps its environment-only contract — no flags, no config file — and
 a client's spawn line never has to change again when internals move. This
 checkout's `.mcp.json` is the one place that still names a spawn of its own,
-for the reasons given above, and `ub mcp install` generates it.
+for the reasons given above, and `ub mcp install claude --print` emits it.
 
 ## The first-user proof
 
