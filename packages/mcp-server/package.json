@@ -16,7 +16,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@hocuspocus/provider": "^4.6.0",
+    "@hocuspocus/provider": "4.6.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@uberblick/hub": "workspace:*",
     "@uberblick/schema": "workspace:*",

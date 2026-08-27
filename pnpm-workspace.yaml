@@ -25,3 +25,13 @@ overrides:
   yjs: 13.6.32
   y-protocols: 1.0.7
   y-prosemirror: 1.3.7
+
+  # Not a CRDT instance concern: `@hocuspocus/common` is the one Hocuspocus
+  # package of the three no manifest here names, and `@hocuspocus/server` and
+  # `@hocuspocus/provider` both ask for it as `^4.6.0` — a range the workspace
+  # cannot pin anywhere else. The decision to keep Hocuspocus (#394) is a
+  # decision to keep exactly 4.6.0: the hub's auth boundary reads library
+  # internals, so a patch bump has to be a reviewed act rather than a resolution.
+  # `packages/hub/test/hocuspocus-pins.test.ts` fails if any of the three
+  # regains a range; the seams the pin protects are characterized next to it.
+  "@hocuspocus/common": 4.6.0
