@@ -5,8 +5,10 @@ import {
   InvalidRoomError,
   InvalidWorkspaceIdError,
   SIDEBAR_SUFFIX,
+  assertCanonicalRoom,
   directoryRoom,
   feedbackRoom,
+  isCanonicalRoom,
   parseRoom,
   parseWorkspaceId,
   roomForDoc,
@@ -111,5 +113,76 @@ describe("room names", () => {
     expect(() => roomForDoc("a/b", UUID)).toThrow(InvalidWorkspaceIdError);
     expect(() => roomForDoc(WORKSPACE, "")).toThrow(InvalidRoomError);
     expect(() => roomForDoc(WORKSPACE, "a/b")).toThrow(InvalidRoomError);
+  });
+});
+
+/**
+ * The closed grammar, which lives *beside* `parseRoom` rather than inside it.
+ *
+ * The hub parses a room name on every authentication, so a `parseRoom` that
+ * began refusing a non-canonical document segment would be the enforcement
+ * change itself — landing with no flag, on whatever deploy picked it up, with
+ * no operator present. These tests hold the two halves apart.
+ */
+describe("the canonical room grammar", () => {
+  // Hex letters, so upper-casing it actually changes the string.
+  const DOC = "abcdef01-2345-4678-89ab-cdef01234567";
+
+  it("leaves parseRoom structural: a non-canonical document segment still parses", () => {
+    // The one test that must exist: proof this step did not smuggle in the
+    // enforcement change.
+    expect(parseRoom(`${WORKSPACE}/notauuid`)).toEqual({
+      workspaceId: WORKSPACE,
+      uuid: "notauuid",
+      isDirectory: false,
+    });
+    // And the validator is the thing that refuses it.
+    expect(isCanonicalRoom(`${WORKSPACE}/notauuid`)).toBe(false);
+  });
+
+  it("accepts a document uuid and every reserved name", () => {
+    const accepted: [label: string, room: string][] = [
+      ["a document uuid", `${WORKSPACE}/${DOC}`],
+      ["the directory", `${WORKSPACE}/${DIRECTORY_SUFFIX}`],
+      ["the sidebar", `${WORKSPACE}/${SIDEBAR_SUFFIX}`],
+      ["the feedback doc", `${WORKSPACE}/${FEEDBACK_SUFFIX}`],
+      // Reserved, and deliberately not built: nothing creates a `_settings`
+      // document (#177). It is in the grammar so that building it later is not
+      // a change to the grammar the hub authenticates against.
+      ["the reserved settings slot", `${WORKSPACE}/_settings`],
+    ];
+    for (const [label, room] of accepted) {
+      expect(isCanonicalRoom(room), label).toBe(true);
+      expect(() => assertCanonicalRoom(room), label).not.toThrow();
+    }
+  });
+
+  it("rejects anything else the structural parse would have let through", () => {
+    const rejected: [label: string, room: string][] = [
+      ["an arbitrary word", `${WORKSPACE}/notauuid`],
+      ["a reserved-looking name nobody reserved", `${WORKSPACE}/_admin`],
+      ["a path with an extra segment", `${WORKSPACE}/${DOC}/extra`],
+      ["an empty document segment", `${WORKSPACE}/`],
+      // One case rule for both segments (#196): the workspace segment has
+      // always been lowercase-only, and room names are case-sensitive keys, so
+      // a shouted uuid would be a second room holding one document.
+      ["an upper-cased document uuid", `${WORKSPACE}/${DOC.toUpperCase()}`],
+      ["a name that carries no workspace", DOC],
+      ["a decorated workspace segment", `${DECORATED}/${DOC}`],
+      ["a workspace segment that is not a workspace id", `main/${DOC}`],
+    ];
+    for (const [label, room] of rejected) {
+      expect(isCanonicalRoom(room), label).toBe(false);
+      expect(() => assertCanonicalRoom(room), label).toThrow();
+    }
+  });
+
+  it("names the offending document segment when it refuses one", () => {
+    expect(() => assertCanonicalRoom(`${WORKSPACE}/notauuid`)).toThrow(
+      InvalidRoomError,
+    );
+    expect(() => assertCanonicalRoom(`${WORKSPACE}/notauuid`)).toThrow(
+      /"notauuid"/,
+    );
   });
 });
