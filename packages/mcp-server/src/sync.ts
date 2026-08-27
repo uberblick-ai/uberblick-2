@@ -7,7 +7,7 @@
  * bounded settle, and a hub that is down, unreachable or refusing the token
  * changes no tool's answer except `sync_status`.
  *
- * Three decisions worth keeping:
+ * Four decisions worth keeping:
  *
  * - **One shared websocket for every room.** `HocuspocusProviderWebsocket` is
  *   created once and every per-room `HocuspocusProvider` attaches to it. A
@@ -23,6 +23,10 @@
  *   a configuration error a human must fix; an unreachable hub resolves itself.
  *   {@link HubSync.state} keeps them distinct, and every mutating tool reports
  *   it, because `{applied, synced}` without a reason is not actionable.
+ * - **A connection the hub has disowned is rebuilt, not kept.** A hub closes a
+ *   room, or refuses a token, without closing the socket underneath — so the
+ *   socket outlives the hub that answered on it and nothing re-handshakes.
+ *   {@link MAX_REBUILDS} is why, and how far it goes.
  */
 
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
@@ -68,6 +72,25 @@ export interface HubState {
  */
 const AUTH_REJECTED = "authentication rejected by hub";
 
+/**
+ * How many times a connection the hub has disowned is rebuilt before the
+ * answer is that the hub, not the socket, is the problem.
+ *
+ * A hub closes a room — its shutdown does exactly that, once per room per
+ * client, with `4205 Reset Connection` — without closing the websocket
+ * underneath it. Nothing on that socket ever offers a token again, so the room
+ * is left unauthenticated and unsynced while {@link HubSync.state} still calls
+ * the socket connected, and a hub that restarts on the same address is a
+ * different process the old socket cannot reach at all. Only a new connection
+ * re-handshakes every room, so a disowned one is dropped and dialled again.
+ *
+ * Bounded, because the same signal is what a hub that refuses this token sends:
+ * three attempts cover a restart (the first one lands as soon as the hub is
+ * back), and a hub that keeps refusing is a configuration error that
+ * `auth-failed` should state rather than bury under reconnects.
+ */
+const MAX_REBUILDS = 3;
+
 export interface AttachOptions {
   room: string;
   doc: Y.Doc;
@@ -110,6 +133,18 @@ export class HubSync {
    */
   private authRejected = false;
 
+  /** The socket's own first retry delay, reused by {@link rebuild}. */
+  private readonly reconnectDelayMs: number;
+
+  /** Rebuilt connections since the last successful handshake. See {@link MAX_REBUILDS}. */
+  private rebuilds = 0;
+
+  /** The rebuild waiting out its backoff — every room's close shares one. */
+  private rebuildTimer: NodeJS.Timeout | null = null;
+
+  /** True between a rebuild's disconnect and the reconnect it is waiting for. */
+  private rebuilding = false;
+
   /** Set by {@link quarantine}: this process may no longer publish anything. */
   private quarantined = false;
 
@@ -127,6 +162,12 @@ export class HubSync {
     this.config = config;
     this.onConnected = onConnected;
     this.enabled = config.authSecret !== null;
+    // A local hub restart should be picked up in seconds, not minutes: the
+    // default backoff climbs to 30s, which would strand an offline-created doc
+    // long after the hub is back. It is the socket's first retry delay — and
+    // its `minDelay`, the retry library's floor, which must not exceed that
+    // delay or the cap — and the first delay a rebuild waits out.
+    this.reconnectDelayMs = Math.min(250, config.reconnectMaxDelayMs);
 
     if (!this.enabled) {
       log.warn(
@@ -135,16 +176,10 @@ export class HubSync {
       return;
     }
 
-    // A local hub restart should be picked up in seconds, not minutes: the
-    // default backoff climbs to 30s, which would strand an offline-created doc
-    // long after the hub is back. `minDelay` is the retry library's floor and
-    // must not exceed the first delay or the cap.
-    const retryDelay = Math.min(250, config.reconnectMaxDelayMs);
-
     this.socket = new HocuspocusProviderWebsocket({
       url: config.hubUrl,
-      delay: retryDelay,
-      minDelay: retryDelay,
+      delay: this.reconnectDelayMs,
+      minDelay: this.reconnectDelayMs,
       factor: 2,
       maxDelay: config.reconnectMaxDelayMs,
       jitter: false,
@@ -154,8 +189,19 @@ export class HubSync {
         if (status === "connected") {
           this.sawFailure = false;
           this.onConnected();
-        } else if (previous === "connected") {
+          return;
+        }
+        if (previous === "connected") {
           this.connectingSince = Date.now();
+        }
+        // `disconnect()` stops the socket retrying, and `connect()` is a no-op
+        // until the close has actually landed — so a rebuild dials from here,
+        // where the socket has just said it is down, rather than guessing when.
+        if (status === "disconnected" && this.rebuilding) {
+          this.rebuilding = false;
+          void this.socket?.connect().catch(() => {
+            // The socket retries a failed dial forever; nothing here to report.
+          });
         }
       },
       onClose: () => {
@@ -187,6 +233,49 @@ export class HubSync {
   }
 
   /**
+   * Drop this socket and dial again, on the reconnect backoff.
+   *
+   * Called when the hub disowns a room on a socket it leaves open — a close it
+   * sent, or a token it refused. See {@link MAX_REBUILDS} for why a new
+   * connection is the only thing that recovers from either.
+   *
+   * One rebuild per backoff window, because a hub shutdown closes every room:
+   * the first close schedules it and the rest are already covered.
+   */
+  private rebuild(): void {
+    if (
+      this.socket === null ||
+      this.destroyed ||
+      this.quarantined ||
+      this.rebuildTimer !== null ||
+      this.rebuilding ||
+      this.socketStatus !== "connected" ||
+      this.rebuilds >= MAX_REBUILDS
+    ) {
+      return;
+    }
+
+    const delay = Math.min(
+      this.reconnectDelayMs * 2 ** this.rebuilds,
+      this.config.reconnectMaxDelayMs,
+    );
+    this.rebuilds += 1;
+    this.rebuildTimer = setTimeout(() => {
+      this.rebuildTimer = null;
+      // A socket that went down on its own in the meantime is already retrying.
+      if (
+        this.destroyed ||
+        this.quarantined ||
+        this.socketStatus !== "connected"
+      ) {
+        return;
+      }
+      this.rebuilding = true;
+      this.socket?.disconnect();
+    }, delay);
+  }
+
+  /**
    * Join a room, or do nothing when sync is disabled or the room is already
    * attached. Never throws and never waits: the provider connects, retries and
    * syncs in the background.
@@ -209,6 +298,7 @@ export class HubSync {
       token: () => this.token(),
       onAuthenticated: () => {
         this.authRejected = false;
+        this.rebuilds = 0;
       },
       onAuthenticationFailed: () => {
         // Distinct from an unreachable hub: a human has to fix the secret. The
@@ -217,6 +307,17 @@ export class HubSync {
         // state renders it. See AUTH_REJECTED.
         this.authRejected = true;
         log.error("hub rejected the token", { room });
+        // A hub on its way out refuses the room it is unloading, so a refusal
+        // is not proof the secret is wrong. The rebuild offers a fresh token on
+        // a fresh connection; `auth-failed` stands until one is accepted, so a
+        // secret that really is wrong is never masked, only retried.
+        this.rebuild();
+      },
+      onClose: () => {
+        // Fires for the socket going away — which retries itself — and for a
+        // room the hub closed on a socket that stays open, which does not. See
+        // MAX_REBUILDS; `rebuild` ignores the first case.
+        this.rebuild();
       },
     });
     // A provider given a shared socket does not attach itself — it only
@@ -389,6 +490,10 @@ export class HubSync {
       return;
     }
     this.destroyed = true;
+    if (this.rebuildTimer !== null) {
+      clearTimeout(this.rebuildTimer);
+      this.rebuildTimer = null;
+    }
     for (const provider of this.providers.values()) {
       provider.destroy();
     }
