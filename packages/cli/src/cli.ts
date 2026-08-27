@@ -60,10 +60,9 @@ init options:
 
 mcp install options:
   target            claude, codex or cursor (default claude)
-  --project         write this directory's config (the default)
-  --user            write the per-user config
-  --print           print the snippet to paste; write nothing
-  --force           replace an existing "uberblick" entry, backing the file up
+  --project         this directory's config (the default)
+  --user            the per-user config
+  --print           print the snippet to paste; run nothing
   --workspace <id>  pin the entry to this workspace, as WORKSPACE_ID
   --name <label>    pin a second entry called "uberblick-<label>" instead of
                     the primary one; needs --workspace

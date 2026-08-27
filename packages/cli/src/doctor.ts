@@ -31,7 +31,7 @@
  * what is said about it.
  */
 
-import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
 import {
@@ -46,13 +46,7 @@ import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import type { Scope } from "./mcp-config.js";
-import {
-  DEFAULT_ENTRY,
-  TARGETS,
-  UnusableConfig,
-  inspect,
-  targetFile,
-} from "./mcp-config.js";
+import { DEFAULT_ENTRY, TARGETS, presence, targetFile } from "./mcp-config.js";
 import type { Endpoint, HubReach } from "./probes.js";
 import {
   dialHost,
@@ -484,7 +478,6 @@ const SCOPES: Scope[] = ["project", "user"];
 
 function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
   const registered: string[] = [];
-  const unusable: string[] = [];
   let looked = 0;
   let custom = false;
 
@@ -492,25 +485,15 @@ function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
     for (const scope of SCOPES) {
       const file = targetFile(target, scope, cwd, env);
       looked += 1;
-      let text: string;
-      try {
-        text = readFileSync(file.path, "utf8");
-      } catch {
+      // The same presence probe `ub mcp install` decides with, so the two
+      // commands cannot disagree about what is wired up. A file that will not
+      // parse registers nothing, and nothing is quoted back out of one either.
+      const found = presence(file, DEFAULT_ENTRY);
+      if (found === "absent") {
         continue;
       }
-      try {
-        const found = inspect(file.format, text, DEFAULT_ENTRY);
-        if (found.existing !== null) {
-          registered.push(`${target} (${scope}): ${file.path}`);
-          custom = custom || !found.matches;
-        }
-      } catch (error) {
-        // Never the file's own bytes, and never the parser's message: a client
-        // config is exactly where somebody keeps an API token.
-        unusable.push(
-          `${file.path} (${error instanceof UnusableConfig ? error.message : "could not be read"})`,
-        );
-      }
+      registered.push(`${target} (${scope}): ${file.path}`);
+      custom = custom || found === "foreign";
     }
   }
 
@@ -520,10 +503,9 @@ function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
     const more = registered.length > 1 ? ` (and ${registered.length - 1} more)` : "";
     return pass("mcp", `registered in ${first}${more}${note}`);
   }
-  const refused = unusable.length === 0 ? "" : `; could not read ${unusable.join(", ")}`;
   return fail(
     "mcp",
-    `no MCP client registers uberblick — looked in ${looked} configs for claude, codex and cursor${refused}`,
+    `no MCP client registers uberblick — looked in ${looked} configs for claude, codex and cursor`,
     "wire one up with `ub mcp install [claude|codex|cursor]`",
   );
 }

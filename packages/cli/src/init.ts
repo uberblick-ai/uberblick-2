@@ -584,14 +584,14 @@ export async function initCommand(
 
   if (flags.mcp === true) {
     // The wiring itself lives in `ub mcp install`; this only delegates to it
-    // with its defaults. A refusal there — an entry somebody else owns, a file
-    // that will not parse — is reported by that command and stays a warning
-    // here: everything `ub init` was asked to settle has been settled already,
-    // and failing a bootstrap over an unrelated config file would be wrong.
+    // with its defaults. That command prints the snippet and exits 0 whenever
+    // it cannot run a vendor CLI, so the only nonzero case left is a refusal —
+    // an entry somebody else owns — and that stays a warning here: everything
+    // `ub init` was asked to settle has been settled already, and failing a
+    // bootstrap over an unrelated config file would be wrong.
     if ((await installCommand([], io)) !== 0) {
       io.err(
-        "ub init: no MCP client configuration was written — see above, or run " +
-          "`ub mcp install --print` for the snippet to paste\n",
+        "ub init: uberblick was not registered with an MCP client — see above\n",
       );
     }
   }

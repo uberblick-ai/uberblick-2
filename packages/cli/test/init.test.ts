@@ -423,17 +423,16 @@ describe("ub init", () => {
     expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
 
     // Asked for outright, it delegates to `ub mcp install` — with no vendor CLI
-    // reachable, so this is the file-editing path, in the sandbox's own
-    // directory rather than anywhere on the developer's machine.
+    // reachable, so that command prints the snippet to paste instead of wiring
+    // anything up, and `ub init` still succeeds. Nothing is written into the
+    // sandbox's directory, or anywhere on the developer's machine.
     const asked = runUb(["init", "--yes", "--mcp"], box, {
       PATH: "/nonexistent-for-tests",
     });
     expect(asked.status).toBe(0);
-    expect(asked.stdout).toMatch(/uberblick registered with claude/);
-    const registered = JSON.parse(
-      readFileSync(join(box.cwd, ".mcp.json"), "utf8"),
-    );
-    expect(registered.mcpServers.uberblick.args).toEqual(["mcp", "serve"]);
+    expect(asked.stderr).toMatch(/`claude` is not installed/);
+    expect(asked.stdout).toContain('"uberblick"');
+    expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
   });
 
   it("initialises outside a checkout, and names no contributor task there", () => {

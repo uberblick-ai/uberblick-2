@@ -55,15 +55,6 @@ export function describeFsError(error: unknown): string {
   return `it could not be opened${errno(error)}`;
 }
 
-/**
- * ELOOP is what `O_NOFOLLOW` reports for a symlink. It is worth its own message
- * everywhere it can happen: "permission denied" and "you have a symlink here"
- * lead to completely different fixes.
- */
-export function isSymlinkRefusal(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException).code === "ELOOP";
-}
-
 /** What a path holds, as far as this module is willing to write to it. */
 export type Target =
   | { kind: "absent" }
@@ -85,7 +76,10 @@ export function classify(path: string): Target {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return { kind: "absent" };
     }
-    if (isSymlinkRefusal(error)) {
+    // ELOOP is what `O_NOFOLLOW` reports for a symlink, and it earns its own
+    // message: "permission denied" and "you have a symlink here" lead to
+    // completely different fixes.
+    if ((error as NodeJS.ErrnoException).code === "ELOOP") {
       return { kind: "refused", because: "it is a symbolic link" };
     }
     return { kind: "refused", because: describeFsError(error) };
