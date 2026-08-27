@@ -30,6 +30,7 @@ import {
 import type { ReactElement } from "react";
 import { DocChrome, DocMetaLine } from "../src/ui/DocChrome.js";
 import { usePresence } from "../src/ui/hooks.js";
+import type { HubEndpoint } from "../src/config.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 /** The workspace these stub room keys sit in. A workspace id is a uuid. */
@@ -39,6 +40,12 @@ const DOC_UUID = "9f3c1a2b-0000-4000-8000-0123456789ab";
 
 /** The foreign client id standing in for an agent session. */
 const AGENT_CLIENT = 424_242;
+
+/** The hub the shell resolved — never an address the chrome knows by itself. */
+const ENDPOINT: HubEndpoint = {
+  url: "wss://hub.example/ws",
+  source: "document",
+};
 
 interface Fixture {
   ydoc: Y.Doc;
@@ -114,13 +121,20 @@ function publishAgentCursor(fix: Fixture, blockIndex: number): void {
  * assertion below still exercises the live path, because this reading is the
  * same observer over the same awareness map.
  */
-function Chrome({ fix }: { fix: Fixture }): ReactElement {
+function Chrome({
+  fix,
+  endpoint = ENDPOINT,
+}: {
+  fix: Fixture;
+  endpoint?: HubEndpoint | null;
+}): ReactElement {
   const presence = usePresence(fix.connection);
   return (
     <>
       <DocChrome
         connection={fix.connection}
         presence={presence}
+        endpoint={endpoint}
         meta={getMeta(fix.ydoc)}
         pinned={false}
         onTogglePin={null}
@@ -140,13 +154,16 @@ function Chrome({ fix }: { fix: Fixture }): ReactElement {
   );
 }
 
-function mount(fix: Fixture): { host: HTMLElement; root: Root } {
+function mount(
+  fix: Fixture,
+  endpoint: HubEndpoint | null = ENDPOINT,
+): { host: HTMLElement; root: Root } {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  act(() => root.render(<Chrome fix={fix} />));
+  act(() => root.render(<Chrome fix={fix} endpoint={endpoint} />));
   // Past every settle window, so the connection pill shows what a reader sees
   // rather than the "offline" every mount starts from.
   act(() => void vi.advanceTimersByTime(5_000));
@@ -273,6 +290,68 @@ describe("the doc chrome reads the document, the awareness and the status", () =
     try {
       expect(text(host, ".ub-pill-offline")).toBe("offline");
       expect(host.querySelector(".ub-pill-offline .ub-dot-off")).not.toBeNull();
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
+  /**
+   * #362: "synced" is not a status without "which hub". One machine
+   * legitimately runs several — a dev island and a promoted remote — and two
+   * tabs of one workspace can each be perfectly synced to a different world.
+   * The pill is what a reader glances at, so the endpoint has to be reachable
+   * from it without opening the panel: hover for a pointer, the accessible
+   * name for everyone else.
+   */
+  it("carries the hub and its source on the pill, without opening the panel", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    const { host, root } = mount(fix);
+    try {
+      const pill = host.querySelector(".ub-sync-toggle");
+      expect(pill?.getAttribute("title")).toBe(
+        "Sync details — hub wss://hub.example/ws (served /uberblick-config.json)",
+      );
+      // The state word stays inside the accessible name — the endpoint is
+      // added to it, not substituted for it.
+      expect(pill?.getAttribute("aria-label")).toBe(
+        "Sync details — synced, hub wss://hub.example/ws (served /uberblick-config.json)",
+      );
+      // Still just the handle: naming the hub must not open anything.
+      expect(pill?.getAttribute("aria-expanded")).toBe("false");
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("names the compiled fallback as one, since that is how a tab lands wrong", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    const { host, root } = mount(fix, {
+      url: "ws://localhost:1234",
+      source: "define",
+    });
+    try {
+      expect(host.querySelector(".ub-sync-toggle")?.getAttribute("title")).toBe(
+        "Sync details — hub ws://localhost:1234 (compiled default, /uberblick-config.json not used)",
+      );
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("says nothing about the hub while the endpoint is still resolving", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    const { host, root } = mount(fix, null);
+    try {
+      // A plausible guess is the one answer this must not give.
+      expect(host.querySelector(".ub-sync-toggle")?.getAttribute("title")).toBe(
+        "Sync details",
+      );
     } finally {
       act(() => root.unmount());
       host.remove();

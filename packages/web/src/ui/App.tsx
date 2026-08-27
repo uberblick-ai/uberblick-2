@@ -21,7 +21,7 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
-import { configuredWorkspaces, hubUrl } from "../config.js";
+import { configuredWorkspaces, hubEndpoint } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
 import { watchDocumentStub } from "../collab/directory-stub.js";
 import { randomIdentity } from "../collab/identity.js";
@@ -212,6 +212,12 @@ export function App(): ReactElement {
   // re-renders this component with them.
   const hubReady = useHubEndpoint();
   const configured = hubReady ? configuredWorkspaces() : [];
+  /**
+   * Which hub every "synced" in this window is about (#362) — read once here
+   * and handed to both surfaces that assert sync state, so the pill's hover and
+   * the panel's rows can never name different hubs.
+   */
+  const endpoint = hubReady ? hubEndpoint() : null;
   /** The one that answers `/`, the address that names no workspace. */
   const defaultWorkspace = configured[0] ?? null;
   const route = parseRoute(path, defaultWorkspace);
@@ -547,6 +553,7 @@ export function App(): ReactElement {
         <DocChrome
           connection={chromeRoom}
           presence={presence}
+          endpoint={endpoint}
           meta={meta}
           threads={threads}
           pinned={pinned}
@@ -635,7 +642,7 @@ export function App(): ReactElement {
           <SyncPanel
             connection={chromeRoom}
             presence={presence}
-            endpoint={hubReady ? hubUrl() : null}
+            endpoint={endpoint}
             onClose={closeSync}
           />
         )}
