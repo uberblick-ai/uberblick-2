@@ -31,6 +31,20 @@ HUB_DB_PATH = "{{config_root}}/packages/hub/data/hub.sqlite"
 # distribution is a separate concern.
 _.path = ["{{config_root}}/node_modules/.bin"]
 
+# The contributor quick-start, once per checkout entry. `enter` fires when this
+# config becomes active, not on every `cd` inside it, and only for a shell with
+# `mise activate` — shims alone never run hooks. The script decides whether to
+# say anything at all; see its header.
+[hooks]
+enter = { run = 'sh "{{config_root}}/scripts/mise-welcome.sh"' }
+
+[tasks.welcome]
+description = "Show the contributor quick-start"
+# `quiet` keeps mise's own "[welcome] $ sh ..." banner off the output, so the
+# hook and the task print the same thing.
+quiet = true
+run = 'sh "{{config_root}}/scripts/mise-welcome.sh"'
+
 [tasks.setup]
 description = "Fresh checkout to running: pinned toolchain, frozen dependencies, then `ub init`"
 # The fresh-checkout entry point, and a superset of `ub init` rather than a
