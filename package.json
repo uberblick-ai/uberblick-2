@@ -12,7 +12,7 @@
     "lint": "biome lint --error-on-warnings .",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test && pnpm run test:coordinator-skill",
-    "test:coordinator-skill": "if [ -f .claude/skills/next-issue/preflight-tier.test.mjs ]; then node --test .claude/skills/next-issue/preflight-tier.test.mjs; else echo 'skipped: .claude/skills/next-issue is absent from this checkout, so the preflight drift guard cannot run here'; fi"
+    "test:coordinator-skill": "if [ -d .claude/skills/next-issue ]; then node --test .claude/skills/next-issue/preflight-tier.test.mjs; else echo 'skipped: .claude/skills/next-issue is absent from this checkout, so the preflight drift guard cannot run here'; fi"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.9",
