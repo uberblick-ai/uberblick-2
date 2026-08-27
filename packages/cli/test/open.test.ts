@@ -183,7 +183,8 @@ async function open(
     });
   } catch (reason) {
     child.kill("SIGKILL");
-    throw new Error(`${String(reason)}:\n${stdout}${stderr}`);
+    const said = reason instanceof Error ? reason.message : String(reason);
+    throw new Error(`${said}:\n${stdout}${stderr}`);
   }
 
   const url = BANNER.exec(stdout)?.[1];
