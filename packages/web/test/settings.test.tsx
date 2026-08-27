@@ -80,7 +80,10 @@ function openSettings(): View {
   document.body.appendChild(host);
   const root = createRoot(host);
   const close = vi.fn();
-  act(() => root.render(<SettingsDialog onClose={close} />));
+  // No workspace: this file is about Connections and the dialog's own chrome.
+  // The Storage section is `forget.test.tsx`, and with no `indexedDB.databases`
+  // in jsdom it renders as the "cannot list" notice and adds no controls here.
+  act(() => root.render(<SettingsDialog workspace={null} onClose={close} />));
   return {
     host,
     root,
