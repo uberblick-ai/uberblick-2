@@ -287,6 +287,23 @@ it("refuses a template that carries no description", () => {
   );
 
   expect(() => readSeedDocs(stripped)).toThrow(/description/);
+
+  // Quoted padding is the one spelling the schema's scalar reader hands back
+  // whole, so the refusal has to measure the description rather than the
+  // whitespace around it — the same discipline `create_doc` applies.
+  const blank = join(sandbox().cwd, "blank-description");
+  mkdirSync(blank, { recursive: true });
+  writeFileSync(
+    join(blank, file),
+    source
+      .split("\n")
+      .map((line) =>
+        line.startsWith("description:") ? 'description: "   "' : line,
+      )
+      .join("\n"),
+  );
+
+  expect(() => readSeedDocs(blank)).toThrow(/description/);
 });
 
 it("is adopted by an MCP server started afterwards, with no second group", async () => {
