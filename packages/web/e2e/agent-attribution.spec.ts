@@ -35,6 +35,18 @@ const UB = join(repoRoot, "packages", "cli", "bin", "ub.mjs");
 /** How long the caret has to stay after the edit for a person to read it. */
 const READABLE_MS = 3_000;
 
+/**
+ * How long a closed session is given to exit on its own before it is signalled.
+ *
+ * Closing stdin is what an MCP client does and what this test is about; the
+ * signals after it are the test harness refusing to leave a real server
+ * process, its database handle and its hub sockets behind.
+ */
+const GRACEFUL_EXIT_MS = 5_000;
+
+/** Every session this file has started, so cleanup can reap a stray child. */
+const sessions = new Set<McpSession>();
+
 let started: Harness | null = null;
 let agentState = "";
 const contexts: BrowserContext[] = [];
@@ -54,6 +66,11 @@ test.beforeAll(async () => {
 });
 
 test.afterEach(async () => {
+  // The sessions first: a test that failed mid-session must not leave a real
+  // server process running against the harness's hub. `close` is idempotent,
+  // so the ordinary path having closed them already costs nothing.
+  await Promise.all([...sessions].map((session) => session.close()));
+  sessions.clear();
   for (const context of contexts.splice(0)) await context.close();
 });
 
@@ -135,8 +152,10 @@ class McpSession {
   private nextId = 1;
   private buffer = "";
   private stderr = "";
+  private closing: Promise<void> | null = null;
 
   constructor(clientInfo: { name: string; title?: string }) {
+    sessions.add(this);
     this.child = spawn(process.execPath, [UB, "mcp", "serve"], {
       // The agent's own directory, so no `uberblick.json` in the checkout can
       // steer it: everything it needs is in the environment below.
@@ -223,12 +242,33 @@ class McpSession {
     return JSON.parse(text) as T;
   }
 
-  /** What an MCP client does when it is done: close stdin, and be gone. */
+  /**
+   * What an MCP client does when it is done: close stdin, and be gone.
+   *
+   * Idempotent and bounded. A session that is closed twice — the ordinary path
+   * and then the cleanup backstop — waits on the same exit, and a server that
+   * does not go on its own is signalled rather than left holding a database
+   * handle and a hub socket into the next test.
+   */
   close(): Promise<void> {
-    return new Promise((settle) => {
-      this.child.once("exit", () => settle());
+    this.closing ??= new Promise<void>((settle) => {
+      if (this.child.exitCode !== null || this.child.signalCode !== null) {
+        settle();
+        return;
+      }
+      const term = setTimeout(() => this.child.kill("SIGTERM"), GRACEFUL_EXIT_MS);
+      const kill = setTimeout(
+        () => this.child.kill("SIGKILL"),
+        GRACEFUL_EXIT_MS * 2,
+      );
+      this.child.once("exit", () => {
+        clearTimeout(term);
+        clearTimeout(kill);
+        settle();
+      });
       this.child.stdin?.end();
     });
+    return this.closing;
   }
 }
 
@@ -243,19 +283,23 @@ async function writeAndLeave(
   newText: string,
 ): Promise<number> {
   const session = new McpSession(clientInfo);
-  const doc = await session.call<DocPayload>("get_doc", { uuid });
-  const block = doc.blocks[0];
-  if (block === undefined) throw new Error("e2e: the document has no blocks");
-  await session.call("edit_block", {
-    uuid,
-    block_id: block.id,
-    old_text: block.text,
-    new_text: newText,
-    rev: block.rev,
-  });
-  const wroteAt = Date.now();
-  await session.close();
-  return wroteAt;
+  try {
+    const doc = await session.call<DocPayload>("get_doc", { uuid });
+    const block = doc.blocks[0];
+    if (block === undefined) throw new Error("e2e: the document has no blocks");
+    await session.call("edit_block", {
+      uuid,
+      block_id: block.id,
+      old_text: block.text,
+      new_text: newText,
+      rev: block.rev,
+    });
+    return Date.now();
+  } finally {
+    // In a `finally`, because a session that failed half way through is still
+    // a running server process — and the closing is the very thing under test.
+    await session.close();
+  }
 }
 
 test("a short-lived MCP client's caret stays long enough to be read, labelled and then gone", async ({
@@ -289,12 +333,24 @@ test("a short-lived MCP client's caret stays long enough to be read, labelled an
   expect(labelColor).toBe(caretColor);
 
   // The session itself is gone the moment it left — the grace is a decoration
-  // in this editor, not presence. Nothing counts it any more.
+  // in this editor, not presence. Nothing counts it any more...
   await page.locator(".ub-user-card").click();
   await expect(
     page.locator(".ub-panel-fact", { hasText: "MCP connections" }),
   ).toContainText("0");
   await page.keyboard.press("Escape");
+
+  // ...and nothing lists it either. The sync panel's Present now reads the
+  // document room's own awareness — the same room the retained caret is drawn
+  // in — and says the room is empty while that caret is on screen.
+  await page.locator(".ub-sync-toggle").click();
+  const presence = page.locator("#ub-sync-panel");
+  await expect(presence).toContainText("Nobody else is in this room.");
+  await expect(
+    presence.getByText("Uberblick Coordinator Agent"),
+  ).toHaveCount(0);
+  await page.locator(".ub-sync-toggle").click();
+  await expect(label).toBeVisible();
 
   // ...and it is still on screen three seconds after the write returned, which
   // is the whole point: a person gets to see who wrote.
