@@ -177,6 +177,23 @@ export function runUb(
 }
 
 /**
+ * Which `ub` command a run was, for a diagnostic — the subcommand path only.
+ *
+ * Never the whole argument list: `ub remote set` takes a URL, and the URLs the
+ * remote suite feeds it carry passwords and tokens on purpose. A message that
+ * echoed argv would print one into CI output the first time a machine was slow,
+ * which is the leak those very tests exist to forbid.
+ */
+function commandOf(args: string[]): string {
+  const path: string[] = [];
+  for (const token of args) {
+    if (token.startsWith("-") || path.length === 2) break;
+    path.push(token);
+  }
+  return path.join(" ");
+}
+
+/**
  * The same, without blocking — so a test can have two `ub` processes racing each
  * other, which is the only way to observe what concurrent runs do to a file they
  * both write.
@@ -214,6 +231,14 @@ export function runUbAsync(
     // complete, and a test asserting "the secret appears nowhere" on a truncated
     // capture would pass for the wrong reason.
     child.on("close", (status) => {
+      // `killed` rather than a signal: `spawn`'s timeout is the only thing that
+      // kills this child, and a process that died of a signal nobody sent it
+      // crashed — reporting that as slowness would send the reader after the
+      // wrong bug. Say which run ran out of time, because a bare null status
+      // reads as a crash too.
+      if (child.killed) {
+        stderr += `\ntimed out waiting for \`ub ${commandOf(args)}\` to exit within ${timeoutMs}ms\n`;
+      }
       resolve({ status, stdout, stderr, output: `${stdout}${stderr}` });
     });
   });
@@ -221,3 +246,36 @@ export function runUbAsync(
 
 /** A hub address nothing listens on: `ub status` must not wait on the network. */
 export const DEAD_HUB_URL = "ws://127.0.0.1:1";
+
+/**
+ * How long one awaited condition gets before the wait gives up.
+ *
+ * Generous rather than tight, and deliberately so: these suites spawn real
+ * processes that bind real sockets and open real SQLite files, and the review
+ * container runs every package's suite at once on whatever cores are left. A
+ * deadline sized for a quiet machine turns load into a red gate, which trains
+ * everyone to re-run — and a re-run habit is how a real regression eventually
+ * walks through. What has to stay sharp is the *message*, not the clock: a wait
+ * that expires still names the condition it was waiting for, so a genuine hang
+ * is still reported as one, just later.
+ */
+export const WAIT_TIMEOUT_MS = 30_000;
+
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Wait for `predicate`, polling. Throws with `label` on timeout. */
+export async function waitUntil(
+  label: string,
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = WAIT_TIMEOUT_MS,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await predicate())) {
+    if (Date.now() > deadline) {
+      throw new Error(`timed out waiting for ${label}`);
+    }
+    await sleep(25);
+  }
+}

@@ -27,7 +27,15 @@ import { afterEach, describe, expect, it } from "vitest";
 import { bundlePlan } from "../src/open.js";
 import { probeHub, probePort } from "../src/probes.js";
 import type { Sandbox } from "./helpers.js";
-import { UB_BIN, removeTempDirs, runUbAsync, sandbox } from "./helpers.js";
+import {
+  UB_BIN,
+  WAIT_TIMEOUT_MS,
+  removeTempDirs,
+  runUbAsync,
+  sandbox,
+  sleep,
+  waitUntil,
+} from "./helpers.js";
 
 const WORKSPACE = "b4d1f0a7-3c62-4e91-8f05-7ad2c9e61b38";
 const SECRET = "open-test-signing-secret-9d31fa";
@@ -133,10 +141,6 @@ interface Running {
 
 const BANNER = /uberblick is at (http:\/\/\S+)/;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((done) => setTimeout(done, ms));
-}
-
 /**
  * Start `ub open` and resolve once it is actually serving.
  *
@@ -172,29 +176,29 @@ async function open(
     over = true;
   });
 
-  const deadline = Date.now() + 30_000;
-  for (;;) {
-    const match = BANNER.exec(stdout);
-    if (match?.[1] !== undefined) {
-      return {
-        url: match[1],
-        stdout: () => stdout,
-        stderr: () => stderr,
-        interrupt: async () => {
-          child.kill("SIGINT");
-          return await exited;
-        },
-      };
-    }
-    if (over) {
-      throw new Error(`ub open exited before it served:\n${stdout}${stderr}`);
-    }
-    if (Date.now() > deadline) {
-      child.kill("SIGKILL");
-      throw new Error(`ub open never served:\n${stdout}${stderr}`);
-    }
-    await sleep(25);
+  try {
+    await waitUntil("`ub open` to print its banner", () => {
+      if (over) throw new Error("ub open exited before it served");
+      return BANNER.test(stdout);
+    });
+  } catch (reason) {
+    child.kill("SIGKILL");
+    const said = reason instanceof Error ? reason.message : String(reason);
+    throw new Error(`${said}:\n${stdout}${stderr}`);
   }
+
+  const url = BANNER.exec(stdout)?.[1];
+  if (url === undefined) throw new Error(`ub open named no URL:\n${stdout}`);
+  return {
+    url,
+    stdout: () => stdout,
+    stderr: () => stderr,
+    interrupt: async () => {
+      child.kill("SIGINT");
+      await waitUntil("`ub open` to exit after Ctrl-C", () => over);
+      return await exited;
+    },
+  };
 }
 
 /**
@@ -223,23 +227,33 @@ async function interruptWhen(
   child.stderr.on("data", (chunk: Buffer) => {
     output += chunk.toString("utf8");
   });
-  await when();
-  child.kill("SIGINT");
-  return await new Promise((done) => {
+  const exited = new Promise<{
+    status: number | null;
+    signal: string | null;
+    output: string;
+  }>((done) => {
     child.on("close", (status, signal) => done({ status, signal, output }));
   });
+  let over = false;
+  void exited.then(() => {
+    over = true;
+  });
+
+  await when();
+  child.kill("SIGINT");
+  await waitUntil(
+    "`ub open` to exit after an interrupt while it was still coming up",
+    () => over,
+  );
+  return await exited;
 }
 
 /** Resolve once something is listening on `port` — here, the hub `ub open` started. */
 async function untilBound(port: number): Promise<void> {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    if ((await probePort("127.0.0.1", port)).state !== "free") {
-      return;
-    }
-    await sleep(20);
-  }
-  throw new Error(`nothing ever bound port ${port}`);
+  await waitUntil(
+    `the hub \`ub open\` starts to bind port ${port}`,
+    async () => (await probePort("127.0.0.1", port)).state !== "free",
+  );
 }
 
 /** Run `ub open` expecting it to refuse, and hand back what it said. */
@@ -248,7 +262,7 @@ async function openFails(
   args: string[],
   extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<{ status: number | null; output: string }> {
-  const run = await runUbAsync(["open", ...args], box, extraEnv, 30_000);
+  const run = await runUbAsync(["open", ...args], box, extraEnv, WAIT_TIMEOUT_MS);
   return { status: run.status, output: run.output };
 }
 
@@ -312,7 +326,7 @@ describe("ub open", () => {
     expect(readFileSync(browser.opened, "utf8").trim()).toBe(app.url);
 
     expect((await app.interrupt()).status).toBe(0);
-  }, 60_000);
+  });
 
   it("uses a hub that is already answering, and Ctrl-C leaves it running", async () => {
     const { box, env } = configured();
@@ -336,7 +350,7 @@ describe("ub open", () => {
     expect((await app.interrupt()).status).toBe(0);
     // The hub this command did not start is the hub it did not stop.
     expect(await hubAnswers(box, hubUrl)).toBe(true);
-  }, 60_000);
+  });
 
   it("after `ub remote set`, serves a bundle pointed at the remote and starts no hub", async () => {
     const { box, env } = configured();
@@ -357,7 +371,7 @@ describe("ub open", () => {
     expect(app.stdout()).toContain("remote — nothing started here");
 
     expect((await app.interrupt()).status).toBe(0);
-  }, 60_000);
+  });
 
   it("releases both ports on Ctrl-C, so a second `ub open` succeeds at once", async () => {
     const { box, env } = configured();
@@ -378,7 +392,7 @@ describe("ub open", () => {
     const second = await open(box, ["--port", String(webPort)], { ...env, HUB_URL: hubUrl });
     expect(second.url).toBe(`http://127.0.0.1:${webPort}/`);
     expect((await second.interrupt()).status).toBe(0);
-  }, 60_000);
+  });
 
   it("serves the configuration document uncached, ahead of the SPA fallback", async () => {
     const { box, env } = configured();
@@ -403,7 +417,7 @@ describe("ub open", () => {
     expect(await deepLink.text()).toContain("<title>uberblick</title>");
 
     expect((await app.interrupt()).status).toBe(0);
-  }, 60_000);
+  });
 
   it("refuses rather than serving a blank page when there is no bundle", async () => {
     const { box, env } = configured();
@@ -421,7 +435,7 @@ describe("ub open", () => {
     // And in a checkout, an absent bundle is one to build rather than to
     // refuse: the web package is right there and the plan says so.
     expect(bundlePlan({}).action).not.toBe("missing");
-  }, 60_000);
+  });
 
   it("--no-browser prints the URL and opens nothing; --port chooses the port", async () => {
     const { box, env } = configured();
@@ -441,7 +455,7 @@ describe("ub open", () => {
     expect((await get(app.url)).status).toBe(200);
 
     expect((await app.interrupt()).status).toBe(0);
-  }, 60_000);
+  });
 
   it("works with no configuration files at all", async () => {
     const box = sandbox();
@@ -464,7 +478,7 @@ describe("ub open", () => {
     expect(app.stdout()).toContain("ub init");
 
     expect((await app.interrupt()).status).toBe(0);
-  }, 60_000);
+  });
 
   it("names the web port when it is taken, and says who has it", async () => {
     const { box, env } = configured();
@@ -493,7 +507,7 @@ describe("ub open", () => {
     expect(second.output).toContain("`ub open`");
 
     expect((await app.interrupt()).status).toBe(0);
-  }, 60_000);
+  });
 
   it("never binds a hub off loopback, whatever HUB_URL says", async () => {
     const { box, env } = configured();
@@ -526,7 +540,7 @@ describe("ub open", () => {
     expect(named.status).toBe(1);
     expect(named.output).toContain("binds loopback only");
     expect(named.output).toContain("127.attacker.example");
-  }, 90_000);
+  });
 
   it("starts a hub only for an endpoint the hub it starts could answer", async () => {
     const { box, env } = configured();
@@ -555,7 +569,7 @@ describe("ub open", () => {
     });
     expect(ephemeral.status).toBe(1);
     expect(ephemeral.output).toContain("names no port to bind");
-  }, 90_000);
+  });
 
   it("an interrupt while it is still coming up stops the hub it started", async () => {
     const { box, env } = configured();
@@ -578,7 +592,7 @@ describe("ub open", () => {
     expect(run.status).toBe(0);
     expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
     expect((await probePort("127.0.0.1", hubPort)).state).toBe("free");
-  }, 60_000);
+  });
 
   it("refuses when the hub's endpoint is held by something that is not a hub", async () => {
     const { box, env } = configured();
@@ -592,5 +606,5 @@ describe("ub open", () => {
     expect(refused.status).toBe(1);
     expect(refused.output).toContain("held by something else");
     expect(refused.output).toContain(`ws://127.0.0.1:${hubPort}`);
-  }, 60_000);
+  });
 });
