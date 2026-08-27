@@ -277,12 +277,15 @@ file contains only Claude coordinator machinery and does not restate either.
    | architectural | low | local | easy | substantial | 2 |
 
    Read it as three rules. Substantial when the change is architectural, wide,
-   or hard to undo. Trivial only when it is mechanical, local, easy to undo
-   **and** understood. Everything else is bounded — and `uncertainty: high`
-   then moves the tier one step up, which is what routes a genuinely ambiguous
-   change to two challengers instead of one. `.claude/skills/next-issue/preflight-tier.mjs`
-   is this table in executable form and `packages/cli/test/preflight-tier.test.ts`
-   holds the two together; if you change one, change both.
+   or hard to undo — *any* of the three, so a mechanical change with a wide
+   blast radius is substantial too, and deliberately so: a rename with two
+   hundred call sites decides nothing but breaks everything. Trivial only when
+   it is mechanical, local, easy to undo **and** understood. Everything else is
+   bounded — and `uncertainty: high` then moves the tier one step up, which is
+   what routes a genuinely ambiguous change to two challengers instead of one.
+   `.claude/skills/next-issue/preflight-tier.mjs` is this table in executable
+   form and `packages/cli/test/preflight-tier.test.ts` holds the two together;
+   if you change one, change both.
 
    Two things the table deliberately cannot see: `Touches`, and any keyword. A
    change proven mechanical by the grounding read is trivial even in
@@ -317,32 +320,45 @@ file contains only Claude coordinator machinery and does not restate either.
    trivial self-check that found nothing writes no comment at all.
 
    **Then the lifecycle.** Last thing before handing the issue to step 7,
-   re-read the issue, the current claims and `origin/main`; only one still
-   eligible and still unclaimed goes on to be claimed. Nothing here writes
-   `in-progress` — step 7's claim does, after this gate — so no preflight path
-   can leave that label on an issue nobody is implementing.
+   re-read the issue, the current claims and `origin/main`. Nothing in this
+   step writes a label — step 7's claim does, after this gate — so no
+   preflight path can leave `in-progress` on an issue nobody is implementing.
 
-   | Preflight result | Outcome | Labels | Claim | Comment |
-   |---|---|---|---|---|
-   | clear, and still eligible at the recheck | dispatch | `+in-progress` | yes | only if a challenger ran or the self-check found something |
-   | contract stale or incorrect, and the evidence corrects it | return-to-coordination | `−ready` | no | yes |
-   | a real product decision only the owner can make | park-needs-decision | `−ready`, `+needs-decision` | no | yes |
-   | claimed by someone else, or no longer eligible | requeue | — | no | no |
+   | Still eligible at the recheck | What preflight found | Outcome | Labels | Claim | Comment |
+   |---|---|---|---|---|---|
+   | yes | nothing blocking (`none`) | dispatch | add `in-progress` — written by step 7's claim, not here | yes | only when a challenger ran or the self-check found something |
+   | yes | a stale or incorrect contract (`stale-spec`) | return-to-coordination | remove `ready` | no | yes |
+   | yes | an owner-only product decision (`product-decision`) | park-needs-decision | remove `ready`, add `needs-decision` | no | yes |
+   | no | anything (`any`) | requeue | none | no | no |
 
-   Which stop applies is the difference between evidence and authority. A
-   stale contract, a missing outcome or invariant, or a scope or splitting
-   decision the grounding read can settle goes back to coordination with the
-   evidence: `ready` comes off, the comment says what is wrong, and a corrected
-   body has to pass `.github/ISSUE_SPEC.md` and regain `ready` before any later
-   pickup. Only an unresolved *product* question — one the repository cannot
-   answer — takes `needs-decision`, with concrete options and your
+   The recheck outranks every finding, which is the first row to read: if
+   someone else claimed the issue while you were grounding it, it is their work
+   now. Requeue silently — do not strip `ready`, do not comment. Findings you
+   hold go to the claim holder or wait for a fresh pickup; acting on live work
+   from the outside is worse than losing the finding.
+
+   Among the stops, which applies is the difference between evidence and
+   authority. A stale contract, a missing outcome or invariant, or a scope or
+   splitting decision the grounding read can settle goes back to coordination
+   with the evidence: `ready` comes off, the comment says what is wrong, and a
+   corrected body has to pass `.github/ISSUE_SPEC.md` and regain `ready` before
+   any later pickup. Only an unresolved *product* question — one the repository
+   cannot answer — takes `needs-decision`, with concrete options and your
    recommendation per the spec's exit path.
 
    **Findings are not requirements.** Material implementation risks and options
    travel to the implementer in the brief, as options. They are never edited
    into the issue body's acceptance criteria: an alternative written into the
    contract becomes a requirement nobody chose, and out-of-scope prescription
-   is exactly what the challenge exists to remove.
+   is exactly what the challenge exists to remove. An issue that over-prescribes
+   mechanics is the same case and not a stop: name the freedom in the brief and
+   dispatch. Only a *missing* outcome, invariant or product decision stops one.
+
+   **Under `/loop`, a preflight is re-entrant.** An iteration that dies partway
+   through one repeats it on the next pass, and the repeat costs tokens and
+   nothing else: the claim is last, so a second run of the same preflight
+   either re-reaches dispatch and claims once, or finds the first run's claim
+   at its recheck and requeues.
 
 7. **Dispatch.** Only issues step 6 returned as *dispatch* reach here; the
    others are already parked or requeued. For each, follow `AGENTS.md` for the

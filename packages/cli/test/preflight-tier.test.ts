@@ -2,309 +2,198 @@
  * The `next-issue` preflight decision table.
  *
  * The deliverable of that skill is prose a coordinator reads, and prose cannot
- * be run — so the table it routes on also exists as
+ * be run — so the tables it routes on also exist as
  * `.claude/skills/next-issue/preflight-tier.mjs`, and these tests hold the two
- * together. Two things are defended here and nothing else: that every row of
- * the table in `SKILL.md` is the row the module computes, and that the
- * lifecycle a preflight can end in never claims an issue it did not clear.
+ * together. The tier table and the lifecycle table are each parsed out of
+ * `SKILL.md` and replayed through the module, so a row edited in one home and
+ * not the other is a red test. What is deliberately *not* here: assertions
+ * that restate the module against its own definition.
  *
  * This suite lives in `@uberblick/cli` for the same reason `mise-welcome.test.ts`
  * does: it is where repository-level checks already run under `mise run test`.
- * The module itself sits next to the skill, because a table that drifts from
- * the procedure it describes is the failure this whole fixture exists to catch.
+ * The module sits next to the skill, because a table drifting from the
+ * procedure it describes is the failure this fixture exists to catch.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { REPO_ROOT } from "./helpers.js";
 
 const SKILL_DIR = join(REPO_ROOT, ".claude", "skills", "next-issue");
+const MODULE_PATH = join(SKILL_DIR, "preflight-tier.mjs");
+
+/**
+ * The immutable review image is built from `main`'s `.dockerignore`, which
+ * excluded `.claude` outright until this branch un-ignored `.claude/skills/**`
+ * — and a `.dockerignore` change only takes effect once it is on `main`. So the
+ * suite skips loudly where the skill is absent instead of failing there. CI and
+ * every worktree run on a full checkout, which is where the table is defended.
+ */
+const PRESENT = existsSync(MODULE_PATH);
 
 // A runtime path, so tsc leaves the untyped `.mjs` alone and the test loads it
 // exactly where a coordinator reading the skill would find it.
-const { classify, preflight, TIERS, CHALLENGERS, OUTCOMES } = await import(
-  pathToFileURL(join(SKILL_DIR, "preflight-tier.mjs")).href
-);
+const { classify, preflight, AXES, BLOCKERS } = PRESENT
+  ? await import(pathToFileURL(MODULE_PATH).href)
+  : { classify: undefined, preflight: undefined, AXES: undefined, BLOCKERS: undefined };
 
-const SKILL = readFileSync(join(SKILL_DIR, "SKILL.md"), "utf8");
+const SKILL = PRESENT ? readFileSync(join(SKILL_DIR, "SKILL.md"), "utf8") : "";
 
-const MATERIALITY = ["mechanical", "behavioral", "architectural"];
-const UNCERTAINTY = ["low", "high"];
-const BLAST_RADIUS = ["local", "wide"];
-const REVERSIBILITY = ["easy", "hard"];
+type Axes = Record<string, string>;
 
-type Axes = {
-  materiality: string;
-  uncertainty: string;
-  blastRadius: string;
-  reversibility: string;
-};
-
-/** Every combination the four axes can take — 24 of them. */
-const EVERY_COMBINATION: Axes[] = MATERIALITY.flatMap((materiality) =>
-  UNCERTAINTY.flatMap((uncertainty) =>
-    BLAST_RADIUS.flatMap((blastRadius) =>
-      REVERSIBILITY.map((reversibility) => ({
-        materiality,
-        uncertainty,
-        blastRadius,
-        reversibility,
-      })),
-    ),
-  ),
-);
+/** Every combination the module's own axis vocabularies can take — 24 of them. */
+function everyCombination(): Axes[] {
+  let all: Axes[] = [{}];
+  for (const [axis, values] of Object.entries(AXES) as [string, string[]][]) {
+    all = all.flatMap((partial) => values.map((value) => ({ ...partial, [axis]: value })));
+  }
+  return all;
+}
 
 /**
- * The rows of the skill's markdown table, as data.
+ * The cells of one markdown table in `SKILL.md`, as rows of strings.
  *
- * The header is matched rather than the position, so reordering the prose
- * around the table cannot silently make this parse a different one — and a
- * table that has gone missing throws here rather than passing vacuously.
+ * The header is matched on its column names rather than on its position, so
+ * reordering the prose cannot silently make this parse a different table — and
+ * a table that has gone missing throws here rather than passing vacuously.
  */
-function skillTableRows(): { axes: Axes; tier: string; challengers: number }[] {
+function markdownTable(...columns: string[]): string[][] {
   const lines = SKILL.split("\n");
-  const header = lines.findIndex(
-    (line) =>
-      line.includes("| Materiality |") &&
-      line.includes("| Tier |") &&
-      line.includes("| Challengers |"),
-  );
-  if (header === -1) throw new Error("SKILL.md has no preflight tier table");
+  const header = lines.findIndex((line) => columns.every((column) => line.includes(column)));
+  if (header === -1) throw new Error(`SKILL.md has no table with columns ${columns.join(", ")}`);
 
-  const rows: { axes: Axes; tier: string; challengers: number }[] = [];
+  const rows: string[][] = [];
   // +2 skips the header and the `|---|` separator beneath it.
   for (const line of lines.slice(header + 2)) {
     const text = line.trim();
     if (!text.startsWith("|")) break;
-    const cells = text
-      .split("|")
-      .slice(1, -1)
-      .map((cell) => cell.trim().replaceAll("`", ""));
-    if (cells.length !== 6) {
-      throw new Error(`preflight tier table row has ${cells.length} cells, expected 6: ${text}`);
-    }
-    const [
-      materiality = "",
-      uncertainty = "",
-      blastRadius = "",
-      reversibility = "",
-      tier = "",
-      challengers = "",
-    ] = cells;
-    rows.push({
-      axes: { materiality, uncertainty, blastRadius, reversibility },
-      tier,
-      challengers: Number(challengers),
-    });
+    rows.push(text.split("|").slice(1, -1).map((cell) => cell.trim()));
   }
-  if (rows.length === 0) throw new Error("preflight tier table has no rows");
+  if (rows.length === 0) throw new Error(`table ${columns.join(", ")} has no rows`);
   return rows;
 }
 
-describe("the skill's table and the module's table are one table", () => {
-  it("routes every documented row the way the skill says it does", () => {
-    for (const row of skillTableRows()) {
-      const plan = preflight(row.axes);
-      expect(
-        { tier: plan.tier, challengers: plan.challengers },
-        JSON.stringify(row.axes),
-      ).toEqual({ tier: row.tier, challengers: row.challengers });
-    }
-  });
+/** `add \`x\`, remove \`y\`` — the vocabulary the Labels column is written in. */
+function labelsFrom(cell: string): { add: string[]; remove: string[] } {
+  const labels: { add: string[]; remove: string[] } = { add: [], remove: [] };
+  for (const [, verb, label] of cell.matchAll(/\b(add|remove) `([a-z-]+)`/g)) {
+    labels[verb as "add" | "remove"].push(label as string);
+  }
+  return labels;
+}
 
-  it("documents a row for each of the 0, 1 and 2 challenger routes", () => {
-    const documented = new Set(skillTableRows().map((row) => row.challengers));
-    expect(documented).toEqual(new Set([0, 1, 2]));
-  });
+const describeTable = describe.skipIf(!PRESENT);
 
-  it("names every outcome and every label the module can produce", () => {
-    for (const outcome of OUTCOMES) expect(SKILL).toContain(outcome);
-    for (const label of ["in-progress", "ready", "needs-decision"]) {
-      expect(SKILL).toContain(label);
-    }
-  });
-});
-
-describe("classification", () => {
-  it("sends a mechanical, local, reversible, understood change to no challenger", () => {
-    expect(
-      preflight({
-        materiality: "mechanical",
-        uncertainty: "low",
-        blastRadius: "local",
-        reversibility: "easy",
-      }),
-    ).toMatchObject({ tier: "trivial", challengers: 0, independence: "none" });
-  });
-
-  it("sends established behavior with contained impact to one challenger", () => {
-    expect(
-      preflight({
-        materiality: "behavioral",
-        uncertainty: "low",
-        blastRadius: "local",
-        reversibility: "easy",
-      }),
-    ).toMatchObject({ tier: "bounded", challengers: 1 });
-  });
-
-  it("sends architectural, wide or irreversible changes to two challengers", () => {
-    for (const axes of EVERY_COMBINATION) {
-      if (
-        axes.materiality !== "architectural" &&
-        axes.blastRadius !== "wide" &&
-        axes.reversibility !== "hard"
-      ) {
-        continue;
+describeTable(
+  PRESENT
+    ? "the skill's tables and the module's tables are the same tables"
+    : "the preflight table (SKIPPED: .claude/skills/next-issue is not in this checkout)",
+  () => {
+    it("routes every documented row of the tier table", () => {
+      const rows = markdownTable("| Materiality |", "| Tier |", "| Challengers |");
+      for (const [materiality, uncertainty, blastRadius, reversibility, tier, challengers] of rows) {
+        const axes = { materiality, uncertainty, blastRadius, reversibility };
+        expect(preflight(axes), JSON.stringify(axes)).toMatchObject({
+          tier,
+          challengers: Number(challengers),
+        });
       }
-      expect(classify(axes), JSON.stringify(axes)).toBe("substantial");
-    }
-  });
-
-  it("sends a genuinely ambiguous change to two challengers, and never downward", () => {
-    for (const axes of EVERY_COMBINATION) {
-      if (axes.uncertainty !== "low") continue;
-      const certain = TIERS.indexOf(classify(axes));
-      const uncertain = TIERS.indexOf(classify({ ...axes, uncertainty: "high" }));
-      expect(uncertain, JSON.stringify(axes)).toBeGreaterThanOrEqual(certain);
-    }
-    // The ambiguous case the acceptance criteria name: real behavior whose
-    // outcome the grounding read could not state.
-    expect(
-      classify({
-        materiality: "behavioral",
-        uncertainty: "high",
-        blastRadius: "local",
-        reversibility: "easy",
-      }),
-    ).toBe("substantial");
-  });
-
-  it("cannot be escalated by a package name, a label or a keyword", () => {
-    // `Touches` is not a weak signal here, it is not a signal at all: passing
-    // one is an error rather than an input the table quietly weighs.
-    expect(() =>
-      classify({
-        materiality: "mechanical",
-        uncertainty: "low",
-        blastRadius: "local",
-        reversibility: "easy",
-        touches: ["schema"],
-      }),
-    ).toThrow(/unknown signal "touches"/);
-
-    // And a change proven mechanical stays trivial however sensitive its
-    // neighbourhood: the grounding read outranks the neighbourhood.
-    expect(
-      classify({
-        materiality: "mechanical",
-        uncertainty: "low",
-        blastRadius: "local",
-        reversibility: "easy",
-      }),
-    ).toBe("trivial");
-  });
-});
-
-describe("independence", () => {
-  const substantial = {
-    materiality: "architectural",
-    uncertainty: "low",
-    blastRadius: "local",
-    reversibility: "easy",
-  };
-
-  it("prefers diverse challengers where they exist", () => {
-    expect(preflight({ ...substantial, diverseChallengers: true }).independence).toBe("diverse");
-  });
-
-  it("falls back to separate fresh contexts where they do not", () => {
-    expect(preflight({ ...substantial, diverseChallengers: false }).independence).toBe(
-      "fresh-context",
-    );
-  });
-});
-
-describe("the preflight comment", () => {
-  const trivial = {
-    materiality: "mechanical",
-    uncertainty: "low",
-    blastRadius: "local",
-    reversibility: "easy",
-  };
-
-  it("is not required when a trivial self-check found nothing", () => {
-    expect(preflight(trivial).comment).toBe(false);
-  });
-
-  it("is required when a trivial self-check did find something", () => {
-    expect(preflight({ ...trivial, findings: true }).comment).toBe(true);
-  });
-
-  it("is required, findings or not, wherever a challenger ran", () => {
-    for (const axes of EVERY_COMBINATION) {
-      if (CHALLENGERS[classify(axes)] === 0) continue;
-      expect(preflight({ ...axes, findings: false }).comment, JSON.stringify(axes)).toBe(true);
-    }
-  });
-});
-
-describe("lifecycle", () => {
-  const bounded = {
-    materiality: "behavioral",
-    uncertainty: "low",
-    blastRadius: "local",
-    reversibility: "easy",
-  };
-
-  it("claims and dispatches an issue that is still eligible at the recheck", () => {
-    expect(preflight({ ...bounded, stillEligible: true })).toMatchObject({
-      outcome: "dispatch",
-      claim: true,
-      labels: { add: ["in-progress"], remove: [] },
     });
-  });
 
-  it("returns an evidence-correctable stale contract to coordination", () => {
-    expect(preflight({ ...bounded, blocker: "stale-spec" })).toMatchObject({
-      outcome: "return-to-coordination",
-      claim: false,
-      labels: { add: [], remove: ["ready"] },
-      comment: true,
+    it("documents a row for each of the 0, 1 and 2 challenger routes", () => {
+      const rows = markdownTable("| Materiality |", "| Tier |", "| Challengers |");
+      expect(new Set(rows.map((row) => Number(row[5])))).toEqual(new Set([0, 1, 2]));
     });
-  });
 
-  it("parks a genuine owner decision as needs-decision", () => {
-    expect(preflight({ ...bounded, blocker: "product-decision" })).toMatchObject({
-      outcome: "park-needs-decision",
-      claim: false,
-      labels: { add: ["needs-decision"], remove: ["ready"] },
-      comment: true,
-    });
-  });
+    it("routes every documented row of the lifecycle table, whatever the tier", () => {
+      const rows = markdownTable("| Still eligible at the recheck |", "| Outcome |", "| Claim |");
+      for (const [eligible = "", found = "", outcome, labels = "", claim, comment = ""] of rows) {
+        const token = found.match(/`([a-z-]+)`/)?.[1];
+        if (token === undefined) throw new Error(`lifecycle row names no blocker: ${found}`);
+        // `any` is the row that says the recheck outranks every finding, so it
+        // is replayed against the module's whole blocker vocabulary.
+        const cases: string[] = token === "any" ? BLOCKERS : [token];
 
-  it("requeues silently when the recheck finds the issue claimed or ineligible", () => {
-    expect(preflight({ ...bounded, stillEligible: false })).toMatchObject({
-      outcome: "requeue",
-      claim: false,
-      labels: { add: [], remove: [] },
-      comment: false,
-    });
-  });
-
-  it("never leaves an in-progress claim on a path that did not dispatch", () => {
-    for (const axes of EVERY_COMBINATION) {
-      for (const blocker of ["none", "stale-spec", "product-decision"]) {
-        for (const stillEligible of [true, false]) {
-          const plan = preflight({ ...axes, blocker, stillEligible });
-          const where = JSON.stringify({ ...axes, blocker, stillEligible });
-          expect(OUTCOMES, where).toContain(plan.outcome);
-          expect(plan.claim, where).toBe(plan.outcome === "dispatch");
-          expect(plan.labels.add.includes("in-progress"), where).toBe(plan.claim);
+        for (const blocker of cases) {
+          for (const axes of everyCombination()) {
+            const signals = { ...axes, blocker, stillEligible: eligible === "yes" };
+            const where = JSON.stringify(signals);
+            const plan = preflight(signals);
+            expect(plan.outcome, where).toBe(outcome);
+            expect(plan.claim, where).toBe(claim === "yes");
+            expect(plan.labels, where).toEqual(labelsFrom(labels));
+            // "only when a challenger ran or the self-check found something" is
+            // the one conditional cell, and it is asserted both ways.
+            if (comment === "yes" || comment === "no") {
+              expect(plan.comment, where).toBe(comment === "yes");
+            } else {
+              expect(preflight({ ...signals, findings: true }).comment, where).toBe(true);
+              expect(preflight({ ...signals, findings: false }).comment, where).toBe(
+                plan.challengers > 0,
+              );
+            }
+          }
         }
       }
-    }
-  });
-});
+    });
+
+    it("cannot be escalated by a package name, a label or a keyword", () => {
+      const mechanical = {
+        materiality: "mechanical",
+        uncertainty: "low",
+        blastRadius: "local",
+        reversibility: "easy",
+      };
+      // `Touches` is not a weak signal here, it is not a signal at all: passing
+      // one is an error rather than an input the table quietly weighs.
+      expect(() => classify({ ...mechanical, touches: ["schema"] })).toThrow(
+        /unknown signal "touches"/,
+      );
+      // And a change proven mechanical stays trivial however sensitive its
+      // neighbourhood: the grounding read outranks the neighbourhood.
+      expect(classify(mechanical)).toBe("trivial");
+    });
+
+    it("never lowers a tier for uncertainty, and lifts a bounded change to two challengers", () => {
+      const tiers = ["trivial", "bounded", "substantial"];
+      for (const axes of everyCombination()) {
+        if (axes.uncertainty !== "low") continue;
+        const certain = tiers.indexOf(classify(axes));
+        const uncertain = tiers.indexOf(classify({ ...axes, uncertainty: "high" }));
+        expect(uncertain, JSON.stringify(axes)).toBeGreaterThanOrEqual(certain);
+      }
+      expect(
+        classify({
+          materiality: "behavioral",
+          uncertainty: "high",
+          blastRadius: "local",
+          reversibility: "easy",
+        }),
+      ).toBe("substantial");
+    });
+
+    it("lets another agent's claim outrank a finding of its own", () => {
+      // The race the ordering exists for: the preflight found a stale contract,
+      // and by the recheck someone else owns the issue. Stripping `ready` or
+      // commenting would be acting on live work from the outside.
+      expect(
+        preflight({
+          materiality: "behavioral",
+          uncertainty: "low",
+          blastRadius: "local",
+          reversibility: "easy",
+          blocker: "stale-spec",
+          findings: true,
+          stillEligible: false,
+        }),
+      ).toMatchObject({
+        outcome: "requeue",
+        claim: false,
+        labels: { add: [], remove: [] },
+        comment: false,
+      });
+    });
+  },
+);

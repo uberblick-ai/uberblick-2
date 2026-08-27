@@ -27,13 +27,20 @@ const UNCERTAINTY = ["low", "high"];
 const BLAST_RADIUS = ["local", "wide"];
 /** `hard` when the choice is expensive to undo once merged. */
 const REVERSIBILITY = ["easy", "hard"];
-/** What the preflight found that stops a dispatch, if anything. */
-const BLOCKER = ["none", "stale-spec", "product-decision"];
+/**
+ * What the preflight found that stops a dispatch, if anything — exported for
+ * the same reason `AXES` is: a test should enumerate the vocabulary, not
+ * retype it.
+ */
+export const BLOCKERS = ["none", "stale-spec", "product-decision"];
 
 const BOOLEANS = [true, false];
 
-/** The four axes the tier is a function of, and nothing else. */
-const AXES = {
+/**
+ * The four axes the tier is a function of, and nothing else — exported so a
+ * test can enumerate the space without re-declaring the vocabulary here.
+ */
+export const AXES = {
   materiality: MATERIALITY,
   uncertainty: UNCERTAINTY,
   blastRadius: BLAST_RADIUS,
@@ -42,7 +49,7 @@ const AXES = {
 
 /** Lifecycle signals: what the preflight found, and what the recheck saw. */
 const LIFECYCLE = {
-  blocker: BLOCKER,
+  blocker: BLOCKERS,
   /** Did the self-check or a challenger surface anything material? */
   findings: BOOLEANS,
   /** The recheck immediately before the claim: still `ready`, still unclaimed. */
@@ -172,9 +179,12 @@ export function preflight(signals) {
     comment,
   });
 
-  // A blocker outranks the recheck: the finding is durable whoever ends up
-  // implementing the issue, and it has to be recorded before `ready` can mean
-  // anything again.
+  // The recheck outranks every finding. Someone else claimed the issue, or it
+  // stopped being eligible, while this preflight ran: it is their work now, and
+  // stripping `ready` or commenting on it would be acting on live work from the
+  // outside. Take the findings to the claim holder or to a fresh pickup instead.
+  if (!stillEligible) return plan("requeue", { comment: false });
+
   if (blocker === "product-decision") {
     return plan("park-needs-decision", {
       add: ["needs-decision"],
@@ -185,10 +195,10 @@ export function preflight(signals) {
   if (blocker === "stale-spec") {
     return plan("return-to-coordination", { remove: ["ready"], comment: true });
   }
-  // Someone else claimed it, or it stopped being eligible, while the preflight
-  // ran. Their claim is the record; adding our own note would be noise.
-  if (!stillEligible) return plan("requeue", { comment: false });
 
+  // `in-progress` is written by the claim in step 7, not here. It is named as
+  // this outcome's label because dispatch is the only outcome that ends with
+  // the issue claimed — which is the invariant worth being able to check.
   return plan("dispatch", {
     add: ["in-progress"],
     comment: challengers > 0 || findings,
