@@ -12,14 +12,24 @@
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { blockText } from "../src/replica.js";
+import { agentDisplayName } from "../src/server.js";
 import { removeTempDirs, startServer, testConfig, waitUntil } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
 
-async function rigWith(cursorTtlMs?: number): Promise<Rig> {
+interface RigOptions {
+  cursorTtlMs?: number;
+  /** What the MCP client calls itself at `initialize`. */
+  clientInfo?: { name: string; title?: string; version: string };
+}
+
+async function rigWith(options: RigOptions = {}): Promise<Rig> {
+  const { cursorTtlMs, clientInfo } = options;
   const rig = await startServer(
     testConfig(cursorTtlMs === undefined ? {} : { cursorTtlMs }),
+    undefined,
+    clientInfo,
   );
   rigs.push(rig);
   return rig;
@@ -125,8 +135,55 @@ describe("agent awareness", () => {
     expect(head?.index).toBe("brand new".length);
   });
 
+  // Who wrote is half of what a caret says, and the web editor renders whatever
+  // is in `user.name` verbatim (#304). These pin the resolution and the wiring;
+  // the wiring is what a `??` chain would get subtly wrong, because an empty
+  // title is a value.
+  it("names the caret after the session title, the client, then `agent`", () => {
+    expect(
+      agentDisplayName({ name: "Codex", title: "Uberblick Coordinator Agent" }),
+    ).toBe("Uberblick Coordinator Agent");
+    expect(agentDisplayName({ name: "Codex" })).toBe("Codex");
+    // Blank is not an answer: falling through is what keeps the caret labelled.
+    expect(agentDisplayName({ name: "Codex", title: "" })).toBe("Codex");
+    expect(agentDisplayName({ name: "Codex", title: "   " })).toBe("Codex");
+    expect(agentDisplayName({ name: " Codex " })).toBe("Codex");
+    expect(agentDisplayName({ name: " ", title: " " })).toBe("agent");
+    expect(agentDisplayName(undefined)).toBe("agent");
+  });
+
+  it("publishes the session title as the awareness name, with the cursor", async () => {
+    const rig = await rigWith({
+      clientInfo: {
+        name: "Codex",
+        title: "Uberblick Coordinator Agent",
+        version: "0.0.0",
+      },
+    });
+    const doc = await rig.ok("create_doc", {
+      title: "Attribution",
+      description: "A test document.",
+      blocks: [{ type: "paragraph", text: "who" }],
+    });
+    await rig.ok("edit_block", {
+      uuid: doc.uuid,
+      block_id: doc.blocks[0].id,
+      old_text: "who",
+      new_text: "who wrote this",
+    });
+
+    const { state } = awarenessOf(rig, doc.uuid);
+    // Atomic: a caret is on the wire and it carries a name and a colour, so a
+    // reader never sees an anonymous line.
+    expect(state.user).toEqual({
+      name: "Uberblick Coordinator Agent",
+      color: rig.config.color,
+    });
+    expect(state.cursor).not.toBeNull();
+  });
+
   it("withdraws the cursor when its TTL expires", async () => {
-    const rig = await rigWith(120);
+    const rig = await rigWith({ cursorTtlMs: 120 });
     const doc = await rig.ok("create_doc", {
       title: "Transient",
       description: "A test document.",
