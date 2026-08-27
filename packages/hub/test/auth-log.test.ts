@@ -122,6 +122,15 @@ const cases: Case[] = [
     token: async () => "not-a-token",
   },
   {
+    // Refused on length before anything decodes it: a real token is a few
+    // hundred bytes, and an unauthenticated caller does not get to choose how
+    // much work the hub does.
+    name: "a token far longer than any token",
+    cause: "unparseable",
+    identity: "unparseable",
+    token: async () => `${"A".repeat(8192)}.${"B".repeat(8192)}`,
+  },
+  {
     name: "a token signed with somebody else's secret",
     cause: "bad-signature",
     identity: { typ: "room", sub: "wrong-secret-client" },
@@ -250,7 +259,11 @@ describe("a rejected connection", () => {
   });
 
   it("names the socket's own address when nothing is in front of the hub", async () => {
-    const record = await rejectionFor("not-a-token");
+    // Sending the internal header is the obvious way to lie about the peer, so
+    // the upgrade hook overwrites it rather than reading it.
+    const record = await rejectionFor("not-a-token", {
+      headers: { [PEER_ADDRESS_HEADER]: "8.8.8.8" },
+    });
 
     expect(["127.0.0.1", "::ffff:127.0.0.1", "::1"]).toContain(record.peer);
     expect(record.proxied).toBe(false);
@@ -268,8 +281,9 @@ describe("a rejected connection", () => {
   });
 
   it("ignores the hops a client wrote into the proxy header itself", async () => {
-    // Caddy appends the peer it saw to whatever arrived, so everything left of
-    // the last hop is the client's own claim about itself.
+    // Only the last hop is the address a proxy observed; everything left of it
+    // is somebody's claim about itself, which is what a `trusted_proxies`
+    // configuration would let through.
     const record = await rejectionFor("not-a-token", {
       headers: { "x-forwarded-for": "203.0.113.7, 198.51.100.9" },
     });
@@ -282,27 +296,30 @@ describe("a rejected connection", () => {
 describe("the proxy header", () => {
   // A socket from an untrusted address cannot be opened from a test, so the
   // trust rule itself is checked where it is decided.
-  it("is believed from the deployment's own network", () => {
+  it.each([
+    {
+      peer: "172.18.0.5",
+      of: "the deployment's own bridge network",
+      expected: { address: "198.51.100.9", proxied: true },
+    },
+    {
+      peer: "203.0.113.5",
+      of: "a routable address",
+      expected: { address: "203.0.113.5", proxied: false },
+    },
+    {
+      // The tailnet a client dials the deployed hub from. Private-looking, and
+      // deliberately not trusted: it is where the clients are.
+      peer: "100.64.0.7",
+      of: "the tailnet",
+      expected: { address: "100.64.0.7", proxied: false },
+    },
+  ])("from $of is $expected.proxied", ({ peer, expected }) => {
     const headers = new Headers({
-      [PEER_ADDRESS_HEADER]: "172.18.0.5",
+      [PEER_ADDRESS_HEADER]: peer,
       "x-forwarded-for": "198.51.100.9",
     });
 
-    expect(resolvePeer(headers)).toEqual({
-      address: "198.51.100.9",
-      proxied: true,
-    });
-  });
-
-  it("is ignored from a peer that only speaks for itself", () => {
-    const headers = new Headers({
-      [PEER_ADDRESS_HEADER]: "203.0.113.5",
-      "x-forwarded-for": "198.51.100.9",
-    });
-
-    expect(resolvePeer(headers)).toEqual({
-      address: "203.0.113.5",
-      proxied: false,
-    });
+    expect(resolvePeer(headers)).toEqual(expected);
   });
 });

@@ -49,7 +49,12 @@ import { DEFAULT_HOST, DEFAULT_PORT, defaultDatabasePath } from "./config.js";
 import type { HubLogger } from "./log.js";
 import { stderrLogger } from "./log.js";
 import { HubDatabase, isEphemeralDatabase } from "./persistence.js";
-import type { TokenClaims, TokenIdentity } from "./token.js";
+import type {
+  ClampFailure,
+  TokenClaims,
+  TokenFailure,
+  TokenIdentity,
+} from "./token.js";
 import { clampToken, importRootSecret, inspectToken } from "./token.js";
 
 /**
@@ -151,13 +156,24 @@ function isLocalProxy(address: string): boolean {
  * deliberately not in the list) and speaks only for itself.
  *
  * **Which hop of `X-Forwarded-For`.** The *last* one — the address the proxy
- * itself saw. Caddy appends the peer it observed to whatever the client already
- * put in that header, so the conventional leftmost entry is client-controlled,
- * and reading it would let any browser write a fictional address into this
- * hub's log. With exactly one trusted hop — what the deployment has — the
- * rightmost entry is the one Caddy wrote and the only one nobody else could
- * have. Two chained proxies would make it the inner proxy's address, which is
- * the reason the deployment stays one hop deep.
+ * itself saw. With this repo's Caddyfile, which configures no `trusted_proxies`,
+ * Caddy discards whatever the client put in that header and writes the single
+ * peer it observed, so the header has one hop today and both readings coincide.
+ * The last hop is taken because it stays correct if `trusted_proxies` is ever
+ * configured: Caddy would then preserve the client's entries and append its
+ * own, making the conventional leftmost entry client-controlled. Two chained
+ * proxies would make it the inner proxy's address, which is the reason the
+ * deployment stays one hop deep.
+ *
+ * **What this address is for.** A log field, and never an auth input: nothing
+ * downstream branches on it, so a wrong `peer` misleads a reader rather than
+ * admitting a connection. That matters because the trust rule is about the
+ * *shape* of the direct peer, not about a configured proxy — on a loopback-bound
+ * `mise run hub` any local client can send `X-Forwarded-For` and be logged with
+ * `proxied: true`, and `proxied: true` on a hub that has no proxy in front of it
+ * is exactly the tell. In the Compose deployment it cannot happen at all: the
+ * hub publishes no port, so Caddy on the bridge network is the only thing that
+ * can open that socket.
  */
 export function resolvePeer(headers: Headers): PeerAddress {
   const direct = headers.get(PEER_ADDRESS_HEADER) ?? "";
@@ -171,6 +187,13 @@ export function resolvePeer(headers: Headers): PeerAddress {
   }
   return { address: direct === "" ? "unknown" : direct, proxied: false };
 }
+
+/** Every reason the hub refuses a connection, as one closed vocabulary. */
+type RejectionCause =
+  | "token-in-query"
+  | TokenFailure
+  | ClampFailure
+  | "workspace-mismatch";
 
 /**
  * The token's own account of itself on a rejection line: `typ` and `sub` when
@@ -395,7 +418,7 @@ export async function createHub(config: HubConfig): Promise<Hub> {
      * catches.
      */
     async onUpgrade({ request }) {
-      request.headers[PEER_ADDRESS_HEADER] = request.socket.remoteAddress ?? "";
+      request.headers[PEER_ADDRESS_HEADER] = request.socket?.remoteAddress ?? "";
     },
 
     async onAuthenticate({
@@ -410,12 +433,17 @@ export async function createHub(config: HubConfig): Promise<Hub> {
       // browser tabs and long-lived agent sessions present tokens to the same
       // hub, and only one of them is the one that has to be restarted.
       const peer = resolvePeer(requestHeaders);
-      const rejection = {
+      const rejected = (
+        cause: RejectionCause,
+        fields: Record<string, unknown> = {},
+      ) => ({
         event: "hub.auth.rejected",
         room: documentName,
         peer: peer.address,
         proxied: peer.proxied,
-      };
+        ...fields,
+        cause,
+      });
 
       const queried = TOKEN_QUERY_PARAMS.find((name) =>
         requestParameters.has(name),
@@ -423,7 +451,7 @@ export async function createHub(config: HubConfig): Promise<Hub> {
       if (queried !== undefined) {
         // No token identity here: the connection is refused on the URL, before
         // any token has been read, and the parameter is the whole finding.
-        log({ ...rejection, parameter: queried, cause: "token-in-query" });
+        log(rejected("token-in-query", { parameter: queried }));
         throw new AuthError(
           "token-in-query",
           `token must be sent in the auth message, not the "${queried}" query parameter`,
@@ -432,11 +460,7 @@ export async function createHub(config: HubConfig): Promise<Hub> {
 
       const inspected = await inspectToken(rootKey, token);
       if ("failure" in inspected) {
-        log({
-          ...rejection,
-          ...tokenFields(inspected.identity),
-          cause: inspected.failure,
-        });
+        log(rejected(inspected.failure, tokenFields(inspected.identity)));
         throw new AuthError(
           "invalid-token",
           "token is missing, malformed or badly signed",
@@ -451,12 +475,7 @@ export async function createHub(config: HubConfig): Promise<Hub> {
       // to whoever sent it.
       const clamped = clampToken(claims, Math.floor(Date.now() / 1000));
       if (clamped !== null) {
-        log({
-          ...rejection,
-          typ: claims.typ,
-          sub: claims.sub,
-          cause: clamped,
-        });
+        log(rejected(clamped, { typ: claims.typ, sub: claims.sub }));
         throw new AuthError(
           "invalid-token",
           "token is missing, malformed or badly signed",
@@ -465,13 +484,13 @@ export async function createHub(config: HubConfig): Promise<Hub> {
 
       const workspace = roomWorkspace(documentName);
       if (workspace === null || workspace !== claims.workspace) {
-        log({
-          ...rejection,
-          typ: claims.typ,
-          sub: claims.sub,
-          workspace: claims.workspace,
-          cause: "workspace-mismatch",
-        });
+        log(
+          rejected("workspace-mismatch", {
+            typ: claims.typ,
+            sub: claims.sub,
+            workspace: claims.workspace,
+          }),
+        );
         throw new AuthError(
           "workspace-mismatch",
           `token for workspace "${claims.workspace}" may not open room "${documentName}"`,

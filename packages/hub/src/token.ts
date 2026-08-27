@@ -636,6 +636,14 @@ function logString(value: unknown): string | null {
 const UNPARSEABLE: TokenRejection = { failure: "unparseable", identity: null };
 
 /**
+ * The longest string {@link inspectToken} will look at — 4096 characters, which
+ * for a base64url token is 4 KiB. A real token is a few hundred bytes, so
+ * anything past this is not one, and refusing it by length bounds the decode
+ * and the JSON parse an unauthenticated caller can ask the hub for.
+ */
+const MAX_TOKEN_LENGTH = 4096;
+
+/**
  * Verify a token, returning its claims or **why it was refused** — the same
  * decision {@link verifyToken} makes, with the reason kept instead of dropped.
  *
@@ -651,6 +659,9 @@ export async function inspectToken(
   key: CryptoKey,
   token: string,
 ): Promise<TokenClaims | TokenRejection> {
+  if (token.length > MAX_TOKEN_LENGTH) {
+    return UNPARSEABLE;
+  }
   const parts = token.split(SEPARATOR);
   if (parts.length !== 2) {
     return UNPARSEABLE;
