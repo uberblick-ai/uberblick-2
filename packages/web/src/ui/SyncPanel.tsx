@@ -15,6 +15,8 @@
 
 import { useEffect } from "react";
 import type { ReactElement } from "react";
+import { endpointSourceLabel } from "../config.js";
+import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
 import type { RemotePresence } from "./doc-chrome.js";
@@ -43,6 +45,14 @@ function Fact({ label, value }: { label: string; value: string }): ReactElement 
  * `endpoint` is passed rather than read here, because the address is resolved
  * once per session by an async read the shell already waits on (`hubUrl` throws
  * before it settles). Null is that in-between moment, and it says so.
+ *
+ * Its two rows are one answer to one question (#362): *which* hub is this
+ * "synced" about. One machine legitimately runs several — the dev island and
+ * the promoted remote — so a panel that named the state without naming the hub
+ * let two tabs of one workspace both read "synced" while attached to different
+ * worlds. The source is beside the address because falling back to compiled
+ * values is exactly how a tab lands on the wrong one, and the address itself is
+ * `config.ts`'s stripped label: an endpoint, never a credential.
  */
 export function SyncPanel({
   connection,
@@ -54,7 +64,7 @@ export function SyncPanel({
   /** Every remote session in that room, read once by the shell — see `DocChrome`. */
   presence: readonly RemotePresence[];
   /** The endpoint the provider was constructed with, or null until resolved. */
-  endpoint: string | null;
+  endpoint: HubEndpoint | null;
   onClose: () => void;
 }): ReactElement {
   const status = useRoomStatus(connection);
@@ -106,7 +116,13 @@ export function SyncPanel({
         </button>
       </div>
       <dl className="ub-sync-facts">
-        <Fact label="Hub" value={endpoint ?? UNKNOWN} />
+        <Fact label="Hub" value={endpoint?.url ?? UNKNOWN} />
+        {/* Always drawn, "served config" included: a reader checking which hub
+            they are on is asking in the same breath who decided it. */}
+        <Fact
+          label="Source"
+          value={endpoint === null ? UNKNOWN : endpointSourceLabel(endpoint.source)}
+        />
         <Fact label="Room" value={connection?.room ?? UNKNOWN} />
         <Fact label="State" value={state === "syncing" ? "syncing…" : state} />
         {/* Always drawn, zero included: this is the panel someone opens to ask

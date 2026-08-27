@@ -90,6 +90,72 @@ export interface ClientConfig {
 }
 
 /**
+ * The hub this session dialled, as a reader may be *shown* it (#362).
+ *
+ * Two facts, because "synced" without "with what" is not a status: one machine
+ * legitimately runs several hubs — a dev island and a promoted remote — and two
+ * tabs of the same workspace can each be perfectly synced to a different world.
+ * The source travels with the address because falling back to compiled values
+ * is exactly how a tab lands on the wrong one.
+ */
+export interface HubEndpoint {
+  /** The address, or null when the configured value is not one — see {@link endpointLabel}. */
+  url: string | null;
+  source: ConfigSource;
+}
+
+/**
+ * The endpoint of `value`, and nothing else: scheme, host, path.
+ *
+ * Rebuilt from the parsed parts rather than trimmed, so no userinfo, query or
+ * fragment can survive into anything that renders it. `usableEndpoint` already
+ * refuses all three in the *served* document, but the build-time defines are
+ * not validated at all — a `HUB_URL` of `ws://user:pass@host` would otherwise
+ * reach the screen the moment a surface started naming the endpoint.
+ *
+ * Null rather than a best effort when the value does not parse *or* is not an
+ * address this client could dial: a string this cannot take apart is one it
+ * cannot promise anything about, and the socket built from it has failed
+ * anyway. The scheme check is the same one `usableEndpoint` makes, and it is
+ * load-bearing here rather than cosmetic — `new URL` leaves an opaque scheme's
+ * payload in `pathname` with an empty host, so a `mailto:agent:s3cret@host`
+ * would otherwise be re-emitted verbatim. A lone `/` path is dropped because
+ * that is what `new URL` adds to a bare host, and the two spellings are one
+ * address.
+ */
+export function endpointLabel(value: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") return null;
+  const path = parsed.pathname === "/" ? "" : parsed.pathname;
+  return `${parsed.protocol}//${parsed.host}${path}`;
+}
+
+/**
+ * How an endpoint's source reads to someone asking which hub they are on.
+ *
+ * One wording in one place: the sync panel states it and the header pill
+ * carries it on hover, and two different phrasings for one fact would be worse
+ * than either. Every non-document answer names {@link HUB_CONFIG_PATH} rather
+ * than merely omitting it — "the served document did not decide this" is the
+ * half that diagnoses a tab on the wrong hub.
+ */
+export function endpointSourceLabel(source: ConfigSource): string {
+  switch (source) {
+    case "document":
+      return `served ${HUB_CONFIG_PATH}`;
+    case "define":
+      return `compiled default, ${HUB_CONFIG_PATH} not used`;
+    case "fallback":
+      return `in-code default, ${HUB_CONFIG_PATH} not used`;
+  }
+}
+
+/**
  * What to use when the document cannot supply an endpoint.
  *
  * Keyed off whether a `define` was injected at all rather than off the value,
@@ -415,12 +481,29 @@ export function resolveClientConfig(
  * `useHubEndpoint` holds back until {@link resolveClientConfig} has settled.
  */
 export function hubUrl(): string {
+  return settled().hubUrl;
+}
+
+/** The resolved configuration, or the error every reader of it shares. */
+function settled(): ClientConfig {
   if (resolved === null) {
     throw new Error(
       "uberblick web: the hub endpoint was read before resolveClientConfig() settled",
     );
   }
-  return resolved.hubUrl;
+  return resolved;
+}
+
+/**
+ * The endpoint as the UI may say it, with where it came from (#362).
+ *
+ * Deliberately not `hubUrl()`: that one is dialled, this one is displayed, and
+ * the displayed form is stripped to the address alone. Gated the same way — the
+ * surfaces that call it render "—" until `useHubEndpoint` reports ready.
+ */
+export function hubEndpoint(): HubEndpoint {
+  const config = settled();
+  return { url: endpointLabel(config.hubUrl), source: config.hubUrlSource };
 }
 
 /**

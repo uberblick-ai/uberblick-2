@@ -23,6 +23,7 @@ import { Awareness, removeAwarenessStates } from "y-protocols/awareness";
 import { appendBlock, getBlocksFragment, initDoc } from "@uberblick/schema";
 import { SyncPanel } from "../src/ui/SyncPanel.js";
 import { usePresence } from "../src/ui/hooks.js";
+import type { HubEndpoint } from "../src/config.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 /** A workspace id is a uuid. */
@@ -31,7 +32,7 @@ const DOC_UUID = "9f3c1a2b-0000-4000-8000-0123456789ab";
 const ROOM = `${WORKSPACE}/${DOC_UUID}`;
 
 /** The endpoint the shell resolved — never a hardcoded address in the panel. */
-const ENDPOINT = "ws://hub.example:1234";
+const ENDPOINT: HubEndpoint = { url: "ws://hub.example:1234", source: "document" };
 
 /** The foreign client ids standing in for an agent and a second browser tab. */
 const AGENT_CLIENT = 424_242;
@@ -121,7 +122,7 @@ function Panel({
   onClose = () => {},
 }: {
   fix: Fixture;
-  endpoint?: string | null;
+  endpoint?: HubEndpoint | null;
   onClose?: () => void;
 }): ReactElement {
   const presence = usePresence(fix.connection);
@@ -135,13 +136,16 @@ function Panel({
   );
 }
 
-function mount(fix: Fixture): { host: HTMLElement; root: Root } {
+function mount(
+  fix: Fixture,
+  endpoint: HubEndpoint | null = ENDPOINT,
+): { host: HTMLElement; root: Root } {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  act(() => root.render(<Panel fix={fix} />));
+  act(() => root.render(<Panel fix={fix} endpoint={endpoint} />));
   // Past every settle window, so the state word is what a reader sees rather
   // than the "offline" every mount starts from.
   act(() => void vi.advanceTimersByTime(5_000));
@@ -185,7 +189,9 @@ describe("the sync panel renders the state this client holds", () => {
     const { host, root } = mount(fix);
     try {
       expect(facts(host)).toEqual({
-        Hub: ENDPOINT,
+        Hub: ENDPOINT.url,
+        // Which hub this "synced" is about, and who decided it (#362).
+        Source: "served /uberblick-config.json",
         Room: ROOM,
         // A backlog is what stops the state being `synced` — the provider's own
         // flag never comes back down once the handshake raised it.
@@ -297,6 +303,47 @@ describe("the sync panel renders the state this client holds", () => {
     }
   });
 
+  /**
+   * #362's fallback path: the served document did not decide this endpoint.
+   * Falling back to compiled values is exactly how a tab ends up on the wrong
+   * hub while still reading "synced", so the panel says so in words rather
+   * than leaving the address to be recognised.
+   */
+  it("says outright when the endpoint came from compiled values, not the document", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    const { host, root } = mount(fix, {
+      url: "ws://localhost:1234",
+      source: "define",
+    });
+    try {
+      expect(facts(host).Hub).toBe("ws://localhost:1234");
+      expect(facts(host).Source).toBe(
+        "compiled default, /uberblick-config.json not used",
+      );
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("says the same of a build that carried no endpoint of its own", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    const { host, root } = mount(fix, {
+      url: "ws://localhost:1234",
+      source: "fallback",
+    });
+    try {
+      expect(facts(host).Source).toBe(
+        "in-code default, /uberblick-config.json not used",
+      );
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
   it("says so rather than guessing while the endpoint is still resolving", () => {
     vi.useFakeTimers();
     const fix = fixture();
@@ -310,6 +357,7 @@ describe("the sync panel renders the state this client holds", () => {
       // Never a fallback address: the panel exists to say which hub this client
       // dialled, and a plausible guess is the one answer it must not give.
       expect(facts(host).Hub).toBe("—");
+      expect(facts(host).Source).toBe("—");
     } finally {
       act(() => root.unmount());
       host.remove();

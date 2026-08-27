@@ -32,6 +32,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   HUB_CONFIG_PATH,
   configuredWorkspaces,
+  endpointLabel,
   hubUrl,
   readClientConfig,
   resolveClientConfig,
@@ -344,6 +345,41 @@ describe("the workspaces it names", () => {
       expect(config.workspacesSource, kind).toBe("define");
       expect(config.rejected, kind).toBeTypeOf("string");
     }
+  });
+});
+
+/**
+ * What the UI is allowed to *say* about the endpoint (#362).
+ *
+ * The surfaces that assert sync state now name the hub, so the label they name
+ * it with is the one place a credential could reach a screen. `usableEndpoint`
+ * already refuses userinfo in the served document — but the build-time defines
+ * are not validated at all, and a `HUB_URL` set to a credential-bearing address
+ * would otherwise be rendered verbatim in the panel and in the pill's tooltip.
+ */
+describe("the endpoint as it is shown", () => {
+  it("renders the address alone, whatever the configured value carried", () => {
+    // Every way a secret can ride in a URL. The label is rebuilt from the
+    // parsed parts, so none of them has anywhere to survive.
+    expect(endpointLabel("wss://agent:s3cret@hub.example/ws")).toBe(
+      "wss://hub.example/ws",
+    );
+    expect(endpointLabel("wss://hub.example/ws?token=s3cret")).toBe(
+      "wss://hub.example/ws",
+    );
+    expect(endpointLabel("wss://hub.example/ws#s3cret")).toBe(
+      "wss://hub.example/ws",
+    );
+    // The ordinary case is left as it reads, and the `/` `new URL` adds to a
+    // bare host is dropped rather than shown as a path.
+    expect(endpointLabel(INJECTED)).toBe(INJECTED);
+    // Nothing at all rather than a best effort: a string this cannot take
+    // apart is one it cannot promise carries no credential — and an opaque
+    // scheme is exactly that, since `new URL` leaves its whole payload in
+    // `pathname` with no host to rebuild the address from.
+    expect(endpointLabel("hub.example/ws")).toBeNull();
+    expect(endpointLabel("mailto:agent:s3cret@hub.example")).toBeNull();
+    expect(endpointLabel("https://hub.example/ws")).toBeNull();
   });
 });
 

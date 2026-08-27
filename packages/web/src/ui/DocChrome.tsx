@@ -19,6 +19,8 @@ import type { ReactElement } from "react";
 import type * as Y from "yjs";
 import { getMeta, setTags } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
+import { endpointSourceLabel } from "../config.js";
+import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
 import { GROUP_TAGS, groupKeyForTags, groupLabel } from "./groups.js";
@@ -72,6 +74,7 @@ function Breadcrumb({ meta }: { meta: DocMeta }): ReactElement {
 export function DocChrome({
   connection,
   presence,
+  endpoint,
   meta,
   pinned,
   onTogglePin,
@@ -88,6 +91,11 @@ export function DocChrome({
    * same snapshot — one subscription, and no way for the two to disagree.
    */
   presence: readonly RemotePresence[];
+  /**
+   * The hub this session dialled, or null until the config read settles — what
+   * the connection pill carries on hover (#362).
+   */
+  endpoint: HubEndpoint | null;
   /** The open document's metadata, or null when none is open or read yet. */
   meta: DocMeta | null;
   /** Whether the open document is pinned to the sidebar (#115). */
@@ -120,6 +128,25 @@ export function DocChrome({
   const openThreads = threads.filter((thread) => !thread.resolved).length;
   const state = useCalmSyncState(rawSyncState(useRoomStatus(connection)));
   const label = state === "syncing" ? "syncing…" : state;
+  /**
+   * Which hub this state is about (#362) — the endpoint and how it was
+   * resolved, or null while the read is still in flight.
+   *
+   * On the pill rather than only in the panel, because the pill is what a
+   * reader glances at: two tabs of one workspace reading "synced" against
+   * different hubs is a diagnosis a hover should settle, without opening
+   * anything. The address is `config.ts`'s stripped label — an endpoint, never
+   * a credential.
+   *
+   * An address that could not be labelled still leaves a source worth saying,
+   * so the pill says it over "unknown" rather than falling silent: the panel
+   * draws that row either way, and one surface dropping a fact the other keeps
+   * is the disagreement this whole change exists to remove.
+   */
+  const hub =
+    endpoint === null
+      ? null
+      : `${endpoint.url ?? "unknown"} (${endpointSourceLabel(endpoint.source)})`;
   // `meta.uuid === ""` is a room that answered with nothing in it — see
   // `useDocMeta`. There is no document to name, so the breadcrumb says nothing.
   const named = meta !== null && meta.uuid !== "";
@@ -182,9 +209,13 @@ export function DocChrome({
           aria-controls="ub-sync-panel"
           // The visible label is one word about the state, not about the
           // action, and `title` is not reliably announced — so the accessible
-          // name carries both, keeping the visible word inside it.
-          aria-label={`Sync details — ${label}`}
-          title="Sync details"
+          // name carries both, keeping the visible word inside it. The hub
+          // rides along in both, so the endpoint is one hover away for a
+          // pointer and part of the name for everyone else.
+          aria-label={
+            hub === null ? `Sync details — ${label}` : `Sync details — ${label}, hub ${hub}`
+          }
+          title={hub === null ? "Sync details" : `Sync details — hub ${hub}`}
           onClick={onToggleSync}
         >
           <span className="ub-status-mark" aria-hidden="true">
