@@ -528,19 +528,28 @@ without pushing), and a moving `main`, which is a discovery pointer and never a
 runtime reference — the workflow prints the digest, and a deployment pins that.
 It needs no repository secret and no age key: the hub target mounts no build
 secret, and the automatic `GITHUB_TOKEN` scoped to `packages: write` is the
-entire credential.
+entire credential — which is also why the *first* publish creates the package
+private and someone with admin rights has to flip it to public once
+([REMOTE.md](REMOTE.md#the-published-hub-image) has the exact step).
 
 **What a public image discloses.** The hub runs TypeScript source under `tsx`,
 so `COPY . .` puts the repository working tree — minus `.dockerignore`'s
 exclusions — inside an image anyone can pull, which makes those files public
 while the repository itself is not (MIT is the plan). No *credential* is among
-them, and that is checked rather than asserted: `.git`, `.claude`, `.github`,
-`.env*`, `mise.local.toml` and every database file are excluded, `fnox.toml`
-ships age-encrypted and the key to it has never been in the repository, and
-`scripts/check-image-secrets.sh` scans the pulled artefact on every push for
-`age.txt`, a `credentials.json`, an age private key, a credential-shaped
-variable, and — where a machine holds the real signing secret — that exact
-value, which it never prints. Its `--self-test` plants a credential in a
+them, and that is checked rather than asserted: `.git`, `.github`, `.env*`,
+`mise.local.toml` and every database file except two tracked SQLite test
+fixtures are excluded, as is `.claude` **except `.claude/skills`** — the
+coordinator's procedure and its decision table, which `mise run review` needs
+inside the image and which therefore ship in a public one. `fnox.toml` ships
+age-encrypted and the key to it has never been in the repository, and
+`scripts/check-image-secrets.sh` scans the built image *before anything is
+pushed* for `age.txt`, a `credentials.json`, a `mise.local.toml`, an `.env`, an
+age private key, a credential-shaped variable, and — where a machine holds the
+real signing secret — that exact value in the filesystem, the image
+configuration and the build history, none of which it ever prints. Layer blobs
+are not scanned: a secret written and then deleted across layers would survive
+in a blob, which is out of this check's model and is why the Dockerfile mounts
+no secret at all. Its `--self-test` plants a credential in a
 throwaway image and demands a rejection, so the workflow proves the scan can
 fail before it trusts it to pass.
 

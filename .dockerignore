@@ -14,20 +14,36 @@ dist
 **/dist
 data
 **/data
+# A root-anchored pattern matches only the repository root, so every one of
+# these gets a `**/` twin: a database or a derived config one directory down is
+# exactly the file that must not reach a public image.
 *.sqlite
+**/*.sqlite
 *.sqlite-*
+**/*.sqlite-*
 *.sqlite3
+**/*.sqlite3
 *.db
+**/*.db
+# …except two tracked fixtures, which are test data and nobody's corpus.
+# `mise run review` runs the suites inside the image, and without these the
+# hub's and the MCP server's SQLite tests have nothing to open.
+!packages/hub/test/fixtures/extension-sqlite.sqlite
+!packages/mcp-server/test/fixtures/better-sqlite3.sqlite
 .env
+**/.env
 .env.*
+**/.env.*
 test-results
 playwright-report
 .DS_Store
 .vite
 
-
-# A developer's derived mise config carries HUB_AUTH_TOKEN. It is gitignored,
-# so `mise run review` (which builds from `git archive`) never sees it — but a
-# plain `docker build` from a working checkout would otherwise bake the signing
-# secret into an image that is published publicly.
+# A developer's derived mise config carries HUB_AUTH_TOKEN. It is gitignored, so
+# `mise run review` (which builds from `git archive`) never sees it — but a plain
+# `docker build` from a working checkout would otherwise bake the signing secret
+# into an image that is published publicly. Both spellings, at every depth.
 mise.local.toml
+**/mise.local.toml
+.mise.local.toml
+**/.mise.local.toml

@@ -13,9 +13,15 @@
 #
 # The hub target mounts no build secret (the only `--mount=type=secret` in the
 # Dockerfile belongs to the web bundle, a different target), so nothing here
-# needs the age key. Because the published image is public, the push is followed
-# by `scripts/check-image-secrets.sh` over the pulled artefact: a failure there
-# fails the job, so a disclosure is loud rather than quiet.
+# needs the age key. Because the published image is public, the build is loaded
+# locally and `scripts/check-image-secrets.sh` runs over it *before* anything is
+# pushed: a leak that reached the registry first would be public under two tags
+# before it was reported, and the never-overwrite rule would then leave that
+# commit unrepairable.
+#
+# A first publish creates the GHCR package with the repository's visibility,
+# i.e. private, and `packages: write` cannot change that. Someone with admin
+# rights flips it to Public once, in the package settings; nothing here can.
 #
 # IMAGE and MOVING_TAG override the defaults, which is how this is rehearsed
 # against a throwaway local registry.
@@ -49,6 +55,16 @@ report() {
   fi
 }
 
+# Digests and image references are not prose: the job summary gets them inside
+# one fenced block, opened here and closed on every exit path.
+close_summary() {
+  printf '```\n' >>"$GITHUB_STEP_SUMMARY"
+}
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  printf '```\n' >>"$GITHUB_STEP_SUMMARY"
+  trap close_summary EXIT
+fi
+
 # An immutable tag is never rebuilt over. An inspect that fails for any reason
 # other than "no such tag" is a refusal, not a licence to push: guessing wrong
 # in that direction is what would overwrite a published digest.
@@ -75,17 +91,28 @@ if [ -z "${BUILDX_BUILDER:-}" ]; then
     docker buildx create --name uberblick-publish --driver docker-container >/dev/null
   export BUILDX_BUILDER=uberblick-publish
 fi
-# --provenance=false keeps this a plain image manifest rather than an index with
-# an attestation hanging off it. Provenance and SBOM attestations are a decision
-# nobody has taken yet, and an unasked-for one would change what an anonymous
-# `docker pull` of this tag resolves to.
+# Loaded into the local image store rather than pushed: nothing reaches the
+# registry until the scan below has passed. --provenance=false is what makes
+# --load work on a daemon whose image store cannot hold attestations, and it
+# keeps the published artefact a plain image manifest rather than an index with
+# an attestation hanging off it — provenance and SBOM attestations are a
+# decision nobody has taken yet.
 docker buildx build \
   --target hub \
   --provenance=false \
   --tag "$IMAGE:$tag" \
-  --tag "$IMAGE:$MOVING_TAG" \
-  --push \
+  --load \
   "$REPO_ROOT"
+
+"$REPO_ROOT/scripts/check-image-secrets.sh" "$IMAGE:$tag"
+
+# The scanned bytes are the published bytes: this pushes the image that was just
+# checked instead of building a second one. The immutable tag goes first, so a
+# failure between the two leaves the commit published under the name that pins
+# it, with the moving pointer merely not caught up yet.
+docker push --quiet "$IMAGE:$tag"
+docker tag "$IMAGE:$tag" "$IMAGE:$MOVING_TAG"
+docker push --quiet "$IMAGE:$MOVING_TAG"
 
 digest=$(digest_of "$IMAGE:$tag")
 report "pushed $IMAGE@$digest"
@@ -98,7 +125,12 @@ if [ "$moving_digest" != "$digest" ]; then
   exit 1
 fi
 
-# Over the pulled artefact, not the local build: what is published is what has
-# to be clean.
-docker pull --quiet "$IMAGE@$digest" >/dev/null
-"$REPO_ROOT/scripts/check-image-secrets.sh" "$IMAGE@$digest"
+# What the registry serves must be the local image the scan passed, not merely
+# an image with the same tag.
+repo_digests=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$IMAGE:$tag")
+pushed_digest=$(printf '%s\n' "$repo_digests" | sed -n "s|^$IMAGE@||p" | sed -n '1p')
+if [ "$pushed_digest" != "$digest" ]; then
+  echo "$IMAGE:$tag serves $digest, but the scanned image pushed as $pushed_digest" >&2
+  exit 1
+fi
+report "  scanned before push, and the registry serves that same digest"

@@ -17,7 +17,15 @@ name: publish hub image
 # exclusions, because the hub runs TypeScript source under tsx. Publishing it
 # publicly therefore makes those files public; `scripts/check-image-secrets.sh`
 # is what holds the line that no *credential* is among them, and it runs against
-# the pulled artefact on every push.
+# the built image *before* anything is pushed.
+#
+# One manual step this workflow cannot take: the first successful run creates the
+# GHCR package with the repository's visibility — private — and `packages: write`
+# cannot change it. Someone with admin rights flips it once, at
+# https://github.com/orgs/uberblick-ai/packages/container/uberblick-hub/settings
+# → Change visibility → Public. Until that is done the image exists but an
+# anonymous pull is refused, so the credential-free acceptance criteria in #365
+# are checked after it, not before.
 
 on:
   push:
@@ -39,6 +47,12 @@ jobs:
   publish:
     name: build and push the hub image
     runs-on: ubuntu-latest
+    # A fork publishing to this repository's package namespace would fail on
+    # permissions anyway; failing here says why.
+    if: github.repository == 'uberblick-ai/uberblick-2'
+    # A cold build is a few minutes; anything near this is a hung push, not a
+    # slow one.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -52,7 +66,7 @@ jobs:
       - name: Log in to ghcr.io
         env:
           GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_TOKEN: ${{ github.token }}
         run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
       # Builds `target: hub`, pushes `sha-<full sha>` (never overwritten — an

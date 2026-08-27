@@ -15,11 +15,23 @@
 # It flattens the image with `docker export` and fails when it finds:
 #
 #   - a file named `age.txt` (the fnox private key), `credentials.json` (the
-#     hub signing secret) or `mise.local.toml`, or a bare `.env`;
+#     hub signing secret), `mise.local.toml` or `.mise.local.toml`, or an
+#     `.env` in any of its spellings;
 #   - an age private key anywhere in the bytes, by its `AGE-SECRET-KEY-`
 #     prefix;
-#   - the value of `$SECRET_NEEDLE`, when that variable is set;
+#   - the value of `$SECRET_NEEDLE`, when that variable is set, in the flattened
+#     filesystem, in the image configuration, or in the build history;
 #   - a credential-shaped variable baked into the image configuration.
+#
+# **What it does not scan: the layer blobs.** `docker export` is the flattened
+# final filesystem, so a secret written in one layer and deleted in a later one
+# is invisible to it, even though `docker save` would still ship the blob that
+# holds it. Scanning blobs means decompressing every layer of a multi-gigabyte
+# image and is unreliable besides — a compressed stream does not answer to
+# `grep`. The build history is scanned instead, which catches the shape this
+# repository could actually produce (a `--build-arg` or an `ENV` carrying a
+# value); a deliberately hidden layer secret is out of this check's model, and
+# the defence against it is that the Dockerfile mounts no secret at all.
 #
 # `SECRET_NEEDLE` is how a machine that holds the real signing secret checks for
 # that exact value:
@@ -54,6 +66,17 @@ count_in_image() {
   docker export "$CONTAINER" | { grep -a -c -F -- "$needle" || true; }
 }
 
+# The two places a secret reaches an image without ever being a file: an
+# environment value under an innocent name, and a build argument frozen into the
+# history of the layer that used it.
+count_in_metadata() {
+  local image=$1 needle=$2
+  {
+    docker image inspect "$image"
+    docker history --no-trunc --format '{{.CreatedBy}}' "$image"
+  } | { grep -a -c -F -- "$needle" || true; }
+}
+
 check_image() {
   local image=$1
   local failures=0
@@ -66,13 +89,13 @@ check_image() {
 
   local found
   found=$(docker export "$CONTAINER" | tar -t 2>/dev/null |
-    { grep -E '(^|/)(age\.txt|credentials\.json|mise\.local\.toml|\.env)$' || true; })
+    { grep -E '(^|/)(\.env(\..*)?|\.?mise\.local\.toml|age\.txt|credentials\.json)$' || true; })
   if [ -n "$found" ]; then
     echo "FAIL: credential files in the image filesystem:"
     printf '%s\n' "$found" | sed 's/^/  /'
     failures=$((failures + 1))
   else
-    echo "ok: no age.txt, credentials.json, mise.local.toml or .env"
+    echo "ok: no age.txt, credentials.json, mise.local.toml or .env, at any depth"
   fi
 
   if [ "$(count_in_image "$AGE_KEY_PREFIX")" != "0" ]; then
@@ -86,8 +109,11 @@ check_image() {
     if [ "$(count_in_image "$SECRET_NEEDLE")" != "0" ]; then
       echo "FAIL: the value of \$SECRET_NEEDLE is present in the image"
       failures=$((failures + 1))
+    elif [ "$(count_in_metadata "$image" "$SECRET_NEEDLE")" != "0" ]; then
+      echo "FAIL: the value of \$SECRET_NEEDLE is present in the image configuration or build history"
+      failures=$((failures + 1))
     else
-      echo "ok: the value of \$SECRET_NEEDLE is absent"
+      echo "ok: the value of \$SECRET_NEEDLE is absent from the filesystem, the configuration and the history"
     fi
   else
     echo "skipped: \$SECRET_NEEDLE is unset, so no specific secret value was searched for"
@@ -125,6 +151,7 @@ self_test() {
   cat >"$dir/Dockerfile" <<'EOF'
 FROM scratch
 COPY age.txt /root/.config/fnox/age.txt
+ENV API_TOKEN=x
 EOF
   docker build --quiet --tag "$SELFTEST_IMAGE" "$dir" >/dev/null
   rm -rf "$dir"
@@ -141,14 +168,15 @@ EOF
   local rule
   for rule in "credential files in the image filesystem" \
     "an age private key" \
-    "the value of \$SECRET_NEEDLE is present"; do
+    "the value of \$SECRET_NEEDLE is present" \
+    "credential-shaped variable"; do
     if ! printf '%s\n' "$output" | grep -qF -- "$rule"; then
       echo "SELF-TEST FAILED: the planted credential did not trip \"$rule\""
       printf '%s\n' "$output"
       return 1
     fi
   done
-  echo "self-test passed: the filename, age-key and \$SECRET_NEEDLE rules all fired"
+  echo "self-test passed: the filename, age-key, \$SECRET_NEEDLE and image-configuration rules all fired"
 }
 
 if [ "$#" -ne 1 ]; then

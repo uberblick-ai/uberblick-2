@@ -269,12 +269,30 @@ digest the workflow prints, never the moving tag: it is the same split
 `ub remote update` already runs on, where `origin/main` is consulted and the
 immutable commit it resolved to is what gets recorded.
 
+**The first publish creates a private package.** GHCR gives a new package the
+repository's visibility, and `packages: write` cannot change it, so the workflow
+cannot make itself public. Once, by hand, at
+`https://github.com/orgs/uberblick-ai/packages/container/uberblick-hub/settings`
+→ *Change visibility* → **Public**. Until that is done the image exists and an
+anonymous pull is refused; every credential-free claim above starts holding
+after it.
+
 Publishing that image publishes its contents — the hub runs TypeScript source
 under `tsx`, so it carries the repository working tree minus `.dockerignore`'s
 exclusions, `fnox.toml` among them, age-encrypted and undecryptable without a
-key that has never been in the repository. No credential is in there, and
-`scripts/check-image-secrets.sh` checks that over the pulled artefact on every
-push rather than leaving it asserted.
+key that has never been in the repository. `.claude` is excluded **except
+`.claude/skills`**, which the review image needs and which therefore ships in a
+public one. No credential is in there, and `scripts/check-image-secrets.sh`
+checks that over the built image before anything is pushed, rather than leaving
+it asserted.
+
+Two things to expect when running it. The workflow's build pulls `moby/buildkit`
+anonymously on a fresh runner, so a Docker Hub rate limit shows up as a build
+failure that has nothing to do with this repository — re-run it. And the image
+declares no volume: `docker run` without `-v <somewhere>:/data` keeps
+`hub.sqlite` in the container's writable layer, where `docker rm` deletes it.
+The compose file in this repository owns that volume (`hub-data:/data`), and a
+host standing up from the published image has to supply one itself.
 
 This deployment still builds from the host's own checkout. Standing a host up
 from the published image instead — no git, no deploy key — is the host issue's
