@@ -1,5 +1,6 @@
 /**
- * Observations of the running stack: does a hub answer, and who holds a port.
+ * Observations of the running stack: does a hub answer, who holds a port, and
+ * what time the hub thinks it is.
  *
  * Their own module because they are observations rather than verdicts. `ub
  * doctor` turns them into checks with remedies; `ub open` will ask the same two
@@ -90,6 +91,67 @@ export function probePort(host: string, port: number): Promise<PortProbe> {
       server.close(() => resolve({ host, port, state: "free", code: null }));
     });
   });
+}
+
+/**
+ * How far this machine's clock is from the hub's, in whole seconds, or `null`
+ * when nothing answered with an HTTP `Date` to read.
+ *
+ * Positive means this machine is **ahead** of the hub. Nothing here is
+ * authenticated: it is a plain GET, which a Hocuspocus hub answers with a
+ * greeting, and the response carries the `Date` header this reads. That is what
+ * makes the check usable before any credential exists.
+ *
+ * The measurement is bracketed rather than pointwise. `Date` has one-second
+ * resolution and the round trip takes time, so the hub's clock is only known to
+ * lie somewhere in the interval this request spanned; a reading inside that
+ * interval is reported as no skew rather than as a second of noise.
+ */
+export async function probeHubClock(
+  hubUrl: string,
+  timeoutMs = 2_000,
+): Promise<number | null> {
+  let url: URL;
+  try {
+    url = new URL(hubUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol === "ws:") url.protocol = "http:";
+  if (url.protocol === "wss:") url.protocol = "https:";
+
+  const before = Date.now();
+  let header: string | null;
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    header = response.headers.get("date");
+    // Nothing reads the body, but an unconsumed one holds the socket open.
+    await response.body?.cancel();
+  } catch {
+    return null;
+  }
+  const after = Date.now();
+
+  if (header === null) {
+    return null;
+  }
+  const hub = Date.parse(header);
+  if (Number.isNaN(hub)) {
+    return null;
+  }
+
+  // `Date` truncates to the second, so widen the reading by one second at the
+  // late end before concluding that the hub is behind us.
+  if (hub + 1_000 < before) {
+    return Math.round((before - hub - 1_000) / 1_000);
+  }
+  if (hub > after) {
+    return -Math.round((hub - after) / 1_000);
+  }
+  return 0;
 }
 
 export interface HubBind {

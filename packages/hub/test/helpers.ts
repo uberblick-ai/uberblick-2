@@ -22,7 +22,7 @@ import { silentLogger } from "../src/log.js";
 import type { Hub } from "../src/server.js";
 import { createHub } from "../src/server.js";
 import type { TokenScope } from "../src/token.js";
-import { mintToken } from "../src/token.js";
+import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "../src/token.js";
 
 /** The hub's HMAC secret in tests. Never a valid token itself. */
 export const TEST_SECRET = "test-hmac-secret-for-the-hub";
@@ -92,14 +92,22 @@ export function startHub(overrides: Partial<HubConfig> = {}): Promise<Hub> {
   });
 }
 
-export function token(
+export async function token(
   scope: TokenScope = "read-write",
-  options: { sub?: string; workspace?: string; secret?: string } = {},
+  options: {
+    sub?: string;
+    workspace?: string;
+    secret?: string;
+    lifetimeSeconds?: number;
+  } = {},
 ): Promise<string> {
-  return mintToken(options.secret ?? TEST_SECRET, {
+  return mintToken(await importRootSecret(options.secret ?? TEST_SECRET), {
+    typ: "room",
     sub: options.sub ?? "test-client",
     workspace: options.workspace ?? WORKSPACE,
     scope,
+    kid: null,
+    lifetimeSeconds: options.lifetimeSeconds ?? MAX_TOKEN_LIFETIME_SECONDS,
   });
 }
 

@@ -9,9 +9,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import * as Y from "yjs";
 import type { Hub } from "../src/server.js";
+import { importRootSecret } from "../src/token.js";
 import {
   OTHER_WORKSPACE,
   TEST_SECRET,
+  WORKSPACE,
   TEXT_KEY,
   createClient,
   removeTempDatabases,
@@ -25,6 +27,19 @@ import {
 
 let hub: Hub;
 const clients: TestClient[] = [];
+
+/**
+ * Correctly sign an arbitrary payload with the hub's own secret — a token the
+ * minter would refuse to produce, which is exactly what the clamp is for.
+ */
+async function forgeToken(claims: Record<string, unknown>): Promise<string> {
+  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  const key = await importRootSecret(TEST_SECRET);
+  const signature = Buffer.from(
+    await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload)),
+  ).toString("base64url");
+  return `${payload}.${signature}`;
+}
 
 function client(room: string, jwt: string, doc?: Y.Doc): TestClient {
   const created = createClient({
@@ -129,6 +144,43 @@ describe("token auth", () => {
     } finally {
       provider.destroy();
     }
+  });
+
+  it("refuses a token that outlived the hub's ceiling, whatever it claimed", async () => {
+    // Signed with the hub's own secret and correct in every other way: only
+    // the lifetime is wrong. Forged rather than minted, because `mintToken`
+    // refuses to sign this — and a compromised local minter would not use it.
+    const now = Math.floor(Date.now() / 1000);
+    const decade = await forgeToken({
+      typ: "room",
+      sub: "a-compromised-machine",
+      workspace: WORKSPACE,
+      scope: "read-write",
+      kid: null,
+      iat: now,
+      exp: now + 10 * 365 * 24 * 60 * 60,
+    });
+
+    const rejected = client(testRoom(), decade);
+
+    await expect(rejected.denied).resolves.toBe("invalid-token");
+  });
+
+  it("refuses an expired token", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const stale = await forgeToken({
+      typ: "room",
+      sub: "yesterday",
+      workspace: WORKSPACE,
+      scope: "read-write",
+      kid: null,
+      iat: now - 1_800,
+      exp: now - 900,
+    });
+
+    const rejected = client(testRoom(), stale);
+
+    await expect(rejected.denied).resolves.toBe("invalid-token");
   });
 
   describe("read-only scope", () => {

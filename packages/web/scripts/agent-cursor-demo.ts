@@ -79,7 +79,11 @@ import {
   parseWorkspaceId,
   roomForDoc,
 } from "@uberblick/schema";
-import { mintToken } from "../src/collab/token.js";
+import {
+  MAX_TOKEN_LIFETIME_SECONDS,
+  importRootSecret,
+  mintToken,
+} from "../src/collab/token.js";
 
 const HUB_URL = process.env.HUB_URL ?? "ws://localhost:1234";
 const HUB_AUTH_TOKEN = process.env.HUB_AUTH_TOKEN ?? "";
@@ -108,11 +112,17 @@ const AGENT_COLOR = "#7b5ec7";
 const STEP_MS = 2000;
 const WALK_LENGTH = 12;
 
-function token(): Promise<string> {
-  return mintToken(HUB_AUTH_TOKEN, {
+let signingKey: Promise<CryptoKey> | null = null;
+
+async function token(): Promise<string> {
+  signingKey ??= importRootSecret(HUB_AUTH_TOKEN);
+  return mintToken(await signingKey, {
+    typ: "room",
     sub: AGENT_NAME,
     workspace: WORKSPACE,
     scope: "read-write",
+    kid: null,
+    lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
   });
 }
 

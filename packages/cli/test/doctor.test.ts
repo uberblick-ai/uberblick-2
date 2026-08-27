@@ -101,6 +101,34 @@ async function silentServer(): Promise<number> {
   return address.port;
 }
 
+/**
+ * A server that answers any HTTP request with a `Date` header `offsetSeconds`
+ * away from now — the hub's clock, as this machine would read it.
+ *
+ * The clock check reads that header and nothing else, so this is the whole of
+ * what it needs to see. It never speaks websocket, so the hub check reports it
+ * as unreachable; that is a different check and a different assertion.
+ */
+async function skewedClock(offsetSeconds: number): Promise<number> {
+  const sockets: Socket[] = [];
+  const server = createHttpServer((_request, response) => {
+    response.setHeader(
+      "Date",
+      new Date(Date.now() + offsetSeconds * 1_000).toUTCString(),
+    );
+    response.writeHead(200, { "Content-Type": "text/plain" });
+    response.end("not really a hub");
+  });
+  server.on("connection", (socket: Socket) => sockets.push(socket));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  servers.push({ server, sockets });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("the skewed clock did not bind a port");
+  }
+  return address.port;
+}
+
 /** A port nothing is listening on: bound, read back, and released. */
 async function freePort(): Promise<number> {
   const server = createServer();
@@ -160,6 +188,7 @@ describe("ub doctor", () => {
       "credential",
       "database",
       "hub",
+      "clock",
       "port",
       "bind",
       "mcp",
@@ -290,10 +319,40 @@ describe("ub doctor", () => {
     });
 
     expect(check(checks, "hub").status).toBe("pass");
+    // A hub on this machine reads this machine's clock, so they agree.
+    expect(check(checks, "clock").status).toBe("pass");
     expect(check(checks, "port").status).toBe("pass");
     // Taken is not a problem when we are the ones holding it.
     expect(check(checks, "bind").status).toBe("pass");
     expect(check(checks, "bind").reason).toMatch(/uberblick hub/);
+  });
+
+  it("fails the clock check when this machine is minutes away from the hub", async () => {
+    // Tokens expire and the hub refuses one issued too far from its own time,
+    // and it refuses it as an indistinguishable "invalid token". This check is
+    // the only thing that names the real cause.
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const port = await skewedClock(-5 * 60);
+    const { checks } = await doctor(box, {
+      WORKSPACE_ID: WORKSPACE,
+      HUB_URL: `ws://127.0.0.1:${port}`,
+    });
+
+    const clock = check(checks, "clock");
+    expect(clock.status).toBe("fail");
+    expect(clock.reason).toMatch(/ahead of/);
+    expect(clock.reason).toMatch(/29[0-9]s|30[0-9]s/);
+    expect(clock.remedy).toMatch(/clock/);
+  });
+
+  it("skips the clock check when nothing answers an HTTP request", async () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const { checks } = await doctor(box, {
+      WORKSPACE_ID: WORKSPACE,
+      HUB_URL: DEAD_HUB_URL,
+    });
+
+    expect(check(checks, "clock").status).toBe("skipped");
   });
 
   it("names both values when the hub's port and HUB_URL's disagree", async () => {

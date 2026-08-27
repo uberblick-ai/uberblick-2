@@ -19,7 +19,13 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Hub } from "@uberblick/hub";
-import { createHub, mintToken, silentLogger } from "@uberblick/hub";
+import {
+  createHub,
+  importRootSecret,
+  MAX_TOKEN_LIFETIME_SECONDS,
+  mintToken,
+  silentLogger,
+} from "@uberblick/hub";
 import { parseRoom } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { McpConfig } from "../src/config.js";
@@ -284,10 +290,13 @@ export async function peerClient(
   room: string,
   doc: Y.Doc = new Y.Doc(),
 ): Promise<PeerClient> {
-  const token = await mintToken(TEST_SECRET, {
+  const token = await mintToken(await importRootSecret(TEST_SECRET), {
+    typ: "room",
     sub: "test-peer",
     workspace: parseRoom(room).workspaceId,
     scope: "read-write",
+    kid: null,
+    lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
   });
   const provider = new HocuspocusProvider({
     url: hubUrl(port),

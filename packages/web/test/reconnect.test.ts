@@ -21,7 +21,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { createHub, mintToken, silentLogger } from "@uberblick/hub";
+import {
+  createHub,
+  importRootSecret,
+  MAX_TOKEN_LIFETIME_SECONDS,
+  mintToken,
+  silentLogger,
+} from "@uberblick/hub";
 import type { Hub } from "@uberblick/hub";
 import { getBlocks, initDoc, insertBlock } from "@uberblick/schema";
 import * as Y from "yjs";
@@ -102,11 +108,14 @@ function peer(port: number, room: string): { doc: Y.Doc; destroy(): void } {
     url: `ws://127.0.0.1:${port}`,
     name: room,
     document: doc,
-    token: () =>
-      mintToken(SECRET, {
+    token: async () =>
+      mintToken(await importRootSecret(SECRET), {
+        typ: "room",
         sub: "peer",
         workspace: WORKSPACE,
         scope: "read-write",
+        kid: null,
+        lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
       }),
   });
   return { doc, destroy: () => provider.destroy() };

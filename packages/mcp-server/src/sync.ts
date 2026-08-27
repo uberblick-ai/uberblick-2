@@ -16,7 +16,9 @@
  *   hydration.
  * - **The token is an async callable**, not a string: `mintToken` is async, and
  *   a callable is also what a real account service would need on reconnect. It
- *   travels in Hocuspocus' auth message, never in the URL.
+ *   travels in Hocuspocus' auth message, never in the URL. Tokens expire, so a
+ *   callable is also what makes every reconnect mint a fresh one rather than
+ *   replay a stale one.
  * - **"Hub down" and "auth failed" are different answers.** A rejected token is
  *   a configuration error a human must fix; an unreachable hub resolves itself.
  *   {@link HubSync.state} keeps them distinct, and every mutating tool reports
@@ -24,7 +26,11 @@
  */
 
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
-import { mintToken } from "@uberblick/hub/token";
+import {
+  MAX_TOKEN_LIFETIME_SECONDS,
+  importRootSecret,
+  mintToken,
+} from "@uberblick/hub/token";
 import type * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
 import type { McpConfig } from "./config.js";
@@ -109,6 +115,14 @@ export class HubSync {
 
   private destroyed = false;
 
+  /**
+   * The signing key, imported once. `mintToken` takes a key rather than a
+   * secret — the type is what keeps a credential string from being handed to it
+   * by mistake — and importing per mint would repeat that work on every
+   * reconnect.
+   */
+  private signingKey: Promise<CryptoKey> | null = null;
+
   constructor(config: McpConfig, onConnected: () => void) {
     this.config = config;
     this.onConnected = onConnected;
@@ -156,11 +170,20 @@ export class HubSync {
     if (secret === null) {
       throw new Error("HubSync.token: sync is disabled");
     }
-    return mintToken(secret, {
-      sub: this.config.sessionId,
-      workspace: this.config.workspaceId,
-      scope: "read-write",
-    });
+    this.signingKey ??= importRootSecret(secret);
+    return this.signingKey.then((key) =>
+      mintToken(key, {
+        typ: "room",
+        sub: this.config.sessionId,
+        workspace: this.config.workspaceId,
+        scope: "read-write",
+        // Root-signed: this process holds the root secret, not a credential.
+        kid: null,
+        // The ceiling itself. A room token is minted per connect, so a longer
+        // life would buy nothing and a shorter one would only add reconnects.
+        lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+      }),
+    );
   }
 
   /**

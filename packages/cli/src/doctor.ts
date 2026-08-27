@@ -4,7 +4,8 @@
  * Each check answers one question somebody would otherwise answer by finding,
  * reading and translating prose: which storage layout is in force, is a
  * workspace configured, is a signing secret usable, can the database be
- * written, does a hub answer, do the two port settings agree, who holds the
+ * written, does a hub answer, is this machine's clock close enough to the
+ * hub's, do the two port settings agree, who holds the
  * port, is any MCP client wired up. Three of the
  * hub-side failures present identically as "offline" in the web UI, which is
  * the reason this command exists — it names the cause and the fix.
@@ -34,6 +35,7 @@
 import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
+import { CLOCK_SKEW_SECONDS } from "@uberblick/hub/token";
 import type { StoragePaths } from "@uberblick/hub/storage";
 import {
   AmbiguousStorageError,
@@ -62,6 +64,7 @@ import {
   hubBind,
   isLocalHost,
   probeHub,
+  probeHubClock,
   probePort,
 } from "./probes.js";
 import { ORIGIN_LABELS } from "./status.js";
@@ -141,6 +144,7 @@ const AFTER_STORAGE = [
   "credential",
   "database",
   "hub",
+  "clock",
   "port",
   "bind",
   "mcp",
@@ -328,6 +332,47 @@ async function hubCheck(
     local
       ? "start a hub with `ub open --no-browser` — if one is running, the port check says whether HUB_URL disagrees with the port it bound"
       : "check that the deployment is running and that this machine can reach it — nothing is listening at that address from here",
+  );
+}
+
+/**
+ * Whether this machine's clock is close enough to the hub's to be trusted.
+ *
+ * Tokens carry `exp`, and the hub refuses one issued more than
+ * `CLOCK_SKEW_SECONDS` ahead of its own clock or already expired — so a machine
+ * whose clock has drifted cannot connect at all, and the failure it sees is an
+ * indistinguishable "invalid token". Naming the real cause is the only reason
+ * this check exists.
+ *
+ * It needs no credential: the reading comes from the `Date` header of an
+ * unauthenticated GET, so it answers even on a machine that has never been
+ * provisioned. A hub that does not answer is a skip, not a failure — the hub
+ * check above is what reports an unreachable hub, and saying so twice would
+ * only bury it.
+ */
+async function clockCheck(config: McpConfig | null): Promise<Check> {
+  if (config === null) {
+    return skipped("clock", "no workspace configured, so no hub was dialled");
+  }
+  const skew = await probeHubClock(config.hubUrl);
+  if (skew === null) {
+    return skipped(
+      "clock",
+      `${config.hubUrl} answered no HTTP date, so the clocks were not compared`,
+    );
+  }
+  if (Math.abs(skew) <= CLOCK_SKEW_SECONDS) {
+    return pass(
+      "clock",
+      `this machine's clock is within ${CLOCK_SKEW_SECONDS}s of ${config.hubUrl}`,
+    );
+  }
+  const direction = skew > 0 ? "ahead of" : "behind";
+  return fail(
+    "clock",
+    `this machine's clock is ${Math.abs(skew)}s ${direction} ${config.hubUrl}, ` +
+      `more than the ${CLOCK_SKEW_SECONDS}s the hub allows`,
+    "synchronise this machine's clock — every token carries an expiry, and the hub refuses one issued too far from its own time (`sudo timedatectl set-ntp true` on Linux, System Settings > General > Date & Time on macOS)",
   );
 }
 
@@ -579,6 +624,7 @@ export async function doctorReport(
     credentialCheck(resolved, resolvedEnv, platform),
     databaseCheck(config),
     await hubCheck(config, endpoint, dial),
+    await clockCheck(config),
     portCheck(config, endpoint, resolvedEnv),
     await bindCheck(config, endpoint, resolvedEnv, dial),
     mcpCheck(resolvedEnv, cwd),
@@ -626,9 +672,10 @@ export const DOCTOR_OPTIONS = {
 export const DOCTOR_HELP = `usage: ub doctor [--json]
 
 Check the local stack against its known failure modes — configuration, the
-signing secret and its file mode, the database, whether the hub is reachable,
-and the MCP client configs \`ub mcp install\` writes. Reads only; it fixes
-nothing and names what to run instead.
+signing secret and its file mode, the database, whether the hub is reachable
+and agrees with this machine's clock, and the MCP client configs
+\`ub mcp install\` writes. Reads only; it fixes nothing and names what to run
+instead.
 
 options:
   --json            the same checks as JSON on stdout, for a script to read
