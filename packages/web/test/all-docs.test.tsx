@@ -210,6 +210,38 @@ describe("relative changed time", () => {
   it("refuses an unusable value", () => {
     expect(relativeAge("not-a-date", NOW)).toBe("");
   });
+
+  /**
+   * The label is a function of the clock, and nothing moves the clock. A row
+   * whose only change is getting older would otherwise still read "just now"
+   * an hour later, because no directory update arrives to re-render it — so
+   * the pane repaints on its own, once a minute.
+   */
+  it("ages a row's label without anything else changing", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(NOW);
+      const host = await mount(
+        <AllDocsPane
+          connection={null}
+          entries={[entry({ uuid: ONE, title: "Overview", updatedAt: NOW })]}
+          groups={[]}
+          onSelect={() => {}}
+          onTogglePin={null}
+        />,
+      );
+      const changed = (): string | undefined =>
+        host.querySelector(".ub-all-row time")?.textContent ?? undefined;
+      expect(changed()).toBe("just now");
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(changed()).toBe("1 minute ago");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("the sort", () => {

@@ -18,6 +18,17 @@
  * existed carries none), which is why {@link sortDirectory} sorts the missing
  * ones last rather than treating absence as epoch zero: a document nobody has
  * stamped is not the oldest document, it is the one with no answer.
+ *
+ * Last changed is shown as an age rather than a date — "3 days ago" is what a
+ * scan of the listing is actually asking — and the pane keeps its own clock so
+ * a label goes stale by at most a minute even when nothing else re-renders.
+ * The absolute date is still there, in `title` and in the ISO `dateTime`.
+ *
+ * The search filters those same stubs and nothing else: no document room is
+ * opened to answer a query, so the corpus is searchable by title (and by the
+ * stub description, which the rows do not show) the moment the directory has
+ * synced, offline included. Full-text search over document bodies is the MCP
+ * server's, over its own index — not this.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -137,7 +148,14 @@ function Stamp({ at }: { at: number | undefined }): ReactElement {
   );
 }
 
-/** The changing stamp uses the same coarse clock language as GitHub cards. */
+/**
+ * The changing stamp uses the same coarse clock language as GitHub cards.
+ *
+ * "3 days ago" answers *is this fresh?* at a glance, which is the question a
+ * listing is scanned for — but it is the only question it answers. The exact
+ * date stays one hover away in `title`, and the machine value in `dateTime`,
+ * so nothing that was readable before became unreadable.
+ */
 function ChangedStamp({
   at,
   now,
@@ -149,7 +167,11 @@ function ChangedStamp({
   if (stamp === undefined) return <span className="ub-all-stamp ub-muted">—</span>;
   const iso = new Date(stamp).toISOString();
   return (
-    <time className="ub-all-stamp" dateTime={iso}>
+    <time
+      className="ub-all-stamp"
+      dateTime={iso}
+      title={STAMP_FORMAT.format(stamp)}
+    >
       {relativeAge(iso, now)}
     </time>
   );
@@ -202,14 +224,18 @@ export function AllDocsPane({
     [groups],
   );
   const rows = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
+    // `toLowerCase`, not `toLocaleLowerCase`: the needle and the haystack must
+    // fold the same way. A locale-aware fold does not — under a Turkish or
+    // Azeri locale "I" folds to a dotless i, so a document would stop matching
+    // its own title depending on who is looking at it.
+    const needle = query.trim().toLowerCase();
     const matches =
       needle === ""
         ? entries
         : entries.filter(
             (entry) =>
-              entry.title.toLocaleLowerCase().includes(needle) ||
-              (entry.description ?? "").toLocaleLowerCase().includes(needle),
+              entry.title.toLowerCase().includes(needle) ||
+              (entry.description ?? "").toLowerCase().includes(needle),
           );
     return sortDirectory(matches, sort);
   }, [entries, query, sort]);
