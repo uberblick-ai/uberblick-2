@@ -29,7 +29,7 @@ import {
   forgetWorkspace,
   originUsage,
 } from "../collab/forget.js";
-import type { WorkspaceCache } from "../collab/forget.js";
+import type { ForgetResult, WorkspaceCache } from "../collab/forget.js";
 import { useSetting } from "./hooks.js";
 import type { Workspace } from "./route.js";
 
@@ -186,9 +186,14 @@ function GithubConnection(): ReactElement {
 /** The word the reader has to type. Short, unambiguous, and not a click. */
 const CONFIRM_WORD = "forget";
 
-/** "1 document", "4 documents" — a count in a sentence should read as English. */
-function docCount(rooms: number): string {
-  return rooms === 1 ? "1 document" : `${rooms} documents`;
+/**
+ * "no documents", "1 document", "4 documents" — a count in a sentence should
+ * read as English, and zero is a real answer here: a workspace that has only
+ * ever been opened still caches its directory and sidebar.
+ */
+function docCount(documents: number): string {
+  if (documents === 0) return "no documents";
+  return documents === 1 ? "1 document" : `${documents} documents`;
 }
 
 /** Bytes, rounded to something a person reads rather than parses. */
@@ -207,6 +212,11 @@ function bytesLabel(bytes: number): string {
  * backlog, and nothing persists an acknowledged watermark, so the browser
  * genuinely cannot tell without asking the hub — which it will not do, because
  * the cache exists for the times the hub is not there.
+ *
+ * "Of them" is every cached room, not only the documents: an un-synced pin or
+ * sidebar group is lost as finally as an un-synced paragraph, and a cost
+ * sentence that counted fewer things than the forget removes would under-state
+ * the one number it exists to state.
  */
 function unsyncedSentence(cache: WorkspaceCache): string {
   if (cache.unsynced > 0) {
@@ -215,19 +225,54 @@ function unsyncedSentence(cache: WorkspaceCache): string {
       ? ""
       : " For the rest, this browser cannot tell without asking the hub.";
     return (
-      `${docCount(cache.unsynced)} ${holds} updates the hub has not ` +
-      `acknowledged. Forgetting throws those edits away, and nothing recovers ` +
-      `them.${rest}`
+      `${cache.unsynced} of them ${holds} updates the hub has not acknowledged. ` +
+      `Forgetting throws those edits away, and nothing recovers them.${rest}`
     );
   }
   if (cache.certain) {
     return "The hub has acknowledged every update in this browser's copy.";
   }
   return (
-    "Un-synced edits: unknown. This browser cannot tell whether any of these " +
-    "documents hold updates the hub has not acknowledged without asking the " +
-    "hub, and it does not ask. If any do, forgetting throws them away and " +
-    "nothing recovers them."
+    "Un-synced edits: unknown. This browser cannot tell whether any of them " +
+    "hold updates the hub has not acknowledged without asking the hub, and it " +
+    "does not ask. If any do, forgetting throws them away and nothing recovers " +
+    "them."
+  );
+}
+
+/**
+ * What a finished forget did, in the reader's terms.
+ *
+ * Three outcomes, and two of them are not "done". A database another tab still
+ * has open is *queued*, not refused — the browser removes it the moment that
+ * tab closes — so saying "could not be removed" would be false, and would send
+ * the reader looking for a control that should not exist. And a re-read that
+ * could not run has told us nothing, which is not the same as telling us the
+ * sweep was clean.
+ */
+function forgetNote(workspaceId: string, result: ForgetResult): string {
+  const asked = `${result.attempted} cached ${
+    result.attempted === 1 ? "database" : "databases"
+  }`;
+  if (result.remaining === null) {
+    return (
+      `Asked this browser to remove ${asked} of ${workspaceId}, but it would ` +
+      `not say what is left afterwards, so the result could not be verified. ` +
+      `Reopen Settings to see what is still stored.`
+    );
+  }
+  if (result.remaining.length === 0) {
+    return (
+      `Forgot ${workspaceId}: ${asked} removed from this browser. Opening the ` +
+      `workspace again re-downloads it from the hub.`
+    );
+  }
+  const left = result.remaining.length;
+  return (
+    `Forgot ${result.attempted - left} of ${asked} of ${workspaceId}. ` +
+    `${left} ${left === 1 ? "is" : "are"} still open in another tab — ` +
+    `${left === 1 ? "its" : "their"} removal is scheduled and completes when ` +
+    `that tab closes.`
   );
 }
 
@@ -316,6 +361,13 @@ function WorkspaceStorage({ workspace }: { workspace: Workspace | null }): React
     if (trigger.current?.isConnected === true) trigger.current.focus();
   }, [confirming]);
 
+  /** The sentence a finished forget leaves behind, and where focus goes. */
+  const status = useRef<HTMLParagraphElement | null>(null);
+
+  useEffect(() => {
+    if (note !== null) status.current?.focus();
+  }, [note]);
+
   const forget = useCallback(
     async (cache: WorkspaceCache): Promise<void> => {
       if (busy) return;
@@ -324,14 +376,7 @@ function WorkspaceStorage({ workspace }: { workspace: Workspace | null }): React
       setBusy(false);
       setConfirming(null);
       setTyped("");
-      setNote(
-        result.remaining.length === 0
-          ? `Forgot ${cache.workspaceId}: ${docCount(result.deleted)} removed from ` +
-              `this browser. Opening it again re-downloads from the hub.`
-          : `Forgot ${docCount(result.deleted)} of ${cache.workspaceId}. ` +
-              `${docCount(result.remaining.length)} could not be removed — another ` +
-              `tab still has them open.`,
-      );
+      setNote(forgetNote(cache.workspaceId, result));
       await reload();
     },
     [busy, reload],
@@ -344,9 +389,11 @@ function WorkspaceStorage({ workspace }: { workspace: Workspace | null }): React
       </div>
       <p className="ub-setting-copy">
         Every workspace you open leaves a full copy of its documents in this
-        browser, so it keeps working with the hub away. Forgetting one removes
-        that copy from this device and nothing else — the workspace, the hub and
-        every other machine are untouched, and opening it again re-downloads it.
+        browser, so it keeps working with the hub away. Each count below is
+        documents; a workspace also caches its directory and sidebar, and
+        forgetting removes those too. Forgetting removes that copy from this
+        device and nothing else — the workspace, the hub and every other machine
+        are untouched, and opening it again re-downloads it.
       </p>
       {state.kind !== "unavailable" && (
         <p className="ub-setting-copy ub-muted">
@@ -380,7 +427,7 @@ function WorkspaceStorage({ workspace }: { workspace: Workspace | null }): React
             <div key={cache.workspaceId} className="ub-forget">
               <div className="ub-forget-head">
                 <code className="ub-forget-name">{cache.workspaceId}</code>
-                <span className="ub-muted">{docCount(cache.rooms.length)}</span>
+                <span className="ub-muted">{docCount(cache.documents)}</span>
               </div>
               {here ? (
                 /* The open workspace is not forgettable: the editor is writing
@@ -411,15 +458,32 @@ function WorkspaceStorage({ workspace }: { workspace: Workspace | null }): React
                         void forget(cache);
                       }}
                     >
-                      <p className="ub-setting-copy ub-forget-cost" role="alert">
+                      {/* Described by, not announced at: the cost is static
+                          text that was on screen before the field existed, so
+                          `role="alert"` would interrupt a reader for something
+                          nothing changed. `aria-describedby` reads it out when
+                          focus reaches the field it gates — which is the moment
+                          it matters. */}
+                      <p
+                        id={`ub-forget-cost-${cache.workspaceId}`}
+                        className="ub-setting-copy ub-forget-cost"
+                      >
                         {unsyncedSentence(cache)}
+                      </p>
+                      <p
+                        id={`ub-forget-queued-${cache.workspaceId}`}
+                        className="ub-setting-copy ub-muted"
+                      >
+                        A cache another tab still has open is not removed
+                        straight away: its deletion is scheduled, and the browser
+                        completes it when that tab closes.
                       </p>
                       <label
                         className="ub-setting-copy"
                         htmlFor={`ub-forget-${cache.workspaceId}`}
                       >
                         Type <strong>{CONFIRM_WORD}</strong> to remove this
-                        browser&rsquo;s copy of {docCount(cache.rooms.length)}.
+                        browser&rsquo;s copy of {docCount(cache.documents)}.
                       </label>
                       <div className="ub-setting-row">
                         <input
@@ -427,6 +491,10 @@ function WorkspaceStorage({ workspace }: { workspace: Workspace | null }): React
                           className="ub-setting-input"
                           type="text"
                           autoComplete="off"
+                          aria-describedby={
+                            `ub-forget-cost-${cache.workspaceId} ` +
+                            `ub-forget-queued-${cache.workspaceId}`
+                          }
                           ref={field}
                           value={typed}
                           onChange={(event) => setTyped(event.target.value)}
@@ -455,7 +523,15 @@ function WorkspaceStorage({ workspace }: { workspace: Workspace | null }): React
           );
         })}
       {note !== null && (
-        <p className="ub-setting-copy ub-muted" role="status">
+        /* Focusable only programmatically: a completed forget removes the card
+           the reader was standing on, so focus lands here — on the sentence
+           that says what happened — rather than on the document body. */
+        <p
+          ref={status}
+          tabIndex={-1}
+          className="ub-setting-copy ub-muted ub-forget-note"
+          role="status"
+        >
           {note}
         </p>
       )}

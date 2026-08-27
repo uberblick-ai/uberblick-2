@@ -9,8 +9,10 @@
  * - the confirmation states the cost before it can be accepted, and where the
  *   browser cannot tell whether edits are un-synced it says "unknown", never
  *   "none" (the two are different claims, and only one of them is safe);
- * - a forget is scoped by the room grammar: another workspace's rooms and an
- *   unrelated database on the same origin are untouched;
+ * - a forget is scoped by the *canonical* room grammar and by the workspace
+ *   owning a directory database: another workspace's rooms, an unrelated
+ *   database on the same origin, and a name that merely splits like a room name
+ *   are all untouched;
  * - the workspace on screen has no forget control at all;
  * - a forget leaves no trace, so the workspace is cached again the moment it is
  *   opened again — the deletion clears a cache, it does not brand a workspace.
@@ -38,21 +40,46 @@ vi.mock("../src/collab/rooms.js", async (importOriginal) => ({
 const OPEN = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
 const THIRD = "33333333-3333-4333-8333-333333333333";
+/** A uuid nothing in this browser ever opened — no `_directory`, so not ours. */
+const LOOKALIKE = "44444444-4444-4444-8444-444444444444";
 
-/** The fixture: three workspaces' rooms, and a database that is not ours. */
+/**
+ * The fixture: three workspaces' rooms, plus the three name collisions that
+ * separate a room name from a room — a foreign database whose name splits like
+ * one but whose document segment is a word, a whole group with no directory
+ * database, and a plain database belonging to somebody else's app.
+ */
 const SEEDED = [
   `${OPEN}/_directory`,
   `${OPEN}/_sidebar`,
   `${OPEN}/aaaaaaaa-0000-4000-8000-000000000001`,
   `${OTHER}/_directory`,
+  `${OTHER}/_feedback`,
   `${OTHER}/bbbbbbbb-0000-4000-8000-000000000001`,
   `${OTHER}/bbbbbbbb-0000-4000-8000-000000000002`,
+  // Inside a real workspace's group, and still not a room: `parseRoom` splits
+  // it happily, and only the canonical grammar refuses it.
+  `${OTHER}/not-a-uuid`,
   `${THIRD}/_directory`,
+  // A group with no directory database: never a workspace this browser opened,
+  // so it is neither listed nor forgettable.
+  `${LOOKALIKE}/anything`,
+  `${LOOKALIKE}/cccccccc-0000-4000-8000-000000000001`,
   "some-other-app",
 ];
 
+/** OTHER's room databases — exactly what forgetting OTHER should remove. */
+const OTHER_ROOMS = SEEDED.filter(
+  (name) => name.startsWith(`${OTHER}/`) && name !== `${OTHER}/not-a-uuid`,
+);
+
 /** The databases this origin holds, as the stubbed `indexedDB` sees them. */
 let stored: Set<string>;
+
+/** Which of OTHER's rooms are still there. Empty is a completed forget. */
+function survivingRooms(): string[] {
+  return OTHER_ROOMS.filter((name) => stored.has(name));
+}
 
 function installIndexedDB(names: readonly string[]): void {
   stored = new Set(names);
@@ -175,8 +202,9 @@ describe("forgetting a workspace on this device", () => {
   it("names the workspace and deletes nothing until the word is typed", async () => {
     const view = await openSettings(workspaceOf(OPEN));
     const entry = card(view.host, OTHER);
-    // What it would remove, named before anything is pressed.
-    expect(entry.textContent).toContain("3 documents");
+    // What it would remove, named before anything is pressed — documents, not
+    // the directory and sidebar caches that travel with them.
+    expect(entry.textContent).toContain("2 documents");
 
     const { input, submit } = await confirmFor(view, OTHER);
     // The gate: no single-click path exists, and a near miss is not the word.
@@ -194,7 +222,7 @@ describe("forgetting a workspace on this device", () => {
     const armed = button(card(view.host, OTHER), "Forget this workspace");
     expect(armed?.disabled).toBe(false);
     await act(async () => armed?.click());
-    expect([...stored].some((name) => name.startsWith(OTHER))).toBe(false);
+    expect(survivingRooms()).toEqual([]);
     view.unmount();
   });
 
@@ -211,10 +239,24 @@ describe("forgetting a workspace on this device", () => {
         `${OPEN}/_directory`,
         `${OPEN}/_sidebar`,
         `${OPEN}/aaaaaaaa-0000-4000-8000-000000000001`,
+        // A name that splits like one of this workspace's rooms and is not one.
+        `${OTHER}/not-a-uuid`,
         `${THIRD}/_directory`,
+        `${LOOKALIKE}/anything`,
+        `${LOOKALIKE}/cccccccc-0000-4000-8000-000000000001`,
         "some-other-app",
       ].sort(),
     );
+    view.unmount();
+  });
+
+  it("a group with no directory database is neither listed nor forgettable", async () => {
+    const view = await openSettings(workspaceOf(OPEN));
+    expect(
+      [...view.host.querySelectorAll(".ub-forget-name")].map(
+        (name) => name.textContent,
+      ),
+    ).toEqual([OPEN, OTHER, THIRD]);
     view.unmount();
   });
 
@@ -266,7 +308,7 @@ describe("the cost the confirmation states", () => {
     const view = await openSettings(workspaceOf(OPEN));
     const { input } = await confirmFor(view, OTHER);
     const cost = card(view.host, OTHER).querySelector(".ub-forget-cost")?.textContent;
-    expect(cost).toContain("1 document holds updates the hub has not acknowledged");
+    expect(cost).toContain("1 of them holds updates the hub has not acknowledged");
     expect(cost).toContain("nothing recovers them");
 
     // Stated before it can be accepted — and accepting still deletes, because
@@ -275,7 +317,7 @@ describe("the cost the confirmation states", () => {
     await act(async () => {
       button(card(view.host, OTHER), "Forget this workspace")?.click();
     });
-    expect([...stored].some((name) => name.startsWith(OTHER))).toBe(false);
+    expect(survivingRooms()).toEqual([]);
     view.unmount();
   });
 });
@@ -300,7 +342,7 @@ describe("after a forget", () => {
     // that it was forgotten, so the workspace simply reappears.
     stored.add(`${OTHER}/_directory`);
     const reopened = await openSettings(workspaceOf(OPEN));
-    expect(card(reopened.host, OTHER).textContent).toContain("1 document");
+    expect(card(reopened.host, OTHER).textContent).toContain("no documents");
     expect(button(card(reopened.host, OTHER), "Forget on this device")).not.toBeNull();
     reopened.unmount();
   });
