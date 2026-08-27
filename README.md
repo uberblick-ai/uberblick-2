@@ -137,7 +137,8 @@ the web server would never start.
 Hub tokens gained `typ`, `kid` and `exp`, and there is no compatibility branch:
 a client from before that change mints a token the hub refuses, and the refusal
 reads as an ordinary auth failure. Restart any long-running `ub mcp serve` and
-redeploy the web bundle — a browser tab holds the old bundle until it does.
+redeploy the web bundle — and reload any tab still open on it, because a
+redeploy does not replace the JavaScript a tab already loaded.
 
 ## The MCP server, as a client sees it
 

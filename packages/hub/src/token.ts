@@ -21,7 +21,12 @@
  * three. A key reaches them one of two ways:
  *
  *   - {@link importRootSecret} — the hub's root secret, the UTF-8 bytes of the
- *     configured string. Hub and `ub` only.
+ *     configured string. Today the hub verifies with it and three clients mint
+ *     with it — `mcp-server/src/sync.ts`, `web/src/collab/rooms.ts` and the
+ *     web demo script — which is not a boundary but the "Known limits" note
+ *     below, stated as code: one dev secret, held by everyone. (`ub` itself
+ *     never calls this; it mints through `HubSync`.) The ladder that ends this
+ *     replaces those three call sites with credential keys.
  *   - {@link importCredentialKey} — the 32 raw bytes a client parsed out of its
  *     credential with {@link parseCredential}. **A client never derives a key**:
  *     it holds bytes and imports them. Only the hub calls
@@ -303,8 +308,8 @@ function crc32Hex(text: string): string {
   for (const byte of textEncoder.encode(text)) {
     crc ^= byte;
     for (let bit = 0; bit < 8; bit += 1) {
-      // The reflected polynomial 0x04c11db7 — bit-at-a-time, because a table
-      // would be more code than this is worth.
+      // 0xedb88320, the reflection of the CRC-32 polynomial 0x04c11db7 —
+      // bit-at-a-time, because a table would be more code than this is worth.
       crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
     }
   }

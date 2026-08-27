@@ -311,13 +311,15 @@ async function hubCheck(
     return pass("hub", `${config.hubUrl} answered and served the directory room`);
   }
   if (status === "auth-failed") {
-    // Unambiguous here, unlike the same refusal seen by a long-running client:
-    // this probe minted its token seconds ago, in this process, in the current
-    // format. What is left is the secret.
+    // Narrower here than for a long-running client: this probe minted its
+    // token seconds ago, in this process, in the current format, so the token's
+    // *shape* is not in question. Two causes survive that — a secret the hub
+    // does not share, and a clock far enough out that the hub's clamp refuses
+    // an otherwise correct token. The check below reads the second one.
     return fail(
       "hub",
       `${config.hubUrl} refused the signing secret`,
-      "give the hub and this machine the same secret — `ub status` says which layer this one came from",
+      "give the hub and this machine the same secret — `ub status` says which layer this one came from — and read the clock check below, because a clock far enough out of step is refused the same way",
     );
   }
   if (status === "unsettled") {
