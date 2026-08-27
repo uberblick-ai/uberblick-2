@@ -48,8 +48,8 @@ needs [mise activated in your
 shell](https://mise.jdx.dev/getting-started.html): shims put `node` and `pnpm`
 on PATH but never run hooks, so with shims alone nothing is printed and nothing
 is missing. `mise run welcome` prints the same thing on demand, activated or
-not. It is also silent whenever the output would be captured rather than read —
-no terminal, `CI` set, or `MISE_QUIET=1`.
+not. It stays silent when stdout is not a terminal, when `CI` is set, and when
+`MISE_QUIET=1`.
 
 What this supports is exactly one arrangement: **one workspace, one trusted user,
 multiple clients and machines; no login and no tenant isolation.** Everything

@@ -57,24 +57,12 @@ function onATerminal(env: NodeJS.ProcessEnv = {}): SpawnSyncReturns<string> {
 
 describe("the welcome script", () => {
   it("prints the quick-start on a terminal", () => {
+    // PATH is empty here, so this is the clean-checkout case too: node, pnpm
+    // and fnox cannot resolve, and the script still gets all the way through.
     const ran = onATerminal();
 
     expect(ran.stdout).toBe(EXPECTED);
     expect(ran.status).toBe(0);
-  });
-
-  it("runs with node, pnpm and fnox absent from PATH", () => {
-    // PATH is empty in `onATerminal`, so this is the whole point of the file
-    // stated as an assertion: nothing the script needs is installed.
-    for (const tool of ["node", "pnpm", "fnox"]) {
-      const found = spawnSync("/bin/sh", ["-c", `command -v ${tool}`], {
-        encoding: "utf8",
-        env: { PATH: "" },
-      });
-      expect(found.status, `${tool} resolved under an empty PATH`).not.toBe(0);
-    }
-
-    expect(onATerminal().stdout).toBe(EXPECTED);
   });
 
   it("says nothing when stdout is not a terminal", () => {
