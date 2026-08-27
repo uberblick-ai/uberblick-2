@@ -21,13 +21,13 @@ fnox = "1"
 [env]
 
 # The hub's SQLite file, checkout-local and gitignored. Absent this, a hub opens
-# the *packaged user's* database — `~/Library/Application Support/Uberblick/
-# data/hub.sqlite` on macOS, `$XDG_DATA_HOME/uberblick/hub.sqlite` elsewhere —
-# and development has no business writing there. Every mise path inherits it:
-# `mise run hub`, `mise run dev`, `mise run e2e` (whose harness goes further and
-# starts its hub on a temp database of its own). The Docker review container
-# does not — it runs `pnpm` directly and mise never executes there — and needs
-# nothing: no suite opens a default database.
+# the *packaged user's* database — `$XDG_DATA_HOME/uberblick/hub.sqlite`, or
+# `~/.local/share/uberblick/hub.sqlite`, the one layout on every platform
+# (#385) — and development has no business writing there. Every mise path
+# inherits it: `mise run hub`, `mise run dev`, `mise run e2e` (whose harness
+# goes further and starts its hub on a temp database of its own). The Docker
+# review container does not — it runs `pnpm` directly and mise never executes
+# there — and needs nothing: no suite opens a default database.
 HUB_DB_PATH = "{{config_root}}/packages/hub/data/hub.sqlite"
 
 # `ub` and `uberblick` as plain commands inside the checkout. pnpm links the

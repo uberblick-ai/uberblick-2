@@ -133,6 +133,8 @@ describe("`ub status`", () => {
     const report = JSON.parse(run.stdout);
 
     expect(report.storage).toEqual({
+      // Constant, on every platform — a reader of the JSON still finds the key.
+      layout: "xdg",
       config: join(box.configHome, "uberblick", "config.json"),
       data: join(box.dataHome, "uberblick"),
       hub: join(box.dataHome, "uberblick", "hub.sqlite"),

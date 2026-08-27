@@ -16,12 +16,13 @@
 
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
+import { resolveStorage } from "@uberblick/hub";
 import { startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 
@@ -58,11 +59,34 @@ function harness(): Harness {
   return started;
 }
 
+/**
+ * Configure the agent's machine the way a real one is configured: by writing
+ * `config.json` into its own config home.
+ *
+ * `config.json` is the single authority for the hub endpoint (#385) — `ub` does
+ * not read `HUB_URL` from the environment and refuses to pass an inherited one
+ * to the server it spawns — so an exported endpoint would leave this child
+ * dialling the built-in default instead of the harness's hub. `ub init` writes
+ * this file on a developer's machine; here the harness writes it, and the path
+ * comes from the layout module rather than being spelled out again.
+ */
+function configureAgent(): void {
+  const { configDir } = resolveStorage({
+    env: { XDG_CONFIG_HOME: join(agentState, "config") },
+  });
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(
+    join(configDir, "config.json"),
+    `${JSON.stringify({ workspace: harness().workspace, hubUrl: harness().hubUrl }, null, 2)}\n`,
+  );
+}
+
 test.beforeAll(async () => {
   started = await startHarness();
   // The agent's own home: never the developer's `~/.config`, whose workspace
   // and hub would silently replace the harness's.
   agentState = mkdtempSync(join(tmpdir(), "uberblick-e2e-agent-"));
+  configureAgent();
 });
 
 test.afterEach(async () => {
@@ -157,14 +181,17 @@ class McpSession {
   constructor(clientInfo: { name: string; title?: string }) {
     sessions.add(this);
     this.child = spawn(process.execPath, [UB, "mcp", "serve"], {
-      // The agent's own directory, so nothing in the checkout can
-      // steer it: everything it needs is in the environment below.
+      // The agent's own directory, so nothing in the checkout can steer it:
+      // everything it needs is in the environment below and in the
+      // `config.json` `configureAgent` wrote under `XDG_CONFIG_HOME` — which is
+      // where the endpoint comes from, the way it does on a real machine.
       cwd: agentState,
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
+        // Both still legitimately the environment's: an MCP client pins the
+        // workspace in `.mcp.json`, and the signing secret is a secret.
         WORKSPACE_ID: harness().workspace,
-        HUB_URL: harness().hubUrl,
         HUB_AUTH_TOKEN: harness().authSecret,
         UBERBLICK_DB: join(agentState, "agent.sqlite"),
         XDG_CONFIG_HOME: join(agentState, "config"),

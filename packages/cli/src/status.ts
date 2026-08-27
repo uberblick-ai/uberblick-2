@@ -39,6 +39,12 @@ import { cliVersion } from "./version.js";
  * credential, and no value out of one.
  */
 export interface StorageReport {
+  /**
+   * Always `"xdg"` — there is one layout on every platform (#385). The field
+   * stays because a script that reads this object should not have to handle a
+   * key disappearing; it is a constant, not a detection.
+   */
+  layout: "xdg";
   /** The user config file, `config.json`. `credentials.json` sits beside it. */
   config: string;
   /** The data root: the one directory to name when somebody asks. */
@@ -129,6 +135,7 @@ export async function statusReport(
         logEntries: sync.logEntries,
         persistence: sync.persistence,
         storage: {
+          layout: "xdg",
           config: resolved.paths.userConfig,
           data: resolved.storage.dataDir,
           // Asked of the hub package, so that what this reports and what a hub
