@@ -112,7 +112,6 @@ const EXPECTED: Record<
   },
   doc_archived: { recoveryClass: "manual", detail: ["uuid", "archived"] },
   group_not_found: { recoveryClass: "reread", detail: ["group"] },
-  invalid_arguments: { recoveryClass: "manual", detail: ["uuid"] },
   // The unclassified fallback: a handler that threw something nobody mapped
   // cannot say what happened to a write, so it promises the floor and no more.
   internal_error: { recoveryClass: null, detail: [] },
@@ -216,11 +215,6 @@ describe("the failure contract", () => {
           text: "a comment",
         })
       ).payload,
-    );
-    // Individually valid arguments that do not add up to a call: a new thread
-    // needs a block and a range, so this never reaches the schema layer's net.
-    record(
-      (await rig.call("annotate", { uuid: doc.uuid, text: "orphan" })).payload,
     );
     record(
       (
@@ -399,18 +393,38 @@ describe("the failure contract", () => {
     // no `error` code of ours, and nothing durable can have changed — the
     // handler never ran.
     const rig = await localRig();
+    const doc = await seeded(rig);
 
-    const result = await rig.client.callTool({
-      name: "edit_block",
-      arguments: { uuid: "not-a-uuid", block_id: "b", old_text: "", new_text: "" },
-    });
-    const text = (result.content as { text?: string }[])[0]?.text ?? "";
+    const malformed = [
+      // A field whose value is the wrong shape.
+      { uuid: "not-a-uuid", block_id: "b", old_text: "", new_text: "" },
+      // And a field nobody declared, which used to be dropped in silence.
+      {
+        uuid: doc.uuid,
+        block_id: doc.blockId,
+        old_text: "one",
+        new_text: "two",
+        force: true,
+      },
+    ];
+    for (const args of malformed) {
+      const result = await rig.client.callTool({ name: "edit_block", arguments: args });
+      const text = (result.content as { text?: string }[])[0]?.text ?? "";
 
-    expect(result.isError).toBe(true);
-    expect(text).not.toBe("");
-    expect(() => JSON.parse(text)).toThrow();
-    expect(FAILURE_CODES.some((code) => text.includes(code))).toBe(false);
-    // Nothing reached the corpus: the call never got past the boundary.
-    expect((await rig.ok("list_docs")).docs).toEqual([]);
+      expect(result.isError, JSON.stringify(args)).toBe(true);
+      expect(text).not.toBe("");
+      expect(() => JSON.parse(text)).toThrow();
+      expect(FAILURE_CODES.some((code) => text.includes(code))).toBe(false);
+    }
+
+    // Arguments each valid on their own that do not add up to a call land in
+    // the same class, because the shapes are in the input schema rather than in
+    // a handler: `annotate` has no code of its own left to answer with.
+    const incomplete = await rig.call("annotate", { uuid: doc.uuid, text: "orphan" });
+    expect(incomplete.isError).toBe(true);
+    expect(incomplete.payload.error).toBe("schema_validation");
+
+    // Nothing reached the document: no call got past the boundary.
+    expect((await rig.ok("get_doc", { uuid: doc.uuid })).blocks[0].text).toBe("one");
   });
 });

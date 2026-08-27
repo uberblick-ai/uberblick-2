@@ -76,6 +76,8 @@ import {
   guarded,
   hydrationRecovery,
 } from "./failures.js";
+import { strictInput } from "./inputs.js";
+import type { ToolMode } from "./inputs.js";
 import type { Replica, Replicas } from "./replica.js";
 import {
   pinnedUuids,
@@ -329,6 +331,34 @@ const RECOVERY: Record<string, string> & { other: string } = {
     "the MCP server, then check with list_docs and get_sidebar what the rooms in `completed` left behind.",
 };
 
+/**
+ * `annotate`'s two shapes, stated once for the boundary and for `tools/list`.
+ *
+ * The fields are not independently optional: a reply names a thread, opening
+ * one names a block and a range, and a call carrying both says two things at
+ * once. The shape is selected on `thread_id` rather than on an added `action`
+ * field, so every call an agent already writes stays valid.
+ */
+const ANNOTATE_MODES: readonly ToolMode[] = [
+  {
+    title: "A reply (`thread_id`)",
+    when: { field: "thread_id", present: true },
+    forbids: ["block_id", "start", "end"],
+  },
+  {
+    title: "Opening a thread over a range",
+    when: { field: "thread_id", present: false },
+    requires: ["block_id", "start", "end"],
+  },
+];
+
+/** What `annotate` says about its two shapes, in the words an agent reads. */
+const ANNOTATE_SHAPES =
+  "Two shapes, and a call is exactly one of them: open a thread with `block_id`, `start` and `end` — all three, " +
+  "none of them optional — or reply to one with `thread_id` and no range fields at all. Mixing them, or leaving a " +
+  "range half-stated, is refused at the input boundary before anything is written, rather than resolved by " +
+  "ignoring whichever fields do not fit. `text` and `author` belong to both.";
+
 export function registerTools(server: McpServer, replicas: Replicas): void {
   /**
    * Resolve a document, or fail with a hub-aware message: a uuid in the
@@ -537,24 +567,19 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "\n\n" +
         SYNCED_MEANS +
         failureContract("create_doc"),
-      // A whole object rather than the raw shape every other tool passes, so
-      // that `.strict()` applies to the top level too: `{sidebar: {...},
-      // pinned: true}` must be refused wherever the redundant key sits, and a
-      // stripped one would be an input the caller believes it sent. It also
-      // advertises `additionalProperties: false`, so a client sees the rule
-      // before it sends anything.
-      inputSchema: z
-        .object({
-          title: titleArg,
-          description: descriptionArg,
-          tags: z.array(z.string().min(1)).optional(),
-          blocks: z
-            .array(blockInputSchema)
-            .optional()
-            .describe("Initial blocks, in order."),
-          sidebar: sidebarPlacementArg,
-        })
-        .strict(),
+      // `{sidebar: {...}, pinned: true}` must be refused wherever the redundant
+      // key sits, so the nested placement object is strict too — see
+      // {@link sidebarPlacementArg}. The top level is strict like every tool's.
+      inputSchema: strictInput({
+        title: titleArg,
+        description: descriptionArg,
+        tags: z.array(z.string().min(1)).optional(),
+        blocks: z
+          .array(blockInputSchema)
+          .optional()
+          .describe("Initial blocks, in order."),
+        sidebar: sidebarPlacementArg,
+      }),
     },
     guarded("create_doc", async ({ title, description, tags, blocks, sidebar }) => {
       await replicas.settle();
@@ -763,7 +788,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "advisory, never a failure, and never required. (The dedupe is the stored events, so after heavy " +
         "compaction a very long-lived session may be counted and nudged once more for a document it read long ago.)" +
         failureContract("get_doc"),
-      inputSchema: { uuid: uuidArg },
+      inputSchema: strictInput({ uuid: uuidArg }),
     },
     guarded("get_doc", async ({ uuid }) => {
       await replicas.settle();
@@ -802,10 +827,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "immediately on a title or tag change. Both come from the clock of whichever replica wrote them, so treat them " +
         "as approximate, and expect either to be missing on a stub written before they existed." +
         failureContract("list_docs"),
-      inputSchema: {
+      inputSchema: strictInput({
         tag: z.string().min(1).optional().describe("Only documents carrying this tag."),
         include_deleted: z.boolean().optional(),
-      },
+      }),
     },
     guarded("list_docs", async ({ tag, include_deleted }) => {
       await replicas.settle();
@@ -838,10 +863,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Every hit carries the document's `description` — null where nobody has written one — so relevance can be " +
         "judged from the result list rather than by opening each document in turn." +
         failureContract("search"),
-      inputSchema: {
+      inputSchema: strictInput({
         query: z.string().min(1).describe("Words to match. A trailing * is a prefix match."),
         limit: z.number().int().min(1).max(100).optional(),
-      },
+      }),
     },
     guarded("search", async ({ query, limit }) => {
       await replicas.settle();
@@ -861,7 +886,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Each one carries its `description` — null where it has none — so a citing document can be judged without " +
         "opening it." +
         failureContract("backlinks"),
-      inputSchema: { uuid: uuidArg },
+      inputSchema: strictInput({ uuid: uuidArg }),
     },
     guarded("backlinks", async ({ uuid }) => {
       await replicas.settle();
@@ -890,7 +915,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "\n\n" +
         SYNCED_MEANS +
         failureContract("edit_block"),
-      inputSchema: {
+      inputSchema: strictInput({
         uuid: uuidArg,
         block_id: z.string().min(1),
         old_text: z.string().describe("The block text you read. Asserted before the splice."),
@@ -900,7 +925,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           .min(1)
           .optional()
           .describe("The block's `rev` from get_doc. Asserted alongside old_text."),
-      },
+      }),
     },
     guarded("edit_block", async ({ uuid, block_id, old_text, new_text, rev }) => {
       await replicas.settle();
@@ -930,7 +955,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         failureContract("insert_block"),
-      inputSchema: {
+      inputSchema: strictInput({
         uuid: uuidArg,
         after_block_id: z
           .string()
@@ -938,7 +963,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           .nullish()
           .describe("Insert after this block. Omit or null to insert first."),
         ...blockShape,
-      },
+      }),
     },
     guarded("insert_block", async ({ uuid, after_block_id, type, text, level, language }) => {
       await replicas.settle();
@@ -968,7 +993,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         failureContract("delete_block"),
-      inputSchema: { uuid: uuidArg, block_id: z.string().min(1) },
+      inputSchema: strictInput({ uuid: uuidArg, block_id: z.string().min(1) }),
     },
     guarded("delete_block", async ({ uuid, block_id }) => {
       await replicas.settle();
@@ -988,7 +1013,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         failureContract("set_tags"),
-      inputSchema: { uuid: uuidArg, tags: z.array(z.string().min(1)) },
+      inputSchema: strictInput({ uuid: uuidArg, tags: z.array(z.string().min(1)) }),
     },
     guarded("set_tags", async ({ uuid, tags }) => {
       await replicas.settle();
@@ -1009,7 +1034,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         failureContract("set_links"),
-      inputSchema: { uuid: uuidArg, links: z.array(linkArg) },
+      inputSchema: strictInput({ uuid: uuidArg, links: z.array(linkArg) }),
     },
     guarded("set_links", async ({ uuid, links }) => {
       await replicas.settle();
@@ -1036,7 +1061,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         failureContract("set_title"),
-      inputSchema: { uuid: uuidArg, title: titleArg },
+      inputSchema: strictInput({ uuid: uuidArg, title: titleArg }),
     },
     guarded("set_title", async ({ uuid, title }) => {
       await replicas.settle();
@@ -1066,7 +1091,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         failureContract("set_description"),
-      inputSchema: { uuid: uuidArg, description: descriptionArg },
+      inputSchema: strictInput({ uuid: uuidArg, description: descriptionArg }),
     },
     guarded("set_description", async ({ uuid, description }) => {
       await replicas.settle();
@@ -1105,7 +1130,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         failureContract("archive_doc"),
-      inputSchema: { uuid: uuidArg },
+      inputSchema: strictInput({ uuid: uuidArg }),
     },
     guarded("archive_doc", async ({ uuid }) => {
       await replicas.settle();
@@ -1146,7 +1171,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         failureContract("restore_doc"),
-      inputSchema: { uuid: uuidArg },
+      inputSchema: strictInput({ uuid: uuidArg }),
     },
     guarded("restore_doc", async ({ uuid }) => {
       await replicas.settle();
@@ -1179,23 +1204,28 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       description:
         "Open an annotation thread over a range of a block's text, or — with `thread_id` — add a comment to an existing thread. " +
         "The range is anchored by a formatting mark on the text itself, so it survives edits, splits and re-types.\n\n" +
+        ANNOTATE_SHAPES +
+        "\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         failureContract("annotate"),
-      inputSchema: {
-        uuid: uuidArg,
-        text: z.string().min(1).describe("The comment body."),
-        thread_id: z
-          .string()
-          .min(1)
-          .optional()
-          .describe("Comment on this existing thread instead of opening a new one."),
-        block_id: z.string().min(1).optional().describe("Required for a new thread."),
-        start: z.number().int().min(0).optional().describe("Range start, in characters."),
-        end: z.number().int().min(0).optional().describe("Range end, exclusive."),
-        author: z.string().min(1).optional(),
-      },
+      inputSchema: strictInput(
+        {
+          uuid: uuidArg,
+          text: z.string().min(1).describe("The comment body."),
+          thread_id: z
+            .string()
+            .min(1)
+            .optional()
+            .describe("Comment on this existing thread instead of opening a new one."),
+          block_id: z.string().min(1).optional().describe("The block to annotate. New thread only."),
+          start: z.number().int().min(0).optional().describe("Range start, in characters. New thread only."),
+          end: z.number().int().min(0).optional().describe("Range end, exclusive. New thread only."),
+          author: z.string().min(1).optional(),
+        },
+        ANNOTATE_MODES,
+      ),
     },
     guarded("annotate", async ({ uuid, text, thread_id, block_id, start, end, author }) => {
       await replicas.settle();
@@ -1218,18 +1248,15 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         });
       }
 
-      if (block_id === undefined || start === undefined || end === undefined) {
-        throw new ToolError(
-          "invalid_arguments",
-          "A new thread needs block_id, start and end; pass thread_id to comment on an existing one",
-          { uuid },
-        );
-      }
+      // No `thread_id` is the other shape, and the input boundary refused the
+      // call unless all three range fields came with it — see
+      // {@link ANNOTATE_MODES}. The assertions stand in for what TypeScript
+      // cannot read off fields the object declares once for both shapes.
       const created = createAnnotation(
         replica.doc,
-        block_id,
-        start,
-        end,
+        block_id as string,
+        start as number,
+        end as number,
         who,
         text,
       );
@@ -1249,7 +1276,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Render the document as markdown, including fenced code and mermaid blocks. " +
         "Export only: markdown is never the storage format, and there is no import tool." +
         failureContract("export_markdown"),
-      inputSchema: {
+      inputSchema: strictInput({
         uuid: uuidArg,
         frontmatter: z
           .boolean()
@@ -1259,7 +1286,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           .enum(["html-comments", "drop"])
           .optional()
           .describe("How to render annotation threads. Default drop."),
-      },
+      }),
     },
     guarded("export_markdown", async ({ uuid, frontmatter, annotations }) => {
       await replicas.settle();
@@ -1298,7 +1325,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "`persistence` is null unless an update failed to reach the log, in which case every other tool refuses " +
         "to serve until the server is restarted." +
         failureContract("sync_status"),
-      inputSchema: {},
+      inputSchema: strictInput({}),
     },
     // The same snapshot `ub status` prints — see ./status.ts. Diagnostics must
     // still answer when persistence has failed, which is exactly when someone

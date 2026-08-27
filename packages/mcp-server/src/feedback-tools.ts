@@ -66,6 +66,7 @@ import {
 import type { DirectoryEntry, DocFeedback } from "@uberblick/schema";
 import { z } from "zod";
 import { failureContract, guarded } from "./failures.js";
+import { strictInput } from "./inputs.js";
 import { log } from "./log.js";
 import type { Replica, Replicas } from "./replica.js";
 
@@ -171,7 +172,7 @@ export function registerFeedbackTools(
         "holds it, `synced` means the hub acknowledged it.\n\n" +
         FEEDBACK_IS_ADVISORY +
         failureContract("rate_doc"),
-      inputSchema: {
+      inputSchema: strictInput({
         uuid: z.uuid().describe("Document UUID."),
         verdict: z
           .enum(["helpful", "unhelpful"])
@@ -181,7 +182,7 @@ export function registerFeedbackTools(
           .min(1)
           .optional()
           .describe("Why, in one sentence. The rewrite brief when there is one."),
-      },
+      }),
     },
     guarded("rate_doc", async ({ uuid, verdict, reason }) => {
       await replicas.settle();
@@ -239,14 +240,14 @@ export function registerFeedbackTools(
         "on, not as exact ones.\n\n" +
         FEEDBACK_IS_ADVISORY +
         failureContract("feedback_report"),
-      inputSchema: {
+      inputSchema: strictInput({
         limit: z
           .number()
           .int()
           .min(1)
           .optional()
           .describe("Return at most this many documents, most used first."),
-      },
+      }),
     },
     guarded("feedback_report", async ({ limit }) => {
       await replicas.settle();
