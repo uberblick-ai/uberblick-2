@@ -111,17 +111,18 @@ const MAX_REBUILDS = 3;
  * so without a bound the corpus size *is* the count, and the hundred-and-first
  * document takes the connection down.
  *
- * Strictly below the ceiling, and with room to spare rather than by one: a room
- * whose token was minted just as the socket dropped has already sent it, so a
- * reconnect can briefly carry that wave plus a fresh one. 32 keeps even that
- * doubled worst case under 100, and no corpus this serves is slowed by joining
- * in waves of 32 — a wave costs one round trip, and a document leaves the hub's
- * count the moment its `onAuthenticate` resolves.
+ * Strictly below the ceiling, and with room to spare rather than by one: the
+ * count this paces is the hub's, observed from here a round trip late, and a
+ * bound set at the ceiling would be betting on that lag. No corpus this serves
+ * is slowed by joining in waves of 32 — a wave costs one round trip, and a
+ * document leaves the hub's count the moment its `onAuthenticate` resolves.
  *
  * The bound has to hold on **every** connection. Every attached provider
  * re-sends its token from its own `onOpen`, so a hub restart re-authenticates
  * the whole corpus in one tick; that stampede, not the first attach, is the
- * failure this exists for.
+ * failure this exists for. A slot is therefore a place on *one* connection —
+ * see {@link HubSync.socketGeneration} for why a flapping socket cannot carry
+ * one wave's admissions into the next connection's count.
  */
 export const MAX_CONCURRENT_ROOM_ATTACHES = 32;
 
@@ -198,6 +199,16 @@ export interface AttachOptions {
   awareness: Awareness;
 }
 
+/** What {@link HubSyncOptions.onAdmissions} reports, on every change. */
+export interface AdmissionCounts {
+  /** The connection these counts belong to. See {@link HubSync.socketGeneration}. */
+  generation: number;
+  /** Rooms whose token is on the wire, unanswered. Never above the bound. */
+  inFlight: number;
+  /** Rooms that have not been let near the hub yet. */
+  waiting: number;
+}
+
 export interface HubSyncOptions {
   /**
    * Override {@link MAX_CONCURRENT_ROOM_ATTACHES}. A test seam: proving the
@@ -205,6 +216,14 @@ export interface HubSyncOptions {
    * would make that test a hundred rooms long.
    */
   maxConcurrentAttaches?: number;
+
+  /**
+   * Every change to the admission accounting, as it happens. A test seam: the
+   * bound is a statement about a maximum, and sampling a counter can only ever
+   * miss one. Told every transition, a test computes that maximum exactly, and
+   * can drive a flap from an observed admission rather than from a timer.
+   */
+  onAdmissions?: (counts: AdmissionCounts) => void;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -249,6 +268,27 @@ export class HubSync {
   /** The bound on concurrent attach/auth. See {@link MAX_CONCURRENT_ROOM_ATTACHES}. */
   private readonly maxConcurrentAttaches: number;
 
+  /** Told every change to the accounting below. See {@link HubSyncOptions.onAdmissions}. */
+  private readonly onAdmissions: ((counts: AdmissionCounts) => void) | null;
+
+  /**
+   * Which connection the slots now held belong to.
+   *
+   * A slot is a place on one connection, never a standing permission, because
+   * the count it paces is per socket: the hub starts a fresh one for every
+   * connection, and this process learns that a connection has ended a little
+   * after it did. Minting a token takes a moment, and a socket that flaps
+   * inside that moment leaves a continuation holding a slot on a connection
+   * nobody will answer on — one that would otherwise wake up and send into the
+   * *next* connection's count without ever having been paced against it. Repeat
+   * that on every flap and the bound stops bounding anything.
+   *
+   * So a connection ending moves this, and a continuation that wakes to find it
+   * moved queues again rather than sending. Whatever the flap pattern, the
+   * rooms in flight on the connection now open are the ones admitted on it.
+   */
+  private socketGeneration = 0;
+
   /**
    * Rooms whose token is on the wire with no answer yet — the count the bound
    * applies to, and the same thing the hub counts as a pending document.
@@ -273,7 +313,7 @@ export class HubSync {
    */
   private readonly waiting = new Map<
     string,
-    { promise: Promise<void>; admit: () => void }
+    { promise: Promise<number>; admit: (generation: number) => void }
   >();
 
   /** Rebuilt connections since the last durable one. See {@link MAX_REBUILDS}. */
@@ -322,6 +362,7 @@ export class HubSync {
     this.enabled = config.authSecret !== null;
     this.maxConcurrentAttaches =
       options.maxConcurrentAttaches ?? MAX_CONCURRENT_ROOM_ATTACHES;
+    this.onAdmissions = options.onAdmissions ?? null;
     const backoff = socketBackoff(config.reconnectMaxDelayMs);
     // The socket's first retry delay, and the first delay a rebuild waits out.
     this.reconnectDelayMs = backoff.delay;
@@ -341,10 +382,14 @@ export class HubSync {
         this.socketStatus = status as "connecting" | "connected" | "disconnected";
         if (status !== "connected") {
           // Nothing on a connection that is going away will ever be answered,
-          // so the slots those rooms hold are not slots any more. The queue
-          // stays: a queued room has sent nothing, and its provider is still
-          // waiting on the ticket it will need again on the next connection.
+          // so the slots those rooms hold are not slots any more — including
+          // the ones held by a token still being minted, which is what moving
+          // the generation takes back. The queue stays: a queued room has sent
+          // nothing, and its provider is still waiting on the ticket it will
+          // need again on the next connection.
+          this.socketGeneration += 1;
           this.attaching.clear();
+          this.admissionsChanged();
         }
         if (status === "connected") {
           this.sawFailure = false;
@@ -399,14 +444,17 @@ export class HubSync {
    * and cannot be counting. It works the same on a first attach and on a
    * reconnect, because a reconnect is exactly every attached provider asking
    * for a token again.
+   *
+   * Resolves with the {@link socketGeneration} the slot was granted on, which
+   * is what the caller checks before it lets anything leave.
    */
-  private admission(room: string): Promise<void> {
+  private admission(room: string): Promise<number> {
     const queued = this.waiting.get(room);
     if (queued !== undefined) {
       return queued.promise;
     }
-    let admit!: () => void;
-    const promise = new Promise<void>((resolve) => {
+    let admit!: (generation: number) => void;
+    const promise = new Promise<number>((resolve) => {
       admit = resolve;
     });
     this.waiting.set(room, { promise, admit });
@@ -416,22 +464,31 @@ export class HubSync {
 
   /** Let as many queued rooms through as the bound and this connection allow. */
   private pumpAdmissions(): void {
-    if (this.socketStatus !== "connected") {
-      return;
-    }
-    for (const [room, ticket] of this.waiting) {
-      // A room already counted is not a second document to the hub, so letting
-      // it through costs no slot — see {@link waiting}.
-      if (
-        this.attaching.size >= this.maxConcurrentAttaches &&
-        !this.attaching.has(room)
-      ) {
-        return;
+    if (this.socketStatus === "connected") {
+      for (const [room, ticket] of this.waiting) {
+        // A room already counted is not a second document to the hub, so
+        // letting it through costs no slot — see {@link waiting}.
+        if (
+          this.attaching.size >= this.maxConcurrentAttaches &&
+          !this.attaching.has(room)
+        ) {
+          break;
+        }
+        this.waiting.delete(room);
+        this.attaching.add(room);
+        ticket.admit(this.socketGeneration);
       }
-      this.waiting.delete(room);
-      this.attaching.add(room);
-      ticket.admit();
     }
+    this.admissionsChanged();
+  }
+
+  /** Report the accounting, for a test that has to see every transition. */
+  private admissionsChanged(): void {
+    this.onAdmissions?.({
+      generation: this.socketGeneration,
+      inFlight: this.attaching.size,
+      waiting: this.waiting.size,
+    });
   }
 
   /**
@@ -447,23 +504,17 @@ export class HubSync {
   /**
    * Stop gating: every provider is inert from here (detached or destroyed), so
    * the rooms still waiting can be let go rather than left suspended forever.
+   *
+   * Let go on the *current* generation, so a suspended token call returns
+   * instead of queueing again — there is no next connection to queue for.
    */
   private releaseAdmissions(): void {
     for (const [room, ticket] of this.waiting) {
       this.waiting.delete(room);
-      ticket.admit();
+      ticket.admit(this.socketGeneration);
     }
     this.attaching.clear();
-  }
-
-  /** Rooms whose token is on the wire, unanswered. Never above the bound. */
-  attachesInFlight(): number {
-    return this.attaching.size;
-  }
-
-  /** Rooms that have not been let near the hub yet. */
-  attachesWaiting(): number {
-    return this.waiting.size;
+    this.admissionsChanged();
   }
 
   /** Mint a fresh token for this agent session. */
@@ -594,8 +645,18 @@ export class HubSync {
       // resolves, so a room waiting its turn is a room the hub has not been
       // told about. See {@link admission}.
       token: async () => {
-        await this.admission(room);
-        return this.token();
+        for (;;) {
+          const generation = await this.admission(room);
+          const token = await this.token();
+          if (generation === this.socketGeneration) {
+            return token;
+          }
+          // The connection this slot was granted on ended while the token was
+          // being minted. Returning now would send this room's auth and sync
+          // step into the *next* connection's pending count without its ever
+          // having been paced against it — so queue again and be admitted on
+          // the connection it will actually travel on. See socketGeneration.
+        }
       },
       onAuthenticated: () => {
         this.authRejected = false;
@@ -780,11 +841,14 @@ export class HubSync {
    * Wait — briefly, and only when it can help — until every room this process
    * holds is in sync, including the ones still queued for an attach slot.
    *
-   * The queue drains in waves of {@link MAX_CONCURRENT_ROOM_ATTACHES}, and a
-   * wave costs one round trip to the hub — so the settle budget covers the
-   * drain for any corpus this serves. Where it does not, the wait expires and
-   * every unfinished room reports `synced: false` through `isRoomQuiet`, which
-   * is the honest answer rather than a fast one.
+   * The queue drains in waves of {@link MAX_CONCURRENT_ROOM_ATTACHES}, so the
+   * budget is per wave, not per call: a fixed one sized for a single round trip
+   * expires mid-drain on a fresh client, and the caller then records the
+   * hydration as done — served from a corpus that is still queueing. Waiting
+   * `syncTimeoutMs` for each wave still queued is the same promise every wave
+   * gets, made once per wave rather than once per corpus. Where even that
+   * expires, the wait ends and every unfinished room reports `synced: false`
+   * through `isRoomQuiet`, which is the honest answer rather than a fast one.
    *
    * Returns as soon as the hub is known to be unavailable, so an offline tool
    * call costs at most one connect grace and never blocks on a hub that is not
@@ -806,7 +870,16 @@ export class HubSync {
       return;
     }
 
-    const syncDeadline = Date.now() + this.config.syncTimeoutMs;
+    // One per-wave budget for every round trip the queue still has to make,
+    // counted here rather than while it drains: the number only falls from now
+    // on, and a deadline that shrank with it would cut the last wave short.
+    const waves = Math.max(
+      1,
+      Math.ceil(
+        (this.waiting.size + this.attaching.size) / this.maxConcurrentAttaches,
+      ),
+    );
+    const syncDeadline = Date.now() + this.config.syncTimeoutMs * waves;
     while (!this.allQuiet()) {
       if (
         this.socketStatus !== "connected" ||
