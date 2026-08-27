@@ -46,6 +46,25 @@ const NO_VENDOR = { PATH: "/nonexistent-for-tests" };
 const RECORD = "UB_TEST_VENDOR_RECORD";
 
 /**
+ * The variables a stub reports on — and it reports presence only, never a
+ * value. A vendor child inherits nearly the whole environment, so a stub that
+ * dumped it would write this machine's real secrets into a temp file merely to
+ * prove that six of them are absent. `RECORD` leads the list as the positive
+ * control: it is always set, so a recording of nothing but `absent` cannot
+ * pass for an answer.
+ */
+const REPORTED = [
+  RECORD,
+  "HUB_AUTH_TOKEN",
+  "HUB_URL",
+  "HUB_DB_PATH",
+  "UBERBLICK_DB",
+  "WORKSPACE_ID",
+  "WORKSPACES",
+  "CODEX_HOME",
+];
+
+/**
  * A value that must never reach a terminal. Config files are where people keep
  * tokens, and every path that reports on one has to be safe for that.
  */
@@ -60,7 +79,7 @@ interface Stub {
   record: string;
   /** `CODEX_HOME` as the stub saw it. */
   home: string;
-  /** Every variable the stub was spawned with, `NAME=value` per line. */
+  /** `NAME=present` or `NAME=absent`, one line per reported variable. */
   environment: string;
 }
 
@@ -69,13 +88,18 @@ function stubVendor(box: Sandbox, program: string, body = ""): Stub {
   mkdirSync(dir, { recursive: true });
   const path = join(dir, program);
   const record = join(dir, "record");
+  // One `${NAME+present}` per reported variable rather than a dump of the
+  // environment: sh has no indirect expansion, and nothing here may write a
+  // value anyway. PATH is the stub's own directory alone, so only builtins run.
+  const report = REPORTED.map(
+    (name) =>
+      `seen=\${${name}+present}\nprintf '${name}=%s\\n' "\${seen:-absent}"`,
+  ).join("\n");
   writeFileSync(
     path,
     `#!/bin/sh\nprintf '%s\\n' "$@" > "$${RECORD}"\n` +
-      // `set` rather than `env`: PATH here is the stub's own directory and
-      // nothing else, so a builtin is the only thing that can run.
       `printf '%s\\n' "$CODEX_HOME" > "$${RECORD}.home"\n` +
-      `set > "$${RECORD}.env"\n${body}`,
+      `{\n${report}\n} > "$${RECORD}.env"\n${body}`,
     "utf8",
   );
   chmodSync(path, 0o755);
@@ -305,12 +329,14 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     });
 
     expect(run.status, run.output).toBe(0);
+    // The stub reports presence, not values, so this file is safe to write on
+    // a real machine. `RECORD` is the positive control: it is always set, so
+    // the absences below are about what was stripped, not about an empty
+    // recording.
     const received = read(stub.environment);
-    // The rest of the environment is still there, so the absences below are
-    // about what was stripped rather than about an empty recording.
-    expect(received).toMatch(new RegExp(`^${RECORD}=`, "m"));
+    expect(received).toMatch(new RegExp(`^${RECORD}=present$`, "m"));
     for (const name of Object.keys(ours)) {
-      expect(received, name).not.toMatch(new RegExp(`^${name}=`, "m"));
+      expect(received, name).toMatch(new RegExp(`^${name}=absent$`, "m"));
     }
     expect(received).not.toContain(SECRET);
   });
