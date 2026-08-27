@@ -89,8 +89,23 @@ export interface Hub {
    * that did not finish inside the shutdown timeout. The resources are released
    * either way, so a caller can exit on the rejection rather than because of it.
    *
-   * The close frame is part of the contract, not a detail: see
-   * {@link openSockets}.
+   * **What a client sees.** A socket holding at least one room is sent a `1001`
+   * close frame and reports itself disconnected within ~5–10ms, which is what
+   * makes an in-process stop as legible as a killed process — see
+   * {@link openSockets} for why that is not what Hocuspocus does on its own. A
+   * client whose upgrade is in flight, or accepted but not yet upgraded, when
+   * `stop()` is called is refused within ~5ms by the `httpServer.close()` that
+   * runs first, so it never lands on a dead socket either.
+   *
+   * **The one exception**, a boundary rather than a bug: a socket holding *no*
+   * room — never authenticated, token refused, every room detached — is sent no
+   * frame, because Hocuspocus exposes a socket only through
+   * `Connection.webSocket`. Hocuspocus' own connection timeout ends it instead,
+   * with code `4408`, no later than about 60s after it connected; the port is
+   * released immediately either way. Reaching those sockets would mean tracking
+   * raw ones from `onUpgrade`, where a socket can only be destroyed and not
+   * closed — trading a 60s wait for an abrupt reset, on a connection that by
+   * definition holds no client state — so it is not done.
    */
   stop(): Promise<void>;
 }
@@ -313,9 +328,8 @@ const GOING_AWAY = 1001;
  * The sockets are read back from the documents, so this must run *before* the
  * rooms are closed: closing one removes the connection that names its socket.
  * One client on three documents is three connections over one socket, hence the
- * Set. A socket holding no room at all — a refused document, a client that
- * detached everything — is not reachable from here and is left to the hub's own
- * connection timeout, as it was before.
+ * Set. A socket holding no room is not reachable here at all; {@link Hub.stop}
+ * states what that costs.
  */
 function openSockets(hocuspocus: Hocuspocus<HubContext>): Set<WebSocketLike> {
   const sockets = new Set<WebSocketLike>();
@@ -686,8 +700,10 @@ export async function createHub(config: HubConfig): Promise<Hub> {
       });
     });
 
-    // Sockets that never saw the close frame would otherwise keep the HTTP
-    // server's handle (and the port) alive.
+    // Plain HTTP keep-alive connections only: Node stops tracking a socket the
+    // moment it is upgraded, so this reaches no websocket, and the port is
+    // released by `httpServer.close()` above either way. It is kept because a
+    // request that never upgraded is otherwise free to hold its socket open.
     server.httpServer.closeAllConnections?.();
 
     closeDatabase();
