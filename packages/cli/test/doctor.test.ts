@@ -22,7 +22,13 @@ import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Run, Sandbox } from "./helpers.js";
-import { DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox } from "./helpers.js";
+import {
+  DEAD_HUB_URL,
+  pointAt,
+  removeTempDirs,
+  runUbAsync,
+  sandbox,
+} from "./helpers.js";
 
 const WORKSPACE = "9f2c47a1-5b83-4e60-91d7-2a6c8b40e3f5";
 const SECRET = "doctor-test-signing-secret-4b91c7";
@@ -183,7 +189,6 @@ describe("ub doctor", () => {
 
     // A stack with nothing configured still gets an answer for every check.
     expect([...checks.keys()]).toEqual([
-      "storage-layout",
       "workspace",
       "credential",
       "database",
@@ -312,9 +317,9 @@ describe("ub doctor", () => {
   it("passes the hub check against a running hub, and says our hub holds the port", async () => {
     const box = sandbox({ credentials: { signingSecret: SECRET } });
     const hub = await startHub(box);
+    pointAt(box, `ws://127.0.0.1:${hub.port}`);
     const { checks } = await doctor(box, {
       WORKSPACE_ID: WORKSPACE,
-      HUB_URL: `ws://127.0.0.1:${hub.port}`,
       PORT: String(hub.port),
     });
 
@@ -343,10 +348,8 @@ describe("ub doctor", () => {
     async (_name, status, offsetSeconds, direction) => {
       const box = sandbox({ credentials: { signingSecret: SECRET } });
       const port = await skewedClock(offsetSeconds);
-      const { checks } = await doctor(box, {
-        WORKSPACE_ID: WORKSPACE,
-        HUB_URL: `ws://127.0.0.1:${port}`,
-      });
+      pointAt(box, `ws://127.0.0.1:${port}`);
+      const { checks } = await doctor(box, { WORKSPACE_ID: WORKSPACE });
 
       const clock = check(checks, "clock");
       expect(clock.status).toBe(status);
@@ -359,21 +362,19 @@ describe("ub doctor", () => {
 
   it("skips the clock check when nothing answers an HTTP request", async () => {
     const box = sandbox({ credentials: { signingSecret: SECRET } });
-    const { checks } = await doctor(box, {
-      WORKSPACE_ID: WORKSPACE,
-      HUB_URL: DEAD_HUB_URL,
-    });
+    pointAt(box, DEAD_HUB_URL);
+    const { checks } = await doctor(box, { WORKSPACE_ID: WORKSPACE });
 
     expect(check(checks, "clock").status).toBe("skipped");
   });
 
-  it("names both values when the hub's port and HUB_URL's disagree", async () => {
+  it("names both values when the hub's port and the configured endpoint disagree", async () => {
     const box = sandbox({ credentials: { signingSecret: SECRET } });
     const hub = await startHub(box);
     const dialled = await freePort();
+    pointAt(box, `ws://127.0.0.1:${dialled}`);
     const { checks } = await doctor(box, {
       WORKSPACE_ID: WORKSPACE,
-      HUB_URL: `ws://127.0.0.1:${dialled}`,
       PORT: String(hub.port),
     });
     const port = check(checks, "port");
@@ -382,18 +383,18 @@ describe("ub doctor", () => {
     // Which two values disagree…
     expect(port.reason).toContain(String(hub.port));
     expect(port.reason).toContain(String(dialled));
-    // …and why they have to be set together: the hub never reads HUB_URL.
+    // …and how each half is set: one is an environment variable, the other is
+    // this machine's configuration and a `ub` command away.
     expect(port.remedy).toMatch(/PORT/);
-    expect(port.remedy).toMatch(/HUB_URL/);
-    expect(port.remedy).toMatch(/never reads HUB_URL/);
+    expect(port.remedy).toMatch(/ub remote join/);
   });
 
   it("tells a foreign process holding the port from our own hub", async () => {
     const box = sandbox({ credentials: { signingSecret: SECRET } });
     const port = await foreignProcess();
+    pointAt(box, `ws://127.0.0.1:${port}`);
     const { checks } = await doctor(box, {
       WORKSPACE_ID: WORKSPACE,
-      HUB_URL: `ws://127.0.0.1:${port}`,
       PORT: String(port),
     });
     const bind = check(checks, "bind");
@@ -401,15 +402,16 @@ describe("ub doctor", () => {
     expect(bind.status).toBe("fail");
     expect(bind.reason).toContain(`127.0.0.1:${port}`);
     expect(bind.reason).toMatch(/not an uberblick hub/);
-    expect(bind.remedy).toMatch(/set PORT for the hub and HUB_URL for the clients together/);
+    expect(bind.remedy).toMatch(/PORT/);
+    expect(bind.remedy).toMatch(/ub remote join/);
   });
 
   it("refuses to call a hub that never serves the room reachable, or the port ours", async () => {
     const box = sandbox({ credentials: { signingSecret: SECRET } });
     const port = await silentServer();
+    pointAt(box, `ws://127.0.0.1:${port}`);
     const { checks } = await doctor(box, {
       WORKSPACE_ID: WORKSPACE,
-      HUB_URL: `ws://127.0.0.1:${port}`,
       PORT: String(port),
     });
 

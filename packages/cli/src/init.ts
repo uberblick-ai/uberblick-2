@@ -31,11 +31,11 @@
  * with, not a token. The owner's copy lives encrypted in `fnox.toml` and that
  * path is untouched: when a secret is already in force — from fnox, or from the
  * user's own shell — nothing is generated. Otherwise a fresh 32-byte value is
- * written to `credentials.json` (mode 0600), which is the authority, and mirrored
- * into the checkout's derived `mise.local.toml` so the existing mise tasks and
- * `.mcp.json` see the same value. It is never printed: not by the report below,
- * not by an error path, not by a warning. The one thing said about it is where it
- * came from.
+ * written to `credentials.json` (mode 0600), which is the authority every reader
+ * goes to: the mise tasks reach it through `ub env`, and `.mcp.json` spawns
+ * `ub mcp serve`, which resolves it. It is never printed: not by the report
+ * below, not by an error path, not by a warning. The one thing said about it is
+ * where it came from.
  *
  * The generated secret is deliberately a trusted single-user arrangement: one
  * workspace, one trusted user, multiple clients and machines; no login and no
@@ -52,8 +52,10 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
+import { findCheckoutRoot } from "./checkout.js";
 import {
   claimSigningSecret,
+  isOwnerOnly,
   readCredentials,
   readUserConfig,
   resolveConfig,
@@ -67,14 +69,6 @@ import { acquireInitLock, seedLockPath } from "./init-lock.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
-import {
-  derivedSecret,
-  findCheckoutRoot,
-  isOwnerOnly,
-  tomlUnsafeReason,
-  trustLocalConfig,
-  writeLocalConfig,
-} from "./mise-config.js";
 import { seedStarterDocs } from "./starter.js";
 
 /**
@@ -367,24 +361,14 @@ export async function initCommand(
     io.err(`ub init: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
   }
-  // And the one thing that rule does not cover, because it is about the files
-  // this command writes rather than about rooms: a workspace with a control
-  // character in it cannot be put into the derived TOML at all.
-  const unsafe = tomlUnsafeReason(workspace);
-  if (unsafe !== null) {
-    const label = flags.workspace === undefined ? "the workspace" : "--workspace";
-    io.err(`ub init: ${label} cannot be used because ${unsafe}\n`);
-    return 2;
-  }
-
-  // Which checkout, if any, this is being run in. A property of the working
-  // directory rather than of the machine's configuration, so it needs no lock.
+  // Whether this is a checkout, which decides only whether the report below
+  // names the contributor tasks. Nothing is written into one.
   const root = findCheckoutRoot(process.cwd());
 
   // --- everything that writes ---------------------------------------------
   //
   // Under one lock, from here to its release. Each file below is published
-  // atomically on its own, but the three of them have to agree with each other
+  // atomically on its own, but the two of them have to agree with each other
   // when this returns, and only serialising the whole phase gives that. It is
   // taken after the prompts on purpose: a lock held while a terminal waits for
   // somebody to type their name is a lock held for as long as they are at lunch.
@@ -408,8 +392,6 @@ export async function initCommand(
   let credentialNote: string;
   let wroteCredentials = false;
   let persistedWorkspace: string;
-  let localConfig: string | null = null;
-  let trustAfterRelease: string | null = null;
   // Replaced once the workspace on disk is known.
   let mcpEnv: NodeJS.ProcessEnv = resolved.env;
   try {
@@ -441,19 +423,12 @@ export async function initCommand(
       : null;
     if (settled !== null) {
       // Adopting is reading a workspace out of a file, so it is held to what
-      // every other reader of that file holds it to — the shared rule, plus
-      // the one thing that rule does not cover, which is whether the value can
-      // be put into the derived TOML at all. A file this command cannot read
-      // is not one it may invent a workspace over: it throws with the message
-      // the next `ub init` would give for the same file, rather than
-      // publishing a value that would make a later run, a seed or a report
-      // fail somewhere less obvious.
-      const label = `"workspace" in ${userConfigPath()}`;
-      parseWorkspaceId(settled, label);
-      const settledUnsafe = tomlUnsafeReason(settled);
-      if (settledUnsafe !== null) {
-        throw new Error(`${label} cannot be used because ${settledUnsafe}`);
-      }
+      // every other reader of that file holds it to. A file this command
+      // cannot read is not one it may invent a workspace over: it throws with
+      // the message the next `ub init` would give for the same file, rather
+      // than publishing a value that would make a later run, a seed or a
+      // report fail somewhere less obvious.
+      parseWorkspaceId(settled, `"workspace" in ${userConfigPath()}`);
       workspace = settled;
     }
     configPath = writeUserConfig({
@@ -464,17 +439,10 @@ export async function initCommand(
     });
 
     // --- the signing secret -------------------------------------------------
-    const derived = root === null ? null : derivedSecret(root);
     // The raw environment, not `resolved.env`: what matters here is whether
-    // somebody *else* supplies a secret, and `resolved.env` includes the one in
-    // `credentials.json`. Our own derived file is not somebody else either —
-    // inside a checkout mise puts it into this very environment, so counting it
-    // would make a second run report a secret "already supplied" by itself.
-    const fromEnvironment = trimmed(process.env.HUB_AUTH_TOKEN);
-    const supplied =
-      fromEnvironment !== null && fromEnvironment !== derived
-        ? fromEnvironment
-        : null;
+    // somebody *else* supplies a secret — `fnox exec`, or the user's own shell
+    // — and `resolved.env` includes the one in `credentials.json`.
+    const supplied = trimmed(process.env.HUB_AUTH_TOKEN);
 
     if (stored.signingSecret !== null) {
       secret = stored.signingSecret;
@@ -490,61 +458,24 @@ export async function initCommand(
     } else if (supplied !== null) {
       secret = null;
       credentialNote = "supplied by the environment (fnox, or your shell)";
-    } else if (derived !== null) {
-      // The authority went missing while its derived copy survived. Restore it
-      // from that copy: the same value, not a new one.
-      secret = claimSigningSecret(derived);
-      wroteCredentials = true;
-      credentialNote = "restored from this checkout's local mise config";
     } else {
       secret = claimSigningSecret(generateSecret());
       wroteCredentials = true;
       credentialNote = "generated for local development";
     }
 
-    // --- the derived mise config --------------------------------------------
+    // --- what is on disk ----------------------------------------------------
     //
-    // Derived from what is ON DISK, not from what this process decided. Under
-    // the lock the two are the same thing; the re-read costs nothing and keeps
-    // the invariant true of the code rather than of the lock — a derived file
-    // that disagrees with its authority is the one outcome this must not
-    // produce. Same for the workspace, whose authority is `config.json`.
+    // Read back rather than assumed: under the lock the two are the same thing,
+    // and the re-read keeps the report describing the machine rather than this
+    // process's intention.
     const persisted = readCredentials();
-    const persistedConfig = readUserConfig().config;
-    persistedWorkspace = persistedConfig.workspace ?? workspace;
+    persistedWorkspace = readUserConfig().config.workspace ?? workspace;
     if (secret !== null && persisted.signingSecret !== null) {
       secret = persisted.signingSecret;
     }
-
-    if (root !== null && secret !== null) {
-      const outcome = writeLocalConfig(root, {
-        signingSecret: secret,
-        workspace: persistedWorkspace,
-        // Carried, not chosen: an endpoint `ub remote` put in `config.json` is
-        // part of the authority this file is derived from, and dropping it here
-        // would point the mise tasks back at localhost on the next `ub init`.
-        hubUrl: persistedConfig.hubUrl,
-        authorityPath: stored.path,
-      });
-      if (outcome.written) {
-        localConfig = outcome.path;
-        // Trusting is a `mise` subprocess taking a few hundred milliseconds,
-        // and it needs no lock: it is idempotent and it reads the file rather
-        // than writing it.
-        trustAfterRelease = outcome.path;
-      } else {
-        warnings.add(outcome.reason);
-      }
-    }
   } finally {
     lock.release();
-  }
-
-  if (trustAfterRelease !== null) {
-    const trust = trustLocalConfig(trustAfterRelease);
-    if (!trust.trusted) {
-      warnings.add(trust.hint);
-    }
   }
 
   // --- the starter documents -----------------------------------------------
@@ -636,9 +567,6 @@ export async function initCommand(
       "credentials",
       `${stored.path}${isOwnerOnly(stored.path) ? " (0600)" : ""}`,
     );
-  }
-  if (localConfig !== null) {
-    report += field("mise config", `${localConfig} (derived, gitignored)`);
   }
 
   report += "\nnext steps\n";

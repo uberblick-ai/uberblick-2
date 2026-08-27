@@ -73,11 +73,9 @@ hand:
    is what makes Tailscale issue the certificate, so an immediate check is a
    false negative — and confirms `/ws` upgrades to a WebSocket. A failure exits
    non-zero with the last hub and Caddy log lines, and persists nothing.
-6. Prints the URL, and the **join URL** a second computer binds to —
-   `wss://<host>/ws/<workspace id>`, the endpoint with this workspace's id on
-   the end. If this workspace holds no documents it also points your clients at
-   the new hub (`ub remote set`); if it holds documents it switches nothing and
-   prints the `ub remote promote` command instead.
+6. Points this machine's clients at the new hub, and prints the **join URL** a
+   second computer binds to — `wss://<host>/ws/<workspace id>`, the endpoint
+   with this workspace's id on the end.
 
 Every step is idempotent: re-running `ub remote init` against a host it already
 stood up adds no second deploy key and re-clones nothing.
@@ -284,36 +282,14 @@ it exits. SQLite is `/data/hub.sqlite` in the `hub-data` named volume, so normal
 container replacement and `sh remote-compose.sh down` preserve it. Backups are a
 separate follow-up (#85).
 
-## Moving an existing local workspace onto this hub
+## Binding a computer to this hub's workspace
 
-The hub this deployment starts is empty. `ub remote` moves a workspace onto it,
-and onto a second computer afterwards. Which process runs where matters:
-everything in this section runs on **your** computers, not on the remote host,
-which only ever runs `sh remote-compose.sh`.
+The hub this deployment starts is empty; `ub remote init` pointed the machine
+that ran it at the new endpoint. Every other computer joins. Which process runs
+where matters: everything in this section runs on **your** computers, not on the
+remote host, which only ever runs `sh remote-compose.sh`.
 
-On the computer that holds the documents, with the local hub still running —
-`mise run hub` — because documents a browser created live only there until an
-MCP session has pulled them down:
-
-```sh
-ub remote promote wss://<TAILSCALE_HOST>/ws
-```
-
-It hydrates the local directory and every live document into the update log,
-reads the target with a throwaway client that writes nothing, uploads, then
-opens the target again as a fresh client and compares what it finds against what
-you hold — in both directions, tombstones included, and by content rather than
-by name. The endpoint is rewritten only after that comparison succeeds, so a
-failed or partial run leaves you pointed at the hub that still works. Rerunning
-finishes an interrupted run: a shared uuid is one document's lineage on two
-hubs, which Yjs merges.
-
-It exits non-zero without writing anything if the local hub is unreachable, if
-the target accepted the connection but never finished serving its directory (a
-hub whose contents are unknown is not an empty hub), or if the target holds
-documents this workspace has never heard of.
-
-On a second computer, one command:
+There is one verb, and it is the same on every machine:
 
 ```sh
 ub remote join wss://<TAILSCALE_HOST>/ws/<WORKSPACE_ID> \
@@ -352,9 +328,10 @@ mise run web
 ```
 
 `ub init` (which `mise run setup` runs) creates a *local* workspace with its
-starter documents; the join then binds this checkout to the remote one and
-rewrites the derived `mise.local.toml`, so `mise run web` serves the joined
-workspace against the remote hub.
+starter documents; the join then binds this machine to the remote one, and
+`mise run web` serves it because the task runs its command through `ub env`,
+which resolves this machine's own configuration. Nothing is written into the
+checkout.
 
 The secret that reached the remote replaces whatever this machine had, at mode
 0600, and the command says so — on a second machine that is the point, since a
@@ -362,15 +339,15 @@ locally generated secret is random and the remote verifies with the first
 machine's.
 
 Persisting the endpoint — and, after a join, the workspace binding — writes
-`$XDG_CONFIG_HOME/uberblick/config.json`, which is where `ub`, `ub mcp serve`
-and the MCP server it spawns resolve them. `HUB_URL` in the environment
-outranks that file, as `WORKSPACE_ID` there outranks the binding — and a
-project MCP entry pinned with `ub mcp install --project --workspace <id>` is
-exactly how a `WORKSPACE_ID` gets into an agent session's environment. When
-either outranks, these commands name the one that wins instead of claiming a
-switch that did not take effect. The deployed web client
-here reads its endpoint at runtime from the served `/uberblick-config.json`, not
-from any of them.
+`$XDG_CONFIG_HOME/uberblick/config.json`, which is the only place `ub`,
+`ub mcp serve`, the MCP server it spawns and every checkout task under `ub env`
+resolve them from — an endpoint in the environment is not read at all. The
+*workspace* can still be outranked by `WORKSPACE_ID` there, and a project MCP
+entry pinned with `ub mcp install --project --workspace <id>` is exactly how one
+gets into an agent session's environment; `join` names the winner instead of
+claiming a switch that did not take effect. The deployed web client here reads
+its endpoint at runtime from the served `/uberblick-config.json`, not from any
+of them.
 
 The `--secret-file` argument is a path, never the secret: it must be a file only
 you can read (mode 0600), holding either the bare value from the host's `.env`
@@ -380,6 +357,5 @@ Nothing here prints the secret or a token signed with it.
 
 Archived documents replicate as directory state and stay archived; their content
 is not moved. Merging two independently populated workspaces is not supported:
-`promote` refuses it explicitly, naming both document counts, and `join` never
-merges at all — the URL says which workspace it is about, and the others on the
-machine are left alone.
+`join` never merges at all — the URL says which workspace it is about, and the
+others on the machine are left alone.

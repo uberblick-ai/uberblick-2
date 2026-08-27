@@ -108,10 +108,10 @@ function hashToIndex(value: string, buckets: number): number {
 
 /**
  * `<workspaceUuid>.sqlite` in the user's workspace directory — one database per
- * user per workspace. Which directory that is on which platform belongs to
+ * user per workspace. Which directory that is belongs to
  * `@uberblick/hub/storage`, so the cli, this server and the hub cannot drift
- * into three answers; here it is `$XDG_DATA_HOME/uberblick`, on a fresh Mac
- * `~/Library/Application Support/Uberblick/data/workspaces`.
+ * into three answers; it is `$XDG_DATA_HOME/uberblick`, or
+ * `~/.local/share/uberblick` when that variable names nothing absolute.
  *
  * Two MCP server instances sharing one file is the normal case, not an edge
  * case: the store runs in WAL with a busy timeout, and every tool call polls
@@ -125,10 +125,9 @@ function hashToIndex(value: string, buckets: number): number {
 export function defaultDatabasePath(
   workspaceId: string,
   env: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform,
 ): string {
   return join(
-    resolveStorage({ env, platform }).workspaceDir,
+    resolveStorage({ env }).workspaceDir,
     `${parseWorkspaceId(workspaceId).uuid}.sqlite`,
   );
 }
@@ -147,7 +146,6 @@ const MISSING_WORKSPACE =
 
 export function resolveMcpConfig(
   env: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform,
 ): McpConfig {
   const configured = trimmed(env.WORKSPACE_ID);
   if (configured === null) {
@@ -164,7 +162,7 @@ export function resolveMcpConfig(
     authSecret: trimmed(env.HUB_AUTH_TOKEN),
     databasePath:
       trimmed(env.UBERBLICK_DB) ??
-      defaultDatabasePath(workspaceId, env, platform),
+      defaultDatabasePath(workspaceId, env),
     sessionId,
     color: AGENT_COLORS[hashToIndex(sessionId, AGENT_COLORS.length)] ?? "#7b5ec7",
     connectTimeoutMs: 1_500,

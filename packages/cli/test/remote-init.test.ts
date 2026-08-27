@@ -13,13 +13,10 @@
  * scheduled is installed on the host, updates being deliberate; that the
  * signing secret is in no argument vector and on neither stream; that a failed
  * `up` persists nothing; that a failed step is reported in the vendor's own
- * words, bounded; which way the workspace hands off; and that a second run is
- * a no-op.
+ * words, bounded; that the endpoint it stood up is persisted; and that a second
+ * run is a no-op.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
@@ -229,32 +226,6 @@ function init(rig: Harness, args: string[] = [TARGET]): Promise<number> {
   });
 }
 
-/** Put one document in the local update log, the way an MCP session does. */
-async function createDocument(box: Sandbox): Promise<void> {
-  const instance = createMcpServer(
-    // No signing secret: this writes to the log and nothing else.
-    resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }),
-  );
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: "uberblick-cli-tests", version: "0.0.0" });
-  await Promise.all([
-    instance.connect(serverTransport),
-    client.connect(clientTransport),
-  ]);
-  try {
-    await client.callTool({
-      name: "create_doc",
-      arguments: {
-        title: "held here",
-        description: "A test document.",
-        blocks: [{ type: "paragraph", text: "body" }],
-      },
-    });
-  } finally {
-    await client.close();
-    await instance.close();
-  }
-}
 
 describe("ub remote init", () => {
   it("keeps every accepted workspace spelling inside the compose charset", () => {
@@ -475,39 +446,19 @@ describe("ub remote init", () => {
     expect(rig.output()).not.toContain("HUB_AUTH_TOKEN");
   });
 
-  it("persists the endpoint when this workspace holds no documents", async () => {
+  it("persists the endpoint it stood up", async () => {
     const rig = harness();
     expect(await init(rig)).toBe(0);
     expect(readUserConfig(rig.env).raw?.hubUrl).toBe(`wss://${MAGIC_DNS}/ws`);
     expect(rig.out()).toContain(`wss://${MAGIC_DNS}/ws`);
   });
 
-  it("switches nothing when it does, and names the promote command", async () => {
-    const box = sandbox({ credentials: { signingSecret: SECRET } });
-    await createDocument(box);
-    const rig = harness({}, box);
-
-    expect(await init(rig)).toBe(0);
-    expect(rig.out()).toContain(`ub remote promote wss://${MAGIC_DNS}/ws`);
-    expect(readUserConfig(rig.env).raw?.hubUrl).toBeUndefined();
-  });
-
   // The whole of what a second machine has to be told, in one string it can
-  // paste: the endpoint with this workspace's id on the end. Printed either
-  // way, because the workspace reaches the hub by `promote` or by being empty
-  // already, and a second machine binds to it the same way afterwards.
+  // paste: the endpoint with this workspace's id on the end.
   it("prints the join URL a second machine binds to", async () => {
     const empty = harness();
     expect(await init(empty)).toBe(0);
     expect(empty.out()).toContain(
-      `ub remote join wss://${MAGIC_DNS}/ws/${WORKSPACE}`,
-    );
-
-    const box = sandbox({ credentials: { signingSecret: SECRET } });
-    await createDocument(box);
-    const held = harness({}, box);
-    expect(await init(held)).toBe(0);
-    expect(held.out()).toContain(
       `ub remote join wss://${MAGIC_DNS}/ws/${WORKSPACE}`,
     );
   });

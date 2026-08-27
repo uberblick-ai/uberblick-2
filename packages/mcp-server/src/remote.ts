@@ -1,7 +1,7 @@
 /**
  * The two halves of a one-time bridge between a workspace and a hub.
  *
- * `ub remote promote` and `ub remote join` are compositions of exactly two
+ * `ub remote join` and `ub remote init` are compositions of exactly two
  * operations, and both live here because both are about Y.Docs and hub
  * connections rather than about a command line:
  *

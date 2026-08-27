@@ -30,6 +30,7 @@ import type { Sandbox } from "./helpers.js";
 import {
   UB_BIN,
   WAIT_TIMEOUT_MS,
+  pointAt,
   removeTempDirs,
   runUbAsync,
   sandbox,
@@ -305,10 +306,10 @@ describe("ub open", () => {
     const webPort = await freePort();
     const hubUrl = `ws://127.0.0.1:${hubPort}`;
     const browser = browserRecorder(box);
+    pointAt(box, hubUrl);
 
     const app = await open(box, ["--port", String(webPort)], {
       ...env,
-      HUB_URL: hubUrl,
       BROWSER: browser.command,
     });
 
@@ -333,11 +334,9 @@ describe("ub open", () => {
     const hub = await startHub(box);
     const hubUrl = `ws://127.0.0.1:${hub.port}`;
     const webPort = await freePort();
+    pointAt(box, hubUrl);
 
-    const app = await open(box, ["--port", String(webPort)], {
-      ...env,
-      HUB_URL: hubUrl,
-    });
+    const app = await open(box, ["--port", String(webPort)], env);
 
     // Nothing was started: a bind of the occupied port would have failed with
     // EADDRINUSE and taken the command down before it ever served.
@@ -352,11 +351,10 @@ describe("ub open", () => {
     expect(await hubAnswers(box, hubUrl)).toBe(true);
   });
 
-  it("after `ub remote set`, serves a bundle pointed at the remote and starts no hub", async () => {
+  it("serves a bundle pointed at a configured remote, and starts no hub", async () => {
     const { box, env } = configured();
     const remote = "wss://hub.example.ts.net/ws";
-    const set = await runUbAsync(["remote", "set", remote], box);
-    expect(set.status).toBe(0);
+    pointAt(box, remote);
 
     const webPort = await freePort();
     const app = await open(box, ["--port", String(webPort)], env);
@@ -378,8 +376,9 @@ describe("ub open", () => {
     const hubPort = await freePort();
     const webPort = await freePort();
     const hubUrl = `ws://127.0.0.1:${hubPort}`;
+    pointAt(box, hubUrl);
 
-    const first = await open(box, ["--port", String(webPort)], { ...env, HUB_URL: hubUrl });
+    const first = await open(box, ["--port", String(webPort)], env);
     expect(first.stdout()).toContain("started here");
     // A request first, so a keep-alive connection is open when the signal
     // arrives: `close()` alone waits for it, and the port would still be held.
@@ -389,7 +388,7 @@ describe("ub open", () => {
     expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
     expect((await probePort("127.0.0.1", hubPort)).state).toBe("free");
 
-    const second = await open(box, ["--port", String(webPort)], { ...env, HUB_URL: hubUrl });
+    const second = await open(box, ["--port", String(webPort)], env);
     expect(second.url).toBe(`http://127.0.0.1:${webPort}/`);
     expect((await second.interrupt()).status).toBe(0);
   });
@@ -397,10 +396,8 @@ describe("ub open", () => {
   it("serves the configuration document uncached, ahead of the SPA fallback", async () => {
     const { box, env } = configured();
     const webPort = await freePort();
-    const app = await open(box, ["--port", String(webPort)], {
-      ...env,
-      HUB_URL: "wss://hub.example.ts.net/ws",
-    });
+    pointAt(box, "wss://hub.example.ts.net/ws");
+    const app = await open(box, ["--port", String(webPort)], env);
 
     const document = await get(`${app.url}uberblick-config.json`);
     expect(document.status).toBe(200);
@@ -441,11 +438,11 @@ describe("ub open", () => {
     const { box, env } = configured();
     const webPort = await freePort();
     const browser = browserRecorder(box);
+    pointAt(box, "wss://hub.example.ts.net/ws");
 
     // No TTY either way: a spawned child's stdio are pipes, not a terminal.
     const app = await open(box, ["--no-browser", "--port", String(webPort)], {
       ...env,
-      HUB_URL: "wss://hub.example.ts.net/ws",
       BROWSER: browser.command,
     });
 
@@ -484,24 +481,16 @@ describe("ub open", () => {
     const { box, env } = configured();
     const foreignPort = await freePort();
     await foreignListener(foreignPort);
+    pointAt(box, "wss://hub.example.ts.net/ws");
 
-    const foreign = await openFails(box, ["--port", String(foreignPort)], {
-      ...env,
-      HUB_URL: "wss://hub.example.ts.net/ws",
-    });
+    const foreign = await openFails(box, ["--port", String(foreignPort)], env);
     expect(foreign.status).toBe(1);
     expect(foreign.output).toContain(`port ${foreignPort}`);
     expect(foreign.output).toContain("another process");
 
     const webPort = await freePort();
-    const app = await open(box, ["--port", String(webPort)], {
-      ...env,
-      HUB_URL: "wss://hub.example.ts.net/ws",
-    });
-    const second = await openFails(box, ["--port", String(webPort)], {
-      ...env,
-      HUB_URL: "wss://hub.example.ts.net/ws",
-    });
+    const app = await open(box, ["--port", String(webPort)], env);
+    const second = await openFails(box, ["--port", String(webPort)], env);
     expect(second.status).toBe(1);
     expect(second.output).toContain(`port ${webPort}`);
     expect(second.output).toContain("`ub open`");
@@ -509,17 +498,15 @@ describe("ub open", () => {
     expect((await app.interrupt()).status).toBe(0);
   });
 
-  it("never binds a hub off loopback, whatever HUB_URL says", async () => {
+  it("never binds a hub off loopback, whatever the endpoint says", async () => {
     const { box, env } = configured();
     const port = await freePort();
 
     // 0.0.0.0 is an address to *listen* on, and a hub bound there is on every
     // interface — offering the whole network a hub whose only credential is one
     // shared signing secret.
-    const refused = await openFails(box, ["--port", String(await freePort())], {
-      ...env,
-      HUB_URL: `ws://0.0.0.0:${port}`,
-    });
+    pointAt(box, `ws://0.0.0.0:${port}`);
+    const refused = await openFails(box, ["--port", String(await freePort())], env);
     expect(refused.status).toBe(1);
     expect(refused.output).toContain("binds loopback only");
     expect(refused.output).toContain("0.0.0.0");
@@ -533,10 +520,8 @@ describe("ub open", () => {
     // And a *name* that merely looks like loopback is not one: where
     // `127.attacker.example` resolves is somebody else's decision, so a prefix
     // test on the string would bind the shared-secret hub wherever they say.
-    const named = await openFails(box, ["--port", String(await freePort())], {
-      ...env,
-      HUB_URL: `ws://127.attacker.example:${port}`,
-    });
+    pointAt(box, `ws://127.attacker.example:${port}`);
+    const named = await openFails(box, ["--port", String(await freePort())], env);
     expect(named.status).toBe(1);
     expect(named.output).toContain("binds loopback only");
     expect(named.output).toContain("127.attacker.example");
@@ -549,24 +534,18 @@ describe("ub open", () => {
 
     // A hub started here speaks plain ws on loopback. Announcing one at an
     // endpoint it does not answer would be a hub nothing can reach.
-    const tls = await openFails(box, ["--port", String(webPort)], {
-      ...env,
-      HUB_URL: `wss://127.0.0.1:${port}`,
-    });
+    pointAt(box, `wss://127.0.0.1:${port}`);
+    const tls = await openFails(box, ["--port", String(webPort)], env);
     expect(tls.status).toBe(1);
     expect(tls.output).toContain("plain ws://");
 
-    const noPort = await openFails(box, ["--port", String(webPort)], {
-      ...env,
-      HUB_URL: "ws://127.0.0.1",
-    });
+    pointAt(box, "ws://127.0.0.1");
+    const noPort = await openFails(box, ["--port", String(webPort)], env);
     expect(noPort.status).toBe(1);
     expect(noPort.output).toContain("names no port to bind");
 
-    const ephemeral = await openFails(box, ["--port", String(webPort)], {
-      ...env,
-      HUB_URL: "ws://127.0.0.1:0",
-    });
+    pointAt(box, "ws://127.0.0.1:0");
+    const ephemeral = await openFails(box, ["--port", String(webPort)], env);
     expect(ephemeral.status).toBe(1);
     expect(ephemeral.output).toContain("names no port to bind");
   });
@@ -578,10 +557,11 @@ describe("ub open", () => {
 
     // Interrupted the instant the hub has bound its socket — before the web
     // server is up, and so before there is any banner.
+    pointAt(box, `ws://127.0.0.1:${hubPort}`);
     const run = await interruptWhen(
       box,
       ["--port", String(webPort)],
-      { ...env, HUB_URL: `ws://127.0.0.1:${hubPort}` },
+      env,
       () => untilBound(hubPort),
     );
 
@@ -599,10 +579,8 @@ describe("ub open", () => {
     const hubPort = await freePort();
     await foreignListener(hubPort);
 
-    const refused = await openFails(box, ["--port", String(await freePort())], {
-      ...env,
-      HUB_URL: `ws://127.0.0.1:${hubPort}`,
-    });
+    pointAt(box, `ws://127.0.0.1:${hubPort}`);
+    const refused = await openFails(box, ["--port", String(await freePort())], env);
     expect(refused.status).toBe(1);
     expect(refused.output).toContain("held by something else");
     expect(refused.output).toContain(`ws://127.0.0.1:${hubPort}`);

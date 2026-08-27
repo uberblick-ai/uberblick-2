@@ -1,26 +1,17 @@
 /**
- * `ub remote` — where this workspace syncs, and the two one-time bridges.
+ * `ub remote` — where this workspace syncs, and the one-time bridge onto it.
  *
- * Four verbs, and the shape of the command surface is the decision:
+ * `ub remote` says which endpoint is in force and what sharing it actually
+ * buys, in plain words. There is no `invite` (#92): today the served web bundle
+ * carries the shared signing secret, so "sharing" is handing somebody an address
+ * and a secret, and a command named `invite` would imply an access model that
+ * does not exist yet. `ub remote init` and `ub remote update` stand up and
+ * deploy the host; `ub remote join <url>/<workspace-id>` binds this machine to a
+ * workspace that already lives on one, and hydrates it.
  *
- * - `ub remote` says which endpoint is in force and what sharing it actually
- *   buys, in plain words. There is no `invite` (#92): today the served web
- *   bundle carries the shared signing secret, so "sharing" is handing somebody
- *   an address and a secret, and a command named `invite` would imply an access
- *   model that does not exist yet.
- * - `ub remote set <url>` points the clients at an endpoint. Nothing else — it
- *   moves no documents, and it is the right verb only when there is nothing to
- *   move.
- * - `ub remote promote <url>` moves a populated local workspace onto an empty
- *   remote hub.
- * - `ub remote join <url>/<workspace-id>` binds this machine to a workspace that
- *   already lives on a remote hub, and hydrates it.
- *
- * **The direction is the user's word, never inferred.** A single command
- * inferring it from whichever side is empty reads as convenient right up to the
- * day both sides hold documents — at which point the convenient behaviour is
- * silently merging two workspaces nobody asked to merge. So `promote` refuses
- * when the target contradicts it, naming both counts.
+ * There is no operator suite here: no verb that points the clients somewhere
+ * without moving anything, and none that pushes a populated local workspace onto
+ * an empty hub. Release 1 has one owner, one workspace, and `join`.
  *
  * **`join` binds; it does not merge, and it never seeds.** The URL carries the
  * workspace id, so nothing already on this machine is in the way: the id says
@@ -32,20 +23,13 @@
  * that workspace never asked for. With an id in hand there is no "is this side
  * empty" question left to get wrong, which is what makes one verb enough.
  *
- * **`promote`'s refusal is a set difference over uuids.** It tolerates a target
- * that already holds *part* of this workspace, because that is what an
- * interrupted run leaves behind — and an overlapping uuid is the same document,
- * one lineage, which Yjs merges rather than collides. What it does not tolerate
- * is a target holding documents this workspace has never heard of: that is a
- * second populated workspace, and merging those is out of scope.
- *
- * **Nothing is persisted before the far side is verified.** Both bridges finish
- * by opening the remote through a *fresh* client — no mirror, no local state —
- * and comparing what it sees with what this machine holds, in both directions
- * and including tombstones. Only then is the endpoint — and, for `join`, the
- * workspace binding — written. A bounded sync wait is not a completion signal,
- * and `HUB_URL` changed on the strength of one would strand a corpus on the old
- * hub, which is the exact failure these commands exist to prevent.
+ * **Nothing is persisted before the far side is verified.** `join` finishes by
+ * opening the remote through a *fresh* client — no mirror, no local state — and
+ * comparing what it sees with what this machine holds, in both directions and
+ * including tombstones. Only then are the endpoint and the workspace binding
+ * written. A bounded sync wait is not a completion signal, and an endpoint
+ * changed on the strength of one would strand a corpus on the old hub, which is
+ * the exact failure this command exists to prevent.
  *
  * **Persisting means every client, not just `ub`.** See {@link setRemote}.
  *
@@ -77,7 +61,6 @@ import type {
 } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import {
-  USER_CONFIG_FILE,
   credentialsPath,
   readCredentials,
   readUserConfig,
@@ -85,18 +68,14 @@ import {
   userConfigPath,
   writeUserConfig,
 } from "./config.js";
-import type { ResolvedConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
-import { trustLocalConfig } from "./mise-config.js";
 import { remoteInitCommand, remoteUpdateCommand } from "./remote-init.js";
 import { publishOwnerOnly, removeQuietly } from "./safe-write.js";
 import { ORIGIN_LABELS } from "./status.js";
-import type { Regeneration } from "./workspace.js";
-import { regenerateLocalConfig } from "./workspace.js";
 
 export const REMOTE_HELP = `usage: ub remote [command]
 
@@ -104,8 +83,6 @@ commands:
   (none)                 the endpoint in force and what sharing it buys
   init <ssh-target>      stand up the remote hub + web stack on a tailnet host
   update <ssh-target>    deploy origin/main onto that host now
-  set <url>              point the clients at an endpoint; moves nothing
-  promote <url> [opts]   move this populated workspace onto an empty remote hub
   join <url>/<id> [opts] bind this machine to the remote workspace the URL names
 
 options for init:
@@ -117,7 +94,7 @@ The join URL is an endpoint with the workspace id as its last path segment —
 \`ub remote init\` prints it. Joining never merges and never seeds: a workspace
 already on this machine keeps its documents and its \`ub workspace list\` entry.
 
-options for promote and join:
+options for join:
   --secret-file <path>   read the remote's signing secret from a file only you
                          can read (mode 0600). Without it the secret already
                          configured is tried first, and a terminal is prompted
@@ -144,76 +121,6 @@ const SHARING_BOUNDARY =
   "equivalent) until accounts land (#84). There is no invite command; sharing\n" +
   "means handing somebody the address and the secret out of band.\n";
 
-/**
- * What outranks `config.json`, when something does.
- *
- * `config.json` is the *second* layer: `HUB_URL` in the environment beats it.
- * Writing an endpoint here and reporting success would be reporting a switch
- * that did not happen — and after a `promote` that is worse than useless,
- * because the documents really did move while every client keeps dialling the
- * old hub. Naming what wins is the fix.
- *
- * Only a higher layer naming a *different* hub is any of this. One naming the
- * endpoint being written outranks nothing that matters: the value takes effect,
- * there is no switch that did not happen, and nothing is worth saying — which is
- * the ordinary shape of a second machine whose `HUB_URL` already points at the
- * hub it is joining. Same hub, not same spelling — see {@link sameEndpoint}.
- */
-interface Outranking {
-  /** `HUB_URL` in the environment — the only layer above `config.json`. */
-  layer: string;
-  endpoint: string;
-}
-
-function outranking(
-  resolved: ResolvedConfig,
-  /** The endpoint being written; a higher layer naming it is not a conflict. */
-  requested: string,
-): Outranking | null {
-  if (resolved.origins.hubUrl !== "environment") {
-    return null;
-  }
-  const endpoint = resolved.env.HUB_URL?.trim();
-  if (endpoint === undefined || endpoint === "" || sameEndpoint(endpoint, requested)) {
-    return null;
-  }
-  return { layer: "HUB_URL in the environment", endpoint };
-}
-
-/**
- * Whether two configured endpoints name the same hub.
- *
- * `wss://hub/` and `wss://hub` are one hub spelled two ways — `new URL` says so
- * by normalizing the empty path to a root slash and lowercasing the host — and a
- * higher layer spelling it the other way must not read as a conflict, or the
- * second machine this exists for is refused the credential it joined to get.
- *
- * A value that does not parse falls back to its trimmed text, so garbage in
- * `HUB_URL` compares unequal and keeps the warning path rather than throwing
- * from inside a decision about whether to warn. {@link normalizeRemoteUrl} has
- * already refused anything unparseable on the requested side; this is about the
- * layer above, which nothing validates.
- */
-function sameEndpoint(a: string, b: string): boolean {
-  const canonical = (value: string): string => {
-    const text = value.trim();
-    try {
-      return new URL(text).href;
-    } catch {
-      return text;
-    }
-  };
-  return canonical(a) === canonical(b);
-}
-
-function outrankedNote(outranked: Outranking, what: string): string {
-  return (
-    `${outranked.layer} names ${outranked.endpoint}, which outranks the ` +
-    `${USER_CONFIG_FILE} this just wrote — so ${what}. Remove it, or set ` +
-    "HUB_URL to the endpoint you asked for.\n"
-  );
-}
-
 function serialize(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
@@ -225,29 +132,18 @@ export interface RemotePersistence {
   warnings: string[];
   /** True when `credentials.json` now holds a different signing secret. */
   replacedSecret: boolean;
-  /**
-   * What outranks the file just written, when anything does. Whatever went into
-   * `config.json`, *this* is what the clients will dial — so a caller that
-   * printed the new endpoint without saying so would be printing a value that
-   * does not take effect.
-   */
-  outrankedBy: Outranking | null;
 }
 
 /**
  * Persist the endpoint, and say honestly who will follow it.
  *
- * `config.json` is where `ub` resolves `hubUrl`, so writing it is what makes
- * `ub status`, `ub mcp serve` and the MCP server this CLI spawns dial the new
- * hub. It is not the only layer, and it is not the highest — see
- * {@link outranking}, which is why this reports what beats it instead of
- * assuming the write took effect.
+ * `config.json` is where `ub` resolves `hubUrl`, and it is the only place: it is
+ * what makes `ub status`, `ub mcp serve`, the MCP server this CLI spawns and
+ * every checkout task running under `ub env` dial the new hub. Nothing ambient
+ * outranks it.
  *
  * A *deployed* web client learns its endpoint at runtime from the served
- * `/uberblick-config.json` (#91), not from anything written here. A checkout's
- * `mise run web` still takes `HUB_URL` from mise's environment, which this does
- * not touch — that is the dev-server fallback, and pointing a development build
- * at a remote hub is `HUB_URL=… mise run web`.
+ * `/uberblick-config.json` (#91), not from anything written here.
  *
  * **The two authority files must never describe different hubs.** A stored
  * credential that the persisted endpoint cannot use is a machine that
@@ -295,31 +191,7 @@ export function setRemote(
 
   const stored = readCredentials(env);
 
-  // Read before anything is written, because it decides whether the credential
-  // may move: `config.json` is only the second layer, and when `HUB_URL` in the
-  // environment names a different hub, *that* is the endpoint every client
-  // dials. Storing the target's secret anyway would leave the endpoint in force
-  // authenticated with a credential that is not its own — the exact mismatch
-  // the ordering below exists to prevent, arrived at from the other side. The
-  // endpoint is still written, because it is what takes over the moment the
-  // higher layer goes away; the secret is not, and the report says so. A higher
-  // layer naming the endpoint being written is not this and reads as null — see
-  // {@link outranking}, or a second machine already pointed at the hub it is
-  // joining would be refused the credential it went there to get.
-  // (The answer does not depend on the write: `HUB_URL` is untouched by it, and
-  // without it nothing outranks anything.)
-  const outrankedBy = outranking(resolveConfig({ env }), url);
-  const newSecret = secret !== null && secret !== stored.signingSecret;
-  if (newSecret && outrankedBy !== null) {
-    warnings.push(
-      `${credentialsFile} was left alone: ${outrankedBy.layer} names ` +
-        `${outrankedBy.endpoint}, so that is the endpoint in force, and ` +
-        `storing ${url}'s signing secret would leave it authenticating ` +
-        "against a hub the secret does not belong to. Remove the higher layer " +
-        "and rerun to store it.",
-    );
-  }
-  const changingSecret = newSecret && outrankedBy === null;
+  const changingSecret = secret !== null && secret !== stored.signingSecret;
   if (changingSecret) {
     // Captured before anything moves, so the rollback below has something to
     // put back. Null means the file did not exist and rollback is a removal.
@@ -351,12 +223,7 @@ export function setRemote(
   }
   written.push(configFile);
 
-  return {
-    written,
-    warnings,
-    replacedSecret: changingSecret,
-    outrankedBy,
-  };
+  return { written, warnings, replacedSecret: changingSecret };
 }
 
 /**
@@ -674,29 +541,16 @@ function report(
     `them back — not that the hub has flushed them to disk. The snapshot this\n` +
     `verified was taken at ${takenAt}; anything written to the old hub after\n` +
     "that is not part of it, so close the other clients before relying on this.\n";
-  if (persistence.outrankedBy !== null) {
-    text +=
-      `\nThe documents are on ${target}, but ` +
-      outrankedNote(
-        persistence.outrankedBy,
-        "that is still the endpoint in force here",
-      );
-  }
   text += `\n${SHARING_BOUNDARY}`;
   return text;
 }
 
-interface BridgeFlags {
-  url: string;
-  secretFile: string | undefined;
-}
-
-/** Exported so the two bridge helps can be checked against their parser. */
+/** Exported so `join`'s help can be checked against its parser. */
 export const REMOTE_BRIDGE_OPTIONS = {
   "secret-file": { type: "string" },
 } as const;
 
-/** The paragraph both bridge helps end on: how the credential is supplied. */
+/** The paragraph `join`'s help ends on: how the credential is supplied. */
 const SECRET_FILE_NOTE = `  --secret-file <path>  read the remote's signing secret from a file only you
                         can read (mode 0600). Without it the secret already
                         configured is tried first, and a terminal is prompted
@@ -706,20 +560,6 @@ const SECRET_FILE_NOTE = `  --secret-file <path>  read the remote's signing secr
 Never pass a secret as an argument: it would be in the shell history and in
 every process listing on the machine.
 `;
-
-export const REMOTE_PROMOTE_HELP = `usage: ub remote promote <url> [--secret-file <path>]
-
-Move this populated workspace onto an empty remote hub: every local document is
-pushed, the endpoint is then repointed at <url>, and the credential that reached
-it is stored. Refuses when the remote already holds documents, so it can never
-merge two corpora by accident.
-
-operands:
-  <url>                 the remote endpoint, ws:// or wss:// (an https:// or
-                        http:// address is accepted and normalized)
-
-options:
-${SECRET_FILE_NOTE}`;
 
 export const REMOTE_JOIN_HELP = `usage: ub remote join <url-with-workspace-id> [--secret-file <path>]
 
@@ -747,22 +587,6 @@ operands:
 options:
 ${SECRET_FILE_NOTE}`;
 
-function parseBridgeFlags(argv: string[]): BridgeFlags {
-  const { values, positionals } = parseArgs({
-    args: argv,
-    options: REMOTE_BRIDGE_OPTIONS,
-    allowPositionals: true,
-  });
-  if (positionals.length !== 1) {
-    throw new Error("expected exactly one endpoint");
-  }
-  const url = positionals[0];
-  if (url === undefined) {
-    throw new Error("expected exactly one endpoint");
-  }
-  return { url: normalizeRemoteUrl(url), secretFile: values["secret-file"] };
-}
-
 interface JoinFlags {
   /** The endpoint, with the workspace id taken off it. */
   endpoint: string;
@@ -774,9 +598,9 @@ interface JoinFlags {
 function parseJoinFlags(argv: string[]): JoinFlags {
   const { values, positionals } = parseArgs({
     args: argv,
-    // The same surface `promote` parses, and the one `REMOTE_JOIN_HELP` is
-    // checked against: a flag added here and not to the help fails in
-    // `help.test.ts` rather than in somebody's terminal.
+    // The surface `REMOTE_JOIN_HELP` is checked against: a flag added here and
+    // not to the help fails in `help.test.ts` rather than in somebody's
+    // terminal.
     options: REMOTE_BRIDGE_OPTIONS,
     allowPositionals: true,
   });
@@ -806,9 +630,9 @@ function showRemote(io: Io): number {
     text +=
       `Documents sync with ${config.hubUrl}, the built-in default — a hub on ` +
       "this machine.\n\n";
-    text += "  ub remote set <url>      point the clients at an endpoint\n";
     text +=
-      "  ub remote promote <url>  move this workspace onto an empty remote hub\n";
+      "  ub remote init <ssh-target>\n" +
+      "                           stand one up on a host you can reach\n";
     text +=
       "  ub remote join <url>/<workspace-id>\n" +
       "                           bind this machine to a remote workspace\n";
@@ -816,9 +640,7 @@ function showRemote(io: Io): number {
     return 0;
   }
 
-  const source =
-    resolved.origins.hubUrl === "environment" ? "HUB_URL" : "user config";
-  let text = `remote        ${config.hubUrl} (${source})\n`;
+  let text = `remote        ${config.hubUrl} (user config)\n`;
   text += `workspace     ${config.workspaceId}\n`;
   text += `credential    ${
     config.authSecret === null
@@ -830,119 +652,17 @@ function showRemote(io: Io): number {
   return 0;
 }
 
-// --- ub remote set ---------------------------------------------------------
-
-export const REMOTE_SET_HELP = `usage: ub remote set <url>
-
-Point the clients at an endpoint, by writing it to the user config. Moves no
-documents: whatever the current hub holds stays there, and this machine's
-replica keeps whatever it has already logged.
-
-operands:
-  <url>             the endpoint, ws:// or wss:// (an https:// or http://
-                    address is accepted and normalized)
-
-options:
-  -h, --help        show this help
-
-Use \`ub remote promote <url>\` or \`ub remote join <url>\` when the documents
-have to move with the endpoint. The layer above the user config — HUB_URL in
-the environment — still wins, and this says so when it does.
-`;
-
-function setCommand(argv: string[], io: Io): number {
-  if (takeHelp(argv, io, REMOTE_SET_HELP)) return 0;
-
-  const [value, ...rest] = argv;
-  if (value === undefined || rest.length > 0) {
-    io.err("usage: ub remote set <url>\n");
-    return 2;
-  }
-  let url: string;
-  try {
-    url = normalizeRemoteUrl(value);
-  } catch (error) {
-    io.err(`ub remote set: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 2;
-  }
-
-  let persistence: RemotePersistence;
-  try {
-    persistence = setRemote(url);
-  } catch (error) {
-    io.err(`ub remote set: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 1;
-  }
-  warn(io, persistence.warnings);
-
-  let text = `remote        ${url}\n`;
-  for (const path of persistence.written) {
-    text += `config        ${path}\n`;
-  }
-  text +=
-    "\nThis moved no documents. Use `ub remote promote <url>` to move this\n" +
-    "workspace onto an empty hub, or `ub remote join <url>/<workspace-id>` to\n" +
-    "bind this machine to a workspace that already lives on one.\n\n";
-  text += SHARING_BOUNDARY;
-  io.out(text);
-
-  // Written, and then plainly contradicted: printing the endpoint alone would
-  // be printing a value that does not take effect.
-  if (persistence.outrankedBy !== null) {
-    io.err(
-      "ub remote set: " +
-        outrankedNote(
-          persistence.outrankedBy,
-          "the clients will keep dialling that one",
-        ),
-    );
-    return 1;
-  }
-  return 0;
-}
-
 // --- the shared bridge machinery -------------------------------------------
-
-/**
- * Read this machine's workspace, hydrating it from the hub it currently uses.
- *
- * Both bridges start here and for the same reason: the mirror is the
- * authoritative *local* replica, but it is not the only place local documents
- * live. A browser that has only ever talked to the local hub holds documents no
- * MCP session has seen, and those are exactly the ones a careless endpoint
- * switch strands.
- */
-async function readLocal(base: McpConfig, io: Io): Promise<Corpus> {
-  io.err(`ub remote: reading the local workspace via ${base.hubUrl}…\n`);
-  return await syncWorkspace(bridgeConfig(base));
-}
 
 /**
  * Why a corpus reading cannot be trusted, or null when it can.
  *
  * The facts a bounded wait cannot establish on its own, in one place: the hub
  * answered, its directory was read in full, every room is acknowledged, and
- * every document the directory names actually arrived.
- *
- * `pending` exempts rooms from the last two. **A document this machine already
- * holds is not a document the far side has to be able to produce** — it is one
- * the far side is about to receive. A promotion that uploaded a directory stub
- * and died before its room arrived leaves exactly that shape, and treating it
- * as unreadable would make the rerun refuse forever, when attaching the local
- * replica is precisely what repairs it.
- *
- * The exemption is deliberately narrow. It never applies to the directory read
- * itself, which stays fail-closed: an unknown directory is not a small
- * directory. It never applies to a uuid only the far side knows, because that
- * is the one case where the content cannot be verified *and* cannot be
- * supplied. And callers verifying a finished bridge pass no exemption at all —
- * at read-back, missing is missing.
+ * every document the directory names actually arrived. Fail-closed throughout:
+ * an unknown directory is not a small directory, and missing is missing.
  */
-function corpusProblem(
-  url: string,
-  corpus: Corpus,
-  pending: ReadonlySet<string> = new Set(),
-): string | null {
+function corpusProblem(url: string, corpus: Corpus): string | null {
   if (corpus.hub.status !== "connected") {
     return `${hubProblem(url, corpus.hub)}.\n`;
   }
@@ -956,7 +676,7 @@ function corpusProblem(
       "holding nothing.\n"
     );
   }
-  const unsettled = corpus.unsettled.filter((room) => !isPendingRoom(room, pending));
+  const unsettled = corpus.unsettled;
   if (unsettled.length > 0) {
     return (
       `${url} has not acknowledged ${plural(unsettled.length, "room")}, ` +
@@ -964,7 +684,7 @@ function corpusProblem(
       unsettled.map((room) => `  ${room}\n`).join("")
     );
   }
-  const missing = corpus.missing.filter((doc) => !pending.has(doc.uuid));
+  const missing = corpus.missing;
   if (missing.length > 0) {
     return (
       `${plural(missing.length, "document")} named by the directory at ` +
@@ -975,20 +695,9 @@ function corpusProblem(
   return null;
 }
 
-/** Whether a room name belongs to a document the local side already holds. */
-function isPendingRoom(room: string, pending: ReadonlySet<string>): boolean {
-  const uuid = room.slice(room.indexOf("/") + 1);
-  return pending.has(uuid);
-}
-
-/** The uuids a corpus holds, for use as {@link corpusProblem}'s exemption. */
-function uuidsIn(corpus: Corpus): Set<string> {
-  return new Set(corpus.entries.map((entry) => entry.uuid));
-}
-
 /**
- * The verification both bridges end with: what a fresh client finds there,
- * compared with what this machine holds, in both directions.
+ * The verification `join` ends with: what a fresh client finds there, compared
+ * with what this machine holds, in both directions.
  *
  * Both directions, because "the far side has everything we have" is only half
  * of it. A document that appeared over there while the bridge was running means
@@ -1025,7 +734,7 @@ async function verify(
   return { corpus, problem: null };
 }
 
-/** The credential a bridge starts with, from `--secret-file` or what is in force. */
+/** The credential `join` starts with, from `--secret-file` or what is in force. */
 function startingCredential(
   flags: { secretFile: string | undefined },
   inForce: string | null,
@@ -1034,206 +743,6 @@ function startingCredential(
     return { secret: inForce, persist: false };
   }
   return { secret: readSecretFile(flags.secretFile), persist: true };
-}
-
-/**
- * How a refusal names the documents one side has and the other has never heard
- * of.
- *
- * `where` is not decoration: `promote` compares the target against this
- * workspace and `join` compares this workspace against the target, so the same
- * set difference means "documents on the remote" in one and "documents here" in
- * the other. Naming the wrong side would send somebody looking for their
- * documents on a machine that does not have them.
- *
- * Only uuids the other side has never heard of appear here. A shared uuid is
- * one document's lineage, which is a rerun to finish rather than a collision —
- * see the note on `compareCorpus`.
- */
-function foreignDocs(
-  target: string,
-  extra: readonly CorpusDoc[],
-  where: string,
-): string {
-  return (
-    `  ${plural(extra.length, "document")} ${where}\n` +
-    listDocs(extra) +
-    `Nothing was written, and ${target} was not touched.\n`
-  );
-}
-
-// --- ub remote promote -----------------------------------------------------
-
-async function promoteCommand(argv: string[], io: Io): Promise<number> {
-  if (takeHelp(argv, io, REMOTE_PROMOTE_HELP)) return 0;
-
-  let flags: BridgeFlags;
-  try {
-    flags = parseBridgeFlags(argv);
-  } catch (error) {
-    io.err(
-      `ub remote promote: ${error instanceof Error ? error.message : String(error)}\n\n` +
-        "usage: ub remote promote <url> [--secret-file <path>]\n",
-    );
-    return 2;
-  }
-
-  const resolved = resolveConfig();
-  warn(io, resolved.warnings);
-  const base = resolveMcpConfig(resolved.env);
-  const inForce = base.authSecret;
-
-  let credential: Credential;
-  try {
-    credential = startingCredential(flags, inForce);
-  } catch (error) {
-    io.err(`ub remote promote: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 2;
-  }
-  const bridge: Bridge = { base, target: flags.url, credential, io };
-
-  // Phase one: everything this machine has, in the update log.
-  //
-  // The local hub is required, not optional. The corpus a browser built lives
-  // only there until an MCP session pulls it down, and promoting without it
-  // would move a subset, report success, and repoint the clients at a hub that
-  // has never seen the rest.
-  const local = await readLocal(base, io);
-  const localProblem = corpusProblem(base.hubUrl, local);
-  if (localProblem !== null) {
-    io.err(
-      `ub remote promote: ${localProblem}Documents held only by that hub cannot ` +
-        "be included, so nothing was written. Start it (`ub open --no-browser`) and try " +
-        "again — or use `ub remote set` if there is nothing here to move.\n",
-    );
-    return 1;
-  }
-
-  // Phase two: the target, read in full as a fresh client — writes nothing
-  // either way, which is what lets the refusals below leave it untouched.
-  const remote = await openRemote(bridge, flags.secretFile !== undefined);
-  // Exempting what this machine holds: a half-finished earlier promotion left
-  // stubs whose rooms never arrived, and this run is what completes them.
-  const remoteProblem = corpusProblem(bridge.target, remote, uuidsIn(local));
-  if (remoteProblem !== null) {
-    io.err(
-      `ub remote promote: ${remoteProblem}Nothing was written.\n` +
-        (credentialCouldFix(remote.hub)
-          ? "Give the remote's signing secret with --secret-file <path> (mode 0600), " +
-            "or run this from a terminal to be prompted.\n"
-          : ""),
-    );
-    return 1;
-  }
-
-  const before = compareCorpus(local.entries, remote.entries);
-  if (before.extra.length > 0) {
-    io.err(
-      `ub remote promote: ${bridge.target} already holds ` +
-        `${plural(liveDocs(remote).length, "document")}; this workspace holds ` +
-        `${plural(liveDocs(local).length, "document")}. Merging two populated ` +
-        "workspaces is unsupported.\n" +
-        foreignDocs(
-          bridge.target,
-          before.extra,
-          "on it are not in this workspace",
-        ),
-    );
-    return 1;
-  }
-
-  // Phase three: push, then re-read the source, and keep going until the source
-  // stops moving.
-  //
-  // One `HubSync` binds one endpoint, so a phase attached to the target cannot
-  // also be reading the source — which means an upload alone verifies against
-  // whatever the mirror held when it *started*. A browser writing to the local
-  // hub after phase one would be absent from the upload, absent from that
-  // snapshot, and absent from the read-back that compares the two: verification
-  // passes, the endpoint switches, and the change is stranded on the old hub.
-  // So each push is followed by a fresh read of the source, and a source that
-  // moved is pushed again.
-  //
-  // Bounded at two passes. A workspace somebody is actively typing into is not
-  // one this can migrate, and saying so is better than looping until they stop.
-  io.err(
-    before.missing.length > 0
-      ? `ub remote: uploading ${plural(before.missing.length, "document")} to ${bridge.target}…\n`
-      : `ub remote: ${bridge.target} already holds this workspace; re-checking…\n`,
-  );
-
-  let snapshot = local;
-  let sourceMoved = true;
-  for (let pass = 0; sourceMoved && pass < 2; pass += 1) {
-    const uploaded = await syncWorkspace(remoteConfig(bridge));
-    const uploadProblem = corpusProblem(bridge.target, uploaded);
-    if (uploadProblem !== null) {
-      io.err(
-        `ub remote promote: ${uploadProblem}The local workspace is unchanged and ` +
-          `still configured for ${base.hubUrl}. Nothing was written.\n`,
-      );
-      return 1;
-    }
-    // Nothing foreign may have joined the mirror while it was attached. This is
-    // the window between the probe above and this attachment; the probe is what
-    // guards it, and this is what proves the guard held.
-    const joinedMidFlight = compareCorpus(snapshot.entries, uploaded.entries).extra;
-    if (joinedMidFlight.length > 0) {
-      io.err(
-        `ub remote promote: ${plural(joinedMidFlight.length, "document")} appeared ` +
-          `on ${bridge.target} while this was running, so it is no longer the ` +
-          "empty hub this started against. Nothing was written.\n" +
-          listDocs(joinedMidFlight),
-      );
-      return 1;
-    }
-
-    io.err(`ub remote: re-reading ${base.hubUrl} for anything written since…\n`);
-    const resurveyed = await readLocal(base, io);
-    const sourceProblem = corpusProblem(base.hubUrl, resurveyed);
-    if (sourceProblem !== null) {
-      io.err(
-        `ub remote promote: ${sourceProblem}The endpoint was left at ` +
-          `${base.hubUrl}. Nothing was written.\n`,
-      );
-      return 1;
-    }
-    sourceMoved = !isIdentical(compareCorpus(snapshot.entries, resurveyed.entries));
-    snapshot = resurveyed;
-  }
-  if (sourceMoved) {
-    io.err(
-      `ub remote promote: ${base.hubUrl} kept changing while this ran, so no ` +
-        "snapshot of it could be uploaded and verified as a whole. Stop editing " +
-        "this workspace and rerun. Nothing was written.\n",
-    );
-    return 1;
-  }
-
-  const takenAt = new Date().toISOString();
-  const checked = await verify(bridge, snapshot.entries);
-  if (checked.problem !== null) {
-    io.err(
-      `ub remote promote: ${checked.problem}The endpoint was left at ` +
-        `${base.hubUrl}; rerun this once the hub is reachable.\n`,
-    );
-    return 1;
-  }
-
-  let persistence: RemotePersistence;
-  try {
-    persistence = setRemote(bridge.target, {
-      secret: bridge.credential.persist ? bridge.credential.secret : null,
-    });
-  } catch (error) {
-    io.err(`ub remote promote: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 1;
-  }
-  warn(io, persistence.warnings);
-  io.out(
-    report("promoted", bridge.target, checked.corpus, persistence, takenAt),
-  );
-  return 0;
 }
 
 // --- ub remote join --------------------------------------------------------
@@ -1292,12 +801,9 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
 
   // Read as a fresh client, which writes nothing on either side — so every
   // refusal below leaves both this machine and the remote exactly as they were.
-  //
-  // No `pending` exemption, unlike `promote`. That one exists for a far side
-  // holding a directory stub whose room never arrived, which is what an
-  // interrupted *upload* leaves behind; `join` uploads nothing, so a document
-  // the remote's directory names and cannot produce is simply missing, and
-  // hydrating from a remote that cannot serve its own corpus is not a join.
+  // `join` uploads nothing, so a document the remote's directory names and
+  // cannot produce is simply missing, and hydrating from a remote that cannot
+  // serve its own corpus is not a join.
   const remote = await openRemote(bridge, flags.secretFile !== undefined);
   const remoteProblem = corpusProblem(bridge.target, remote);
   if (remoteProblem !== null) {
@@ -1352,11 +858,9 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     ? resolveMcpConfig(resolved.env).hubUrl
     : bridge.target;
 
-  // The binding, and the file derived from it, are two writes that have to
-  // agree when this returns — so they happen under the lock `ub init` and
-  // `ub workspace use` hold for exactly the same pair. Without it, a concurrent
-  // `ub init` can settle a workspace between them and leave the derived file
-  // naming one run's workspace over the other run's binding.
+  // `config.json` is read, merged and republished here, and `ub init` and
+  // `ub workspace use` do the same to the same file — so all three run under
+  // one lock, or one of them loses a field another had just written.
   let lock: InitLock;
   try {
     lock = await acquireInitLock();
@@ -1366,22 +870,11 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   }
 
   let persistence: RemotePersistence;
-  // The binding is only half done while this checkout's derived mise config
-  // still names the workspace and endpoint it had before: nothing in the
-  // repository reads `ub`'s configuration, so `mise run web` and the hub would
-  // keep serving the old one. Only ever a rewrite of a file that is already
-  // there — see {@link regenerateLocalConfig}, and `ub workspace use`, which
-  // pairs the same two writes for the same reason. A second machine joining
-  // from outside a checkout has no such file and gets `none`.
-  let regenerated: Regeneration = { kind: "none" };
   try {
     persistence = setRemote(bridge.target, {
       secret: bridge.credential.persist ? bridge.credential.secret : null,
       workspace: flags.workspace,
     });
-    // Derived from what is on disk now — the binding above included — rather
-    // than from what this process decided.
-    regenerated = regenerateLocalConfig(process.cwd());
   } catch (error) {
     io.err(`ub remote join: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
@@ -1389,17 +882,6 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     lock.release();
   }
   warn(io, persistence.warnings);
-
-  if (regenerated.kind === "written") {
-    // Outside the lock: trusting is a `mise` subprocess, and it reads the file
-    // rather than writing it. Not a nicety — mise refuses every task in a
-    // directory whose config file it does not trust, and trust is bound to the
-    // file's contents, so a rewrite untrusts what `ub init` had trusted.
-    const trust = trustLocalConfig(regenerated.path);
-    if (!trust.trusted) {
-      warn(io, [trust.hint]);
-    }
-  }
 
   let note = "";
   if (liveDocs(checked.corpus).length === 0) {
@@ -1422,32 +904,25 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
       `${bridge.target}\ntoo, under its own rooms. Documents that only ever ` +
       "reached a local hub — written in\na browser and never pulled down by an " +
       "MCP session — are in that hub's database and\nnowhere else, and nothing " +
-      `points at it any more. \`ub remote set ${previousEndpoint}\` points the\n` +
-      "clients back.\n" +
-      // Only when it is true, and it is the whole of what makes the line above
-      // insufficient: that hub authenticated the old secret, and `ub remote
-      // set` carries no credential of its own. One route, and it is the hub's
-      // own environment, and the environment is the one layer that outranks
-      // the files this join has just rewritten.
+      "points at it any more. Going back to that endpoint is\n" +
+      `\`ub remote join ${previousEndpoint}/${previous}\`, which hydrates from ` +
+      "it the way this join did.\n" +
+      // Only when it is true: that hub authenticated the old secret, which this
+      // join has replaced, so it has to be given back to whatever serves that
+      // endpoint before a join could reach it.
       (persistence.replacedSecret
         ? "\nThat hub was authenticated with the signing secret this join has just " +
-          "replaced, and\n`ub remote set` carries no credential — so pointing " +
-          "back is not enough on its own. A\nhub reads HUB_AUTH_TOKEN from its " +
-          "own environment, and for `ub` the environment\noutranks every stored " +
-          "value, so start one with the previous secret exported:\n\n" +
+          "replaced, so\nrejoining it needs that secret: a hub reads " +
+          "HUB_AUTH_TOKEN from its own\nenvironment, so start one with the " +
+          "previous secret exported:\n\n" +
           "  HUB_AUTH_TOKEN=<that secret> ub open --no-browser\n"
         : "");
   }
-  io.out(
-    report("joined", bridge.target, checked.corpus, persistence, takenAt, note) +
-      (regenerated.kind === "written"
-        ? `\nmise config   ${regenerated.path} (derived, gitignored)\n`
-        : ""),
-  );
+  io.out(report("joined", bridge.target, checked.corpus, persistence, takenAt, note));
 
-  // Written, and possibly overruled. `config.json` is the third layer for the
-  // workspace exactly as it is for the endpoint, and a report naming a binding
-  // that something else outranks is the lie `ub status` then contradicts.
+  // Written, and possibly overruled: `WORKSPACE_ID` in the environment outranks
+  // `config.json`, and a report naming a binding that something else outranks is
+  // the lie `ub status` then contradicts.
   const after = resolveConfig();
   const inForce = after.env.WORKSPACE_ID?.trim();
   if (inForce !== flags.workspace) {
@@ -1459,15 +934,6 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     );
   }
 
-  if (regenerated.kind === "refused") {
-    io.err(
-      `ub remote join: this machine is bound to ${flags.workspace}, but ` +
-        `${regenerated.path} could not be updated to match: ${regenerated.reason} ` +
-        "Until it is, every mise task in this directory still serves the " +
-        "workspace that file names.\n",
-    );
-    return 1;
-  }
   return 0;
 }
 
@@ -1475,7 +941,7 @@ export async function remoteCommand(
   argv: string[],
   io: Io = processIo,
 ): Promise<number> {
-  // The subcommand first, so `ub remote promote --help` reaches the help of the
+  // The subcommand first, so `ub remote join --help` reaches the help of the
   // leaf it names rather than being answered by the group. A group's own
   // argument is that one word, so only that word can ask for help — an unknown
   // command is still an unknown command, `--help` after it or not.
@@ -1485,12 +951,6 @@ export async function remoteCommand(
   }
   if (sub === "update") {
     return await remoteUpdateCommand(rest, io);
-  }
-  if (sub === "set") {
-    return setCommand(rest, io);
-  }
-  if (sub === "promote") {
-    return await promoteCommand(rest, io);
   }
   if (sub === "join") {
     return await joinCommand(rest, io);

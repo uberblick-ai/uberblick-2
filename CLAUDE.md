@@ -16,27 +16,34 @@ in docs, README, or CI.
 - `mise run mcp` — start the MCP server
 - `mise run web` — start the Vite dev server
 - `mise run dev` — hub + web (the MCP server is stdio — its client spawns it)
+- `ub env -- <command…>` — run anything under this machine's uberblick
+  configuration; how the tasks above get theirs
 - `mise run lint` — Biome lint (lint only; the formatter is off by decision)
 - `mise run test` — run the test suites
 - `mise run e2e` — the browser proof points (Playwright, Chromium, on demand;
   starts its own hub and dev server on ephemeral ports, so it needs no secret)
 
-Secrets and endpoints come from `fnox exec` (age-encrypted `fnox.toml`, safe
-to commit; the private key lives at `~/.config/fnox/age.txt`, never in the
-repo). The mise tasks already wrap their commands in `fnox exec` — do not
-write secrets to `.env` files or commit plaintext tokens.
+Every task that needs uberblick's configuration wraps its command in
+`fnox exec -- ub env -- …`. `ub env -- <command…>` execs a command under exactly
+the environment `ub` resolves — `WORKSPACE_ID`, the hub endpoint and the signing
+secret — which is the same map `ub mcp serve` hands the MCP server, so a task
+and an agent's server are never configured differently. There is deliberately
+**no bare `ub env`**: printing the resolved environment would print the signing
+secret. A checkout is not a configuration layer, and nothing is written into
+one.
 
-Config: `HUB_AUTH_TOKEN` stays encrypted in fnox. `HUB_URL` is plaintext
-config (default `ws://localhost:1234`) — an endpoint is not a secret, and
-contributors without the age key must still be able to run the stack — but
-that default lives **in code**, never in the committed mise `[env]` (ambient
-for every process in an activated checkout, and it outranks this machine's user
-config, so a committed endpoint silently redirects `ub` and the MCP server at a
-local hub — #376) or a task `env` (which outranks the derived `mise.local.toml`
-and would strand a joined checkout). A checkout that must dial elsewhere gets
-`HUB_URL` from the gitignored `mise.local.toml` that `ub init` derives. The hub
-binds `PORT` (default 1234); `HUB_URL` is client-side only.
-Rule: no hardcoded hub addresses anywhere except the in-code fallback default.
+Secrets come from `fnox exec` (age-encrypted `fnox.toml`, safe to commit; the
+private key lives at `~/.config/fnox/age.txt`, never in the repo) — do not write
+secrets to `.env` files or commit plaintext tokens.
+
+Config: `HUB_AUTH_TOKEN` stays encrypted in fnox and may also come from the
+environment. **The hub endpoint has exactly one authority: this machine's
+`config.json`**, written by `ub init` and `ub remote join`. `HUB_URL` in the
+environment is not read and is not passed to a child — two ambient sources for
+an endpoint is what silently redirected a bound workspace at a local hub while
+reporting `synced` (#376, #385). The in-code fallback default is
+`ws://localhost:1234`; the hub binds `PORT` (default 1234) and never reads the
+endpoint. Rule: no hardcoded hub addresses anywhere except that in-code default.
 
 ## Orchestration policy
 

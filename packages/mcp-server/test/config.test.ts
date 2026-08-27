@@ -70,36 +70,23 @@ describe("resolveMcpConfig", () => {
     expect(decorated.databasePath).toBe(bare.databasePath);
   });
 
-  it("puts the replica in the Mac layout's workspace directory on a Mac", () => {
+  it("puts both spellings of one workspace in one replica file", () => {
     // The layout is `@uberblick/hub/storage`'s to decide and its suite's to
     // prove; what matters here is that both spellings of one workspace land on
-    // one file whichever layout is in force — two replicas of one corpus would
-    // converge with neither. `platform` is a parameter so this holds on the
-    // machine running the tests.
-    // A real temp directory rather than a fixed `/tmp` path: a leftover
-    // `~/.config/uberblick` under a shared name would flip this to the legacy
-    // layout, and two runs would fight over the same one.
-    const macHome = mkdtempSync(join(tmpdir(), "uberblick-mac-home-"));
-    const expected = join(
-      macHome,
-      "Library",
-      "Application Support",
-      "Uberblick",
-      "data",
-      "workspaces",
-      `${WORKSPACE}.sqlite`,
-    );
-    expect(defaultDatabasePath(WORKSPACE, { HOME: macHome }, "darwin")).toBe(
+    // one file — two replicas of one corpus would converge with neither.
+    const dataHome = mkdtempSync(join(tmpdir(), "uberblick-data-home-"));
+    const expected = join(dataHome, "uberblick", `${WORKSPACE}.sqlite`);
+    expect(defaultDatabasePath(WORKSPACE, { XDG_DATA_HOME: dataHome })).toBe(
       expected,
     );
     expect(
-      defaultDatabasePath(`uberblick-${WORKSPACE}`, { HOME: macHome }, "darwin"),
+      defaultDatabasePath(`uberblick-${WORKSPACE}`, { XDG_DATA_HOME: dataHome }),
     ).toBe(expected);
     // Resolution reads; it never creates. Nothing to clean up but the shell.
-    rmSync(macHome, { recursive: true, force: true });
+    rmSync(dataHome, { recursive: true, force: true });
   });
 
-  it("lets UBERBLICK_DB name the file outright, on either layout", () => {
+  it("lets UBERBLICK_DB name the file outright", () => {
     const named = "/tmp/uberblick-config-test/named.sqlite";
     expect(resolveMcpConfig(env({ UBERBLICK_DB: named })).databasePath).toBe(named);
   });

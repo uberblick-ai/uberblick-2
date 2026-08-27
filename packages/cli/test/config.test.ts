@@ -1,10 +1,13 @@
 /**
  * Configuration resolution is the contract every `ub` subcommand inherits, and
- * precedence is the part that is easy to get subtly wrong. Three layers and no
- * fourth: the environment first, because `HUB_URL=… ub mcp serve` has to keep
- * working — and because a project MCP entry's `WORKSPACE_ID` pin arrives that
- * way; then the user's own config; then the built-in defaults, which live in the
- * MCP server and are not redefined here.
+ * precedence is the part that is easy to get subtly wrong.
+ *
+ * The workspace and the signing secret have two layers: the environment — which
+ * is how a project MCP entry's `WORKSPACE_ID` pin and `fnox exec`'s secret
+ * arrive — then the user's own config, then the built-in defaults, which live
+ * in the MCP server and are not redefined here. **The endpoint has one**: this
+ * machine's `config.json`. An ambient `HUB_URL` is not read and is not passed
+ * on, because two sources for the endpoint is the island trap (#376, #385).
  */
 
 import { join } from "node:path";
@@ -87,30 +90,47 @@ describe("resolveConfig", () => {
     );
   });
 
-  it("resolves workspace and hub URL in precedence order: environment, user config, defaults", () => {
+  it("takes the workspace from the environment first, then the user config", () => {
     const userConfig = { workspace: FROM_USER, hubUrl: "ws://user:1" };
 
     const user = sandbox({ userConfig });
     const fromUser = resolveConfig({ env: user.env });
     expect(mcpConfig(fromUser.env).workspaceId).toBe(FROM_USER);
-    expect(mcpConfig(fromUser.env).hubUrl).toBe("ws://user:1");
     expect(fromUser.origins.workspace).toBe("user config");
-    expect(fromUser.origins.hubUrl).toBe("user config");
 
     // The environment is what a project MCP entry's `WORKSPACE_ID` pin arrives
     // as, so this is also what makes such a pin outrank the user's default.
     const withEnv = sandbox({ userConfig });
     const fromEnv = resolveConfig({
-      env: {
-        ...withEnv.env,
-        WORKSPACE_ID: FROM_ENV,
-        HUB_URL: "ws://env:3",
-      },
+      env: { ...withEnv.env, WORKSPACE_ID: FROM_ENV },
     });
     expect(mcpConfig(fromEnv.env).workspaceId).toBe(FROM_ENV);
-    expect(mcpConfig(fromEnv.env).hubUrl).toBe("ws://env:3");
     expect(fromEnv.origins.workspace).toBe("environment");
-    expect(fromEnv.origins.hubUrl).toBe("environment");
+  });
+
+  it("takes the endpoint from the user config alone, whatever the environment says", () => {
+    // The layer that made an activated checkout outrank a machine bound to a
+    // remote hub, so that writes reported `synced` against a hub nobody else
+    // was reading (#376). It is gone, and gone means not passed on either: the
+    // map handed to `ub mcp serve`'s child carries the configured endpoint, or
+    // none at all, never the ambient one.
+    const box = sandbox({ userConfig: { workspace: FROM_USER, hubUrl: "ws://user:1" } });
+    const resolved = resolveConfig({
+      env: { ...box.env, HUB_URL: "ws://ambient:3" },
+    });
+    expect(resolved.origins.hubUrl).toBe("user config");
+    expect(resolved.env.HUB_URL).toBe("ws://user:1");
+    expect(mcpConfig(resolved.env).hubUrl).toBe("ws://user:1");
+
+    // With nothing configured the ambient value is removed rather than passed
+    // through, so the child falls back to the in-code default.
+    const bare = sandbox({ userConfig: { workspace: FROM_USER } });
+    const unconfigured = resolveConfig({
+      env: { ...bare.env, HUB_URL: "ws://ambient:3" },
+    });
+    expect(unconfigured.origins.hubUrl).toBe("default");
+    expect(unconfigured.env.HUB_URL).toBeUndefined();
+    expect(mcpConfig(unconfigured.env).hubUrl).toBe(DEFAULT_HUB_URL);
   });
 
   it("takes the signing secret from credentials.json, and the environment first", () => {
@@ -314,17 +334,13 @@ describe("writeCredentials", () => {
 });
 
 describe("the committed mise config", () => {
-  // The precedence above is only as good as what the repository itself exports.
-  // The committed `[env]` is ambient: it reaches every process born in an
-  // activated checkout, `ub mcp serve` included, and arrives as the layer that
-  // outranks `config.json` — so a committed `HUB_URL` here redirects a machine's
-  // real endpoint at whatever the repository guessed (#376). A task `env` is not
-  // ambient, and is barred for a different reason: it outranks the derived
-  // `mise.local.toml`, so it would strand a joined checkout on the repository's
-  // default. Hence the whole file, not just the `[env]` block. The address
-  // belongs in the clients' code, and the per-checkout binding in
-  // `mise.local.toml`, which is derived from this machine's own config rather
-  // than committed.
+  // Belt and braces beside the resolution above. `ub` ignores an ambient
+  // `HUB_URL` outright now, but the checkout tasks hand their environment to
+  // programs that do read it — vite bakes it into a dev bundle — so a committed
+  // endpoint here would still bind a checkout to whatever the repository
+  // guessed (#376, #385). The address belongs in the clients' code as a
+  // fallback, and the real one in this machine's `config.json`, which `ub env`
+  // is what puts in front of a task.
   it("exports no HUB_URL, so a checkout binds no endpoint", () => {
     const assignments = readFileSync(join(REPO_ROOT, "mise.toml"), "utf8")
       .split("\n")

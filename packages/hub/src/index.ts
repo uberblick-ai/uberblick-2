@@ -23,17 +23,14 @@ export {
   defaultDatabasePath,
   hubDatabasePath,
   resolveHubConfig,
-  storageWarnings,
 } from "./config.js";
 export type { HubConfig } from "./config.js";
 export {
-  AmbiguousStorageError,
   createDataDirectory,
-  MAC_ROOT_DISPLAY,
   resolveStorage,
   WORKSPACE_DATABASE_FILE,
 } from "./storage.js";
-export type { StorageLayout, StorageOptions, StoragePaths } from "./storage.js";
+export type { StorageOptions, StoragePaths } from "./storage.js";
 export { silentLogger, stderrLogger } from "./log.js";
 export type { HubLogger, HubLogRecord } from "./log.js";
 // The credential half of the token module is deliberately absent here: nothing

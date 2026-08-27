@@ -5,19 +5,13 @@ fnox = "1"
 
 # Plaintext local defaults. Only real secrets belong in fnox.toml.
 #
-# No HUB_URL here, and none in a task's `env` either (#376). This block is
-# ambient: it reaches every process born in an activated checkout — `ub` and the
-# MCP server a client spawns through `ub mcp serve` included — and the
-# environment outranks this machine's config.json, so a committed endpoint here
-# silently redirects a promoted workspace at a hub on this machine. Nothing
-# needs it: `ws://localhost:1234` is the in-code default of every client that
-# dials (packages/mcp-server/src/config.ts, packages/web/vite.config.ts,
-# packages/web/scripts/agent-cursor-demo.ts), the e2e harness sets its own, and
-# a checkout that must dial elsewhere gets HUB_URL from the gitignored
-# mise.local.toml `ub init` and `ub remote join` derive — a per-checkout
-# binding somebody chose, not a committed default. A task-level `env` would be
-# worse than this block, not better: it also outranks mise.local.toml, so it
-# would strand `mise run web` on localhost after a join.
+# No HUB_URL here, and none in a task's `env` either (#376, #385). This block is
+# ambient: it reaches every process born in an activated checkout, and an
+# endpoint is not something two sources may disagree about. There is exactly one
+# authority for it — this machine's config.json, written by `ub init` and
+# `ub remote join` — and the tasks below consume it by wrapping their command in
+# `ub env`, which hands over the same environment `ub mcp serve` gives the MCP
+# server. A checkout is not a configuration layer of its own.
 #
 # The hub itself binds HUB_HOST:PORT — default 127.0.0.1:1234 in code — and
 # never reads HUB_URL, so the two must be moved together when the hub runs
@@ -86,21 +80,29 @@ run = "fnox exec --if-missing warn -- node packages/cli/bin/ub.mjs init"
 
 [tasks.hub]
 description = "Start the Hocuspocus sync hub (binds HUB_HOST:PORT, default 127.0.0.1:1234)"
-run = "fnox exec --if-missing warn -- pnpm --filter @uberblick/hub start"
+# `ub env --` puts this machine's own configuration in front of the command:
+# WORKSPACE_ID, the endpoint and the signing secret, resolved exactly as
+# `ub mcp serve` resolves them for the MCP server. `fnox exec` stays outside it,
+# because a decryptable HUB_AUTH_TOKEN is the owner's path and outranks the
+# stored one.
+run = "fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/hub start"
 
 [tasks.mcp]
 description = "Start the MCP server for a smoke test — an MCP client normally spawns it over stdio itself"
 # --silent keeps pnpm's own lifecycle banner off stdout: stdout is the JSON-RPC
 # transport, so anything but MCP frames there breaks the session.
-run = "fnox exec --if-missing warn -- pnpm --silent --filter @uberblick/mcp-server start"
+run = "fnox exec --if-missing warn -- ub env -- pnpm --silent --filter @uberblick/mcp-server start"
 
 [tasks.web]
 description = "Start the Vite dev server"
-run = "fnox exec --if-missing warn -- pnpm --filter @uberblick/web dev"
+# Through `ub env` like the hub: the endpoint the bundle dials is this machine's
+# configured one, so a checkout follows a `ub remote join` without anything
+# being written into it.
+run = "fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web dev"
 
 [tasks.build-web]
 description = "Build the web client into packages/web/dist (HUB_AUTH_TOKEN baked in; HUB_URL only as the fallback)"
-run = "fnox exec --if-missing error -- pnpm --filter @uberblick/web build"
+run = "fnox exec --if-missing error -- ub env -- pnpm --filter @uberblick/web build"
 
 # hub + web only. The MCP server is a stdio process spawned by its client
 # (Claude Code et al.), so it is not part of the dev loop; use `mise run mcp`
@@ -108,7 +110,8 @@ run = "fnox exec --if-missing error -- pnpm --filter @uberblick/web build"
 #
 # These are long-running, so `depends` is wrong here: with MISE_JOBS=1 mise
 # would run the hub to completion before ever starting web. Fan out explicitly
-# instead, and take the whole process group down on Ctrl-C.
+# instead, and take the whole process group down on Ctrl-C. Both halves reach
+# `ub env` through the tasks they delegate to.
 [tasks.dev]
 description = "Run the hub and the web dev server together"
 run = """
@@ -120,7 +123,7 @@ wait
 
 [tasks.agent-cursor]
 description = "Park a demo agent cursor in a document's first block (optional `-- <docUuid>`)"
-run = "fnox exec --if-missing warn -- pnpm --filter @uberblick/web run agent-cursor"
+run = "fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web run agent-cursor"
 
 [tasks.install]
 description = "Install workspace dependencies (frozen lockfile in CI)"
@@ -146,16 +149,19 @@ run = "pnpm -r test"
 
 [tasks.e2e]
 description = "Run the browser end-to-end proof points (Playwright, Chromium only)"
-# No `fnox exec`: the harness starts its own hub on an ephemeral port with its
-# own throwaway signing secret and a temp database, so nothing here needs the
-# real one — and nothing collides with a `mise run dev` on 1234/5173.
+# The harness starts its own hub on an ephemeral port with its own throwaway
+# signing secret and a temp database, so nothing here needs the real one — and
+# nothing collides with a `mise run dev` on 1234/5173. It runs under the same
+# `fnox exec -- ub env --` wrapper as every other task all the same, so there is
+# one way a checkout task gets its environment; the harness sets its own
+# endpoint over it, which is test wiring rather than configuration (#283).
 #
 # `playwright install` runs first because the browser is a download, not a
 # dependency pnpm can fetch: it is a no-op once the pinned Chromium is in the
 # local cache, and the alternative is a first run that fails with instructions.
 run = """
 pnpm --filter @uberblick/web exec playwright install chromium
-pnpm --filter @uberblick/web run e2e
+fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web run e2e
 """
 
 [tasks.fue]
@@ -171,8 +177,8 @@ description = "First-user experience: run the documented install path on a clean
 #
 # The context is the working tree — this is a proof of the install path in front
 # of you, not of one on a server — filtered by `Dockerfile.fue.dockerignore`,
-# which is stricter than the review runner's: nothing `ub init` is supposed to
-# create may reach the image, `mise.local.toml` above all.
+# which is stricter than the review runner's: nothing `ub init` or a local run is
+# supposed to create may reach the image.
 #
 # No `fnox exec`: a new user has no age key, and the whole point is that
 # `--if-missing warn` carries them through to a generated development secret.

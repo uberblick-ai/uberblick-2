@@ -19,6 +19,7 @@ import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { HELP, MCP_HELP } from "../src/cli.js";
 import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
+import { ENV_HELP } from "../src/env.js";
 import { INIT_HELP, INIT_OPTIONS } from "../src/init.js";
 import { INSTALL_HELP, INSTALL_OPTIONS } from "../src/install.js";
 import { OPEN_HELP, OPEN_OPTIONS } from "../src/open.js";
@@ -32,8 +33,6 @@ import {
   REMOTE_BRIDGE_OPTIONS,
   REMOTE_HELP,
   REMOTE_JOIN_HELP,
-  REMOTE_PROMOTE_HELP,
-  REMOTE_SET_HELP,
 } from "../src/remote.js";
 import { STATUS_HELP, STATUS_OPTIONS } from "../src/status.js";
 import {
@@ -87,13 +86,12 @@ const PATHS: Path[] = [
     argv: ["remote"],
     help: REMOTE_HELP,
     options: {},
-    children: ["init", "update", "set", "promote", "join"],
+    children: ["init", "update", "join"],
   },
   { argv: ["remote", "init"], help: REMOTE_INIT_HELP, options: REMOTE_INIT_OPTIONS },
   { argv: ["remote", "update"], help: REMOTE_UPDATE_HELP, options: REMOTE_UPDATE_OPTIONS },
-  { argv: ["remote", "set"], help: REMOTE_SET_HELP, options: {} },
-  { argv: ["remote", "promote"], help: REMOTE_PROMOTE_HELP, options: REMOTE_BRIDGE_OPTIONS },
   { argv: ["remote", "join"], help: REMOTE_JOIN_HELP, options: REMOTE_BRIDGE_OPTIONS },
+  { argv: ["env"], help: ENV_HELP, options: {} },
   { argv: ["mcp"], help: MCP_HELP, options: {}, children: ["install"] },
   { argv: ["mcp", "install"], help: INSTALL_HELP, options: INSTALL_OPTIONS },
 ];
@@ -241,13 +239,10 @@ describe("help before the work", () => {
     ["doctor", "-h"],
     ["workspace", "use", "--help"],
     ["workspace", "use", WORKSPACE, "--help"],
-    ["remote", "set", "--help"],
-    ["remote", "set", "ws://example.invalid:1234", "--help"],
     ["remote", "init", "--help"],
     ["remote", "update", "uberblick@example.invalid", "--help"],
-    ["remote", "promote", "-h"],
-    ["remote", "promote", "ws://example.invalid:1234", "--help"],
     ["remote", "join", "ws://example.invalid:1234", "-h"],
+    ["env", "--help"],
     ["mcp", "install", "zed", "--help"],
     ["mcp", "install", "claude", "--help"],
   ];

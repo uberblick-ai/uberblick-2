@@ -18,7 +18,6 @@
 
 import { parseArgs } from "node:util";
 import { hubDatabasePath } from "@uberblick/hub/config";
-import type { StorageLayout } from "@uberblick/hub/storage";
 import {
   collectSyncStatus,
   createMcpServer,
@@ -33,15 +32,13 @@ import { processIo } from "./io.js";
 import { cliVersion } from "./version.js";
 
 /**
- * Where this machine keeps its files, and which layout said so.
+ * Where this machine keeps its files.
  *
- * A stable object: a script reads `layout` to know whether it is looking at a
- * Mac install, an XDG one, or a Mac still living in the legacy XDG defaults,
- * and reads the paths to find the files without re-deriving anyone's rules.
- * Directories and database files only — no credential, and no value out of one.
+ * A stable object: a script reads the paths to find the files without
+ * re-deriving anyone's rules. Directories and database files only — no
+ * credential, and no value out of one.
  */
 export interface StorageReport {
-  layout: StorageLayout;
   /** The user config file, `config.json`. `credentials.json` sits beside it. */
   config: string;
   /** The data root: the one directory to name when somebody asks. */
@@ -100,18 +97,13 @@ export const ORIGIN_LABELS: Record<Origin, string> = {
 
 /** Collect the report without printing it. Exported for tests. */
 export async function statusReport(
-  options: {
-    env?: NodeJS.ProcessEnv;
-    /** `process.platform` by default; injected so the Mac layout is testable. */
-    platform?: NodeJS.Platform;
-  } = {},
+  options: { env?: NodeJS.ProcessEnv } = {},
 ): Promise<{ report: StatusReport; warnings: string[] }> {
   const resolved = resolveConfig(options);
   // Throws when nothing configures a workspace, which `ub` reports as the
   // error it is: there is no default to fall back to, and `ub init` is named in
   // the message.
-  const platform = options.platform ?? process.platform;
-  const config = resolveMcpConfig(resolved.env, platform);
+  const config = resolveMcpConfig(resolved.env);
   const instance = createMcpServer(config);
   try {
     const sync = await collectSyncStatus(instance.replicas);
@@ -137,12 +129,11 @@ export async function statusReport(
         logEntries: sync.logEntries,
         persistence: sync.persistence,
         storage: {
-          layout: resolved.storage.layout,
           config: resolved.paths.userConfig,
           data: resolved.storage.dataDir,
           // Asked of the hub package, so that what this reports and what a hub
           // started here would open cannot drift apart.
-          hub: hubDatabasePath(resolved.env, platform),
+          hub: hubDatabasePath(resolved.env),
           workspace: config.databasePath,
         },
       },
@@ -189,7 +180,7 @@ export function renderStatus(report: StatusReport): string {
   text += field("database", report.databasePath);
   // The data root, named once: everything durable is under it, and "where is my
   // data" is the question this line exists to answer.
-  text += field("storage", `${report.storage.layout} — ${report.storage.data}`);
+  text += field("storage", report.storage.data);
   // Two counts in two units, as `sync_status` reports them: rooms, and provider
   // sync messages. They are not expected to agree.
   text += field(

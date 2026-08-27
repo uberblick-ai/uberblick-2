@@ -66,8 +66,7 @@ export interface HubConfig {
 }
 
 /**
- * `hub.sqlite` in the user's data root — see `@uberblick/hub/storage` for which
- * root that is on which platform.
+ * `hub.sqlite` in the user's data root — see `@uberblick/hub/storage`.
  *
  * Derived from the *user*, never from where this package sits: a Homebrew or
  * tarball upgrade replaces program files, so a database under the install
@@ -89,30 +88,11 @@ export function defaultDatabasePath(options: StorageOptions = {}): string {
  */
 export function hubDatabasePath(
   env: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform,
 ): string {
   const configured = env.HUB_DB_PATH?.trim();
   return configured === undefined || configured === ""
-    ? defaultDatabasePath({ env, platform })
+    ? defaultDatabasePath({ env })
     : configured;
-}
-
-/**
- * The storage layout's own notes, for the hub to log at startup — the one
- * legacy-macOS line, or nothing.
- *
- * Empty whenever `HUB_DB_PATH` names the database, because then the layout is
- * not what this hub opened and a note about it would be noise. It is also why
- * this is a function rather than a field on {@link HubConfig}: the config is
- * what tests construct by hand, and a warning list is not something a caller
- * should have to supply.
- */
-export function storageWarnings(env: NodeJS.ProcessEnv = process.env): string[] {
-  const configured = env.HUB_DB_PATH?.trim();
-  if (configured !== undefined && configured !== "") {
-    return [];
-  }
-  return resolveStorage({ env }).warnings;
 }
 
 function parsePort(raw: string | undefined): number {

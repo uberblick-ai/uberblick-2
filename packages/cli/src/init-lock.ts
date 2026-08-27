@@ -1,14 +1,13 @@
 /**
  * The lock `ub init` holds while it writes.
  *
- * Three files have to agree when this command finishes: the signing secret in
- * `credentials.json`, the workspace in `config.json`, and the `mise.local.toml`
- * derived from both. Atomic publication makes each of them individually safe to
- * write while somebody reads it, but it cannot make the *set* consistent — two
- * inits can still interleave so that the derived file mirrors one run's workspace
- * and another run's secret. A lock around the whole write phase is the one
- * mechanism that covers every branch, including the read-modify-write of a
- * `credentials.json` that already carries other keys.
+ * Two files have to agree when this command finishes: the signing secret in
+ * `credentials.json` and the workspace in `config.json`. Atomic publication
+ * makes each of them individually safe to write while somebody reads it, but it
+ * cannot make the *pair* consistent — two inits can still interleave so that one
+ * run's workspace ends up beside another run's secret. A lock around the whole
+ * write phase is the one mechanism that covers every branch, including the
+ * read-modify-write of a `credentials.json` that already carries other keys.
  *
  * It is a lock file, not a lock service: `open(O_CREAT|O_EXCL)` on
  * `.init.lock` beside `credentials.json`, in whichever config root the storage

@@ -20,17 +20,13 @@
  * room, a token or the database is the bare uuid. A *prefix* is resolved to the
  * uuid it names, because a prefix is a way of typing an id, not an id.
  *
- * **`use` also regenerates this checkout's derived `mise.local.toml`.** Nothing
- * in the repository reads `ub`'s configuration: `mise run web` and the hub take
- * their environment from mise, which takes it from that derived file. A binding
- * nobody derived from would leave every mise task serving the workspace this
- * machine used to default to, silently. So the
- * binding and the file derived from it are written together, under the same lock
- * `ub init` holds — see {@link regenerateLocalConfig} for what "derived from"
- * means when the environment is itself one of the layers.
+ * **`use` writes one file, and every reader follows it.** The checkout's mise
+ * tasks run through `ub env`, which resolves this same `config.json`, so there
+ * is no second copy of the binding to keep in step and no way for the two to
+ * disagree.
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/hub/storage";
 import { defaultDatabasePath } from "@uberblick/mcp-server";
@@ -42,15 +38,6 @@ import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
-import type { DerivedKey } from "./mise-config.js";
-import {
-  DERIVED_KEYS,
-  derivedValues,
-  findCheckoutRoot,
-  localConfigPath,
-  trustLocalConfig,
-  writeLocalConfig,
-} from "./mise-config.js";
 import { describeFsError } from "./safe-write.js";
 import { ORIGIN_LABELS } from "./status.js";
 
@@ -355,121 +342,11 @@ function readMergeTarget(path: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-/**
- * The environment with the derived file's own echo taken out of it.
- *
- * Inside an activated checkout mise exports these three *from* `mise.local.toml`,
- * so resolving with them in place would make that file its own
- * highest-precedence input — a fixed point at the workspace being replaced, and
- * a switch that can never reach mise at all. `ub init` discounts its own derived
- * file for the same reason (see its signing-secret branch).
- *
- * Only the echo, though, compared value by value. A variable that differs from
- * what the file supplies is somebody's deliberate act — `HUB_AUTH_TOKEN` from
- * fnox, the documented way to authorise a repository-chosen hub, or an endpoint
- * exported for one shell — and discarding it would derive a file that is stale
- * or, worse, credential-less. What this cannot do is tell an echo from an
- * identical value set by hand, which is a distinction without a difference: both
- * agree with the file already.
- */
-function withoutOwnEcho(
-  env: NodeJS.ProcessEnv,
-  supplied: Partial<Record<DerivedKey, string>>,
-): NodeJS.ProcessEnv {
-  const stripped = { ...env };
-  for (const key of DERIVED_KEYS) {
-    if (stripped[key] !== undefined && stripped[key] === supplied[key]) {
-      delete stripped[key];
-    }
-  }
-  return stripped;
-}
-
-/**
- * What became of this checkout's derived mise config.
- *
- * `refused` is a failure, not a note: the binding has been written by then, so a
- * derived file that did not follow it means `ub` and every mise task in the
- * directory now name different workspaces — the split-brain the lock exists to
- * prevent, arrived by another road.
- */
-export type Regeneration =
-  | { kind: "none" }
-  | { kind: "written"; path: string }
-  | { kind: "refused"; path: string; reason: string };
-
-/**
- * Rewrite this checkout's derived mise config from the configuration as it now
- * resolves.
- *
- * Only ever a *re*write: a checkout without one gets nothing, because creating
- * that file is `ub init`'s job. It carries the signing secret, and a fresh one
- * would also be untrusted — and a config file mise does not trust takes down
- * every task in the directory, which is a worse state than the stale workspace
- * this exists to fix. A file that is there is trusted again after the rewrite,
- * because mise's paranoid mode binds trust to a config file's contents.
- *
- * With no workspace or no secret in force there is nothing honest to write: the
- * file would lose its `HUB_AUTH_TOKEN` and the hub would refuse to start. It is
- * left as it was and the command fails; a half-derived file is not an option.
- *
- * Exported because `ub remote join` binds a workspace and an endpoint in one
- * write, and the file derived from them has to follow both — a second copy of
- * this would be a second answer to what "derived from" means.
- */
-export function regenerateLocalConfig(cwd: string): Regeneration {
-  const root = findCheckoutRoot(cwd);
-  if (root === null || !existsSync(localConfigPath(root))) {
-    return { kind: "none" };
-  }
-  const path = localConfigPath(root);
-
-  const resolved = resolveConfig({
-    env: withoutOwnEcho(process.env, derivedValues(root)),
-  });
-  const workspace = resolved.env.WORKSPACE_ID;
-  const signingSecret = resolved.env.HUB_AUTH_TOKEN;
-  if (workspace === undefined || signingSecret === undefined) {
-    return {
-      kind: "refused",
-      path,
-      reason:
-        `no ${workspace === undefined ? "workspace" : "signing secret"} is ` +
-        "configured for it to be derived from, and a file missing one takes " +
-        "every mise task in this directory down. Run `ub init`.",
-    };
-  }
-
-  // A failure to publish is reported, not thrown. `refused` already means "the
-  // authority moved and this file did not", which is exactly what an EACCES on
-  // the staged write leaves behind — and a caller with a report to print (`ub
-  // remote join` has one by the time this runs) must not lose it to an
-  // exception whose message says nothing about the split brain.
-  let outcome: ReturnType<typeof writeLocalConfig>;
-  try {
-    outcome = writeLocalConfig(root, {
-      signingSecret,
-      workspace,
-      hubUrl: resolved.env.HUB_URL,
-      authorityPath: resolved.paths.credentials,
-    });
-  } catch (error) {
-    return {
-      kind: "refused",
-      path,
-      reason: `${error instanceof Error ? error.message : String(error)}.`,
-    };
-  }
-  return outcome.written
-    ? { kind: "written", path: outcome.path }
-    : { kind: "refused", path: outcome.path, reason: outcome.reason };
-}
-
 export const WORKSPACE_USE_HELP = `usage: ub workspace use <id>
 
-Make a workspace this machine's default, by writing the user config, and
-regenerate the derived mise config so the mise tasks in this checkout follow the
-switch.
+Make a workspace this machine's default, by writing the user config. Every
+reader follows it: \`ub\`, the MCP server it spawns, and the checkout's mise
+tasks, which run through \`ub env\`.
 
 operands:
   <id>              a workspace <uuid>, a decorated <slug>-<uuid>, or a unique
@@ -527,13 +404,11 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   }
   const id = resolved.id;
 
-  const cwd = process.cwd();
   const path = userConfigPath();
 
-  // The binding and the file derived from it are two writes that have to agree
-  // when this returns, so they happen under the lock `ub init` holds for the
-  // same reason — otherwise two `use` runs can interleave into a derived file
-  // naming one run's workspace over the other run's binding.
+  // `config.json` is read, merged and republished, and `ub init` does the same
+  // to the same file — so the pair runs under the lock `ub init` holds, or one
+  // of them loses a field the other had just written.
   let lock: InitLock;
   try {
     lock = await acquireInitLock();
@@ -542,30 +417,16 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     return 1;
   }
 
-  let regenerated: Regeneration = { kind: "none" };
   try {
     // Merged over what is on disk: identity and the endpoint are not this
     // command's to drop — and neither is a file that did not parse, which is
     // refused rather than quietly replaced with a one-field file.
     writeUserConfig({ ...readMergeTarget(path), workspace: id });
-    // Derived from what is on disk now — the binding above included — rather
-    // than from what this process decided, which is what makes the pair agree
-    // however the two writes are interleaved with another run's.
-    regenerated = regenerateLocalConfig(cwd);
   } catch (error) {
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   } finally {
     lock.release();
-  }
-
-  if (regenerated.kind === "written") {
-    // Outside the lock: trusting is a `mise` subprocess, and it reads the file
-    // rather than writing it.
-    const trust = trustLocalConfig(regenerated.path);
-    if (!trust.trusted) {
-      warn(io, [trust.hint]);
-    }
   }
 
   const { uuid } = parseWorkspaceId(id);
@@ -574,11 +435,6 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     text += field("uuid", uuid);
   }
   text += field("config", path);
-  // Named only when it was actually written: a report that lists a file this run
-  // could not update is a report claiming an agreement that is not there.
-  if (regenerated.kind === "written") {
-    text += field("mise config", `${regenerated.path} (derived, gitignored)`);
-  }
   io.out(text);
 
   // Written, and possibly overruled: a higher layer means this file changed
@@ -593,19 +449,6 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     );
   }
 
-  // Written, and only half of it: the binding moved and the file the mise tasks
-  // read did not, so this directory now answers one way to `ub` and another to
-  // `mise run web`. Exiting 0 on that would make a script's next step run
-  // against the workspace this command was asked to leave.
-  if (regenerated.kind === "refused") {
-    io.err(
-      `ub workspace use: ${path} now makes ${id} this machine's default, but ` +
-        `${regenerated.path} could not be updated to match: ${regenerated.reason} ` +
-        "Until it is, every mise task here still serves the workspace that file " +
-        "names.\n",
-    );
-    return 1;
-  }
   return 0;
 }
 
