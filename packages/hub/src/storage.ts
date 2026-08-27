@@ -41,9 +41,9 @@
  * question. They are applied by their own packages, above this default.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, normalize, resolve, sep } from "node:path";
 
 /** Which of the three layouts resolution landed on. Stable: `--json` prints it. */
 export type StorageLayout = "mac" | "xdg" | "legacy-xdg";
@@ -95,6 +95,10 @@ const MAC_DIR = "Uberblick";
  * one by hand — would otherwise point every client at an empty corpus while the
  * documents sat in the legacy root. Anything that does not parse as a complete
  * receipt is not one, and resolution falls back to refusing, which is safe.
+ * A recorded target names a *file inside that root* — see
+ * {@link holdsReceiptTarget} — because a receipt is a file anything can write,
+ * so a path in it that climbs out of the root is tampering or corruption, not
+ * an inventory.
  */
 export const MIGRATION_RECEIPT = "migration.json";
 
@@ -122,6 +126,48 @@ export interface MigrationReceipt {
 
 function isString(value: unknown): value is string {
   return typeof value === "string" && value !== "";
+}
+
+/**
+ * Where a recorded target sits under a root — or null when it does not sit
+ * under it at all.
+ *
+ * A receipt is a file on disk that anything can write, so a `target` is input,
+ * not a fact: `../../../somewhere` joined onto the root names a path outside
+ * it, and a check that such a file "exists" would let an inventory be satisfied
+ * by files that have nothing to do with this installation. Three conditions,
+ * and the third is the one that has to be right: not absolute, no `..` left
+ * after normalising, and — the actual guarantee, since it does not depend on
+ * reasoning about the first two — the resolved path lies strictly inside the
+ * root.
+ */
+export function receiptTargetPath(root: string, target: string): string | null {
+  if (isAbsolute(target) || normalize(target).split(sep).includes("..")) {
+    return null;
+  }
+  const path = resolve(root, target);
+  return path.startsWith(`${resolve(root)}${sep}`) ? path : null;
+}
+
+/**
+ * Whether `root` itself still holds the file a receipt recorded as `target`.
+ *
+ * The one definition of "this recorded file is there", used by resolution — for
+ * which the answer decides which root a machine lives in — and by `ub storage
+ * migrate`, which asks the same question of a destination it is about to report
+ * as already migrated. A directory is not a file, and a path pointing out of
+ * the root is not the root's.
+ */
+export function holdsReceiptTarget(root: string, target: string): boolean {
+  const path = receiptTargetPath(root, target);
+  if (path === null) {
+    return false;
+  }
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -431,7 +477,7 @@ export function resolveStorage(options: StorageOptions = {}): StoragePaths {
     if (receipt !== null) {
       const missing = receipt.files
         .map((file) => file.target)
-        .filter((target) => !existsSync(join(mac.configDir, target)));
+        .filter((target) => !holdsReceiptTarget(mac.configDir, target));
       if (missing.length === 0) {
         return { ...mac, warnings: [migratedWarning(mac, xdg)] };
       }

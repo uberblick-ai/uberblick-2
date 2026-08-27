@@ -81,8 +81,10 @@ import {
   MIGRATION_RECEIPT,
   WORKSPACE_DATABASE_FILE,
   createDataDirectory,
+  holdsReceiptTarget,
   macStorage,
   readMigrationReceipt,
+  receiptTargetPath,
   resolveStorage,
 } from "@uberblick/hub/storage";
 import { takeHelp } from "./help.js";
@@ -555,7 +557,7 @@ function suppliedOrLayoutHub(
  */
 function verifyReceipt(root: string, receipt: MigrationReceipt): string[] {
   return receipt.files
-    .filter((file) => !existsSync(join(root, file.target)))
+    .filter((file) => !holdsReceiptTarget(root, file.target))
     .map((file) => file.target);
 }
 
@@ -871,7 +873,20 @@ export async function runMigration(
   const locked: DatabaseSync[] = [];
   try {
     for (const copy of plan.copies) {
-      const destination = join(staging, copy.target);
+      // Every target is built by `relative()` from the Mac layout's own paths,
+      // so it is relative already — this is the check that keeps it that way.
+      // A target that climbed out of the root would write outside the staging
+      // tree here and be recorded as an inventory entry pointing at somebody
+      // else's file, so a layout change that ever produced one has to fail
+      // loudly rather than be published.
+      const destination = receiptTargetPath(staging, copy.target);
+      if (destination === null) {
+        throw new Refused(
+          `${copy.target} is not a path inside ${plan.to}`,
+          "nothing was published. This is a bug in uberblick rather than " +
+            "anything about this machine; please report it",
+        );
+      }
       createDataDirectory(dirname(destination));
       const written = copy.database
         ? await stageDatabase(copy, destination, locked)

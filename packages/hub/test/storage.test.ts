@@ -400,6 +400,66 @@ describe("state in both roots", () => {
     });
   }
 
+  // A recorded target is input, not a fact: it comes out of a file on disk.
+  // One that names something outside the root, or a directory, must not count
+  // as the root still holding that file — otherwise an inventory is satisfied
+  // by things this installation has nothing to do with, and an incomplete Mac
+  // corpus is selected over a legacy root that has the real replicas.
+  for (const [name, target, plant] of [
+    [
+      "climbs out of the root",
+      join("..", "..", "..", ".config", "uberblick", `${WORKSPACE}.sqlite`),
+      // The file the traversal points at really is there, so only the path
+      // check can be what rejects this.
+      (root: string) => seed(join(legacyConfig(root), `${WORKSPACE}.sqlite`)),
+    ],
+    [
+      "is a directory rather than a file",
+      join("data", "workspaces", `${WORKSPACE}.sqlite`),
+      (root: string) =>
+        mkdirSync(join(macRoot(root), "data", "workspaces", `${WORKSPACE}.sqlite`), {
+          recursive: true,
+        }),
+    ],
+  ] as [string, string, (root: string) => void][]) {
+    it(`refuses a receipt whose target ${name}`, () => {
+      const root = home();
+      seed(join(legacyConfig(root), "config.json"));
+      seed(join(legacyData(root), `${WORKSPACE}.sqlite`));
+      seed(join(macRoot(root), "config.json"));
+      plant(root);
+      seedReceipt(root, {
+        version: 1,
+        migratedAt: new Date().toISOString(),
+        from: { configDir: legacyConfig(root), dataDir: legacyData(root) },
+        files: [
+          {
+            kind: "config",
+            source: join(legacyConfig(root), "config.json"),
+            target: "config.json",
+            bytes: 3,
+          },
+          {
+            kind: "workspace",
+            source: join(legacyData(root), `${WORKSPACE}.sqlite`),
+            target,
+            bytes: 4096,
+          },
+        ],
+      });
+
+      let thrown: unknown;
+      try {
+        resolveStorage({ env: { HOME: root }, platform: "darwin" });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(AmbiguousStorageError);
+      expect((thrown as AmbiguousStorageError).missing).toEqual([target]);
+    });
+  }
+
   // A receipt that parses is still not an answer if the root has since lost
   // part of what it recorded: one recognised file plus an intact receipt is a
   // half-restored backup, and taking it would leave the replicas it is missing
