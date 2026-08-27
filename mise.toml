@@ -142,7 +142,12 @@ run = "pnpm -r typecheck"
 
 [tasks.test]
 description = "Run all test suites"
-run = "pnpm -r test"
+# `pnpm test` rather than `pnpm -r test`, for the same reason as lint above: the
+# root script is the one command, so the Docker review runs it identically. It
+# chains the workspace fan-out with the coordinator-skill suite under
+# `.claude/skills`, which `pnpm -r` cannot reach — `pnpm-workspace.yaml` globs
+# `packages/*` only.
+run = "pnpm test"
 
 [tasks.e2e]
 description = "Run the browser end-to-end proof points (Playwright, Chromium only)"
