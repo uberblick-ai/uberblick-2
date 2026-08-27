@@ -358,6 +358,22 @@ describe("the doc chrome reads the document, the awareness and the status", () =
     }
   });
 
+  it("keeps the source when the address could not be labelled", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    // A configured value `endpointLabel` refuses — the panel draws its Source
+    // row regardless, so the pill must not be the surface that goes quiet.
+    const { host, root } = mount(fix, { url: null, source: "define" });
+    try {
+      expect(host.querySelector(".ub-sync-toggle")?.getAttribute("title")).toBe(
+        "Sync details — hub unknown (compiled default, /uberblick-config.json not used)",
+      );
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
   it("moves the rev when a block's content changes", () => {
     vi.useFakeTimers();
     const fix = fixture();

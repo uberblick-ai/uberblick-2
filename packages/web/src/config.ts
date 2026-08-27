@@ -113,10 +113,15 @@ export interface HubEndpoint {
  * not validated at all — a `HUB_URL` of `ws://user:pass@host` would otherwise
  * reach the screen the moment a surface started naming the endpoint.
  *
- * Null rather than a best effort when the value does not parse: a string this
- * cannot take apart is one it cannot promise anything about, and the socket
- * built from it has failed anyway. A lone `/` path is dropped because that is
- * what `new URL` adds to a bare host, and the two spellings are one address.
+ * Null rather than a best effort when the value does not parse *or* is not an
+ * address this client could dial: a string this cannot take apart is one it
+ * cannot promise anything about, and the socket built from it has failed
+ * anyway. The scheme check is the same one `usableEndpoint` makes, and it is
+ * load-bearing here rather than cosmetic — `new URL` leaves an opaque scheme's
+ * payload in `pathname` with an empty host, so a `mailto:agent:s3cret@host`
+ * would otherwise be re-emitted verbatim. A lone `/` path is dropped because
+ * that is what `new URL` adds to a bare host, and the two spellings are one
+ * address.
  */
 export function endpointLabel(value: string): string | null {
   let parsed: URL;
@@ -125,6 +130,7 @@ export function endpointLabel(value: string): string | null {
   } catch {
     return null;
   }
+  if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") return null;
   const path = parsed.pathname === "/" ? "" : parsed.pathname;
   return `${parsed.protocol}//${parsed.host}${path}`;
 }

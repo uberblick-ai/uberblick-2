@@ -636,8 +636,8 @@ export function App(): ReactElement {
         {/* The sync detail panel (#72), over the panes rather than beside them:
             it is opened to answer a question and closed again. The room the
             pill reports on, the sessions the pill names one of, and the
-            endpoint the socket was built from — null only in the moment before
-            that read settles. */}
+            display label for the endpoint that was resolved — the same one the
+            pill carries, null only in the moment before that read settles. */}
         {syncOpen && (
           <SyncPanel
             connection={chromeRoom}

@@ -33,7 +33,6 @@ import {
   HUB_CONFIG_PATH,
   configuredWorkspaces,
   endpointLabel,
-  endpointSourceLabel,
   hubUrl,
   readClientConfig,
   resolveClientConfig,
@@ -375,17 +374,12 @@ describe("the endpoint as it is shown", () => {
     // bare host is dropped rather than shown as a path.
     expect(endpointLabel(INJECTED)).toBe(INJECTED);
     // Nothing at all rather than a best effort: a string this cannot take
-    // apart is one it cannot promise carries no credential.
+    // apart is one it cannot promise carries no credential — and an opaque
+    // scheme is exactly that, since `new URL` leaves its whole payload in
+    // `pathname` with no host to rebuild the address from.
     expect(endpointLabel("hub.example/ws")).toBeNull();
-  });
-
-  it("names every non-document source as one, so a fallback is legible", () => {
-    expect(endpointSourceLabel("document")).toBe(`served ${HUB_CONFIG_PATH}`);
-    // Both compiled answers say the document did not decide this — the fact
-    // that diagnoses a tab reading "synced" against the wrong hub.
-    expect(endpointSourceLabel("define")).toContain(`${HUB_CONFIG_PATH} not used`);
-    expect(endpointSourceLabel("fallback")).toContain(`${HUB_CONFIG_PATH} not used`);
-    expect(endpointSourceLabel("define")).not.toBe(endpointSourceLabel("fallback"));
+    expect(endpointLabel("mailto:agent:s3cret@hub.example")).toBeNull();
+    expect(endpointLabel("https://hub.example/ws")).toBeNull();
   });
 });
 

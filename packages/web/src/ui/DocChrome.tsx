@@ -137,11 +137,16 @@ export function DocChrome({
    * different hubs is a diagnosis a hover should settle, without opening
    * anything. The address is `config.ts`'s stripped label — an endpoint, never
    * a credential.
+   *
+   * An address that could not be labelled still leaves a source worth saying,
+   * so the pill says it over "unknown" rather than falling silent: the panel
+   * draws that row either way, and one surface dropping a fact the other keeps
+   * is the disagreement this whole change exists to remove.
    */
   const hub =
-    endpoint === null || endpoint.url === null
+    endpoint === null
       ? null
-      : `${endpoint.url} (${endpointSourceLabel(endpoint.source)})`;
+      : `${endpoint.url ?? "unknown"} (${endpointSourceLabel(endpoint.source)})`;
   // `meta.uuid === ""` is a room that answered with nothing in it — see
   // `useDocMeta`. There is no document to name, so the breadcrumb says nothing.
   const named = meta !== null && meta.uuid !== "";
