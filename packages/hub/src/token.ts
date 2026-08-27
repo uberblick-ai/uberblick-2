@@ -83,6 +83,17 @@ export const MAX_TOKEN_LIFETIME_SECONDS = 15 * 60;
  */
 export const CLOCK_SKEW_SECONDS = 60;
 
+/**
+ * The longest a token may be — 4096 characters, which for a base64url token is
+ * 4 KiB. A real one is a few hundred bytes.
+ *
+ * Both ends hold it. {@link inspectToken} refuses anything longer before it
+ * decodes or parses, so an unauthenticated caller cannot choose how much work
+ * the hub does; {@link mintToken} refuses to produce one, because the hub must
+ * not sign what it will not accept.
+ */
+export const MAX_TOKEN_LENGTH = 4096;
+
 export interface TokenClaims {
   typ: TokenType;
   /** Who the token was issued to — a user or agent session identifier. */
@@ -550,7 +561,15 @@ export async function mintToken(
     textEncoder.encode(payloadPart),
   );
 
-  return `${payloadPart}${SEPARATOR}${base64urlEncode(new Uint8Array(signature))}`;
+  const minted = `${payloadPart}${SEPARATOR}${base64urlEncode(new Uint8Array(signature))}`;
+  // The hub must not sign what it will not accept: `verifyToken` refuses a
+  // token past this length, and `sub` is the one claim long enough to reach it.
+  if (minted.length > MAX_TOKEN_LENGTH) {
+    throw new Error(
+      `mintToken: the token would be ${minted.length} characters, past the ${MAX_TOKEN_LENGTH} a token may be — sub is too long`,
+    );
+  }
+  return minted;
 }
 
 function parseClaims(payload: Record<string, unknown>): TokenClaims | null {
@@ -634,14 +653,6 @@ function logString(value: unknown): string | null {
 }
 
 const UNPARSEABLE: TokenRejection = { failure: "unparseable", identity: null };
-
-/**
- * The longest string {@link inspectToken} will look at — 4096 characters, which
- * for a base64url token is 4 KiB. A real token is a few hundred bytes, so
- * anything past this is not one, and refusing it by length bounds the decode
- * and the JSON parse an unauthenticated caller can ask the hub for.
- */
-const MAX_TOKEN_LENGTH = 4096;
 
 /**
  * Verify a token, returning its claims or **why it was refused** — the same
