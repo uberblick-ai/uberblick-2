@@ -404,7 +404,7 @@ function withoutOwnEcho(
  * directory now name different workspaces — the split-brain the lock exists to
  * prevent, arrived by another road.
  */
-type Regeneration =
+export type Regeneration =
   | { kind: "none" }
   | { kind: "written"; path: string }
   | { kind: "refused"; path: string; reason: string };
@@ -423,8 +423,12 @@ type Regeneration =
  * With no workspace or no secret in force there is nothing honest to write: the
  * file would lose its `HUB_AUTH_TOKEN` and the hub would refuse to start. It is
  * left as it was and the command fails; a half-derived file is not an option.
+ *
+ * Exported because `ub remote join` binds a workspace and an endpoint in one
+ * write, and the file derived from them has to follow both — a second copy of
+ * this would be a second answer to what "derived from" means.
  */
-function regenerateLocalConfig(cwd: string): Regeneration {
+export function regenerateLocalConfig(cwd: string): Regeneration {
   const root = findCheckoutRoot(cwd);
   if (root === null || !existsSync(localConfigPath(root))) {
     return { kind: "none" };
@@ -448,12 +452,26 @@ function regenerateLocalConfig(cwd: string): Regeneration {
     };
   }
 
-  const outcome = writeLocalConfig(root, {
-    signingSecret,
-    workspace,
-    hubUrl: resolved.env.HUB_URL,
-    authorityPath: resolved.paths.credentials,
-  });
+  // A failure to publish is reported, not thrown. `refused` already means "the
+  // authority moved and this file did not", which is exactly what an EACCES on
+  // the staged write leaves behind — and a caller with a report to print (`ub
+  // remote join` has one by the time this runs) must not lose it to an
+  // exception whose message says nothing about the split brain.
+  let outcome: ReturnType<typeof writeLocalConfig>;
+  try {
+    outcome = writeLocalConfig(root, {
+      signingSecret,
+      workspace,
+      hubUrl: resolved.env.HUB_URL,
+      authorityPath: resolved.paths.credentials,
+    });
+  } catch (error) {
+    return {
+      kind: "refused",
+      path,
+      reason: `${error instanceof Error ? error.message : String(error)}.`,
+    };
+  }
   return outcome.written
     ? { kind: "written", path: outcome.path }
     : { kind: "refused", path: outcome.path, reason: outcome.reason };

@@ -374,46 +374,52 @@ heard of, naming both counts. A shared uuid is not that: it is one document's
 lineage on two hubs, which Yjs merges, so rerunning finishes an interrupted
 promotion rather than colliding with it.
 
-**On a second computer**, from a fresh clone with nothing in its workspace:
+**On a second computer**, one command, whatever is on that machine already:
 
 ```
-mise trust && mise run setup -- --yes --workspace <workspace id>
-ub remote join wss://<host>.ts.net/ws \
+ub remote join wss://<host>.ts.net/ws/<workspace id> \
   --secret-file ~/uberblick-remote-secret
-mise run web            # the web client alone; the hub is the remote one
 ```
 
-The workspace id is the one the first machine's `ub status` prints, decorated or
-bare. Give it: a workspace id is a uuid and `ub init` with none in force
-generates a *new* one, so a machine that invented its own would join the remote
-hub and find nothing of yours on it — the rooms are keyed by a different id.
+That URL is what `ub remote init` prints: the endpoint with the workspace id as
+its **last path segment**. Two journeys, two verbs, and that is the whole of the
+command surface — a *new* workspace is `ub init` (which seeds starter
+documents), and a workspace that already exists somewhere is `ub remote join`
+(which seeds nothing; the documents arrive over the wire). The id has to travel,
+because a workspace id is a uuid and `ub init` generates a *new* one: a machine
+that invented its own would join the remote hub and find nothing of yours on it,
+the rooms being keyed by a different id. Carrying it in the URL is what makes it
+one paste instead of two.
 
-`ub init --workspace <id>` is joining a workspace that exists elsewhere, so it
-writes configuration and seeds no documents: the fresh checkout's workspace
-really is empty and `join` has nothing to duplicate. The documents arrive over
-the wire. `join` hydrates the full remote directory and every live document
-into the local update log, verifies it by the same read-back, and only then
-persists the endpoint. An
-unreachable or auth-rejecting remote leaves your configuration exactly as it
-was. It refuses a local workspace holding documents the remote has never heard
-of, naming both counts.
+`join` binds this machine to the workspace the URL names **regardless of local
+state** — no prior `ub init` is needed, and one that has run is not in the way.
+It hydrates the full remote directory and every live document into that
+workspace's replica, verifies it by the same read-back, and only then persists
+the endpoint and the binding. An unreachable or auth-rejecting remote leaves
+your configuration exactly as it was, and a URL missing its workspace id, or
+carrying something that is not one, is refused before anything is written, with
+the expected form in the message.
 
-Unlike `promote`, `join` does **not** require a local hub — a second computer
-has none. It says so instead, and says the part that matters: the check that
-decides whether this workspace is empty could then see only the update log. A
-checkout whose documents only ever reached a local hub that is switched off
-reads as empty from here, so `join` would accept it, pull down the remote corpus
-and repoint every client away from the hub holding its work. If this machine has
-a local hub with documents on it, start it and rerun instead.
+A workspace that was already on this machine stays. It is never merged into the
+joined one and never moved: `ub workspace list` shows both, and
+`ub workspace use <id> --user` switches back. The endpoint is machine-wide,
+though, so after a join that workspace syncs with the remote hub too, under its
+own rooms.
 
-The secret that reached the remote replaces whatever `ub init` generated here,
-in `credentials.json` at mode 0600, and the command says it is doing so. That is
-the whole point on a second machine: `ub init` invents a *random* secret, and
+Inside a clone, `mise trust && mise run setup -- --yes` first and then the join
+gives you `mise run web` against the remote hub: the join rewrites the derived
+`mise.local.toml`, so the mise tasks follow the workspace and the endpoint it
+persisted.
+
+The secret that reached the remote replaces whatever this machine had, in
+`credentials.json` at mode 0600, and the command says it is doing so. That is
+the whole point on a second machine: a locally generated secret is *random*, and
 the remote verifies with the first machine's.
 
-**What "persisted" covers, and what outranks it.** The endpoint goes into your
-`config.json`, which is where `ub`, `ub mcp serve` and the MCP server it spawns
-resolve it. That file is the *third* layer:
+**What "persisted" covers, and what outranks it.** The endpoint — and, after a
+`join`, the workspace binding with it — goes into your `config.json`, which is
+where `ub`, `ub mcp serve` and the MCP server it spawns resolve them. That file
+is the *third* layer:
 `HUB_URL` in the environment beats it, and so does a `hubUrl` in a committable
 `./uberblick.json`. When either does, these commands say which one wins rather
 than reporting a switch that did not happen — `ub remote set` exits non-zero,
@@ -425,9 +431,10 @@ at all.
 
 A deployed web client does not read any of these: it resolves its endpoint — and
 its workspaces — at runtime from the served `/uberblick-config.json`. A
-checkout's `mise run web`
-still takes `HUB_URL` from mise's environment, so point a development build at a
-remote hub with `HUB_URL=… mise run web`.
+checkout's `mise run web` still takes `HUB_URL` from mise's environment, which
+`ub init`, `ub workspace use` and `ub remote join` keep in step by rewriting the
+derived `mise.local.toml`; point a development build somewhere else for one run
+with `HUB_URL=… mise run web`.
 
 Archived documents travel as directory state — a tombstone replicates and stays
 a tombstone — but their content is not moved: "every live document" is what a
@@ -441,7 +448,8 @@ history. Neither the secret nor a token signed with it is printed by any of
 these commands.
 
 `ub remote set <url>` is the third verb, and it moves nothing — the right one
-only when there is nothing to move. `ub remote` with no remote configured says
+only when there is nothing to move; it takes a bare endpoint, with no workspace
+id, because it changes no binding. `ub remote` with no remote configured says
 so and exits 0; with one, it prints the endpoint and states the boundary you
 actually get: the served web bundle carries the shared signing secret, so
 reaching the app is the same as holding the credential, and the deployment is

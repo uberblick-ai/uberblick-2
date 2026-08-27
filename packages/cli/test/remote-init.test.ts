@@ -414,6 +414,26 @@ describe("ub remote init", () => {
     expect(readUserConfig(rig.env).raw?.hubUrl).toBeUndefined();
   });
 
+  // The whole of what a second machine has to be told, in one string it can
+  // paste: the endpoint with this workspace's id on the end. Printed either
+  // way, because the workspace reaches the hub by `promote` or by being empty
+  // already, and a second machine binds to it the same way afterwards.
+  it("prints the join URL a second machine binds to", async () => {
+    const empty = harness();
+    expect(await init(empty)).toBe(0);
+    expect(empty.out()).toContain(
+      `ub remote join wss://${MAGIC_DNS}/ws/${WORKSPACE}`,
+    );
+
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    await createDocument(box);
+    const held = harness({}, box);
+    expect(await init(held)).toBe(0);
+    expect(held.out()).toContain(
+      `ub remote join wss://${MAGIC_DNS}/ws/${WORKSPACE}`,
+    );
+  });
+
   it("is a no-op against a host it already initialised", async () => {
     const rig = harness({
       facts: { checkout: "present", deploykey: HOST_KEY },

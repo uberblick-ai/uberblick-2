@@ -13,30 +13,39 @@
  *   move.
  * - `ub remote promote <url>` moves a populated local workspace onto an empty
  *   remote hub.
- * - `ub remote join <url>` pulls a populated remote workspace into an empty
- *   local one.
+ * - `ub remote join <url>/<workspace-id>` binds this machine to a workspace that
+ *   already lives on a remote hub, and hydrates it.
  *
- * **Two verbs, not one, and each refuses the ambiguous case.** A single command
- * inferring its direction from whichever side is empty reads as convenient
- * right up to the day both sides hold documents — at which point the convenient
- * behaviour is silently merging two workspaces nobody asked to merge. So the
- * direction is the user's word, and the command refuses when the other side
- * contradicts it, naming both counts.
+ * **The direction is the user's word, never inferred.** A single command
+ * inferring it from whichever side is empty reads as convenient right up to the
+ * day both sides hold documents — at which point the convenient behaviour is
+ * silently merging two workspaces nobody asked to merge. So `promote` refuses
+ * when the target contradicts it, naming both counts.
  *
- * **A refusal is a set difference over uuids.** Both bridges tolerate a far side
+ * **`join` binds; it does not merge, and it never seeds.** The URL carries the
+ * workspace id, so nothing already on this machine is in the way: the id says
+ * which rooms and which `<uuid>.sqlite` replica this is about, and a workspace
+ * that was here first has a different id — it keeps its documents and its entry
+ * in `ub workspace list`, and switching back to it is `ub workspace use`.
+ * Nothing is written *into* a joined workspace either: its documents arrive over
+ * the wire, and a starter document invented here is one the machine that owns
+ * that workspace never asked for. With an id in hand there is no "is this side
+ * empty" question left to get wrong, which is what makes one verb enough.
+ *
+ * **`promote`'s refusal is a set difference over uuids.** It tolerates a target
  * that already holds *part* of this workspace, because that is what an
  * interrupted run leaves behind — and an overlapping uuid is the same document,
- * one lineage, which Yjs merges rather than collides. What neither tolerates is
- * a far side holding documents this workspace has never heard of: that is a
+ * one lineage, which Yjs merges rather than collides. What it does not tolerate
+ * is a target holding documents this workspace has never heard of: that is a
  * second populated workspace, and merging those is out of scope.
  *
  * **Nothing is persisted before the far side is verified.** Both bridges finish
  * by opening the remote through a *fresh* client — no mirror, no local state —
  * and comparing what it sees with what this machine holds, in both directions
- * and including tombstones. Only then is the endpoint written. A bounded sync
- * wait is not a completion signal, and `HUB_URL` changed on the strength of one
- * would strand a corpus on the old hub, which is the exact failure these
- * commands exist to prevent.
+ * and including tombstones. Only then is the endpoint — and, for `join`, the
+ * workspace binding — written. A bounded sync wait is not a completion signal,
+ * and `HUB_URL` changed on the strength of one would strand a corpus on the old
+ * hub, which is the exact failure these commands exist to prevent.
  *
  * **Persisting means every client, not just `ub`.** See {@link setRemote}.
  *
@@ -66,6 +75,7 @@ import type {
   HubState,
   McpConfig,
 } from "@uberblick/mcp-server";
+import { parseWorkspaceId } from "@uberblick/schema";
 import {
   USER_CONFIG_FILE,
   credentialsPath,
@@ -78,10 +88,16 @@ import {
 } from "./config.js";
 import type { ResolvedConfig } from "./config.js";
 import { takeHelp } from "./help.js";
+import type { InitLock } from "./init-lock.js";
+import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
+import { trustLocalConfig } from "./mise-config.js";
 import { remoteInitCommand, remoteUpdateCommand } from "./remote-init.js";
 import { publishOwnerOnly, removeQuietly } from "./safe-write.js";
+import { ORIGIN_LABELS } from "./status.js";
+import type { Regeneration } from "./workspace.js";
+import { regenerateLocalConfig } from "./workspace.js";
 
 export const REMOTE_HELP = `usage: ub remote [command]
 
@@ -91,12 +107,16 @@ commands:
   update <ssh-target>    deploy origin/main onto that host now
   set <url>              point the clients at an endpoint; moves nothing
   promote <url> [opts]   move this populated workspace onto an empty remote hub
-  join <url> [opts]      pull a populated remote workspace into this empty one
+  join <url>/<id> [opts] bind this machine to the remote workspace the URL names
 
 options for init:
   --dir <path>           checkout directory on the host (default ~/uberblick-remote)
   --host <fqdn>          the host's MagicDNS name, when detection cannot see it
   --ip <v4>              the host's Tailscale IPv4, likewise
+
+The join URL is an endpoint with the workspace id as its last path segment —
+\`ub remote init\` prints it. Joining never merges and never seeds: a workspace
+already on this machine keeps its documents and its \`ub workspace list\` entry.
 
 options for promote and join:
   --secret-file <path>   read the remote's signing secret from a file only you
@@ -251,6 +271,12 @@ export interface RemotePersistence {
  * second, and a failure to publish the endpoint puts the credential back. The
  * residual window is a failed rollback, which is reported rather than hidden.
  *
+ * **A workspace travels with the endpoint, when one is given.** `ub remote join`
+ * binds this machine to the workspace its URL names, and that binding and the
+ * endpoint have to land in the same file in the same write — a machine pointed
+ * at the remote hub while still naming the workspace it had before would dial
+ * the right hub for the wrong rooms.
+ *
  * Kept a separately callable unit on purpose: `ub remote deploy` (#152) needs
  * exactly this and must not grow a second copy of it.
  */
@@ -259,6 +285,8 @@ export function setRemote(
   options: {
     /** A new signing secret to store alongside, or null to leave it alone. */
     secret?: string | null;
+    /** The workspace to bind this machine to, or undefined to leave it alone. */
+    workspace?: string | undefined;
     env?: NodeJS.ProcessEnv;
     cwd?: string;
   } = {},
@@ -276,7 +304,11 @@ export function setRemote(
   // Merged over what is on disk: identity, workspace and any field a later
   // version writes are not this command's to drop.
   const current = readUserConfig(env);
-  const nextConfig = { ...current.raw, hubUrl: url };
+  const nextConfig = {
+    ...current.raw,
+    hubUrl: url,
+    ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
+  };
 
   const stored = readCredentials(env);
 
@@ -402,6 +434,69 @@ export function normalizeRemoteUrl(value: string): string {
   // endpoint that reads differently from the one they gave invites a second
   // guess about whether it was understood.
   return url.pathname === "/" ? `${url.protocol}//${url.host}` : url.toString();
+}
+
+/**
+ * The two things a join URL carries: where the hub is, and which workspace.
+ *
+ * The form is an endpoint with the workspace id as its **last path segment** —
+ * `wss://hub.example.ts.net/ws/<workspace-id>` — and `ub remote init` prints
+ * exactly that. One string is the whole of what a second machine has to be
+ * told, which is the point: an id copied separately is an id copied wrongly,
+ * and a machine that invents its own joins a hub and finds nothing of yours on
+ * it, because the rooms are keyed by a different id.
+ *
+ * The id's grammar belongs to schema — a uuid, optionally slug-decorated — and
+ * is not restated here. The spelling is kept as typed, the way `ub workspace
+ * use` keeps it; only what reaches a room, a token or the database filename is
+ * the bare uuid. Everything before the last segment is an ordinary endpoint and
+ * goes through {@link normalizeRemoteUrl}, so a credential smuggled into the URL
+ * is refused there rather than in two places.
+ *
+ * Neither refusal echoes the URL back. `ub remote init` prints this string and
+ * people paste it about, so the actionable half is the *form*, and repeating a
+ * value somebody may have put a secret into is how it reaches a terminal log.
+ */
+export function parseJoinTarget(value: string): {
+  endpoint: string;
+  workspace: string;
+} {
+  const url = new URL(normalizeRemoteUrl(value));
+  // The last segment and its own separator; everything before them is the
+  // endpoint, **verbatim**. Splitting the path and rejoining the non-empty
+  // parts would rewrite it — `/proxy//ws/<id>` would come back as `/proxy/ws`
+  // — and an empty segment is somebody's reverse proxy path, which may well
+  // route differently from the tidied version. Only the id is this command's
+  // to remove. A path of "/" leaves an empty workspace, which is the refusal
+  // below rather than a special case.
+  const cut = url.pathname.lastIndexOf("/");
+  const workspace = url.pathname.slice(cut + 1);
+  if (workspace === "") {
+    throw new Error(
+      "that URL names no workspace. A join URL is the endpoint with the " +
+        "workspace id as its last path segment and nothing after it, like " +
+        "wss://hub.example.ts.net/ws/<workspace-id> — `ub remote init` prints " +
+        "it, and `ub status` on the first machine names the id",
+    );
+  }
+  try {
+    parseWorkspaceId(workspace);
+  } catch {
+    throw new Error(
+      "the last path segment of that URL is not a workspace id: it must be a " +
+        "uuid, or <slug>-<uuid>. A join URL looks like " +
+        "wss://hub.example.ts.net/ws/<workspace-id> — `ub remote init` prints it",
+    );
+  }
+  return {
+    // Back through the same normaliser, so an endpoint that is nothing but a
+    // host reads as one — the one thing it does to a path is collapse a bare
+    // root, which is exactly what removing `/<id>` leaves behind.
+    endpoint: normalizeRemoteUrl(
+      `${url.protocol}//${url.host}${url.pathname.slice(0, cut)}`,
+    ),
+    workspace,
+  };
 }
 
 /** A secret file only its owner may read — ssh's rule for a private key. */
@@ -563,6 +658,8 @@ function report(
   persistence: RemotePersistence,
   /** When the snapshot this verified was taken. See the note it prints. */
   takenAt: string,
+  /** What this verb has to say about the documents, if anything. */
+  note = "",
 ): string {
   const live = liveDocs(corpus);
   const tombstones = corpus.entries.length - live.length;
@@ -573,6 +670,7 @@ function report(
       `\n${plural(tombstones, "archived directory entry")} travelled with the ` +
       "directory. Archived documents stay archived; their content is not moved.\n";
   }
+  text += note;
   text += "\nconfiguration\n";
   for (const path of persistence.written) {
     text += `  ${path}\n`;
@@ -580,8 +678,8 @@ function report(
   if (persistence.replacedSecret) {
     text +=
       "\nThe signing secret in credentials.json was replaced with the one that\n" +
-      "reached the remote. On a second machine that is the point: `ub init`\n" +
-      "generated a random secret here, and the remote verifies with the first\n" +
+      "reached the remote. On a second machine that is the point: a secret\n" +
+      "generated here is random, and the remote verifies with the first\n" +
       "machine's.\n";
   }
   text +=
@@ -640,16 +738,28 @@ operands:
 options:
 ${SECRET_FILE_NOTE}`;
 
-export const REMOTE_JOIN_HELP = `usage: ub remote join <url> [--secret-file <path>]
+export const REMOTE_JOIN_HELP = `usage: ub remote join <url-with-workspace-id> [--secret-file <path>]
 
-Pull a populated remote workspace into this empty one: the remote's documents
-are hydrated into the local replica, the endpoint is repointed at <url>, and the
-credential that reached it is stored. Refuses when this machine already holds
-documents, so it can never merge two corpora by accident.
+Bind this machine to a workspace that already lives on a remote hub, whatever is
+here already: the remote's documents are hydrated into that workspace's local
+replica, the endpoint and the binding are stored, and so is the credential that
+reached it. No \`ub init\` is needed first.
+
+It never merges and never seeds. A workspace already on this machine is a
+different id with its own replica: it keeps its documents and its
+\`ub workspace list\` entry, and \`ub workspace use <id> --user\` switches back.
+Nothing is written into the joined workspace either — its documents arrive over
+the wire.
 
 operands:
-  <url>                 the remote endpoint, ws:// or wss:// (an https:// or
-                        http:// address is accepted and normalized)
+  <url-with-workspace-id>
+                        the endpoint with the workspace id as its last path
+                        segment, like wss://hub.example.ts.net/ws/<workspace-id>.
+                        \`ub remote init\` prints it, and \`ub status\` on the
+                        machine that has the workspace names the id. ws:// or
+                        wss:// (an https:// or http:// address is accepted and
+                        normalized); a URL without an id is refused before
+                        anything is written
 
 options:
 ${SECRET_FILE_NOTE}`;
@@ -668,6 +778,30 @@ function parseBridgeFlags(argv: string[]): BridgeFlags {
     throw new Error("expected exactly one endpoint");
   }
   return { url: normalizeRemoteUrl(url), secretFile: values["secret-file"] };
+}
+
+interface JoinFlags {
+  /** The endpoint, with the workspace id taken off it. */
+  endpoint: string;
+  /** The workspace id, as typed. */
+  workspace: string;
+  secretFile: string | undefined;
+}
+
+function parseJoinFlags(argv: string[]): JoinFlags {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    // The same surface `promote` parses, and the one `REMOTE_JOIN_HELP` is
+    // checked against: a flag added here and not to the help fails in
+    // `help.test.ts` rather than in somebody's terminal.
+    options: REMOTE_BRIDGE_OPTIONS,
+    allowPositionals: true,
+  });
+  const [url, ...rest] = positionals;
+  if (url === undefined || rest.length > 0) {
+    throw new Error("expected exactly one join URL");
+  }
+  return { ...parseJoinTarget(url), secretFile: values["secret-file"] };
 }
 
 function warn(io: Io, warnings: readonly string[]): void {
@@ -693,7 +827,8 @@ function showRemote(io: Io): number {
     text +=
       "  ub remote promote <url>  move this workspace onto an empty remote hub\n";
     text +=
-      "  ub remote join <url>     pull a remote workspace into this empty one\n";
+      "  ub remote join <url>/<workspace-id>\n" +
+      "                           bind this machine to a remote workspace\n";
     io.out(text);
     return 0;
   }
@@ -767,8 +902,8 @@ function setCommand(argv: string[], io: Io): number {
   }
   text +=
     "\nThis moved no documents. Use `ub remote promote <url>` to move this\n" +
-    "workspace onto an empty hub, or `ub remote join <url>` to pull a remote\n" +
-    "workspace into an empty one.\n\n";
+    "workspace onto an empty hub, or `ub remote join <url>/<workspace-id>` to\n" +
+    "bind this machine to a workspace that already lives on one.\n\n";
   text += SHARING_BOUNDARY;
   io.out(text);
 
@@ -913,7 +1048,7 @@ async function verify(
 
 /** The credential a bridge starts with, from `--secret-file` or what is in force. */
 function startingCredential(
-  flags: BridgeFlags,
+  flags: { secretFile: string | undefined },
   inForce: string | null,
 ): Credential {
   if (flags.secretFile === undefined) {
@@ -1124,58 +1259,68 @@ async function promoteCommand(argv: string[], io: Io): Promise<number> {
 
 // --- ub remote join --------------------------------------------------------
 
+/**
+ * Bind this machine to the workspace the URL names, and hydrate it.
+ *
+ * Regardless of what is here already — that is the whole shape of the command.
+ * See the module note: the id in the URL settles which workspace this is about,
+ * so there is nothing to compare, nothing to merge, and nothing to seed.
+ */
 async function joinCommand(argv: string[], io: Io): Promise<number> {
+  // First statement, before the URL is even looked at: `ub remote join <url>
+  // -h` is somebody asking what the form is, and answering it by refusing the
+  // form they got wrong would be the joke this help exists to stop.
   if (takeHelp(argv, io, REMOTE_JOIN_HELP)) return 0;
 
-  let flags: BridgeFlags;
+  let flags: JoinFlags;
   try {
-    flags = parseBridgeFlags(argv);
+    flags = parseJoinFlags(argv);
   } catch (error) {
     io.err(
       `ub remote join: ${error instanceof Error ? error.message : String(error)}\n\n` +
-        "usage: ub remote join <url> [--secret-file <path>]\n",
+        "usage: ub remote join <url-with-workspace-id> [--secret-file <path>]\n",
     );
     return 2;
   }
 
   const resolved = resolveConfig();
   warn(io, resolved.warnings);
-  const base = resolveMcpConfig(resolved.env);
-  const inForce = base.authSecret;
-
-  let credential: Credential;
+  // The workspace the URL names, not the one in force. A machine with no
+  // configuration at all has none — and one that does have a workspace is not
+  // what this command was asked about. Everything downstream follows from the
+  // id: the rooms opened on the remote, and the `<uuid>.sqlite` replica this
+  // hydrates into, which is a different file from any workspace already here.
+  let base: McpConfig;
   try {
-    credential = startingCredential(flags, inForce);
+    base = resolveMcpConfig({
+      ...resolved.env,
+      WORKSPACE_ID: flags.workspace,
+      HUB_URL: flags.endpoint,
+    });
   } catch (error) {
     io.err(`ub remote join: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
   }
-  const bridge: Bridge = { base, target: flags.url, credential, io };
 
-  // What is here already. Unlike `promote`, an unreachable local hub is not
-  // fatal: the fresh-checkout flow — `ub init` then `ub remote join` on a second
-  // computer — has no local hub at all, and requiring one would make the normal
-  // second-machine journey impossible. It is said out loud instead, because a
-  // local hub that is merely switched off is the one case this cannot see into.
-  const local = await readLocal(base, io);
-  const localProblem = corpusProblem(base.hubUrl, local);
-  if (localProblem !== null) {
-    // Not "some documents are unaccounted for" — the check that decides whether
-    // this workspace is empty is itself the thing that could not see everything.
-    // A checkout whose documents only ever reached a local hub reads as empty
-    // from here, so join would accept it, pull down a foreign corpus, and
-    // repoint every client away from the hub that holds its work.
-    io.err(
-      `ub remote join: note: ${localProblem}The "is this workspace empty" check ` +
-        "therefore saw only the local update log. If this machine has a local " +
-        "hub with documents on it, this will read as empty, join anyway, and " +
-        "leave those documents behind on a hub nothing points at any more — " +
-        "start it (`ub open --no-browser`) and rerun instead.\n",
-    );
+  let credential: Credential;
+  try {
+    credential = startingCredential(flags, base.authSecret);
+  } catch (error) {
+    io.err(`ub remote join: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 2;
   }
+  const bridge: Bridge = { base, target: flags.endpoint, credential, io };
 
+  // Read as a fresh client, which writes nothing on either side — so every
+  // refusal below leaves both this machine and the remote exactly as they were.
+  //
+  // No `pending` exemption, unlike `promote`. That one exists for a far side
+  // holding a directory stub whose room never arrived, which is what an
+  // interrupted *upload* leaves behind; `join` uploads nothing, so a document
+  // the remote's directory names and cannot produce is simply missing, and
+  // hydrating from a remote that cannot serve its own corpus is not a join.
   const remote = await openRemote(bridge, flags.secretFile !== undefined);
-  const remoteProblem = corpusProblem(bridge.target, remote, uuidsIn(local));
+  const remoteProblem = corpusProblem(bridge.target, remote);
   if (remoteProblem !== null) {
     io.err(
       `ub remote join: ${remoteProblem}Nothing was written.\n` +
@@ -1187,22 +1332,6 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     return 1;
   }
 
-  const before = compareCorpus(remote.entries, local.entries);
-  if (before.extra.length > 0) {
-    io.err(
-      `ub remote join: this workspace already holds ` +
-        `${plural(liveDocs(local).length, "document")}; the remote holds ` +
-        `${plural(liveDocs(remote).length, "document")}. Merging two populated ` +
-        "workspaces is unsupported.\n" +
-        foreignDocs(
-          bridge.target,
-          before.extra,
-          `in this workspace are not on ${bridge.target}`,
-        ),
-    );
-    return 1;
-  }
-
   io.err(
     `ub remote: hydrating ${plural(liveDocs(remote).length, "document")} from ${bridge.target}…\n`,
   );
@@ -1210,8 +1339,9 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   const joinProblem = corpusProblem(bridge.target, joined);
   if (joinProblem !== null) {
     io.err(
-      `ub remote join: ${joinProblem}The endpoint was left at ${base.hubUrl}. ` +
-        "Rerun to finish.\n",
+      `ub remote join: ${joinProblem}This machine's configuration is ` +
+        "unchanged — no endpoint and no workspace were persisted. Rerun to " +
+        "finish; what did arrive is in the local update log already.\n",
     );
     return 1;
   }
@@ -1220,23 +1350,145 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   const checked = await verify(bridge, joined.entries);
   if (checked.problem !== null) {
     io.err(
-      `ub remote join: ${checked.problem}The endpoint was left at ` +
-        `${base.hubUrl}; rerun this once the hub is reachable.\n`,
+      `ub remote join: ${checked.problem}This machine's configuration is ` +
+        "unchanged — no endpoint and no workspace were persisted. Rerun this " +
+        "once the hub is reachable.\n",
     );
     return 1;
   }
 
-  let persistence: RemotePersistence;
+  // The workspace this machine was on before, if any. Named in the report
+  // because it does not go away and is not merged — a person who has just been
+  // switched out of a workspace holding their documents is owed the sentence
+  // that says where those documents are and how to get back to them.
+  const previous = resolved.env.WORKSPACE_ID?.trim();
+  const switched =
+    previous !== undefined &&
+    previous !== "" &&
+    parseWorkspaceId(previous).uuid !== parseWorkspaceId(flags.workspace).uuid;
+  // The endpoint that workspace was dialling, from the snapshot taken before
+  // anything was written — the built-in default filled in, because "start the
+  // hub and point back at it" needs an address a person can paste.
+  const previousEndpoint = switched
+    ? resolveMcpConfig(resolved.env).hubUrl
+    : bridge.target;
+
+  // The binding, and the file derived from it, are two writes that have to
+  // agree when this returns — so they happen under the lock `ub init` and
+  // `ub workspace use` hold for exactly the same pair. Without it, a concurrent
+  // `ub init` can settle a workspace between them and leave the derived file
+  // naming one run's workspace over the other run's binding.
+  let lock: InitLock;
   try {
-    persistence = setRemote(bridge.target, {
-      secret: bridge.credential.persist ? bridge.credential.secret : null,
-    });
+    lock = await acquireInitLock();
   } catch (error) {
     io.err(`ub remote join: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
+
+  let persistence: RemotePersistence;
+  // The binding is only half done while this checkout's derived mise config
+  // still names the workspace and endpoint it had before: nothing in the
+  // repository reads `ub`'s configuration, so `mise run web` and the hub would
+  // keep serving the old one. Only ever a rewrite of a file that is already
+  // there — see {@link regenerateLocalConfig}, and `ub workspace use`, which
+  // pairs the same two writes for the same reason. A second machine joining
+  // from outside a checkout has no such file and gets `none`.
+  let regenerated: Regeneration = { kind: "none" };
+  try {
+    persistence = setRemote(bridge.target, {
+      secret: bridge.credential.persist ? bridge.credential.secret : null,
+      workspace: flags.workspace,
+    });
+    // Derived from what is on disk now — the binding above included — rather
+    // than from what this process decided.
+    regenerated = regenerateLocalConfig(process.cwd());
+  } catch (error) {
+    io.err(`ub remote join: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  } finally {
+    lock.release();
+  }
   warn(io, persistence.warnings);
-  io.out(report("joined", bridge.target, checked.corpus, persistence, takenAt));
+
+  if (regenerated.kind === "written") {
+    // Outside the lock: trusting is a `mise` subprocess, and it reads the file
+    // rather than writing it. Not a nicety — mise refuses every task in a
+    // directory whose config file it does not trust, and trust is bound to the
+    // file's contents, so a rewrite untrusts what `ub init` had trusted.
+    const trust = trustLocalConfig(regenerated.path);
+    if (!trust.trusted) {
+      warn(io, [trust.hint]);
+    }
+  }
+
+  let note = "";
+  if (liveDocs(checked.corpus).length === 0) {
+    note +=
+      "\nThat workspace holds nothing yet. If you expected documents, check the " +
+      "workspace id\nin the URL against `ub status` on the machine that has " +
+      "them.\n";
+  }
+  note += `\nworkspace     ${flags.workspace}\n`;
+  if (switched) {
+    // What this machine holds for the old workspace, rather than "its
+    // documents": all this knows is that something configured it, which is not
+    // evidence of a replica.
+    note +=
+      `\n${previous} was not merged into this one and nothing of it was moved. ` +
+      "Whatever this\nmachine holds for it is still here — `ub workspace list` " +
+      "shows the workspaces with\na replica on this machine — and " +
+      `\`ub workspace use ${previous} --user\` switches back.\n` +
+      "\nThe endpoint, though, is machine-wide: that workspace now syncs with " +
+      `${bridge.target}\ntoo, under its own rooms. Documents that only ever ` +
+      "reached a local hub — written in\na browser and never pulled down by an " +
+      "MCP session — are in that hub's database and\nnowhere else, and nothing " +
+      `points at it any more. \`ub remote set ${previousEndpoint}\` points the\n` +
+      "clients back.\n" +
+      // Only when it is true, and it is the whole of what makes the line above
+      // insufficient: that hub authenticated the old secret, and `ub remote
+      // set` carries no credential of its own. One route, and it is the hub's
+      // own environment, and the environment is the one layer that outranks
+      // the files this join has just rewritten.
+      (persistence.replacedSecret
+        ? "\nThat hub was authenticated with the signing secret this join has just " +
+          "replaced, and\n`ub remote set` carries no credential — so pointing " +
+          "back is not enough on its own. A\nhub reads HUB_AUTH_TOKEN from its " +
+          "own environment, and for `ub` the environment\noutranks every stored " +
+          "value, so start one with the previous secret exported:\n\n" +
+          "  HUB_AUTH_TOKEN=<that secret> ub open --no-browser\n"
+        : "");
+  }
+  io.out(
+    report("joined", bridge.target, checked.corpus, persistence, takenAt, note) +
+      (regenerated.kind === "written"
+        ? `\nmise config   ${regenerated.path} (derived, gitignored)\n`
+        : ""),
+  );
+
+  // Written, and possibly overruled. `config.json` is the third layer for the
+  // workspace exactly as it is for the endpoint, and a report naming a binding
+  // that something else outranks is the lie `ub status` then contradicts.
+  const after = resolveConfig();
+  const inForce = after.env.WORKSPACE_ID?.trim();
+  if (inForce !== flags.workspace) {
+    io.err(
+      `ub: warning: ${ORIGIN_LABELS[after.origins.workspace]} sets ${
+        inForce ?? "no workspace"
+      }, which takes precedence over the binding just written — that is the ` +
+        "workspace in force here, whatever this joined.\n",
+    );
+  }
+
+  if (regenerated.kind === "refused") {
+    io.err(
+      `ub remote join: this machine is bound to ${flags.workspace}, but ` +
+        `${regenerated.path} could not be updated to match: ${regenerated.reason} ` +
+        "Until it is, every mise task in this directory still serves the " +
+        "workspace that file names.\n",
+    );
+    return 1;
+  }
   return 0;
 }
 

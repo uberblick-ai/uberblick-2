@@ -50,7 +50,7 @@ import {
 import * as Y from "yjs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Sandbox } from "./helpers.js";
-import { setRemote } from "../src/remote.js";
+import { parseJoinTarget, setRemote } from "../src/remote.js";
 import {
   DEAD_HUB_URL,
   removeTempDirs,
@@ -59,6 +59,8 @@ import {
 } from "./helpers.js";
 
 const SECRET = "test-signing-secret-for-the-remote-bridge";
+/** No `mise` on PATH, so no `mise trust` subprocess in the middle of a test. */
+const WITHOUT_MISE = { PATH: "/usr/bin:/bin" };
 const OTHER_SECRET = "a-different-secret-the-remote-was-deployed-with";
 const WORKSPACE = "b7c3d914-5a20-4e6f-8d13-9f04a2c68e75";
 
@@ -295,9 +297,12 @@ async function readHub(hub: Hub): Promise<Map<string, string[]>> {
 }
 
 /** What the local update log holds, read offline through the MCP tools. */
-async function readMirror(box: Sandbox): Promise<Map<string, string[]>> {
+async function readMirror(
+  box: Sandbox,
+  workspace: string = WORKSPACE,
+): Promise<Map<string, string[]>> {
   // No secret: sync is disabled, so every answer comes from the log alone.
-  return await withMcp(box, { WORKSPACE_ID: WORKSPACE }, async (call) => {
+  return await withMcp(box, { WORKSPACE_ID: workspace }, async (call) => {
     const listed = await call("list_docs", {});
     const found = new Map<string, string[]>();
     for (const doc of listed.docs as { uuid: string }[]) {
@@ -739,44 +744,59 @@ describe("ub remote promote", () => {
 });
 
 describe("ub remote join", () => {
-  it("hydrates an empty workspace from the remote, then switches", async () => {
+  /**
+   * The join URL, which is the whole of what a second machine is told: the
+   * endpoint with the workspace id as its last path segment.
+   */
+  function joinUrl(hub: Hub, workspace: string = WORKSPACE): string {
+    return `${url(hub)}/${workspace}`;
+  }
+
+  /** A secret file the way `join` insists on being given one: mode 0600. */
+  function secretFile(box: Sandbox, secret: string): string {
+    const path = join(box.cwd, "remote-secret");
+    writeFileSync(path, `${secret}\n`, { mode: 0o600 });
+    chmodSync(path, 0o600);
+    return path;
+  }
+
+  it("binds a machine with no configuration at all to the workspace in the URL", async () => {
     const remote = await startHub(OTHER_SECRET);
     const fromWeb = await webDoc(remote, "Shared note", OTHER_SECRET);
     const other = await webDoc(remote, "Second note", OTHER_SECRET);
 
-    // A fresh second checkout: `ub init` writes configuration, generates a
-    // *local* development secret and imports no documents, so this workspace is
-    // genuinely empty. The dead endpoint stands in for the hub that is not
-    // running on a machine which has never had one.
-    const box = sandbox({ userConfig: { hubUrl: DEAD_HUB_URL } });
-    expect(
-      (await runUbAsync(["init", "--yes", "--workspace", WORKSPACE], box)).status,
-    ).toBe(0);
-
-    // The remote was deployed with its own secret, so this is also the
-    // credential path: a file only its owner can read, never an argument.
-    const secretFile = join(box.cwd, "remote-secret");
-    writeFileSync(secretFile, `${OTHER_SECRET}\n`, { mode: 0o600 });
-    chmodSync(secretFile, 0o600);
+    // Nothing here: no `ub init`, no workspace, no endpoint, no credential —
+    // the second machine as the owner decided it should work.
+    const box = sandbox();
 
     const run = await runUbAsync(
-      ["remote", "join", url(remote), "--secret-file", secretFile],
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(box, OTHER_SECRET),
+      ],
       box,
     );
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("joined 2 documents");
+
+    // The id came off the URL: the endpoint persisted is the URL without it,
+    // and the workspace persisted is the one it named.
     expect(persistedHubUrl(box)).toBe(url(remote));
-    // The credential that reached the remote is now this machine's, replacing
-    // the random one `ub init` generated here — without which a second machine
-    // could never authenticate. Still owner-only afterwards.
+    expect(readConfigFile(box, "config.json").workspace).toBe(WORKSPACE);
+    expect((await runUbAsync(["workspace"], box)).stdout).toContain(WORKSPACE);
+    // The credential that reached the remote is this machine's now. Still
+    // owner-only afterwards.
     expect(storedSecret(box)).toBe(OTHER_SECRET);
-    expect(run.stdout).toContain("signing secret in credentials.json was replaced");
     const mode =
       statSync(join(box.configHome, "uberblick", "credentials.json")).mode & 0o777;
     expect(mode).toBe(0o600);
 
-    // The corpus is in the local update log: read back with the hub stopped and
-    // no secret configured, so nothing can have come off the wire.
+    // The corpus is in the local update log, and nothing else is: read back
+    // with the hub stopped and no secret configured, so nothing can have come
+    // off the wire and no starter document can have been seeded here.
     for (const hub of hubs.splice(0)) {
       await hub.stop();
     }
@@ -788,61 +808,173 @@ describe("ub remote join", () => {
     expect(run.output).not.toMatch(TOKEN_SHAPE);
   });
 
-  // The fresh-checkout flow has no local hub, so join must work without one —
-  // and must say what it therefore could not see, rather than implying it
-  // checked.
-  it("joins without a local hub, and says what it could not account for", async () => {
-    const remote = await startHub();
-    await webDoc(remote, "Theirs");
-    const box = sandbox({
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
-      credentials: { signingSecret: SECRET },
-    });
+  it("adds the remote as a second workspace, leaving the seeded one intact", async () => {
+    const remote = await startHub(OTHER_SECRET);
+    const theirs = await webDoc(remote, "Shared note", OTHER_SECRET);
 
-    const run = await runUbAsync(["remote", "join", url(remote)], box);
+    // A machine that has already been set up: `ub init` generated a workspace
+    // of its own and seeded the starter documents into it. The dead endpoint
+    // stands in for the local hub that is not running.
+    const box = sandbox({ userConfig: { hubUrl: DEAD_HUB_URL } });
+    expect((await runUbAsync(["init", "--yes"], box)).status).toBe(0);
+    const mine = readConfigFile(box, "config.json").workspace as string;
+    expect(mine).not.toBe(WORKSPACE);
+    const seeded = await readMirror(box, mine);
+    expect(seeded.size).toBeGreaterThan(0);
+
+    const run = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(box, OTHER_SECRET),
+      ],
+      box,
+    );
     expect(run.status).toBe(0);
-    // The check that decides "is this workspace empty" is itself what could not
-    // see everything — saying only "some documents are unaccounted for" would
-    // understate it.
-    expect(run.stderr).toContain('"is this workspace empty" check');
-    expect(run.stderr).toContain("saw only the local update log");
-    expect(run.stderr).toContain("leave those documents behind");
-    expect(run.stderr).toContain("ub open --no-browser");
-    expect(run.stderr).not.toMatch(/mise/);
-    expect(persistedHubUrl(box)).toBe(url(remote));
+    expect(run.stdout).toContain("joined 1 document");
+    // Switched to the joined one…
+    expect(readConfigFile(box, "config.json").workspace).toBe(WORKSPACE);
+    expect((await runUbAsync(["workspace"], box)).stdout).toContain(WORKSPACE);
+    // …and told where the other one went, because it did not go anywhere.
+    expect(run.stdout).toContain(mine);
+    expect(run.stdout).toContain("was not merged into this one");
+    expect(run.stdout).toContain(`ub workspace use ${mine} --user`);
+    // Including the hazard the machine-wide endpoint creates for it: documents
+    // that only ever reached the local hub are in that hub's database, and
+    // nothing dials it any more.
+    expect(run.stdout).toContain("nothing points at it any more");
+    expect(run.stdout).toContain(`ub remote set ${DEAD_HUB_URL}`);
+    // And that pointing back is not enough on its own: this join replaced the
+    // only signing secret this machine had with the remote's, `ub remote set`
+    // carries no credential, and the one route that reaches that hub is its own
+    // environment — not `mise run hub`, whose [env] is the file this rewrote.
+    expect(run.stdout).toContain("carries no credential");
+    expect(run.stdout).toContain("HUB_AUTH_TOKEN from its own environment");
+    expect(run.stdout).toContain("ub open --no-browser");
+
+    // Both are listed, and the first one still holds everything it held.
+    const listed = await runUbAsync(["workspace", "list"], box);
+    expect(listed.stdout).toContain(mine);
+    expect(listed.stdout).toContain(WORKSPACE);
+    for (const hub of hubs.splice(0)) {
+      await hub.stop();
+    }
+    expect(await readMirror(box, mine)).toEqual(seeded);
+    expect([...(await readMirror(box, WORKSPACE)).keys()]).toEqual([theirs]);
+  });
+
+  // A join inside a checkout has a third file to keep in step: the derived
+  // `mise.local.toml`, which is where `mise run web` and the hub get their
+  // workspace, endpoint and secret from. A binding nothing derived from would
+  // leave every mise task here serving the workspace this machine just left.
+  it("rewrites the checkout's derived mise config, and trusts it again", async () => {
+    const remote = await startHub(OTHER_SECRET);
+    await webDoc(remote, "Shared note", OTHER_SECRET);
+
+    // A checkout as `ub init` leaves it: a derived file naming this machine's
+    // own workspace, its endpoint and its generated secret.
+    const box = sandbox({ checkout: true, userConfig: { hubUrl: DEAD_HUB_URL } });
+    expect(
+      (await runUbAsync(["init", "--yes", "--no-mcp"], box, WITHOUT_MISE)).status,
+    ).toBe(0);
+    const derived = join(box.cwd, "mise.local.toml");
+    const mine = readConfigFile(box, "config.json").workspace as string;
+    expect(readFileSync(derived, "utf8")).toContain(`WORKSPACE_ID = "${mine}"`);
+    expect(readFileSync(derived, "utf8")).toContain(`HUB_URL = "${DEAD_HUB_URL}"`);
+
+    const run = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(box, OTHER_SECRET),
+      ],
+      box,
+      WITHOUT_MISE,
+    );
+    expect(run.status, run.output).toBe(0);
+
+    // All three values, because all three moved: the file is derived from the
+    // authority, not patched.
+    const after = readFileSync(derived, "utf8");
+    expect(after).toContain(`WORKSPACE_ID = "${WORKSPACE}"`);
+    expect(after).toContain(`HUB_URL = "${url(remote)}"`);
+    expect(after).toContain(`HUB_AUTH_TOKEN = "${OTHER_SECRET}"`);
+    expect(run.stdout).toContain("mise config");
+    expect(run.stdout).toContain(derived);
+
+    // mise binds trust to a config file's contents, so a rewrite untrusts what
+    // `ub init` had trusted. With no `mise` to run, the command says what to
+    // run by hand rather than leaving every task in the directory refused.
+    expect(run.stderr).toContain(`mise trust ${derived}`);
+  });
+
+  // The split is byte-for-byte: the endpoint stored is what was typed with the
+  // id and its separator taken off, and nothing else tidied. An empty segment
+  // is somebody's reverse proxy path — `/proxy//ws` and `/proxy/ws` may route
+  // to different places, and only the person who typed it knows which.
+  it.each([
+    [`wss://hub.example.ts.net/ws/${WORKSPACE}`, "wss://hub.example.ts.net/ws"],
+    [`wss://hub.example.ts.net/${WORKSPACE}`, "wss://hub.example.ts.net"],
+    [
+      `wss://hub.example.ts.net/proxy//ws/${WORKSPACE}`,
+      "wss://hub.example.ts.net/proxy//ws",
+    ],
+    [`wss://hub.example.ts.net/ws//${WORKSPACE}`, "wss://hub.example.ts.net/ws/"],
+    // The decorated spelling is an id like any other, and is kept as typed.
+    [
+      `wss://hub.example.ts.net/ws/notes-${WORKSPACE}`,
+      "wss://hub.example.ts.net/ws",
+    ],
+  ])("takes the id off %s and leaves the endpoint alone", (url, endpoint) => {
+    const target = parseJoinTarget(url);
+    expect(target.endpoint).toBe(endpoint);
+    // Lossless: the two halves put back together are the URL that was typed.
+    expect(`${target.endpoint}/${target.workspace}`).toBe(url);
+  });
+
+  // Nothing is written before the URL is understood — not the endpoint, not a
+  // credential, not a workspace — and the message says what the form is,
+  // because a URL missing its id is indistinguishable from a correct one.
+  it.each([
+    // No path at all: nothing was named, not even wrongly.
+    ["ws://127.0.0.1:9999", "names no workspace"],
+    // The endpoint as it was documented before this command took an id — the
+    // paste most likely to happen, and `ws` is not a workspace id.
+    ["ws://127.0.0.1:9999/ws", "is not a workspace id"],
+    ["ws://127.0.0.1:9999/ws/not-a-workspace-id", "is not a workspace id"],
+    // A truncated uuid: a real copy-paste failure, and not a prefix match here.
+    ["ws://127.0.0.1:9999/ws/b7c3d914-5a20-4e6f", "is not a workspace id"],
+  ])("refuses %s and writes nothing", async (target, because) => {
+    const box = sandbox();
+    const run = await runUbAsync(["remote", "join", target], box);
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain(because);
+    // The expected form, in the refusal itself.
+    expect(run.stderr).toContain("wss://hub.example.ts.net/ws/<workspace-id>");
+    expect(run.stderr).toContain("usage: ub remote join <url-with-workspace-id>");
+    expect(existsSync(join(box.configHome, "uberblick", "config.json"))).toBe(false);
+    expect(existsSync(join(box.configHome, "uberblick", "credentials.json"))).toBe(
+      false,
+    );
   });
 
   it("refuses a secret file other users can read", async () => {
     const box = sandbox({ userConfig: { workspace: WORKSPACE } });
-    const secretFile = join(box.cwd, "remote-secret");
-    writeFileSync(secretFile, `${OTHER_SECRET}\n`);
-    chmodSync(secretFile, 0o644);
+    const path = join(box.cwd, "remote-secret");
+    writeFileSync(path, `${OTHER_SECRET}\n`);
+    chmodSync(path, 0o644);
 
     const run = await runUbAsync(
-      ["remote", "join", DEAD_HUB_URL, "--secret-file", secretFile],
+      ["remote", "join", `${DEAD_HUB_URL}/${WORKSPACE}`, "--secret-file", path],
       box,
     );
     expect(run.status).toBe(2);
     expect(run.stderr).toContain("lets other users read");
     expect(run.output).not.toContain(OTHER_SECRET);
-  });
-
-  it("refuses a non-empty local workspace, naming both counts", async () => {
-    const local = await startHub();
-    const remote = await startHub();
-    const box = machine(local);
-    await mcpDoc(box, local, "Mine");
-    await webDoc(remote, "Theirs");
-
-    const run = await runUbAsync(["remote", "join", url(remote)], box);
-    expect(run.status).toBe(1);
-    expect(run.stderr).toContain("this workspace already holds 1 document");
-    expect(run.stderr).toContain("the remote holds 1 document");
-    expect(run.stderr).toContain("Merging two populated workspaces is unsupported");
-    // The documents named are the LOCAL ones. Saying they are on the remote
-    // would send somebody looking for them on a machine that lacks them.
-    expect(run.stderr).toContain(`in this workspace are not on ${url(remote)}`);
-    expect(persistedHubUrl(box)).toBe(url(local));
   });
 
   it("persists nothing when the remote is unreachable", async () => {
@@ -851,7 +983,10 @@ describe("ub remote join", () => {
       credentials: { signingSecret: SECRET },
     });
 
-    const run = await runUbAsync(["remote", "join", DEAD_HUB_URL], box);
+    const run = await runUbAsync(
+      ["remote", "join", `${DEAD_HUB_URL}/${WORKSPACE}`],
+      box,
+    );
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("did not answer");
     expect(persistedHubUrl(box)).toBe("ws://127.0.0.1:2");
@@ -864,7 +999,7 @@ describe("ub remote join", () => {
       credentials: { signingSecret: SECRET },
     });
 
-    const run = await runUbAsync(["remote", "join", url(remote)], box);
+    const run = await runUbAsync(["remote", "join", joinUrl(remote)], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("rejected the credential");
     expect(run.stderr).toContain("--secret-file");
