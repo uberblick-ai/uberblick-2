@@ -29,11 +29,14 @@
  *
  * Two gates, and the pair is the whole scoping guarantee.
  *
- * A *name* is ours only when `isCanonicalRoom` accepts it: two segments, a bare
- * workspace uuid, and a document segment that is either a lowercase uuid or one
- * of the reserved ids the room grammar owns. `parseRoom` alone is not enough —
- * it is a structural splitter, so it reads a foreign `<uuid>/anything` as that
- * workspace's room and would hand it to the deleter.
+ * A *name* is ours only when it is a room name *and* its document segment is a
+ * lowercase uuid or one of the reserved ids the room grammar owns. `parseRoom`
+ * alone is not enough — it is a deliberately structural splitter, so it reads a
+ * foreign `<uuid>/anything` as that workspace's room and would hand it to the
+ * deleter. The closed rule is applied here rather than through the schema
+ * package's own validator on purpose: that validator sits on the hub's
+ * authentication path and #222 is its first and only sanctioned caller, so
+ * calling it from here would be the enforcement change arriving by accident.
  *
  * A *group* is ours only when it holds its own `<uuid>/_directory` database.
  * Every workspace this client has actually opened has one, because the
@@ -47,12 +50,43 @@
  * worth designing against.
  */
 
-import { DIRECTORY_SUFFIX, isCanonicalRoom, parseRoom } from "@uberblick/schema";
+import {
+  DIRECTORY_SUFFIX,
+  FEEDBACK_SUFFIX,
+  SIDEBAR_SUFFIX,
+  parseRoom,
+} from "@uberblick/schema";
 import { openRoomBacklog } from "./rooms.js";
 
 /** A document uuid — the segment shape that makes a room a *document* room. */
 const DOCUMENT_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * The document ids a room may name besides a uuid — the same closed set the
+ * room grammar owns. `_settings` is a reservation with no code behind it yet;
+ * it is listed so that a workspace which one day caches one is forgotten whole.
+ */
+const RESERVED_DOCUMENT_IDS: ReadonlySet<string> = new Set([
+  DIRECTORY_SUFFIX,
+  SIDEBAR_SUFFIX,
+  FEEDBACK_SUFFIX,
+  "_settings",
+]);
+
+/** The workspace a database name belongs to, or null when it is not ours. */
+function roomWorkspace(name: string): string | null {
+  let workspaceId: string;
+  let uuid: string;
+  try {
+    ({ workspaceId, uuid } = parseRoom(name));
+  } catch {
+    return null;
+  }
+  return DOCUMENT_UUID.test(uuid) || RESERVED_DOCUMENT_IDS.has(uuid)
+    ? workspaceId
+    : null;
+}
 
 /** What this browser holds for one workspace. */
 export interface WorkspaceCache {
@@ -105,7 +139,8 @@ export function canListDatabases(): boolean {
  * Every database on this origin whose name is a canonical room name, grouped by
  * workspace. Null when the browser will not say what it stores.
  *
- * The first gate only. {@link ourWorkspaces} adds the second.
+ * The first gate only — see {@link roomWorkspace}. {@link ourWorkspaces}
+ * adds the second.
  */
 async function canonicalRooms(): Promise<Map<string, string[]> | null> {
   if (!canListDatabases()) return null;
@@ -117,8 +152,9 @@ async function canonicalRooms(): Promise<Map<string, string[]> | null> {
   }
   const byWorkspace = new Map<string, string[]>();
   for (const { name } of listed) {
-    if (name === undefined || !isCanonicalRoom(name)) continue;
-    const { workspaceId } = parseRoom(name);
+    if (name === undefined) continue;
+    const workspaceId = roomWorkspace(name);
+    if (workspaceId === null) continue;
     const rooms = byWorkspace.get(workspaceId);
     if (rooms === undefined) byWorkspace.set(workspaceId, [name]);
     else rooms.push(name);
@@ -181,28 +217,37 @@ export async function originUsage(): Promise<number | null> {
   }
 }
 
-/** What a forget actually did. */
+/** What a forget actually did, one database at a time. */
 export interface ForgetResult {
   /** How many databases the forget named. */
   attempted: number;
-  /**
-   * The workspace's databases still present afterwards, or `null` when the
-   * re-read could not run at all.
-   *
-   * Read back rather than inferred from the requests, because a deletion the
-   * browser queued completes later. `null` is not an empty list: a browser that
-   * has stopped answering `databases()` has told us nothing, and reporting that
-   * as a clean sweep would be the one claim this screen must never make on no
-   * evidence.
-   */
-  remaining: string[] | null;
+  /** Deletions the browser reported as complete. */
+  removed: number;
   /**
    * Deletions a live connection queued rather than refused — another tab still
    * has the database open. The request stays pending and the browser completes
    * it as soon as that connection closes, so nothing here retries and nothing
    * coordinates between tabs.
+   *
+   * Counted from the request's own `blocked` event, never from what is listed
+   * afterwards: a browser may already omit a database whose deletion is pending,
+   * and reading the listing as the answer would report a queued deletion as a
+   * finished one.
    */
-  blocked: number;
+  scheduled: number;
+  /** Deletions the browser refused outright. Failed, and not queued. */
+  failed: number;
+  /**
+   * The workspace's databases still present afterwards, or `null` when the
+   * re-read could not run at all.
+   *
+   * Evidence, not the verdict: the three counts above come from the deletion
+   * requests themselves, and this only says whether anything could be checked
+   * afterwards. `null` is not an empty list — a browser that has stopped
+   * answering `databases()` has told us nothing, and reporting that as a clean
+   * sweep would be the one claim this screen must never make on no evidence.
+   */
+  remaining: string[] | null;
 }
 
 /** One deletion's outcome. `blocked` means queued, never refused. */
@@ -238,9 +283,13 @@ export async function forgetWorkspace(workspaceId: string): Promise<ForgetResult
   const rooms = (await ourWorkspaces())?.get(workspaceId) ?? [];
   const outcomes = await Promise.all(rooms.map(deleteDatabase));
   const after = await canonicalRooms();
+  const count = (outcome: Outcome): number =>
+    outcomes.filter((seen) => seen === outcome).length;
   return {
     attempted: rooms.length,
+    removed: count("done"),
+    scheduled: count("blocked"),
+    failed: count("error"),
     remaining: after === null ? null : (after.get(workspaceId) ?? []),
-    blocked: outcomes.filter((outcome) => outcome === "blocked").length,
   };
 }

@@ -9,10 +9,13 @@
  * - the confirmation states the cost before it can be accepted, and where the
  *   browser cannot tell whether edits are un-synced it says "unknown", never
  *   "none" (the two are different claims, and only one of them is safe);
- * - a forget is scoped by the *canonical* room grammar and by the workspace
- *   owning a directory database: another workspace's rooms, an unrelated
- *   database on the same origin, and a name that merely splits like a room name
- *   are all untouched;
+ * - a forget is scoped by the closed room grammar and by the workspace owning a
+ *   directory database: another workspace's rooms, an unrelated database on the
+ *   same origin, and a name that merely splits like a room name are all
+ *   untouched;
+ * - what a finished forget claims comes from the deletion requests themselves,
+ *   so a queued deletion is reported as scheduled even when the browser has
+ *   already stopped listing the database;
  * - the workspace on screen has no forget control at all;
  * - a forget leaves no trace, so the workspace is cached again the moment it is
  *   opened again — the deletion clears a cache, it does not brand a workspace.
@@ -76,6 +79,9 @@ const OTHER_ROOMS = SEEDED.filter(
 /** The databases this origin holds, as the stubbed `indexedDB` sees them. */
 let stored: Set<string>;
 
+/** Names whose deletion the stub defers rather than completes. */
+let queued: Set<string>;
+
 /** Which of OTHER's rooms are still there. Empty is a completed forget. */
 function survivingRooms(): string[] {
   return OTHER_ROOMS.filter((name) => stored.has(name));
@@ -92,8 +98,14 @@ function installIndexedDB(names: readonly string[]): void {
         onblocked: null,
       };
       queueMicrotask(() => {
+        // A name in `queued` models the hostile shape of the real API: another
+        // connection defers the deletion, and the browser stops listing the
+        // database while it is pending. So the listing afterwards looks exactly
+        // like a completed deletion, and only the request's own `blocked` event
+        // can tell the two apart.
         stored.delete(name);
-        request.onsuccess?.();
+        if (queued.has(name)) request.onblocked?.();
+        else request.onsuccess?.();
       });
       return request;
     },
@@ -188,6 +200,7 @@ async function confirmFor(
 
 beforeEach(() => {
   backlog.value = new Map();
+  queued = new Set();
   installStorage();
   installIndexedDB(SEEDED);
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -257,6 +270,27 @@ describe("forgetting a workspace on this device", () => {
         (name) => name.textContent,
       ),
     ).toEqual([OPEN, OTHER, THIRD]);
+    view.unmount();
+  });
+
+  it("reports a queued deletion as scheduled, never as removed", async () => {
+    // One database another tab still holds open. The stub then does what a real
+    // browser may do — stop listing it while its deletion is pending — so the
+    // re-read afterwards is indistinguishable from a clean sweep. Only the
+    // recorded outcome can produce an honest sentence here.
+    queued.add(`${OTHER}/bbbbbbbb-0000-4000-8000-000000000001`);
+    const view = await openSettings(workspaceOf(OPEN));
+    const { input } = await confirmFor(view, OTHER);
+    await act(async () => typeInto(input, "forget"));
+    await act(async () => {
+      button(card(view.host, OTHER), "Forget this workspace")?.click();
+    });
+
+    expect(survivingRooms()).toEqual([]);
+    const note = view.host.querySelector(".ub-forget-note")?.textContent ?? "";
+    expect(note).toContain("3 of 4 cached databases removed");
+    expect(note).toContain("scheduled");
+    expect(note).not.toContain("all 4");
     view.unmount();
   });
 

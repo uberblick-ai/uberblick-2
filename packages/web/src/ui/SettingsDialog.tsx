@@ -243,37 +243,54 @@ function unsyncedSentence(cache: WorkspaceCache): string {
 /**
  * What a finished forget did, in the reader's terms.
  *
- * Three outcomes, and two of them are not "done". A database another tab still
- * has open is *queued*, not refused — the browser removes it the moment that
- * tab closes — so saying "could not be removed" would be false, and would send
- * the reader looking for a control that should not exist. And a re-read that
- * could not run has told us nothing, which is not the same as telling us the
- * sweep was clean.
+ * Driven by the per-database outcomes the deletion requests themselves
+ * reported, never by what the browser lists afterwards. A database whose
+ * deletion is *queued* — another tab still has it open — may already be gone
+ * from `databases()`, so a note written from the listing would tell the reader
+ * it was removed when the browser has not removed it yet. The listing only adds
+ * the last sentence: whether any of this could be re-checked at all.
+ *
+ * Three outcomes, and only one of them is "gone". Queued is not refused, so it
+ * must not read as a failure the reader has to act on; refused is not queued,
+ * so it must not read as a promise that it will finish on its own.
  */
 function forgetNote(workspaceId: string, result: ForgetResult): string {
   const asked = `${result.attempted} cached ${
     result.attempted === 1 ? "database" : "databases"
   }`;
+  const clean =
+    result.removed === result.attempted &&
+    result.scheduled === 0 &&
+    result.failed === 0;
+  const parts = [
+    `Forgot ${workspaceId}: ${
+      clean ? `all ${asked}` : `${result.removed} of ${asked}`
+    } removed from this browser.`,
+  ];
+  if (result.scheduled > 0) {
+    const one = result.scheduled === 1;
+    parts.push(
+      `${result.scheduled} ${one ? "is" : "are"} still open in another tab — ` +
+        `${one ? "its" : "their"} removal is scheduled and completes when that ` +
+        `tab is closed.`,
+    );
+  }
+  if (result.failed > 0) {
+    parts.push(
+      `${result.failed} could not be removed: the browser refused the ` +
+        `${result.failed === 1 ? "deletion" : "deletions"}.`,
+    );
+  }
+  if (clean) {
+    parts.push("Opening the workspace again re-downloads it from the hub.");
+  }
   if (result.remaining === null) {
-    return (
-      `Asked this browser to remove ${asked} of ${workspaceId}, but it would ` +
-      `not say what is left afterwards, so the result could not be verified. ` +
-      `Reopen Settings to see what is still stored.`
+    parts.push(
+      "This browser would not say what it still stores afterwards, so none of " +
+        "that could be re-checked.",
     );
   }
-  if (result.remaining.length === 0) {
-    return (
-      `Forgot ${workspaceId}: ${asked} removed from this browser. Opening the ` +
-      `workspace again re-downloads it from the hub.`
-    );
-  }
-  const left = result.remaining.length;
-  return (
-    `Forgot ${result.attempted - left} of ${asked} of ${workspaceId}. ` +
-    `${left} ${left === 1 ? "is" : "are"} still open in another tab — ` +
-    `${left === 1 ? "its" : "their"} removal is scheduled and completes when ` +
-    `that tab closes.`
-  );
+  return parts.join(" ");
 }
 
 /** The read of what is stored: still running, refused, or an answer. */
