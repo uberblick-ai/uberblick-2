@@ -114,12 +114,16 @@ export function parseRoom(room: string): ParsedRoom {
  * The document ids a canonical room may name besides a uuid.
  *
  * `_directory`, `_sidebar` and `_feedback` are real: {@link directoryRoom},
- * {@link sidebarRoom} and {@link feedbackRoom} build them and every replica
- * opens all three. `_settings` is a **reservation only** — no code creates it,
- * nothing opens it, and there is deliberately no `settingsRoom` to call
- * (#177). It is named here so that building it later is not a change to the
- * room grammar, because the grammar sits on the hub's authentication path and
- * that is not where a new well-known document should have to be introduced.
+ * {@link sidebarRoom} and {@link feedbackRoom} build them, and each has a
+ * consumer that opens it. Not the same consumers, though — the MCP replica set
+ * (`packages/mcp-server/src/replica.ts`) attaches all three, including
+ * `_feedback`; the web client attaches the directory and the sidebar only.
+ *
+ * `_settings` is a **reservation only** — no code creates it, nothing opens
+ * it, and there is deliberately no `settingsRoom` to call (#177). It is named
+ * here so that building it later is not a change to the room grammar, because
+ * the grammar sits on the hub's authentication path and that is not where a
+ * new well-known document should have to be introduced.
  */
 const CANONICAL_DOCUMENT_IDS: ReadonlySet<string> = new Set([
   DIRECTORY_SUFFIX,
