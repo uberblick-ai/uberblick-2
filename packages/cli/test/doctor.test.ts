@@ -241,7 +241,7 @@ describe("ub doctor", () => {
     expect(run.output).not.toContain(SECRET);
   });
 
-  it("fails the hub check with no hub running, and names the URL it dialled", async () => {
+  it("fails the hub check with no hub running, names the URL it dialled and remedies it with `ub open`", async () => {
     const { checks, run } = await doctor(
       sandbox({
         userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
@@ -252,8 +252,32 @@ describe("ub doctor", () => {
 
     expect(hub.status).toBe("fail");
     expect(hub.reason).toContain(DEAD_HUB_URL);
-    expect(hub.remedy).toMatch(/mise run hub/);
+    // A remedy is only a remedy if the reader can run it: `ub` recommends `ub`,
+    // never a task that exists in a checkout and nowhere else.
+    expect(hub.remedy).toMatch(/ub open --no-browser/);
+    expect(hub.remedy).not.toMatch(/mise/);
     expect(run.status).not.toBe(0);
+  });
+
+  it("sends a remote hub-down at the deployment, never at a local start command", async () => {
+    // A hub somebody deployed is not one this machine can start, so naming any
+    // start command here would send the reader after a hub that is not theirs.
+    const { checks } = await doctor(
+      sandbox({
+        userConfig: {
+          workspace: WORKSPACE,
+          hubUrl: "wss://hub.example.invalid:443",
+        },
+        credentials: { signingSecret: SECRET },
+      }),
+    );
+    const hub = check(checks, "hub");
+
+    expect(hub.status).toBe("fail");
+    expect(hub.reason).toContain("hub.example.invalid");
+    expect(hub.remedy).toMatch(/deployment/);
+    expect(hub.remedy).not.toMatch(/ub open/);
+    expect(hub.remedy).not.toMatch(/mise/);
   });
 
   it("passes the hub check against a running hub, and says our hub holds the port", async () => {
@@ -321,6 +345,9 @@ describe("ub doctor", () => {
     // Up, and serving nothing: a connection is not a hub.
     expect(check(checks, "hub").status).toBe("fail");
     expect(check(checks, "hub").reason).toMatch(/did not finish syncing/);
+    // The endpoint is loopback, so the restart it suggests is one `ub` can do.
+    expect(check(checks, "hub").remedy).toMatch(/ub open --no-browser/);
+    expect(check(checks, "hub").remedy).not.toMatch(/mise/);
     // And speaking the protocol is not proof of whose server it is — only a
     // directory read with our own token would be.
     expect(check(checks, "bind").status).toBe("skipped");

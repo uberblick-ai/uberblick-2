@@ -44,6 +44,7 @@ import type { McpConfig } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import type { ResolvedConfig } from "./config.js";
 import { readCredentials, resolveConfig } from "./config.js";
+import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import type { Scope } from "./mcp-config.js";
@@ -280,7 +281,11 @@ function hubProber(config: McpConfig): Dial {
 /** What both hub checks are handed: an endpoint in, what a client found out. */
 type Dial = (url: string) => Promise<HubReach>;
 
-async function hubCheck(config: McpConfig | null, dial: Dial): Promise<Check> {
+async function hubCheck(
+  config: McpConfig | null,
+  endpoint: Endpoint | null,
+  dial: Dial,
+): Promise<Check> {
   if (config === null) {
     return skipped("hub", "no workspace configured, so no hub token could be minted");
   }
@@ -290,6 +295,10 @@ async function hubCheck(config: McpConfig | null, dial: Dial): Promise<Check> {
       `no signing secret, so ${config.hubUrl} was not dialled — this machine is local-only`,
     );
   }
+  // Which remedy applies is a property of the endpoint, not of the failure. A
+  // hub on this machine is one `ub open` away; a remote one is somebody's
+  // deployment, which this command can neither start nor pretend to.
+  const local = endpoint !== null && isLocalHost(endpoint.host);
   const status = await dial(config.hubUrl);
   if (status === "connected") {
     return pass("hub", `${config.hubUrl} answered and served the directory room`);
@@ -308,13 +317,17 @@ async function hubCheck(config: McpConfig | null, dial: Dial): Promise<Check> {
     return fail(
       "hub",
       `${config.hubUrl} answered but the directory room did not finish syncing`,
-      "check the hub's log — it accepted the connection without serving the room; restarting it with `mise run hub` is the usual fix",
+      local
+        ? "check the hub's log — it accepted the connection without serving the room; restarting it (`ub open --no-browser` starts one on loopback) is the usual fix"
+        : "check the deployment's log — it accepted the connection without serving the room; restarting the hub there is the usual fix",
     );
   }
   return fail(
     "hub",
     `nothing answered ${config.hubUrl}`,
-    "start the hub with `mise run hub` — if it is running, the port check says whether HUB_URL disagrees with the port it bound",
+    local
+      ? "start a hub with `ub open --no-browser` — if one is running, the port check says whether HUB_URL disagrees with the port it bound"
+      : "check that the deployment is running and that this machine can reach it — nothing is listening at that address from here",
   );
 }
 
@@ -565,7 +578,7 @@ export async function doctorReport(
     workspaceCheck(resolvedEnv, resolved, config, error),
     credentialCheck(resolved, resolvedEnv, platform),
     databaseCheck(config),
-    await hubCheck(config, dial),
+    await hubCheck(config, endpoint, dial),
     portCheck(config, endpoint, resolvedEnv),
     await bindCheck(config, endpoint, resolvedEnv, dial),
     mcpCheck(resolvedEnv, cwd),
@@ -605,16 +618,37 @@ export function renderDoctor(report: DoctorReport): string {
   return text;
 }
 
+/** Exported so the help below can be checked against the parser it describes. */
+export const DOCTOR_OPTIONS = {
+  json: { type: "boolean", default: false },
+} as const;
+
+export const DOCTOR_HELP = `usage: ub doctor [--json]
+
+Check the local stack against its known failure modes — configuration, the
+signing secret and its file mode, the database, whether the hub is reachable,
+and the MCP client configs \`ub mcp install\` writes. Reads only; it fixes
+nothing and names what to run instead.
+
+options:
+  --json            the same checks as JSON on stdout, for a script to read
+  -h, --help        show this help
+
+Exits non-zero when any check fails, so it works as a gate in a script.
+`;
+
 export async function doctorCommand(
   argv: string[],
   io: Io = processIo,
 ): Promise<number> {
+  if (takeHelp(argv, io, DOCTOR_HELP)) return 0;
+
   let json = false;
   try {
     json =
       parseArgs({
         args: argv,
-        options: { json: { type: "boolean", default: false } },
+        options: DOCTOR_OPTIONS,
         allowPositionals: false,
       }).values.json === true;
   } catch (error) {

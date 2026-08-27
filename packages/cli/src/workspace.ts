@@ -43,6 +43,7 @@ import {
   userConfigPath,
   writeUserConfig,
 } from "./config.js";
+import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
@@ -72,6 +73,9 @@ commands:
                          never seen it; the replica hydrates on next use
   <slug>-<uuid>          a decorated id, stored exactly as you type it
   <prefix>               a unique prefix of a uuid \`ub workspace list\` shows
+
+options:
+  -h, --help             show this help; after a command, that command's help
 `;
 
 /** As much of a uuid as someone can have typed so far. */
@@ -208,13 +212,31 @@ function showWorkspace(io: Io): number {
 
 // --- ub workspace list -----------------------------------------------------
 
+/** Exported so the help below can be checked against the parser it describes. */
+export const WORKSPACE_LIST_OPTIONS = {
+  json: { type: "boolean", default: false },
+} as const;
+
+export const WORKSPACE_LIST_HELP = `usage: ub workspace list [--json]
+
+Every workspace this machine has a local database for, with the one currently in
+force marked. Reads the database directory only — a workspace that exists
+elsewhere but has never been opened here is not listed.
+
+options:
+  --json            the same list as JSON on stdout, for a script to read
+  -h, --help        show this help
+`;
+
 function listCommand(argv: string[], io: Io): number {
+  if (takeHelp(argv, io, WORKSPACE_LIST_HELP)) return 0;
+
   let json = false;
   try {
     json =
       parseArgs({
         args: argv,
-        options: { json: { type: "boolean", default: false } },
+        options: WORKSPACE_LIST_OPTIONS,
         allowPositionals: false,
       }).values.json === true;
   } catch (error) {
@@ -437,13 +459,41 @@ function regenerateLocalConfig(cwd: string): Regeneration {
     : { kind: "refused", path: outcome.path, reason: outcome.reason };
 }
 
+/** Exported so the help below can be checked against the parser it describes. */
+export const WORKSPACE_USE_OPTIONS = {
+  user: { type: "boolean", default: false },
+} as const;
+
+export const WORKSPACE_USE_HELP = `usage: ub workspace use <id> [--user]
+
+Bind this directory to a workspace by writing \`${DIRECTORY_FILE}\`, and regenerate
+the derived mise config so the mise tasks here follow the switch.
+
+operands:
+  <id>              a workspace <uuid>, a decorated <slug>-<uuid>, or a unique
+                    prefix of a uuid \`ub workspace list\` shows. A full uuid is
+                    accepted even if this machine has never seen it; the replica
+                    hydrates on next use.
+
+options:
+  --user            bind this machine instead, by writing the user config
+                    (default: this directory)
+  -h, --help        show this help
+
+Moves no documents and creates no workspace — it changes which one this
+directory resolves to. A layer above (WORKSPACE_ID, or an outranking file) still
+wins, and this says so when it does.
+`;
+
 async function useCommand(argv: string[], io: Io): Promise<number> {
+  if (takeHelp(argv, io, WORKSPACE_USE_HELP)) return 0;
+
   let user = false;
   let raw: string | undefined;
   try {
     const { values, positionals } = parseArgs({
       args: argv,
-      options: { user: { type: "boolean", default: false } },
+      options: WORKSPACE_USE_OPTIONS,
       allowPositionals: true,
     });
     user = values.user === true;
@@ -574,19 +624,24 @@ export async function workspaceCommand(
   argv: string[],
   io: Io = processIo,
 ): Promise<number> {
+  // The subcommand first, so `ub workspace use --help` reaches the help of the
+  // leaf it names rather than being answered by the group. A group's own
+  // argument is that one word, so only that word can ask for help — an unknown
+  // command is still an unknown command, `--help` after it or not, which is what
+  // the top level does too.
   const [sub, ...rest] = argv;
-  if (sub === undefined) {
-    return showWorkspace(io);
-  }
-  if (sub === "--help" || sub === "-h" || sub === "help") {
-    io.out(WORKSPACE_HELP);
-    return 0;
-  }
   if (sub === "list") {
     return listCommand(rest, io);
   }
   if (sub === "use") {
     return await useCommand(rest, io);
+  }
+  if (sub === undefined) {
+    return showWorkspace(io);
+  }
+  if (sub === "help" || sub === "--help" || sub === "-h") {
+    io.out(WORKSPACE_HELP);
+    return 0;
   }
   io.err(`ub workspace: unknown command ${JSON.stringify(sub)}\n\n${WORKSPACE_HELP}`);
   return 2;

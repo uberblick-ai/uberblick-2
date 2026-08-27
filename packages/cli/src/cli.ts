@@ -68,8 +68,23 @@ mcp install options:
   -- <command>      register this command instead of uberblick's own
 
 options:
-  -h, --help        show this help
+  -h, --help        show this help; after a command, that command's help
   -v, --version     print the version
+`;
+
+/**
+ * `ub mcp` is a group like `workspace` and `remote`, with one human child.
+ *
+ * `serve` is left out for the same reason it is left out of the top-level help:
+ * it is the stdio line a client config points at, written there by machine.
+ */
+export const MCP_HELP = `usage: ub mcp <command>
+
+commands:
+  install [target]       register uberblick with an MCP client
+
+options:
+  -h, --help             show this help; after a command, that command's help
 `;
 
 /** Run one `ub` invocation and return its exit code. Never throws for usage. */
@@ -115,8 +130,14 @@ export async function runCli(
     if (subcommand === "install") {
       return await installCommand(args, io);
     }
+    // Only the subcommand slot asks for help here: `ub mcp bogus --help` is an
+    // unknown command, the same as `ub bogus --help` is below.
+    if (subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
+      io.out(MCP_HELP);
+      return 0;
+    }
     const named = subcommand === undefined ? " nothing" : ` ${JSON.stringify(subcommand)}`;
-    io.err(`ub mcp: expected "install" or "serve", got${named}\n`);
+    io.err(`ub mcp: expected "install" or "serve", got${named}\n\n${MCP_HELP}`);
     return 2;
   }
 

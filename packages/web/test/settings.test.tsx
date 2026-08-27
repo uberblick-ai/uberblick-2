@@ -164,6 +164,11 @@ describe("the settings dialog", () => {
           sidebar={null}
           groups={[]}
           entries={[]}
+          workspaces={[]}
+          workspace={null}
+          onSwitchWorkspace={() => {}}
+          identity={{ name: "settings tab", color: "#0675c9" }}
+          agentSessions={0}
           selected={null}
           onSelect={() => {}}
           onCreate={() => {}}

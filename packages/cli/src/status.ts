@@ -27,6 +27,7 @@ import {
 import type { SyncStatus } from "@uberblick/mcp-server";
 import type { CredentialOrigin, Origin } from "./config.js";
 import { DIRECTORY_FILE, resolveConfig } from "./config.js";
+import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { cliVersion } from "./version.js";
@@ -217,16 +218,38 @@ export function renderStatus(report: StatusReport): string {
   return text;
 }
 
+/** Exported so the help below can be checked against the parser it describes. */
+export const STATUS_OPTIONS = {
+  json: { type: "boolean", default: false },
+} as const;
+
+export const STATUS_HELP = `usage: ub status [--json]
+
+What this directory resolves to right now: the workspace and which layer chose
+it, the hub endpoint, whether a signing secret is configured, the local database
+and the sync state of every room attached to it. Reads only — nothing here
+changes any configuration.
+
+options:
+  --json            the same report as JSON on stdout, for a script to read
+  -h, --help        show this help
+
+The signing secret is never printed; the report says only whether one is there
+and where it came from.
+`;
+
 export async function statusCommand(
   argv: string[],
   io: Io = processIo,
 ): Promise<number> {
+  if (takeHelp(argv, io, STATUS_HELP)) return 0;
+
   let json = false;
   try {
     json =
       parseArgs({
         args: argv,
-        options: { json: { type: "boolean", default: false } },
+        options: STATUS_OPTIONS,
         allowPositionals: false,
       }).values.json === true;
   } catch (error) {

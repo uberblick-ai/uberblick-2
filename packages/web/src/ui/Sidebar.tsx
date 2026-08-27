@@ -45,8 +45,12 @@ import {
   unpinDoc,
 } from "@uberblick/schema";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
+import type { AwarenessUser } from "../collab/identity.js";
 import type { RoomConnection } from "../collab/rooms.js";
-import { useRoomStatus, useStoredFlag } from "./hooks.js";
+import { useDirectory, useRoomStatus, useStoredFlag } from "./hooks.js";
+import { UserMenu } from "./UserMenu.js";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
+import type { Workspace } from "./route.js";
 
 /** The group a pin lands in when the sidebar has none yet. */
 const FIRST_GROUP_NAME = "Pinned";
@@ -122,6 +126,11 @@ export function Sidebar({
   sidebar,
   groups,
   entries,
+  workspaces,
+  workspace,
+  onSwitchWorkspace,
+  identity,
+  agentSessions,
   selected,
   onSelect,
   onCreate,
@@ -135,8 +144,22 @@ export function Sidebar({
   sidebar: RoomConnection | null;
   /** The sidebar as `readSidebar` reports it, live. */
   groups: SidebarGroup[];
-  /** The directory stubs, for the titles the sidebar itself does not store. */
+  /**
+   * The workspace's documents, for the count the switcher prints (#74) — the
+   * live ones, which is what that number means. Titles come from a second
+   * reading of the same directory that keeps the tombstones; see `stubs`.
+   */
   entries: DirectoryEntry[];
+  /** The workspaces the switcher offers — see `workspaceList`. */
+  workspaces: readonly Workspace[];
+  /** The workspace the address names, or null when it names none. */
+  workspace: Workspace | null;
+  /** Go to a workspace. Switching is navigating; see `WorkspaceSwitcher`. */
+  onSwitchWorkspace: (segment: string) => void;
+  /** This tab's awareness identity — what the user card is about. */
+  identity: AwarenessUser;
+  /** Agent sessions in the workspace, for the user menu's readout. */
+  agentSessions: number;
   selected: string | null;
   onSelect: (uuid: string) => void;
   onCreate: () => void;
@@ -157,9 +180,20 @@ export function Sidebar({
    * something to take back.
    */
   const [renaming, setRenaming] = useState<{ id: string; fresh: boolean } | null>(null);
-  const titles = useMemo(
-    () => new Map(entries.map((entry) => [entry.uuid, entry.title])),
-    [entries],
+  /**
+   * The directory stub behind each pinned uuid — tombstones included, which is
+   * the whole point of reading the directory again rather than using `entries`.
+   *
+   * The sidebar is the one reader that names documents by uuid instead of
+   * listing them, so it is the one reader that still has something to draw
+   * after a document leaves the listings. Read without the tombstones, an
+   * archived pin has no title and falls back to eight characters of uuid
+   * (#287); with the stub in hand the row says what it is.
+   */
+  const stubs = useDirectory(connection, true);
+  const labels = useMemo(
+    () => new Map(stubs.map((entry) => [entry.uuid, entry])),
+    [stubs],
   );
 
   const end = useCallback(() => {
@@ -222,6 +256,15 @@ export function Sidebar({
 
   return (
     <nav className="ub-list" data-dragging={drag?.kind}>
+      {/* The workspace, across the top of the column it is the workspace of
+          (#74). Above the head rather than in it: the head is about this
+          workspace's documents, and the switcher is about which workspace. */}
+      <WorkspaceSwitcher
+        workspaces={workspaces}
+        current={workspace}
+        docs={entries.length}
+        onSwitch={onSwitchWorkspace}
+      />
       <div className="ub-list-head">
         <button type="button" onClick={onCreate} disabled={connection === null}>
           + new doc
@@ -246,7 +289,7 @@ export function Sidebar({
           <GroupSection
             group={group}
             ydoc={ydoc}
-            titles={titles}
+            labels={labels}
             selected={selected}
             onSelect={onSelect}
             dnd={dnd}
@@ -296,6 +339,9 @@ export function Sidebar({
         >
           <span aria-hidden="true">⚙</span> Settings
         </button>
+        {/* Who this client is (#74). Last, because it is the one row that is
+            about the person rather than about the corpus. */}
+        <UserMenu identity={identity} agentSessions={agentSessions} />
       </div>
     </nav>
   );
@@ -379,7 +425,7 @@ function DropSlot({
 function GroupSection({
   group,
   ydoc,
-  titles,
+  labels,
   selected,
   onSelect,
   dnd,
@@ -391,7 +437,8 @@ function GroupSection({
   group: SidebarGroup;
   /** The sidebar's Y.Doc, or null when there is no sidebar room to write to. */
   ydoc: Y.Doc | null;
-  titles: ReadonlyMap<string, string>;
+  /** What each pinned uuid is called, and whether it is archived. */
+  labels: ReadonlyMap<string, DirectoryEntry>;
   selected: string | null;
   onSelect: (uuid: string) => void;
   dnd: Dnd;
@@ -521,7 +568,7 @@ function GroupSection({
                   onDragEnd={dnd.end}
                   title={uuid}
                 >
-                  <PinLabel uuid={uuid} titles={titles} />
+                  <PinLabel uuid={uuid} labels={labels} />
                 </button>
               </li>
             </Fragment>
@@ -543,21 +590,36 @@ function GroupSection({
 }
 
 /**
- * What a pinned row is called.
+ * What a pinned row is called — the three states `get_sidebar` reports, in the
+ * same words.
  *
  * A uuid the directory has never mentioned is shown as itself rather than
  * dropped: the sidebar is somebody's curation, and silently hiding an entry
  * from it would be the one thing a curated list must not do. It resolves into
  * its title when the directory arrives.
+ *
+ * An archived document used to be drawn as that same stub (#287), which was a
+ * lie about a document the directory can describe perfectly well: the stub is
+ * there, tombstoned, with the title still in it. So the row keeps the title and
+ * marks it. Archiving is not unpinning — whether a pin should follow the
+ * document out of the listings is #210 — and the row stays live, because
+ * opening it read-only is where Restore is.
  */
 function PinLabel({
   uuid,
-  titles,
+  labels,
 }: {
   uuid: string;
-  titles: ReadonlyMap<string, string>;
+  labels: ReadonlyMap<string, DirectoryEntry>;
 }): ReactNode {
-  const title = titles.get(uuid);
-  if (title === undefined) return <span className="ub-muted">{uuid.slice(0, 8)}</span>;
-  return title === "" ? <em>Untitled</em> : title;
+  const entry = labels.get(uuid);
+  if (entry === undefined) return <span className="ub-muted">{uuid.slice(0, 8)}</span>;
+  const title = entry.title === "" ? <em>Untitled</em> : entry.title;
+  if (entry.deleted !== true) return title;
+  return (
+    <>
+      {title}
+      <span className="ub-muted">{" \u00b7 archived"}</span>
+    </>
+  );
 }

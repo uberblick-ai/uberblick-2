@@ -4,6 +4,34 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>uberblick</title>
+    <script>
+      /* The appearance choice, stamped before the parser reaches <body> (#74).
+       *
+       * It has to be here, blocking and inline. `src/ui/theme.ts` owns the
+       * attribute at runtime, but it arrives on a `type="module"` script, and
+       * those are deferred by definition: first paint happens long before it
+       * runs, so a reader who chose dark would watch the app paint light and
+       * then swap.
+       *
+       * Same key and shape as `src/settings.ts`, and no more trusting than it
+       * is: only the two explicit choices stamp anything. Everything else —
+       * "system", a missing key, an unparseable blob, storage that throws in a
+       * private window — leaves the attribute off, which is how "follow the
+       * system preference" is spelled (see `styles.css`).
+       *
+       * Pinned by `test/appearance-bootstrap.test.ts`, which runs *this* text
+       * rather than a copy of it. */
+      try {
+        const settings = JSON.parse(
+          localStorage.getItem("uberblick.settings.v1") || "{}",
+        );
+        if (settings.appearance === "light" || settings.appearance === "dark") {
+          document.documentElement.setAttribute("data-theme", settings.appearance);
+        }
+      } catch {
+        /* Unreadable storage: no stamp, so the system preference decides. */
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

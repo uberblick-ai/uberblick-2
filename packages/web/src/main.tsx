@@ -17,6 +17,7 @@
 import { createRoot } from "react-dom/client";
 import { resolveClientConfig } from "./config.js";
 import { App } from "./ui/App.js";
+import { applyStoredAppearance } from "./ui/theme.js";
 import "./ui/styles.css";
 // The app's own surfaces are the plain CSS above; this is the chrome
 // framework the vendored shadcn components need (#27). It is imported after,
@@ -32,5 +33,12 @@ if (!container) {
 // Memoised in config.ts, and it never rejects — the hook below joins this same
 // read rather than starting a second one.
 void resolveClientConfig();
+
+// Not the first-paint path — this module is deferred, and `index.html`'s
+// blocking snippet is what stamps the attribute before anything is painted
+// (#74). This is the runtime owner catching up with it: one read at startup, so
+// the module's view and the document agree from the first render, and the
+// attribute is still correct if that snippet never ran.
+applyStoredAppearance();
 
 createRoot(container).render(<App />);

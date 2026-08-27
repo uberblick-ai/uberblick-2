@@ -1,6 +1,10 @@
 /**
  * Awareness identity: a fun name and a colour, one per tab.
  *
+ * The colour is a *default*, not the last word: a reader who picks one in the
+ * user menu (#74) stores it, and `rooms.ts` publishes the stored one over this
+ * for every room. The name has no such override — nothing has asked for one.
+ *
  * Self-asserted for now. CLAUDE.md's hosted future derives identity from token
  * claims instead — which is why `AwarenessUser` is a value passed into the
  * provider rather than something the provider invents.
@@ -13,20 +17,25 @@
  * literal rather than a CSS token: the theme cannot reach inside the inline
  * styles the cursor plugin writes.
  *
- * Because the theme follows `prefers-color-scheme`, each colour has to work on
- * both grounds. All eight sit near luminance 0.18: ≥4.1:1 against the dark
+ * Because the app is painted in either scheme — the system's preference, or the
+ * appearance the reader chose — each colour has to work on both grounds. All eight sit near luminance 0.18: ≥4.1:1 against the dark
  * background, ≥4.1:1 against the light one, and ≥4.69:1 against the white
  * cursor-label text (`--cursor-label-foreground`).
+ *
+ * Named, because the presence picker (#74) draws them as swatches and a swatch
+ * needs a word for the reader who cannot see it. The names describe the hue and
+ * nothing else — they are labels, not identifiers, and nothing is stored by
+ * them.
  */
 const COLORS = [
-  "#e30c4e",
-  "#ac6008",
-  "#837401",
-  "#0c853d",
-  "#0e8085",
-  "#0675c9",
-  "#8c4bf7",
-  "#cb26b4",
+  { name: "crimson", hex: "#e30c4e" },
+  { name: "amber", hex: "#ac6008" },
+  { name: "olive", hex: "#837401" },
+  { name: "green", hex: "#0c853d" },
+  { name: "teal", hex: "#0e8085" },
+  { name: "blue", hex: "#0675c9" },
+  { name: "violet", hex: "#8c4bf7" },
+  { name: "magenta", hex: "#cb26b4" },
 ] as const;
 
 /**
@@ -67,6 +76,13 @@ export interface AwarenessUser {
   color: string;
 }
 
+/** One swatch on the presence picker: a hue, and what to call it. */
+export interface PresenceColor {
+  name: string;
+  /** 6-digit hex, `#rrggbb`. */
+  hex: string;
+}
+
 function pick<T>(values: readonly T[]): T {
   const index = Math.floor(Math.random() * values.length);
   // noUncheckedIndexedAccess: the index is always in range, but prove it.
@@ -77,8 +93,11 @@ function pick<T>(values: readonly T[]): T {
 export function randomIdentity(): AwarenessUser {
   return {
     name: `${pick(ADJECTIVES)} ${pick(NOUNS)}`,
-    color: pick(COLORS),
+    color: pick(COLORS).hex,
   };
 }
 
-export { COLORS as AWARENESS_COLORS, FALLBACK_COLOR as AWARENESS_FALLBACK_COLOR };
+export {
+  COLORS as AWARENESS_COLORS,
+  FALLBACK_COLOR as AWARENESS_FALLBACK_COLOR,
+};

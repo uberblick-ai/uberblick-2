@@ -36,8 +36,20 @@ import { IndexeddbPersistence } from "y-indexeddb";
 import * as Y from "yjs";
 import { parseRoom } from "@uberblick/schema";
 import { HUB_AUTH_TOKEN, hubUrl } from "../config.js";
+import { getSetting, subscribeSettings } from "../settings.js";
 import { mintToken } from "./token.js";
 import type { AwarenessUser } from "./identity.js";
+
+/**
+ * What this client publishes as its `client` awareness field (#74).
+ *
+ * Awareness has no "this is an agent" marker — an MCP session publishes the
+ * same `user` a browser tab does, and #73 is where a richer one would arrive.
+ * A web tab does know what a web tab looks like, though, so it says so: a
+ * remote session that does not claim to be one is an MCP session, which is
+ * what the user menu counts.
+ */
+export const WEB_CLIENT = "web";
 
 let socket: HocuspocusProviderWebsocket | null = null;
 
@@ -207,6 +219,8 @@ interface Entry {
   connection: RoomConnection;
   persistence: IndexeddbPersistence | null;
   listeners: Set<(status: RoomStatus) => void>;
+  /** Stop republishing this room's awareness colour — see `publishUser`. */
+  stopPreference: () => void;
   refs: number;
 }
 
@@ -231,7 +245,27 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // alone. This is silent when you get it wrong: the UI just reads "offline".
   provider.attach();
 
-  provider.setAwarenessField("user", identity);
+  /**
+   * Publish who is here: the tab's identity, with the browser's chosen presence
+   * colour over it (#74).
+   *
+   * Re-run whenever a setting changes, because the picker is the *menu*, not
+   * this module — and a colour peers only see after a reconnect is not a live
+   * presence colour. Compared before it is published: a settings write about
+   * something else must not put an awareness message on the wire per room.
+   */
+  let publishedColor = "";
+  const publishUser = (): void => {
+    const color = getSetting("presenceColor") ?? identity.color;
+    if (color === publishedColor) return;
+    publishedColor = color;
+    provider.setAwarenessField("user", { ...identity, color });
+  };
+  publishUser();
+  const stopPreference = subscribeSettings(publishUser);
+  // What kind of client this is, so remote sessions can be told apart — see
+  // `WEB_CLIENT`.
+  provider.setAwarenessField("client", WEB_CLIENT);
 
   // Seeded from the socket rather than defaulted to false. A room joined while
   // the shared socket is already connected gets no `status` event — the event
@@ -342,7 +376,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     whenLocalReplicaLoaded,
   };
 
-  return { connection, persistence, listeners, refs: 0 };
+  return { connection, persistence, listeners, stopPreference, refs: 0 };
 }
 
 /**
@@ -370,6 +404,7 @@ export function acquireRoom(
       if (held.refs > 0) return;
       entries.delete(room);
       held.listeners.clear();
+      held.stopPreference();
       // `destroy` closes the database through the same open promise, so on a
       // room whose database never opened it rejects. Nothing to repair — the
       // thing being closed was never there.

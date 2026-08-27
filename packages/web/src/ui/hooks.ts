@@ -21,7 +21,7 @@ import {
   readSidebar,
 } from "@uberblick/schema";
 import type { DirectoryEntry, DocMeta, SidebarGroup } from "@uberblick/schema";
-import { acquireRoom } from "../collab/rooms.js";
+import { acquireRoom, WEB_CLIENT } from "../collab/rooms.js";
 import type { RoomConnection, RoomStatus } from "../collab/rooms.js";
 import { resolveClientConfig } from "../config.js";
 import { getSetting, subscribeSettings } from "../settings.js";
@@ -119,8 +119,21 @@ export function useRoomStatus(connection: RoomConnection | null): RoomStatus {
   return status;
 }
 
-/** Directory entries, live. Discovery is a synced doc, so this is just an observer. */
-export function useDirectory(connection: RoomConnection | null): DirectoryEntry[] {
+/**
+ * Directory entries, live. Discovery is a synced doc, so this is just an
+ * observer.
+ *
+ * Tombstoned stubs are left out by default, because the listings this feeds are
+ * about the documents the workspace *has*. A reader that names documents by
+ * uuid rather than by listing them — the sidebar's pins — asks for them
+ * instead: it has to say what an archived pin is called, and a stub filtered
+ * out of the reading is a title it cannot see (#287). Entries carry `deleted`,
+ * so the two are told apart at the point of rendering.
+ */
+export function useDirectory(
+  connection: RoomConnection | null,
+  includeDeleted = false,
+): DirectoryEntry[] {
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   useEffect(() => {
     if (connection === null) {
@@ -129,11 +142,11 @@ export function useDirectory(connection: RoomConnection | null): DirectoryEntry[
     }
     const { ydoc } = connection;
     const map = getDirectoryMap(ydoc);
-    const read = (): void => setEntries(listDirectory(ydoc));
+    const read = (): void => setEntries(listDirectory(ydoc, { includeDeleted }));
     read();
     map.observe(read);
     return () => map.unobserve(read);
-  }, [connection]);
+  }, [connection, includeDeleted]);
   return entries;
 }
 
@@ -303,6 +316,57 @@ export function usePeers(connection: RoomConnection | null): Peer[] {
     return () => awareness.off("change", read);
   }, [connection]);
   return peers;
+}
+
+/**
+ * How many agent sessions are in this room right now (#74).
+ *
+ * Awareness has no "this is an agent" field — an MCP session publishes the same
+ * `user` a browser tab does — so the question is answered from the other side:
+ * this app marks its own sessions (`WEB_CLIENT`), and a remote session that
+ * does not claim to be a web client is an agent.
+ *
+ * **The boundary that classification buys, stated rather than hidden:** it is
+ * an *absence* test, so anything that predates the marker looks like an agent.
+ * Concretely, during a rollout a browser tab still running a bundle from before
+ * #267 is counted as an MCP connection until that tab reloads — for the length
+ * of one deploy, one workspace's count can read high. This is accepted as the
+ * price of keeping the change inside the web client: the positive marker
+ * belongs on the publishing side, and that is #73's `lastAction` awareness
+ * field, which is where a session will eventually say what it *is* instead of
+ * this inferring it from what it does not say. Nothing is ever counted that is
+ * not connected, and the miscount clears itself on reload.
+ *
+ * A state with no `user` is nobody: the MCP server's connectivity probe opens
+ * rooms with its awareness deliberately unset, and it must not read as a
+ * session (see `mcp-server/src/remote.ts`).
+ *
+ * The room to ask is the workspace's directory — every session joins it, agents
+ * included, whatever document it is working on.
+ */
+export function useAgentSessions(connection: RoomConnection | null): number {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    const awareness = connection?.provider.awareness ?? null;
+    if (awareness === null) {
+      setCount(0);
+      return;
+    }
+    const read = (): void => {
+      let agents = 0;
+      awareness.getStates().forEach((state, clientId) => {
+        if (clientId === awareness.clientID) return;
+        const fields = state as { user?: unknown; client?: unknown };
+        if (fields.user === undefined || fields.client === WEB_CLIENT) return;
+        agents += 1;
+      });
+      setCount((previous) => (previous === agents ? previous : agents));
+    };
+    read();
+    awareness.on("change", read);
+    return () => awareness.off("change", read);
+  }, [connection]);
+  return count;
 }
 
 /** Nobody else here. One frozen instance, so an empty room never re-renders. */

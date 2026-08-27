@@ -1,28 +1,29 @@
 ---
 name: next-issue
-description: One iteration of the implementation loop — observe GitHub, advance open PRs through the gates, dispatch Opus sub-agents for eligible issues per .github/ISSUE_SPEC.md. Designed to be driven by /loop (e.g. `/loop /next-issue`); a single manual invocation runs exactly one iteration.
+description: >-
+  One Claude coordinator iteration: advance open PRs through the gates, then
+  dispatch eligible issues through the agent-neutral AGENTS.md workflow.
+  Designed for /loop; one manual invocation runs one iteration.
 ---
 
 # next-issue — one iteration of the implementation loop
 
 You are the coordinator (CLAUDE.md orchestration policy): you observe, decide,
 validate, and merge — you never write feature code. All implementation happens
-in Opus sub-agents. The issue contract is `.github/ISSUE_SPEC.md`; read it
-before triaging — it is authoritative for the header grammar, labels, claim
-protocol, scheduling semantics, and lint. This file does not restate it.
+in an isolated implementer agent. Read `AGENTS.md` for the shared agent-neutral
+claim, implementation, review, and handoff workflow. Read
+`.github/ISSUE_SPEC.md` for issue grammar, labels, scheduling, and lint. This
+file contains only Claude coordinator machinery and does not restate either.
 
 ## Hard rules
 
-- Dispatch implementation to Opus sub-agents: `model: opus`,
-  `isolation: worktree`. Never edit feature code in the main checkout — it may
-  hold the user's uncommitted work; worktrees only.
+- Apply `AGENTS.md` to every implementer lane and external review. The
+  coordinator owns validation and rulings, not feature code.
 - The coordinator's own repo edits (skill or docs changes, commits) happen in
   the coordinator's own worktree too (EnterWorktree), never in the shared
   checkout — multiple sessions share it and it may sit on any branch. Even
-  small doc/skill edits are dispatched to Opus sub-agents; the coordinator
+  small doc/skill edits are dispatched to an implementer agent; the coordinator
   briefs, validates, and merges.
-- Never commit to `main`. Code reaches `main` only through a PR that passed
-  every gate.
 - Bounce nonconforming input per the spec's lint; never fill gaps by guessing.
 - Escalate genuine product decisions via the spec's `needs-decision` path
   (comment with concrete options + your recommendation), notify the user
@@ -43,8 +44,8 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    invocation loaded its instructions before the pull, so a protocol change
    on `main` governs from the next invocation onward.
    Then `gh issue list --state open`, `gh pr list --state open`, and
-   for each open PR its checks and reviews. Reconcile claims: apply the spec's
-   stale-claim recovery rule.
+   for each open PR its checks and reviews. Reconcile claims using the stale
+   predicate in `AGENTS.md`.
 
 2. **Advance open PRs first** — an open PR is closer to value than a new
    dispatch, and this includes PRs that predate the loop. For each, drive the
@@ -91,6 +92,12 @@ protocol, scheduling semantics, and lint. This file does not restate it.
      the same: be critical, and hunt specifically for overtesting and
      overengineering per this repo's principles (KISS/YAGNI, least code wins,
      tests defend contracts and invariants — not implementation trivia).
+   **Re-read before ruling.** Immediately before any ruling — a triage
+   disposition, an acceptance validation, a tier call, a merge — re-read the
+   linked issue thread and the PR thread (`gh issue view <n> --comments`,
+   `gh pr view <n> --comments`). Owner decisions and coordinator notes land
+   there mid-flight; a ruling made from session memory can contradict one that
+   was written down while you were elsewhere.
    **Finding triage — before any fix-up brief.** A finding is not
    automatically a work item; every finding is triaged explicitly against
    the supported usage model (single user, local-first, one hub, parallel
@@ -226,39 +233,34 @@ protocol, scheduling semantics, and lint. This file does not restate it.
    work in flight — claimed issues plus unmerged PRs — at 6: the bottleneck is
    the gates, not implementation.
 
-6. **Dispatch.** For each issue to start: add `in-progress`, comment
-   `Claimed: feat/<slug>` (or `fix/`). **Announce the work to the user** in
-   your visible output: one or two plain sentences on what the issue is and
-   why it's next, plus the direct GitHub URL (from
-   `gh issue view <n> --json url`). Then spawn an Opus sub-agent whose brief
-   is decision-complete but pulled, not pushed: pass the full issue body and
-   the applicable CLAUDE.md invariants, and instruct the agent to START by
-   reading the product docs its Pointers cite through the uberblick MCP tools
-   — `get_doc` on each cited uuid, `search` for what the issue did not
-   anticipate — before any implementation or repository changes. You inline
-   only what those tools cannot serve: PR diffs, review threads, decisions
-   taken in this session. Excerpts you paste start aging the moment you paste
-   them; the live doc does not. Where this session has the uberblick MCP
-   server registered as tools the sub-agent inherits it; where it does not,
-   the agent reaches the same tools through a throwaway stdio client script
-   spawning the command recorded in `.mcp.json`, the pattern #77 and #134
-   use; that script is a temporary file in a scratch directory outside the
-   committed worktree, never part of the diff. The brief says which of the
-   two applies.
-   Then the contract: branch from fresh `main`, implement, `mise run test` +
-   `mise run typecheck` green, push, open a PR with `Closes #N` and a body
-   stating what changed and how it was verified; and any live doc the agent
-   finds contradicting the code it read is named as a discrepancy in that PR
-   body — the read side of the dogfooding contract, mirroring the post-merge
-   doc update. Until #130 lands, the brief also asks the agent to close its
-   report with an uberblick-usage summary: MCP used or not, which docs by
-   title and uuid, helpful yes/no and one line why. Sub-agents never merge.
+6. **Dispatch.** For each issue to start, follow `AGENTS.md` for the claim,
+   implementer brief, worktree, validation, PR, handoff, and notification
+   contract. **Announce the work to the user** in your visible output: one or
+   two plain sentences on what the issue is and why it is next, plus the direct
+   GitHub URL (from `gh issue view <n> --json url`).
+
+   The brief instructs the implementer to read `AGENTS.md` first, before any
+   repository change. Prompt the implementer named by the claim: spawn an
+   Opus sub-agent (`model: opus`, `isolation: worktree`) by default, or use
+   the Herdr skill to dispatch a Codex session with the issue URL. The brief is decision-complete
+   but pulled, not pushed: pass the full issue body and applicable CLAUDE.md
+   invariants, and instruct the agent to start by reading the product docs its
+   Pointers cite through the uberblick MCP tools — `get_doc` on each cited
+   uuid, `search` for what the issue did not anticipate — before repository
+   changes. Inline only what those tools cannot serve: PR diffs, review
+   threads, and decisions taken in this session. Where the MCP server is not
+   registered, use the throwaway stdio-client pattern from #77 and #134 in a
+   scratch directory outside the committed worktree. The brief states which
+   route applies.
+
+   Any live doc that contradicts the code is named in the PR body — the read
+   side of the dogfooding contract, mirroring the post-merge doc update. Until
+   #130 lands, ask for an uberblick-usage summary: MCP used or not, docs read
+   by title and uuid, helpful yes/no, and one line why.
+
    Several individually-trivial issues with the same `Touches` set may go to
-   one agent as one batch: claim each issue separately, brief all their
-   bodies, and have the single PR close them all (`Closes #a, #b`) with a
-   combined diff reviewable in one sitting and a merge report checking each
-   issue's acceptance criteria — every condition of the spec's sizing
-   exception.
+   one agent only under the sizing exception in `.github/ISSUE_SPEC.md`; claim
+   each separately and validate every issue independently.
 
 7. **Report.** End with a short status a human can skim: PRs advanced (which
    gate), issues dispatched / bounced / parked, what the loop is waiting on.

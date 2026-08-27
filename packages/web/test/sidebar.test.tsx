@@ -30,8 +30,10 @@ import {
   appendBlock,
   pinDoc,
   readSidebar,
+  restoreDirectoryEntry,
   roomForDoc,
   sidebarRoom,
+  tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { SidebarGroup } from "@uberblick/schema";
@@ -427,5 +429,39 @@ describe("the sidebar is the _sidebar document", () => {
     }
     const again = await openApp(`/${WORKSPACE}`);
     expect(groupToggle(again, 0)?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("names an archived pin instead of showing its uuid, and takes it back", async () => {
+    const directory = seedDirectory();
+    const sidebar = sidebarDoc();
+    const reading = createGroup(sidebar, "Reading");
+    pinDoc(sidebar, reading, ONE);
+    pinDoc(sidebar, reading, TWO);
+    // The pair an agent works over: `archive_doc` tombstones the directory
+    // stub, `get_sidebar` reads that stub through the pins.
+    const directoryPeer = peerOf(directory);
+    const sidebarPeer = peerOf(sidebar);
+
+    const host = await openApp(`/${WORKSPACE}`);
+    expect(rowTitles(host, 0)).toEqual(["Overview", "Editing"]);
+
+    // ---- archived elsewhere: the tombstone arrives over the wire ----
+    act(() => {
+      tombstoneDirectoryEntry(directoryPeer, ONE);
+    });
+    // The title the stub still carries, marked — never the eight characters of
+    // uuid this used to fall back to (#287).
+    expect(rowTitles(host, 0)).toEqual(["Overview \u00b7 archived", "Editing"]);
+    expect(host.querySelector(".ub-list")?.textContent ?? "").not.toContain(
+      ONE.slice(0, 8),
+    );
+    // The pin is untouched: archiving is not unpinning (#210).
+    expect(stored(sidebarPeer)).toEqual([["Reading", [ONE, TWO]]]);
+
+    // ---- restored: the ordinary row, in its place ----
+    act(() => {
+      restoreDirectoryEntry(directoryPeer, ONE);
+    });
+    expect(rowTitles(host, 0)).toEqual(["Overview", "Editing"]);
   });
 });

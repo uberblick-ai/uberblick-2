@@ -2,9 +2,9 @@
  *
  * The product's surfaces — editor, sidebar, reading layout — are plain CSS and
  * stay that way (`styles.css`). Tailwind is here for one job: to let us vendor
- * shadcn/ui components (`ui/shadcn/`) over Radix primitives, so the menus,
- * popovers and dialogs the design needs are standard mature open source rather
- * than hand-built. Coexistence, not a rewrite.
+ * shadcn/ui components (`ui/shadcn/`) over Radix primitives, so the menus and
+ * popovers the design needs are standard mature open source rather than
+ * hand-built. Coexistence, not a rewrite.
  *
  * Three things make that coexistence safe, and each is load-bearing:
  *
@@ -27,8 +27,10 @@
  *    exist in `styles.css` (they were kept shadcn-canonical in #34 for exactly
  *    this). It *defines* nothing: every value on the right-hand side is a
  *    `var()` at an existing token. Light and dark therefore come for free —
- *    `styles.css` flips those properties under `prefers-color-scheme`, and the
- *    components re-resolve with them.
+ *    each of those properties is a `light-dark()` naming both of its values,
+ *    picked between by `color-scheme` (the system's preference, or the
+ *    appearance choice `styles.css` stamps as `data-theme`), and the components
+ *    re-resolve with them.
  *
  * Not everything can go through `@theme`, and the exceptions are deliberate:
  *
@@ -90,14 +92,11 @@
      are. `data-slot` is on every shadcn v4 element, so this reaches them and
      nothing else: a portalled menu is a sibling of `.ub-app`, not a child, and
      no `.ub-*` rule can style it.
-     - `font: inherit` because a <button> does not inherit type from its
-       ancestors, and every trigger is one.
-     - `margin: 0` because a dialog's title is an <h2> and its description a
-       <p>, and the UA margins on those are prose margins. */
+     `font: inherit` because a <button> does not inherit type from its
+     ancestors, and every trigger is one. */
   [data-slot] {
     box-sizing: border-box;
     font: inherit;
-    margin: 0;
   }
 
   /* And the button reset, for the same reason: a trigger or a close control

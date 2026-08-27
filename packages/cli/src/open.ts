@@ -60,6 +60,7 @@ import type { Hub } from "@uberblick/hub";
 import { createHub, resolveHubConfig } from "@uberblick/hub";
 import { DEFAULT_HUB_URL, resolveMcpConfig } from "@uberblick/mcp-server";
 import { resolveConfig } from "./config.js";
+import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import {
@@ -389,9 +390,10 @@ interface HubDecision {
  * wildcards `0.0.0.0` and `::` — those are addresses to *listen* on, and a hub
  * bound to one is on every interface. The hub's only credential is a single
  * shared signing secret, so that would hand the whole network a hub which
- * trusts anyone holding it. `HUB_HOST=0.0.0.0 mise run hub` is the deliberate
- * opt-in and `ub open` is not it. Probing such an endpoint for a hub somebody
- * else started stays fine: this governs only what this command starts.
+ * trusts anyone holding it. Offering a hub beyond this machine is the remote
+ * deployment's job (`ub remote init`, REMOTE.md), and `ub open` is not it.
+ * Probing such an endpoint for a hub somebody else started stays fine: this
+ * governs only what this command starts.
  *
  * **A literal, or one of two exact names — never a prefix.** `/^127\./` also
  * matches the *DNS name* `127.attacker.example`, whose resolution somebody else
@@ -442,8 +444,9 @@ function whyNotStartable(hubUrl: string, parsed: URL): string | null {
     return (
       `${preamble}\`ub open\` binds loopback only, and ${host} is not a loopback ` +
       "address. A hub's only credential is one shared signing secret, so binding " +
-      "it there would offer that hub to every interface — `HUB_HOST=… mise run " +
-      "hub` is the deliberate way to do that on purpose"
+      "it there would offer that hub to every interface — reaching a hub from " +
+      "another machine is the remote deployment's job (`ub remote init`, and " +
+      "REMOTE.md)"
     );
   }
   return null;
@@ -607,17 +610,18 @@ function openBrowser(url: string, env: NodeJS.ProcessEnv, io: Io): void {
 interface Options {
   port: number;
   browser: boolean;
-  help: boolean;
 }
+
+/** Exported so the help above can be checked against the parser it describes. */
+export const OPEN_OPTIONS = {
+  browser: { type: "boolean" },
+  port: { type: "string" },
+} as const;
 
 function parseOptions(argv: string[]): Options {
   const { values, positionals } = parseArgs({
     args: argv,
-    options: {
-      browser: { type: "boolean" },
-      port: { type: "string" },
-      help: { type: "boolean", short: "h" },
-    },
+    options: OPEN_OPTIONS,
     allowNegative: true,
     allowPositionals: true,
   });
@@ -632,7 +636,7 @@ function parseOptions(argv: string[]): Options {
       throw new Error(`--port must be an integer in 1..65535, got ${JSON.stringify(raw)}`);
     }
   }
-  return { port, browser: values.browser ?? true, help: values.help ?? false };
+  return { port, browser: values.browser ?? true };
 }
 
 /** What this command started, and is therefore responsible for stopping. */
@@ -709,16 +713,14 @@ export async function openCommand(
   argv: string[],
   io: Io = processIo,
 ): Promise<number> {
+  if (takeHelp(argv, io, OPEN_HELP)) return 0;
+
   let options: Options;
   try {
     options = parseOptions(argv);
   } catch (error) {
     io.err(`ub open: ${message(error)}\n\n${OPEN_HELP}`);
     return 2;
-  }
-  if (options.help) {
-    io.out(OPEN_HELP);
-    return 0;
   }
 
   const resolved = resolveConfig();
@@ -745,8 +747,8 @@ export async function openCommand(
         : null;
   if (missing !== null) {
     io.err(
-      `ub open: ${missing}. Build one with \`mise run build-web\` in a checkout, ` +
-        "or point UBERBLICK_WEB_DIST at a bundle.\n",
+      `ub open: ${missing}. Point UBERBLICK_WEB_DIST at a built bundle, or ` +
+        "build one from a checkout — the README says how.\n",
     );
     return await foreground.shutdown(1);
   }
