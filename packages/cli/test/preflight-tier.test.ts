@@ -25,13 +25,29 @@ const SKILL_DIR = join(REPO_ROOT, ".claude", "skills", "next-issue");
 const MODULE_PATH = join(SKILL_DIR, "preflight-tier.mjs");
 
 /**
- * The immutable review image is built from `main`'s `.dockerignore`, which
- * excluded `.claude` outright until this branch un-ignored `.claude/skills/**`
- * — and a `.dockerignore` change only takes effect once it is on `main`. So the
- * suite skips loudly where the skill is absent instead of failing there. CI and
- * every worktree run on a full checkout, which is where the table is defended.
+ * Two checkouts, two behaviors — and the difference matters, because a skip is
+ * a drift guard switched off.
+ *
+ * The immutable review image is source-only: the runner archives the tree, and
+ * `main`'s `.dockerignore` drops `.git` along with `.claude`. There the skill
+ * genuinely is not there and cannot be, so the suite skips loudly rather than
+ * reddening a gate it has no way to pass. (This branch un-ignores
+ * `.claude/skills/**`, but a `.dockerignore` only takes effect from `main`, so
+ * the skip is still needed for one review cycle.)
+ *
+ * Anywhere with a `.git` at the root — CI, a worktree, a contributor's clone —
+ * a missing skill directory means the fixture has come apart, and skipping
+ * would silently drop the guard exactly when something moved. So: fail, by
+ * name, before a single test is collected.
  */
 const PRESENT = existsSync(MODULE_PATH);
+const SOURCE_ONLY = !existsSync(join(REPO_ROOT, ".git"));
+
+if (!PRESENT && !SOURCE_ONLY) {
+  throw new Error(
+    `${MODULE_PATH} is missing from a checkout that has a .git, so the preflight drift guard cannot run. Only the source-only Docker review image may skip this suite — if the skill moved, move this test with it.`,
+  );
+}
 
 // A runtime path, so tsc leaves the untyped `.mjs` alone and the test loads it
 // exactly where a coordinator reading the skill would find it.
@@ -89,7 +105,7 @@ const describeTable = describe.skipIf(!PRESENT);
 describeTable(
   PRESENT
     ? "the skill's tables and the module's tables are the same tables"
-    : "the preflight table (SKIPPED: .claude/skills/next-issue is not in this checkout)",
+    : "the preflight table (SKIPPED: source-only checkout — the Docker review image carries no .claude/skills)",
   () => {
     it("routes every documented row of the tier table", () => {
       const rows = markdownTable("| Materiality |", "| Tier |", "| Challengers |");
