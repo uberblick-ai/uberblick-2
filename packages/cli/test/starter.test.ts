@@ -119,7 +119,7 @@ function workspace(target: Sandbox = box): string {
  * and hands it back to be read with the same schema functions every client
  * uses. That is the state a first-ever web client would sync down, which is
  * exactly what `ub init` has to have written by the time it returns — and it is
- * the only reading that cannot be flattered by a server's own repairs.
+ * the only reading that cannot be flattered by a later server's repairs.
  */
 function replayRoom(
   roomOf: (workspaceId: string) => string,
@@ -232,10 +232,13 @@ it("seeds exactly the two starter documents, with their uuids, tags and links", 
 });
 
 it("describes both starter documents, in the document and in the stub", () => {
-  // Read from the log with no MCP server ever constructed against this
-  // workspace, for the same reason the sidebar is: a server observing the
-  // documents repairs their stubs, so a stub the seed forgot to describe would
-  // read as described anyway. `ub init` has to have written both.
+  // What this pins is the observable contract: from the log alone, both
+  // documents and both stubs are described by the time `ub init` returns.
+  // It does not pin which writer put the description in the stub — the seed's
+  // own `upsertDirectoryEntry` and `Replicas.repairStub`, which reconciles a
+  // stub from `meta.description`, both run inside that one process, and this
+  // assertion cannot tell them apart. Reading from the log keeps a *later*
+  // server's repair out of it, which is why no MCP server is constructed here.
   const directory = replayRoom(directoryRoom);
   for (const template of TEMPLATES) {
     const doc = replayRoom((id) => roomForDoc(id, template.uuid));
