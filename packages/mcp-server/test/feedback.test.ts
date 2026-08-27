@@ -409,8 +409,15 @@ describe("feedback_report", () => {
         agent: "burst",
       });
     }
-    await waitUntil("the burst to reach this replica", () =>
-      getFeedbackEvents(feedback).length > 500,
+    // The whole burst, not merely enough of it to cross the limit: the 300
+    // arrive as a stream of updates, and a loaded machine can deliver them in
+    // pieces. Waiting for `> 500` returns on a partial arrival — the report
+    // below then counts only the sessions that had landed (590, say, not 600),
+    // which is the whole of this test's flake. Nothing folds while we wait:
+    // compaction runs on the settle a tool call pays, and there is none until
+    // the report.
+    await waitUntil("the whole burst to reach this replica", () =>
+      getFeedbackEvents(feedback).length >= 600,
     );
 
     // A read is enough: compaction runs on the settle every tool call pays.
