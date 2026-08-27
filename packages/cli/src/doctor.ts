@@ -35,7 +35,10 @@
 import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
-import { CLOCK_SKEW_SECONDS } from "@uberblick/hub/token";
+import {
+  CLOCK_SKEW_SECONDS,
+  MAX_TOKEN_LIFETIME_SECONDS,
+} from "@uberblick/hub/token";
 import type { StoragePaths } from "@uberblick/hub/storage";
 import {
   AmbiguousStorageError,
@@ -308,13 +311,13 @@ async function hubCheck(
     return pass("hub", `${config.hubUrl} answered and served the directory room`);
   }
   if (status === "auth-failed") {
-    // Two causes, one refusal: the hub collapses every auth failure to one
-    // reason on the wire. The second cause is the newer one and the easier to
-    // misdiagnose — rotating a correct secret fixes nothing.
+    // Unambiguous here, unlike the same refusal seen by a long-running client:
+    // this probe minted its token seconds ago, in this process, in the current
+    // format. What is left is the secret.
     return fail(
       "hub",
-      `${config.hubUrl} refused the token`,
-      "give the hub and this machine the same secret — `ub status` says which layer this one came from — or this `ub mcp serve` / web bundle predates the current token format: restart the server, redeploy the bundle",
+      `${config.hubUrl} refused the signing secret`,
+      "give the hub and this machine the same secret — `ub status` says which layer this one came from",
     );
   }
   if (status === "unsettled") {
@@ -347,12 +350,19 @@ async function hubCheck(
  * indistinguishable "invalid token". Naming the real cause is the only reason
  * this check exists.
  *
+ * **Two thresholds, because the two directions break differently.** A machine
+ * running fast trips `iat > now + CLOCK_SKEW_SECONDS`, which is 60 s. A machine
+ * running slow mints a token that is *already expired* when the hub reads it —
+ * `now > exp` — and since a room token is minted for
+ * {@link MAX_TOKEN_LIFETIME_SECONDS}, that is 900 s of room before it breaks.
+ * Neither bound is this command's invention; both are the clamp's, read from
+ * the same constants the hub applies.
+ *
  * It needs no credential: the reading comes from the `Date` header of an
  * unauthenticated GET, so it answers even on a machine that has never been
  * provisioned. A hub that does not answer is a skip, not a failure — the hub
  * check above is what reports an unreachable hub, and saying so twice would
- * only bury it. A machine running *behind* the hub is reported and passes:
- * nothing refuses that direction.
+ * only bury it.
  */
 async function clockCheck(config: McpConfig | null): Promise<Check> {
   if (config === null) {
@@ -365,25 +375,29 @@ async function clockCheck(config: McpConfig | null): Promise<Check> {
       `${config.hubUrl} answered no HTTP date, so the clocks were not compared`,
     );
   }
-  // The probe reports how far the hub reads ahead of us; the clamp cares about
-  // the other direction, so flip it once, here.
+  // The probe reports how far the hub reads ahead of us; both bounds below are
+  // stated from this machine's side, so flip it once, here.
   const ahead = -skew;
   const measured =
     ahead === 0
       ? `in step with ${config.hubUrl}`
       : `${Math.abs(ahead)}s ${ahead > 0 ? "ahead of" : "behind"} ${config.hubUrl}`;
 
-  // Asymmetric on purpose: the hub refuses a token whose `iat` is ahead of its
-  // own clock, and nothing refuses one that is behind. A machine running slow
-  // is worth reporting and is not a failure.
-  if (ahead <= CLOCK_SKEW_SECONDS) {
+  // Asymmetric because the two failures are different ones: running fast trips
+  // the 60s issued-in-the-future bound, running slow mints a token that has
+  // already expired, which takes a whole token lifetime to reach.
+  const limit = ahead > 0 ? CLOCK_SKEW_SECONDS : MAX_TOKEN_LIFETIME_SECONDS;
+  if (Math.abs(ahead) <= limit) {
     return pass("clock", `this machine's clock is ${measured}`);
   }
+  const rule =
+    ahead > 0
+      ? `more than the ${CLOCK_SKEW_SECONDS}s the hub tolerates ahead of its own`
+      : `more than the ${MAX_TOKEN_LIFETIME_SECONDS}s a token lives, so this machine mints tokens that have already expired`;
   return fail(
     "clock",
-    `this machine's clock is ${measured}, more than the ${CLOCK_SKEW_SECONDS}s ` +
-      "the hub tolerates ahead of its own",
-    "synchronise this machine's clock — every token carries an expiry, and the hub refuses one issued too far ahead of its own time (`sudo timedatectl set-ntp true` on Linux, System Settings > General > Date & Time on macOS). The reading is an HTTP `Date` header, so a reverse proxy in front of the hub is whose clock this compares against",
+    `this machine's clock is ${measured}, ${rule}`,
+    "synchronise this machine's clock — every token carries an expiry, and the hub refuses one issued ahead of its own time or already past it (`sudo timedatectl set-ntp true` on Linux, System Settings > General > Date & Time on macOS). The reading is an HTTP `Date` header, so a reverse proxy in front of the hub is whose clock this compares against",
   );
 }
 

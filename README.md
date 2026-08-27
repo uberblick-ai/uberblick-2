@@ -133,6 +133,12 @@ there.
 because `depends` on two long-running tasks serializes under `MISE_JOBS=1` and
 the web server would never start.
 
+**After pulling a change to the token format, restart what is already running.**
+Hub tokens gained `typ`, `kid` and `exp`, and there is no compatibility branch:
+a client from before that change mints a token the hub refuses, and the refusal
+reads as an ordinary auth failure. Restart any long-running `ub mcp serve` and
+redeploy the web bundle — a browser tab holds the old bundle until it does.
+
 ## The MCP server, as a client sees it
 
 `ub mcp install [target]` wires uberblick into an MCP client, so nobody has to
