@@ -180,11 +180,17 @@ export const CLIENT_NAME = "uberblick-tests";
  * Start a server and an MCP client joined by an in-memory transport pair.
  *
  * `store` is injectable so a suite can drive persistence failures through the
- * real code path rather than around it.
+ * real code path rather than around it, and `clientInfo` so a suite can say
+ * what the client calls itself at `initialize` — which is where the awareness
+ * name comes from.
  */
 export async function startServer(
   config: McpConfig = testConfig(),
   store?: MirrorStore,
+  clientInfo: { name: string; title?: string; version: string } = {
+    name: CLIENT_NAME,
+    version: "0.0.0",
+  },
 ): Promise<Rig> {
   const instance =
     store === undefined
@@ -193,7 +199,7 @@ export async function startServer(
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
 
-  const client = new Client({ name: CLIENT_NAME, version: "0.0.0" });
+  const client = new Client(clientInfo);
   await Promise.all([
     instance.connect(serverTransport),
     client.connect(clientTransport),
@@ -222,7 +228,7 @@ export async function startServer(
     instance,
     client,
     config,
-    clientName: CLIENT_NAME,
+    clientName: clientInfo.name,
     call,
     async ok(name, args) {
       const result = await call(name, args);

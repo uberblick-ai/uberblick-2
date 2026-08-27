@@ -23,6 +23,26 @@ import { seedSidebarOnce } from "./sidebar-tools.js";
 import { MirrorStore } from "./store.js";
 import { registerTools } from "./tools.js";
 
+/**
+ * The name to publish beside this session's caret, from what the client said
+ * about itself at `initialize`.
+ *
+ * Precedence, and why (#304): `title` is the human-readable name of *this
+ * session* — "Uberblick Coordinator Agent" — and is what a reader wants over
+ * the caret; `name` is the client or executable behind it — "Codex",
+ * "claude-code" — which still says who wrote. `agent` is a defensive last
+ * resort: a protocol-compliant client always sends `name`.
+ *
+ * Blank is not an answer. A client that sends `title: ""` (or spaces) has said
+ * nothing, and falling through to its name is the difference between a labelled
+ * caret and a bare line over somebody's prose.
+ */
+export function agentDisplayName(
+  client: { name?: string | undefined; title?: string | undefined } | undefined,
+): string {
+  return client?.title?.trim() || client?.name?.trim() || "agent";
+}
+
 export interface UberblickMcpServer {
   readonly server: McpServer;
   readonly replicas: Replicas;
@@ -58,10 +78,10 @@ export function createMcpServer(
   // Awareness identity: the web UI renders this name over the agent's cursor
   // and it becomes the default annotation author, so it must say which client
   // is actually writing — Claude Code, Codex, or anything else that speaks MCP.
-  // The client tells us at `initialize`; we do not guess a vendor.
+  // The client tells us at `initialize`; we do not guess a vendor. See
+  // {@link agentDisplayName} for which of the two fields wins.
   server.server.oninitialized = () => {
-    const client = server.server.getClientVersion();
-    replicas.setAgentName(client?.title ?? client?.name ?? "agent");
+    replicas.setAgentName(agentDisplayName(server.server.getClientVersion()));
   };
 
   registerTools(server, replicas);
