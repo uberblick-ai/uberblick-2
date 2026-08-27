@@ -24,8 +24,11 @@
  * **A database another process has open is a refusal, not a race.** Each source
  * is opened in `locking_mode = EXCLUSIVE` with no busy timeout before it is
  * copied: a hub, an MCP client or the web app holding it open makes that fail,
- * and the run stops naming the file. That lock is also what makes the copy
- * provably free of a concurrent writer.
+ * and the run stops naming the file. Every one of those locks is then **held
+ * until the new root has been published**, so a database this run has already
+ * copied cannot be written to while the rest are still being copied — a commit
+ * landing in that window would otherwise be stranded in a root nothing reads
+ * the moment the rename makes the copies live.
  *
  * **The checks that can refuse a source run read-only, first.** Closing a
  * read-write connection to a database whose last writer crashed makes SQLite
@@ -316,6 +319,16 @@ export function planMigration(options: MigrateOptions = {}): MigrationPlan {
   } catch (thrown) {
     if (!(thrown instanceof AmbiguousStorageError)) {
       throw thrown;
+    }
+    // A destination that records a migration but has lost part of it gets the
+    // refusal that names the files, not the generic one about two roots: the
+    // thing to do about it is completely different, and only one of the two
+    // messages says which files went missing.
+    if (thrown.missing.length > 0) {
+      return refusedPlan(to, {
+        reason: `${to} records a completed migration but no longer holds ${thrown.missing.length === 1 ? "a file" : "files"} it recorded: ${thrown.missing.join(", ")}`,
+        remedy: thrown.remedy,
+      });
     }
     return refusedPlan(to, {
       reason: `${to} already holds uberblick files, and so do ${thrown.legacyConfigDir} and ${thrown.legacyDataDir}`,
@@ -743,28 +756,29 @@ function inspectSource(copy: PlannedCopy): string | null {
 async function stageDatabase(
   copy: PlannedCopy,
   destination: string,
+  locked: DatabaseSync[],
 ): Promise<{ bytes: number }> {
   const claim = inspectSource(copy);
 
   const source = openExclusively(copy.source);
-  let counts: Record<string, number>;
+  // Registered before anything that can throw, and deliberately *not* closed
+  // here: the caller holds every source's lock until the whole root has been
+  // published. See {@link runMigration}. Pushing first is what keeps a failure
+  // below from leaking a connection nobody can close.
+  locked.push(source);
+  const counts = refusing(copy.source, () => tableCounts(source));
+  // A timer of our own for as long as the copy runs — see BACKUP_WAKE_MS.
+  const wake = setInterval(() => {}, BACKUP_WAKE_MS);
+  wake.unref();
   try {
-    counts = refusing(copy.source, () => tableCounts(source));
-    // A timer of our own for as long as the copy runs — see BACKUP_WAKE_MS.
-    const wake = setInterval(() => {}, BACKUP_WAKE_MS);
-    wake.unref();
-    try {
-      await backup(source, destination);
-    } catch (error) {
-      throw new Refused(
-        `copying ${copy.source} failed: ${message(error)}`,
-        "nothing was published and the original is untouched",
-      );
-    } finally {
-      clearInterval(wake);
-    }
+    await backup(source, destination);
+  } catch (error) {
+    throw new Refused(
+      `copying ${copy.source} failed: ${message(error)}`,
+      "nothing was published and the original is untouched",
+    );
   } finally {
-    source.close();
+    clearInterval(wake);
   }
 
   // The backup API creates the file at the umask; it is inside a 0700 staging
@@ -844,12 +858,23 @@ export async function runMigration(
   );
   createDataDirectory(staging);
   const files: MigrationReceipt["files"] = [];
+  // Every source database's exclusive lock, held from its own copy until the
+  // whole root is published.
+  //
+  // Releasing each one after its own backup would leave a window with teeth:
+  // while the *later* files are still being copied, a client could open a
+  // legacy database this run had already copied and commit to it, and the
+  // publication would then make a stale copy live while those commits sat in a
+  // root nothing reads any more. Held to the end, the only thing such a client
+  // can do is fail to open the file — which is the honest answer, because the
+  // migration really is using it.
+  const locked: DatabaseSync[] = [];
   try {
     for (const copy of plan.copies) {
       const destination = join(staging, copy.target);
       createDataDirectory(dirname(destination));
       const written = copy.database
-        ? await stageDatabase(copy, destination)
+        ? await stageDatabase(copy, destination, locked)
         : stageFile(copy.source, destination);
       files.push({
         kind: copy.kind,
@@ -874,6 +899,13 @@ export async function runMigration(
       return { ...base, state: "refused", refusals: [error.refusal] };
     }
     throw error;
+  } finally {
+    // After the publication, or after the refusal that cancelled it. Not
+    // before: the whole point is that no source is writable while a copy of it
+    // is waiting to become the live one.
+    for (const source of locked) {
+      source.close();
+    }
   }
 
   return { ...base, migrated: files };

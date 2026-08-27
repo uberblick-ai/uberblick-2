@@ -352,25 +352,43 @@ export class AmbiguousStorageError extends Error {
   readonly macRoot: string;
   readonly legacyConfigDir: string;
   readonly legacyDataDir: string;
+  /**
+   * Files a receipt in the Mac root recorded that are not there any more, when
+   * that is *why* this was thrown. Empty for the ordinary two-roots case.
+   */
+  readonly missing: string[];
   /** The line `ub doctor` prints under the failed check. */
   readonly remedy: string;
 
-  constructor(mac: StoragePaths, legacy: StoragePaths) {
+  constructor(mac: StoragePaths, legacy: StoragePaths, missing: string[] = []) {
     super(
-      `refusing to guess where uberblick's files are: ${mac.configDir} and the ` +
-        `legacy ${legacy.configDir} / ${legacy.dataDir} both hold state — run ` +
-        "`ub doctor`, which names both roots and the way out",
+      missing.length > 0
+        ? `refusing to guess where uberblick's files are: ${mac.configDir} ` +
+          "records a completed migration but no longer holds " +
+          `${missing.length} of the files it recorded (${missing.join(", ")}), ` +
+          `and the originals are still in ${legacy.configDir} / ` +
+          `${legacy.dataDir} — run \`ub doctor\`, which names both roots and ` +
+          "the way out"
+        : `refusing to guess where uberblick's files are: ${mac.configDir} and the ` +
+          `legacy ${legacy.configDir} / ${legacy.dataDir} both hold state — run ` +
+          "`ub doctor`, which names both roots and the way out",
     );
     this.name = "AmbiguousStorageError";
     this.macRoot = mac.configDir;
     this.legacyConfigDir = legacy.configDir;
     this.legacyDataDir = legacy.dataDir;
+    this.missing = missing;
     this.remedy =
-      `keep one: move what you want to keep into ${mac.configDir} and remove ` +
-      "the rest — or empty that root, and `ub storage migrate` will fill it " +
-      "from the legacy pair, which it never does over files already there. " +
-      "Setting XDG_CONFIG_HOME and XDG_DATA_HOME pins the legacy pair " +
-      "explicitly";
+      missing.length > 0
+        ? `put the missing files back under ${mac.configDir}, or remove that ` +
+          "root entirely and run `ub storage migrate` again — the originals " +
+          `it copied from are still in ${legacy.configDir} and ` +
+          `${legacy.dataDir}, so nothing has been lost`
+        : `keep one: move what you want to keep into ${mac.configDir} and remove ` +
+          "the rest — or empty that root, and `ub storage migrate` will fill it " +
+          "from the legacy pair, which it never does over files already there. " +
+          "Setting XDG_CONFIG_HOME and XDG_DATA_HOME pins the legacy pair " +
+          "explicitly";
   }
 }
 
@@ -401,12 +419,23 @@ export function resolveStorage(options: StorageOptions = {}): StoragePaths {
   if (holdsState(mac)) {
     // Both roots hold files. A completed migration is the one case where that
     // is an answer rather than a question: it copied rather than moved, so the
-    // originals stay as a rollback. The receipt has to be a *valid* one, and
-    // the root has to hold state of its own — a root with nothing in it but a
-    // marker is not a migrated installation, whatever the marker says.
+    // originals stay as a rollback. Three things have to hold before that
+    // answer is taken, and each of them has stranded a corpus in some earlier
+    // shape of this code: the root has to hold state of its own, the receipt
+    // has to parse as a complete one, and the root has to still hold *every
+    // file the receipt recorded*. A root with one recognised file and an intact
+    // receipt beside it is a half-restored backup, not a migrated installation,
+    // and choosing it would leave the replicas it is missing unreachable in the
+    // legacy root.
     const receipt = readMigrationReceipt(mac.configDir);
     if (receipt !== null) {
-      return { ...mac, warnings: [migratedWarning(mac, xdg)] };
+      const missing = receipt.files
+        .map((file) => file.target)
+        .filter((target) => !existsSync(join(mac.configDir, target)));
+      if (missing.length === 0) {
+        return { ...mac, warnings: [migratedWarning(mac, xdg)] };
+      }
+      throw new AmbiguousStorageError(mac, xdg, missing);
     }
     throw new AmbiguousStorageError(mac, xdg);
   }

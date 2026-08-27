@@ -228,6 +228,43 @@ async function deadPid(): Promise<number> {
   return child.pid as number;
 }
 
+/**
+ * Whether a writer could have this database right now.
+ *
+ * The same sequence the migration itself uses to take a source, so a true here
+ * means a client really could have opened the file and committed to it.
+ */
+function canWrite(path: string): boolean {
+  let db: DatabaseSync;
+  try {
+    db = new DatabaseSync(path);
+  } catch {
+    return false;
+  }
+  try {
+    db.exec("PRAGMA busy_timeout = 0");
+    db.exec("BEGIN IMMEDIATE");
+    db.exec("ROLLBACK");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    db.close();
+  }
+}
+
+/** The staged copy of one workspace replica, wherever this run's staging is. */
+function stagedReplica(box: Legacy, uuid: string): string | null {
+  const parent = dirname(box.mac);
+  for (const name of existsSync(parent) ? readdirSync(parent) : []) {
+    if (name.startsWith(".Uberblick.") && name.endsWith(".tmp")) {
+      const path = join(parent, name, "data", "workspaces", `${uuid}.sqlite`);
+      if (existsSync(path)) return path;
+    }
+  }
+  return null;
+}
+
 /** A file's digest, or "absent". For "this did not change" on one path. */
 function digestOf(path: string): string {
   return existsSync(path)
@@ -737,6 +774,67 @@ describe("what refuses, and what each refusal says", () => {
     expect(run.status).toBe(1);
     expect(run.stdout).toMatch(/refused/);
     expect(run.stdout).toMatch(/not macOS/);
+  });
+});
+
+// --- the window between the first copy and the publication --------------------
+
+describe("the locks a run holds", () => {
+  it("keeps every copied source locked until the new root is published", async () => {
+    // Three databases, so the copy phase spans several turns of the event loop,
+    // and a fat hub database so the last of them is not instantaneous.
+    const box = legacy({ workspaces: [WORKSPACE, OTHER_WORKSPACE] });
+    const checkoutHub = join(box.home, "checkout", "hub.sqlite");
+    hubDatabase(
+      checkoutHub,
+      Array.from({ length: 4_000 }, (_, i) => `room-${i}`),
+    );
+    const firstReplica = join(box.dataDir, `${WORKSPACE}.sqlite`);
+    expect(canWrite(firstReplica)).toBe(true);
+
+    let settled = false;
+    const run = runMigration(darwin(box, { hubDb: checkoutHub }));
+    void run.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+
+    // Probing starts only once the *staged copy* of the first replica exists,
+    // which is the point from which this run has certainly taken that lock —
+    // no sleeps, and no chance of the probe stealing the lock from the run.
+    let copied = false;
+    let probes = 0;
+    let writableWhileRunning = false;
+    while (!settled) {
+      await new Promise((resolve) => setImmediate(resolve));
+      // Re-checked after the wait as well as before it: the run can finish
+      // *during* the wait, and a probe after publication finds the locks
+      // released — correctly — which would look exactly like the bug.
+      if (settled) break;
+      if (!copied) {
+        copied = stagedReplica(box, WORKSPACE) !== null;
+        continue;
+      }
+      probes += 1;
+      if (canWrite(firstReplica)) {
+        writableWhileRunning = true;
+      }
+    }
+
+    const report = await run;
+    expect(report.state).toBe("ready");
+    // The probe has to have actually run, or this passes by doing nothing.
+    expect(copied).toBe(true);
+    expect(probes).toBeGreaterThan(0);
+    // The finding: with the lock dropped after its own backup, a client could
+    // commit here and the published copy would never see it.
+    expect(writableWhileRunning).toBe(false);
+    // And the locks really are released once the root is live.
+    expect(canWrite(firstReplica)).toBe(true);
   });
 });
 

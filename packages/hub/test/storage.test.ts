@@ -67,7 +67,18 @@ function receiptFor(root: string): unknown {
     migratedAt: new Date().toISOString(),
     from: { configDir: legacyConfig(root), dataDir: legacyData(root) },
     files: [
-      { kind: "config", source: join(legacyConfig(root), "config.json"), target: "config.json", bytes: 3 },
+      {
+        kind: "config",
+        source: join(legacyConfig(root), "config.json"),
+        target: "config.json",
+        bytes: 3,
+      },
+      {
+        kind: "workspace",
+        source: join(legacyData(root), `${WORKSPACE}.sqlite`),
+        target: join("data", "workspaces", `${WORKSPACE}.sqlite`),
+        bytes: 4096,
+      },
     ],
   };
 }
@@ -389,6 +400,52 @@ describe("state in both roots", () => {
     });
   }
 
+  // A receipt that parses is still not an answer if the root has since lost
+  // part of what it recorded: one recognised file plus an intact receipt is a
+  // half-restored backup, and taking it would leave the replicas it is missing
+  // unreachable in the legacy root.
+  it("refuses a receipt whose inventory the root no longer holds", () => {
+    const root = home();
+    seed(join(legacyConfig(root), "config.json"));
+    seed(join(legacyData(root), `${WORKSPACE}.sqlite`));
+    seed(join(macRoot(root), "config.json"));
+    // The receipt records the replica as well; only the config file is there.
+    seedReceipt(root, {
+      version: 1,
+      migratedAt: new Date().toISOString(),
+      from: { configDir: legacyConfig(root), dataDir: legacyData(root) },
+      files: [
+        {
+          kind: "config",
+          source: join(legacyConfig(root), "config.json"),
+          target: "config.json",
+          bytes: 3,
+        },
+        {
+          kind: "workspace",
+          source: join(legacyData(root), `${WORKSPACE}.sqlite`),
+          target: join("data", "workspaces", `${WORKSPACE}.sqlite`),
+          bytes: 4096,
+        },
+      ],
+    });
+
+    let thrown: unknown;
+    try {
+      resolveStorage({ env: { HOME: root }, platform: "darwin" });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AmbiguousStorageError);
+    const refusal = thrown as AmbiguousStorageError;
+    // Loudly, and naming the file: "something is missing" is not actionable.
+    expect(refusal.missing).toEqual([join("data", "workspaces", `${WORKSPACE}.sqlite`)]);
+    expect(refusal.message).toContain(`${WORKSPACE}.sqlite`);
+    expect(refusal.remedy).toMatch(/ub storage migrate/);
+    expect(refusal.remedy).toContain(legacyData(root));
+  });
+
   // The one case where two populated roots is an answer rather than a
   // question: `ub storage migrate` copies rather than moves, so the originals
   // are still there on purpose, and the receipt it leaves says which root is
@@ -399,6 +456,7 @@ describe("state in both roots", () => {
     seed(join(legacyConfig(root), "config.json"));
     seed(join(legacyData(root), `${WORKSPACE}.sqlite`));
     seed(join(macRoot(root), "config.json"));
+    seed(join(macRoot(root), "data", "workspaces", `${WORKSPACE}.sqlite`));
     seedReceipt(root, receiptFor(root));
 
     const storage = resolveStorage({ env: { HOME: root }, platform: "darwin" });
