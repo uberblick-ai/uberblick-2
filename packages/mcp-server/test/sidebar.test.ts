@@ -461,7 +461,8 @@ describe("the one-time seed", () => {
       docs.push([{ uuid: corpusUuid(3), since: 0 }]);
       sidebar.getArray<string>(SIDEBAR_ORDER_KEY).push([START_HERE]);
     });
-    expect((await before.ok("get_sidebar")).groups).toEqual([]);
+    // No tool call in this session, so nothing converts it here — the restart
+    // is what this test is about. The in-session path is the test below.
     await before.close();
     rig = null;
 
@@ -479,6 +480,48 @@ describe("the one-time seed", () => {
       ],
     });
     expect(isSidebarSeeded(after.instance.replicas.sidebar().doc)).toBe(true);
+  });
+
+  it("converts a legacy sidebar the hub delivers after start", async () => {
+    // The conversion cannot be a boot-time act alone: with the hub late, slow
+    // or reconnecting, this is when the legacy state actually arrives — and
+    // until it is converted the sidebar reads as empty and pin_doc would create
+    // beside it. The observer arms on every change, local or remote, and the
+    // settle every tool call already pays runs the conversion.
+    const hub = await startHub();
+    hubs.push(hub);
+    const fresh = await startServer(
+      testConfig({
+        databasePath: tempDatabasePath(),
+        authSecret: TEST_SECRET,
+        hubUrl: hubUrl(hub.port),
+      }),
+    );
+    rig = fresh;
+    expect((await fresh.ok("get_sidebar")).groups).toEqual([]);
+
+    const legacy = await peerClient(hub.port, sidebarRoom(WORKSPACE));
+    peers.push(legacy);
+    await legacy.synced;
+    legacy.doc.transact(() => {
+      const groups = legacy.doc.getMap<unknown>(SIDEBAR_GROUPS_KEY);
+      const group = new Y.Map<unknown>();
+      groups.set(START_HERE, group);
+      group.set("name", "Start here");
+      const docs = new Y.Array<{ uuid: string; since: number }>();
+      group.set("docs", docs);
+      docs.push([{ uuid: corpusUuid(3), since: 0 }]);
+      legacy.doc.getArray<string>(SIDEBAR_ORDER_KEY).push([START_HERE]);
+    });
+
+    await waitUntil("the legacy sidebar to be converted in session", async () => {
+      const payload = await fresh.ok("get_sidebar");
+      return payload.groups.length === 1;
+    });
+    expect((await fresh.ok("get_sidebar")).groups[0]).toMatchObject({
+      id: START_HERE,
+      name: "Start here",
+    });
   });
 
   it("pins a seeded group's name back into its constant id", async () => {

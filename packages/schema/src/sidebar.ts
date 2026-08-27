@@ -427,16 +427,21 @@ export function getOrCreateGroup(
   for (const id of orderedGroupIds(sidebarDoc)) {
     if (groupName(sidebarDoc, id) === name) return id;
   }
+  // Free means the *key* is unused, not that a name can be read from it: a
+  // group written under the earlier layout has no readable name, and creating
+  // over its key would replace the map holding its pins — deleting them, which
+  // is the loss this module exists to prevent. See migrateLegacySidebar.
+  const taken = (id: string): boolean =>
+    getSidebarGroups(sidebarDoc).get(id) !== undefined;
   const preferred =
-    wellKnownId !== undefined && groupName(sidebarDoc, wellKnownId) === null
+    wellKnownId !== undefined && !taken(wellKnownId)
       ? wellKnownId
       : `${NAME_ID_PREFIX}${name}`;
-  const free = groupName(sidebarDoc, preferred) === null;
   return createGroup(
     sidebarDoc,
     name,
     index,
-    free ? preferred : crypto.randomUUID(),
+    taken(preferred) ? crypto.randomUUID() : preferred,
   );
 }
 
@@ -609,15 +614,25 @@ export function readSidebar(sidebarDoc: Y.Doc): SidebarGroup[] {
  *     stored order, the same occurrence on both, and the next write of that
  *     document sweeps the shadowed copy. Nothing is lost and nothing needs
  *     coordinating.
- *   - **Additive.** Pins already in `pins:<id>` are kept and never duplicated,
- *     so a group half-rebuilt by hand after the break keeps what was rebuilt.
+ *   - **Additive.** Pins already in `pins:<id>` are kept, keep their place, and
+ *     are never duplicated: the legacy pins follow them, in their own order. A
+ *     group half-rebuilt by hand after the break keeps what was rebuilt.
  *
- * Two boundaries, both stated rather than handled. A legacy group whose `name`
- * is not a string is left alone: it has nothing this layout could call a group,
- * and inventing one would put a made-up name in a user's sidebar. And a pin
- * written into the old nested map by a pre-#305 replica *after* the conversion
- * integrates into a map that no longer exists, so it stays invisible — no such
- * replica exists any more, and the sidebar itself is the record either way.
+ * Three boundaries, stated rather than handled:
+ *
+ *   - A legacy group whose `name` is not a string is left alone. It has nothing
+ *     this layout could call a group, and inventing one would put a made-up
+ *     name in somebody's sidebar.
+ *   - A legacy group missing from `order` is converted and counted, and stays
+ *     invisible until something places it — exactly what happens to a
+ *     current-layout group missing from `order`. Converting it costs nothing
+ *     and keeps its pins reachable the moment it is placed.
+ *   - A pin written into the old nested map by a **pre-#305 replica** after the
+ *     conversion integrates into a map that no longer exists, so it is
+ *     unreachable. Such a replica is a browser session that has been open since
+ *     before that release: reload every one of them before deploying this, and
+ *     the window closes. Nothing already written is at risk — only a write made
+ *     from a stale tab afterwards.
  */
 export function migrateLegacySidebar(sidebarDoc: Y.Doc): number {
   const groups = getSidebarGroups(sidebarDoc);

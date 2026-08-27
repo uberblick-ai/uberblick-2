@@ -38,6 +38,7 @@ import {
   getDirectoryMap,
   getMeta,
   listDirectory,
+  migrateLegacySidebar,
   repairDuplicateBlocks,
   roomForDoc,
   sidebarRoom,
@@ -159,6 +160,21 @@ export class Replicas {
 
   /** Re-entrancy guard: compaction's own update must not re-arm the flag. */
   private compactingFeedback = false;
+
+  /**
+   * The sidebar changed and has not been checked for the earlier group layout
+   * since.
+   *
+   * Armed by any change — local, remote or replayed — and drained at settle,
+   * for the reason the conversion cannot be a boot-time act alone: a sidebar
+   * written under that layout reads as *empty*, and one that hydrates from the
+   * hub after start would stay that way for the rest of the session. See
+   * {@link convertSidebarIfDue}.
+   */
+  private sidebarConversionDue = false;
+
+  /** Re-entrancy guard: the conversion's own update must not re-arm the flag. */
+  private convertingSidebar = false;
 
   /** Display name published in awareness. Refined once the client identifies. */
   private agentName: string;
@@ -446,8 +462,13 @@ export class Replicas {
     // The sidebar holds uuids and the feedback doc holds events — neither has
     // blocks or metadata, so there is no stub to repair and nothing to index.
     // Falling through would ask a document-shaped question of a doc that is not
-    // one.
+    // one. What the sidebar does need is the layout check, armed here and run
+    // at settle: this is the update observer's own transaction, which is no
+    // place to start another one.
     if (replica.isSidebar) {
+      if (!this.convertingSidebar) {
+        this.sidebarConversionDue = true;
+      }
       return;
     }
     // The feedback doc has nothing to index either, but its size is this
@@ -846,6 +867,43 @@ export class Replicas {
       this.reconcileDirectory();
     }
     this.compactFeedbackIfDue();
+    this.convertSidebarIfDue();
+  }
+
+  /**
+   * Convert a sidebar written under the group layout that preceded #210, if
+   * anything has changed it.
+   *
+   * The conversion at server start is not enough on its own: with the hub slow,
+   * late or reconnecting, the legacy state arrives *after* that decision, and
+   * until it is converted every client reads the sidebar as empty — and a
+   * `pin_doc` naming one of those groups would create beside it. Running it
+   * wherever the sidebar changes closes that window at the root.
+   *
+   * Idempotent and free when there is nothing to convert: a sidebar with no
+   * `Y.Map` under a group id is one map read and no update at all. Never from a
+   * poisoned replica, like every other write at settle, and guarded so its own
+   * update does not re-arm the flag it just cleared.
+   */
+  private convertSidebarIfDue(): void {
+    if (!this.sidebarConversionDue || this.persistenceFailure !== null) {
+      return;
+    }
+    this.sidebarConversionDue = false;
+    this.convertingSidebar = true;
+    try {
+      const sidebar = this.sidebar();
+      const converted = migrateLegacySidebar(sidebar.doc);
+      if (converted > 0) {
+        log.info("converted sidebar groups written under the earlier layout", {
+          room: sidebar.room,
+          groups: converted,
+          applied: this.persistenceFailure === null,
+        });
+      }
+    } finally {
+      this.convertingSidebar = false;
+    }
   }
 
   /**
@@ -907,6 +965,10 @@ export class Replicas {
     }
 
     if (this.persistenceFailure !== null) return;
+    // Again, after the hub wait: the legacy state may be exactly what this
+    // settle just hydrated, and the tool that is waiting for it is about to
+    // read the sidebar.
+    this.convertSidebarIfDue();
     this.releaseQuietRooms();
     this.compactLargeLogs();
   }

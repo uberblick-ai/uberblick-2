@@ -524,7 +524,9 @@ describe("migrating into the sidebar", () => {
     // name gets an id of its own: two groups, both visible and repairable —
     // never a rename of somebody's group as a side effect of a pin.
     const recreated = getOrCreateGroup(doc, "Start here", undefined, START_HERE);
-    expect(recreated).not.toBe(START_HERE);
+    // The name-derived id, not a random one: two replicas doing this while out
+    // of contact still write one group rather than two.
+    expect(recreated).toBe("name:Start here");
     expect(readSidebar(doc).map((group) => group.name)).toEqual([
       "Archive",
       "Start here",
@@ -567,6 +569,8 @@ function legacyGroup(
 describe("a sidebar written under the earlier layout", () => {
   const WORK = "10000000-0000-4000-8000-000000000001";
   const READING = "10000000-0000-4000-8000-000000000002";
+  /** A seeded group's constant id, which pin_doc addresses by name. */
+  const SEEDED = "5e1d0000-0000-4000-8000-000000000001";
 
   it("reads as empty until it is converted, then reads as it was written", () => {
     const doc = new Y.Doc();
@@ -602,6 +606,51 @@ describe("a sidebar written under the earlier layout", () => {
     expect(readSidebar(doc)).toEqual([
       { id: WORK, name: "Work", docs: [ALPHA] },
       { id: native, name: "Reading", docs: [BETA] },
+    ]);
+  });
+
+  it("is never created over by a group of the same well-known id", () => {
+    // The way a replica that has not converted yet can destroy pins: a legacy
+    // group has no readable name, so a create addressed to its id would replace
+    // the map holding them. Reachable through the ordinary offline path — the
+    // hub delivers this state late, and pin_doc names a seeded group.
+    const doc = new Y.Doc();
+    legacyGroup(doc, SEEDED, "Start here", [ALPHA, BETA]);
+
+    expect(getOrCreateGroup(doc, "Start here", undefined, SEEDED)).toBe(
+      "name:Start here",
+    );
+
+    // Nothing was taken from it: converting afterwards still finds both pins.
+    expect(migrateLegacySidebar(doc)).toBe(1);
+    expect(readSidebar(doc)).toEqual([
+      { id: SEEDED, name: "Start here", docs: [ALPHA, BETA] },
+      { id: "name:Start here", name: "Start here", docs: [] },
+    ]);
+  });
+
+  it("carries a legacy pin the new array already holds only once", () => {
+    // The half-converted shape: this replica holds the old map, and the array
+    // the conversion writes into already carries one of its pins. Copying it
+    // again would shadow the pin that is already placed.
+    const doc = new Y.Doc();
+    legacyGroup(doc, WORK, "Work", [ALPHA, BETA]);
+    doc.getArray<{ uuid: string; since: number }>(`pins:${WORK}`).push([
+      { uuid: BETA, since: 0 },
+    ]);
+
+    migrateLegacySidebar(doc);
+    // Storage, not only the read: a second copy of BETA would be shadowed
+    // rather than visible, and would come back the moment the placed one moved.
+    expect(
+      doc
+        .getArray<{ uuid: string }>(`pins:${WORK}`)
+        .toArray()
+        .map((pin) => pin.uuid),
+    ).toEqual([BETA, ALPHA]);
+    // What was already placed keeps its place; the legacy pins follow it.
+    expect(readSidebar(doc)).toEqual([
+      { id: WORK, name: "Work", docs: [BETA, ALPHA] },
     ]);
   });
 

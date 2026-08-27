@@ -261,6 +261,10 @@ export async function seedSidebarOnce(replicas: Replicas): Promise<void> {
   // without this, the checks below would take a workspace full of curation for
   // a workspace with none. Converting is idempotent and convergent, so it costs
   // one map read on every start after the first — see migrateLegacySidebar.
+  // The same conversion runs again wherever the sidebar changes (replica.ts's
+  // `convertSidebarIfDue`), because state the hub delivers after this point
+  // would otherwise read as empty for the rest of the session; this call is the
+  // one the seed's own decision depends on, so it stays explicit.
   const converted = migrateLegacySidebar(sidebar.doc);
   if (converted > 0) {
     const failure = replicas.persistenceError();
