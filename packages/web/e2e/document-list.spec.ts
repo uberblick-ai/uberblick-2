@@ -101,7 +101,8 @@ test("the workspace address is the list, and it holds what another browser creat
   await entry.click();
   await expect(reader).toHaveURL(new RegExp(`/${harness().workspace}/all$`));
   await expect(listedTitles(reader)).toHaveText([second, first]);
-  const pin = reader.getByRole("button", { name: "Pin to the sidebar" }).first();
+  // Named after its own row, so the two pins are two different controls.
+  const pin = reader.getByRole("button", { name: `Pin ${second} to the sidebar` });
   await expect(pin).toHaveAttribute("aria-pressed", "false");
   await expect(pin.locator("svg")).toBeVisible();
 

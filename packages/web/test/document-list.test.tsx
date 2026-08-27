@@ -557,6 +557,9 @@ describe("the sidebar entry", () => {
     expect(host.querySelector(".ub-list .ub-group")).toBeNull();
     const open = host.querySelector<HTMLButtonElement>(".ub-all-open-entry");
     expect(open?.textContent).toContain("All docs");
+    // Both workspace addresses render the same listing, so the entry is the
+    // current page at either one — not only at the address it navigates to.
+    expect(open?.getAttribute("aria-current")).toBe("page");
 
     await act(async () => open?.click());
     expect(window.location.pathname).toBe(`/${WORKSPACE}/all`);

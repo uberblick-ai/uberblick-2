@@ -55,6 +55,9 @@ const YEAR = 365 * DAY;
 const SCOPE =
   "Filters titles, tags and descriptions — not the text inside documents.";
 
+/** One list per screen, so the sentence the search field points at has one id. */
+const SCOPE_ID = "ub-docs-scope";
+
 /** `3 days ago`, at the coarseness a reader actually reads. */
 export function relativeAge(iso: string, now: number = Date.now()): string {
   const then = Date.parse(iso);
@@ -143,6 +146,17 @@ function matches(entry: DirectoryEntry, needle: string): boolean {
     (entry.description ?? "").toLowerCase().includes(needle) ||
     entry.tags.some((tag) => tag.toLowerCase().includes(needle))
   );
+}
+
+/**
+ * What a row's pin does, named after the document it does it to.
+ *
+ * Every pin in the list looks alike, so "Pin to the sidebar" on all of them
+ * leaves a reader hearing the buttons with no way to tell which row they are on.
+ */
+function pinLabel(entry: DirectoryEntry, pinned: boolean): string {
+  const named = entry.title === "" ? "Untitled" : entry.title;
+  return pinned ? `Unpin ${named} from the sidebar` : `Pin ${named} to the sidebar`;
 }
 
 /**
@@ -239,12 +253,16 @@ export function DocumentList({
             className="ub-docs-search"
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
+            aria-describedby={SCOPE_ID}
           />
         </label>
         {/* The scope, on screen rather than assumed. A filter that quietly
             skipped the words inside documents would be read as a search that
-            found nothing in them. */}
-        <p className="ub-docs-scope ub-muted">{SCOPE}</p>
+            found nothing in them — so the field itself carries the sentence as
+            its description, not only the sighted reader. */}
+        <p id={SCOPE_ID} className="ub-docs-scope ub-muted">
+          {SCOPE}
+        </p>
         {rows.length === 0 ? (
           /* Four silences, and only two of them are answers. A client that has
              not heard from the directory yet knows neither that the workspace
@@ -305,16 +323,8 @@ export function DocumentList({
                     type="button"
                     className="ub-docs-pin"
                     aria-pressed={groupOf.has(entry.uuid)}
-                    aria-label={
-                      groupOf.has(entry.uuid)
-                        ? "Unpin from the sidebar"
-                        : "Pin to the sidebar"
-                    }
-                    title={
-                      groupOf.has(entry.uuid)
-                        ? "Unpin from the sidebar"
-                        : "Pin to the sidebar"
-                    }
+                    aria-label={pinLabel(entry, groupOf.has(entry.uuid))}
+                    title={pinLabel(entry, groupOf.has(entry.uuid))}
                     onClick={() => onTogglePin(entry.uuid)}
                   >
                     <PinIcon active={groupOf.has(entry.uuid)} />

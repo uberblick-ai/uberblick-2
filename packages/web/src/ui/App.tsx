@@ -224,6 +224,9 @@ export function App(): ReactElement {
   // and then there are no rooms to join at all.
   const workspace = route.kind === "no-workspace" ? null : route.workspace;
   const selected = route.kind === "doc" ? route.uuid : null;
+  // Both addresses that name the workspace render the document list, so the
+  // sidebar's entry for it is the current page at either one.
+  const listing = route.kind === "all" || route.kind === "list";
   const [collapsed, setCollapsed] = useStoredFlag(SIDEBAR_COLLAPSED_KEY, false);
   /**
    * The thread the reader is looking at. It lives here because the two ends of
@@ -574,7 +577,7 @@ export function App(): ReactElement {
             onSelect={onSelect}
             onCreate={onCreate}
             onOpenAll={onOpenAll}
-            allOpen={route.kind === "all"}
+            allOpen={listing}
           />
         )}
         {/* The corpus journey (#406): both addresses that name the workspace
@@ -584,7 +587,7 @@ export function App(): ReactElement {
             document, so it takes the pane rather than passing four more props
             through `RoutePane`, which exists to say what a *document* address
             resolves to. */}
-        {route.kind === "all" || route.kind === "list" ? (
+        {listing ? (
           <DocumentList
             connection={directory}
             entries={entries}
