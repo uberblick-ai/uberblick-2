@@ -244,7 +244,11 @@ const blockShape = {
     .describe("Code language, e.g. \"ts\". Code blocks only."),
 };
 
-const blockInputSchema = z.object(blockShape);
+// Strict, like the sibling placement object: `create_doc`'s guarantee has to
+// reach inside the array, or a block carrying a key the schema never declared
+// is created with the key discarded. `insert_block` spreads the same shape at
+// its top level, where strictInput already applies the rule.
+const blockInputSchema = z.object(blockShape).strict();
 
 function toBlockInput(input: z.infer<typeof blockInputSchema>): BlockInput {
   return {

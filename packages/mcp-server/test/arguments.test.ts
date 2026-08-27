@@ -98,6 +98,16 @@ describe("unknown fields", () => {
     });
     expect(created.isError).toBe(true);
 
+    // Strictness has to reach the nested objects an input declares, or the
+    // guarantee stops at the first array: a block carrying a key the schema
+    // does not know would otherwise be created with that key discarded.
+    const nested = await rig.call("create_doc", {
+      title: "Rejected",
+      description: "A test document.",
+      blocks: [{ type: "paragraph", text: "x", bogus: 1 }],
+    });
+    expect(nested.isError).toBe(true);
+
     // A mutation field with a typo in it. The write it asked for is the one
     // that must not happen quietly under a different field.
     const renamed = await rig.call("set_title", {
@@ -165,6 +175,7 @@ describe("annotate", () => {
         ...args,
       });
       expect(result.isError, JSON.stringify(args)).toBe(true);
+      expect(result.payload.error, JSON.stringify(args)).toBe("schema_validation");
     }
 
     // The document holds what the two valid calls put there, and nothing else.
@@ -217,6 +228,7 @@ describe("sidebar_group", () => {
         ...args,
       });
       expect(result.isError, JSON.stringify(args)).toBe(true);
+      expect(result.payload.error, JSON.stringify(args)).toBe("schema_validation");
     }
     // Nothing was renamed, moved or deleted on the way through.
     expect(await groups(rig)).toEqual(["Start here", "Reference"]);
