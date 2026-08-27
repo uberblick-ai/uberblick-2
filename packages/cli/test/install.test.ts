@@ -60,6 +60,8 @@ interface Stub {
   record: string;
   /** `CODEX_HOME` as the stub saw it. */
   home: string;
+  /** Every variable the stub was spawned with, `NAME=value` per line. */
+  environment: string;
 }
 
 function stubVendor(box: Sandbox, program: string, body = ""): Stub {
@@ -70,11 +72,19 @@ function stubVendor(box: Sandbox, program: string, body = ""): Stub {
   writeFileSync(
     path,
     `#!/bin/sh\nprintf '%s\\n' "$@" > "$${RECORD}"\n` +
-      `printf '%s\\n' "$CODEX_HOME" > "$${RECORD}.home"\n${body}`,
+      // `set` rather than `env`: PATH here is the stub's own directory and
+      // nothing else, so a builtin is the only thing that can run.
+      `printf '%s\\n' "$CODEX_HOME" > "$${RECORD}.home"\n` +
+      `set > "$${RECORD}.env"\n${body}`,
     "utf8",
   );
   chmodSync(path, 0o755);
-  return { env: { PATH: dir, [RECORD]: record }, record, home: `${record}.home` };
+  return {
+    env: { PATH: dir, [RECORD]: record },
+    record,
+    home: `${record}.home`,
+    environment: `${record}.env`,
+  };
 }
 
 function read(path: string): string {
@@ -272,6 +282,39 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(run.stderr).toMatch(/exited 1/);
   });
 
+  it("hands the vendor no variable of uberblick's own", () => {
+    // `ub` is habitually run with a signing secret and an endpoint exported —
+    // that is exactly what `fnox exec` does — and a child inherits whatever it
+    // is handed. A vendor CLI has no use for either, and a client that records
+    // its environment would be keeping this machine's credential in its own
+    // format. The pin a vendor does need rides in argv, not here.
+    const box = sandbox();
+    const stub = stubVendor(box, "claude");
+    const ours: NodeJS.ProcessEnv = {
+      HUB_AUTH_TOKEN: SECRET,
+      HUB_URL: "wss://hub.example.ts.net",
+      HUB_DB_PATH: "/tmp/hub.sqlite",
+      UBERBLICK_DB: "/tmp/uberblick.sqlite",
+      WORKSPACE_ID: WORKSPACE,
+      WORKSPACES: "one,two",
+    };
+
+    const run = runUb(["mcp", "install", "claude", "--project"], box, {
+      ...stub.env,
+      ...ours,
+    });
+
+    expect(run.status, run.output).toBe(0);
+    const received = read(stub.environment);
+    // The rest of the environment is still there, so the absences below are
+    // about what was stripped rather than about an empty recording.
+    expect(received).toMatch(new RegExp(`^${RECORD}=`, "m"));
+    for (const name of Object.keys(ours)) {
+      expect(received, name).not.toMatch(new RegExp(`^${name}=`, "m"));
+    }
+    expect(received).not.toContain(SECRET);
+  });
+
   it("prints the snippet when the vendor is not installed, and leaves nothing behind", () => {
     const box = sandbox();
 
@@ -287,6 +330,20 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(codex.status).toBe(0);
     expect(codex.stdout).toContain("[mcp_servers.uberblick]");
     expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
+  });
+
+  it("leaves a `.codex` it did not create, empty or not", () => {
+    // "Writes nothing" has to include taking nothing away. An empty `.codex` a
+    // checkout already had is still somebody's state — and whether this run is
+    // the one that made the directory is the only thing that decides it.
+    const box = sandbox();
+    const dir = join(box.cwd, ".codex");
+    mkdirSync(dir, { recursive: true });
+
+    const run = runUb(["mcp", "install", "codex", "--project"], box, NO_VENDOR);
+    expect(run.status, run.output).toBe(0);
+    expect(run.stdout).toContain("[mcp_servers.uberblick]");
+    expect(existsSync(dir)).toBe(true);
   });
 });
 
@@ -371,6 +428,51 @@ describe("ub mcp install, and what is registered already", () => {
     expect(run.output).not.toContain(SECRET);
     expect(run.output).not.toContain("somebody-elses");
     // Byte-identical afterwards, and the vendor was never given the chance.
+    expect(read(path)).toBe(before);
+    expect(existsSync(stub.record)).toBe(false);
+  });
+
+  it("refuses a target file it cannot read, rather than delegating over it", () => {
+    // Reading this as "absent" would mean "go ahead" — and going ahead points
+    // `claude mcp add` at a file this could not read, which it loads and
+    // rewrites. Nothing of it comes back out, not even a parser's complaint.
+    const box = sandbox();
+    const path = join(box.cwd, ".mcp.json");
+    const before = `{ "mcpServers": { "uberblick": { "token": "${SECRET}"\n`;
+    writeFileSync(path, before, "utf8");
+    const stub = stubVendor(box, "claude");
+
+    const run = runUb(["mcp", "install", "claude", "--project"], box, stub.env);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain(path);
+    expect(run.stderr).toMatch(/could not be read/);
+    expect(run.output).not.toContain(SECRET);
+    // The way out is the same snippet, and the file is untouched.
+    expect(JSON.parse(run.stdout).mcpServers.uberblick.command).toBe("ub");
+    expect(read(path)).toBe(before);
+    expect(existsSync(stub.record)).toBe(false);
+  });
+
+  it("does not call an entry ours when its `env` is not an environment", () => {
+    // `null`, `[]`, `""`, a number: all of them have no entries to compare, and
+    // an entry whose environment this cannot read is not one it understands.
+    const box = sandbox();
+    const path = join(box.cwd, ".mcp.json");
+    const before = `${JSON.stringify(
+      {
+        mcpServers: {
+          uberblick: { command: "ub", args: ["mcp", "serve"], env: null },
+        },
+      },
+      null,
+      2,
+    )}\n`;
+    writeFileSync(path, before, "utf8");
+    const stub = stubVendor(box, "claude");
+
+    const run = runUb(["mcp", "install", "claude", "--project"], box, stub.env);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toMatch(/something other than this/);
     expect(read(path)).toBe(before);
     expect(existsSync(stub.record)).toBe(false);
   });

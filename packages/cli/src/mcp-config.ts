@@ -14,12 +14,11 @@
  * the one TOML header we own are enough for that — a file nothing splices needs
  * no byte-preserving splicer.
  *
- * **Nothing echoes a value back.** {@link presence} answers with one of three
+ * **Nothing echoes a value back.** {@link presence} answers with one of four
  * words and never with anything it read. A config file is exactly where
  * somebody keeps an API token, and a diagnostic that quotes one onto a terminal
- * has leaked it — so a file that will not parse is simply not ours, which is
- * also the honest answer: whether to touch it is then the vendor CLI's call, or
- * the reader's.
+ * has leaked it — so a file this cannot read is `unusable`, named by path and
+ * described no further: not the parser's complaint, not a line of it.
  */
 
 import { readFileSync } from "node:fs";
@@ -132,27 +131,36 @@ export function codexHome(cwd: string): string {
 
 /** What a client's config already holds under one entry's name. */
 export type Presence =
-  /** Nothing there — or nothing this can read, which is nobody's install. */
+  /** Nothing there: no file, or a file that registers nothing of ours. */
   | "absent"
   /** Exactly the entry this would register. */
   | "ours"
   /** Something else under our name; not ours to replace. */
-  | "foreign";
+  | "foreign"
+  /**
+   * The file is there and this cannot read it. Distinct from `absent` because
+   * the two lead somewhere different: absent means go ahead, unusable means a
+   * file exists whose contents nobody here knows — reported by path, never
+   * delegated to a vendor CLI that would write over it.
+   */
+  | "unusable";
 
 /**
  * Whether `file` already registers `entry`, and whether it is ours.
  *
- * The whole read side of `ub mcp install`, and of `ub doctor`'s MCP check. An
- * unreadable or unparseable file counts as `absent`: nothing here writes, so
- * there is nothing to protect it from — either the vendor's own CLI decides
- * what to do with its own file, or a snippet is printed for somebody to paste.
+ * The whole read side of `ub mcp install`, and of `ub doctor`'s MCP check. A
+ * file that is not there is `absent`; a file that is there and will not open or
+ * will not parse is `unusable`, which is a different answer for a different
+ * reason: the caller may not treat a file it cannot read as an empty one.
  */
 export function presence(file: TargetFile, entry: Entry): Presence {
   let text: string;
   try {
     text = readFileSync(file.path, "utf8");
-  } catch {
-    return "absent";
+  } catch (error) {
+    // Not there is nobody's install; anything else — a directory, a mode that
+    // refuses us — is a file that exists and has not been read.
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "unusable";
   }
   if (file.format === "toml") {
     const table = tomlTable(text, entry.name);
@@ -164,7 +172,7 @@ export function presence(file: TargetFile, entry: Entry): Presence {
     const doc = JSON.parse(text) as { mcpServers?: Record<string, unknown> };
     registered = doc?.mcpServers?.[entry.name];
   } catch {
-    return "absent";
+    return "unusable";
   }
   if (registered === undefined) return "absent";
   return jsonMatches(registered, entry) ? "ours" : "foreign";
@@ -183,18 +191,23 @@ export function presence(file: TargetFile, entry: Entry): Presence {
  */
 const KNOWN_JSON_KEYS = new Set(["type", "command", "args", "env"]);
 
-function jsonMatches(value: unknown, entry: Entry): boolean {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const held = value as Record<string, unknown>;
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function jsonMatches(held: unknown, entry: Entry): boolean {
+  if (!isObject(held)) return false;
   if (Object.keys(held).some((key) => !KNOWN_JSON_KEYS.has(key))) return false;
   if (held.type !== undefined && held.type !== "stdio") return false;
   const args = held.args ?? [];
   // Absent and empty are the same unpinned entry, spelled two ways; a pin has
   // to be the same variable set to the same workspace, because the pin is the
-  // whole reason a second entry exists.
-  const env = Object.entries((held.env ?? {}) as Record<string, unknown>);
+  // whole reason a second entry exists. Anything that is not an object — `null`,
+  // an array, a string, a number — is not an environment at all, and an entry
+  // this does not understand is never declared "already installed".
+  if (held.env !== undefined && !isObject(held.env)) return false;
+  const heldEnv = held.env ?? {};
+  const env = Object.entries(heldEnv);
   const wanted = Object.entries(entry.env ?? {});
   return (
     held.command === entry.command &&
@@ -202,7 +215,7 @@ function jsonMatches(value: unknown, entry: Entry): boolean {
     args.length === entry.args.length &&
     args.every((arg, index) => arg === entry.args[index]) &&
     env.length === wanted.length &&
-    wanted.every(([key, value]) => (held.env as Record<string, unknown>)[key] === value)
+    wanted.every(([key, value]) => heldEnv[key] === value)
   );
 }
 

@@ -476,6 +476,21 @@ describe("ub doctor", () => {
     expect(check(wired.checks, "mcp").reason).toContain(config);
   });
 
+  it("names a config it could not read, instead of calling it absent", async () => {
+    // "No MCP client registers uberblick" would be an answer this check does
+    // not have: the file is there and nothing here knows what is in it. It is
+    // named by path and quoted nowhere — a config file is where tokens live.
+    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const config = join(box.cwd, ".mcp.json");
+    writeFileSync(config, `{ "mcpServers": { "uberblick": "${SECRET}"\n`, "utf8");
+    const { run, checks } = await doctor(box);
+
+    expect(check(checks, "mcp").status).toBe("fail");
+    expect(check(checks, "mcp").reason).toContain(config);
+    expect(check(checks, "mcp").reason).toMatch(/could not read/);
+    expect(run.output).not.toContain(SECRET);
+  });
+
   it("writes exactly one JSON object to stdout with --json, and nothing else", async () => {
     const box = sandbox({
       userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },

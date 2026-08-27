@@ -478,6 +478,7 @@ const SCOPES: Scope[] = ["project", "user"];
 
 function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
   const registered: string[] = [];
+  const unusable: string[] = [];
   let looked = 0;
   let custom = false;
 
@@ -486,10 +487,15 @@ function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
       const file = targetFile(target, scope, cwd, env);
       looked += 1;
       // The same presence probe `ub mcp install` decides with, so the two
-      // commands cannot disagree about what is wired up. A file that will not
-      // parse registers nothing, and nothing is quoted back out of one either.
+      // commands cannot disagree about what is wired up. Nothing is quoted back
+      // out of a config file — not its contents, and not a parser's complaint
+      // about them: a file that is there and will not read is named by path.
       const found = presence(file, DEFAULT_ENTRY);
       if (found === "absent") {
+        continue;
+      }
+      if (found === "unusable") {
+        unusable.push(file.path);
         continue;
       }
       registered.push(`${target} (${scope}): ${file.path}`);
@@ -497,16 +503,23 @@ function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
     }
   }
 
+  // Reported whether or not something else is wired up: a config a command
+  // cannot read is a fact about this machine either way, and "no client
+  // registers uberblick" would be an answer this check does not have.
+  const unread =
+    unusable.length === 0 ? "" : `; could not read ${unusable.join(", ")}`;
   const first = registered[0];
   if (first !== undefined) {
     const note = custom ? ", running a command of its own rather than `ub mcp serve`" : "";
     const more = registered.length > 1 ? ` (and ${registered.length - 1} more)` : "";
-    return pass("mcp", `registered in ${first}${more}${note}`);
+    return pass("mcp", `registered in ${first}${more}${note}${unread}`);
   }
   return fail(
     "mcp",
-    `no MCP client registers uberblick — looked in ${looked} configs for claude, codex and cursor`,
-    "wire one up with `ub mcp install [claude|codex|cursor]`",
+    `no MCP client registers uberblick — looked in ${looked} configs for claude, codex and cursor${unread}`,
+    unusable.length === 0
+      ? "wire one up with `ub mcp install [claude|codex|cursor]`"
+      : "repair or move the file named above, then `ub mcp install [claude|codex|cursor]`",
   );
 }
 

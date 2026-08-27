@@ -157,13 +157,17 @@ ub mcp install cursor --print       # the snippet, on stdout
 its own file best, and the scope and any `--workspace` pin ride on the vendor's
 own flags (`-e KEY=value`, `--env KEY=VALUE`). Codex has no scope flag: which
 file it writes *is* the configuration directory it is handed, so `--project`
-points it at this checkout's `.codex`. Every other client — Cursor, which ships
-no `mcp add`, and any client `ub` has never heard of — gets the snippet and the
-path to paste it into, on exit 0, with nothing written; so does a target whose
-vendor CLI is not installed. Before it delegates, the command reads the target
-file for one answer: an entry that is already ours is a no-op that says "already
-installed", an entry somebody else wrote under the name `uberblick` is left
-exactly as it was with the snippet printed instead, and anything else is added.
+points it at this checkout's `.codex`. Cursor, which ships no `mcp add`, gets
+the snippet and the path to paste it into, on exit 0, with nothing written — so
+does a target whose vendor CLI is not installed. A client `ub` has never heard of
+gets the same snippet and that client's own MCP configuration as the
+destination: there is no path to invent for a client nobody has described.
+Before it delegates, the command reads the target file for one answer: an entry
+that is already ours is a no-op that says "already installed", an entry somebody
+else wrote under the name `uberblick` is left exactly as it was with the snippet
+printed instead, a file that is there and cannot be read is refused by path —
+nothing is handed to a vendor CLI over a file whose contents nobody knows — and
+anything else is added.
 There is no `--force`, no backup and no rewrite — the file this command does not
 write is the file it cannot damage. Nothing prompts, so the whole command runs
 unattended.
@@ -171,7 +175,10 @@ unattended.
 Reports name files, never their contents: a conflicting entry is reported by
 path with nothing of it quoted back, and a vendor CLI's own output is not
 relayed, because a client's diagnostics quote the config they just read. Config
-files are where API tokens live.
+files are where API tokens live. The vendor is spawned without uberblick's own
+variables in its environment — no `HUB_*`, no `UBERBLICK_*`, no `WORKSPACE_ID` —
+because it has no use for them and `ub` is habitually run with a secret
+exported; the pin it does need rides in its argv.
 
 The installed line is always `ub mcp serve`. Which hub and which credential
 apply is resolved by `ub` — a client config that pinned either would be a second

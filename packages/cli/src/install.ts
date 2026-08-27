@@ -28,16 +28,19 @@
  * **This command does not edit config files.** Claude Code ships `claude mcp
  * add` and Codex ships `codex mcp add` — including the environment flags a
  * `--workspace` pin needs — so those are run, and the vendor writes its own
- * file. Cursor ships no such subcommand, and neither does a client `ub` has
- * never heard of, so those get the snippet to paste and the path to paste it
- * into. Editing somebody else's JSON or TOML in place bought one thing, an
- * untouched file, at the price of a parser per format; delegating and printing
- * buy the same thing outright.
+ * file. Cursor ships no such subcommand, so it gets the snippet to paste and
+ * the path to paste it into; a client `ub` has never heard of gets the same
+ * snippet and its own MCP configuration as the destination, because there is no
+ * path to invent for a client nobody has described. Editing somebody else's
+ * JSON or TOML in place bought one thing, an untouched file, at the price of a
+ * parser per format; delegating and printing buy the same thing outright.
  *
  * **What it refuses.** Before running a vendor CLI it reads the target file for
  * one answer only (`presence`): an entry that is already ours is a no-op, an
  * entry that is somebody else's is left alone and the snippet is printed
- * instead, and anything else is added. There is no `--force`, no backup and no
+ * instead, a file that is there and cannot be read is refused by path — nothing
+ * is delegated to a vendor CLI over a file whose contents nobody here knows —
+ * and anything else is added. There is no `--force`, no backup and no
  * rewrite — the file this command does not write is the file it cannot damage.
  * Nothing here prompts, so the whole command runs unattended.
  */
@@ -125,9 +128,10 @@ itself, so a client config never carries a stale copy of them — and never a
 secret. The one value an entry may carry is WORKSPACE_ID, from --workspace.
 
 Claude Code and Codex are wired up by running their own \`mcp add\` command, so
-the vendor writes its own file. Every other client — Cursor included — gets the
-snippet to paste and the path to paste it into. This command edits no config
-file, and never replaces an entry it did not register.
+the vendor writes its own file. Cursor gets the snippet to paste and the path to
+paste it into; a client \`ub\` does not know gets the same snippet, to paste into
+that client's own MCP configuration. This command edits no config file, and
+never replaces an entry it did not register.
 
 operands:
   target            the client: ${TARGETS.join(", ")} (default ${DEFAULT_TARGET}).
@@ -317,6 +321,35 @@ function vendorCli(
   return null;
 }
 
+/** A variable `ub` resolves its own configuration from — see `config.ts`. */
+function isOurs(name: string): boolean {
+  return (
+    name.startsWith("HUB_") ||
+    name.startsWith("UBERBLICK_") ||
+    name === "WORKSPACE_ID" ||
+    name === "WORKSPACES"
+  );
+}
+
+/**
+ * The environment a vendor CLI is handed: this process's, minus uberblick's own.
+ *
+ * `ub` is habitually run with a signing secret and an endpoint exported — that
+ * is what `fnox exec` does — and a child inherits whatever it is given. No
+ * vendor CLI has any use for either, and a client that logs its environment, or
+ * records it into a session file, would be carrying this machine's credential
+ * into somebody else's format. What the pin needs travels in argv (`-e`,
+ * `--env`), never here; the only thing added is the vendor's own
+ * {@link Vendor.env}, which is `CODEX_HOME` saying which file codex writes.
+ */
+function vendorEnv(vendor: Vendor): NodeJS.ProcessEnv {
+  const inherited: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!isOurs(name)) inherited[name] = value;
+  }
+  return { ...inherited, ...vendor.env };
+}
+
 type VendorRun =
   | { kind: "ok" }
   /** The program is not installed — the caller prints the snippet instead. */
@@ -337,7 +370,7 @@ type VendorRun =
 function runVendor(vendor: Vendor): VendorRun {
   const result = spawnSync(vendor.program, vendor.args, {
     stdio: "ignore",
-    env: { ...process.env, ...vendor.env },
+    env: vendorEnv(vendor),
   });
   if (result.error !== undefined) {
     const code = (result.error as NodeJS.ErrnoException).code;
@@ -422,7 +455,8 @@ export async function installCommand(
   if (flags.unlisted !== null) {
     io.err(
       `ub mcp install: ${JSON.stringify(flags.unlisted)} is not a client \`ub\` ` +
-        "knows — this is the generic stdio form to paste into its own config\n",
+        "knows, so there is no file of ours to name — paste this generic stdio " +
+        "form into that client's own MCP configuration\n",
     );
     io.out(snippet("json", entry));
     return 0;
@@ -457,6 +491,20 @@ export async function installCommand(
     io.out(report + pin.note);
     return 0;
   }
+  if (installed === "unusable") {
+    // Not "absent, so go ahead": delegating would point a vendor CLI at a file
+    // this could not read, and `claude mcp add` rewrites the file it loads.
+    // Reported by path with nothing of it quoted — a file that will not parse
+    // is still a config file, which is where people keep tokens.
+    io.err(
+      `ub mcp install: ${file.path} is there and could not be read, so nothing ` +
+        "was run against it and nothing was written. This is what uberblick " +
+        "would have registered; repair or move that file, or paste this in by " +
+        "hand\n",
+    );
+    io.out(snippet(file.format, entry));
+    return 1;
+  }
   if (installed === "foreign") {
     // "something other than this" rather than "somebody else's": an entry
     // pinned to a different workspace is ours and is still not the one being
@@ -473,40 +521,50 @@ export async function installCommand(
 
   // `codex mcp add` refuses outright when the directory `CODEX_HOME` names is
   // not there, and for `--project` that directory is the checkout's own — so it
-  // is created, and taken back again when it turns out codex is not installed.
-  // `rmdirSync` refuses a directory with anything in it, which is the check.
+  // is created. `mkdirSync` answers with the path it made and with `undefined`
+  // when there was nothing to make, which is the only honest way to know whose
+  // directory this is: a `.codex` the checkout already had is somebody's state,
+  // empty or not, and is never removed.
   const codexProject = flags.target === "codex" && flags.scope === "project";
-  if (codexProject) {
-    mkdirSync(codexHome(cwd), { recursive: true });
-  }
-  const ran = runVendor(vendor);
-  if (ran.kind === "absent") {
-    if (codexProject) {
+  const made =
+    codexProject && mkdirSync(codexHome(cwd), { recursive: true }) !== undefined;
+  let registered = false;
+  try {
+    const ran = runVendor(vendor);
+    if (ran.kind === "absent") {
+      return printSnippet(io, file, entry, `\`${vendor.program}\` is not installed`);
+    }
+    if (ran.kind === "failed") {
+      io.err(
+        `ub mcp install: \`${vendor.program} mcp add\` failed — ${ran.because}. ` +
+          "Its output is not repeated here because a client's diagnostics can " +
+          `quote the config; run \`${vendor.program} mcp add\` yourself to see it\n`,
+      );
+      return 1;
+    }
+
+    registered = true;
+    let report = `uberblick registered with ${flags.target}\n\n`;
+    report += field("target", where);
+    report += field("file", file.path);
+    report += field("command", commandLine(entry));
+    report += pin.fields;
+    report += field("via", `${vendor.program} mcp add`);
+    report += pin.note;
+    report += "\nRestart the client, or reload its MCP servers, to pick this up.\n";
+    io.out(report);
+    return 0;
+  } finally {
+    // Every ending but a registration — the vendor missing, the vendor
+    // refusing, a throw — leaves the checkout as this run found it. `rmdirSync`
+    // refuses a directory with anything in it, which is the check that codex
+    // did not write a config there after all.
+    if (made && !registered) {
       try {
         rmdirSync(codexHome(cwd));
       } catch {
-        // It was already in use. Leaving it is the whole intent.
+        // Something is in it. Leaving it is the whole intent.
       }
     }
-    return printSnippet(io, file, entry, `\`${vendor.program}\` is not installed`);
   }
-  if (ran.kind === "failed") {
-    io.err(
-      `ub mcp install: \`${vendor.program} mcp add\` failed — ${ran.because}. ` +
-        "Its output is not repeated here because a client's diagnostics can " +
-        `quote the config; run \`${vendor.program} mcp add\` yourself to see it\n`,
-    );
-    return 1;
-  }
-
-  let report = `uberblick registered with ${flags.target}\n\n`;
-  report += field("target", where);
-  report += field("file", file.path);
-  report += field("command", commandLine(entry));
-  report += pin.fields;
-  report += field("via", `${vendor.program} mcp add`);
-  report += pin.note;
-  report += "\nRestart the client, or reload its MCP servers, to pick this up.\n";
-  io.out(report);
-  return 0;
 }
