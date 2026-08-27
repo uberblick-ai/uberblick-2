@@ -327,6 +327,11 @@ that needs its own workspace pins `WORKSPACE_ID` in the project MCP entry the
 client already reads, which arrives as the environment — the layer that already
 wins. Nothing committable ever carries an endpoint or a credential, so the
 signing secret in `credentials.json` applies to whichever hub *you* configured.
+That is also why the committed `mise.toml` sets no `HUB_URL`: mise's `[env]` is
+ambient for every process born in an activated checkout — `ub` and the MCP
+server a client spawns included — and being the environment it would outrank
+the endpoint this machine chose. A per-checkout binding is still available,
+in the gitignored `mise.local.toml` that `ub init` derives.
 
 ### Where your files live
 
@@ -603,8 +608,11 @@ package owns the instance. Check with `mise exec -- pnpm why yjs`.
 
 Secrets live in `fnox.toml`, age-encrypted and safe to commit. The private key
 is expected at `~/.config/fnox/age.txt` and never in the repo. Only real
-secrets go there: plaintext local defaults such as `HUB_URL`
-(`ws://localhost:1234`) live in `mise.toml`'s `[env]` block.
+secrets go there: plaintext local defaults such as `HUB_DB_PATH` live in
+`mise.toml`'s `[env]` block. `HUB_URL` deliberately does not — that block is
+ambient for everything in a checkout and outranks your `config.json`, so its
+`ws://localhost:1234` default lives in the clients' code instead, and a
+per-checkout endpoint lives in the derived `mise.local.toml`.
 
 Contributors without the age key are not blocked. The task wrappers pass
 `fnox exec --if-missing warn` explicitly, so a secret fnox cannot decrypt logs a

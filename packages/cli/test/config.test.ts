@@ -25,7 +25,7 @@ import {
   resolveConfig,
   writeCredentials,
 } from "../src/config.js";
-import { removeTempDirs, sandbox } from "./helpers.js";
+import { REPO_ROOT, removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -310,5 +310,27 @@ describe("writeCredentials", () => {
       mcpConfig(resolveConfig({ env: fresh.env }).env)
         .authSecret,
     ).toBe("new");
+  });
+});
+
+describe("the committed mise config", () => {
+  // The precedence above is only as good as what the repository itself exports.
+  // The committed `[env]` is ambient: it reaches every process born in an
+  // activated checkout, `ub mcp serve` included, and arrives as the layer that
+  // outranks `config.json` — so a committed `HUB_URL` here redirects a machine's
+  // real endpoint at whatever the repository guessed (#376). A task `env` is not
+  // ambient, and is barred for a different reason: it outranks the derived
+  // `mise.local.toml`, so it would strand a joined checkout on the repository's
+  // default. Hence the whole file, not just the `[env]` block. The address
+  // belongs in the clients' code, and the per-checkout binding in
+  // `mise.local.toml`, which is derived from this machine's own config rather
+  // than committed.
+  it("exports no HUB_URL, so a checkout binds no endpoint", () => {
+    const assignments = readFileSync(join(REPO_ROOT, "mise.toml"), "utf8")
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("#"))
+      .filter((line) => /\bHUB_URL\s*=/.test(line));
+
+    expect(assignments).toEqual([]);
   });
 });

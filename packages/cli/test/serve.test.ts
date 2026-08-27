@@ -170,6 +170,33 @@ describe("ub mcp serve", () => {
     }
   });
 
+  // What the wrapper owes a client: with no `HUB_URL` in the environment — the
+  // layer that outranks it — the endpoint is the user config's, and it survives
+  // the exec into the server the client actually talks to. `checkout: true` is
+  // documentation of the spawn shape, a `cwd` inside a repository; nothing on
+  // this path reads it, which is the point. Worth pinning because of #376,
+  // where an ambient `HUB_URL` from the checkout's own mise config replaced
+  // this answer for every process spawned there.
+  it("dials the user config's endpoint when a client spawns it inside a checkout", async () => {
+    const box = sandbox({
+      checkout: true,
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      credentials: { signingSecret: "cli-serve-checkout-secret" },
+    });
+
+    const session = await connect(box);
+    try {
+      const result = await session.client.callTool({
+        name: "sync_status",
+        arguments: {},
+      });
+      const content = result.content as { text: string }[];
+      expect(JSON.parse(content[0]!.text).hub.url).toBe(DEAD_HUB_URL);
+    } finally {
+      await session.close();
+    }
+  });
+
   it("passes the resolved configuration through, warnings and all", async () => {
     // A user config that names the workspace and an endpoint, a credential so
     // the hub is enabled rather than disabled, and a secret misplaced in that

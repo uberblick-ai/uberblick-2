@@ -26,7 +26,10 @@ import { join } from "node:path";
 import { resolveStorage } from "@uberblick/hub/storage";
 import { parseWorkspaceId } from "@uberblick/schema";
 
-/** The only hub address in this package. Matches mise's `HUB_URL` default. */
+/**
+ * The only hub address in this package, and the one a checkout falls back to:
+ * `mise.toml` commits no `HUB_URL`, deliberately (#376).
+ */
 export const DEFAULT_HUB_URL = "ws://localhost:1234";
 
 /**
