@@ -7,7 +7,6 @@ import * as Y from "yjs";
 import { getBlocksFragment } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
-import type { CreateEditorOptions } from "../src/editor/create-editor.js";
 import { plainText } from "../src/editor/ytext.js";
 
 /** Every top-level child of the `blocks` fragment, as a comparable snapshot. */
@@ -61,10 +60,7 @@ export function snapshotFragment(ydoc: Y.Doc): FragmentSnapshot[] {
  */
 export function mountEditor(
   ydoc: Y.Doc,
-  options: {
-    newBlockId?: () => string;
-    hovercard?: CreateEditorOptions["hovercard"];
-  } = {},
+  options: { newBlockId?: () => string } = {},
 ): { editor: Editor; element: HTMLElement } {
   const element = document.createElement("div");
   document.body.appendChild(element);
@@ -75,7 +71,6 @@ export function mountEditor(
     ...(options.newBlockId === undefined
       ? {}
       : { newBlockId: options.newBlockId }),
-    ...(options.hovercard === undefined ? {} : { hovercard: options.hovercard }),
   });
   editor.on("destroy", () => element.remove());
   return { editor, element };

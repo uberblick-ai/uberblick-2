@@ -5,24 +5,17 @@
  * the reader opens them from the sidebar's gear, changes one thing, and is back
  * where they were with the address bar untouched.
  *
- * Everything it reads and writes goes through `settings.ts`, which is the only
- * module allowed to touch localStorage for settings — nothing here knows the
- * key, and nothing here can reach a Y.Doc. A pasted token therefore has no path
- * into a document, an export, or the hub.
+ * One section so far, Storage. The layout is a list of sections of entries so
+ * the next one is a sibling rather than a rewrite — and no more than that is
+ * built here.
  *
- * Two sections exist so far, Connections and Storage. The layout is a list of
- * sections of entries so the next one (models, when the ablauf work arrives) is
- * a sibling rather than a rewrite — and no more than that is built here.
- *
- * Storage is the one exception to "nothing here can reach a Y.Doc", and only in
- * one direction: it reads and deletes the *IndexedDB replicas* rooms leave
- * behind (`collab/forget.ts`). It never opens a room, never writes one, and
- * never talks to the hub.
+ * Storage reads and deletes the *IndexedDB replicas* rooms leave behind
+ * (`collab/forget.ts`). It never opens a room, never writes one, and never
+ * talks to the hub.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { setSetting } from "../settings.js";
 import {
   cachedWorkspaces,
   canListDatabases,
@@ -30,14 +23,7 @@ import {
   originUsage,
 } from "../collab/forget.js";
 import type { ForgetResult, WorkspaceCache } from "../collab/forget.js";
-import { useSetting } from "./hooks.js";
 import type { Workspace } from "./route.js";
-
-/** What GitHub is asked for a token's identity. Nothing else is requested. */
-const GITHUB_USER_URL = "https://api.github.com/user";
-
-/** The scopes the copy asks for, spelled the way GitHub's own UI spells them. */
-const GITHUB_SCOPES = "Issues: read, Pull requests: read, Metadata: read";
 
 /** Anything a reader can tab to. Used by the focus trap and nothing else. */
 const FOCUSABLE =
@@ -45,142 +31,6 @@ const FOCUSABLE =
 
 function focusable(root: HTMLElement): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>(FOCUSABLE)];
-}
-
-type TokenCheck =
-  | { ok: true; login: string }
-  | { ok: false; error: string };
-
-/**
- * Ask GitHub who a token belongs to — the one call that validates a paste.
- *
- * Every non-2xx answer is a refusal to store anything. 401 is the one worth
- * naming, because it is the one the reader can act on: the token is wrong,
- * expired, or was pasted with a character missing.
- */
-async function checkGithubToken(token: string): Promise<TokenCheck> {
-  let response: Response;
-  try {
-    response = await fetch(GITHUB_USER_URL, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-      },
-    });
-  } catch {
-    // Offline, or github.com unreachable. Not the token's fault, and saying so
-    // keeps the reader from re-pasting a token that was fine.
-    return { ok: false, error: "Could not reach github.com. Nothing was saved." };
-  }
-  if (response.status === 401) {
-    return { ok: false, error: "GitHub rejected that token (401). Nothing was saved." };
-  }
-  if (!response.ok) {
-    return {
-      ok: false,
-      error: `GitHub answered ${response.status}. Nothing was saved.`,
-    };
-  }
-  const body: unknown = await response.json().catch(() => null);
-  const login =
-    typeof body === "object" && body !== null
-      ? (body as { login?: unknown }).login
-      : null;
-  if (typeof login !== "string" || login === "") {
-    return { ok: false, error: "GitHub answered without a login. Nothing was saved." };
-  }
-  return { ok: true, login };
-}
-
-/**
- * The GitHub connection: connected as somebody, or a field to paste a token in.
- *
- * The two states are one entry rather than two components because they are one
- * fact — whether this browser holds a token — read straight from the store, so
- * a disconnect anywhere is reflected here without a second copy to update.
- */
-function GithubConnection(): ReactElement {
-  const token = useSetting("githubToken");
-  const login = useSetting("githubLogin");
-  const [draft, setDraft] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [checking, setChecking] = useState(false);
-
-  const connect = useCallback(async (): Promise<void> => {
-    const pasted = draft.trim();
-    if (pasted === "" || checking) return;
-    setChecking(true);
-    setError(null);
-    const result = await checkGithubToken(pasted);
-    setChecking(false);
-    if (!result.ok) {
-      // Nothing is written: a token GitHub would not answer for is not a token
-      // worth keeping, and storing it would leave every later reader to
-      // rediscover that it is broken.
-      setError(result.error);
-      return;
-    }
-    setSetting("githubToken", pasted);
-    setSetting("githubLogin", result.login);
-    setDraft("");
-  }, [checking, draft]);
-
-  const disconnect = useCallback((): void => {
-    setSetting("githubToken", null);
-    setSetting("githubLogin", null);
-    setError(null);
-  }, []);
-
-  return (
-    <div className="ub-setting">
-      <div className="ub-setting-head">
-        <h4 className="ub-setting-title">GitHub</h4>
-        {token !== null && (
-          <span className="ub-setting-state">connected as {login ?? "—"}</span>
-        )}
-      </div>
-      <p className="ub-setting-copy">
-        Reference hovercards (#175) read the title and state of issues and pull
-        requests you link to. Paste a fine-grained personal access token with
-        read-only access: <strong>{GITHUB_SCOPES}</strong>.
-      </p>
-      <p className="ub-setting-copy ub-muted">
-        The token is kept in this browser only. It is never written to a
-        document, never exported, and never sent anywhere but github.com.
-      </p>
-      {token === null ? (
-        <div className="ub-setting-row">
-          <input
-            className="ub-setting-input"
-            type="password"
-            aria-label="GitHub token"
-            placeholder="github_pat_…"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-          />
-          <button
-            type="button"
-            className="ub-tool ub-tool-on"
-            disabled={draft.trim() === "" || checking}
-            onClick={() => void connect()}
-          >
-            {checking ? "Checking…" : "Connect"}
-          </button>
-        </div>
-      ) : (
-        <div className="ub-setting-row">
-          <button type="button" className="ub-tool" onClick={disconnect}>
-            Disconnect
-          </button>
-        </div>
-      )}
-      {error !== null && (
-        <p className="ub-setting-error" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
-  );
 }
 
 /** The word the reader has to type. Short, unambiguous, and not a click. */
@@ -665,12 +515,6 @@ export function SettingsDialog({
           This machine and this browser. Nothing here is synced or shared with
           the workspace.
         </p>
-        <section className="ub-settings-section" aria-labelledby="ub-settings-conn">
-          <h3 id="ub-settings-conn" className="ub-settings-section-title">
-            Connections
-          </h3>
-          <GithubConnection />
-        </section>
         <section className="ub-settings-section" aria-labelledby="ub-settings-storage">
           <h3 id="ub-settings-storage" className="ub-settings-section-title">
             Storage

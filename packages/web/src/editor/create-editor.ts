@@ -10,9 +10,6 @@ import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { BlockIds } from "./block-ids.js";
 import { Collaboration } from "./collaboration.js";
-import { GitHubHovercards } from "./github-hovercard.js";
-import type { GitHubHovercardOptions } from "./github-hovercard.js";
-import { GitHubRefs } from "./github-refs.js";
 import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
 import { paletteExtensions } from "./nodes.js";
@@ -37,11 +34,6 @@ export interface CreateEditorOptions {
   editable?: boolean;
   /** Block-id source; injectable for deterministic tests. */
   newBlockId?: () => string;
-  /**
-   * The GitHub hovercard's hover-intent delay, so a test need not wait it out.
-   * Defaults to the real one.
-   */
-  hovercard?: Partial<GitHubHovercardOptions>;
 }
 
 export function createUberblickEditor(options: CreateEditorOptions): Editor {
@@ -66,13 +58,6 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
       fragment: options.fragment,
       awareness: options.awareness ?? null,
     }),
-    // Presentation over state that is already true, like the one below it: the
-    // stored text of a pasted GitHub link stays the full URL.
-    GitHubRefs,
-    // Reads the same references the decoration draws, and nothing else: the
-    // card is fetched on hover, shown in a portal, and never touches the
-    // document (#175).
-    GitHubHovercards.configure(options.hovercard ?? {}),
   ];
 
   return new Editor({
