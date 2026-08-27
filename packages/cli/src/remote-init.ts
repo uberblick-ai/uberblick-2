@@ -547,19 +547,25 @@ const TAIL_LINES = 3;
 const TAIL_CHARS = 500;
 
 /**
- * The last few lines a vendor said on stderr, bounded.
+ * The last few lines a vendor said on stderr, bounded and stripped of control
+ * characters — a remote host's output ends up on this terminal, and an escape
+ * sequence in it is the host writing to the screen rather than reporting.
  *
  * These programs run locally under the caller's own credentials, and their
  * diagnostics are the only place the cause of a failure is written — an exit
  * status alone sends the reader to this file. The bound is against a vendor
- * that hands back a whole build log, not against a secret: the signing secret
- * never reaches one of them, `childEnvironment` strips it and it travels on
- * stdin, which this package's tests assert.
+ * that hands back a whole build log.
+ *
+ * It is not a redaction: the signing secret does reach one vendor, on the
+ * stdin of the step that writes `.env`, and a host that echoed its stdin back
+ * would echo the secret. That one call site quotes nothing, which is why
+ * nothing here has to be scrubbed.
  */
 function stderrTail(stderr: string): string {
   const lines = stderr
     .split("\n")
-    .map((line) => line.trimEnd())
+    // Newlines survive as the split; everything else in Cc does not.
+    .map((line) => line.replace(/\p{Cc}/gu, "").trimEnd())
     .filter((line) => line !== "");
   const tail = lines.slice(-TAIL_LINES).join("\n");
   return tail.length > TAIL_CHARS ? `…${tail.slice(-TAIL_CHARS)}` : tail;
@@ -848,8 +854,11 @@ export async function remoteInitCommand(
     { env },
   );
   if (checkout.status !== 0) {
+    // The whole of what git said, then the verdict — `ub remote update`'s
+    // shape. A clone that is refused the deploy key says so five lines from
+    // the end, behind git's own boilerplate, so the tail alone loses it.
     io.err(
-      `ub remote init: ${failed(existing ? "git fetch on the host" : "git clone on the host", checkout)}.\n`,
+      `${checkout.stderr}ub remote init: ${failed(existing ? "git fetch on the host" : "git clone on the host", checkout)}.\n`,
     );
     return 1;
   }
@@ -862,7 +871,12 @@ export async function remoteInitCommand(
     input: `# Written by \`ub remote init\`. Untracked, so updates never touch it.\nTAILSCALE_HOST=${magicDns}\nTAILSCALE_IP=${address}\nHUB_AUTH_TOKEN=${secret}\nWEB_WORKSPACES=${webWorkspace}\n`,
   });
   if (wrote.status !== 0) {
-    io.err(`ub remote init: ${failed("writing .env on the host", wrote)}.\n`);
+    // The one step handed the secret, and the only one whose words are not
+    // quoted: a host that echoed its stdin back on stderr would put the
+    // payload in this line. A shell's error message is not worth that.
+    io.err(
+      `ub remote init: ${failed("writing .env on the host", { ...wrote, stderr: "" })}.\n`,
+    );
     return 1;
   }
 

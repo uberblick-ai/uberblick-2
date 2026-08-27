@@ -423,6 +423,15 @@ describe("ub remote init", () => {
     expect(reported).not.toContain(long);
     expect(reported).toContain(`…${"x".repeat(500)}`);
     expect(reported.length).toBeLessThan(600);
+
+    // And a host writing escape sequences is quoted as text, never replayed:
+    // its stderr reaches this terminal, where an OSC would retitle the window.
+    const escaping = harness({
+      gh: `  *"deploy-key add"*) printf 'be\\033]0;pwned\\007fore\\r\\n' >&2; exit 1 ;;`,
+    });
+    expect(await init(escaping)).toBe(1);
+    expect(escaping.err()).toContain("exited 1: be]0;pwnedfore");
+    expect(/\p{Cc}/u.test(escaping.err().replaceAll("\n", ""))).toBe(false);
   });
 
   it("names the usual causes when the deploy key is refused", async () => {
@@ -437,17 +446,20 @@ describe("ub remote init", () => {
     expect(rig.labels().join("\n")).not.toContain("uberblick:clone");
   });
 
-  it("has no signing secret to quote back, whatever a vendor prints", async () => {
+  it("quotes nothing back from the one step that carries the secret", async () => {
     const rig = harness({
-      // The worst case: a failing vendor that echoes the variable it inherited.
-      gh: `  *"deploy-key add"*) printf 'token=%s\\n' "\${HUB_AUTH_TOKEN:-<unset>}" >&2; exit 1 ;;`,
+      // The worst case at the only site that matters: writing `.env` is the
+      // one call handed the secret, and this host echoes everything it was
+      // given — argv, environment and the payload on stdin — back on stderr.
+      ssh: `  *"uberblick:env"*)
+    tr '\\0' '\\n' < "$UB_TEST_RECORD/$(printf '%03d' "$count")-ssh" >&2
+    exit 1 ;;`,
     });
-    // The shape `fnox exec` leaves: exported here, so inherited by default.
-    rig.env.HUB_AUTH_TOKEN = SECRET;
     expect(await init(rig)).toBe(1);
-    // The echo did reach the report — and found nothing to echo.
-    expect(rig.err()).toContain("token=<unset>");
+    // Reported as the step and its status, with none of what the host said.
+    expect(rig.err()).toContain("writing .env on the host exited 1.");
     expect(rig.output()).not.toContain(SECRET);
+    expect(rig.output()).not.toContain("HUB_AUTH_TOKEN");
   });
 
   it("persists the endpoint when this workspace holds no documents", async () => {
