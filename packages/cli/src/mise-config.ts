@@ -326,12 +326,12 @@ function render(env: DerivedEnvironment, extra: readonly string[]): string {
   return `${MARKER}
 #
 # Derived from the config \`ub\` resolves — this machine's credentials.json and
-# config.json (\`ub status\` names the directory they are in) and
-# ./uberblick.json — same values, one owner. Do not edit the three values
-# below: \`ub init\` writes them, \`ub workspace use\` and \`ub remote join\`
-# rewrite them, and no other command does. Anything else you add to [env] is
-# kept. \`ub remote set\` and \`ub remote promote\` change the authority files
-# without regenerating this — rerun \`ub init\` to pick the new endpoint up.
+# config.json (\`ub status\` names the directory they are in): same values, one
+# owner. Do not edit the three values below: \`ub init\` writes them, and
+# \`ub workspace use\` and \`ub remote join\` rewrite them — no other command
+# does. Anything else you add to [env] is kept. \`ub remote set\` and
+# \`ub remote promote\` change the authority files without regenerating this —
+# rerun \`ub init\` to pick the new endpoint up.
 # Delete it and rerun \`ub init\` and it comes back the same.
 #
 # It exists because mise tasks inherit their environment from mise rather than

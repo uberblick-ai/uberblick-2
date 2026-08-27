@@ -1,5 +1,5 @@
 /**
- * `ub workspace` — which workspace this directory works in, and how to change it.
+ * `ub workspace` — which workspace is in force, and how to change it.
  *
  * Three forms and no more: the one in force, the ones this machine has a
  * database for, and the binding verb.
@@ -8,12 +8,12 @@
  * listing, `use` writes config files — the whole command is local bookkeeping,
  * the way `git remote` is, and it stays fast and offline for the same reason.
  *
- * **`use` writes `./uberblick.json`, not the user config.** That is the missing
- * half of the layout: the directory file is what binds one checkout to one
- * workspace, and until now the only command that persisted a workspace was
- * `ub init`, which writes the *user-global* config — a trap the moment two
- * checkouts want two workspaces. `--user` asks for the old behaviour
- * explicitly: bind the machine rather than the directory.
+ * **`use` writes the user config — this machine's default workspace.** There is
+ * one place a workspace preference lives, `config.json`, the same file `ub init`
+ * writes. A repository that needs its own workspace does not get a second config
+ * file for it: it pins `WORKSPACE_ID` in its project MCP entry
+ * (`ub mcp install --project --workspace <id>`), which every agent session in
+ * that checkout spawns through and which outranks this.
  *
  * **`use` stores the string as typed.** A `<slug>-<uuid>` spelling is kept whole,
  * because the slug is what makes a config file readable, and only what reaches a
@@ -24,25 +24,19 @@
  * in the repository reads `ub`'s configuration: `mise run web` and the hub take
  * their environment from mise, which takes it from that derived file. A binding
  * nobody derived from would leave every mise task serving the workspace this
- * directory used to be bound to, silently. So the
+ * machine used to default to, silently. So the
  * binding and the file derived from it are written together, under the same lock
  * `ub init` holds — see {@link regenerateLocalConfig} for what "derived from"
  * means when the environment is itself one of the layers.
  */
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/hub/storage";
 import { defaultDatabasePath } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";
-import {
-  DIRECTORY_FILE,
-  resolveConfig,
-  userConfigPath,
-  writeUserConfig,
-} from "./config.js";
+import { resolveConfig, userConfigPath, writeUserConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
@@ -57,7 +51,7 @@ import {
   trustLocalConfig,
   writeLocalConfig,
 } from "./mise-config.js";
-import { describeFsError, publishOwnerOnly } from "./safe-write.js";
+import { describeFsError } from "./safe-write.js";
 import { ORIGIN_LABELS } from "./status.js";
 
 export const WORKSPACE_HELP = `usage: ub workspace [command]
@@ -65,8 +59,8 @@ export const WORKSPACE_HELP = `usage: ub workspace [command]
 commands:
   (none)                 the workspace in force, and which layer chose it
   list [--json]          workspaces this machine has a database for
-  use <id> [--user]      bind this directory to a workspace; --user binds the
-                         machine instead, by writing the user config
+  use <id>               make a workspace this machine's default, by writing
+                         the user config
 
 <id> is any of three things:
   <uuid>                 a workspace uuid — accepted even if this machine has
@@ -116,7 +110,7 @@ interface InForce {
  * The workspace configuration resolves to — the same value and the same origin
  * `ub status` reports, without opening the database to get it.
  */
-function inForce(options: { env?: NodeJS.ProcessEnv; cwd?: string } = {}): InForce {
+function inForce(options: { env?: NodeJS.ProcessEnv } = {}): InForce {
   const resolved = resolveConfig(options);
   const configured = resolved.env.WORKSPACE_ID ?? null;
   return {
@@ -134,7 +128,7 @@ function inForce(options: { env?: NodeJS.ProcessEnv; cwd?: string } = {}): InFor
  * workspace you are in.
  */
 export function listWorkspaces(
-  options: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
+  options: { env?: NodeJS.ProcessEnv } = {},
 ): { entries: WorkspaceEntry[]; warnings: string[] } {
   const env = options.env ?? process.env;
   const current = inForce(options);
@@ -192,8 +186,7 @@ function showWorkspace(io: Io): number {
     io.err(
       "ub workspace: no workspace configured. There is no default — a guessed " +
         "workspace would open a corpus nobody chose. Run `ub init` to create " +
-        "one, or `ub workspace use <id>` to bind this directory to one that " +
-        "exists.\n",
+        "one, or `ub workspace use <id>` to adopt one that exists.\n",
     );
     return 1;
   }
@@ -332,8 +325,8 @@ export function resolveWorkspaceId(
  * A file that exists but cannot be believed is a refusal, not a default: this
  * command replaces one field and republishes the whole file, so treating an
  * unparseable one as an empty object would throw away everything else its
- * author put in it. That is as true of `config.json` — an identity, an
- * endpoint — as of `./uberblick.json`, which is why both go through here.
+ * author put in it: `config.json` holds an identity and an endpoint this
+ * command has no business dropping.
  */
 function readMergeTarget(path: string): Record<string, unknown> {
   let text: string;
@@ -360,10 +353,6 @@ function readMergeTarget(path: string): Record<string, unknown> {
     throw new Error(`refusing to rewrite ${path}: expected a JSON object`);
   }
   return parsed as Record<string, unknown>;
-}
-
-function serialize(value: unknown): string {
-  return `${JSON.stringify(value, null, 2)}\n`;
 }
 
 /**
@@ -436,7 +425,6 @@ export function regenerateLocalConfig(cwd: string): Regeneration {
   const path = localConfigPath(root);
 
   const resolved = resolveConfig({
-    cwd,
     env: withoutOwnEcho(process.env, derivedValues(root)),
   });
   const workspace = resolved.env.WORKSPACE_ID;
@@ -477,15 +465,11 @@ export function regenerateLocalConfig(cwd: string): Regeneration {
     : { kind: "refused", path: outcome.path, reason: outcome.reason };
 }
 
-/** Exported so the help below can be checked against the parser it describes. */
-export const WORKSPACE_USE_OPTIONS = {
-  user: { type: "boolean", default: false },
-} as const;
+export const WORKSPACE_USE_HELP = `usage: ub workspace use <id>
 
-export const WORKSPACE_USE_HELP = `usage: ub workspace use <id> [--user]
-
-Bind this directory to a workspace by writing \`${DIRECTORY_FILE}\`, and regenerate
-the derived mise config so the mise tasks here follow the switch.
+Make a workspace this machine's default, by writing the user config, and
+regenerate the derived mise config so the mise tasks in this checkout follow the
+switch.
 
 operands:
   <id>              a workspace <uuid>, a decorated <slug>-<uuid>, or a unique
@@ -494,38 +478,36 @@ operands:
                     hydrates on next use.
 
 options:
-  --user            bind this machine instead, by writing the user config
-                    (default: this directory)
   -h, --help        show this help
 
-Moves no documents and creates no workspace — it changes which one this
-directory resolves to. A layer above (WORKSPACE_ID, or an outranking file) still
-wins, and this says so when it does.
+Moves no documents and creates no workspace — it changes which one this machine
+resolves to by default. A repository binds itself instead by pinning
+WORKSPACE_ID in its project MCP entry (\`ub mcp install --project --workspace
+<id>\`); that, and WORKSPACE_ID in the environment, still win, and this says so
+when they do.
 `;
 
 async function useCommand(argv: string[], io: Io): Promise<number> {
   if (takeHelp(argv, io, WORKSPACE_USE_HELP)) return 0;
 
-  let user = false;
   let raw: string | undefined;
   try {
-    const { values, positionals } = parseArgs({
+    const { positionals } = parseArgs({
       args: argv,
-      options: WORKSPACE_USE_OPTIONS,
+      options: {},
       allowPositionals: true,
     });
-    user = values.user === true;
     if (positionals.length !== 1) {
       throw new Error("expected exactly one workspace id");
     }
     raw = positionals[0];
   } catch (error) {
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
-    io.err("usage: ub workspace use <id> [--user]\n");
+    io.err("usage: ub workspace use <id>\n");
     return 2;
   }
   if (raw === undefined) {
-    io.err("usage: ub workspace use <id> [--user]\n");
+    io.err("usage: ub workspace use <id>\n");
     return 2;
   }
 
@@ -546,7 +528,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   const id = resolved.id;
 
   const cwd = process.cwd();
-  const path = user ? userConfigPath() : join(cwd, DIRECTORY_FILE);
+  const path = userConfigPath();
 
   // The binding and the file derived from it are two writes that have to agree
   // when this returns, so they happen under the lock `ub init` holds for the
@@ -562,21 +544,10 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
 
   let regenerated: Regeneration = { kind: "none" };
   try {
-    if (user) {
-      // Merged over what is on disk: identity and the endpoint are not this
-      // command's to drop — and neither is a file that did not parse, which is
-      // refused rather than quietly replaced with a one-field file.
-      writeUserConfig({ ...readMergeTarget(path), workspace: id });
-    } else {
-      // Owner-only like every other file this CLI publishes. Nothing in here is
-      // a secret and git does not record the mode, so one writer with one rule
-      // is worth more than a second rule for the committable file.
-      publishOwnerOnly(
-        path,
-        serialize({ ...readMergeTarget(path), workspace: id }),
-        "ub workspace use",
-      );
-    }
+    // Merged over what is on disk: identity and the endpoint are not this
+    // command's to drop — and neither is a file that did not parse, which is
+    // refused rather than quietly replaced with a one-field file.
+    writeUserConfig({ ...readMergeTarget(path), workspace: id });
     // Derived from what is on disk now — the binding above included — rather
     // than from what this process decided, which is what makes the pair agree
     // however the two writes are interleaved with another run's.
@@ -613,7 +584,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   // Written, and possibly overruled: a higher layer means this file changed
   // nothing anyone will observe, and printing the binding without saying so
   // would be the lie `ub status` then contradicts.
-  const after = inForce({ cwd });
+  const after = inForce();
   if (after.configured !== id) {
     io.err(
       `ub: warning: ${ORIGIN_LABELS[after.origin]} sets ${
@@ -628,7 +599,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   // against the workspace this command was asked to leave.
   if (regenerated.kind === "refused") {
     io.err(
-      `ub workspace use: ${path} now binds this directory to ${id}, but ` +
+      `ub workspace use: ${path} now makes ${id} this machine's default, but ` +
         `${regenerated.path} could not be updated to match: ${regenerated.reason} ` +
         "Until it is, every mise task here still serves the workspace that file " +
         "names.\n",

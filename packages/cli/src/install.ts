@@ -1,19 +1,29 @@
 /**
  * `ub mcp install [target]` — register uberblick with an MCP client.
  *
- * The thing being installed is always the same line, `ub mcp serve`, with no
- * arguments and no environment. Which workspace, which hub and which credential
- * apply is resolved by `ub` itself (see `config.ts`); a client config that
- * pinned any of them would be a second copy of configuration that already has an
- * owner, and it would go stale the first time somebody ran `ub init`.
+ * The thing being installed is always the same line, `ub mcp serve`. Which hub
+ * and which credential apply is resolved by `ub` itself (see `config.ts`); a
+ * client config that pinned either would be a second copy of configuration that
+ * already has an owner, and it would go stale the first time somebody ran
+ * `ub remote join`.
  *
- * **The one deliberate exception: `--workspace`.** It registers a *second*
- * entry, named `uberblick-<label>`, spawning the same line plus one pinned
- * variable — `WORKSPACE_ID`, the top precedence layer. That is how one agent
- * session reads two corpora: one process per workspace, two named toolsets, no
- * workspace parameter on any tool. Everything else is still resolved at spawn,
- * and a pinned entry does not follow `ub workspace use` — which every report
- * about one says out loud, because it is the exception.
+ * **The one thing an entry may pin is `--workspace`.** A project MCP entry *is*
+ * the repository's workspace binding: `--project --workspace <id>` writes
+ * exactly `WORKSPACE_ID`, the top precedence layer, into the entry every agent
+ * session in that checkout spawns through. There is no second uberblick-specific
+ * project file for this, because the client config the process already needs is
+ * the one that travels with the repository.
+ *
+ * Without `--name` the pin lands on the primary `uberblick` entry — the ordinary
+ * "this repository works in that workspace". `--name <label>` puts it on a
+ * separately named `uberblick-<label>` instead, which is how one agent session
+ * reads two corpora: one process per workspace, two toolsets, no workspace
+ * parameter on any tool. Either way a pinned entry does not follow
+ * `ub workspace use` — which every report about one says out loud.
+ *
+ * **Nothing else is ever written into an entry.** No endpoint, no credential, no
+ * value read out of `credentials.json`: a client config is committable, and
+ * `ub mcp serve` resolves all of that at spawn time anyway.
  *
  * **Two ways to write, and the vendor's own comes first.** Claude Code ships
  * `claude mcp add`, and Codex ships `codex mcp add` for its global config, so
@@ -29,8 +39,10 @@
  *
  * **What it refuses.** Deciding what is already there is always done by reading
  * the file, whichever path does the writing. An entry that is already ours is a
- * no-op; an entry that is somebody else's is reported next to what would replace
- * it and left alone unless `--force` says otherwise; a file that cannot be
+ * no-op; an entry that is ours up to the workspace it pins is re-pinned in place
+ * when `--workspace` names one, because that flag is the permission; an entry
+ * that is somebody else's is reported next to what would replace it and left
+ * alone unless `--force` says otherwise; a file that cannot be
  * edited without guessing is named and left untouched. Nothing here prompts, so
  * the whole command runs unattended.
  *
@@ -65,7 +77,6 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
-import { parseWorkspaceId } from "@uberblick/schema";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
@@ -103,9 +114,9 @@ interface Flags {
   scope: Scope;
   print: boolean;
   force: boolean;
-  /** The workspace to pin a secondary entry to, as it was typed. */
+  /** The workspace to pin the entry to, as it was typed. */
   workspace: string | null;
-  /** What to call that entry, when `--name` said. */
+  /** A separately named entry to pin instead of the primary one. */
   label: string | null;
   /** The command to install, when `-- …` overrode it. */
   entry: Entry;
@@ -151,9 +162,9 @@ export const INSTALL_OPTIONS = {
 export const INSTALL_HELP = `usage: ub mcp install [target] [options] [-- <command>]
 
 Register uberblick with an MCP client, so there is no JSON to hand-edit. What is
-registered is \`ub mcp serve\` with no arguments and no environment: workspace,
-endpoint and credential are resolved by \`ub\` itself, so a client config never
-carries a stale copy of them.
+registered is \`ub mcp serve\`: endpoint and credential are resolved by \`ub\`
+itself, so a client config never carries a stale copy of them — and never a
+secret. The one value an entry may carry is WORKSPACE_ID, from --workspace.
 
 operands:
   target            the client: ${TARGETS.join(", ")} (default ${DEFAULT_TARGET}).
@@ -165,14 +176,20 @@ options:
   --user            write the per-user config
   --print           print the snippet to paste, and write nothing
   --force           replace an existing "uberblick" entry, backing the file up
-  --workspace <id>  register a second entry pinned to this workspace instead,
-                    resolved the way \`ub workspace use\` resolves an id
-  --name <label>    call that entry "uberblick-<label>" (default: its slug);
-                    needs --workspace, which is the entry it names
+  --workspace <id>  pin the entry to this workspace by setting WORKSPACE_ID in
+                    it, resolved the way \`ub workspace use\` resolves an id.
+                    With --project that is the repository's workspace binding
+  --name <label>    pin a second entry called "uberblick-<label>" instead of
+                    the primary one, so one session can read two corpora;
+                    needs --workspace, which is what it names
   -h, --help        show this help
   -- <command>      register this command instead of uberblick's own. Only the
                     first \`--\` is ours; everything after it is passed through
                     verbatim, including further \`--\` and \`--help\`.
+
+Re-running with a different --workspace re-pins the entry in place (the file is
+backed up first); an install naming no --workspace leaves an existing pin alone
+rather than dropping it, because that would move a repository to another corpus.
 
 Safe against a file you care about: other servers are left alone, a second run
 reports \`already installed\`, an entry it did not write is never replaced without
@@ -245,22 +262,17 @@ function commandLine(entry: Entry): string {
 }
 
 /**
- * The same entry under its own name, pinned to one workspace.
+ * The entry, pinned to one workspace — the primary one unless `--name` asked for
+ * a second.
  *
  * The id is stored as it was typed, decoration included, exactly as
  * `ub workspace use` stores it: the slug is what makes a config file readable,
  * and only what reaches a room, a token or the database is the bare uuid.
- *
- * The default label is that slug, because it is the name the workspace already
- * has. A bare uuid has none, so its first group stands in — short enough to
- * type as a toolset name, and distinct among the handful of workspaces one
- * machine holds.
  */
 function pinnedTo(entry: Entry, id: string, label: string | null): Entry {
-  const { uuid, slug } = parseWorkspaceId(id);
   return {
     ...entry,
-    name: `${SERVER_NAME}-${label ?? slug ?? (uuid.split("-")[0] as string)}`,
+    name: label === null ? entry.name : `${entry.name}-${label}`,
     env: { WORKSPACE_ID: id },
   };
 }
@@ -379,10 +391,13 @@ export function verifyUnchanged(path: string, config: OpenConfig): void {
 
 // --- writing ----------------------------------------------------------------
 
-/** `<file>.<timestamp>.bak`, beside the file, in the sortable compact form. */
-function backupPath(path: string): string {
+/**
+ * `<file>.<timestamp>.bak`, beside the file, in the sortable compact form —
+ * with `-2`, `-3`… when a run in the same second already took the plain name.
+ */
+function backupPath(path: string, attempt: number): string {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-  return `${path}.${stamp}.bak`;
+  return `${path}.${stamp}${attempt === 1 ? "" : `-${attempt}`}.bak`;
 }
 
 /**
@@ -443,13 +458,23 @@ export function publish(
   }
 }
 
-/** Copy the bytes that were read aside, before anything replaces them. */
+/**
+ * Copy the bytes that were read aside, before anything replaces them.
+ *
+ * A name already taken is never written through — that would destroy the very
+ * copy this exists to keep — so the run takes the next free one instead. The
+ * stamp is per-second and re-pinning needs no `--force`, so two writes inside
+ * one second are now an ordinary thing rather than a mistake to report.
+ */
 function backUp(path: string, config: OpenConfig): string {
-  const backup = backupPath(path);
-  if (!stageInto(backup, config.text, "absent", Number(config.mode & 0o777n))) {
-    throw new Error(`a backup already exists at ${backup} — run again`);
+  const mode = Number(config.mode & 0o777n);
+  for (let attempt = 1; attempt <= 100; attempt += 1) {
+    const backup = backupPath(path, attempt);
+    if (stageInto(backup, config.text, "absent", mode)) {
+      return backup;
+    }
   }
-  return backup;
+  throw new Error(`cannot put a backup beside ${path} — run again`);
 }
 
 function field(name: string, value: string): string {
@@ -559,11 +584,11 @@ export async function installCommand(
     return 2;
   }
 
-  // What is being installed: the primary entry, or the secondary one a
-  // `--workspace` pin asks for. Resolved before anything is opened, so a bad id
-  // is a usage error rather than a half-finished install — and resolved exactly
-  // as `ub workspace use` resolves one, so a prefix names the same workspace in
-  // both commands.
+  // What is being installed: the entry, pinned when `--workspace` says so and
+  // under a second name when `--name` does. Resolved before anything is opened,
+  // so a bad id is a usage error rather than a half-finished install — and
+  // resolved exactly as `ub workspace use` resolves one, so a prefix names the
+  // same workspace in both commands.
   let entry = flags.entry;
   if (flags.workspace !== null) {
     let known: WorkspaceEntry[];
@@ -623,11 +648,13 @@ export async function installCommand(
   try {
     let existing: string | null = null;
     let matches = false;
+    let pinOnly = false;
     if (existingFile !== null) {
       try {
         const state = inspect(file.format, existingFile.text, entry);
         existing = state.existing;
         matches = state.matches;
+        pinOnly = state.pinOnly;
       } catch (error) {
         if (!(error instanceof UnusableConfig)) {
           throw error;
@@ -655,14 +682,35 @@ export async function installCommand(
       return 0;
     }
 
-    if (existing !== null && !flags.force) {
+    // Re-pinning is not a collision. The entry runs our command with our
+    // arguments and differs only in the workspace it names, which is the one
+    // value `--workspace` exists to set — so the flag *is* the permission, and
+    // demanding `--force` on top of it would make the issue's headline flow
+    // (`--project --workspace X` in a checkout that already has the entry) fail
+    // on its second run. It is still a rewrite: the file is backed up first,
+    // exactly as `--force` would.
+    //
+    // Deliberately one-directional. An install with no `--workspace` proposes an
+    // *unpinned* entry, so taking this branch there would drop a repository's
+    // workspace binding because somebody re-ran the plain install line — a
+    // session silently moved to another corpus, which is the failure the pin
+    // exists to prevent. That still needs `--force`, and says so in its own
+    // words rather than calling the entry somebody else's.
+    const repinning = pinOnly && entry.env !== undefined;
+
+    if (existing !== null && !flags.force && !repinning) {
       io.err(
-        `ub mcp install: ${file.path} already registers "${entry.name}" as ` +
-          "something else, so it was left alone.\n\n" +
-          `existing\n${existing}\n\n` +
-          `proposed\n${snippet(file.format, entry).trimEnd()}\n\n` +
-          "Values other than the command are hidden. Re-run with --force to " +
-          "replace it; the file is backed up first.\n",
+        pinOnly
+          ? `ub mcp install: ${file.path} pins "${entry.name}" to a workspace ` +
+            "and this install names none, so it was left alone. Pass " +
+            "--workspace <id> to re-pin it, or --force to drop the pin; either " +
+            "way the file is backed up first.\n"
+          : `ub mcp install: ${file.path} already registers "${entry.name}" as ` +
+            "something else, so it was left alone.\n\n" +
+            `existing\n${existing}\n\n` +
+            `proposed\n${snippet(file.format, entry).trimEnd()}\n\n` +
+            "Values other than the command are hidden. Re-run with --force to " +
+            "replace it; the file is backed up first.\n",
       );
       return 1;
     }

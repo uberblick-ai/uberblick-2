@@ -222,7 +222,6 @@ function stepFor(rig: Harness, marker: string): Step {
 function init(rig: Harness, args: string[] = [TARGET]): Promise<number> {
   return remoteInitCommand(args, rig.io, {
     env: rig.env,
-    cwd: rig.box.cwd,
     reach: async () => null,
   });
 }

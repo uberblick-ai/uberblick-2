@@ -538,7 +538,6 @@ function parseInitFlags(argv: string[]): InitFlags {
 
 export interface RemoteInitDeps {
   env?: NodeJS.ProcessEnv;
-  cwd?: string;
   /** How the deployment is verified from here. Injected by the tests. */
   reach?: Reach;
 }
@@ -596,9 +595,8 @@ export async function remoteInitCommand(
   }
 
   const env = deps.env ?? process.env;
-  const cwd = deps.cwd ?? process.cwd();
   const reach = deps.reach ?? reachStack;
-  const resolved = resolveConfig({ env, cwd });
+  const resolved = resolveConfig({ env });
   for (const warning of resolved.warnings) io.err(`ub: warning: ${warning}\n`);
 
   let base: McpConfig;
@@ -879,7 +877,7 @@ export async function remoteInitCommand(
     return 0;
   }
 
-  const persistence = setRemote(endpoint, { env, cwd });
+  const persistence = setRemote(endpoint, { env });
   for (const warning of persistence.warnings) io.err(`ub: warning: ${warning}\n`);
   report +=
     `\nThis workspace holds no documents, so the endpoint is now ${endpoint}\n` +

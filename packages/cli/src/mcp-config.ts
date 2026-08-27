@@ -54,10 +54,10 @@ export interface Entry {
   /**
    * Environment pinned into the entry, absent for the unpinned one.
    *
-   * The only value that ever goes here is `WORKSPACE_ID`, and only for the
-   * secondary entries `--workspace` writes: an entry that exists to serve one
-   * named workspace is the one thing a client config can say that `ub` cannot
-   * work out for itself.
+   * The only value that ever goes here is `WORKSPACE_ID`, and only when
+   * `--workspace` said so: which workspace a project's entry serves is the one
+   * thing a client config can say that `ub` cannot work out for itself. No
+   * endpoint, no credential, ever.
    */
   env?: Record<string, string>;
 }
@@ -67,10 +67,10 @@ export interface Entry {
  *
  * No arguments and no environment: which workspace, which hub and which
  * credential apply is resolved by `ub` itself, from the layers `config.ts`
- * documents. A client config that pinned any of them would be a second, stale
- * copy of configuration that already has an owner. The one exception is a
- * *second* entry, under its own name and pinned to one workspace on purpose —
- * see `install.ts`. This one never carries configuration.
+ * documents. A client config that pinned the hub or the credential would be a
+ * second, stale copy of configuration that already has an owner. `WORKSPACE_ID`
+ * is the exception `--workspace` writes — see `install.ts`. This one never
+ * carries configuration.
  */
 export const DEFAULT_ENTRY: Entry = {
   name: SERVER_NAME,
@@ -138,6 +138,18 @@ export interface Found {
   existing: string | null;
   /** Whether what is there already runs exactly the proposed command. */
   matches: boolean;
+  /**
+   * Whether what is there is this command's own entry differing at most in the
+   * pinned workspace: the same program, the same arguments, and an `env` that is
+   * absent, empty, or a single `WORKSPACE_ID`.
+   *
+   * Setting that one value is the whole job of `--workspace`, so an entry that
+   * differs only there is a *re-pin*, not somebody else's server sitting under
+   * our name — and `install.ts` rewrites it (after the same backup) rather than
+   * demanding `--force` for a flag the user has already typed. Any other key in
+   * `env` is somebody's own configuration, and the entry is foreign.
+   */
+  pinOnly: boolean;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -423,7 +435,37 @@ function envMatches(
   );
 }
 
-function jsonMatches(value: unknown, entry: Entry): boolean {
+/**
+ * An `env` this command could have written, whatever workspace it names.
+ *
+ * Absent and empty are the unpinned entry as `ub` and `claude mcp add` each
+ * spell it; a lone `WORKSPACE_ID` is a pinned one. Everything else — a second
+ * variable, a `WORKSPACE_ID` that is not a string — belongs to whoever put it
+ * there.
+ */
+function envIsPinOnly(value: unknown): boolean {
+  if (value === undefined) {
+    return true;
+  }
+  if (!isPlainObject(value)) {
+    return false;
+  }
+  const keys = Object.keys(value);
+  if (keys.length === 0) {
+    return true;
+  }
+  return keys.length === 1 && typeof value.WORKSPACE_ID === "string";
+}
+
+/**
+ * Whether an existing entry is the proposed one — exactly, or up to the
+ * workspace pin when `pin` is `"any"`. See {@link Found.pinOnly}.
+ */
+function jsonMatches(
+  value: unknown,
+  entry: Entry,
+  pin: "exact" | "any" = "exact",
+): boolean {
   if (!isPlainObject(value)) {
     return false;
   }
@@ -436,7 +478,9 @@ function jsonMatches(value: unknown, entry: Entry): boolean {
   if (type !== undefined && type !== "stdio") {
     return false;
   }
-  if (!envMatches(value.env, entry.env)) {
+  if (
+    !(pin === "any" ? envIsPinOnly(value.env) : envMatches(value.env, entry.env))
+  ) {
     return false;
   }
   const args = value.args ?? [];
@@ -500,11 +544,12 @@ function inspectJson(text: string, entry: Entry): Found {
   }
   const value = servers?.[entry.name];
   if (value === undefined) {
-    return { existing: null, matches: false };
+    return { existing: null, matches: false, pinOnly: false };
   }
   return {
     existing: JSON.stringify(redactJson(value), null, 2),
     matches: jsonMatches(value, entry),
+    pinOnly: jsonMatches(value, entry, "any"),
   };
 }
 
@@ -1051,17 +1096,36 @@ function redactTomlRegion(classified: TomlLine[]): string {
  * is no TOML parser here to tell "the same table, formatted differently" from
  * "a table that does something else".
  */
+/**
+ * The one line `--workspace` writes, exactly as {@link tomlBlock} emits it.
+ *
+ * The comparison below is byte equality, so telling a re-pin from a foreign
+ * table means taking this line out of both sides. Only this exact spelling is
+ * removed: an `env` carrying anything else stays put, the blocks then differ,
+ * and the table is reported as somebody else's — which is the right answer.
+ */
+const TOML_PIN_LINE = /^env = \{ WORKSPACE_ID = "(?:[^"\\]|\\.)*" \}$/;
+
+function withoutTomlPin(block: string): string {
+  return block
+    .split("\n")
+    .filter((line) => !TOML_PIN_LINE.test(line))
+    .join("\n");
+}
+
 function inspectToml(text: string, entry: Entry): Found {
   const source = text.split("\n");
   const classified = scanToml(text);
   const region = ourRegion(classified, entry.name);
   if (region === null) {
-    return { existing: null, matches: false };
+    return { existing: null, matches: false, pinOnly: false };
   }
   const block = source.slice(region.start, region.end).join("\n").replace(/\s+$/, "");
+  const ours = tomlBlock(entry);
   return {
     existing: redactTomlRegion(classified.slice(region.start, region.end)),
-    matches: `${block}\n` === tomlBlock(entry),
+    matches: `${block}\n` === ours,
+    pinOnly: withoutTomlPin(`${block}\n`) === withoutTomlPin(ours),
   };
 }
 

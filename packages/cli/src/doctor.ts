@@ -110,7 +110,7 @@ function skipped(name: string, reason: string, remedy: string | null = null): Ch
 }
 
 const WORKSPACE_REMEDY =
-  "`ub init` creates a workspace; `ub workspace use <id>` binds this directory to an existing one";
+  "`ub init` creates a workspace; `ub workspace use <id>` adopts an existing one";
 
 /** install.md: "set `PORT` for the hub and `HUB_URL` for the clients together." */
 const PORT_REMEDY =
@@ -624,7 +624,7 @@ export async function doctorReport(
   let resolved: ResolvedConfig | null = null;
   let error: string | null = null;
   try {
-    resolved = resolveConfig({ env, cwd, platform });
+    resolved = resolveConfig({ env, platform });
     warnings.push(...resolved.warnings);
   } catch (thrown) {
     error = message(thrown);

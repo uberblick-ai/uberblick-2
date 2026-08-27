@@ -911,15 +911,19 @@ describe("the checkout's own .mcp.json", () => {
       .uberblick;
     expect([generated.command, ...generated.args]).toEqual(CHECKOUT_SPAWN);
 
-    // The whole entry, and not the bytes around it. The committed file was
-    // written through `claude mcp add` and this one by the fallback writer,
-    // which spell an empty `env` and a trailing newline differently — a
-    // difference in whose typewriter ran, not in what got registered.
-    const registered = (server: Record<string, unknown>) => ({
-      ...server,
-      env: server.env ?? {},
-    });
-    expect(registered(generated)).toEqual(registered(entry));
+    // Byte for byte, which is what "generated rather than hand-maintained"
+    // actually means: a file somebody edited by hand would differ in its
+    // spacing long before it differed in what it registers.
+    expect(committed).toBe(read(join(box.cwd, ".mcp.json")));
+  });
+
+  it("carries no workspace pin, so this checkout follows the machine default", () => {
+    // A project entry MAY pin `WORKSPACE_ID` — that is how a repository binds
+    // itself to a workspace now — and this one deliberately does not, so
+    // `ub workspace use` still moves what an agent session here reads.
+    const entry = JSON.parse(read(join(REPO_ROOT, ".mcp.json"))).mcpServers
+      .uberblick;
+    expect(entry.env).toBeUndefined();
   });
 });
 
@@ -952,28 +956,84 @@ describe("ub mcp install --workspace", () => {
     return runUb(["mcp", "install", "claude", "--project", ...flags], box, NO_VENDOR);
   }
 
-  it("adds a named, pinned entry beside the primary one, and says what the pin costs", () => {
+  it("pins the primary entry, which is how a repository binds itself", () => {
+    // `--workspace` with no `--name` addresses `uberblick` itself, so the
+    // project MCP config the client already reads *is* the repository's
+    // workspace binding — there is no per-directory config file beside it.
     const box = sandbox();
-    expect(install(box).status).toBe(0);
+    const run = install(box, "--workspace", WORKSPACE);
+    expect(run.status, run.output).toBe(0);
+
+    // Exactly `WORKSPACE_ID`, and the whole file: no second entry, no endpoint,
+    // no credential.
+    expect(servers(box)).toEqual({
+      uberblick: { ...UNPINNED, env: { WORKSPACE_ID: WORKSPACE } },
+    });
+
+    // The pin is the one thing `ub` will not re-resolve at spawn, so the report
+    // says so rather than leaving it to be discovered.
+    expect(run.stdout).toContain(`This entry is pinned to ${WORKSPACE}`);
+    expect(run.stdout).toContain("does not follow `ub workspace use`");
+  });
+
+  it("writes the same pin in the Cursor and Codex project formats", () => {
+    // Whole files, written out: the pin has to be the same statement in every
+    // format, and a format-specific slip is exactly what a value-shaped
+    // assertion would miss.
+    const cursor = sandbox();
+    expect(
+      runUb(
+        ["mcp", "install", "cursor", "--project", "--workspace", WORKSPACE],
+        cursor,
+        NO_VENDOR,
+      ).status,
+    ).toBe(0);
+    expect(read(join(cursor.cwd, ".cursor", "mcp.json"))).toBe(
+      '{\n  "mcpServers": {\n    "uberblick": {\n      "type": "stdio",\n' +
+        '      "command": "ub",\n      "args": [\n        "mcp",\n        "serve"\n' +
+        `      ],\n      "env": {\n        "WORKSPACE_ID": "${WORKSPACE}"\n` +
+        "      }\n    }\n  }\n}\n",
+    );
+
+    const codex = sandbox();
+    expect(
+      runUb(
+        ["mcp", "install", "codex", "--project", "--workspace", WORKSPACE],
+        codex,
+        NO_VENDOR,
+      ).status,
+    ).toBe(0);
+    expect(read(join(codex.cwd, ".codex", "config.toml"))).toBe(
+      "[mcp_servers.uberblick]\n" +
+        'command = "ub"\n' +
+        'args = ["mcp", "serve"]\n' +
+        `env = { WORKSPACE_ID = "${WORKSPACE}" }\n`,
+    );
+  });
+
+  it("adds a named, pinned entry beside the primary one when --name says so", () => {
+    // #180's behaviour, now under an explicit name: one agent session, two
+    // toolsets, two corpora.
+    const box = sandbox();
+    expect(install(box, "--workspace", UNRELATED).status).toBe(0);
     const before = read(join(box.cwd, ".mcp.json"));
 
     const run = install(box, "--workspace", WORKSPACE, "--name", "ablauf");
-    expect(run.status).toBe(0);
+    expect(run.status, run.output).toBe(0);
 
     // The whole file, before and after: one entry arrived, and the primary is
     // exactly what it was — in value here, and byte for byte below.
-    expect(JSON.parse(before).mcpServers).toEqual({ uberblick: UNPINNED });
+    expect(JSON.parse(before).mcpServers).toEqual({
+      uberblick: { ...UNPINNED, env: { WORKSPACE_ID: UNRELATED } },
+    });
     expect(servers(box)).toEqual({
-      uberblick: UNPINNED,
+      uberblick: { ...UNPINNED, env: { WORKSPACE_ID: UNRELATED } },
       "uberblick-ablauf": { ...UNPINNED, env: { WORKSPACE_ID: WORKSPACE } },
     });
     expect(soleInsertion(before, read(join(box.cwd, ".mcp.json")))).not.toBeNull();
 
-    // The pin is the one thing `ub` will not re-resolve at spawn, so the report
-    // says so rather than leaving it to be discovered.
     expect(run.stdout).toContain("uberblick-ablauf");
     expect(run.stdout).toContain(`This entry is pinned to ${WORKSPACE}`);
-    expect(run.stdout).toContain("does not follow `ub workspace use`");
   });
 
   it("writes today's unpinned entry byte-for-byte when nothing is pinned", () => {
@@ -988,6 +1048,67 @@ describe("ub mcp install --workspace", () => {
     );
   });
 
+  it("leaves an install without --workspace following the user's default, in both scopes", () => {
+    // Nothing is copied implicitly: not the workspace the machine currently
+    // resolves to, not the endpoint, not the credential. An unpinned entry
+    // means `ub mcp serve` re-resolves all of it at spawn, which is what makes
+    // `ub workspace use` take effect without editing a client config.
+    const box = sandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: "wss://hub.example.ts.net" },
+      credentials: { signingSecret: SECRET },
+    });
+
+    expect(install(box).status).toBe(0);
+    expect(servers(box)).toEqual({ uberblick: UNPINNED });
+
+    const user = runUb(["mcp", "install", "claude", "--user"], box, NO_VENDOR);
+    expect(user.status, user.output).toBe(0);
+    const home = JSON.parse(read(join(box.env.HOME as string, ".claude.json")));
+    expect(home.mcpServers.uberblick).toEqual(UNPINNED);
+  });
+
+  it("never writes an endpoint, a credential or a secret into any generated format", () => {
+    // A client config is committable, and `credentials.json` is the one file on
+    // this machine that must not be copied anywhere. Every target format is
+    // scanned, pinned and unpinned alike.
+    const forbidden = [
+      SECRET,
+      "wss://hub.example.ts.net",
+      "HUB_URL",
+      "HUB_AUTH_TOKEN",
+      "HUB_CREDENTIAL",
+      "HUB_ROOT_SECRET",
+      "signingSecret",
+    ];
+    const targets = [
+      { target: "claude", file: [".mcp.json"] },
+      { target: "cursor", file: [".cursor", "mcp.json"] },
+      { target: "codex", file: [".codex", "config.toml"] },
+    ] as const;
+
+    for (const { target, file } of targets) {
+      for (const pin of [[], ["--workspace", WORKSPACE]]) {
+        const box = sandbox({
+          userConfig: { workspace: WORKSPACE, hubUrl: "wss://hub.example.ts.net" },
+          credentials: { signingSecret: SECRET },
+        });
+        const run = runUb(
+          ["mcp", "install", target, "--project", ...pin],
+          box,
+          NO_VENDOR,
+        );
+        expect(run.status, run.output).toBe(0);
+
+        const written = read(join(box.cwd, ...file));
+        for (const value of forbidden) {
+          expect(written).not.toContain(value);
+        }
+        // And nothing was echoed onto a stream either.
+        expect(run.output).not.toContain(SECRET);
+      }
+    }
+  });
+
   it("stores a decorated id as typed, and resolves a prefix to the id it names", () => {
     const box = sandbox();
     withDatabase(box, WORKSPACE);
@@ -995,18 +1116,18 @@ describe("ub mcp install --workspace", () => {
     withDatabase(box, UNRELATED);
 
     // Decoration is kept whole — the slug is what makes a config readable, and
-    // it is the name the entry takes when nobody says otherwise.
+    // only what reaches a room, a token or the database is the bare uuid.
     const decorated = `ablauf-${WORKSPACE}`;
     expect(install(box, "--workspace", decorated).status).toBe(0);
-    expect(servers(box)["uberblick-ablauf"]).toEqual({
+    expect(servers(box).uberblick).toEqual({
       ...UNPINNED,
       env: { WORKSPACE_ID: decorated },
     });
 
-    // A prefix is a way of typing an id, not an id: it is resolved, and a bare
-    // uuid has no slug to name the entry with, so its first group stands in.
+    // A prefix is a way of typing an id, not an id: it is resolved to the id it
+    // names, so it means the same thing here as in `ub workspace use`.
     expect(install(box, "--workspace", "b7c").status).toBe(0);
-    expect(servers(box)[`uberblick-${UNRELATED.slice(0, 8)}`]).toEqual({
+    expect(servers(box).uberblick).toEqual({
       ...UNPINNED,
       env: { WORKSPACE_ID: UNRELATED },
     });
@@ -1068,18 +1189,56 @@ describe("ub mcp install --workspace", () => {
     expect(read(path)).toContain('"uberblick": {"command": "ub", "args": ["mcp", "serve"]}');
   });
 
-  it("does not repin an entry to another workspace without being asked", () => {
-    // Same name, different workspace: the pin is the entry's whole reason to
-    // exist, so moving it quietly would hand a session another corpus under a
-    // name it already trusts.
+  it("re-pins an entry it already wrote, and refuses to drop a pin nobody asked to drop", () => {
+    // The idempotence the repository binding lives or dies by, in the three
+    // states a checkout can be in.
     const box = sandbox();
-    expect(install(box, "--workspace", WORKSPACE, "--name", "ablauf").status).toBe(0);
-    const before = read(join(box.cwd, ".mcp.json"));
 
-    const repin = install(box, "--workspace", UNRELATED, "--name", "ablauf");
-    expect(repin.status).toBe(1);
-    expect(repin.stderr).toMatch(/--force/);
+    // Unpinned → pinned. The entry is ours, so naming a workspace is enough;
+    // requiring --force here would make the documented flow fail on its second
+    // run in every checkout that already has uberblick installed.
+    expect(install(box).status).toBe(0);
+    const unpinned = read(join(box.cwd, ".mcp.json"));
+    const pinned = install(box, "--workspace", WORKSPACE);
+    expect(pinned.status, pinned.output).toBe(0);
+    expect(servers(box)).toEqual({
+      uberblick: { ...UNPINNED, env: { WORKSPACE_ID: WORKSPACE } },
+    });
+    // A rewrite, not a fresh write: the previous bytes are recoverable.
+    expect(backupsOf(box.cwd, ".mcp.json").map(read)).toContain(unpinned);
+
+    // Pinned → re-pinned, same rule, and the report names the new workspace.
+    const moved = install(box, "--workspace", UNRELATED);
+    expect(moved.status, moved.output).toBe(0);
+    expect(servers(box)).toEqual({
+      uberblick: { ...UNPINNED, env: { WORKSPACE_ID: UNRELATED } },
+    });
+    expect(moved.stdout).toContain(`This entry is pinned to ${UNRELATED}`);
+
+    // …but not in reverse. A plain install proposes an *unpinned* entry, and
+    // silently taking the pin out would move every agent session in this
+    // checkout to the machine default — so that one still has to be asked for.
+    const before = read(join(box.cwd, ".mcp.json"));
+    const dropped = install(box);
+    expect(dropped.status).toBe(1);
+    expect(dropped.stderr).toMatch(/--workspace <id> to re-pin it/);
+    expect(dropped.stderr).toMatch(/--force/);
     expect(read(join(box.cwd, ".mcp.json"))).toBe(before);
+    // And the refusal names no workspace: config values are never echoed.
+    expect(dropped.output).not.toContain(UNRELATED);
+
+    // A genuinely foreign entry is still somebody else's, pin or no pin.
+    const foreign = sandbox();
+    writeFileSync(
+      join(foreign.cwd, ".mcp.json"),
+      '{\n  "mcpServers": {\n    "uberblick": {"command": "somebody-elses",\n' +
+        '      "args": ["serve"], "env": {"WORKSPACE_ID": "x", "TOKEN": "y"}}\n' +
+        "  }\n}\n",
+      "utf8",
+    );
+    const refused = install(foreign, "--workspace", WORKSPACE);
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/registers "uberblick" as something else/);
   });
 });
 

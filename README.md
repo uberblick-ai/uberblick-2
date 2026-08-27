@@ -156,9 +156,12 @@ ub mcp install cursor --print       # the snippet, on stdout
 
 Where the vendor ships its own installer — `claude mcp add`, `codex mcp add` for
 its global config — that is what runs, because the vendor knows its own file
-best; otherwise the documented config file is edited directly. The report names
-which of the two happened. Either way the command reads the file first, so an
-unrelated server in it is left alone — byte for byte, since both formats are
+best; otherwise the documented config file is edited directly. A `--workspace`
+pin is the exception and is always written here, because whether a given vendor
+CLI takes an environment flag, and under which spelling, is not something to
+guess at. The report names which of the two happened. Either way the command
+reads the file first, so an unrelated server in it is left alone — byte for
+byte, since both formats are
 spliced as text rather than reparsed and re-emitted — a second run is a no-op
 that says "already installed", and an `uberblick` entry it did not write is
 reported next to what would replace it and left in place unless `--force` says
@@ -172,34 +175,38 @@ command and the *names* of anything else it sets, with the values masked, and a
 file that will not parse is reported by path alone. Config files are where API
 tokens live.
 
-The installed line is always `ub mcp serve`, with no arguments and no
-environment. Which workspace, which hub and which credential apply is resolved
-by `ub` — a client config that pinned any of them would be a second copy of
-configuration that already has an owner.
+The installed line is always `ub mcp serve`. Which hub and which credential
+apply is resolved by `ub` — a client config that pinned either would be a second
+copy of configuration that already has an owner, and a project config is
+committable, so a secret has no business being in one. The **one** value an
+entry may carry is `WORKSPACE_ID`, and only when `--workspace` asks for it:
 
-**This checkout is the exception, and `.mcp.json` records it.** A fresh clone has
-no installed `ub` on its PATH, and the owner's real secret only becomes visible
-through `fnox exec`, so the committed `.mcp.json` registers a spawn that runs the
-server out of the checkout instead — through mise, wrapped in `fnox exec`, with
-the package manager's own output silenced. The exact spawn is config, and
-`.mcp.json` is where it lives; read it there rather than copying it into a shell.
+```
+ub mcp install claude --project --workspace ablauf-<uuid>
+```
 
-It is still generated rather than hand-maintained: everything after `--` replaces
-the command `ub mcp install` registers, so regenerating the file means passing
-that recorded spawn back to `ub mcp install claude --project --force -- …`. A
-test asserts that the committed file is exactly what doing so produces.
+**A project MCP entry is this repository's workspace binding.** That is the
+whole mechanism; there is no per-directory config file of uberblick's own. The
+client already reads a project-scoped MCP config to know what to spawn in this
+working directory, so the pin goes there: `WORKSPACE_ID` is the top precedence
+layer, so every agent session started in this checkout resolves that workspace
+and nothing else has to be told. Without `--workspace` the entry stays unpinned
+and follows this machine's default, which is the right answer for a repository
+that has no workspace of its own.
 
-What that spawn is careful about, since none of it is obvious:
+Re-running with a different `--workspace` re-pins the entry in place, backing
+the file up first — the flag is the permission, so there is no `--force` to
+remember. It does not work in reverse: an install naming no `--workspace` leaves
+an existing pin alone rather than dropping it, because a repository quietly
+moved to another corpus is exactly what the pin is there to prevent.
 
-- Secrets come from `fnox exec`, which supplies `HUB_AUTH_TOKEN`. A missing key
-  is a warning, not an error, on purpose: a contributor without the age key still
-  gets a working server — offline-first, with `sync_status` reporting `disabled`.
-- Package-manager lifecycle output is suppressed. stdout is the JSON-RPC
-  transport, so a banner on it would corrupt the session.
-- `HUB_URL` is left unset, so the server falls back to `ws://localhost:1234` —
-  the same default mise's `[env]` carries. No hub address is pinned here.
+`.mcp.json` in this checkout is exactly that file, and it is generated rather
+than hand-maintained — `ub mcp install claude --project` writes it, and a test
+asserts the committed bytes are what doing so produces. It is deliberately
+unpinned: this repository works in whatever workspace `ub workspace use` last
+named.
 
-For a standalone smoke test, `mise run mcp` runs the same thing in the
+For a standalone smoke test, `mise run mcp` runs the same server in the
 foreground.
 
 ### A second workspace
@@ -213,28 +220,35 @@ one. What it is *not* is tenancy: one shared secret still mints a token for any
 workspace, so this separates corpora, not people — namespacing for one trusted
 user, with real isolation waiting on per-workspace auth (#84).
 
-Give a second project its own workspace by pinning it in that checkout, which is
-what `./uberblick.json` is for — committable, and never secrets. That is one
-command, run in the checkout:
+Give a second project its own workspace by pinning it in that checkout's project
+MCP config — committable, and never secrets. That is one command, run in the
+checkout:
 
 ```
-ub workspace use ablauf-$(uuidgen | tr A-Z a-z)
+ub mcp install claude --project --workspace ablauf-$(uuidgen | tr A-Z a-z)
 ```
 
-`ub workspace` on its own prints the workspace in force and which config layer
-chose it; `ub workspace list` shows the workspaces this machine has a database
-for, so `use` also takes a unique uuid prefix from that list. `use` writes
-`./uberblick.json` — the directory binding — and regenerates this checkout's
-derived `mise.local.toml` with it, so the mise tasks serve the workspace the
-directory is bound to; `--user` binds the machine instead, by writing the user
-config the way `ub init` does.
+That writes `WORKSPACE_ID` into the `uberblick` entry of this directory's
+`.mcp.json`, and every agent session started here spawns through it. Nothing
+else in the entry changes and nothing else is copied into it.
 
-`ub mcp install` then registers the plain `ub mcp serve`, which resolves that
-workspace from the directory it runs in. Where a client config spawns the server
-some other way — this repository's own `.mcp.json` does — put the id in the
-spawn's environment instead, as `WORKSPACE_ID=ablauf-<uuid>`: the environment
-wins over every file layer. Either way it is the same server, the same hub and a
-different corpus.
+To change this *machine's* default instead — what an unpinned entry, `ub status`
+and the mise tasks all resolve to — use `ub workspace use <id>`. It writes your
+`config.json` and regenerates this checkout's derived `mise.local.toml` with it,
+so `mise run web` and the hub follow the switch. `ub workspace` on its own
+prints the workspace in force and which layer chose it; `ub workspace list`
+shows the workspaces this machine has a database for, so `use` and
+`--workspace` both also take a unique uuid prefix from that list.
+
+One agent session can hold **two** workspaces at once: `--name <label>` puts the
+pin on a separately named `uberblick-<label>` entry instead of the primary one,
+so two processes serve two corpora under two tool prefixes.
+
+```
+ub mcp install claude --project --workspace <other-uuid> --name ablauf
+```
+
+Either way it is the same server, the same hub and a different corpus.
 
 The web client takes one more value, `WORKSPACES`: a comma-separated list of the
 workspaces to offer in the topbar switcher, e.g.
@@ -268,7 +282,7 @@ ub status          # workspace, hub, credential, sync state
 ub status --json   # the same, as one JSON object
 ub workspace       # the workspace in force, and which layer chose it
 ub workspace list  # workspaces this machine has a database for
-ub workspace use   # bind this directory to a workspace (--user: this machine)
+ub workspace use   # make a workspace this machine's default
 ub remote          # the endpoint in force, and what sharing it buys
 ub mcp install     # register uberblick with an MCP client
 ub mcp serve       # the stdio entry point for an MCP client
@@ -303,17 +317,16 @@ Precedence, highest first:
 
 | Layer | Holds |
 | --- | --- |
-| environment (`WORKSPACE_ID`, `HUB_URL`, `HUB_AUTH_TOKEN`) | wins, so `HUB_URL=… ub mcp serve` keeps working |
-| `./uberblick.json` | binds one checkout to one workspace. Committable, so never secrets — and never the hub the stored secret is sent to |
+| environment (`WORKSPACE_ID`, `HUB_URL`, `HUB_AUTH_TOKEN`) | wins, so `HUB_URL=… ub mcp serve` keeps working — and so a project MCP entry's `WORKSPACE_ID` pin binds the repository it travels with |
 | `config.json` | per-user identity (display name, cursor colour), the workspace and the hub endpoint — what `ub init` writes. Which directory it is in is [the layout](#where-your-files-live) |
 | `credentials.json`, mode 0600, beside it | the hub signing secret. Never printed by any command, and refused outright — not merely warned about — if anyone but its owner can read it |
 | built-in defaults | hub `ws://localhost:1234`. No workspace: there is no default one |
 
-The stored signing secret is scoped to hubs *you* chose: if the hub URL in force
-came from a committable `./uberblick.json`, the secret in `credentials.json` is
-not attached to it and `ub` says so — a clone must not be able to point your
-credential at its author's endpoint. Exporting `HUB_AUTH_TOKEN`, or setting
-`HUB_URL` yourself, is the explicit opt-in and always applies.
+Three layers and no fourth. There is no per-directory config file: a repository
+that needs its own workspace pins `WORKSPACE_ID` in the project MCP entry the
+client already reads, which arrives as the environment — the layer that already
+wins. Nothing committable ever carries an endpoint or a credential, so the
+signing secret in `credentials.json` applies to whichever hub *you* configured.
 
 ### Where your files live
 
@@ -409,7 +422,7 @@ the expected form in the message.
 
 A workspace that was already on this machine stays. It is never merged into the
 joined one and never moved: `ub workspace list` shows both, and
-`ub workspace use <id> --user` switches back. The endpoint is machine-wide,
+`ub workspace use <id>` switches back. The endpoint is machine-wide,
 though, so after a join that workspace syncs with the remote hub too, under its
 own rooms.
 
@@ -426,15 +439,10 @@ the remote verifies with the first machine's.
 **What "persisted" covers, and what outranks it.** The endpoint — and, after a
 `join`, the workspace binding with it — goes into your `config.json`, which is
 where `ub`, `ub mcp serve` and the MCP server it spawns resolve them. That file
-is the *third* layer:
-`HUB_URL` in the environment beats it, and so does a `hubUrl` in a committable
-`./uberblick.json`. When either does, these commands say which one wins rather
-than reporting a switch that did not happen — `ub remote set` exits non-zero,
-and after a bridge the report says the documents moved but names the endpoint
-still in force. Writing the higher layer instead is not the fix: `./uberblick.json`
-is committable, and the stored signing secret is deliberately withheld from a
-repository-chosen hub, so clients pointed there would dial it with no credential
-at all.
+is the *second* layer: `HUB_URL` in the environment beats it. When it does,
+these commands say so rather than reporting a switch that did not happen —
+`ub remote set` exits non-zero, and after a bridge the report says the documents
+moved but names the endpoint still in force.
 
 A deployed web client does not read any of these: it resolves its endpoint — and
 its workspaces — at runtime from the served `/uberblick-config.json`. A
@@ -503,8 +511,7 @@ It runs on demand, like `mise run e2e`, and never in per-PR CI. Same standing
 rule as the review image: no secrets, no host mounts, no privileged mode, no
 Docker socket. The build context is the working tree filtered by
 `Dockerfile.fue.dockerignore`, which is stricter than the review runner's
-`.dockerignore` — `mise.local.toml`, `uberblick.json` and every local database
-are excluded, because a proof that runs on state `ub init` was supposed to
+`.dockerignore` — `mise.local.toml` and every local database are excluded, because a proof that runs on state `ub init` was supposed to
 create proves nothing.
 
 ## Review isolation

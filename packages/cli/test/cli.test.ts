@@ -165,35 +165,6 @@ describe("ub status", () => {
     expect(run.output).not.toContain(secret);
   });
 
-  it("does not hand the stored secret to a hub ./uberblick.json chose", () => {
-    // The hostile checkout, through the real binary: a cloned `uberblick.json`
-    // names an endpoint, the user has a signing secret on disk, and `ub status`
-    // must report local-only rather than dial that hub with a signed token.
-    const secret = "cli-test-signing-secret-c40b8a";
-    const box = sandbox({
-      directoryFile: { hubUrl: DEAD_HUB_URL },
-      userConfig: { workspace: WORKSPACE },
-      credentials: { signingSecret: secret },
-    });
-
-    const run = runUb(["status", "--json"], box);
-    expect(run.status).toBe(0);
-    const report = JSON.parse(run.stdout);
-    expect(report.hubUrl).toBe(DEAD_HUB_URL);
-    expect(report.credentialPresent).toBe(false);
-    expect(report.credentialSource).toBeNull();
-    expect(report.hub.status).toBe("disabled");
-    expect(run.stderr).toMatch(/was not attached to a repository-chosen hub/);
-    expect(run.output).not.toContain(secret);
-
-    // Setting HUB_URL is the opt-in, and then the secret does apply.
-    const optIn = runUb(["status", "--json"], box, { HUB_URL: DEAD_HUB_URL });
-    const opted = JSON.parse(optIn.stdout);
-    expect(opted.credentialPresent).toBe(true);
-    expect(opted.credentialSource).toBe("credentials file");
-    expect(optIn.output).not.toContain(secret);
-  });
-
   it("never quotes a malformed configuration file back", () => {
     // A bare secret pasted into credentials.json: the parser's message would be
     // the secret itself, so it is not printed.
@@ -209,19 +180,17 @@ describe("ub status", () => {
     expect(run.stderr).toMatch(/credentials\.json: invalid JSON/);
     expect(run.output).not.toContain(secret);
 
-    // And the same for a committable file, where a pasted secret is the very
-    // mistake `ub` warns about — a file that does not parse never gets that far,
-    // so the parser message must not carry it out either.
+    // And the same for `config.json`, where a pasted secret is the very mistake
+    // `ub` warns about — a file that does not parse never gets that far, so the
+    // parser message must not carry it out either.
     const misplaced = "cli-test-misplaced-secret-a70c93";
-    const committable = sandbox({
-      raw: { directoryFile: `${misplaced}\n` },
-      userConfig: { workspace: WORKSPACE },
-    });
-    const second = runUb(["status", "--json"], committable, {
+    const broken = sandbox({ raw: { userConfig: `${misplaced}\n` } });
+    const second = runUb(["status", "--json"], broken, {
+      WORKSPACE_ID: WORKSPACE,
       HUB_URL: DEAD_HUB_URL,
     });
     expect(second.status).toBe(0);
-    expect(second.stderr).toMatch(/uberblick\.json: invalid JSON/);
+    expect(second.stderr).toMatch(/config\.json: invalid JSON/);
     expect(second.output).not.toContain(misplaced);
   });
 
@@ -229,12 +198,12 @@ describe("ub status", () => {
     const secret = "cli-test-signing-secret-71b4de";
     const box = sandbox({
       credentials: { signingSecret: secret },
-      directoryFile: { workspace: "../escape" },
+      userConfig: { workspace: "../escape" },
     });
 
     const run = runUb(["status"], box);
     expect(run.status).not.toBe(0);
-    expect(run.stderr).toMatch(/uberblick\.json/);
+    expect(run.stderr).toMatch(/config\.json/);
     expect(run.output).not.toContain(secret);
   });
 });
