@@ -80,6 +80,7 @@ import {
 } from "@uberblick/schema";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import { z } from "zod";
+import { ToolError, failureContract, guarded } from "./failures.js";
 import { log } from "./log.js";
 import type { Replica, Replicas } from "./replica.js";
 
@@ -116,23 +117,19 @@ const LEGACY_TAG_GROUPS = [
  */
 const SEED_LEADING_TITLES = ["Overview", "Install and run"];
 
-/** What the tools need from `tools.ts`, so neither module imports the other. */
+/**
+ * What the tools need from `tools.ts`, so neither module imports the other.
+ *
+ * The failure half is not in here: `guarded`, `ToolError` and the description
+ * text all come from ./failures.ts, which both modules import. One contract in
+ * one place beats two modules agreeing to pass the same wrapper around.
+ */
 export interface SidebarToolContext {
   /** The directory entry for a uuid, or a `doc_not_found` failure. */
   requireStub(uuid: string): DirectoryEntry;
   /** `{applied, synced, hub}` for a write that just landed. */
   durability(replica: Replica): Record<string, unknown>;
-  /** Wrap a handler so every throw becomes a structured tool failure. */
-  guarded<Args>(
-    handler: (args: Args) => Promise<CallToolResult>,
-  ): (args: Args) => Promise<CallToolResult>;
   json(payload: unknown): CallToolResult;
-  /** A tool failure with a stable machine-readable code, ready to throw. */
-  error(
-    code: string,
-    message: string,
-    detail?: Record<string, unknown>,
-  ): Error;
 }
 
 /** How a pinned uuid resolves against the directory. */
@@ -292,17 +289,16 @@ export interface SidebarPlacement {
 export function requireGroup(
   replicas: Replicas,
   groupId: string,
-  error: SidebarToolContext["error"],
 ): SidebarGroup {
   const group = readSidebar(replicas.sidebar().doc).find(
     (candidate) => candidate.id === groupId,
   );
   if (group === undefined) {
-    throw error(
+    throw new ToolError(
       "group_not_found",
       `No sidebar group ${groupId} in workspace ${replicas.config.workspaceId} — ` +
         "get_sidebar lists the ids, and pin_doc is what creates a group by name",
-      { group: groupId, applied: false, synced: false },
+      { group: groupId },
     );
   }
   return group;
@@ -326,7 +322,6 @@ export function placeInGroup(
   groupId: string,
   uuid: string,
   index: number | undefined,
-  error: SidebarToolContext["error"],
 ): { moved: boolean; position: number } {
   const sidebar = replicas.sidebar();
   const moved = readSidebar(sidebar.doc).some((group) =>
@@ -339,11 +334,11 @@ export function placeInGroup(
   // read, is the way this happens. Saying "gone" is the only honest answer:
   // a sentinel position would be echoed to the caller as if it were a place.
   if (target === undefined) {
-    throw error(
+    throw new ToolError(
       "group_not_found",
       `Sidebar group ${groupId} disappeared while ${uuid} was being pinned into it — ` +
         "read get_sidebar and pin it again",
-      { group: groupId, uuid, applied: false, synced: false },
+      { group: groupId, uuid },
     );
   }
   return { moved, position: target.docs.indexOf(uuid) };
@@ -407,10 +402,11 @@ export function registerSidebarTools(
         "The workspace's curated navigation: named groups of pinned documents, in the order they are stored. " +
         "This is not the corpus — unpinned documents are fully alive and reachable through list_docs, search, " +
         "links and backlinks; they are simply not entry points.\n\n" +
-        SIDEBAR_SHAPE,
+        SIDEBAR_SHAPE +
+        failureContract("get_sidebar"),
       inputSchema: {},
     },
-    context.guarded(async () => {
+    guarded("get_sidebar", async () => {
       await replicas.settle();
       const sidebar = replicas.sidebar();
       return context.json({
@@ -431,14 +427,15 @@ export function registerSidebarTools(
         "reordered: pinning one that is already pinned moves it to `index` in the named group — carrying the pin " +
         "as it stands rather than re-pinning it, so a concurrent unpin still wins — and `index` then counts " +
         "positions in the target group after the document has been taken out of it.\n\n" +
-        SIDEBAR_SHAPE,
+        SIDEBAR_SHAPE +
+        failureContract("pin_doc"),
       inputSchema: {
         uuid: z.uuid().describe("Document UUID."),
         group: groupArg,
         index: indexArg,
       },
     },
-    context.guarded(async ({ uuid, group, index }) => {
+    guarded("pin_doc", async ({ uuid, group, index }) => {
       await replicas.settle();
       // The sidebar stores uuids and nothing else, so a typo pinned here is a
       // reference nothing can ever resolve. Identity is checked against the
@@ -449,13 +446,7 @@ export function registerSidebarTools(
       const groups = readSidebar(sidebar.doc);
       const target = findGroup(groups, group);
       const groupId = target?.id ?? createGroup(sidebar.doc, group);
-      const { moved } = placeInGroup(
-        replicas,
-        groupId,
-        uuid,
-        index,
-        context.error,
-      );
+      const { moved } = placeInGroup(replicas, groupId, uuid, index);
       return context.json({
         uuid,
         group: { id: groupId, name: target?.name ?? group },
@@ -476,14 +467,15 @@ export function registerSidebarTools(
         "An unpin beats a move made concurrently on another replica, so a document does not reappear because " +
         "somebody was dragging it at the time. It takes no group: one pin per document means there is only ever " +
         "one place to remove it from. `unpinned` is false when the document was not pinned to begin with.\n\n" +
-        SIDEBAR_SHAPE,
+        SIDEBAR_SHAPE +
+        failureContract("unpin_doc"),
       inputSchema: {
         // No directory check: a pin whose document nothing can resolve is
         // exactly the one that most needs removing.
         uuid: z.uuid().describe("Document UUID."),
       },
     },
-    context.guarded(async ({ uuid }) => {
+    guarded("unpin_doc", async ({ uuid }) => {
       await replicas.settle();
       const sidebar = replicas.sidebar();
       const wasPinned = readSidebar(sidebar.doc).some((group) =>
@@ -509,7 +501,8 @@ export function registerSidebarTools(
         "uuids, and they stay reachable through list_docs and search.\n\n" +
         "There is no create action: pin_doc creates a group by naming one that does not exist, which is how a " +
         "group comes into being with something in it rather than empty.\n\n" +
-        SIDEBAR_SHAPE,
+        SIDEBAR_SHAPE +
+        failureContract("sidebar_group"),
       inputSchema: {
         action: z
           .enum(["rename", "delete", "move"])
@@ -519,24 +512,22 @@ export function registerSidebarTools(
         index: indexArg,
       },
     },
-    context.guarded(async ({ action, group, name, index }) => {
+    guarded("sidebar_group", async ({ action, group, name, index }) => {
       await replicas.settle();
       const sidebar = replicas.sidebar();
       const target = findGroup(readSidebar(sidebar.doc), group);
       if (target === null) {
-        throw context.error(
+        throw new ToolError(
           "group_not_found",
           `No sidebar group "${group}" in workspace ${replicas.config.workspaceId}`,
-          { group, applied: false, synced: false },
+          { group },
         );
       }
       let renamed = target.name;
       if (action === "rename") {
         if (name === undefined) {
-          throw context.error("invalid_arguments", "rename needs a `name`", {
+          throw new ToolError("invalid_arguments", "rename needs a `name`", {
             group,
-            applied: false,
-            synced: false,
           });
         }
         renameGroup(sidebar.doc, target.id, name);
