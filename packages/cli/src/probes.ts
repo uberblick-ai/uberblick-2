@@ -94,18 +94,25 @@ export function probePort(host: string, port: number): Promise<PortProbe> {
 }
 
 /**
- * How far this machine's clock is from the hub's, in whole seconds, or `null`
- * when nothing answered with an HTTP `Date` to read.
+ * How far the **hub's** clock reads ahead of this machine's, in whole seconds,
+ * or `null` when nothing answered with an HTTP `Date` to read. A negative
+ * reading means this machine is ahead — the direction the hub refuses.
  *
- * Positive means this machine is **ahead** of the hub. Nothing here is
- * authenticated: it is a plain GET, which a Hocuspocus hub answers with a
- * greeting, and the response carries the `Date` header this reads. That is what
- * makes the check usable before any credential exists.
+ * Nothing here is authenticated: it is a plain GET, which a Hocuspocus hub
+ * answers with a greeting, and the response carries the `Date` header this
+ * reads. That is what makes the check usable before any credential exists.
  *
- * The measurement is bracketed rather than pointwise. `Date` has one-second
- * resolution and the round trip takes time, so the hub's clock is only known to
- * lie somewhere in the interval this request spanned; a reading inside that
- * interval is reported as no skew rather than as a second of noise.
+ * The reading is taken against the **midpoint** of the request rather than
+ * against either end. `Date` has one-second resolution and the round trip takes
+ * time, so the hub's clock is only known to lie somewhere in the interval this
+ * request spanned; the midpoint splits that uncertainty instead of spending all
+ * of it in one direction, where a hub exactly at the threshold would be
+ * reported as inside it and then refuse the connection anyway.
+ *
+ * **What is actually measured is whoever wrote the `Date` header.** The request
+ * is sent uncached (`no-store`, plus a cache-busting parameter) so a proxy does
+ * not answer it from a store, but a terminating reverse proxy still writes its
+ * own clock into that header. The check's remedy says so.
  */
 export async function probeHubClock(
   hubUrl: string,
@@ -119,12 +126,14 @@ export async function probeHubClock(
   }
   if (url.protocol === "ws:") url.protocol = "http:";
   if (url.protocol === "wss:") url.protocol = "https:";
+  url.searchParams.set("ub-clock", String(Date.now()));
 
   const before = Date.now();
   let header: string | null;
   try {
     const response = await fetch(url, {
       method: "GET",
+      cache: "no-store",
       signal: AbortSignal.timeout(timeoutMs),
     });
     header = response.headers.get("date");
@@ -142,16 +151,7 @@ export async function probeHubClock(
   if (Number.isNaN(hub)) {
     return null;
   }
-
-  // `Date` truncates to the second, so widen the reading by one second at the
-  // late end before concluding that the hub is behind us.
-  if (hub + 1_000 < before) {
-    return Math.round((before - hub - 1_000) / 1_000);
-  }
-  if (hub > after) {
-    return -Math.round((hub - after) / 1_000);
-  }
-  return 0;
+  return Math.round((hub - (before + after) / 2) / 1_000);
 }
 
 export interface HubBind {

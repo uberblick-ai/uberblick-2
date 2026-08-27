@@ -327,6 +327,40 @@ describe("ub doctor", () => {
     expect(check(checks, "bind").reason).toMatch(/uberblick hub/);
   });
 
+  it("names both causes when the hub refuses the token, version skew included", async () => {
+    // The hub collapses every auth failure to one reason, and this PR added a
+    // second cause: a client minting the old token format. A remedy that only
+    // said "same secret" would send someone to rotate a correct one.
+    const box = sandbox({ credentials: { signingSecret: "a-different-secret" } });
+    const hub = await startHub(box);
+    const { checks } = await doctor(box, {
+      WORKSPACE_ID: WORKSPACE,
+      HUB_URL: `ws://127.0.0.1:${hub.port}`,
+      PORT: String(hub.port),
+    });
+
+    const check_ = check(checks, "hub");
+    expect(check_.status).toBe("fail");
+    expect(check_.remedy).toMatch(/same secret/);
+    expect(check_.remedy).toMatch(/predates the current token format/);
+  });
+
+  it("reports a clock running behind the hub without failing it", async () => {
+    // Asymmetric on purpose: the hub refuses a token issued ahead of its own
+    // clock and nothing refuses one issued behind it, so only one direction is
+    // a broken stack.
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const port = await skewedClock(5 * 60);
+    const { checks } = await doctor(box, {
+      WORKSPACE_ID: WORKSPACE,
+      HUB_URL: `ws://127.0.0.1:${port}`,
+    });
+
+    const clock = check(checks, "clock");
+    expect(clock.status).toBe("pass");
+    expect(clock.reason).toMatch(/behind/);
+  });
+
   it("fails the clock check when this machine is minutes away from the hub", async () => {
     // Tokens expire and the hub refuses one issued too far from its own time,
     // and it refuses it as an indistinguishable "invalid token". This check is

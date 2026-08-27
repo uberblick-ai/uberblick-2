@@ -308,10 +308,13 @@ async function hubCheck(
     return pass("hub", `${config.hubUrl} answered and served the directory room`);
   }
   if (status === "auth-failed") {
+    // Two causes, one refusal: the hub collapses every auth failure to one
+    // reason on the wire. The second cause is the newer one and the easier to
+    // misdiagnose — rotating a correct secret fixes nothing.
     return fail(
       "hub",
-      `${config.hubUrl} refused the signing secret`,
-      "give the hub and this machine the same secret — `ub status` says which layer this one came from",
+      `${config.hubUrl} refused the token`,
+      "give the hub and this machine the same secret — `ub status` says which layer this one came from — or this `ub mcp serve` / web bundle predates the current token format: restart the server, redeploy the bundle",
     );
   }
   if (status === "unsettled") {
@@ -348,7 +351,8 @@ async function hubCheck(
  * unauthenticated GET, so it answers even on a machine that has never been
  * provisioned. A hub that does not answer is a skip, not a failure — the hub
  * check above is what reports an unreachable hub, and saying so twice would
- * only bury it.
+ * only bury it. A machine running *behind* the hub is reported and passes:
+ * nothing refuses that direction.
  */
 async function clockCheck(config: McpConfig | null): Promise<Check> {
   if (config === null) {
@@ -361,18 +365,25 @@ async function clockCheck(config: McpConfig | null): Promise<Check> {
       `${config.hubUrl} answered no HTTP date, so the clocks were not compared`,
     );
   }
-  if (Math.abs(skew) <= CLOCK_SKEW_SECONDS) {
-    return pass(
-      "clock",
-      `this machine's clock is within ${CLOCK_SKEW_SECONDS}s of ${config.hubUrl}`,
-    );
+  // The probe reports how far the hub reads ahead of us; the clamp cares about
+  // the other direction, so flip it once, here.
+  const ahead = -skew;
+  const measured =
+    ahead === 0
+      ? `in step with ${config.hubUrl}`
+      : `${Math.abs(ahead)}s ${ahead > 0 ? "ahead of" : "behind"} ${config.hubUrl}`;
+
+  // Asymmetric on purpose: the hub refuses a token whose `iat` is ahead of its
+  // own clock, and nothing refuses one that is behind. A machine running slow
+  // is worth reporting and is not a failure.
+  if (ahead <= CLOCK_SKEW_SECONDS) {
+    return pass("clock", `this machine's clock is ${measured}`);
   }
-  const direction = skew > 0 ? "ahead of" : "behind";
   return fail(
     "clock",
-    `this machine's clock is ${Math.abs(skew)}s ${direction} ${config.hubUrl}, ` +
-      `more than the ${CLOCK_SKEW_SECONDS}s the hub allows`,
-    "synchronise this machine's clock — every token carries an expiry, and the hub refuses one issued too far from its own time (`sudo timedatectl set-ntp true` on Linux, System Settings > General > Date & Time on macOS)",
+    `this machine's clock is ${measured}, more than the ${CLOCK_SKEW_SECONDS}s ` +
+      "the hub tolerates ahead of its own",
+    "synchronise this machine's clock — every token carries an expiry, and the hub refuses one issued too far ahead of its own time (`sudo timedatectl set-ntp true` on Linux, System Settings > General > Date & Time on macOS). The reading is an HTTP `Date` header, so a reverse proxy in front of the hub is whose clock this compares against",
   );
 }
 

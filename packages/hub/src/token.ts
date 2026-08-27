@@ -70,10 +70,11 @@ export const MAX_TOKEN_LIFETIME_SECONDS = 15 * 60;
 /**
  * How far ahead of the hub a client's clock may be and still be believed.
  *
- * Applied to `iat` only. It is deliberately *not* applied past `exp`: grace
- * there would extend every token's effective life beyond the ceiling above,
- * which is the one thing this clamp exists to impose. A clock skewed further
- * than this is a configuration fault, and `ub doctor` names it.
+ * Applied to `iat` only. Grace at both ends would compound — a token issued 60 s
+ * ahead and honoured 60 s past its expiry lives 1020 s against a 900 s ceiling —
+ * and it would buy nothing: a room token is minted per connect, so it is
+ * seconds old when the hub reads it and needs no slack at the far end. A clock
+ * skewed further than this is a configuration fault, and `ub doctor` names it.
  */
 export const CLOCK_SKEW_SECONDS = 60;
 
@@ -128,13 +129,35 @@ function base64urlEncode(bytes: Uint8Array): string {
     .replaceAll("=", "");
 }
 
-/** @throws when `value` is not base64url. Callers treat that as "not a token". */
+/** Unpadded base64url and nothing else — no padding, no `+`/`/`, no whitespace. */
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * Decode **canonical** unpadded base64url, or throw. Callers treat a throw as
+ * "not a token" and "not a credential" respectively.
+ *
+ * Strict rather than forgiving, in both directions. `atob` implements WHATWG
+ * forgiving-base64: it accepts the standard alphabet, padding and interior
+ * whitespace, and it silently drops the unused bits of the final character — so
+ * several different strings decode to the same bytes. Every one of those
+ * spellings would otherwise be accepted as the same token or credential.
+ *
+ * The alphabet check rejects the first three; re-encoding rejects the fourth,
+ * which is the only cheap way to insist on exactly one spelling. The
+ * consequence worth naming: **a token string is canonical**, so a replay cache
+ * (#242) may key on the string itself rather than on its decoded claims.
+ */
 function base64urlDecode(value: string): Uint8Array<ArrayBuffer> {
-  // atob implements WHATWG forgiving-base64, which accepts the unpadded form.
+  if (!BASE64URL.test(value)) {
+    throw new Error("not canonical base64url");
+  }
   const binary = globalThis.atob(value.replaceAll("-", "+").replaceAll("_", "/"));
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {
     bytes[index] = binary.charCodeAt(index);
+  }
+  if (base64urlEncode(bytes) !== value) {
+    throw new Error("not canonical base64url");
   }
   return bytes;
 }
@@ -182,6 +205,9 @@ const CREDENTIAL_SEPARATOR = ".";
 
 /** HMAC-SHA-256's output, which is what a credential key is. */
 const CREDENTIAL_KEY_BYTES = 32;
+
+/** Those 32 bytes as unpadded base64url: one length, one spelling. */
+const CREDENTIAL_KEY_CHARS = 43;
 
 /** A `keyVersion` is 128 random bits in lowercase hex — never a counter. */
 const KEY_VERSION = /^[0-9a-f]{32}$/;
@@ -376,6 +402,12 @@ export function parseCredential(value: string): ParsedCredential {
     return { invalid: "malformed-cred-id" };
   }
 
+  // 32 bytes are exactly 43 unpadded base64url characters. Checked before the
+  // decode so a padded, standard-alphabet or whitespace-bearing spelling of the
+  // right bytes is refused rather than quietly normalised into a credential.
+  if (key.length !== CREDENTIAL_KEY_CHARS || !BASE64URL.test(key)) {
+    return { invalid: "malformed-key" };
+  }
   let keyBytes: Uint8Array;
   try {
     keyBytes = base64urlDecode(key);
@@ -439,9 +471,14 @@ function isSubject(value: unknown): value is string {
   return typeof value === "string" && value !== "";
 }
 
-/** Whole seconds since the epoch. The same rule on both sides of a token. */
+/**
+ * Whole seconds since the epoch. The same rule on both sides of a token.
+ *
+ * `isSafeInteger`, not `isInteger`: past 2^53 integer arithmetic stops being
+ * exact, so `exp - iat` would no longer mean what the clamp reads it as.
+ */
 function isEpochSeconds(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 /** A credential id, or `null` for the root secret. Nothing else is a `kid`. */
@@ -484,6 +521,12 @@ export async function mintToken(
   assertClaims(claims);
 
   const iat = claims.iat ?? Math.floor(Date.now() / 1000);
+  const exp = iat + claims.lifetimeSeconds;
+  if (!isEpochSeconds(exp)) {
+    // Reachable only from an `iat` near the end of the safe integers, which
+    // passed its own check while their sum does not.
+    throw new Error("mintToken: iat + lifetimeSeconds is not a whole second");
+  }
   const payload: TokenClaims = {
     typ: claims.typ,
     sub: claims.sub,
@@ -491,7 +534,7 @@ export async function mintToken(
     scope: claims.scope,
     kid: claims.kid,
     iat,
-    exp: iat + claims.lifetimeSeconds,
+    exp,
   };
   const payloadPart = base64urlEncode(
     textEncoder.encode(JSON.stringify(payload)),

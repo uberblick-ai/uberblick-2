@@ -102,6 +102,12 @@ describe("mintToken / verifyToken", () => {
       keyBytes: new Uint8Array(32).fill(7),
     });
 
+    // The rig: a token that does verify, so the non-canonical spellings of it
+    // below prove something.
+    const minted = await mintToken(key, request());
+    const [payload, signature] = minted.split(".") as [string, string];
+    expect(await verifyToken(key, minted)).not.toBeNull();
+
     for (const candidate of [
       SECRET,
       credential,
@@ -112,8 +118,15 @@ describe("mintToken / verifyToken", () => {
       "a.b.c",
       "!!!.!!!",
       Buffer.from('{"sub":"s"}').toString("base64url"),
+      // One spelling only. `atob` is forgiving about all three of these and
+      // would decode each to the bytes of the token above — which is what
+      // would let a replay cache (#242) keyed on the token string be walked
+      // straight past.
+      `${payload.slice(0, 8)} ${payload.slice(8)}.${signature}`,
+      `${payload}.${Buffer.from(signature, "base64url").toString("base64")}`,
+      `${payload}.${signature}=`,
     ]) {
-      expect(await verifyToken(key, candidate)).toBeNull();
+      expect(await verifyToken(key, candidate), candidate).toBeNull();
     }
   });
 

@@ -6,11 +6,12 @@
  *    work — an instruction to do exactly that survived two rounds of external
  *    review before anybody tried to run it. Nothing outside `packages/hub` may
  *    name it.
- * 2. **Every place that mints a token is enumerated.** `TokenRequest` already
- *    makes `typ`, `kid` and `lifetimeSeconds` compile errors when forgotten;
- *    this is the other half — a *new* minting site is a security-relevant
- *    addition, and adding one has to be a deliberate edit here rather than a
- *    line nobody noticed.
+ * 2. **Every place that mints a token is enumerated.** That the three claims are
+ *    passed at all is a compile-time guarantee — `TokenRequest` makes `typ`,
+ *    `kid` and `lifetimeSeconds` required — so this checks the one thing the
+ *    compiler cannot: a *new* minting site is a security-relevant addition, and
+ *    adding one has to be a deliberate edit here rather than a line nobody
+ *    noticed.
  */
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -88,20 +89,5 @@ describe("token minting sites", () => {
 
   it("are exactly the files this list names", () => {
     expect(mentioning("mintToken(")).toEqual(EXPECTED);
-  });
-
-  it("each pass an explicit room type, key id and lifetime", () => {
-    for (const path of EXPECTED) {
-      const source = readFileSync(`${REPO}${path}`, "utf8");
-      // Read as text rather than parsed: the claim these three fields are
-      // spelled out at the call site is a claim about what a reader sees.
-      expect(source, `${path} should mint with typ: "room"`).toMatch(
-        /typ: "room"/,
-      );
-      expect(source, `${path} should name a kid`).toMatch(/kid[:,]/);
-      expect(source, `${path} should pass an explicit lifetime`).toMatch(
-        /lifetimeSeconds/,
-      );
-    }
   });
 });

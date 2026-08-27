@@ -232,6 +232,11 @@ describe("parseCredential", () => {
     ["a flipped byte in the key", flipKeyChar(valid), "checksum-mismatch"],
     ["a truncated string", valid.slice(0, -3), "checksum-mismatch"],
     ["a key that is not 32 bytes", shortKey(), "malformed-key"],
+    [
+      "a key in the standard base64 alphabet, padded",
+      standardAlphabetKey(),
+      "malformed-key",
+    ],
     ["a wrong prefix", valid.replace(/^ubc1/, "ubc2"), "not-a-credential"],
     ["too few segments", valid.split(".").slice(0, 4).join("."), "not-a-credential"],
     ["too many segments", `${valid}.extra`, "not-a-credential"],
@@ -248,6 +253,26 @@ function flipKeyChar(credential: string): string {
   const key = parts[3] as string;
   const first = key[0] === "A" ? "B" : "A";
   parts[3] = `${first}${key.slice(1)}`;
+  return parts.join(".");
+}
+
+/**
+ * The right 32 bytes, spelled in standard base64 with padding instead of
+ * base64url. `atob` would forgive it and hand back exactly the right key;
+ * `ubc1` specifies one spelling, so this is not a credential.
+ */
+function standardAlphabetKey(): string {
+  const bytes = new Uint8Array(32);
+  bytes.fill(0xff, 0, 16);
+  for (let index = 16; index < 32; index += 1) {
+    bytes[index] = [0xfb, 0xef, 0xbe][(index - 16) % 3] as number;
+  }
+  const parts = formatCredential({
+    workspaceUuid: WORKSPACE,
+    credId: CRED_ID,
+    keyBytes: bytes,
+  }).split(".");
+  parts[3] = Buffer.from(bytes).toString("base64");
   return parts.join(".");
 }
 
