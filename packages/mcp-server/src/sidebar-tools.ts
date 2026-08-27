@@ -275,6 +275,80 @@ function findGroup(groups: SidebarGroup[], key: string): SidebarGroup | null {
   );
 }
 
+/** Where a document ended up: the group it is in, and its index in that group. */
+export interface SidebarPlacement {
+  group: { id: string; name: string };
+  position: number;
+}
+
+/**
+ * The group carrying `groupId`, or a `group_not_found` failure.
+ *
+ * Id only, deliberately: `create_doc` places into a group that already exists,
+ * and a name would let it create one as a side effect of creating a document.
+ * `pin_doc` keeps its own name-or-id lookup, which is the tool an agent uses to
+ * bring a group into being.
+ */
+export function requireGroup(
+  replicas: Replicas,
+  groupId: string,
+  error: SidebarToolContext["error"],
+): SidebarGroup {
+  const group = readSidebar(replicas.sidebar().doc).find(
+    (candidate) => candidate.id === groupId,
+  );
+  if (group === undefined) {
+    throw error(
+      "group_not_found",
+      `No sidebar group ${groupId} in workspace ${replicas.config.workspaceId} — ` +
+        "get_sidebar lists the ids, and pin_doc is what creates a group by name",
+      { group: groupId, applied: false, synced: false },
+    );
+  }
+  return group;
+}
+
+/**
+ * Put a document at `index` in an existing group — the one pin operation, used
+ * by `pin_doc` and by `create_doc`'s optional placement.
+ *
+ * One path means one set of semantics: schema's one-pin rule (a pin already
+ * elsewhere is *moved*, carrying its unpin counter, so a concurrent unpin still
+ * wins), `index` clamped into range and omitted meaning last, and order stored
+ * rather than computed. Two implementations would be two of those, drifting.
+ *
+ * The caller resolves the group first — {@link requireGroup} or `pin_doc`'s
+ * name-or-id lookup — because "which group" is where the two tools legitimately
+ * differ, and "what pinning means" is where they must not.
+ */
+export function placeInGroup(
+  replicas: Replicas,
+  groupId: string,
+  uuid: string,
+  index: number | undefined,
+  error: SidebarToolContext["error"],
+): { moved: boolean; position: number } {
+  const sidebar = replicas.sidebar();
+  const moved = readSidebar(sidebar.doc).some((group) =>
+    group.docs.includes(uuid),
+  );
+  if (moved) moveDoc(sidebar.doc, uuid, groupId, index);
+  else pinDoc(sidebar.doc, groupId, uuid, index);
+  const target = readSidebar(sidebar.doc).find((group) => group.id === groupId);
+  // A concurrent sidebar_group delete, arriving between the write and this
+  // read, is the way this happens. Saying "gone" is the only honest answer:
+  // a sentinel position would be echoed to the caller as if it were a place.
+  if (target === undefined) {
+    throw error(
+      "group_not_found",
+      `Sidebar group ${groupId} disappeared while ${uuid} was being pinned into it — ` +
+        "read get_sidebar and pin it again",
+      { group: groupId, uuid, applied: false, synced: false },
+    );
+  }
+  return { moved, position: target.docs.indexOf(uuid) };
+}
+
 /** The sidebar as an agent reads it: stored order, titles from the directory. */
 function sidebarPayload(
   replicas: Replicas,
@@ -375,9 +449,13 @@ export function registerSidebarTools(
       const groups = readSidebar(sidebar.doc);
       const target = findGroup(groups, group);
       const groupId = target?.id ?? createGroup(sidebar.doc, group);
-      const moved = groups.some((entry) => entry.docs.includes(uuid));
-      if (moved) moveDoc(sidebar.doc, uuid, groupId, index);
-      else pinDoc(sidebar.doc, groupId, uuid, index);
+      const { moved } = placeInGroup(
+        replicas,
+        groupId,
+        uuid,
+        index,
+        context.error,
+      );
       return context.json({
         uuid,
         group: { id: groupId, name: target?.name ?? group },
