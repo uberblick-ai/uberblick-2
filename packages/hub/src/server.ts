@@ -49,7 +49,12 @@ import type {
 import { Server } from "@hocuspocus/server";
 import { parseRoom } from "@uberblick/schema";
 import type { HubConfig } from "./config.js";
-import { DEFAULT_HOST, DEFAULT_PORT, defaultDatabasePath } from "./config.js";
+import {
+  DEFAULT_HOST,
+  DEFAULT_PORT,
+  MAX_PENDING_DOCUMENTS,
+  defaultDatabasePath,
+} from "./config.js";
 import type { HubLogger } from "./log.js";
 import { stderrLogger } from "./log.js";
 import { HubDatabase, isEphemeralDatabase } from "./persistence.js";
@@ -476,6 +481,11 @@ export async function createHub(config: HubConfig): Promise<Hub> {
     stopOnSignals: false,
     // No start banner on stdout; startup is one structured line on stderr.
     quiet: true,
+    // The hub states its own ceiling rather than inheriting a library default
+    // that an upgrade could move under it. See MAX_PENDING_DOCUMENTS for why
+    // this is a guard and not a capacity knob, and why its two siblings stay
+    // at their defaults.
+    maxPendingDocuments: config.maxPendingDocuments ?? MAX_PENDING_DOCUMENTS,
     ...(config.debounce === undefined ? {} : { debounce: config.debounce }),
     ...(config.maxDebounce === undefined
       ? {}
