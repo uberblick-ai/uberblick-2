@@ -251,16 +251,17 @@ deployment, wire — and it stands up a fresh hub and a fresh workspace.
 - **Document state syncs; auth state decides.** State that must merge between
   copies and survive offline lives in a Y.Doc. State that must be correct in
   one place at one time — which workspaces a hub serves, which credentials open
-  them, which have been revoked — belongs in the hub's own SQLite tables, never
-  synced and never rebuilt from documents: the hub must decide before it admits
-  a connection, and the party being revoked is the one who controls whether its
-  own replica is current. Closed list, not a general licence for server-side
-  state: the workspace registry and its credentials, nothing else. That list is
-  empty today — release 1 keeps the shared secret, and the registry and its
-  credential ladder are deferred with #388 — so the invariant binds whatever
-  auth is built next rather than code that exists. Unlike the derived indexes
-  above such tables cannot be rebuilt; what losing them costs is reference
-  material — see #84 until it lands in the architecture doc.
+  them, which have been revoked — never lives in a synced document and is never
+  rebuilt from documents: the hub must decide before it admits a connection,
+  and the party being revoked is the one who controls whether its own replica
+  is current. What backs it instead stays open — the hub's own non-synced
+  tables, or an identity provider the hub consults — until the real-auth
+  trigger fires; that decision is deferred with #388. Closed list, not a
+  general licence for server-side state: the workspaces a hub serves and the
+  credentials that open them, nothing else. That list is empty today — release
+  1 keeps the shared secret. Unlike the derived indexes above such state cannot
+  be rebuilt; what losing it costs is reference material — see #84 until it
+  lands in the architecture doc.
 - Identity is UUIDs everywhere; titles and paths are display data. On
   conflict, `meta.title` in the doc is authoritative; the directory stub is a
   cache repaired on write/connect.
