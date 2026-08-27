@@ -18,7 +18,7 @@
  * - **`legacy-xdg`** — a macOS machine that already has state in the implicit
  *   XDG defaults (`~/.config/uberblick`, `~/.local/share/uberblick`) from
  *   before the Mac layout existed. It keeps every one of those paths, and says
- *   so once. Moving files is `ub storage migrate` (#249) — never something a
+ *   so once. Moving files is `ub storage migrate` — never something a
  *   read command does behind someone's back, and never half a move.
  *
  * **The refusal.** If a Mac has state in *both* roots, nothing here guesses:
@@ -77,6 +77,20 @@ export interface StoragePaths {
 /** The XDG directory name, and the Application Support one. */
 const XDG_DIR = "uberblick";
 const MAC_DIR = "Uberblick";
+
+/**
+ * What `ub storage migrate` leaves in the Mac root when it has finished, and
+ * the reason a migrated machine is not the ambiguous one below.
+ *
+ * A migration copies rather than moves — the originals are what makes it
+ * reversible — so afterwards *both* roots hold uberblick files, which is
+ * exactly the configuration this module otherwise refuses to guess about. This
+ * file is the answer somebody already gave: the Mac root is live, the legacy
+ * pair is a retained original. Presence is the whole signal; nothing here opens
+ * or parses it, because a resolution that could fail to parse would be a
+ * machine that cannot find its own documents.
+ */
+export const MIGRATION_RECEIPT = "migration.json";
 
 /**
  * How the Mac root is written in prose — a remedy line, a document. The
@@ -156,10 +170,26 @@ function xdgLayout(env: NodeJS.ProcessEnv): StoragePaths {
     hubDatabase: join(dataDir, HUB_DATABASE),
     // Flat, exactly as it has always been: a `workspaces/` subdirectory here
     // would move every existing replica on every existing machine, which is
-    // #249's job and not a side effect of an upgrade.
+    // `ub storage migrate`'s job and not a side effect of an upgrade.
     workspaceDir: dataDir,
     warnings: [],
   };
+}
+
+/**
+ * The Mac layout's paths, whatever layout is actually in force.
+ *
+ * Exported for one caller: `ub storage migrate`, whose whole job is to write
+ * into a root that resolution is — correctly — not returning yet, because the
+ * files are still in the legacy one. Nothing else should ask; every reader
+ * wants {@link resolveStorage}, which answers where the files *are*.
+ *
+ * `platform` is ignored, and takes the same options type only so callers do not
+ * have to build a second one: this *is* the Mac layout, and asking for it on a
+ * Linux box is what the tests do.
+ */
+export function macStorage(options: StorageOptions = {}): StoragePaths {
+  return macLayout(options.env ?? process.env);
 }
 
 function macLayout(env: NodeJS.ProcessEnv): StoragePaths {
@@ -206,7 +236,22 @@ function holdsState(paths: StoragePaths): boolean {
 }
 
 /** How to move a legacy installation, named wherever the legacy layout is. */
-const MIGRATE = "`ub storage migrate` (#249) will move it";
+const MIGRATE = "`ub storage migrate` will move it";
+
+/**
+ * The one line a migrated machine says: where its files are now, and that the
+ * originals are still there for whoever wants to check them before removing
+ * them. Nothing suggests removing them automatically — see `ub storage
+ * migrate`, which deletes nothing by design.
+ */
+function migratedWarning(mac: StoragePaths, legacy: StoragePaths): string {
+  return (
+    `migrated: uberblick's files are in ${mac.configDir}. The originals in ` +
+    `${legacy.configDir} and ${legacy.dataDir} were left in place by ` +
+    "`ub storage migrate` and are no longer read — remove them yourself once " +
+    "you are satisfied with the migrated copies."
+  );
+}
 
 function migrationWarning(mac: StoragePaths, legacy: StoragePaths): string {
   return (
@@ -242,9 +287,11 @@ export class AmbiguousStorageError extends Error {
     this.legacyConfigDir = legacy.configDir;
     this.legacyDataDir = legacy.dataDir;
     this.remedy =
-      `keep one: ${MIGRATE} once it lands, or move what you want to keep into ` +
-      `${mac.configDir} and remove the rest — setting XDG_CONFIG_HOME and ` +
-      "XDG_DATA_HOME pins the legacy pair explicitly";
+      `keep one: move what you want to keep into ${mac.configDir} and remove ` +
+      "the rest — or empty that root, and `ub storage migrate` will fill it " +
+      "from the legacy pair, which it never does over files already there. " +
+      "Setting XDG_CONFIG_HOME and XDG_DATA_HOME pins the legacy pair " +
+      "explicitly";
   }
 }
 
@@ -271,6 +318,12 @@ export function resolveStorage(options: StorageOptions = {}): StoragePaths {
   const mac = macLayout(env);
   if (!holdsState(xdg)) {
     return mac;
+  }
+  // A completed migration is the one case where both roots holding files is not
+  // an ambiguity: somebody ran `ub storage migrate`, which copied rather than
+  // moved so that the originals stay as a rollback.
+  if (existsSync(join(mac.configDir, MIGRATION_RECEIPT))) {
+    return { ...mac, warnings: [migratedWarning(mac, xdg)] };
   }
   if (holdsState(mac)) {
     throw new AmbiguousStorageError(mac, xdg);

@@ -253,6 +253,7 @@ ub workspace       # the workspace in force, and which layer chose it
 ub workspace list  # workspaces this machine has a database for
 ub workspace use   # bind this directory to a workspace (--user: this machine)
 ub remote          # the endpoint in force, and what sharing it buys
+ub storage migrate # move a legacy macOS install into Application Support
 ub mcp install     # register uberblick with an MCP client
 ub mcp serve       # the stdio entry point for an MCP client
 ```
@@ -309,7 +310,7 @@ a file named after it.
 | --- | --- |
 | `~/Library/Application Support/Uberblick/` — `config.json`, `credentials.json`, `data/hub.sqlite`, `data/workspaces/<uuid>.sqlite` | macOS, with no `XDG_*` variable set and no uberblick files in the old locations. Apple's place for app-managed data, and the one a Homebrew or tarball upgrade cannot replace |
 | `$XDG_CONFIG_HOME/uberblick/` (config, credentials) and `$XDG_DATA_HOME/uberblick/` (`hub.sqlite`, `<uuid>.sqlite`) | everywhere that is not macOS — and anywhere you set either variable yourself, macOS included. Setting one moves the whole layout, never half of it |
-| the same XDG pair, on a Mac that already has files there | a machine older than the Mac layout keeps every path it had. It is told once, naming `ub storage migrate` (#249); nothing moves and nothing new is created until that lands |
+| the same XDG pair, on a Mac that already has files there | a machine older than the Mac layout keeps every path it had. It is told once, naming `ub storage migrate`; nothing moves until somebody runs it |
 
 `ub status` names the data root; `ub status --json` carries a `storage` object
 with the layout (`mac`, `xdg`, `legacy-xdg`) and every resolved path — the
@@ -322,7 +323,47 @@ database.
 A Mac holding uberblick files in *both* roots is the one case with no answer.
 Nothing is opened and every command refuses, because choosing a root would hide
 whatever is in the other; `ub doctor` fails its `storage-layout` check naming
-both.
+both. The single exception is a finished migration, which leaves a
+`migration.json` receipt in the new root saying that the old pair is a retained
+original — see below.
+
+#### Moving a legacy Mac install: `ub storage migrate`
+
+This is a **developer's** journey, not a new user's: a fresh install already
+lands in Application Support and has nothing to move. It is for a Mac that has
+been running uberblick out of a checkout since before that layout existed, which
+`ub status` and `ub doctor` both say in one line.
+
+```sh
+ub storage migrate --dry-run                   # exact paths, counts, refusals
+ub storage migrate --hub-db path/to/hub.sqlite # the real thing
+```
+
+**Close everything using uberblick first** — MCP clients, `ub open`, a hub, the
+web app. Every database is opened exclusively before it is copied, so anything
+still holding one makes the command exit non-zero naming that file, having
+written nothing.
+
+What moves: `config.json`, `credentials.json` (still mode 0600), and every
+`<uuid>.sqlite` replica. The hub database is the one thing that is never guessed
+at — in a checkout it is wherever `[env] HUB_DB_PATH` in `mise.toml` points, so
+name it with `--hub-db` and it becomes `data/hub.sqlite`; leave the flag off and
+no local hub is moved, and the report says so. Databases are copied through
+SQLite's own backup, which carries the write-ahead log a file copy would lose,
+and each copy's integrity, row counts and recorded workspace are verified before
+the new root is published in one atomic step.
+
+**Nothing is deleted.** The originals stay exactly where they were, which is what
+makes the move reversible: remove the new root and the old layout is live again.
+Once `ub status`, `ub doctor` and `ub workspace list` all read the new copies —
+they will, and `ub doctor`'s `storage-layout` line then says `mac` — removing the
+originals is yours to do by hand. Re-running the command reports "already
+migrated" and copies nothing.
+
+Two things are deliberately **not** part of this: there is no menu-bar
+application, and the browser's IndexedDB is not migrated (it is a separate,
+unsolved storage boundary — #198). A migration moves files on disk and nothing
+else.
 
 ### Going remote: local first, then a hub, then a second computer
 

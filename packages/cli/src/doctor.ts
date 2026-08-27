@@ -129,10 +129,15 @@ function storageCheck(storage: StoragePaths): Check {
       name: "storage-layout",
       status: "pass",
       reason: `${storage.layout} — ${where}`,
-      remedy: `\`ub storage migrate\` (#249) will move these under ${MAC_ROOT_DISPLAY}; nothing has moved yet, and nothing new was created`,
+      remedy: `\`ub storage migrate\` moves these under ${MAC_ROOT_DISPLAY}; nothing has moved yet, and nothing new was created`,
     };
   }
-  return pass("storage-layout", `${storage.layout} — ${where}`);
+  return {
+    // A migrated Mac carries the one note the layout has left to make — where
+    // the originals are, and that removing them is the reader's own decision.
+    ...pass("storage-layout", `${storage.layout} — ${where}`),
+    remedy: storage.warnings[0] ?? null,
+  };
 }
 
 /** The checks that need a resolved layout — every one of them, in order. */

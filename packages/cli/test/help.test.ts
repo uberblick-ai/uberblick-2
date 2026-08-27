@@ -36,6 +36,7 @@ import {
   REMOTE_SET_HELP,
 } from "../src/remote.js";
 import { STATUS_HELP, STATUS_OPTIONS } from "../src/status.js";
+import { MIGRATE_HELP, MIGRATE_OPTIONS, STORAGE_HELP } from "../src/storage.js";
 import {
   WORKSPACE_HELP,
   WORKSPACE_LIST_HELP,
@@ -84,6 +85,8 @@ const PATHS: Path[] = [
   },
   { argv: ["workspace", "list"], help: WORKSPACE_LIST_HELP, options: WORKSPACE_LIST_OPTIONS },
   { argv: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: WORKSPACE_USE_OPTIONS },
+  { argv: ["storage"], help: STORAGE_HELP, options: {}, children: ["migrate"] },
+  { argv: ["storage", "migrate"], help: MIGRATE_HELP, options: MIGRATE_OPTIONS },
   {
     argv: ["remote"],
     help: REMOTE_HELP,
@@ -107,6 +110,7 @@ const DISPATCHERS = [
   { file: "cli.ts", group: [], variable: "command" },
   { file: "cli.ts", group: ["mcp"], variable: "subcommand" },
   { file: "workspace.ts", group: ["workspace"], variable: "sub" },
+  { file: "storage.ts", group: ["storage"], variable: "sub" },
   { file: "remote.ts", group: ["remote"], variable: "sub" },
 ];
 
@@ -242,6 +246,8 @@ describe("help before the work", () => {
     ["doctor", "-h"],
     ["workspace", "use", "--help"],
     ["workspace", "use", WORKSPACE, "--help"],
+    ["storage", "migrate", "--dry-run", "--help"],
+    ["storage", "migrate", "--hub-db", "/nowhere.sqlite", "-h"],
     ["remote", "set", "--help"],
     ["remote", "set", "ws://example.invalid:1234", "--help"],
     ["remote", "init", "--help"],
@@ -287,7 +293,7 @@ describe("what is not a request for help", () => {
     // A group answers for itself only when its own one argument is the
     // question. `ub workspace bogus --help` is a typo, not a request, and every
     // level says so the same way — the top level always has.
-    for (const group of [[], ["workspace"], ["remote"], ["mcp"]]) {
+    for (const group of [[], ["workspace"], ["storage"], ["remote"], ["mcp"]]) {
       const argv = [...group, "bogus", "--help"];
       const run = runUb(argv, sandbox());
       expect(run.status, argv.join(" ")).toBe(2);

@@ -19,6 +19,7 @@ import { openCommand } from "./open.js";
 import { remoteCommand } from "./remote.js";
 import { serveCommand } from "./serve.js";
 import { statusCommand } from "./status.js";
+import { storageCommand } from "./storage.js";
 import { cliVersion } from "./version.js";
 import { workspaceCommand } from "./workspace.js";
 
@@ -33,6 +34,7 @@ commands:
   status [--json]        workspace, hub, credential, database and sync state
   doctor [--json]        check the local stack against its known failure modes
   workspace [command]    which workspace this directory works in
+  storage [command]      where this machine keeps its files
   remote [command]       the endpoint documents sync with, and the one-time bridges
   mcp install [target]   register uberblick with an MCP client
 
@@ -41,6 +43,10 @@ workspace commands:
   workspace list         workspaces this machine has a database for ([--json])
   workspace use <id>     bind this directory to a workspace, by uuid,
                          <slug>-<uuid> or a unique prefix (--user: this machine)
+
+storage commands:
+  storage migrate        move a legacy macOS installation into
+                         ~/Library/Application Support/Uberblick
 
 remote commands:
   remote                 the endpoint in force and what sharing it buys
@@ -116,6 +122,9 @@ export async function runCli(
   }
   if (command === "workspace") {
     return await workspaceCommand(rest, io);
+  }
+  if (command === "storage") {
+    return await storageCommand(rest, io);
   }
   if (command === "remote") {
     return await remoteCommand(rest, io);

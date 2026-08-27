@@ -92,8 +92,11 @@ const UUID_LENGTH = 36;
  * `~/Library/Application Support/Uberblick/data/workspaces` on a Mac, and this
  * command has no business knowing which.
  */
-function databaseDirectory(env: NodeJS.ProcessEnv): string {
-  return resolveStorage({ env }).workspaceDir;
+function databaseDirectory(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return resolveStorage({ env, platform }).workspaceDir;
 }
 
 export interface WorkspaceEntry {
@@ -112,11 +115,18 @@ interface InForce {
   warnings: string[];
 }
 
+/** `platform` is a parameter for the same reason `env` is: so a Mac is testable. */
+interface ListOptions {
+  env?: NodeJS.ProcessEnv;
+  cwd?: string;
+  platform?: NodeJS.Platform;
+}
+
 /**
  * The workspace configuration resolves to — the same value and the same origin
  * `ub status` reports, without opening the database to get it.
  */
-function inForce(options: { env?: NodeJS.ProcessEnv; cwd?: string } = {}): InForce {
+function inForce(options: ListOptions = {}): InForce {
   const resolved = resolveConfig(options);
   const configured = resolved.env.WORKSPACE_ID ?? null;
   return {
@@ -133,14 +143,15 @@ function inForce(options: { env?: NodeJS.ProcessEnv; cwd?: string } = {}): InFor
  * one — which may have neither a database nor a document yet, and is still the
  * workspace you are in.
  */
-export function listWorkspaces(
-  options: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
-): { entries: WorkspaceEntry[]; warnings: string[] } {
+export function listWorkspaces(options: ListOptions = {}): {
+  entries: WorkspaceEntry[];
+  warnings: string[];
+} {
   const env = options.env ?? process.env;
   const current = inForce(options);
 
   const uuids = new Set<string>();
-  const directory = databaseDirectory(env);
+  const directory = databaseDirectory(env, options.platform);
   let names: string[] = [];
   try {
     names = readdirSync(directory);
@@ -167,7 +178,7 @@ export function listWorkspaces(
   const entries = [...uuids].sort().map((uuid) => ({
     uuid,
     active: uuid === current.uuid,
-    databasePath: defaultDatabasePath(uuid, env),
+    databasePath: defaultDatabasePath(uuid, env, options.platform),
   }));
   return { entries, warnings: current.warnings };
 }

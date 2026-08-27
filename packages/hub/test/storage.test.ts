@@ -20,7 +20,12 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { defaultDatabasePath } from "../src/config.js";
 import type { StorageLayout } from "../src/storage.js";
-import { AmbiguousStorageError, resolveStorage } from "../src/storage.js";
+import {
+  AmbiguousStorageError,
+  MIGRATION_RECEIPT,
+  macStorage,
+  resolveStorage,
+} from "../src/storage.js";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -323,6 +328,51 @@ describe("state in both roots", () => {
     expect(() => resolveStorage({ env: { HOME: root }, platform: "darwin" })).toThrow(
       AmbiguousStorageError,
     );
+  });
+
+  // The one case where two populated roots is an answer rather than a
+  // question: `ub storage migrate` copies rather than moves, so the originals
+  // are still there on purpose, and the receipt it leaves says which root is
+  // live. Without it, every command on a machine that had migrated
+  // successfully would refuse to open anything.
+  it("takes the Mac root when a completed migration left its receipt there", () => {
+    const root = home();
+    seed(join(legacyConfig(root), "config.json"));
+    seed(join(legacyData(root), `${WORKSPACE}.sqlite`));
+    seed(join(macRoot(root), "config.json"));
+    seed(join(macRoot(root), MIGRATION_RECEIPT));
+
+    const storage = resolveStorage({ env: { HOME: root }, platform: "darwin" });
+
+    expect(storage.layout).toBe("mac");
+    expect(storage.configDir).toBe(macRoot(root));
+    expect(storage.workspaceDir).toBe(join(macRoot(root), "data", "workspaces"));
+    // Said once, and it names the originals rather than offering to remove
+    // them: nothing in uberblick deletes a pre-migration copy.
+    expect(storage.warnings).toHaveLength(1);
+    expect(storage.warnings[0]).toContain(legacyConfig(root));
+    expect(storage.warnings[0]).toContain(legacyData(root));
+    expect(storage.warnings[0]).toMatch(/no longer read/);
+  });
+});
+
+// --- the destination a migration writes into ---------------------------------
+
+describe("the Mac layout as a destination", () => {
+  it("is available on a legacy machine, where resolution is still the old pair", () => {
+    // `ub storage migrate` has to name the root it is about to create, which is
+    // exactly the root resolution is correctly not returning yet.
+    const root = home();
+    seed(join(legacyConfig(root), "config.json"));
+    const env = { HOME: root };
+
+    expect(resolveStorage({ env, platform: "darwin" }).layout).toBe("legacy-xdg");
+    expect(macStorage({ env }).configDir).toBe(macRoot(root));
+    expect(macStorage({ env }).hubDatabase).toBe(
+      join(macRoot(root), "data", "hub.sqlite"),
+    );
+    // And asking created nothing, like every other path in this module.
+    expect(existsSync(join(root, "Library"))).toBe(false);
   });
 });
 
