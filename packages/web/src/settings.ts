@@ -16,8 +16,8 @@
  * cache would be a second copy to keep honest across tabs. Every read is
  * defensive — an unparseable blob, a JSON array, a field of the wrong type all
  * degrade to the default for that field. Corrupt storage returns defaults; it
- * never throws, because the alternative is a settings dialog that cannot open
- * to fix the thing that broke it.
+ * never throws, because the alternative is a user menu that cannot open to fix
+ * the thing that broke it.
  *
  * The subscription is same-tab only: `setSetting` notifies, so open UI reacts.
  * A write in another tab is not observed (no `storage` listener) — nobody has

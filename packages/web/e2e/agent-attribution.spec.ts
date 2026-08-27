@@ -97,11 +97,6 @@ function editor(page: Page) {
 /**
  * Create a document, type into it, and answer with its uuid — which the
  * address carries, `/<workspace>/<uuid>`, and which is what an agent works by.
- *
- * The reader's caret is left in the block on purpose. It is where a reader's
- * caret is while an agent writes, and it is what stops the arrival animation
- * from veiling the very text the caret has to be visible in (#121's "the
- * reader wins").
  */
 async function createDoc(page: Page, text: string): Promise<string> {
   const before = new URL(page.url()).pathname;

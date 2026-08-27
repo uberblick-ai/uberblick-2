@@ -2317,8 +2317,8 @@ h3.ub-heading {
    touches the tokens or the rules above, and nothing above knows about it. */
 
 /* The sidebar's fixed entry. It lives in the footer, below the line the
-   curated groups end at — quiet like Settings, but a place to go rather than a
-   dialog, so it keeps the foreground colour. */
+   curated groups end at, and shares the footer's row shape with the user card
+   under it. */
 .ub-all-open-entry {
   display: flex;
   align-items: center;
