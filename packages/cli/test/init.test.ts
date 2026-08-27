@@ -38,6 +38,8 @@ import {
   runUbAsync,
   sandbox,
   type Sandbox,
+  sleep,
+  waitUntil,
 } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -317,9 +319,14 @@ describe("ub init", () => {
     // Each attempt joins a workspace by id, which is the one way to tell `ub
     // init` not to seed the starter corpus. That seed spends a hub's whole
     // connect-and-sync budget per attempt against a hub no test starts —
-    // seconds this test's subject has no stake in, and what put 24 spawned
-    // processes over the 30s budget on CI. The starter corpus under concurrent
-    // runs is `starter.test.ts`'s subject, and it is tested there.
+    // seconds this test's subject has no stake in, and what used to put 24
+    // spawned processes over the file's budget on CI. The starter corpus under
+    // concurrent runs is `starter.test.ts`'s subject, and it is tested there.
+    //
+    // Four rounds of six is the longest sequential wait in this package: each
+    // round is bounded by the 25 s `runUbAsync` gives a run, and the vitest
+    // budget sits above their sum so a run that overruns reports itself rather
+    // than being cut off by an anonymous test timeout.
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const box = sandbox({ checkout: true });
       const workspace = randomUUID();
@@ -353,7 +360,7 @@ describe("ub init", () => {
     writeFileSync(lock, "999999\n");
 
     const running = runUbAsync(["init", "--yes"], box, WITHOUT_MISE);
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await sleep(400);
     // Still waiting: nothing has been written, because nothing may be.
     expect(existsSync(credentialsPath(box))).toBe(false);
     expect(existsSync(localConfigPath(box))).toBe(false);
@@ -396,9 +403,7 @@ describe("ub init", () => {
         waiting ||= stderr.includes("waiting for another `ub init`");
       },
     );
-    while (!waiting) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    await waitUntil("`ub init` to say it is waiting for the lock", () => waiting);
     writeFileSync(
       join(box.configHome, "uberblick", "config.json"),
       `${JSON.stringify({ workspace: JOINED }, null, 2)}\n`,
@@ -435,9 +440,7 @@ describe("ub init", () => {
         waiting ||= stderr.includes("waiting for another `ub init`");
       },
     );
-    while (!waiting) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    await waitUntil("`ub init` to say it is waiting for the lock", () => waiting);
     writeFileSync(config, `${JSON.stringify({ workspace: "a/b" }, null, 2)}\n`);
     rmSync(lock);
 

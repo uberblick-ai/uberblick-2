@@ -8,7 +8,17 @@ export default defineConfig({
     // opens a real SQLite file and gives the hub a bounded chance to answer.
     // Temp XDG directories and dead ports keep them safe in parallel, but the
     // timeouts have to allow a full spawn/connect/shutdown round trip.
-    testTimeout: 30_000,
-    hookTimeout: 30_000,
+    //
+    // Deliberately well above the sum of the waits any one test makes in
+    // sequence — the longest chains here are `ub init`'s concurrency test (four
+    // rounds, each bounded by the 25 s `runUbAsync` gives a spawned run) and
+    // `ub open`'s port-release test (two starts and two interrupts, each
+    // bounded by WAIT_TIMEOUT_MS in test/helpers.ts). Whichever timeout fires
+    // first is the one that gets to explain the failure, and a bare "test timed
+    // out in 30000ms" names nothing — which is what a loaded machine used to
+    // produce here. The named wait says which condition never arrived, and that
+    // is the difference between a diagnosis and a re-run.
+    testTimeout: 150_000,
+    hookTimeout: 150_000,
   },
 });

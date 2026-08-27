@@ -213,7 +213,14 @@ export function runUbAsync(
     // `close`, not `exit`: both pipes have to be drained before the output is
     // complete, and a test asserting "the secret appears nowhere" on a truncated
     // capture would pass for the wrong reason.
-    child.on("close", (status) => {
+    child.on("close", (status, signal) => {
+      // Nothing else here has a handle on this child, so a signal means
+      // `spawn`'s own timeout killed it. Say which run ran out of time: a bare
+      // null status reads as a crash, and the assertion it fails then reports
+      // the wrong thing about a machine that was merely slow.
+      if (signal !== null) {
+        stderr += `\ntimed out waiting for \`ub ${args.join(" ")}\` to exit within ${timeoutMs}ms\n`;
+      }
       resolve({ status, stdout, stderr, output: `${stdout}${stderr}` });
     });
   });
@@ -221,3 +228,36 @@ export function runUbAsync(
 
 /** A hub address nothing listens on: `ub status` must not wait on the network. */
 export const DEAD_HUB_URL = "ws://127.0.0.1:1";
+
+/**
+ * How long one awaited condition gets before the wait gives up.
+ *
+ * Generous rather than tight, and deliberately so: these suites spawn real
+ * processes that bind real sockets and open real SQLite files, and the review
+ * container runs every package's suite at once on whatever cores are left. A
+ * deadline sized for a quiet machine turns load into a red gate, which trains
+ * everyone to re-run — and a re-run habit is how a real regression eventually
+ * walks through. What has to stay sharp is the *message*, not the clock: a wait
+ * that expires still names the condition it was waiting for, so a genuine hang
+ * is still reported as one, just later.
+ */
+export const WAIT_TIMEOUT_MS = 30_000;
+
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Wait for `predicate`, polling. Throws with `label` on timeout. */
+export async function waitUntil(
+  label: string,
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = WAIT_TIMEOUT_MS,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await predicate())) {
+    if (Date.now() > deadline) {
+      throw new Error(`timed out waiting for ${label}`);
+    }
+    await sleep(25);
+  }
+}
