@@ -84,10 +84,15 @@ const AUTH_REJECTED = "authentication rejected by hub";
  * different process the old socket cannot reach at all. Only a new connection
  * re-handshakes every room, so a disowned one is dropped and dialled again.
  *
- * Bounded, because the same signal is what a hub that refuses this token sends:
- * three attempts cover a restart (the first one lands as soon as the hub is
- * back), and a hub that keeps refusing is a configuration error that
- * `auth-failed` should state rather than bury under reconnects.
+ * Bounded, and bounded per *durable* connection — see
+ * {@link HubSync.hubDisownedRoom}. Three rebuilds cover a restart, whose first
+ * one lands as soon as the hub is back; once they are spent this stops
+ * re-dialling and leaves recovery to the provider's own dead-connection
+ * timeout, because a hub that goes on disowning a room is not something a
+ * fourth socket fixes. The budget matters most where the hub is *not* uniformly
+ * broken: a document the hub cannot load is refused after the token has been
+ * accepted, so the rooms beside it keep working, and without a bound this would
+ * tear a healthy connection down several times a second forever.
  */
 const MAX_REBUILDS = 3;
 
@@ -136,8 +141,22 @@ export class HubSync {
   /** The socket's own first retry delay, reused by {@link rebuild}. */
   private readonly reconnectDelayMs: number;
 
-  /** Rebuilt connections since the last successful handshake. See {@link MAX_REBUILDS}. */
+  /** Rebuilt connections since the last durable one. See {@link MAX_REBUILDS}. */
   private rebuilds = 0;
+
+  /**
+   * Rooms that have synced on the connection currently open — the whole of what
+   * "this connection worked" means, and cleared the moment a new one opens.
+   *
+   * Synced, not authenticated, because an accepted token is not evidence: a hub
+   * that cannot load a document accepts the token for its room and refuses the
+   * room immediately afterwards, so counting handshakes would call that
+   * connection durable and hand it a fresh budget on every rebuild.
+   */
+  private readonly syncedRooms = new Set<string>();
+
+  /** Whether the hub has already disowned a room on the connection now open. */
+  private connectionDisowned = false;
 
   /** The rebuild waiting out its backoff — every room's close shares one. */
   private rebuildTimer: NodeJS.Timeout | null = null;
@@ -188,6 +207,11 @@ export class HubSync {
         this.socketStatus = status as "connecting" | "connected" | "disconnected";
         if (status === "connected") {
           this.sawFailure = false;
+          // A new connection has proven nothing yet and dropped nothing yet.
+          // This runs before any of its rooms can answer, which is what makes
+          // the two sets below a record of this connection and no other.
+          this.syncedRooms.clear();
+          this.connectionDisowned = false;
           this.onConnected();
           return;
         }
@@ -199,6 +223,9 @@ export class HubSync {
         // where the socket has just said it is down, rather than guessing when.
         if (status === "disconnected" && this.rebuilding) {
           this.rebuilding = false;
+          if (this.destroyed || this.quarantined) {
+            return;
+          }
           void this.socket?.connect().catch(() => {
             // The socket retries a failed dial forever; nothing here to report.
           });
@@ -233,11 +260,48 @@ export class HubSync {
   }
 
   /**
+   * The hub let go of one room — a close it sent, or a token it refused — on a
+   * connection it is otherwise keeping open. Decide what that says about the
+   * connection, then rebuild it.
+   *
+   * The decision can only be made here, because it is about the connection this
+   * room has just been dropped from: if it had every attached room in sync
+   * before that, it was a working connection that something ended — a hub
+   * shutting down, most often — and the rebuild that follows is the first of a
+   * fresh budget. If it did not, this is the same connection failing the same
+   * way again, and the budget it is spending is the one that stops it.
+   *
+   * Only the first disowned room of a connection judges it. A shutdown closes
+   * every room, and the second close says nothing the first did not.
+   */
+  private hubDisownedRoom(): void {
+    // The socket itself going away is not this: it already retries on its own,
+    // and it takes every room with it.
+    if (this.socketStatus !== "connected") {
+      return;
+    }
+    if (!this.connectionDisowned && this.everyRoomSynced()) {
+      this.rebuilds = 0;
+    }
+    this.connectionDisowned = true;
+    this.rebuild();
+  }
+
+  /** Whether every attached room has synced on the connection now open. */
+  private everyRoomSynced(): boolean {
+    for (const room of this.providers.keys()) {
+      if (!this.syncedRooms.has(room)) {
+        return false;
+      }
+    }
+    return this.providers.size > 0;
+  }
+
+  /**
    * Drop this socket and dial again, on the reconnect backoff.
    *
-   * Called when the hub disowns a room on a socket it leaves open — a close it
-   * sent, or a token it refused. See {@link MAX_REBUILDS} for why a new
-   * connection is the only thing that recovers from either.
+   * See {@link MAX_REBUILDS} for why a new connection is the only thing that
+   * recovers a room the hub has disowned, and where this stops.
    *
    * One rebuild per backoff window, because a hub shutdown closes every room:
    * the first close schedules it and the rest are already covered.
@@ -298,7 +362,11 @@ export class HubSync {
       token: () => this.token(),
       onAuthenticated: () => {
         this.authRejected = false;
-        this.rebuilds = 0;
+      },
+      onSynced: ({ state }) => {
+        if (state) {
+          this.syncedRooms.add(room);
+        }
       },
       onAuthenticationFailed: () => {
         // Distinct from an unreachable hub: a human has to fix the secret. The
@@ -307,17 +375,19 @@ export class HubSync {
         // state renders it. See AUTH_REJECTED.
         this.authRejected = true;
         log.error("hub rejected the token", { room });
-        // A hub on its way out refuses the room it is unloading, so a refusal
-        // is not proof the secret is wrong. The rebuild offers a fresh token on
-        // a fresh connection; `auth-failed` stands until one is accepted, so a
-        // secret that really is wrong is never masked, only retried.
-        this.rebuild();
+        // A hub on its way out refuses the room it is unloading, and one that
+        // cannot load a document refuses that document's room after accepting
+        // the token — so a refusal is not proof the secret is wrong. The
+        // rebuild offers a fresh token on a fresh connection; `auth-failed`
+        // stands until one is accepted, so a secret that really is wrong is
+        // never masked, only retried.
+        this.hubDisownedRoom();
       },
       onClose: () => {
         // Fires for the socket going away — which retries itself — and for a
         // room the hub closed on a socket that stays open, which does not. See
-        // MAX_REBUILDS; `rebuild` ignores the first case.
-        this.rebuild();
+        // MAX_REBUILDS; `hubDisownedRoom` ignores the first case.
+        this.hubDisownedRoom();
       },
     });
     // A provider given a shared socket does not attach itself — it only

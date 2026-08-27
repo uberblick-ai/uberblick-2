@@ -15,8 +15,9 @@
  * secret into a hub that is merely slow.
  */
 
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
-import type { Hub } from "@uberblick/hub";
+import type { Hub, HubLogRecord } from "@uberblick/hub";
 import {
   hubUrl,
   LIVE_HUB_SETTLE,
@@ -28,8 +29,9 @@ import {
   testConfig,
   TEST_SECRET,
   waitUntil,
+  WORKSPACE,
 } from "./helpers.js";
-import type { Rig, TestConfigOptions } from "./helpers.js";
+import type { HubOptions, Rig, TestConfigOptions } from "./helpers.js";
 
 const hubs: Hub[] = [];
 const rigs: Rig[] = [];
@@ -44,7 +46,7 @@ afterEach(async () => {
   removeTempDirs();
 });
 
-async function hub(options: { port?: number; databasePath?: string } = {}) {
+async function hub(options: HubOptions = {}) {
   const started = await startHub(options);
   hubs.push(started);
   return started;
@@ -86,6 +88,31 @@ async function waitForBlock(
       (block) => block.text === text,
     );
   });
+}
+
+/**
+ * Replace a room's stored update with bytes Yjs cannot decode, in a hub
+ * database nothing is holding open.
+ *
+ * What it buys is a room the hub refuses *after* accepting the token for it:
+ * `onLoadDocument` throws, and Hocuspocus answers a failed document load with
+ * the same `permission-denied` it answers a bad token with. That is the shape
+ * a hub on its way out produces for a room it is unloading — here it is made
+ * permanent, and confined to one room, so the rooms beside it stay healthy.
+ */
+function poisonRoom(databasePath: string, room: string): void {
+  const db = new DatabaseSync(databasePath);
+  try {
+    const changed = db
+      .prepare(`UPDATE "documents" SET data = $data WHERE name = $name`)
+      .run({ data: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]), name: room });
+    // The row has to exist, or the test would be proving nothing at all.
+    if (changed.changes !== 1) {
+      throw new Error(`no stored document for room ${room}`);
+    }
+  } finally {
+    db.close();
+  }
 }
 
 /** Wait until a server reports everything it holds has reached the hub. */
@@ -157,6 +184,100 @@ describe("a hub that restarts under connected servers", () => {
       expect([label, status.hub.status]).toEqual([label, "connected"]);
       expect([label, status.pendingRooms]).toEqual([label, []]);
     }
+  });
+
+  it("spends its rebuilds and stops when one room is refused for good", async () => {
+    const database = tempDatabasePath();
+    const first = await hub({ databasePath: database });
+    const port = first.port;
+
+    const here = await serverOn(port);
+    const doomed = await here.ok("create_doc", {
+      title: "The document the hub will not load",
+      description: "A test document.",
+      blocks: [{ type: "paragraph", text: "stored before it was poisoned" }],
+    });
+    await waitForSynced(here, "the writer");
+
+    // Stop, poison one room, start again on the same port and database. From
+    // here on the hub accepts this server's token and refuses that one room —
+    // the case where rebuilding forever is worse than stopping, because the
+    // rooms beside it are working and every rebuild tears them down too.
+    await first.stop();
+    hubs.splice(hubs.indexOf(first), 1);
+    poisonRoom(database, `${WORKSPACE}/${doomed.uuid}`);
+
+    const records: HubLogRecord[] = [];
+    await hub({
+      port,
+      databasePath: database,
+      log: (record) => records.push(record),
+    });
+
+    // One record per connection this server completes with the restarted hub:
+    // a rebuild re-authenticates every room, the healthy directory room
+    // included, so counting that room counts connections.
+    const connections = (): number =>
+      records.filter(
+        (record) =>
+          record.event === "hub.auth.accepted" &&
+          record.sub === here.config.sessionId &&
+          record.room === `${WORKSPACE}/_directory`,
+      ).length;
+
+    // MAX_REBUILDS in ../src/sync.ts. Written out rather than imported: the
+    // bound is what this test is about, so a change to it should read here.
+    const bound = 3;
+    await waitUntil(
+      "the refused room to spend every rebuild its connection had",
+      () => connections() >= bound,
+    );
+    const spent = connections();
+    // Six rebuild windows at this rig's 250ms cap — where a rebuild budget
+    // that resets on every accepted token would show itself as a re-dial storm.
+    await sleep(1_500);
+    expect(connections()).toBe(spent);
+    expect(spent).toBe(bound);
+
+    // The rooms beside the refused one never stopped working: a write made
+    // after the bound bound reaches a replica that has never seen this hub.
+    const kept = await here.ok("create_doc", {
+      title: "Written while the other room was refused",
+      description: "A test document.",
+      blocks: [{ type: "paragraph", text: "the healthy rooms still carry writes" }],
+    });
+    const there = await serverOn(port);
+    await waitForBlock(
+      there,
+      kept.uuid,
+      "the healthy rooms still carry writes",
+      "a replica that has only ever seen the restarted hub",
+    );
+
+    const roomsOf = (status: {
+      rooms: { room: string; synced: boolean }[];
+    }): Map<string, boolean> =>
+      new Map(status.rooms.map((entry) => [entry.room, entry.synced]));
+
+    await waitUntil("the healthy room to report itself synced", async () => {
+      const status = await here.ok("sync_status", {});
+      return roomsOf(status).get(`${WORKSPACE}/${kept.uuid}`) === true;
+    });
+
+    // And the answer stays honest room by room: the refused one is not synced,
+    // the healthy one is, and the document is still readable, because the local
+    // replica rather than the hub is the authoritative copy. `hub.status` is
+    // deliberately not asserted — it answers for the whole socket, which really
+    // is up and carrying every other room, and whether a later room's handshake
+    // has cleared the refusal flag by now is a race with no right answer to
+    // pin. Where a refused room shows is `rooms`.
+    const status = await here.ok("sync_status", {});
+    expect(roomsOf(status).get(`${WORKSPACE}/${kept.uuid}`)).toBe(true);
+    expect(roomsOf(status).get(`${WORKSPACE}/${doomed.uuid}`)).toBe(false);
+    const read = await here.ok("get_doc", { uuid: doomed.uuid });
+    expect((read.blocks as { text: string }[]).map((block) => block.text)).toEqual([
+      "stored before it was poisoned",
+    ]);
   });
 
   it("still reports a wrong secret as auth-failed, retries and all", async () => {

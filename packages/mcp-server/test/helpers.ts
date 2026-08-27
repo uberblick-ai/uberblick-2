@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { Hub } from "@uberblick/hub";
+import type { Hub, HubLogger } from "@uberblick/hub";
 import {
   createHub,
   importRootSecret,
@@ -338,6 +338,12 @@ export interface HubOptions {
   port?: number;
   databasePath?: string;
   authSecret?: string;
+  /**
+   * Where the hub's structured records go. Silent by default; a suite that has
+   * to count what the hub saw — connections accepted, rooms closed — reads them
+   * here rather than inventing a seam for it.
+   */
+  log?: HubLogger;
 }
 
 export function startHub(options: HubOptions = {}): Promise<Hub> {
@@ -345,7 +351,7 @@ export function startHub(options: HubOptions = {}): Promise<Hub> {
     authSecret: options.authSecret ?? TEST_SECRET,
     port: options.port ?? 0,
     databasePath: options.databasePath ?? tempDatabasePath(),
-    log: silentLogger,
+    log: options.log ?? silentLogger,
     debounce: 20,
     maxDebounce: 200,
     shutdownTimeoutMs: 5_000,
