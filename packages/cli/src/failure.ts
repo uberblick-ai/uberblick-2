@@ -24,13 +24,26 @@
  * codes may appear inside an existing category as `ub` learns to tell failures
  * apart — a caller that switches on `code` must have a default branch.
  *
- * **Nothing here invents text.** `message` is the same sentence the human mode
- * prints, so the two cannot drift into saying different things, and the fields
- * are the four below and no more. Not an exception's `stack`, `cause` or
- * arbitrary properties: those are where a path, a query or a value out of
- * `credentials.json` would ride out to a caller, and the messages `ub` itself
- * authors carry none of that. The signing secret is never printed by any
- * command, failure included.
+ * **Nothing here invents text.** `message` is the thrown error's own message,
+ * verbatim — the same sentence the human mode prints, so the two cannot drift
+ * into saying different things. It is therefore *not* sanitised, and a failure
+ * out of `node:fs` carries the path it failed on: the data directory, which the
+ * successful `ub status --json` payload already publishes as `databasePath` and
+ * the human mode already prints. Vetting each message into a path-free form
+ * would be a per-catch-site taxonomy nobody scheduled, and it would make the
+ * two modes say different things.
+ *
+ * **What the envelope excludes is the guarantee.** The four fields below and no
+ * more: never an exception's `stack`, never its `cause`, never arbitrary
+ * properties carried on it. That is where a query, a stack frame's source path
+ * or a value nobody vetted would ride out to a caller. And the signing secret
+ * is never printed by any command, on any stream, failure included.
+ *
+ * **Help wins over all of it.** `--help` anywhere on the command path prints
+ * that path's help on stdout and exits 0, before this is reached — so
+ * `ub status --json --help` is prose, deliberately: somebody reaching for help
+ * is not running the command, and its output is not the command's result. See
+ * ./help.ts.
  *
  * `ub mcp install --print` stays outside all of this on purpose: it emits a
  * client-configuration snippet to paste, not a result, so it is not a `--json`
@@ -40,16 +53,16 @@
 import type { Io } from "./io.js";
 
 /** How a caller must treat the failure. Closed, and pinned to the exit class. */
-export type FailureCategory = "usage" | "operational";
+type FailureCategory = "usage" | "operational";
 
 /**
  * The name of the failure. Additive: a new code may appear inside an existing
  * category, so switch on {@link FailureCategory} and default on this.
  */
-export type FailureCode = "invalid_arguments" | "command_failed";
+type FailureCode = "invalid_arguments" | "command_failed";
 
 /** The one shape a `--json` command prints when it cannot answer. */
-export interface CliFailure {
+interface CliFailure {
   error: {
     code: FailureCode;
     category: FailureCategory;
@@ -83,11 +96,16 @@ export function failureMessage(error: unknown): string {
  * has to be *refused in JSON*, and a refusal the parser produced cannot be read
  * out of the parser's own result. A bare `--` ends the search, the same rule
  * help follows.
+ *
+ * `--json=…` counts too, though the parser rejects it a moment later: a boolean
+ * option takes no value. Somebody who wrote it plainly asked for JSON, and
+ * answering the mistake in prose is the one place a `--json` reader would still
+ * be handed something it cannot parse.
  */
 export function wantsJson(argv: readonly string[]): boolean {
   for (const arg of argv) {
     if (arg === "--") return false;
-    if (arg === "--json") return true;
+    if (arg === "--json" || arg.startsWith("--json=")) return true;
   }
   return false;
 }

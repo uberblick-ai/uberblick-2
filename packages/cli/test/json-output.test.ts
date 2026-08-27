@@ -96,6 +96,20 @@ describe("--json output", () => {
     expect(report).not.toHaveProperty("error");
   });
 
+  it("lets `--help` win over `--json`, on stdout, at exit 0", () => {
+    // Settled policy, and the one documented hole in "a `--json` run prints
+    // JSON": somebody reaching for help is not running the command, so what
+    // comes back is that path's help rather than the command's result.
+    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+
+    for (const { argv } of JSON_COMMANDS) {
+      const run = runUb([...argv, "--json", "--help"], box);
+      expect(run.status).toBe(0);
+      expect(run.stdout).toMatch(/^usage: ub /);
+      expect(run.stderr).toBe("");
+    }
+  });
+
   it("carries warnings on stderr while stdout stays one JSON value", () => {
     // An unparseable config file is a warning, not a failure: the run still has
     // an answer, and the answer must not have a warning line glued to the front
@@ -121,9 +135,18 @@ describe("--json failures", () => {
     expect(error.command).toBe(name);
     expect(error.message).toMatch(/--bogus/);
     // The four documented fields and no fifth: a `stack` or a `cause` is how an
-    // exception's incidentals — a path, a query, a value nobody vetted — would
-    // ride out to a caller.
+    // exception's incidentals — a stack frame, a query, a value nobody vetted —
+    // would ride out to a caller.
     expect(Object.keys(error).sort()).toEqual(["category", "code", "command", "message"]);
+
+    // `--json=true` is the same refusal by another road: a boolean option with a
+    // value, which the parser rejects — and the caller who wrote it plainly
+    // asked for JSON, so the rejection cannot come back as prose.
+    const valued = runUb([...argv, "--json=true"], box);
+    expect(valued.status).toBe(2);
+    const refused = soleJsonValue(valued.stdout) as { error: Record<string, unknown> };
+    expect(refused.error.code).toBe("invalid_arguments");
+    expect(refused.error.command).toBe(name);
   });
 
   it.each([

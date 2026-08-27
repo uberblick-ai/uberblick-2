@@ -51,7 +51,7 @@ import type { McpConfig } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import type { ResolvedConfig } from "./config.js";
 import { readCredentials, resolveConfig } from "./config.js";
-import { reportFailure, wantsJson } from "./failure.js";
+import { failureMessage as message, reportFailure, wantsJson } from "./failure.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
@@ -94,10 +94,6 @@ export interface DoctorReport {
   /** False when any check failed — the same condition as the exit code. */
   ok: boolean;
   checks: Check[];
-}
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function pass(name: string, reason: string): Check {

@@ -334,9 +334,10 @@ signing secret in `credentials.json` applies to whichever hub *you* configured.
 The rule for every command that offers `--json`, and the forward policy for any
 that gains one: **a recognized `--json` run puts exactly one JSON value on
 stdout — success or failure alike — and the exit status is the authoritative
-outcome.** stderr carries only what the result cannot: warnings, and the MCP
-server's own logging. So a script parses one representation and branches on one
-number, and never scrapes prose to find out that something went wrong.
+outcome.** On the success path stderr carries only what the result cannot:
+warnings, and the MCP server's own logging. So a script parses one
+representation and branches on one number, and never scrapes prose to find out
+that something went wrong.
 
 | Exit | Means |
 | --- | --- |
@@ -344,8 +345,10 @@ number, and never scrapes prose to find out that something went wrong.
 | `1` | operational — it could not produce a result here and now, or `ub doctor` found a failing check |
 | `2` | usage — the invocation was refused; repeating it unchanged cannot help |
 
-A failure prints one object with a single `error` key, which is also the
-discriminator: a result never has one.
+**Test for the `error` key, not for the exit code.** Exit 1 does not imply a
+failure envelope: `ub doctor` exits 1 for a report full of perfectly readable
+checks. A failure prints one object with a single `error` key, and that key is
+the discriminator — a result never has one.
 
 ```json
 {
@@ -363,9 +366,12 @@ discriminator: a result never has one.
 new codes may appear inside an existing category as `ub` learns to tell failures
 apart, so switch on `category` and keep a default branch for `code`. `message`
 is the sentence the human mode prints, and the four fields above are the whole
-envelope — never an exception's `stack` or `cause`, which is where a path or a
-value nobody vetted would ride out to a caller. No failure carries the signing
-secret; nothing does.
+envelope — never an exception's `stack`, its `cause`, or arbitrary properties
+carried on it, which is where a stack frame, a query or a value nobody vetted
+would ride out to a caller. `message` is *not* sanitised beyond that: a failure
+out of the filesystem names the path it failed on, the same path a successful
+`ub status --json` already publishes as `databasePath`. No failure carries the
+signing secret; nothing does.
 
 A failing `ub doctor` *check* is not a failure in this sense: the report is the
 answer, `ok: false` carries it, and the checks stay where a caller can read
@@ -373,10 +379,19 @@ them. A reader that hangs up is not one either — `ub` stops writing and exits
 with the status the command had reached, rather than crashing over a pipe the
 caller closed on purpose.
 
-Two boundaries. `ub mcp install --print` is a client-configuration snippet to
-paste, not a result, so it is not a `--json` mode and has no envelope. And
-`--json` is not added to a command without a consumer that needs it: there is no
-global `--json` switch and no plan for one.
+Four boundaries, all deliberate:
+
+- **`--help` wins over `--json`.** `--help` or `-h` anywhere on the command path
+  prints that path's help on stdout and exits 0, before anything is parsed.
+  `ub status --json --help` is prose: somebody reaching for help is not running
+  the command, so what comes back is not the command's result.
+- **A command that does not exist is refused in prose**, on stderr, exit 2 — no
+  recognized `--json` command was reached, so there is no `--json` mode to
+  answer in. `ub bogus --json` and `ub workspace bogus --json` are both this.
+- **`ub mcp install --print`** is a client-configuration snippet to paste, not a
+  result, so it is not a `--json` mode and has no envelope.
+- **`--json` is not added to a command without a consumer** that needs it: there
+  is no global `--json` switch and no plan for one.
 
 ### Where your files live
 

@@ -16,11 +16,14 @@ import { stopWhenDrained } from "./exit.js";
 // trace over the caller's stderr and exiting 1: a crash where the caller did
 // something ordinary and deliberate. So a vanished reader is swallowed and the
 // process exits with the status the command had already reached — the exit
-// status reports what `ub` did, never what its reader did. Anything else on
-// these streams still throws, because it is not this.
+// status reports what `ub` did, never what its reader did.
+//
+// `EPIPE` and nothing else: that errno *is* the reader-gone signal, and a
+// stream error that is not it — ENOSPC on a redirect, a device that went away —
+// is a real failure whose report is worth the noise. It still throws.
 for (const stream of [process.stdout, process.stderr]) {
   stream.on("error", (error: NodeJS.ErrnoException) => {
-    if (error.code !== "EPIPE" && error.code !== "ERR_STREAM_DESTROYED") {
+    if (error.code !== "EPIPE") {
       throw error;
     }
   });
