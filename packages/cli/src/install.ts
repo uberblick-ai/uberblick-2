@@ -39,8 +39,10 @@
  *
  * **What it refuses.** Deciding what is already there is always done by reading
  * the file, whichever path does the writing. An entry that is already ours is a
- * no-op; an entry that is somebody else's is reported next to what would replace
- * it and left alone unless `--force` says otherwise; a file that cannot be
+ * no-op; an entry that is ours up to the workspace it pins is re-pinned in place
+ * when `--workspace` names one, because that flag is the permission; an entry
+ * that is somebody else's is reported next to what would replace it and left
+ * alone unless `--force` says otherwise; a file that cannot be
  * edited without guessing is named and left untouched. Nothing here prompts, so
  * the whole command runs unattended.
  *
@@ -184,6 +186,10 @@ options:
   -- <command>      register this command instead of uberblick's own. Only the
                     first \`--\` is ours; everything after it is passed through
                     verbatim, including further \`--\` and \`--help\`.
+
+Re-running with a different --workspace re-pins the entry in place (the file is
+backed up first); an install naming no --workspace leaves an existing pin alone
+rather than dropping it, because that would move a repository to another corpus.
 
 Safe against a file you care about: other servers are left alone, a second run
 reports \`already installed\`, an entry it did not write is never replaced without
@@ -385,10 +391,13 @@ export function verifyUnchanged(path: string, config: OpenConfig): void {
 
 // --- writing ----------------------------------------------------------------
 
-/** `<file>.<timestamp>.bak`, beside the file, in the sortable compact form. */
-function backupPath(path: string): string {
+/**
+ * `<file>.<timestamp>.bak`, beside the file, in the sortable compact form —
+ * with `-2`, `-3`… when a run in the same second already took the plain name.
+ */
+function backupPath(path: string, attempt: number): string {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-  return `${path}.${stamp}.bak`;
+  return `${path}.${stamp}${attempt === 1 ? "" : `-${attempt}`}.bak`;
 }
 
 /**
@@ -449,13 +458,23 @@ export function publish(
   }
 }
 
-/** Copy the bytes that were read aside, before anything replaces them. */
+/**
+ * Copy the bytes that were read aside, before anything replaces them.
+ *
+ * A name already taken is never written through — that would destroy the very
+ * copy this exists to keep — so the run takes the next free one instead. The
+ * stamp is per-second and re-pinning needs no `--force`, so two writes inside
+ * one second are now an ordinary thing rather than a mistake to report.
+ */
 function backUp(path: string, config: OpenConfig): string {
-  const backup = backupPath(path);
-  if (!stageInto(backup, config.text, "absent", Number(config.mode & 0o777n))) {
-    throw new Error(`a backup already exists at ${backup} — run again`);
+  const mode = Number(config.mode & 0o777n);
+  for (let attempt = 1; attempt <= 100; attempt += 1) {
+    const backup = backupPath(path, attempt);
+    if (stageInto(backup, config.text, "absent", mode)) {
+      return backup;
+    }
   }
-  return backup;
+  throw new Error(`cannot put a backup beside ${path} — run again`);
 }
 
 function field(name: string, value: string): string {
@@ -566,10 +585,10 @@ export async function installCommand(
   }
 
   // What is being installed: the entry, pinned when `--workspace` says so and
-  // under a second name when `--name` does. Resolved before anything is opened, so a bad id
-  // is a usage error rather than a half-finished install — and resolved exactly
-  // as `ub workspace use` resolves one, so a prefix names the same workspace in
-  // both commands.
+  // under a second name when `--name` does. Resolved before anything is opened,
+  // so a bad id is a usage error rather than a half-finished install — and
+  // resolved exactly as `ub workspace use` resolves one, so a prefix names the
+  // same workspace in both commands.
   let entry = flags.entry;
   if (flags.workspace !== null) {
     let known: WorkspaceEntry[];
@@ -629,11 +648,13 @@ export async function installCommand(
   try {
     let existing: string | null = null;
     let matches = false;
+    let pinOnly = false;
     if (existingFile !== null) {
       try {
         const state = inspect(file.format, existingFile.text, entry);
         existing = state.existing;
         matches = state.matches;
+        pinOnly = state.pinOnly;
       } catch (error) {
         if (!(error instanceof UnusableConfig)) {
           throw error;
@@ -661,14 +682,35 @@ export async function installCommand(
       return 0;
     }
 
-    if (existing !== null && !flags.force) {
+    // Re-pinning is not a collision. The entry runs our command with our
+    // arguments and differs only in the workspace it names, which is the one
+    // value `--workspace` exists to set — so the flag *is* the permission, and
+    // demanding `--force` on top of it would make the issue's headline flow
+    // (`--project --workspace X` in a checkout that already has the entry) fail
+    // on its second run. It is still a rewrite: the file is backed up first,
+    // exactly as `--force` would.
+    //
+    // Deliberately one-directional. An install with no `--workspace` proposes an
+    // *unpinned* entry, so taking this branch there would drop a repository's
+    // workspace binding because somebody re-ran the plain install line — a
+    // session silently moved to another corpus, which is the failure the pin
+    // exists to prevent. That still needs `--force`, and says so in its own
+    // words rather than calling the entry somebody else's.
+    const repinning = pinOnly && entry.env !== undefined;
+
+    if (existing !== null && !flags.force && !repinning) {
       io.err(
-        `ub mcp install: ${file.path} already registers "${entry.name}" as ` +
-          "something else, so it was left alone.\n\n" +
-          `existing\n${existing}\n\n` +
-          `proposed\n${snippet(file.format, entry).trimEnd()}\n\n` +
-          "Values other than the command are hidden. Re-run with --force to " +
-          "replace it; the file is backed up first.\n",
+        pinOnly
+          ? `ub mcp install: ${file.path} pins "${entry.name}" to a workspace ` +
+            "and this install names none, so it was left alone. Pass " +
+            "--workspace <id> to re-pin it, or --force to drop the pin; either " +
+            "way the file is backed up first.\n"
+          : `ub mcp install: ${file.path} already registers "${entry.name}" as ` +
+            "something else, so it was left alone.\n\n" +
+            `existing\n${existing}\n\n` +
+            `proposed\n${snippet(file.format, entry).trimEnd()}\n\n` +
+            "Values other than the command are hidden. Re-run with --force to " +
+            "replace it; the file is backed up first.\n",
       );
       return 1;
     }

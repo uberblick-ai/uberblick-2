@@ -159,8 +159,9 @@ its global config — that is what runs, because the vendor knows its own file
 best; otherwise the documented config file is edited directly. A `--workspace`
 pin is the exception and is always written here, because whether a given vendor
 CLI takes an environment flag, and under which spelling, is not something to
-guess at. The report names which of the two happened. Either way the command reads the file first, so an
-unrelated server in it is left alone — byte for byte, since both formats are
+guess at. The report names which of the two happened. Either way the command
+reads the file first, so an unrelated server in it is left alone — byte for
+byte, since both formats are
 spliced as text rather than reparsed and re-emitted — a second run is a no-op
 that says "already installed", and an `uberblick` entry it did not write is
 reported next to what would replace it and left in place unless `--force` says
@@ -192,6 +193,12 @@ layer, so every agent session started in this checkout resolves that workspace
 and nothing else has to be told. Without `--workspace` the entry stays unpinned
 and follows this machine's default, which is the right answer for a repository
 that has no workspace of its own.
+
+Re-running with a different `--workspace` re-pins the entry in place, backing
+the file up first — the flag is the permission, so there is no `--force` to
+remember. It does not work in reverse: an install naming no `--workspace` leaves
+an existing pin alone rather than dropping it, because a repository quietly
+moved to another corpus is exactly what the pin is there to prevent.
 
 `.mcp.json` in this checkout is exactly that file, and it is generated rather
 than hand-maintained — `ub mcp install claude --project` writes it, and a test

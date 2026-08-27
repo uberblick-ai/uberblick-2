@@ -1126,7 +1126,7 @@ describe("ub mcp install --workspace", () => {
 
     // A prefix is a way of typing an id, not an id: it is resolved to the id it
     // names, so it means the same thing here as in `ub workspace use`.
-    expect(install(box, "--workspace", "b7c", "--force").status).toBe(0);
+    expect(install(box, "--workspace", "b7c").status).toBe(0);
     expect(servers(box).uberblick).toEqual({
       ...UNPINNED,
       env: { WORKSPACE_ID: UNRELATED },
@@ -1189,18 +1189,56 @@ describe("ub mcp install --workspace", () => {
     expect(read(path)).toContain('"uberblick": {"command": "ub", "args": ["mcp", "serve"]}');
   });
 
-  it("does not repin an entry to another workspace without being asked", () => {
-    // Same name, different workspace: the pin is the entry's whole reason to
-    // exist, so moving it quietly would hand a session another corpus under a
-    // name it already trusts.
+  it("re-pins an entry it already wrote, and refuses to drop a pin nobody asked to drop", () => {
+    // The idempotence the repository binding lives or dies by, in the three
+    // states a checkout can be in.
     const box = sandbox();
-    expect(install(box, "--workspace", WORKSPACE, "--name", "ablauf").status).toBe(0);
-    const before = read(join(box.cwd, ".mcp.json"));
 
-    const repin = install(box, "--workspace", UNRELATED, "--name", "ablauf");
-    expect(repin.status).toBe(1);
-    expect(repin.stderr).toMatch(/--force/);
+    // Unpinned → pinned. The entry is ours, so naming a workspace is enough;
+    // requiring --force here would make the documented flow fail on its second
+    // run in every checkout that already has uberblick installed.
+    expect(install(box).status).toBe(0);
+    const unpinned = read(join(box.cwd, ".mcp.json"));
+    const pinned = install(box, "--workspace", WORKSPACE);
+    expect(pinned.status, pinned.output).toBe(0);
+    expect(servers(box)).toEqual({
+      uberblick: { ...UNPINNED, env: { WORKSPACE_ID: WORKSPACE } },
+    });
+    // A rewrite, not a fresh write: the previous bytes are recoverable.
+    expect(backupsOf(box.cwd, ".mcp.json").map(read)).toContain(unpinned);
+
+    // Pinned → re-pinned, same rule, and the report names the new workspace.
+    const moved = install(box, "--workspace", UNRELATED);
+    expect(moved.status, moved.output).toBe(0);
+    expect(servers(box)).toEqual({
+      uberblick: { ...UNPINNED, env: { WORKSPACE_ID: UNRELATED } },
+    });
+    expect(moved.stdout).toContain(`This entry is pinned to ${UNRELATED}`);
+
+    // …but not in reverse. A plain install proposes an *unpinned* entry, and
+    // silently taking the pin out would move every agent session in this
+    // checkout to the machine default — so that one still has to be asked for.
+    const before = read(join(box.cwd, ".mcp.json"));
+    const dropped = install(box);
+    expect(dropped.status).toBe(1);
+    expect(dropped.stderr).toMatch(/--workspace <id> to re-pin it/);
+    expect(dropped.stderr).toMatch(/--force/);
     expect(read(join(box.cwd, ".mcp.json"))).toBe(before);
+    // And the refusal names no workspace: config values are never echoed.
+    expect(dropped.output).not.toContain(UNRELATED);
+
+    // A genuinely foreign entry is still somebody else's, pin or no pin.
+    const foreign = sandbox();
+    writeFileSync(
+      join(foreign.cwd, ".mcp.json"),
+      '{\n  "mcpServers": {\n    "uberblick": {"command": "somebody-elses",\n' +
+        '      "args": ["serve"], "env": {"WORKSPACE_ID": "x", "TOKEN": "y"}}\n' +
+        "  }\n}\n",
+      "utf8",
+    );
+    const refused = install(foreign, "--workspace", WORKSPACE);
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/registers "uberblick" as something else/);
   });
 });
 

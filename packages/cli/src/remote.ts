@@ -297,13 +297,13 @@ export function setRemote(
 
   // Read before anything is written, because it decides whether the credential
   // may move: `config.json` is only the second layer, and when `HUB_URL` in the
-  // environment names a different hub *that* is the endpoint every client dials. Storing
-  // the target's secret anyway would leave the endpoint in force authenticated
-  // with a credential that is not its own — the exact mismatch the ordering
-  // below exists to prevent, arrived at from the other side. The endpoint is
-  // still written, because it is what takes over the moment the higher layer
-  // goes away; the secret is not, and the report says so. A higher layer naming
-  // the endpoint being written is not this and reads as null — see
+  // environment names a different hub, *that* is the endpoint every client
+  // dials. Storing the target's secret anyway would leave the endpoint in force
+  // authenticated with a credential that is not its own — the exact mismatch
+  // the ordering below exists to prevent, arrived at from the other side. The
+  // endpoint is still written, because it is what takes over the moment the
+  // higher layer goes away; the secret is not, and the report says so. A higher
+  // layer naming the endpoint being written is not this and reads as null — see
   // {@link outranking}, or a second machine already pointed at the hub it is
   // joining would be refused the credential it went there to get.
   // (The answer does not depend on the write: `HUB_URL` is untouched by it, and
