@@ -27,6 +27,11 @@
  *   room, or refuses a token, without closing the socket underneath — so the
  *   socket outlives the hub that answered on it and nothing re-handshakes.
  *   {@link MAX_REBUILDS} is why, and how far it goes.
+ * - **Rooms join the hub in waves, never all at once.** One socket carrying the
+ *   whole corpus is also one socket that can be terminated for naming too many
+ *   documents before any of them authenticates.
+ *   {@link MAX_CONCURRENT_ROOM_ATTACHES} is the bound, and it holds on every
+ *   connection, not only the first.
  */
 
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
@@ -96,10 +101,110 @@ const AUTH_REJECTED = "authentication rejected by hub";
  */
 const MAX_REBUILDS = 3;
 
+/**
+ * How many of this process's rooms may be handshaking with the hub at once.
+ *
+ * The hub terminates a **whole socket** whose count of documents-not-yet-
+ * authenticated reaches its ceiling (`MAX_PENDING_DOCUMENTS`, 100, in
+ * `packages/hub/src/config.ts`) — not the offending room, the socket, and every
+ * healthy room riding on it. This process puts the entire corpus on one socket,
+ * so without a bound the corpus size *is* the count, and the hundred-and-first
+ * document takes the connection down.
+ *
+ * Strictly below the ceiling, and with room to spare rather than by one: a room
+ * whose token was minted just as the socket dropped has already sent it, so a
+ * reconnect can briefly carry that wave plus a fresh one. 32 keeps even that
+ * doubled worst case under 100, and no corpus this serves is slowed by joining
+ * in waves of 32 — a wave costs one round trip, and a document leaves the hub's
+ * count the moment its `onAuthenticate` resolves.
+ *
+ * The bound has to hold on **every** connection. Every attached provider
+ * re-sends its token from its own `onOpen`, so a hub restart re-authenticates
+ * the whole corpus in one tick; that stampede, not the first attach, is the
+ * failure this exists for.
+ */
+export const MAX_CONCURRENT_ROOM_ATTACHES = 32;
+
+/** The first retry delay a socket waits out, before jitter and before clamping. */
+const SOCKET_RETRY_BASE_MS = 250;
+
+/** What {@link socketBackoff} hands the websocket. */
+export interface SocketBackoff {
+  delay: number;
+  minDelay: number;
+  factor: number;
+  maxDelay: number;
+  jitter: true;
+}
+
+/**
+ * The socket's reconnect band.
+ *
+ * A local hub restart should be picked up in seconds, not minutes: the
+ * library's default backoff climbs to 30s, which would strand an
+ * offline-created doc long after the hub is back.
+ *
+ * Randomized, because release 1 is three clients — two Macs and the agent
+ * machine — against one remote hub. They go down together when it does and come
+ * back together, so a deterministic ladder has all three redialling in the same
+ * millisecond, every time, for as long as the hub is unwell. `jitter: true` is
+ * the retry library's full-jitter strategy: attempt *n* waits a uniform draw
+ * from `[minDelay, min(delay * factor^(n-1), maxDelay)]`. The randomness is the
+ * library's own `Math.random` — `HocuspocusProviderWebsocket` forwards only
+ * these fields, so there is no source to inject, and the band below is what a
+ * test can pin instead.
+ *
+ * `minDelay` is not decorative: the retry library validates `delay >= minDelay`
+ * on every `connect()`, so leaving it at its 1000 default with a 250 delay
+ * makes every attempt reject with "delay cannot be less than minDelay" instead
+ * of dialling. Half the delay, so the first retry — the one all three clients
+ * make together — already spreads.
+ */
+export function socketBackoff(maxDelayMs: number): SocketBackoff {
+  const delay = Math.min(SOCKET_RETRY_BASE_MS, maxDelayMs);
+  return {
+    delay,
+    minDelay: Math.max(1, Math.floor(delay / 2)),
+    factor: 2,
+    maxDelay: maxDelayMs,
+    jitter: true,
+  };
+}
+
+/**
+ * How long the *n*th rebuild of a disowned connection waits.
+ *
+ * A uniform draw from `[ceiling / 2, ceiling]`, where the ceiling is the
+ * doubling ladder this used to walk exactly: `base * 2^n`, capped. Same reason
+ * as {@link socketBackoff} — a hub shutdown disowns every room on every client
+ * at once, so three clients on a fixed ladder rebuild in lockstep. The source is
+ * a parameter rather than a bare `Math.random` so a test can state the band's
+ * ends instead of sampling it.
+ */
+export function rebuildDelayMs(
+  rebuilds: number,
+  baseMs: number,
+  maxMs: number,
+  random: () => number = Math.random,
+): number {
+  const ceiling = Math.min(baseMs * 2 ** rebuilds, maxMs);
+  const floorMs = Math.max(1, Math.floor(ceiling / 2));
+  return Math.round(floorMs + (ceiling - floorMs) * random());
+}
+
 export interface AttachOptions {
   room: string;
   doc: Y.Doc;
   awareness: Awareness;
+}
+
+export interface HubSyncOptions {
+  /**
+   * Override {@link MAX_CONCURRENT_ROOM_ATTACHES}. A test seam: proving the
+   * bound holds needs a corpus larger than a hub ceiling, and a ceiling of 100
+   * would make that test a hundred rooms long.
+   */
+  maxConcurrentAttaches?: number;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -141,6 +246,36 @@ export class HubSync {
   /** The socket's own first retry delay, reused by {@link rebuild}. */
   private readonly reconnectDelayMs: number;
 
+  /** The bound on concurrent attach/auth. See {@link MAX_CONCURRENT_ROOM_ATTACHES}. */
+  private readonly maxConcurrentAttaches: number;
+
+  /**
+   * Rooms whose token is on the wire with no answer yet — the count the bound
+   * applies to, and the same thing the hub counts as a pending document.
+   *
+   * Emptied whenever a connection opens or ends: nothing is authenticated on a
+   * connection that has just started, and nothing will be answered on one that
+   * has just finished.
+   */
+  private readonly attaching = new Set<string>();
+
+  /**
+   * Rooms holding a place in the queue, oldest first (a Map iterates in
+   * insertion order), each with the resolve that lets its provider mint.
+   *
+   * One entry per room, never one per attempt: a socket that re-opens while a
+   * room is still queued runs that provider's `onOpen` again, and handing the
+   * second one the ticket the first is already waiting on is what keeps a
+   * flapping socket from queueing the same room twice. Both then send when the
+   * ticket clears — one extra auth and sync-step-1 for a single document, which
+   * the hub answers idempotently and which cannot move its pending count,
+   * because the count is per document and not per message.
+   */
+  private readonly waiting = new Map<
+    string,
+    { promise: Promise<void>; admit: () => void }
+  >();
+
   /** Rebuilt connections since the last durable one. See {@link MAX_REBUILDS}. */
   private rebuilds = 0;
 
@@ -177,16 +312,19 @@ export class HubSync {
    */
   private signingKey: Promise<CryptoKey> | null = null;
 
-  constructor(config: McpConfig, onConnected: () => void) {
+  constructor(
+    config: McpConfig,
+    onConnected: () => void,
+    options: HubSyncOptions = {},
+  ) {
     this.config = config;
     this.onConnected = onConnected;
     this.enabled = config.authSecret !== null;
-    // A local hub restart should be picked up in seconds, not minutes: the
-    // default backoff climbs to 30s, which would strand an offline-created doc
-    // long after the hub is back. It is the socket's first retry delay — and
-    // its `minDelay`, the retry library's floor, which must not exceed that
-    // delay or the cap — and the first delay a rebuild waits out.
-    this.reconnectDelayMs = Math.min(250, config.reconnectMaxDelayMs);
+    this.maxConcurrentAttaches =
+      options.maxConcurrentAttaches ?? MAX_CONCURRENT_ROOM_ATTACHES;
+    const backoff = socketBackoff(config.reconnectMaxDelayMs);
+    // The socket's first retry delay, and the first delay a rebuild waits out.
+    this.reconnectDelayMs = backoff.delay;
 
     if (!this.enabled) {
       log.warn(
@@ -197,14 +335,17 @@ export class HubSync {
 
     this.socket = new HocuspocusProviderWebsocket({
       url: config.hubUrl,
-      delay: this.reconnectDelayMs,
-      minDelay: this.reconnectDelayMs,
-      factor: 2,
-      maxDelay: config.reconnectMaxDelayMs,
-      jitter: false,
+      ...backoff,
       onStatus: ({ status }) => {
         const previous = this.socketStatus;
         this.socketStatus = status as "connecting" | "connected" | "disconnected";
+        if (status !== "connected") {
+          // Nothing on a connection that is going away will ever be answered,
+          // so the slots those rooms hold are not slots any more. The queue
+          // stays: a queued room has sent nothing, and its provider is still
+          // waiting on the ticket it will need again on the next connection.
+          this.attaching.clear();
+        }
         if (status === "connected") {
           this.sawFailure = false;
           // A new connection has proven nothing yet and dropped nothing yet.
@@ -235,6 +376,94 @@ export class HubSync {
         this.sawFailure = true;
       },
     });
+
+    // Subscribed here rather than passed as `onOpen`: the websocket calls the
+    // configured `onOpen` *before* it records the payload every provider's own
+    // `onOpen` is handed, so a listener registered there would start the wave
+    // before the socket could carry it. Registered after construction, this one
+    // runs once the payload is in place and still ahead of every provider.
+    this.socket.on("open", () => {
+      if (this.destroyed || this.quarantined) {
+        return;
+      }
+      this.pumpAdmissions();
+    });
+  }
+
+  /**
+   * Wait for this room's turn to hand the hub a token.
+   *
+   * The gate is the token callable itself, and that is the whole trick: a
+   * provider sends nothing at all — no auth message, no sync step — until its
+   * token resolves, so a room waiting here is a room the hub has never heard of
+   * and cannot be counting. It works the same on a first attach and on a
+   * reconnect, because a reconnect is exactly every attached provider asking
+   * for a token again.
+   */
+  private admission(room: string): Promise<void> {
+    const queued = this.waiting.get(room);
+    if (queued !== undefined) {
+      return queued.promise;
+    }
+    let admit!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      admit = resolve;
+    });
+    this.waiting.set(room, { promise, admit });
+    this.pumpAdmissions();
+    return promise;
+  }
+
+  /** Let as many queued rooms through as the bound and this connection allow. */
+  private pumpAdmissions(): void {
+    if (this.socketStatus !== "connected") {
+      return;
+    }
+    for (const [room, ticket] of this.waiting) {
+      // A room already counted is not a second document to the hub, so letting
+      // it through costs no slot — see {@link waiting}.
+      if (
+        this.attaching.size >= this.maxConcurrentAttaches &&
+        !this.attaching.has(room)
+      ) {
+        return;
+      }
+      this.waiting.delete(room);
+      this.attaching.add(room);
+      ticket.admit();
+    }
+  }
+
+  /**
+   * The hub has answered for this room — accepted it, refused it, or closed it.
+   * Either way it is no longer pending on the hub, so the slot goes back.
+   */
+  private roomAnswered(room: string): void {
+    if (this.attaching.delete(room)) {
+      this.pumpAdmissions();
+    }
+  }
+
+  /**
+   * Stop gating: every provider is inert from here (detached or destroyed), so
+   * the rooms still waiting can be let go rather than left suspended forever.
+   */
+  private releaseAdmissions(): void {
+    for (const [room, ticket] of this.waiting) {
+      this.waiting.delete(room);
+      ticket.admit();
+    }
+    this.attaching.clear();
+  }
+
+  /** Rooms whose token is on the wire, unanswered. Never above the bound. */
+  attachesInFlight(): number {
+    return this.attaching.size;
+  }
+
+  /** Rooms that have not been let near the hub yet. */
+  attachesWaiting(): number {
+    return this.waiting.size;
   }
 
   /** Mint a fresh token for this agent session. */
@@ -301,7 +530,8 @@ export class HubSync {
    * Drop this socket and dial again, on the reconnect backoff.
    *
    * See {@link MAX_REBUILDS} for why a new connection is the only thing that
-   * recovers a room the hub has disowned, and where this stops.
+   * recovers a room the hub has disowned, and where this stops; and
+   * {@link rebuildDelayMs} for the band each one waits out.
    *
    * One rebuild per backoff window, because a hub shutdown closes every room:
    * the first close schedules it and the rest are already covered.
@@ -319,8 +549,9 @@ export class HubSync {
       return;
     }
 
-    const delay = Math.min(
-      this.reconnectDelayMs * 2 ** this.rebuilds,
+    const delay = rebuildDelayMs(
+      this.rebuilds,
+      this.reconnectDelayMs,
       this.config.reconnectMaxDelayMs,
     );
     this.rebuilds += 1;
@@ -359,9 +590,16 @@ export class HubSync {
       document: doc,
       awareness,
       websocketProvider: this.socket,
-      token: () => this.token(),
+      // The bound lives here: nothing leaves this provider until the token
+      // resolves, so a room waiting its turn is a room the hub has not been
+      // told about. See {@link admission}.
+      token: async () => {
+        await this.admission(room);
+        return this.token();
+      },
       onAuthenticated: () => {
         this.authRejected = false;
+        this.roomAnswered(room);
       },
       onSynced: ({ state }) => {
         if (state) {
@@ -374,6 +612,7 @@ export class HubSync {
         // remote text about a token we just sent, and every consumer of this
         // state renders it. See AUTH_REJECTED.
         this.authRejected = true;
+        this.roomAnswered(room);
         log.error("hub rejected the token", { room });
         // A hub on its way out refuses the room it is unloading, and one that
         // cannot load a document refuses that document's room after accepting
@@ -384,6 +623,9 @@ export class HubSync {
         this.hubDisownedRoom();
       },
       onClose: () => {
+        // A room the hub closed is a room it is no longer deciding about, so
+        // its slot goes back even though no answer ever came.
+        this.roomAnswered(room);
         // Fires for the socket going away — which retries itself — and for a
         // room the hub closed on a socket that stays open, which does not. See
         // MAX_REBUILDS; `hubDisownedRoom` ignores the first case.
@@ -435,6 +677,9 @@ export class HubSync {
     for (const provider of this.providers.values()) {
       provider.detach();
     }
+    // Detached providers send nothing, so the queue is only holding suspended
+    // token calls now.
+    this.releaseAdmissions();
     this.socket?.disconnect();
     log.error("quarantined the hub connection: this replica is not durable");
   }
@@ -509,7 +754,20 @@ export class HubSync {
     return total;
   }
 
+  /**
+   * Whether every room this process holds is in sync — waiting rooms included.
+   *
+   * A room queued behind {@link MAX_CONCURRENT_ROOM_ATTACHES} has not reached
+   * the hub yet, so it is not quiet, and saying otherwise is how a write comes
+   * back `synced: true` while the queue is still draining. Its provider reports
+   * that too — nothing it has not handshaked is `isSynced` — but the queue is
+   * stated here rather than inferred, because `{applied, synced}` is an
+   * invariant and not an emergent property of a library's flags.
+   */
   private allQuiet(): boolean {
+    if (this.waiting.size > 0 || this.attaching.size > 0) {
+      return false;
+    }
     for (const provider of this.providers.values()) {
       if (!provider.isSynced || provider.hasUnsyncedChanges) {
         return false;
@@ -519,8 +777,14 @@ export class HubSync {
   }
 
   /**
-   * Wait — briefly, and only when it can help — until every attached room is in
-   * sync.
+   * Wait — briefly, and only when it can help — until every room this process
+   * holds is in sync, including the ones still queued for an attach slot.
+   *
+   * The queue drains in waves of {@link MAX_CONCURRENT_ROOM_ATTACHES}, and a
+   * wave costs one round trip to the hub — so the settle budget covers the
+   * drain for any corpus this serves. Where it does not, the wait expires and
+   * every unfinished room reports `synced: false` through `isRoomQuiet`, which
+   * is the honest answer rather than a fast one.
    *
    * Returns as soon as the hub is known to be unavailable, so an offline tool
    * call costs at most one connect grace and never blocks on a hub that is not
@@ -568,6 +832,7 @@ export class HubSync {
       provider.destroy();
     }
     this.providers.clear();
+    this.releaseAdmissions();
     this.socket?.destroy();
   }
 }
