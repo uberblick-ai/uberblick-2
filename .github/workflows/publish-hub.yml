@@ -69,9 +69,11 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
         run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
-      # Builds `target: hub`, pushes `sha-<full sha>` (never overwritten — an
-      # existing one makes this a no-op that exits 0) and the moving `main`,
-      # prints the pushed digest, then pulls that digest back and scans it.
+      # Builds `target: hub` into the local image store and scans it there,
+      # before anything is pushed. Only a clean scan pushes: `sha-<full sha>`
+      # first (never overwritten — an existing one makes this a no-op that exits
+      # 0), then the moving `main`. It prints the pushed digest and checks that
+      # the digest the registry serves is the image that was scanned.
       - name: Build, push and verify
         run: scripts/publish-hub-image.sh "$GITHUB_SHA"
 
