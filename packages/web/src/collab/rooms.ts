@@ -37,7 +37,7 @@ import * as Y from "yjs";
 import { parseRoom } from "@uberblick/schema";
 import { HUB_AUTH_TOKEN, hubUrl } from "../config.js";
 import { getSetting, subscribeSettings } from "../settings.js";
-import { mintToken } from "./token.js";
+import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "./token.js";
 import type { AwarenessUser } from "./identity.js";
 
 /**
@@ -141,6 +141,9 @@ function dropSocket(): void {
   current.disconnect();
 }
 
+/** The signing key, imported once for the life of the page. */
+let signingKey: Promise<CryptoKey> | null = null;
+
 /**
  * Mint a fresh hub token for one room. Called by Hocuspocus before every
  * connect.
@@ -158,10 +161,17 @@ async function hubToken(room: string, identity: AwarenessUser): Promise<string> 
       "uberblick web: HUB_AUTH_TOKEN is empty — run through `mise run web` with a decryptable fnox.toml",
     );
   }
-  return mintToken(HUB_AUTH_TOKEN, {
+  signingKey ??= importRootSecret(HUB_AUTH_TOKEN);
+  return mintToken(await signingKey, {
+    typ: "room",
     sub: identity.name,
     workspace: parseRoom(room).workspaceId,
     scope: "read-write",
+    // Root-signed: the bundle carries the root secret, not a credential.
+    kid: null,
+    // The ceiling itself. Hocuspocus calls this before every connect, so each
+    // reconnect mints a fresh token rather than replaying an expired one.
+    lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
   });
 }
 

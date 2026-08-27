@@ -11,7 +11,11 @@
 
 import { describe, expect, it } from "vitest";
 import { verifyToken } from "@uberblick/hub/token";
-import { mintToken } from "../src/collab/token.js";
+import {
+  MAX_TOKEN_LIFETIME_SECONDS,
+  importRootSecret,
+  mintToken,
+} from "../src/collab/token.js";
 
 const SECRET = "dev-secret";
 /** A workspace claim is the workspace's bare uuid. */
@@ -19,26 +23,35 @@ const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 
 describe("client-minted tokens", () => {
   it("verifies against the hub with the claims intact", async () => {
-    const token = await mintToken(SECRET, {
+    const key = await importRootSecret(SECRET);
+    const token = await mintToken(key, {
+      typ: "room",
       sub: "loitering otter",
       workspace: WORKSPACE,
       scope: "read-write",
+      kid: null,
+      lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
     });
-    const claims = await verifyToken(SECRET, token);
+    const claims = await verifyToken(key, token);
     expect(claims).not.toBeNull();
+    expect(claims?.typ).toBe("room");
     expect(claims?.sub).toBe("loitering otter");
     expect(claims?.workspace).toBe(WORKSPACE);
     expect(claims?.scope).toBe("read-write");
     expect(typeof claims?.iat).toBe("number");
+    expect(claims?.exp).toBe((claims?.iat ?? 0) + MAX_TOKEN_LIFETIME_SECONDS);
 
     // Rooms are `<workspace>/<uuid>`; a slash in the workspace claim would let a
     // token authorise a room name it does not name, so the client's minter
     // refuses it too.
     await expect(
-      mintToken(SECRET, {
+      mintToken(key, {
+        typ: "room",
         sub: "agent",
         workspace: `${WORKSPACE}/evil`,
         scope: "read-write",
+        kid: null,
+        lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
       }),
     ).rejects.toThrow(/workspace/);
   });

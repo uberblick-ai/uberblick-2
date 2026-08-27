@@ -204,10 +204,10 @@ the fallback, which is exactly why CI is high priority.
 The hub will eventually be hosted commercially with multiple workspaces and
 multiple user accounts (OAuth sessions). Spike consequences, nothing more:
 rooms carry `workspaceId` from day one; the auth token is claims-shaped
-(`{sub, workspace, scope}`, HMAC-signed with a dev secret for now) rather than
-an opaque shared string, and is sent via Hocuspocus's auth message, never in
-the WebSocket URL query string; awareness identity should derive from token
-claims eventually, not self-assertion. No OAuth, permissions, or multi-user
+(`{typ, sub, workspace, scope, kid, iat, exp}`, HMAC-signed with a dev secret
+for now) rather than an opaque shared string, and is sent via Hocuspocus's auth
+message, never in the WebSocket URL query string; awareness identity should
+derive from token claims eventually, not self-assertion. No OAuth, permissions, or multi-user
 auth in the spike itself.
 
 ## Invariants

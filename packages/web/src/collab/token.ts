@@ -14,9 +14,11 @@
  *
  * Format, for reference — see @uberblick/hub/token for the authority:
  *
- *     base64url(JSON {sub, workspace, scope, iat}) "." base64url(HMAC-SHA256(secret, payloadPart))
+ *     base64url(JSON {typ, sub, workspace, scope, kid, iat, exp}) "." base64url(HMAC-SHA256(key, payloadPart))
  *
- * `iat` defaults to now, so tokens are not byte-stable across calls.
+ * `iat` defaults to now, so tokens are not byte-stable across calls, and every
+ * token expires — `mintToken` takes a `CryptoKey`, which is what
+ * `importRootSecret` turns the bundle's secret into.
  *
  * ============================ LOUD WARNING ============================
  * The client mints its own token from a secret compiled into the bundle. That
@@ -27,5 +29,14 @@
  * =====================================================================
  */
 
-export { mintToken } from "@uberblick/hub/token";
-export type { TokenClaims, TokenRequest, TokenScope } from "@uberblick/hub/token";
+export {
+  MAX_TOKEN_LIFETIME_SECONDS,
+  importRootSecret,
+  mintToken,
+} from "@uberblick/hub/token";
+export type {
+  TokenClaims,
+  TokenRequest,
+  TokenScope,
+  TokenType,
+} from "@uberblick/hub/token";
