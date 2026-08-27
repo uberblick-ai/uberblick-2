@@ -23,6 +23,18 @@ implementer, the coordinator adds `in-progress` and posts the claim defined by
 implementer type, and implementer session or agent id so reviewers can prove
 that they did not author the diff.
 
+A claim is the *end* of the coordinator's pickup, not the start of it: before
+it writes one, the coordinator grounds the issue against a recorded
+`origin/main` commit, challenges it in proportion to its risk, and rechecks
+eligibility. How risk is classified and how that challenge is run belongs to
+each coordinator's own procedure — for the Claude loop,
+`.claude/skills/next-issue/SKILL.md` — and is not restated here. Two
+consequences are agent-neutral, because reclaimers and reviewers depend on
+them: a pickup that stops before dispatch never leaves an `in-progress` label
+behind, and an issue whose contract turns out to be stale, or to need a
+decision only the owner can make, loses `ready` and returns to coordination
+instead of being dispatched.
+
 An `in-progress` claim is stale and may be reclaimed only when all three facts
 are true:
 
