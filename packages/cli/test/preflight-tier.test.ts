@@ -190,6 +190,30 @@ describeTable(
       ).toBe("substantial");
     });
 
+    it("records how a two-challenger route was made independent, diverse or not", () => {
+      // The fallback is the point: where no second model family, harness or
+      // approach is available, two separate fresh contexts still satisfy
+      // independence — but which one was used has to reach the comment, so a
+      // regression that stopped recording it would be invisible in the prose.
+      for (const axes of everyCombination()) {
+        for (const diverseChallengers of [true, false]) {
+          const plan = preflight({ ...axes, diverseChallengers });
+          const where = JSON.stringify({ ...axes, diverseChallengers });
+          if (plan.challengers === 2) {
+            expect(plan.independence, where).toBe(
+              diverseChallengers ? "diverse" : "fresh-context",
+            );
+          } else {
+            // One challenger is a fresh context; none is none. Diversity is a
+            // property of a pair, so it never shows up on those routes.
+            expect(plan.independence, where).toBe(
+              plan.challengers === 1 ? "fresh-context" : "none",
+            );
+          }
+        }
+      }
+    });
+
     it("lets another agent's claim outrank a finding of its own", () => {
       // The race the ordering exists for: the preflight found a stale contract,
       // and by the recheck someone else owns the issue. Stripping `ready` or

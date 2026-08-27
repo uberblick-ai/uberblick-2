@@ -311,18 +311,13 @@ file contains only Claude coordinator machinery and does not restate either.
    For the trivial tier this is a brief code-grounded self-check instead, at
    the same commit.
 
-   **Record it once.** One concise issue comment, before implementation, for
-   every one- and two-challenger case: the base SHA, the tier and one line of
-   rationale, how many challengers ran and how they were independent, the
-   material findings with their dispositions (or "none"), and proceed or stop.
-   Never transcripts, never timings, never round-by-round narration — one
-   comment, or the preflight becomes the thing it was meant to prevent. A
-   trivial self-check that found nothing writes no comment at all.
-
-   **Then the lifecycle.** Last thing before handing the issue to step 7,
-   re-read the issue, the current claims and `origin/main`. Nothing in this
-   step writes a label — step 7's claim does, after this gate — so no
-   preflight path can leave `in-progress` on an issue nobody is implementing.
+   **Recheck, then decide.** Last thing before handing the issue to step 7,
+   `git fetch origin main` **again** — the fetch you grounded against is
+   minutes old, and only a fresh one can tell you upstream moved while you were
+   reading. An advance that touches what you grounded sends you back to refresh
+   the affected grounding and challenge; an advance elsewhere in the tree does
+   not. Then re-read the issue and the current claims, and take the outcome off
+   this table.
 
    | Still eligible at the recheck | What preflight found | Outcome | Labels | Claim | Comment |
    |---|---|---|---|---|---|
@@ -330,6 +325,11 @@ file contains only Claude coordinator machinery and does not restate either.
    | yes | a stale or incorrect contract (`stale-spec`) | return-to-coordination | remove `ready` | no | yes |
    | yes | an owner-only product decision (`product-decision`) | park-needs-decision | remove `ready`, add `needs-decision` | no | yes |
    | no | anything (`any`) | requeue | none | no | no |
+
+   Step 6 never writes `in-progress` — step 7's claim does, after this gate —
+   so no preflight path can leave that label on an issue nobody is
+   implementing. The other two labels are step 6's: a stop takes `ready` off,
+   and an owner question adds `needs-decision`.
 
    The recheck outranks every finding, which is the first row to read: if
    someone else claimed the issue while you were grounding it, it is their work
@@ -346,6 +346,27 @@ file contains only Claude coordinator machinery and does not restate either.
    cannot answer — takes `needs-decision`, with concrete options and your
    recommendation per the spec's exit path.
 
+   **Record it once, and only after the recheck.** The comment is the
+   preflight's one durable side effect, so it is written when the outcome is
+   known, never before: posted ahead of the recheck it can land on an issue
+   another agent claimed a minute ago, which is exactly what the requeue row
+   forbids. One concise issue comment for every one- and two-challenger case
+   and for either stop, carrying the base SHA, the tier and one line of
+   rationale, how many challengers ran and how they were independent, the
+   material findings with their dispositions (or "none"), and proceed or stop.
+   Never transcripts, never timings, never round-by-round narration — one
+   comment, or the preflight becomes the thing it was meant to prevent. A
+   trivial self-check that found nothing writes none, and a requeue writes none
+   either.
+
+   **The comment is keyed by `<issue, base SHA>`.** Before posting, look for a
+   preflight comment on the issue already recording that same base SHA. If one
+   is there, this preflight ran before and died between the comment and the
+   claim: edit that comment instead of posting beside it. Exactly one preflight
+   comment per issue per base SHA, however many times the loop restarts. A
+   later pickup that grounds at a newer commit is a different key and gets its
+   own comment — not a duplicate, a second preflight.
+
    **Findings are not requirements.** Material implementation risks and options
    travel to the implementer in the brief, as options. They are never edited
    into the issue body's acceptance criteria: an alternative written into the
@@ -356,9 +377,11 @@ file contains only Claude coordinator machinery and does not restate either.
 
    **Under `/loop`, a preflight is re-entrant.** An iteration that dies partway
    through one repeats it on the next pass, and the repeat costs tokens and
-   nothing else: the claim is last, so a second run of the same preflight
-   either re-reaches dispatch and claims once, or finds the first run's claim
-   at its recheck and requeues.
+   nothing else, because both of its durable effects are guarded: the claim is
+   last, so a second run either re-reaches dispatch and claims once or finds
+   the first run's claim at its recheck and requeues; and the comment is keyed
+   by base SHA, so a second run at the same commit edits the first run's
+   comment rather than posting a second.
 
 7. **Dispatch.** Only issues step 6 returned as *dispatch* reach here; the
    others are already parked or requeued. For each, follow `AGENTS.md` for the
