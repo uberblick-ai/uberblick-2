@@ -1101,6 +1101,40 @@ body {
   color: var(--destructive);
 }
 
+/* One cached workspace inside the Storage entry (#198). */
+.ub-forget {
+  margin-top: 0.6rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.ub-forget-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ub-forget-name {
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+/* A gate that is not yet satisfied still has to look like one. */
+.ub-forget .ub-tool:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* The cost, stated above the field that accepts it — see `unsyncedSentence`. */
+.ub-forget-cost {
+  padding: 0.4rem 0.5rem;
+  border-left: 2px solid var(--destructive);
+  background: var(--destructive-subtle);
+  color: var(--foreground);
+}
+
 /* ---- the sync detail panel (#72, design surface 1e's right column) ---- */
 
 /* An overlay, not a fourth column: it is opened to answer a question and closed
@@ -1746,6 +1780,16 @@ body {
 .ub-tool-on {
   background: var(--brand-subtle);
   border-color: var(--brand);
+  color: var(--foreground);
+}
+
+/* The destructive tool button — the workspace forget (#198). Same construction
+   as `.ub-tool-on` and for the same reason: the accent carries the border and
+   the wash, while the label stays `--foreground`, which is the only pair that
+   holds its contrast in both themes. */
+.ub-tool-danger {
+  background: var(--destructive-subtle);
+  border-color: var(--destructive);
   color: var(--foreground);
 }
 

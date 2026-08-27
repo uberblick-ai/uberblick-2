@@ -10,15 +10,28 @@
  * key, and nothing here can reach a Y.Doc. A pasted token therefore has no path
  * into a document, an export, or the hub.
  *
- * One section exists so far, Connections. The layout is a list of sections of
- * entries so the next one (models, when the ablauf work arrives) is a sibling
- * rather than a rewrite — and no more than that is built here.
+ * Two sections exist so far, Connections and Storage. The layout is a list of
+ * sections of entries so the next one (models, when the ablauf work arrives) is
+ * a sibling rather than a rewrite — and no more than that is built here.
+ *
+ * Storage is the one exception to "nothing here can reach a Y.Doc", and only in
+ * one direction: it reads and deletes the *IndexedDB replicas* rooms leave
+ * behind (`collab/forget.ts`). It never opens a room, never writes one, and
+ * never talks to the hub.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { setSetting } from "../settings.js";
+import {
+  cachedWorkspaces,
+  canListDatabases,
+  forgetWorkspace,
+  originUsage,
+} from "../collab/forget.js";
+import type { WorkspaceCache } from "../collab/forget.js";
 import { useSetting } from "./hooks.js";
+import type { Workspace } from "./route.js";
 
 /** What GitHub is asked for a token's identity. Nothing else is requested. */
 const GITHUB_USER_URL = "https://api.github.com/user";
@@ -170,11 +183,299 @@ function GithubConnection(): ReactElement {
   );
 }
 
+/** The word the reader has to type. Short, unambiguous, and not a click. */
+const CONFIRM_WORD = "forget";
+
+/** "1 document", "4 documents" — a count in a sentence should read as English. */
+function docCount(rooms: number): string {
+  return rooms === 1 ? "1 document" : `${rooms} documents`;
+}
+
+/** Bytes, rounded to something a person reads rather than parses. */
+function bytesLabel(bytes: number): string {
+  const mb = bytes / 1_000_000;
+  if (mb >= 1) return `${mb.toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1000))} kB`;
+}
+
+/**
+ * What forgetting this workspace would throw away — the sentence the reader has
+ * to have read before the confirmation can be accepted (#198).
+ *
+ * Three answers, and the third is the point. "Unknown" is not a softer way of
+ * saying "none": a cached room with no live connection carries no readable
+ * backlog, and nothing persists an acknowledged watermark, so the browser
+ * genuinely cannot tell without asking the hub — which it will not do, because
+ * the cache exists for the times the hub is not there.
+ */
+function unsyncedSentence(cache: WorkspaceCache): string {
+  if (cache.unsynced > 0) {
+    const holds = cache.unsynced === 1 ? "holds" : "hold";
+    const rest = cache.certain
+      ? ""
+      : " For the rest, this browser cannot tell without asking the hub.";
+    return (
+      `${docCount(cache.unsynced)} ${holds} updates the hub has not ` +
+      `acknowledged. Forgetting throws those edits away, and nothing recovers ` +
+      `them.${rest}`
+    );
+  }
+  if (cache.certain) {
+    return "The hub has acknowledged every update in this browser's copy.";
+  }
+  return (
+    "Un-synced edits: unknown. This browser cannot tell whether any of these " +
+    "documents hold updates the hub has not acknowledged without asking the " +
+    "hub, and it does not ask. If any do, forgetting throws them away and " +
+    "nothing recovers them."
+  );
+}
+
+/** The read of what is stored: still running, refused, or an answer. */
+type CacheState =
+  | { kind: "reading" }
+  | { kind: "unavailable" }
+  | { kind: "ready"; caches: WorkspaceCache[] };
+
+/**
+ * Storage: what this browser keeps for each workspace it has visited, and the
+ * way to forget one of them (#198).
+ *
+ * Deleting is allowed even when local edits never reached the hub — the owner's
+ * call, and the reason the gate is a typed word rather than a button: the cost
+ * is stated above the field, so accepting it is a thing the reader did, not a
+ * thing that happened to them. The workspace on screen is excluded, because
+ * forgetting what you are looking at would delete the replica the open editor
+ * is writing into.
+ */
+function WorkspaceStorage({ workspace }: { workspace: Workspace | null }): ReactElement {
+  // Seeded rather than defaulted: a browser that cannot list its own databases
+  // is answered before the first paint, so nothing is read and nothing is
+  // rendered as "still reading" that will never finish.
+  const [state, setState] = useState<CacheState>(() =>
+    canListDatabases() ? { kind: "reading" } : { kind: "unavailable" },
+  );
+  const [usage, setUsage] = useState<number | null>(null);
+  /** The workspace whose confirmation is open — at most one at a time. */
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  /** What the last forget actually did. Cleared when another one is opened. */
+  const [note, setNote] = useState<string | null>(null);
+
+  const reload = useCallback(async (): Promise<void> => {
+    const caches = await cachedWorkspaces();
+    setState(caches === null ? { kind: "unavailable" } : { kind: "ready", caches });
+  }, []);
+
+  useEffect(() => {
+    if (!canListDatabases()) return;
+    void reload();
+    void originUsage().then(setUsage);
+  }, [reload]);
+
+  /** The control that opened the confirmation, so cancelling can return focus. */
+  const trigger = useRef<HTMLButtonElement | null>(null);
+
+  const open = useCallback((workspaceId: string, from: HTMLButtonElement): void => {
+    trigger.current = from;
+    setConfirming(workspaceId);
+    setTyped("");
+    setNote(null);
+  }, []);
+
+  /** Set by `cancel`; consumed by the effect below once the form is gone. */
+  const returnFocus = useRef(false);
+
+  const cancel = useCallback((): void => {
+    // The confirmation is unmounting with focus inside it, so focus has to be
+    // handed back — and only *after* the re-render, because the trigger is
+    // disabled while its confirmation is open and a disabled control cannot
+    // take focus.
+    returnFocus.current = true;
+    setConfirming(null);
+    setTyped("");
+  }, []);
+
+  /** The confirmation's field, while one is open. */
+  const field = useRef<HTMLInputElement | null>(null);
+
+  /**
+   * Focus follows the confirmation: into the field when one opens, and back to
+   * the control that opened it when one is dismissed. A gate the keyboard
+   * cannot reach is not a gate, and a form that unmounts with focus inside it
+   * drops the reader on the document body.
+   */
+  useEffect(() => {
+    if (confirming !== null) {
+      field.current?.focus();
+      return;
+    }
+    if (!returnFocus.current) return;
+    returnFocus.current = false;
+    if (trigger.current?.isConnected === true) trigger.current.focus();
+  }, [confirming]);
+
+  const forget = useCallback(
+    async (cache: WorkspaceCache): Promise<void> => {
+      if (busy) return;
+      setBusy(true);
+      const result = await forgetWorkspace(cache.workspaceId);
+      setBusy(false);
+      setConfirming(null);
+      setTyped("");
+      setNote(
+        result.remaining.length === 0
+          ? `Forgot ${cache.workspaceId}: ${docCount(result.deleted)} removed from ` +
+              `this browser. Opening it again re-downloads from the hub.`
+          : `Forgot ${docCount(result.deleted)} of ${cache.workspaceId}. ` +
+              `${docCount(result.remaining.length)} could not be removed — another ` +
+              `tab still has them open.`,
+      );
+      await reload();
+    },
+    [busy, reload],
+  );
+
+  return (
+    <div className="ub-setting">
+      <div className="ub-setting-head">
+        <h4 className="ub-setting-title">Cached workspaces</h4>
+      </div>
+      <p className="ub-setting-copy">
+        Every workspace you open leaves a full copy of its documents in this
+        browser, so it keeps working with the hub away. Forgetting one removes
+        that copy from this device and nothing else — the workspace, the hub and
+        every other machine are untouched, and opening it again re-downloads it.
+      </p>
+      {state.kind !== "unavailable" && (
+        <p className="ub-setting-copy ub-muted">
+          {usage === null
+            ? "This browser does not report how much it stores for this site."
+            : `This site stores about ${bytesLabel(usage)} in total. The browser ` +
+              "reports no per-workspace breakdown, so that number covers every " +
+              "workspace below at once."}
+        </p>
+      )}
+      {state.kind === "reading" && (
+        <p className="ub-setting-copy ub-muted">Reading what is stored…</p>
+      )}
+      {state.kind === "unavailable" && (
+        <p className="ub-setting-copy ub-muted">
+          This browser does not let a page list its own databases, so uberblick
+          cannot tell what is stored here or forget one workspace at a time. Its
+          own site-data controls clear everything for this site at once.
+        </p>
+      )}
+      {state.kind === "ready" && state.caches.length === 0 && (
+        <p className="ub-setting-copy ub-muted">
+          Nothing is cached in this browser yet.
+        </p>
+      )}
+      {state.kind === "ready" &&
+        state.caches.map((cache) => {
+          const here = cache.workspaceId === workspace?.uuid;
+          const isConfirming = confirming === cache.workspaceId;
+          return (
+            <div key={cache.workspaceId} className="ub-forget">
+              <div className="ub-forget-head">
+                <code className="ub-forget-name">{cache.workspaceId}</code>
+                <span className="ub-muted">{docCount(cache.rooms.length)}</span>
+              </div>
+              {here ? (
+                /* The open workspace is not forgettable: the editor is writing
+                   into this very replica, so there is no control to press. */
+                <p className="ub-setting-copy ub-muted">
+                  Open now — switch to another workspace to forget this one.
+                </p>
+              ) : (
+                <>
+                  {/* The trigger stays mounted while its confirmation is open,
+                      so cancelling has somewhere to hand focus back to. */}
+                  <div className="ub-setting-row">
+                    <button
+                      type="button"
+                      className="ub-tool"
+                      disabled={isConfirming}
+                      onClick={(event) => open(cache.workspaceId, event.currentTarget)}
+                    >
+                      Forget on this device…
+                    </button>
+                  </div>
+                  {isConfirming && (
+                    <form
+                      className="ub-forget-confirm"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        if (typed.trim().toLowerCase() !== CONFIRM_WORD) return;
+                        void forget(cache);
+                      }}
+                    >
+                      <p className="ub-setting-copy ub-forget-cost" role="alert">
+                        {unsyncedSentence(cache)}
+                      </p>
+                      <label
+                        className="ub-setting-copy"
+                        htmlFor={`ub-forget-${cache.workspaceId}`}
+                      >
+                        Type <strong>{CONFIRM_WORD}</strong> to remove this
+                        browser&rsquo;s copy of {docCount(cache.rooms.length)}.
+                      </label>
+                      <div className="ub-setting-row">
+                        <input
+                          id={`ub-forget-${cache.workspaceId}`}
+                          className="ub-setting-input"
+                          type="text"
+                          autoComplete="off"
+                          ref={field}
+                          value={typed}
+                          onChange={(event) => setTyped(event.target.value)}
+                        />
+                        <button
+                          type="submit"
+                          className="ub-tool ub-tool-danger"
+                          disabled={typed.trim().toLowerCase() !== CONFIRM_WORD || busy}
+                        >
+                          {busy ? "Forgetting…" : "Forget this workspace"}
+                        </button>
+                        <button
+                          type="button"
+                          className="ub-tool"
+                          disabled={busy}
+                          onClick={cancel}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
+      {note !== null && (
+        <p className="ub-setting-copy ub-muted" role="status">
+          {note}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /**
  * The dialog. Rendered only while open — an overlay nobody asked for should not
  * be in the tree at all.
+ *
+ * `workspace` is the one the address names, so Storage can refuse to forget it.
  */
-export function SettingsDialog({ onClose }: { onClose: () => void }): ReactElement {
+export function SettingsDialog({
+  workspace,
+  onClose,
+}: {
+  workspace: Workspace | null;
+  onClose: () => void;
+}): ReactElement {
   const dialog = useRef<HTMLDivElement | null>(null);
 
   /**
@@ -276,6 +577,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): ReactEleme
             Connections
           </h3>
           <GithubConnection />
+        </section>
+        <section className="ub-settings-section" aria-labelledby="ub-settings-storage">
+          <h3 id="ub-settings-storage" className="ub-settings-section-title">
+            Storage
+          </h3>
+          <WorkspaceStorage workspace={workspace} />
         </section>
       </div>
     </div>

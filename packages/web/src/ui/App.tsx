@@ -651,7 +651,10 @@ export function App(): ReactElement {
           with everything else. */}
       {settingsOpen &&
         createPortal(
-          <SettingsDialog onClose={() => setSettingsOpen(false)} />,
+          <SettingsDialog
+            workspace={workspace}
+            onClose={() => setSettingsOpen(false)}
+          />,
           document.body,
         )}
     </main>
