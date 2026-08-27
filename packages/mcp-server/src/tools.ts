@@ -22,6 +22,12 @@
  * "stored by the hub" either, which is why {@link SYNCED_MEANS} says so in the
  * tool descriptions rather than leaving the word to be read generously.
  *
+ * Every handler is wrapped by `guarded` from ./failures.ts, which owns the
+ * other half of that honesty: what a call answers with when it fails. The
+ * failure floor — the `error` code, the `message`, what happened to the write
+ * and how to recover — is stamped there rather than restated at each throw
+ * site, so the throw sites here carry only what they know on top of it.
+ *
  * All document reads and writes go through `@uberblick/schema`. That is not
  * politeness: the web editor destroys content outside its palette, and the
  * schema helpers are what keep this server inside it.
@@ -31,11 +37,8 @@ import { randomUUID } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
-  AnnotationRangeError,
   BLOCK_TYPES,
-  BlockNotFoundError,
   MAX_DESCRIPTION_LENGTH,
-  StaleBlockError,
   addComment,
   appendBlock,
   createAnnotation,
@@ -67,8 +70,7 @@ import type {
 } from "@uberblick/schema";
 import { z } from "zod";
 import { registerFeedbackTools, recordDocUsage } from "./feedback-tools.js";
-import { log } from "./log.js";
-import { PersistenceError } from "./replica.js";
+import { ToolError, failureContract, guarded } from "./failures.js";
 import type { Replica, Replicas } from "./replica.js";
 import {
   pinnedUuids,
@@ -79,103 +81,9 @@ import {
 import type { SidebarPlacement } from "./sidebar-tools.js";
 import { collectSyncStatus } from "./status.js";
 
-/** A tool failure with a stable machine-readable code. */
-class ToolError extends Error {
-  readonly code: string;
-
-  readonly detail: Record<string, unknown>;
-
-  constructor(
-    code: string,
-    message: string,
-    detail: Record<string, unknown> = {},
-  ) {
-    super(message);
-    this.name = "ToolError";
-    this.code = code;
-    this.detail = detail;
-  }
-}
-
 function json(payload: unknown): CallToolResult {
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
-  };
-}
-
-function failure(payload: Record<string, unknown>): CallToolResult {
-  return {
-    isError: true,
-    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
-  };
-}
-
-/**
- * Map a thrown error onto a tool failure.
- *
- * `StaleBlockError` is the interesting one: it comes back as the re-read
- * payload — `currentText` and `currentRev` — so a caller can re-diff and retry
- * without another round trip.
- */
-function toFailure(error: unknown): CallToolResult {
-  if (error instanceof PersistenceError) {
-    // Fail-stop: every later call lands here too, until the server is restarted.
-    return failure({
-      error: "persistence_failed",
-      message: error.message,
-      room: error.room,
-      applied: false,
-      synced: false,
-    });
-  }
-  if (error instanceof StaleBlockError) {
-    return failure({
-      error: "stale_block",
-      message: error.message,
-      blockId: error.blockId,
-      expectedText: error.expectedText,
-      expectedRev: error.expectedRev ?? null,
-      currentText: error.currentText,
-      currentRev: error.currentRev,
-      retry: "re-diff against currentText and call edit_block again with currentRev",
-    });
-  }
-  if (error instanceof BlockNotFoundError) {
-    return failure({
-      error: "block_not_found",
-      message: error.message,
-      blockId: error.blockId,
-    });
-  }
-  if (error instanceof AnnotationRangeError) {
-    return failure({
-      error: "annotation_range",
-      message: error.message,
-      reason: error.reason,
-      blockId: error.blockId,
-      conflictingThreadId: error.conflictingThreadId ?? null,
-    });
-  }
-  if (error instanceof ToolError) {
-    return failure({ error: error.code, message: error.message, ...error.detail });
-  }
-  log.error("tool call failed", error);
-  return failure({
-    error: "internal_error",
-    message: error instanceof Error ? error.message : String(error),
-  });
-}
-
-/** Wrap a handler so every throw becomes a structured tool failure. */
-function guarded<Args>(
-  handler: (args: Args) => Promise<CallToolResult>,
-): (args: Args) => Promise<CallToolResult> {
-  return async (args: Args) => {
-    try {
-      return await handler(args);
-    } catch (error) {
-      return toFailure(error);
-    }
   };
 }
 
@@ -495,7 +403,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       throw new ToolError(
         "doc_archived",
         `Document ${uuid} is archived — restore_doc to edit`,
-        { uuid, archived: true, applied: false, synced: false },
+        { uuid, archived: true },
       );
     }
     return requireDoc(uuid);
@@ -587,12 +495,6 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     };
   };
 
-  const toolError = (
-    code: string,
-    message: string,
-    detail?: Record<string, unknown>,
-  ): ToolError => new ToolError(code, message, detail);
-
   const annotationJson = (
     replica: Replica,
     annotation: Annotation,
@@ -618,7 +520,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "\n\n" +
         CREATE_DOC_DURABILITY +
         "\n\n" +
-        SYNCED_MEANS,
+        SYNCED_MEANS +
+        failureContract("create_doc"),
       // A whole object rather than the raw shape every other tool passes, so
       // that `.strict()` applies to the top level too: `{sidebar: {...},
       // pinned: true}` must be refused wherever the redundant key sits, and a
@@ -638,7 +541,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         })
         .strict(),
     },
-    guarded(async ({ title, description, tags, blocks, sidebar }) => {
+    guarded("create_doc", async ({ title, description, tags, blocks, sidebar }) => {
       await replicas.settle();
 
       // Resolved before a uuid exists, because this is the one part of the call
@@ -648,7 +551,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const group =
         sidebar === undefined
           ? null
-          : requireGroup(replicas, sidebar.group.id, toolError);
+          : requireGroup(replicas, sidebar.group.id);
 
       const uuid = randomUUID();
       const replica = replicas.replica(uuid);
@@ -699,10 +602,15 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         recovery: string,
         extra: Record<string, unknown> = {},
       ): ToolError =>
-        toolError(code, message, {
+        // `applied`, `partial` and `synced` come from the shared stamp in
+        // ./failures.ts; only what this call knows on top of them is here.
+        new ToolError(code, message, {
           uuid,
-          applied: false,
-          synced: false,
+          // Some of this call's work is durable whenever a room completed
+          // before the one that failed — `completed` is which, and there is no
+          // rollback that could make it false.
+          partial: completed.length > 0,
+          recoveryClass: "manual",
           rolledBack: false,
           completed: completed.map((entry) => ({ ...entry, applied: true })),
           failed,
@@ -785,7 +693,6 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
               group.id,
               uuid,
               sidebar.group.position,
-              toolError,
             );
             placement = { group: { id: group.id, name: group.name }, position };
           } catch (error) {
@@ -839,10 +746,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "document per session, however often you read it, so re-reading costs nothing. The first read of a " +
         "document you have not rated also answers with a one-line `feedback` reminder that rate_doc exists; it is " +
         "advisory, never a failure, and never required. (The dedupe is the stored events, so after heavy " +
-        "compaction a very long-lived session may be counted and nudged once more for a document it read long ago.)",
+        "compaction a very long-lived session may be counted and nudged once more for a document it read long ago.)" +
+        failureContract("get_doc"),
       inputSchema: { uuid: uuidArg },
     },
-    guarded(async ({ uuid }) => {
+    guarded("get_doc", async ({ uuid }) => {
       await replicas.settle();
       const replica = requireDoc(uuid);
       const meta = getMeta(replica.doc);
@@ -877,13 +785,14 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "`createdAt` and `updatedAt` are epoch milliseconds, present only where known — sort keys, not history. " +
         "`updatedAt` is deliberately coarse: a server re-stamps it at most once every few minutes of observed edits, " +
         "immediately on a title or tag change. Both come from the clock of whichever replica wrote them, so treat them " +
-        "as approximate, and expect either to be missing on a stub written before they existed.",
+        "as approximate, and expect either to be missing on a stub written before they existed." +
+        failureContract("list_docs"),
       inputSchema: {
         tag: z.string().min(1).optional().describe("Only documents carrying this tag."),
         include_deleted: z.boolean().optional(),
       },
     },
-    guarded(async ({ tag, include_deleted }) => {
+    guarded("list_docs", async ({ tag, include_deleted }) => {
       await replicas.settle();
       const entries = listDirectory(replicas.directory().doc, {
         includeDeleted: include_deleted ?? false,
@@ -912,13 +821,14 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Full-text search over document titles, descriptions and block text, from the local FTS5 index. " +
         "The index is derived from the replicas and updated as updates are observed, so it reflects edits from any client this replica has seen.\n\n" +
         "Every hit carries the document's `description` — null where nobody has written one — so relevance can be " +
-        "judged from the result list rather than by opening each document in turn.",
+        "judged from the result list rather than by opening each document in turn." +
+        failureContract("search"),
       inputSchema: {
         query: z.string().min(1).describe("Words to match. A trailing * is a prefix match."),
         limit: z.number().int().min(1).max(100).optional(),
       },
     },
-    guarded(async ({ query, limit }) => {
+    guarded("search", async ({ query, limit }) => {
       await replicas.settle();
       return json({
         query,
@@ -934,10 +844,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       description:
         "Documents whose `links` name this document. Links are by UUID, never by path or title. " +
         "Each one carries its `description` — null where it has none — so a citing document can be judged without " +
-        "opening it.",
+        "opening it." +
+        failureContract("backlinks"),
       inputSchema: { uuid: uuidArg },
     },
-    guarded(async ({ uuid }) => {
+    guarded("backlinks", async ({ uuid }) => {
       await replicas.settle();
       return json({ uuid, backlinks: replicas.store.backlinks(uuid) });
     }),
@@ -962,7 +873,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "cannot be detected, and the window widens the longer this server stays offline.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
-        SYNCED_MEANS,
+        SYNCED_MEANS +
+        failureContract("edit_block"),
       inputSchema: {
         uuid: uuidArg,
         block_id: z.string().min(1),
@@ -975,7 +887,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           .describe("The block's `rev` from get_doc. Asserted alongside old_text."),
       },
     },
-    guarded(async ({ uuid, block_id, old_text, new_text, rev }) => {
+    guarded("edit_block", async ({ uuid, block_id, old_text, new_text, rev }) => {
       await replicas.settle();
       const replica = requireWritableDoc(uuid);
       editBlock(replica.doc, block_id, old_text, new_text, {
@@ -1001,7 +913,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "GFM table source, so every block has one text an agent can edit.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
-        SYNCED_IS_ACKNOWLEDGED,
+        SYNCED_IS_ACKNOWLEDGED +
+        failureContract("insert_block"),
       inputSchema: {
         uuid: uuidArg,
         after_block_id: z
@@ -1012,7 +925,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         ...blockShape,
       },
     },
-    guarded(async ({ uuid, after_block_id, type, text, level, language }) => {
+    guarded("insert_block", async ({ uuid, after_block_id, type, text, level, language }) => {
       await replicas.settle();
       const replica = requireWritableDoc(uuid);
       const blockId = insertBlock(
@@ -1038,10 +951,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "and never delete-and-reinsert to re-type, which churns the block id and orphans its annotations.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
-        SYNCED_IS_ACKNOWLEDGED,
+        SYNCED_IS_ACKNOWLEDGED +
+        failureContract("delete_block"),
       inputSchema: { uuid: uuidArg, block_id: z.string().min(1) },
     },
-    guarded(async ({ uuid, block_id }) => {
+    guarded("delete_block", async ({ uuid, block_id }) => {
       await replicas.settle();
       const replica = requireWritableDoc(uuid);
       deleteBlock(replica.doc, block_id);
@@ -1057,10 +971,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Replace the document's tag set. The directory stub is updated to match, so list_docs and tag filters follow.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
-        SYNCED_IS_ACKNOWLEDGED,
+        SYNCED_IS_ACKNOWLEDGED +
+        failureContract("set_tags"),
       inputSchema: { uuid: uuidArg, tags: z.array(z.string().min(1)) },
     },
-    guarded(async ({ uuid, tags }) => {
+    guarded("set_tags", async ({ uuid, tags }) => {
       await replicas.settle();
       const replica = requireWritableDoc(uuid);
       setTags(replica.doc, tags);
@@ -1077,10 +992,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "The backlinks index follows immediately.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
-        SYNCED_IS_ACKNOWLEDGED,
+        SYNCED_IS_ACKNOWLEDGED +
+        failureContract("set_links"),
       inputSchema: { uuid: uuidArg, links: z.array(linkArg) },
     },
-    guarded(async ({ uuid, links }) => {
+    guarded("set_links", async ({ uuid, links }) => {
       await replicas.settle();
       const replica = requireWritableDoc(uuid);
       setLinks(replica.doc, links);
@@ -1103,10 +1019,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "a document nobody can pick out of a listing.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
-        SYNCED_IS_ACKNOWLEDGED,
+        SYNCED_IS_ACKNOWLEDGED +
+        failureContract("set_title"),
       inputSchema: { uuid: uuidArg, title: titleArg },
     },
-    guarded(async ({ uuid, title }) => {
+    guarded("set_title", async ({ uuid, title }) => {
       await replicas.settle();
       const replica = requireWritableDoc(uuid);
       setTitle(replica.doc, title);
@@ -1132,10 +1049,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "with a better one.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
-        SYNCED_IS_ACKNOWLEDGED,
+        SYNCED_IS_ACKNOWLEDGED +
+        failureContract("set_description"),
       inputSchema: { uuid: uuidArg, description: descriptionArg },
     },
-    guarded(async ({ uuid, description }) => {
+    guarded("set_description", async ({ uuid, description }) => {
       await replicas.settle();
       const replica = requireWritableDoc(uuid);
       setDescription(replica.doc, description);
@@ -1170,10 +1088,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "either way: `applied` is the durable half.\n\n" +
         ARCHIVE_IS_LAST_WRITE_WINS +
         "\n\n" +
-        SYNCED_IS_ACKNOWLEDGED,
+        SYNCED_IS_ACKNOWLEDGED +
+        failureContract("archive_doc"),
       inputSchema: { uuid: uuidArg },
     },
-    guarded(async ({ uuid }) => {
+    guarded("archive_doc", async ({ uuid }) => {
       await replicas.settle();
       const stub = requireStub(uuid);
       const directory = replicas.directory();
@@ -1210,10 +1129,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "arrives or on a later call, whichever was missing. Offline, content arriving means the hub coming back.\n\n" +
         ARCHIVE_IS_LAST_WRITE_WINS +
         "\n\n" +
-        SYNCED_IS_ACKNOWLEDGED,
+        SYNCED_IS_ACKNOWLEDGED +
+        failureContract("restore_doc"),
       inputSchema: { uuid: uuidArg },
     },
-    guarded(async ({ uuid }) => {
+    guarded("restore_doc", async ({ uuid }) => {
       await replicas.settle();
       const stub = requireStub(uuid);
       const directory = replicas.directory();
@@ -1246,7 +1166,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "The range is anchored by a formatting mark on the text itself, so it survives edits, splits and re-types.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
-        SYNCED_IS_ACKNOWLEDGED,
+        SYNCED_IS_ACKNOWLEDGED +
+        failureContract("annotate"),
       inputSchema: {
         uuid: uuidArg,
         text: z.string().min(1).describe("The comment body."),
@@ -1261,7 +1182,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         author: z.string().min(1).optional(),
       },
     },
-    guarded(async ({ uuid, text, thread_id, block_id, start, end, author }) => {
+    guarded("annotate", async ({ uuid, text, thread_id, block_id, start, end, author }) => {
       await replicas.settle();
       const replica = requireWritableDoc(uuid);
       const who = author ?? replicas.name;
@@ -1311,7 +1232,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       title: "Export a document as markdown",
       description:
         "Render the document as markdown, including fenced code and mermaid blocks. " +
-        "Export only: markdown is never the storage format, and there is no import tool.",
+        "Export only: markdown is never the storage format, and there is no import tool." +
+        failureContract("export_markdown"),
       inputSchema: {
         uuid: uuidArg,
         frontmatter: z
@@ -1324,7 +1246,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           .describe("How to render annotation threads. Default drop."),
       },
     },
-    guarded(async ({ uuid, frontmatter, annotations }) => {
+    guarded("export_markdown", async ({ uuid, frontmatter, annotations }) => {
       await replicas.settle();
       const replica = requireDoc(uuid);
       return json({
@@ -1359,25 +1281,25 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "statements about acknowledgement, so a hub that dies inside the debounce comes back missing updates " +
         "this tool has already reported as synced, until a replica holding them reconnects and re-sends.\n\n" +
         "`persistence` is null unless an update failed to reach the log, in which case every other tool refuses " +
-        "to serve until the server is restarted.",
+        "to serve until the server is restarted." +
+        failureContract("sync_status"),
       inputSchema: {},
     },
     // The same snapshot `ub status` prints — see ./status.ts. Diagnostics must
     // still answer when persistence has failed, which is exactly when someone
     // needs to know why every other tool stopped.
-    guarded(async () => json(await collectSyncStatus(replicas))),
+    guarded("sync_status", async () => json(await collectSyncStatus(replicas))),
   );
 
   // The sidebar tools live in ./sidebar-tools.ts and are handed exactly what
-  // every tool here uses — the identity check, the durability responder, the
-  // failure wrapper — so curation shares this file's contract without either
-  // module importing the other.
+  // every tool here uses — the identity check and the durability responder — so
+  // curation shares this file's contract without either module importing the
+  // other. The failure contract is not passed: ./failures.ts is a module both
+  // sides import.
   registerSidebarTools(server, replicas, {
     requireStub,
     durability,
-    guarded,
     json,
-    error: toolError,
   });
 
   // Usage and helpfulness telemetry, on the same terms: ./feedback-tools.ts
@@ -1387,7 +1309,6 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
   registerFeedbackTools(server, replicas, {
     requireStub,
     durability,
-    guarded,
     json,
   });
 }

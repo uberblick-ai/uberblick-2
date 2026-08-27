@@ -65,19 +65,20 @@ import {
 } from "@uberblick/schema";
 import type { DirectoryEntry, DocFeedback } from "@uberblick/schema";
 import { z } from "zod";
+import { failureContract, guarded } from "./failures.js";
 import { log } from "./log.js";
 import type { Replica, Replicas } from "./replica.js";
 
-/** What the tools need from `tools.ts`, so neither module imports the other. */
+/**
+ * What the tools need from `tools.ts`, so neither module imports the other.
+ * The failure wrapper is not among them: it comes from ./failures.ts, which
+ * every tool module imports directly.
+ */
 export interface FeedbackToolContext {
   /** The directory entry for a uuid, or a `doc_not_found` failure. */
   requireStub(uuid: string): DirectoryEntry;
   /** `{applied, synced, hub}` for a write that just landed. */
   durability(replica: Replica): Record<string, unknown>;
-  /** Wrap a handler so every throw becomes a structured tool failure. */
-  guarded<Args>(
-    handler: (args: Args) => Promise<CallToolResult>,
-  ): (args: Args) => Promise<CallToolResult>;
   json(payload: unknown): CallToolResult;
 }
 
@@ -168,7 +169,8 @@ export function registerFeedbackTools(
         "verdict was folded away, there is nothing left to replace and it counts as a second session. The write goes to the workspace's synced " +
         "`_feedback` document, so it is an ordinary durable write — `applied` means this server's update log " +
         "holds it, `synced` means the hub acknowledged it.\n\n" +
-        FEEDBACK_IS_ADVISORY,
+        FEEDBACK_IS_ADVISORY +
+        failureContract("rate_doc"),
       inputSchema: {
         uuid: z.uuid().describe("Document UUID."),
         verdict: z
@@ -181,7 +183,7 @@ export function registerFeedbackTools(
           .describe("Why, in one sentence. The rewrite brief when there is one."),
       },
     },
-    context.guarded(async ({ uuid, verdict, reason }) => {
+    guarded("rate_doc", async ({ uuid, verdict, reason }) => {
       await replicas.settle();
       // Identity is checked against the directory, never by opening the room: a
       // verdict on a uuid nothing can resolve is noise nobody can act on. An
@@ -235,7 +237,8 @@ export function registerFeedbackTools(
         "ordinary ones are exact. In the other direction, two replicas compacting different slices at once " +
         "converge on one of the two totals, so a count can sit below the truth. Read these as good numbers to act " +
         "on, not as exact ones.\n\n" +
-        FEEDBACK_IS_ADVISORY,
+        FEEDBACK_IS_ADVISORY +
+        failureContract("feedback_report"),
       inputSchema: {
         limit: z
           .number()
@@ -245,7 +248,7 @@ export function registerFeedbackTools(
           .describe("Return at most this many documents, most used first."),
       },
     },
-    context.guarded(async ({ limit }) => {
+    guarded("feedback_report", async ({ limit }) => {
       await replicas.settle();
       const feedback = replicas.feedback();
       const rows = readFeedback(feedback.doc);

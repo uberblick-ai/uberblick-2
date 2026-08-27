@@ -225,13 +225,15 @@ export async function startServer(
     const content = result.content as { type: string; text?: string }[];
     const text = content[0]?.text ?? "null";
     // Tool payloads are JSON. A schema rejection never reaches the handler, so
-    // the SDK answers with its own plain-text error — keep it readable.
+    // the SDK answers with its own plain-text error — keep it readable, and
+    // label it as the boundary class it is rather than as one of the codes a
+    // handler can return. See ../src/failures.ts and ./failures.test.ts.
     try {
       return { isError: result.isError === true, payload: JSON.parse(text) };
     } catch {
       return {
         isError: result.isError === true,
-        payload: { error: "invalid_arguments", message: text },
+        payload: { error: "schema_validation", message: text },
       };
     }
   };
