@@ -25,7 +25,7 @@ import {
   resolveConfig,
   writeCredentials,
 } from "../src/config.js";
-import { removeTempDirs, sandbox } from "./helpers.js";
+import { REPO_ROOT, removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -310,5 +310,24 @@ describe("writeCredentials", () => {
       mcpConfig(resolveConfig({ env: fresh.env }).env)
         .authSecret,
     ).toBe("new");
+  });
+});
+
+describe("the committed mise config", () => {
+  // The precedence above is only as good as what the repository itself exports.
+  // mise's environment — `[env]` and a task's own `env` alike — reaches every
+  // process born in an activated checkout, `ub mcp serve` included, and arrives
+  // as the layer that outranks `config.json`; so a committed `HUB_URL` here
+  // redirects a machine's real endpoint at whatever the repository guessed
+  // (#376). The clients carry that default in code instead. `mise.local.toml`
+  // is a different file and stays free to bind one: it is derived from this
+  // machine's own config, not committed.
+  it("exports no HUB_URL, so a checkout binds no endpoint", () => {
+    const assignments = readFileSync(join(REPO_ROOT, "mise.toml"), "utf8")
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("#"))
+      .filter((line) => /\bHUB_URL\s*=/.test(line));
+
+    expect(assignments).toEqual([]);
   });
 });

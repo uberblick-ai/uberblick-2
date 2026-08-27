@@ -5,13 +5,26 @@ fnox = "1"
 
 # Plaintext local defaults. Only real secrets belong in fnox.toml.
 #
-# HUB_URL is the websocket endpoint clients (web, mcp-server) dial. The hub
-# itself binds HUB_HOST:PORT — default 127.0.0.1:1234 in code — so the two must
-# agree; override them together when running the hub somewhere else. The bind
-# address is loopback until someone opts into more: the hub's only credential is
-# a shared dev secret, so `HUB_HOST=0.0.0.0` is a deliberate choice.
+# No HUB_URL here, and none in a task's `env` either (#376). This block is
+# ambient: it reaches every process born in an activated checkout — `ub` and the
+# MCP server a client spawns through `ub mcp serve` included — and the
+# environment outranks this machine's config.json, so a committed endpoint here
+# silently redirects a promoted workspace at a hub on this machine. Nothing
+# needs it: `ws://localhost:1234` is the in-code default of every client that
+# dials (packages/mcp-server/src/config.ts, packages/web/vite.config.ts,
+# packages/web/scripts/agent-cursor-demo.ts), the e2e harness sets its own, and
+# a checkout that must dial elsewhere gets HUB_URL from the gitignored
+# mise.local.toml `ub init` and `ub remote join` derive — a per-checkout
+# binding somebody chose, not a committed default. A task-level `env` would be
+# worse than this block, not better: it also outranks mise.local.toml, so it
+# would strand `mise run web` on localhost after a join.
+#
+# The hub itself binds HUB_HOST:PORT — default 127.0.0.1:1234 in code — and
+# never reads HUB_URL, so the two must be moved together when the hub runs
+# somewhere else. The bind address is loopback until someone opts into more: the
+# hub's only credential is a shared dev secret, so `HUB_HOST=0.0.0.0` is a
+# deliberate choice.
 [env]
-HUB_URL = "ws://localhost:1234"
 
 # The hub's SQLite file, checkout-local and gitignored. Absent this, a hub opens
 # the *packaged user's* database — `~/Library/Application Support/Uberblick/

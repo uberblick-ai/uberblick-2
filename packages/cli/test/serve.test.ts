@@ -170,6 +170,33 @@ describe("ub mcp serve", () => {
     }
   });
 
+  // The shape of the 2026-08-27 island incident (#376): a client spawned this
+  // from a checkout directory, the checkout's mise `[env]` exported a localhost
+  // `HUB_URL`, and the environment layer outranks the endpoint this machine was
+  // promoted to — so writes reported `synced` against a hub nobody meant. What
+  // the wrapper owes a client is that the working directory chooses nothing:
+  // with no `HUB_URL` in the environment, the endpoint is the user config's,
+  // whether it is spawned inside a checkout or anywhere else.
+  it("dials the user config's endpoint when a client spawns it inside a checkout", async () => {
+    const box = sandbox({
+      checkout: true,
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      credentials: { signingSecret: "cli-serve-checkout-secret" },
+    });
+
+    const session = await connect(box);
+    try {
+      const result = await session.client.callTool({
+        name: "sync_status",
+        arguments: {},
+      });
+      const content = result.content as { text: string }[];
+      expect(JSON.parse(content[0]!.text).hub.url).toBe(DEAD_HUB_URL);
+    } finally {
+      await session.close();
+    }
+  });
+
   it("passes the resolved configuration through, warnings and all", async () => {
     // A user config that names the workspace and an endpoint, a credential so
     // the hub is enabled rather than disabled, and a secret misplaced in that

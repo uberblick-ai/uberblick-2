@@ -239,19 +239,20 @@ export interface DerivedEnvironment {
   signingSecret: string;
   workspace: string;
   /**
-   * The endpoint the mise tasks should dial, or undefined to leave `mise.toml`'s
-   * committed default in force.
+   * The endpoint the mise tasks should dial, or undefined to leave the clients'
+   * own `ws://localhost:1234` default in force.
    *
    * `ub` resolves `hubUrl` from `config.json` itself, but nothing else in the
    * repository does: `mise run web` bakes `HUB_URL` into the bundle from mise's
-   * environment, and `mise.toml` commits `ws://localhost:1234`. Without this
-   * line, `ub remote join` would leave the browser talking to a hub on this
-   * machine while `ub` talked to the remote — one workspace split across two
-   * hubs, which is precisely the stranding these commands exist to prevent.
+   * environment. Without this line, `ub remote join` would leave the browser
+   * talking to a hub on this machine while `ub` talked to the remote — one
+   * workspace split across two hubs, which is precisely the stranding these
+   * commands exist to prevent.
    *
-   * It goes here rather than into the committed `mise.toml` because an endpoint
-   * is per-machine client configuration, and the repository's default has to
-   * keep working for a contributor who never set a remote.
+   * This file is also the *only* mise config that may carry an endpoint. The
+   * committed `mise.toml` deliberately carries none (#376): it is ambient for
+   * every process in the checkout and outranks `config.json`, whereas this one
+   * is derived from that same authority and rewritten whenever it moves.
    */
   hubUrl?: string | undefined;
   /**
