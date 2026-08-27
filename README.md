@@ -381,8 +381,9 @@ hub and find nothing of yours on it — the rooms are keyed by a different id.
 `ub init --workspace <id>` is joining a workspace that exists elsewhere, so it
 writes configuration and seeds no documents: the fresh checkout's workspace
 really is empty and `join` has nothing to duplicate. The documents arrive over
-the wire. `join` hydrates the full remote directory and every live document into the local update
-log, verifies it by the same read-back, and only then persists the endpoint. An
+the wire. `join` hydrates the full remote directory and every live document
+into the local update log, verifies it by the same read-back, and only then
+persists the endpoint. An
 unreachable or auth-rejecting remote leaves your configuration exactly as it
 was. It refuses a local workspace holding documents the remote has never heard
 of, naming both counts.

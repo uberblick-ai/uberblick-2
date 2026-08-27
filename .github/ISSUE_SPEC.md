@@ -118,8 +118,9 @@ doesn't answer? Then the issue is not `ready`.**
   see #14"). Cite a product doc as `title (uuid)` — e.g. "Editing and blocks
   (b1d5d904-c8b6-46a1-a4df-22251875bcdb)"; `list_docs` against the live
   workspace is the authoritative — and only — source of a uuid. The repository
-  holds no copy of the corpus and no uuid table. Cite, never restate: the agent reads the doc itself at dispatch, so a pointer
-  that copies its content only ages. `None.` only when CLAUDE.md genuinely
+  holds no copy of the corpus and no uuid table. Cite, never restate: the agent
+  reads the doc itself at dispatch, so a pointer that copies its content only
+  ages. `None.` only when CLAUDE.md genuinely
   covers it. Every implementing agent starts with zero session memory; this
   section is what makes that cheap instead of expensive.
 

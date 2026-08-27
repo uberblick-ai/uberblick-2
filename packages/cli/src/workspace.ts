@@ -22,8 +22,9 @@
  *
  * **`use` also regenerates this checkout's derived `mise.local.toml`.** Nothing
  * in the repository reads `ub`'s configuration: `mise run web` and the hub take
- * their environment from mise, which takes it from that derived file. A binding nobody derived from would leave every mise task
- * serving the workspace this directory used to be bound to, silently. So the
+ * their environment from mise, which takes it from that derived file. A binding
+ * nobody derived from would leave every mise task serving the workspace this
+ * directory used to be bound to, silently. So the
  * binding and the file derived from it are written together, under the same lock
  * `ub init` holds — see {@link regenerateLocalConfig} for what "derived from"
  * means when the environment is itself one of the layers.

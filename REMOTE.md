@@ -328,9 +328,10 @@ rooms being keyed by a different id. Either spelling works, decorated or bare.
 
 `ub init --workspace <id>` seeds no documents — naming an id is joining a
 workspace that exists elsewhere — so that workspace is empty and there is
-nothing to duplicate. `join` pulls the whole remote directory and every live document into the local update log, verifies it
-the same way, and only then persists the endpoint; `mise run web` then starts the
-web client alone, against the remote hub. An unreachable or auth-rejecting
+nothing to duplicate. `join` pulls the whole remote directory and every live
+document into the local update log, verifies it the same way, and only then
+persists the endpoint; `mise run web` then starts the web client alone, against
+the remote hub. An unreachable or auth-rejecting
 remote writes nothing at all.
 
 Unlike `promote`, `join` does not require a local hub — a second computer has

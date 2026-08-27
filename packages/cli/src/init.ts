@@ -17,12 +17,11 @@
  * **The starter documents.** A workspace holding nothing but the two documents
  * in `templates/` is topped up with whatever of them is missing, through the
  * package-private markdown reader in `@uberblick/mcp-server` — so a fresh
- * workspace gets
- * both, an interrupted seed is finished by the next run, and a workspace that
- * holds anything else is never written into. `--workspace` opts out entirely:
- * naming an id is joining a workspace that exists elsewhere, and its emptiness
- * here means only that it has not been hydrated yet. See `starter.ts`. They are
- * ordinary documents from the moment they land.
+ * workspace gets both, an interrupted seed is finished by the next run, and a
+ * workspace that holds anything else is never written into. `--workspace` opts
+ * out entirely: naming an id is joining a workspace that exists elsewhere, and
+ * its emptiness here means only that it has not been hydrated yet. See
+ * `starter.ts`. They are ordinary documents from the moment they land.
  *
  * It is convenience, never a precondition. Every other command works without it
  * — absent configuration is a default, not an error (see `config.ts`) — so
