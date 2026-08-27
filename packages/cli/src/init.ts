@@ -16,12 +16,12 @@
  *
  * **The starter documents.** A workspace holding nothing but the two documents
  * in `templates/` is topped up with whatever of them is missing, through the
- * same seed importer `mise run import-seed` uses — so a fresh workspace gets
- * both, an interrupted seed is finished by the next run, and a workspace that
- * holds anything else is never written into. `--workspace` opts out entirely:
- * naming an id is joining a workspace that exists elsewhere, and its emptiness
- * here means only that it has not been hydrated yet. See `starter.ts`. They are
- * ordinary documents from the moment they land.
+ * package-private markdown reader in `@uberblick/mcp-server` — so a fresh
+ * workspace gets both, an interrupted seed is finished by the next run, and a
+ * workspace that holds anything else is never written into. `--workspace` opts
+ * out entirely: naming an id is joining a workspace that exists elsewhere, and
+ * its emptiness here means only that it has not been hydrated yet. See
+ * `starter.ts`. They are ordinary documents from the moment they land.
  *
  * It is convenience, never a precondition. Every other command works without it
  * — absent configuration is a default, not an error (see `config.ts`) — so
@@ -643,7 +643,6 @@ export async function initCommand(
   if (root !== null) {
     report +=
       "  mise run dev          the hub and the web app on http://localhost:5173\n";
-    report += "  mise run import-seed  import the product documents\n";
   }
   // Only when the question was left open: `--mcp` does it below instead, and
   // `--no-mcp` is somebody saying they do not want to be told about it.

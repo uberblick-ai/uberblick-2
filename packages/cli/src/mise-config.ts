@@ -1,17 +1,18 @@
 /**
  * The derived per-checkout mise config.
  *
- * The authority for local configuration is
- * `$XDG_CONFIG_HOME/uberblick/{config,credentials}.json`, and `ub` reads it
- * directly. The mise tasks do not: `mise run hub`, `mise run web` and
- * `mise run import-seed` inherit their environment from mise, and the hub in
- * particular refuses to start without `HUB_AUTH_TOKEN`. (The committed
- * `.mcp.json` no longer belongs on that list — it spawns `ub mcp serve`, which
- * resolves the configuration itself.) So `ub init` also writes
- * `mise.local.toml` — mise's conventional gitignored local config — as a file
- * **derived** from that authority: same value, one owner, rewritten whenever it
- * drifts. Delete it and rerun `ub init` and it comes back with the same value;
- * it is regenerated, not re-randomised, because the authority is elsewhere.
+ * The authority for local configuration is this machine's
+ * `{config,credentials}.json` — in `$XDG_CONFIG_HOME/uberblick` or, on a Mac,
+ * `~/Library/Application Support/Uberblick`; `@uberblick/hub/storage` decides
+ * — and `ub` reads it directly. The mise tasks do not: `mise run hub` and
+ * `mise run web` inherit their environment from mise, and the hub in particular
+ * refuses to start without `HUB_AUTH_TOKEN`. (The committed `.mcp.json` no
+ * longer belongs on that list — it spawns `ub mcp serve`, which resolves the
+ * configuration itself.) So `ub init` also writes `mise.local.toml` — mise's
+ * conventional gitignored local config — as a file **derived** from that
+ * authority: same value, one owner, rewritten whenever it drifts. Delete it and
+ * rerun `ub init` and it comes back with the same value; it is regenerated, not
+ * re-randomised, because the authority is elsewhere.
  *
  * `ub init` is what *creates* it, and `ub workspace use` rewrites the one it
  * created — a binding the mise tasks never saw would leave them serving the
@@ -323,8 +324,9 @@ export function tomlUnsafeReason(value: string): string | null {
 function render(env: DerivedEnvironment, extra: readonly string[]): string {
   return `${MARKER}
 #
-# Derived from the config \`ub\` resolves — $XDG_CONFIG_HOME/uberblick/
-# {credentials,config}.json and ./uberblick.json — same values, one owner. Do
+# Derived from the config \`ub\` resolves — this machine's credentials.json and
+# config.json (\`ub status\` names the directory they are in) and
+# ./uberblick.json — same values, one owner. Do
 # not edit the three values below: \`ub init\` writes them and \`ub workspace
 # use\` rewrites them, and no other command does. Anything else you add to
 # [env] is kept. \`ub remote\` changes the authority files without

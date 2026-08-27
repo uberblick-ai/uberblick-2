@@ -8,10 +8,16 @@
  */
 
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { InvalidWorkspaceIdError } from "@uberblick/schema";
-import { DEFAULT_HUB_URL, resolveMcpConfig } from "../src/config.js";
+import {
+  DEFAULT_HUB_URL,
+  defaultDatabasePath,
+  resolveMcpConfig,
+} from "../src/config.js";
 import { PACKAGE_ROOT, mainTsProcess } from "./helpers.js";
 
 const WORKSPACE = "9c1f0b4a-6d27-4e83-9b5a-1f2e3d4c5b6a";
@@ -62,6 +68,40 @@ describe("resolveMcpConfig", () => {
     const bare = resolveMcpConfig(env());
     expect(decorated.workspaceId).toBe(bare.workspaceId);
     expect(decorated.databasePath).toBe(bare.databasePath);
+  });
+
+  it("puts the replica in the Mac layout's workspace directory on a Mac", () => {
+    // The layout is `@uberblick/hub/storage`'s to decide and its suite's to
+    // prove; what matters here is that both spellings of one workspace land on
+    // one file whichever layout is in force — two replicas of one corpus would
+    // converge with neither. `platform` is a parameter so this holds on the
+    // machine running the tests.
+    // A real temp directory rather than a fixed `/tmp` path: a leftover
+    // `~/.config/uberblick` under a shared name would flip this to the legacy
+    // layout, and two runs would fight over the same one.
+    const macHome = mkdtempSync(join(tmpdir(), "uberblick-mac-home-"));
+    const expected = join(
+      macHome,
+      "Library",
+      "Application Support",
+      "Uberblick",
+      "data",
+      "workspaces",
+      `${WORKSPACE}.sqlite`,
+    );
+    expect(defaultDatabasePath(WORKSPACE, { HOME: macHome }, "darwin")).toBe(
+      expected,
+    );
+    expect(
+      defaultDatabasePath(`uberblick-${WORKSPACE}`, { HOME: macHome }, "darwin"),
+    ).toBe(expected);
+    // Resolution reads; it never creates. Nothing to clean up but the shell.
+    rmSync(macHome, { recursive: true, force: true });
+  });
+
+  it("lets UBERBLICK_DB name the file outright, on either layout", () => {
+    const named = "/tmp/uberblick-config-test/named.sqlite";
+    expect(resolveMcpConfig(env({ UBERBLICK_DB: named })).databasePath).toBe(named);
   });
 
   it("refuses a value that is not a workspace id", () => {

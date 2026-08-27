@@ -326,11 +326,12 @@ is a uuid and `ub init` with none in force generates a *new* one: a machine that
 invented its own workspace would join a hub and find nothing of yours there, the
 rooms being keyed by a different id. Either spelling works, decorated or bare.
 
-`ub init` imports no documents, so that workspace is empty and there is nothing
-to duplicate — do not run `mise run import-seed` on it. `join` pulls the whole
-remote directory and every live document into the local update log, verifies it
-the same way, and only then persists the endpoint; `mise run web` then starts the
-web client alone, against the remote hub. An unreachable or auth-rejecting
+`ub init --workspace <id>` seeds no documents — naming an id is joining a
+workspace that exists elsewhere — so that workspace is empty and there is
+nothing to duplicate. `join` pulls the whole remote directory and every live
+document into the local update log, verifies it the same way, and only then
+persists the endpoint; `mise run web` then starts the web client alone, against
+the remote hub. An unreachable or auth-rejecting
 remote writes nothing at all.
 
 Unlike `promote`, `join` does not require a local hub — a second computer has

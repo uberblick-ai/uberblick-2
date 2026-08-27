@@ -119,8 +119,21 @@ export function useRoomStatus(connection: RoomConnection | null): RoomStatus {
   return status;
 }
 
-/** Directory entries, live. Discovery is a synced doc, so this is just an observer. */
-export function useDirectory(connection: RoomConnection | null): DirectoryEntry[] {
+/**
+ * Directory entries, live. Discovery is a synced doc, so this is just an
+ * observer.
+ *
+ * Tombstoned stubs are left out by default, because the listings this feeds are
+ * about the documents the workspace *has*. A reader that names documents by
+ * uuid rather than by listing them — the sidebar's pins — asks for them
+ * instead: it has to say what an archived pin is called, and a stub filtered
+ * out of the reading is a title it cannot see (#287). Entries carry `deleted`,
+ * so the two are told apart at the point of rendering.
+ */
+export function useDirectory(
+  connection: RoomConnection | null,
+  includeDeleted = false,
+): DirectoryEntry[] {
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   useEffect(() => {
     if (connection === null) {
@@ -129,11 +142,11 @@ export function useDirectory(connection: RoomConnection | null): DirectoryEntry[
     }
     const { ydoc } = connection;
     const map = getDirectoryMap(ydoc);
-    const read = (): void => setEntries(listDirectory(ydoc));
+    const read = (): void => setEntries(listDirectory(ydoc, { includeDeleted }));
     read();
     map.observe(read);
     return () => map.unobserve(read);
-  }, [connection]);
+  }, [connection, includeDeleted]);
   return entries;
 }
 

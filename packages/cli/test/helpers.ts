@@ -32,6 +32,12 @@ const RESOLVED_VARIABLES = [
   "HUB_URL",
   "HUB_AUTH_TOKEN",
   "UBERBLICK_DB",
+  // `ub status` reports the database a hub started here would open, and
+  // `ub open` starts one with it — and inside this checkout mise exports it
+  // from `[env]` for every contributor and every CI run, so leaving it in
+  // would make those assertions a test of the runner's mise config. A suite
+  // that wants one passes it through `extraEnv`, which is applied after this.
+  "HUB_DB_PATH",
   "XDG_CONFIG_HOME",
   "XDG_DATA_HOME",
 ] as const;

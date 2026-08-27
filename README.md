@@ -42,6 +42,15 @@ secret that already exists. `mise run init` re-runs just the `ub init` step.
 block it has not been told to trust — and it is a hard error, not a warning.
 `ub init` runs `mise trust` on the file it writes for the same reason.
 
+Entering the checkout prints a short quick-start — the two commands above, the
+check tasks, and `mise tasks` for the rest. It is a `mise` project hook, so it
+needs [mise activated in your
+shell](https://mise.jdx.dev/getting-started.html): shims put `node` and `pnpm`
+on PATH but never run hooks, so with shims alone nothing is printed and nothing
+is missing. `mise run welcome` prints the same thing on demand, activated or
+not. It stays silent when stdout is not a terminal, when `CI` is set, and when
+`MISE_QUIET=1`.
+
 What this supports is exactly one arrangement: **one workspace, one trusted user,
 multiple clients and machines; no login and no tenant isolation.** Everything
 below is a consequence of that.
@@ -58,9 +67,9 @@ There are two ways to have one, and they do not fight:
   generates nothing when it can already see one.
 - **Everybody else — a generated development secret.** With no age key,
   `fnox exec --if-missing warn` warns and leaves the variable alone, and
-  `ub init` writes 32 random bytes to
-  `$XDG_CONFIG_HOME/uberblick/credentials.json` (mode 0600). That file is the
-  authority. Because mise tasks and `.mcp.json` inherit their environment from
+  `ub init` writes 32 random bytes to `credentials.json` (mode 0600) in this
+  machine's config root — see [Where your files live](#where-your-files-live).
+  That file is the authority. Because mise tasks and `.mcp.json` inherit their environment from
   mise rather than from `ub`, `ub init` also writes a gitignored
   `mise.local.toml` **derived** from it: same value, one owner, rewritten
   whenever the two drift, and restored with the same value if you delete it.
@@ -84,6 +93,7 @@ present.
 ```
 mise run setup        # one-command bootstrap: toolchain, dependencies, `ub init`
 mise run init         # just the `ub init` step, idempotent
+mise run welcome      # the quick-start the `enter` hook prints
 
 mise run hub          # Hocuspocus sync hub
 mise run mcp          # MCP server, standalone smoke test only (see below)
@@ -233,9 +243,9 @@ deployed client reads its workspaces at runtime from the served
 deployment its workspaces is an environment variable and a container recreate,
 never a bundle rebuild.
 
-`mise run import-seed` is the one-time import of `docs-seed/` into the system.
-After it, the product docs live in the documents, and are read and written
-through the MCP tools rather than by editing the seed files.
+The project's own documents live in the live uberblick workspace, not in this
+repository. `list_docs` enumerates them and the MCP tools read and write them;
+there is no corpus import command and no snapshot to keep in step.
 
 ## The `ub` command line
 
@@ -288,8 +298,8 @@ Precedence, highest first:
 | --- | --- |
 | environment (`WORKSPACE_ID`, `HUB_URL`, `HUB_AUTH_TOKEN`) | wins, so `HUB_URL=… ub mcp serve` keeps working |
 | `./uberblick.json` | binds one checkout to one workspace. Committable, so never secrets — and never the hub the stored secret is sent to |
-| `$XDG_CONFIG_HOME/uberblick/config.json` | per-user identity (display name, cursor colour), the workspace and the hub endpoint — what `ub init` writes |
-| `$XDG_CONFIG_HOME/uberblick/credentials.json`, mode 0600 | the hub signing secret. Never printed by any command, and refused outright — not merely warned about — if anyone but its owner can read it |
+| `config.json` | per-user identity (display name, cursor colour), the workspace and the hub endpoint — what `ub init` writes. Which directory it is in is [the layout](#where-your-files-live) |
+| `credentials.json`, mode 0600, beside it | the hub signing secret. Never printed by any command, and refused outright — not merely warned about — if anyone but its owner can read it |
 | built-in defaults | hub `ws://localhost:1234`. No workspace: there is no default one |
 
 The stored signing secret is scoped to hubs *you* chose: if the hub URL in force
@@ -297,6 +307,32 @@ came from a committable `./uberblick.json`, the secret in `credentials.json` is
 not attached to it and `ub` says so — a clone must not be able to point your
 credential at its author's endpoint. Exporting `HUB_AUTH_TOKEN`, or setting
 `HUB_URL` yourself, is the explicit opt-in and always applies.
+
+### Where your files live
+
+One layout per machine, **resolved rather than configured**, and nothing in it
+for you to create: `ub init` makes the directories it needs, and there is no
+workspace directory for you to make — a workspace is a uuid, and its replica is
+a file named after it.
+
+| Where | When |
+| --- | --- |
+| `~/Library/Application Support/Uberblick/` — `config.json`, `credentials.json`, `data/hub.sqlite`, `data/workspaces/<uuid>.sqlite` | macOS, with no `XDG_*` variable set and no uberblick files in the old locations. Apple's place for app-managed data, and the one a Homebrew or tarball upgrade cannot replace |
+| `$XDG_CONFIG_HOME/uberblick/` (config, credentials) and `$XDG_DATA_HOME/uberblick/` (`hub.sqlite`, `<uuid>.sqlite`) | everywhere that is not macOS — and anywhere you set either variable yourself, macOS included. Setting one moves the whole layout, never half of it |
+| the same XDG pair, on a Mac that already has files there | a machine older than the Mac layout keeps every path it had. It is told once, naming `ub storage migrate` (#249); nothing moves and nothing new is created until that lands |
+
+`ub status` names the data root; `ub status --json` carries a `storage` object
+with the layout (`mac`, `xdg`, `legacy-xdg`) and every resolved path — the
+directories and database files, never the credential. `HUB_DB_PATH` and
+`UBERBLICK_DB` name a database file outright and outrank all of it, which is
+what this checkout's mise tasks use: `[env] HUB_DB_PATH` points at a
+checkout-local file, so `mise run hub` never opens a packaged install's
+database.
+
+A Mac holding uberblick files in *both* roots is the one case with no answer.
+Nothing is opened and every command refuses, because choosing a root would hide
+whatever is in the other; `ub doctor` fails its `storage-layout` check naming
+both.
 
 ### Going remote: local first, then a hub, then a second computer
 
@@ -352,11 +388,12 @@ bare. Give it: a workspace id is a uuid and `ub init` with none in force
 generates a *new* one, so a machine that invented its own would join the remote
 hub and find nothing of yours on it — the rooms are keyed by a different id.
 
-`ub init` writes configuration and imports no documents, so a fresh checkout's
-workspace really is empty and `join` has nothing to duplicate — do not run
-`mise run import-seed` there, the product documents arrive over the wire. `join`
-hydrates the full remote directory and every live document into the local update
-log, verifies it by the same read-back, and only then persists the endpoint. An
+`ub init --workspace <id>` is joining a workspace that exists elsewhere, so it
+writes configuration and seeds no documents: the fresh checkout's workspace
+really is empty and `join` has nothing to duplicate. The documents arrive over
+the wire. `join` hydrates the full remote directory and every live document
+into the local update log, verifies it by the same read-back, and only then
+persists the endpoint. An
 unreachable or auth-rejecting remote leaves your configuration exactly as it
 was. It refuses a local workspace holding documents the remote has never heard
 of, naming both counts.
@@ -374,9 +411,9 @@ in `credentials.json` at mode 0600, and the command says it is doing so. That is
 the whole point on a second machine: `ub init` invents a *random* secret, and
 the remote verifies with the first machine's.
 
-**What "persisted" covers, and what outranks it.** The endpoint goes into
-`$XDG_CONFIG_HOME/uberblick/config.json`, which is where `ub`, `ub mcp serve`
-and the MCP server it spawns resolve it. That file is the *third* layer:
+**What "persisted" covers, and what outranks it.** The endpoint goes into your
+`config.json`, which is where `ub`, `ub mcp serve` and the MCP server it spawns
+resolve it. That file is the *third* layer:
 `HUB_URL` in the environment beats it, and so does a `hubUrl` in a committable
 `./uberblick.json`. When either does, these commands say which one wins rather
 than reporting a switch that did not happen — `ub remote set` exits non-zero,
@@ -562,8 +599,9 @@ The MCP server treats it as optional and runs local-only without it: its update
 log is the authoritative replica, so no secret means no sync, not no service
 (`sync_status` reports `hub.status: "disabled"`). `WORKSPACE_ID` it does
 require — with none set it exits non-zero, naming `ub init` — and it reads
-`UBERBLICK_DB` (default `$XDG_DATA_HOME/uberblick/<workspaceUuid>.sqlite`, keyed
-by the bare uuid so both spellings of a workspace hydrate one file). A database
+`UBERBLICK_DB` (default `<uuid>.sqlite` in the data root — see [Where your files
+live](#where-your-files-live) — keyed by the bare uuid so both spellings of a
+workspace hydrate one file). A database
 records the workspace it holds, so pointing `UBERBLICK_DB` at another
 workspace's file makes the server exit non-zero naming both ids and the path
 rather than merging two corpora into one index.

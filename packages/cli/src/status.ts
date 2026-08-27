@@ -12,10 +12,13 @@
  * stays parseable by a pipe.
  *
  * No secret is ever printed. `credentialPresent` is the whole of what this
- * command says about the hub signing secret.
+ * command says about the hub signing secret. The `storage` object is
+ * directories and database paths, never anything out of `credentials.json`.
  */
 
 import { parseArgs } from "node:util";
+import { hubDatabasePath } from "@uberblick/hub/config";
+import type { StorageLayout } from "@uberblick/hub/storage";
 import {
   collectSyncStatus,
   createMcpServer,
@@ -28,6 +31,26 @@ import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { cliVersion } from "./version.js";
+
+/**
+ * Where this machine keeps its files, and which layout said so.
+ *
+ * A stable object: a script reads `layout` to know whether it is looking at a
+ * Mac install, an XDG one, or a Mac still living in the legacy XDG defaults,
+ * and reads the paths to find the files without re-deriving anyone's rules.
+ * Directories and database files only — no credential, and no value out of one.
+ */
+export interface StorageReport {
+  layout: StorageLayout;
+  /** The user config file, `config.json`. `credentials.json` sits beside it. */
+  config: string;
+  /** The data root: the one directory to name when somebody asks. */
+  data: string;
+  /** The database a hub started here would open (`HUB_DB_PATH` wins). */
+  hub: string;
+  /** This workspace's replica (`UBERBLICK_DB` wins) — the same as `databasePath`. */
+  workspace: string;
+}
 
 export interface StatusReport {
   version: string;
@@ -65,6 +88,7 @@ export interface StatusReport {
   inFlightUpdates: number;
   logEntries: number;
   persistence: SyncStatus["persistence"];
+  storage: StorageReport;
 }
 
 /** How an origin reads in the human output. Shared with `ub workspace`. */
@@ -77,13 +101,19 @@ export const ORIGIN_LABELS: Record<Origin, string> = {
 
 /** Collect the report without printing it. Exported for tests. */
 export async function statusReport(
-  options: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
+  options: {
+    env?: NodeJS.ProcessEnv;
+    cwd?: string;
+    /** `process.platform` by default; injected so the Mac layout is testable. */
+    platform?: NodeJS.Platform;
+  } = {},
 ): Promise<{ report: StatusReport; warnings: string[] }> {
   const resolved = resolveConfig(options);
   // Throws when nothing configures a workspace, which `ub` reports as the
   // error it is: there is no default to fall back to, and `ub init` is named in
   // the message.
-  const config = resolveMcpConfig(resolved.env);
+  const platform = options.platform ?? process.platform;
+  const config = resolveMcpConfig(resolved.env, platform);
   const instance = createMcpServer(config);
   try {
     const sync = await collectSyncStatus(instance.replicas);
@@ -108,6 +138,15 @@ export async function statusReport(
         inFlightUpdates: sync.inFlightUpdates,
         logEntries: sync.logEntries,
         persistence: sync.persistence,
+        storage: {
+          layout: resolved.storage.layout,
+          config: resolved.paths.userConfig,
+          data: resolved.storage.dataDir,
+          // Asked of the hub package, so that what this reports and what a hub
+          // started here would open cannot drift apart.
+          hub: hubDatabasePath(resolved.env, platform),
+          workspace: config.databasePath,
+        },
       },
     };
   } finally {
@@ -150,6 +189,9 @@ export function renderStatus(report: StatusReport): string {
   // with, and the two words must not blur into each other.
   text += field("credential", credential);
   text += field("database", report.databasePath);
+  // The data root, named once: everything durable is under it, and "where is my
+  // data" is the question this line exists to answer.
+  text += field("storage", `${report.storage.layout} — ${report.storage.data}`);
   // Two counts in two units, as `sync_status` reports them: rooms, and provider
   // sync messages. They are not expected to agree.
   text += field(

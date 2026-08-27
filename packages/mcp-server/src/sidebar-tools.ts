@@ -20,7 +20,12 @@
  * 3. **The one-time seed.** Before the sidebar existed, the web UI grouped the
  *    corpus by four tags. {@link seedSidebarOnce} reproduces that grouping —
  *    including the owner's reading order, Overview before Install and run —
- *    after which tags are metadata and the sidebar is the navigation.
+ *    after which tags are metadata and the sidebar is the navigation. It is a
+ *    migration for corpora that predate curation, and nothing more: a new
+ *    workspace gets its first-open sidebar from `ub init` (see the CLI's
+ *    `starter.ts` and `seed.ts`'s `SidebarSeed`), because the web client is
+ *    usually the first thing opened and it runs no migration at all. What this
+ *    finds already written, it adopts.
  *
  * The seed runs at server start and nowhere else. Not from the tools: a read
  * that writes would report a sidebar the update log may have refused, because
