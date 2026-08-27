@@ -63,6 +63,18 @@ elif ! printf '%s' "$inspect" |
 fi
 
 echo "$IMAGE:$tag is not published yet; building it."
+
+# The default "docker" builder can only push straight to a registry when the
+# daemon happens to use the containerd image store; a docker-container builder
+# can on any daemon. Pinning one here is what keeps the published artefact from
+# depending on how the machine that ran the build was configured. Setting
+# BUILDX_BUILDER — buildx's own variable — opts out, which is how this is
+# rehearsed against a local registry.
+if [ -z "${BUILDX_BUILDER:-}" ]; then
+  docker buildx inspect uberblick-publish >/dev/null 2>&1 ||
+    docker buildx create --name uberblick-publish --driver docker-container >/dev/null
+  export BUILDX_BUILDER=uberblick-publish
+fi
 # --provenance=false keeps this a plain image manifest rather than an index with
 # an attestation hanging off it. Provenance and SBOM attestations are a decision
 # nobody has taken yet, and an unasked-for one would change what an anonymous
