@@ -102,6 +102,33 @@ function sleep(ms: number): Promise<void> {
 const WAIT_TIMEOUT_MS = 20_000;
 
 /**
+ * The one deadline that has to outlast a repair rather than interrupt it.
+ *
+ * What is measured, and all that is claimed here: when a room is released and
+ * re-joined in the same tick — a document switch, a StrictMode remount — the
+ * re-joined room sometimes goes quiet. It reports "synced" within
+ * milliseconds, and then neither is anything another client writes delivered
+ * to it, nor does the hub acknowledge anything it writes, until the provider
+ * repairs itself. Rare (single-digit occurrences in thousands of cycles) and
+ * not load-dependent — idle machines produce it too. *Why* the hub stops
+ * serving a room it has just been re-joined on is #402's question, not this
+ * file's; the wait below depends only on the two observables above.
+ *
+ * The repair is the socket's message-reconnect check: Hocuspocus runs
+ * `checkConnection` every `messageReconnectTimeout / 10` (3s), forces a
+ * reconnect once `messageReconnectTimeout` (30s) has passed without a message,
+ * takes up to two close attempts to get there, and then still owes a reconnect
+ * delay and a fresh handshake — end to end, 30.4s to 33.3s across every
+ * instrumented recovery. So 30s is a floor rather than the number, and
+ * WAIT_TIMEOUT_MS is under it either way: the step this replaces went red on a
+ * live write that would have landed a second or two later. 45s is that
+ * measured band plus ~12s, the same kind of margin WAIT_TIMEOUT_MS gives an
+ * ordinary condition — not a guess at how slow a machine is, and not
+ * trimmable to the 31s that a single run happens to show.
+ */
+const REJOIN_REPAIR_TIMEOUT_MS = 45_000;
+
+/**
  * Vitest's own budget per test.
  *
  * The rule: above the longest chain of named waits a test here makes in
@@ -112,8 +139,10 @@ const WAIT_TIMEOUT_MS = 20_000;
  * The chain that sets the number is "repairs a document close that arrives
  * during the forced-drop cooldown": eight waits end to end — two in
  * `seedDocument`, four in the test body, two in `expectLiveWrite` — at
- * WAIT_TIMEOUT_MS each. Change either constant and check that this one is still
- * the larger.
+ * WAIT_TIMEOUT_MS each, so 160s. The runner-up is "leaves the socket alone…",
+ * whose five WAIT_TIMEOUT_MS waits sit beside one REJOIN_REPAIR_TIMEOUT_MS:
+ * 145s. Change any of the three constants and check that this one is still the
+ * larger.
  */
 const TEST_TIMEOUT_MS = 180_000;
 
@@ -316,6 +345,21 @@ it("leaves the socket alone when it is the client that leaves a room", async () 
   first.release();
   const second = await openTab(room, hub.port);
   await waitFor("the re-joined room to sync", () => second.latest().synced);
+
+  // "Synced" is the handshake alone, and a re-joined room can report it and
+  // still be unserved — see REJOIN_REPAIR_TIMEOUT_MS and #402. What gates a
+  // live write is the hub actually serving this room, and the tab can prove
+  // that without asking the hub directly: write something, and wait for the
+  // acknowledgement to come back. An ack is a message the hub only sends over
+  // a connection it is still serving, and it stops in the same window live
+  // delivery does.
+  insertBlock(second.connection.ydoc, null, { type: "paragraph", text: "re-joined" });
+  await waitFor(
+    "the hub to acknowledge a write from the re-joined room",
+    () => second.latest().unsyncedChanges === 0,
+    REJOIN_REPAIR_TIMEOUT_MS,
+  );
+
   await expectLiveWrite(second, hub.port, room, "after re-joining");
 
   expect(drops).toBe(0);
