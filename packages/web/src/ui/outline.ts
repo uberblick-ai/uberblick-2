@@ -34,42 +34,6 @@ export function outlineFromDoc(ydoc: Y.Doc): OutlineEntry[] {
 }
 
 /**
- * The outline entries that should carry a changed-block dot (#120).
- *
- * The outline lists headings and the marks are on blocks, so the two have to be
- * mapped onto each other. The mapping is **the nearest entry at or above the
- * changed block, in document order**: a changed heading dots its own entry, and
- * a changed paragraph, code or mermaid block dots the entry of the section it
- * sits in. That is the section a reader would have to open to find it, which is
- * what the dot is telling them to do.
- *
- * Two consequences worth naming rather than hiding:
- *
- * - A block under a heading too deep to be listed (level 4-6) dots the nearest
- *   *listed* heading above it, because that is the deepest entry there is.
- * - A block before the first heading has no entry above it and gets no dot. Its
- *   gutter line still shows; the document's first screen is the one place a
- *   reader does not need the rail to find something.
- */
-export function outlineDots(
-  ydoc: Y.Doc,
-  changed: ReadonlySet<string>,
-): Set<string> {
-  const dots = new Set<string>();
-  if (changed.size === 0) return dots;
-  let section: string | null = null;
-  for (const block of getBlocks(ydoc)) {
-    const listed =
-      block.type === "heading" && (block.level ?? 1) <= OUTLINE_MAX_LEVEL;
-    if (listed) section = block.id;
-    if (!changed.has(block.id)) continue;
-    const entry = listed ? block.id : section;
-    if (entry !== null) dots.add(entry);
-  }
-  return dots;
-}
-
-/**
  * Call `onChange` with a fresh outline whenever it could have changed. Returns
  * the unsubscribe.
  *

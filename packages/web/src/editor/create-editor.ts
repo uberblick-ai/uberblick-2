@@ -9,8 +9,6 @@ import type { Schema } from "@tiptap/pm/model";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { BlockIds } from "./block-ids.js";
-import { ChangedBlockMarks } from "./changed-marks.js";
-import type { ChangedBlocks } from "./changed-blocks.js";
 import { Collaboration } from "./collaboration.js";
 import { GitHubHovercards } from "./github-hovercard.js";
 import type { GitHubHovercardOptions } from "./github-hovercard.js";
@@ -19,8 +17,6 @@ import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
 import { paletteExtensions } from "./nodes.js";
 import { TableBlocks } from "./table.js";
-import { AgentTypingTheater } from "./typing-theater.js";
-import type { AgentTypingOptions } from "./typing-theater.js";
 
 /** The palette without collaboration — the schema, and nothing that needs a Y.Doc. */
 export const paletteOnlyExtensions: Extensions = [...paletteExtensions];
@@ -41,19 +37,6 @@ export interface CreateEditorOptions {
   editable?: boolean;
   /** Block-id source; injectable for deterministic tests. */
   newBlockId?: () => string;
-  /**
-   * The document's changed-block tracker. Omitted, the editor draws no
-   * changed-block marks — which is what an editor with no reader wants.
-   */
-  changed?: ChangedBlocks;
-  /**
-   * The injectable parts of the agent typing animation — the motion
-   * preference, the jitter source and the clock — so a test can make playback
-   * deterministic. All default to the real thing.
-   */
-  typing?: Partial<
-    Pick<AgentTypingOptions, "reducedMotion" | "random" | "now">
-  >;
   /**
    * The GitHub hovercard's hover-intent delay, so a test need not wait it out.
    * Defaults to the real one.
@@ -83,21 +66,13 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
       fragment: options.fragment,
       awareness: options.awareness ?? null,
     }),
-    // Presentation over state that is already true, like the two below it: the
+    // Presentation over state that is already true, like the one below it: the
     // stored text of a pasted GitHub link stays the full URL.
     GitHubRefs,
     // Reads the same references the decoration draws, and nothing else: the
     // card is fetched on hover, shown in a portal, and never touches the
     // document (#175).
     GitHubHovercards.configure(options.hovercard ?? {}),
-    ChangedBlockMarks.configure({ marks: options.changed ?? null }),
-    // After the changed-block marker, and reading the same tracker: the gutter
-    // line says *that* a block changed the moment it does, whatever the
-    // animation's queue is doing about showing *what* changed (#121).
-    AgentTypingTheater.configure({
-      marks: options.changed ?? null,
-      ...(options.typing ?? {}),
-    }),
   ];
 
   return new Editor({

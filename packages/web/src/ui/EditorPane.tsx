@@ -8,8 +8,6 @@ import type { ReactElement, ReactNode } from "react";
 import { getBlocksFragment, parseRoom, setTitle } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { bindGuardedEditor } from "../editor/guarded-binding.js";
-import { changedBlocks } from "../editor/changed-blocks.js";
-import { clearWhenSeen } from "../editor/changed-marks.js";
 import { describeForeignBlocks } from "../editor/palette.js";
 import { writeToClipboard } from "../editor/source-chrome.js";
 import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
@@ -332,9 +330,6 @@ function BoundEditor({
       element,
       fragment: getBlocksFragment(connection.ydoc),
       awareness: connection.provider.awareness,
-      // Session-local and ephemeral: the marks are held against this Y.Doc and
-      // nothing else, so a reload starts clean (see editor/changed-blocks.ts).
-      changed: changedBlocks(connection),
       editable: !archivedNow.current,
     });
     // A comment highlight is a plain span ProseMirror renders from the `comment`
@@ -371,27 +366,11 @@ function BoundEditor({
     };
   }, [connection, onSelectThread]);
 
-  // Reading a block clears its mark. Separate from the binding above because it
-  // needs the editor that binding produced, and because it is the one part of
-  // the feature that depends on the viewport rather than on the document.
-  //
-  // `isDestroyed` is the guard for switching straight from one open document to
-  // another. Both effects re-run on the same pass, and React runs every cleanup
-  // before any setup: the binding above tears its editor down and queues the
-  // replacement through `setEditor`, so on that one pass `editor` still holds
-  // the editor that was just destroyed — and reading `view.dom` off it throws
-  // (#68). Skipping is not a lost subscription: `setEditor` re-runs this effect
-  // with the live editor a moment later.
-  useEffect(() => {
-    if (editor === null || editor.isDestroyed) return;
-    return clearWhenSeen(changedBlocks(connection), editor);
-  }, [connection, editor]);
-
   /**
    * Read-only is a *setting* on the live editor, never a reason to rebind.
    * Archiving a document someone is reading has to flip it in place — a rebind
-   * would throw away their caret, their scroll position and the changed-block
-   * marks they have not read yet, on a change that touched no content at all.
+   * would throw away their caret and their scroll position, on a change that
+   * touched no content at all.
    *
    * ProseMirror's own `editable` is what enforces it: with it off the view
    * ignores every user input path — keys, `beforeinput`, paste, drop — while

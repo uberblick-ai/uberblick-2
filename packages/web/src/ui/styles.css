@@ -1897,6 +1897,21 @@ h3.ub-heading {
   content: attr(data-number) ".";
 }
 
+/* Content for a screen reader and nobody else: the list container each run of
+   list items is announced inside (editor/list-keys.ts). Off-screen rather than
+   `display: none`, which would take it out of the accessibility tree too. */
+.ub-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .ub-quote {
   margin: 0.7em 0;
   padding: 0.1rem 0 0.1rem 0.9rem;
@@ -2585,205 +2600,6 @@ h3.ub-heading {
 .ub-blockmenu-empty {
   margin: 0;
   padding: 0.4rem;
-}
-
-/* ---- changed-block marks ---- */
-
-/* Two halves of one signal: an accent line in the block's gutter, and a dot on
- * the outline entry for the section that block is in. Both are session-local
- * and ephemeral — a reload starts clean, because nothing about them is stored
- * (see `src/editor/changed-blocks.ts`).
- *
- * The tokens live here rather than up in the main block so the whole feature is
- * one section to read, and one section to delete.
- */
-:root {
-  /* How far out into `--block-gutter` the accent line reaches, and how thick it
-     is. The insertion `+` is 22px wide against the gutter's outer edge, so the
-     6px nearest the text is free — the line lives there, and the two never
-     overlap. */
-  --changed-bar-inset: 0.375rem;
-  --changed-bar-width: 2px;
-}
-
-/* The line is a **box-shadow**, not a pseudo-element, and that is the whole
-   trick. `.ub-code` is a scroll container (`overflow-x: auto`), and an
-   element's own overflow clips its pseudo-elements — so a `::after` in the
-   gutter was invisible on exactly the block type an agent most often rewrites,
-   and the only way to show it was to turn that block's horizontal scrolling
-   off while it was marked. An outer box-shadow is a box decoration rather than
-   content: the element's own overflow does not clip it, so `code` keeps its
-   scrollbar and still gets its line.
-
-   The shape comes out of the offset and the spread. A negative spread shrinks
-   the shadow's rectangle before the offset moves it left, and the spec clips an
-   outer shadow so that nothing is painted inside the border box — what is left
-   is a bar `--changed-bar-width` wide sitting `--changed-bar-inset` out from the
-   block's edge, inset top and bottom by the same amount. It costs no layout: a
-   shadow is painted, never laid out, and the gutter it sits in is reserved
-   whether anything is in it or not. No prose moves, ever.
-
-   The class is applied by a ProseMirror node decoration, which lands on a
-   NodeView's outer element exactly as it lands on a plain paragraph. That is
-   why `code` and `mermaid` need no marker of their own: those blocks own their
-   DOM (`src/editor/source-chrome.ts`), and nothing here reaches into it. */
-.ub-changed {
-  box-shadow: calc(-1 * var(--changed-bar-inset)) 0 0
-    calc(var(--changed-bar-width) - var(--changed-bar-inset)) var(--brand);
-  animation: ub-changed-in 160ms ease-out;
-}
-
-/* Only `from` is given: the block's own box-shadow is the destination, so the
-   line fades up in place rather than being described twice. */
-@keyframes ub-changed-in {
-  from {
-    box-shadow: calc(-1 * var(--changed-bar-inset)) 0 0
-      calc(var(--changed-bar-width) - var(--changed-bar-inset)) transparent;
-  }
-}
-
-/* The rail's half — the only half a reader can see while the block is out of
-   viewport. The slot is always in the flow, so switching the dot on moves no
-   heading text sideways. */
-.ub-outline-dot {
-  display: inline-block;
-  vertical-align: middle;
-  width: 0.4rem;
-  height: 0.4rem;
-  margin-right: 0.4rem;
-  border-radius: 50%;
-  background: var(--brand);
-  opacity: 0;
-  transition: opacity 120ms ease-out;
-}
-
-.ub-outline-dot-on {
-  opacity: 1;
-}
-
-/* Content for a screen reader and nobody else: what the outline's dot means
-   for anyone who cannot see a colour, and the list container each run of list
-   items is announced inside (editor/list-keys.ts). Off-screen rather than
-   `display: none`, which would take it out of the accessibility tree too. */
-.ub-sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  border: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-/* Both are decoration on a state change that has already happened. */
-@media (prefers-reduced-motion: reduce) {
-  .ub-changed {
-    animation: none;
-  }
-
-  .ub-outline-dot {
-    transition: none;
-  }
-}
-
-/* ---------------------------------------------------------------------------
- * Agent typing theater (#121)
- *
- * Five classes, all applied by ProseMirror decorations over text that is
- * already correct — see `src/editor/typing-theater.ts`.
- *
- * The plugin is the off-switch for `prefers-reduced-motion`: under that
- * preference it builds no takes, so four of these five are never applied at
- * all and need no rule of their own. The fifth is `.ub-typed-pulse`, and it
- * gets a guard at the foot of this section — see the note there for why it
- * needs one, and why it has to be *there* rather than in the reduced-motion
- * block further up the file.
- * ------------------------------------------------------------------------- */
-
-/* Text the agent removed, drawn back in as a widget so it can be seen leaving.
-   It is not in the document — the document already says the new thing. */
-.ub-typed-out {
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
-  opacity: 0.5;
-}
-
-/* The collapse is `font-size`, which is the only way inline text can shrink to
-   nothing and still wrap while it does. Width and `max-width` do not apply to
-   an inline box, and making it `inline-block` to give them something to act on
-   would stop a removed paragraph from wrapping at all — one very long line
-   sliding out of the column. `forwards` holds it at zero for the frame between
-   the animation ending and the widget being dropped. */
-.ub-typed-out-going {
-  /* Matches STRIKE_MS in typing-theater.ts. */
-  animation: ub-typed-out 350ms ease-in forwards;
-}
-
-@keyframes ub-typed-out {
-  to {
-    font-size: 0;
-    opacity: 0;
-  }
-}
-
-/* Text the agent has written but the reader has not been shown yet. `display:
-   none` rather than `visibility: hidden`, so the line grows as it is typed
-   instead of the whole final paragraph sitting there as blank space — and so a
-   screen reader is not read text that is, as far as this reader is concerned,
-   still being written. Nothing is ever hidden under the local caret: a block
-   the reader's selection is in is not animated at all. */
-.ub-typing-veil {
-  display: none;
-}
-
-/* The frontier the text is arriving at. The negative margin is what keeps it
-   free: the bar is painted in the space the next character will occupy, so no
-   prose moves when it does. One colour for now — a caret per agent session
-   needs the awareness attribution that #73 will bring. */
-.ub-typing-caret {
-  display: inline-block;
-  width: 2px;
-  height: 1.05em;
-  margin-right: -2px;
-  vertical-align: text-bottom;
-  background: var(--brand);
-}
-
-/* A block that was fast-forwarded rather than played, because the reader had
-   more waiting for them than the backlog allows. The gutter line has already
-   said the block changed; this only says "and it changed just now". */
-.ub-typed-pulse {
-  /* Matches PULSE_MS in typing-theater.ts. */
-  animation: ub-typed-pulse 600ms ease-out;
-}
-
-@keyframes ub-typed-pulse {
-  from {
-    background: color-mix(in oklch, var(--brand) 20%, transparent);
-  }
-}
-
-/* The pulse is the one part of the theater that can still be on screen when the
-   plugin stops drawing, so it is the one part that needs a CSS guard.
-   `prefers-reduced-motion` can be turned on *during* a pulse, and the plugin's
-   own answer — clearing everything in the disabled branch of `reduce` — only
-   reaches the screen on the next transaction. This settles it immediately, and
-   settles it for any path that puts the class on a block while the preference
-   is true, including ones nobody has thought of.
-
-   It has to live **here, after the rule it turns off**, not up in the
-   reduced-motion block with `.ub-changed`. A media query contributes nothing to
-   specificity: both rules are one class, so the later one in the file wins. Up
-   there it would be overridden by `.ub-typed-pulse` below it and quietly do
-   nothing at all — which is a hard thing to notice, since the plugin usually
-   clears the pulse anyway and the animation is 600ms long. The ordering is
-   pinned by a test in `test/typing-theater.test.ts` for that reason. */
-@media (prefers-reduced-motion: reduce) {
-  .ub-typed-pulse {
-    animation: none;
-  }
 }
 
 /* ---- all docs (#118) ------------------------------------------------------

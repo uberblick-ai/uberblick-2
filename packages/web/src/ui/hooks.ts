@@ -28,7 +28,6 @@ import { getSetting, subscribeSettings } from "../settings.js";
 import type { Settings } from "../settings.js";
 import { AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
 import type { AwarenessUser } from "../collab/identity.js";
-import { changedBlocks } from "../editor/changed-blocks.js";
 import { findForeignBlocks } from "../editor/palette.js";
 import type { ForeignBlock } from "../editor/palette.js";
 import { blockText, plainText } from "../editor/ytext.js";
@@ -490,51 +489,6 @@ export function useOutline(connection: RoomConnection | null): OutlineEntry[] {
     return observeOutline(connection.ydoc, setOutline);
   }, [connection]);
   return outline;
-}
-
-/** No marks. One frozen instance, so "nothing changed" never re-renders anything. */
-const NO_CHANGES: ReadonlySet<string> = new Set<string>();
-
-/** Whether `previous` already holds exactly the marked ids and no others. */
-function sameBlocks(
-  previous: ReadonlySet<string>,
-  touched: ReadonlyMap<string, number>,
-): boolean {
-  if (previous.size !== touched.size) return false;
-  for (const id of touched.keys()) if (!previous.has(id)) return false;
-  return true;
-}
-
-/**
- * Blocks a remote client has changed since this reader last looked, live.
- *
- * A snapshot rather than the tracker's own set: React compares by identity, and
- * a set that mutates in place would never look different to it. The membership
- * check is the other half of that — the tracker also announces changes that are
- * not membership changes (a block marked *again* restarts its read window), and
- * a fresh Set for one of those would re-render the rail to draw the same dots.
- */
-export function useChangedBlocks(
-  connection: RoomConnection | null,
-): ReadonlySet<string> {
-  const [changed, setChanged] = useState<ReadonlySet<string>>(NO_CHANGES);
-  useEffect(() => {
-    if (connection === null) {
-      setChanged(NO_CHANGES);
-      return;
-    }
-    const marks = changedBlocks(connection);
-    const read = (): void => {
-      const touched = marks.touched();
-      setChanged((previous) => {
-        if (sameBlocks(previous, touched)) return previous;
-        return touched.size === 0 ? NO_CHANGES : new Set(touched.keys());
-      });
-    };
-    read();
-    return marks.subscribe(read);
-  }, [connection]);
-  return changed;
 }
 
 /**
