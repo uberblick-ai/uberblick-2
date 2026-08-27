@@ -104,7 +104,7 @@ const describeTable = describe.skipIf(!PRESENT);
 describeTable(
   PRESENT
     ? "the skill's tables and the module's tables are the same tables"
-    : "the preflight table (SKIPPED: source-only checkout — the Docker review image carries no .claude/skills)",
+    : "the preflight table (SKIPPED: source-only checkout without .claude/skills)",
   () => {
     it("routes every documented row of the tier table", () => {
       const rows = markdownTable("| Materiality |", "| Tier |", "| Challengers |");

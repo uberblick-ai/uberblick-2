@@ -2,7 +2,8 @@
 
 Read this whenever a PR has an external round to request or a finding to
 disposition. `SKILL.md` step 2 owns the gates' order and their mechanics;
-everything here is conditional on a review producing something.
+"Requesting the round" applies before a review exists, and every section after
+it is conditional on one producing something.
 
 ## Requesting the round
 
