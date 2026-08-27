@@ -77,7 +77,7 @@ afterAll(() => {
 describe("directory timestamps", () => {
   it("stamps createdAt on create_doc and returns both from list_docs", async () => {
     const rig = await localRig();
-    const doc = await rig.ok("create_doc", { title: "Stamped" });
+    const doc = await rig.ok("create_doc", { title: "Stamped", description: "A test document." });
 
     const listed = await rig.ok("list_docs");
     const entry = listed.docs.find((row: any) => row.uuid === doc.uuid);
@@ -87,7 +87,7 @@ describe("directory timestamps", () => {
 
   it("bumps updatedAt at most once per window under a burst of edits", async () => {
     const rig = await localRig();
-    const doc = await rig.ok("create_doc", { title: "Burst" });
+    const doc = await rig.ok("create_doc", { title: "Burst", description: "A test document." });
     const directoryUpdates = countDirectoryUpdates(rig);
 
     // Twenty edits spread over twenty seconds — a plausible minute of an agent
@@ -118,7 +118,7 @@ describe("directory timestamps", () => {
 
   it("bumps updatedAt immediately on a tag change", async () => {
     const rig = await localRig();
-    const doc = await rig.ok("create_doc", { title: "Retagged" });
+    const doc = await rig.ok("create_doc", { title: "Retagged", description: "A test document." });
 
     vi.setSystemTime(T0 + 1_000);
     await rig.ok("set_tags", { uuid: doc.uuid, tags: ["reference"] });
@@ -127,7 +127,7 @@ describe("directory timestamps", () => {
 
   it("bumps updatedAt immediately on a title change", async () => {
     const rig = await localRig();
-    const doc = await rig.ok("create_doc", { title: "Before" });
+    const doc = await rig.ok("create_doc", { title: "Before", description: "A test document." });
 
     // The web editor's path: the title lives in the document, and the stub
     // follows it.
@@ -142,7 +142,7 @@ describe("directory timestamps", () => {
 
   it("backfills createdAt on a stub that predates the field", async () => {
     const rig = await localRig();
-    const doc = await rig.ok("create_doc", { title: "Old" });
+    const doc = await rig.ok("create_doc", { title: "Old", description: "A test document." });
 
     // A stub exactly as a writer that predates the fields left it: right title,
     // right tags, no stamps at all. Written into the map directly, because

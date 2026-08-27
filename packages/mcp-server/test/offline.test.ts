@@ -63,6 +63,7 @@ describe("with the hub stopped", () => {
       "rate_doc",
       "restore_doc",
       "search",
+      "set_description",
       "set_links",
       "set_tags",
       "sidebar_group",
@@ -80,6 +81,7 @@ describe("with the hub stopped", () => {
 
     const created = await rig.ok("create_doc", {
       title: "Offline notes",
+      description: "A test document.",
       tags: ["spike"],
       blocks: [
         { type: "heading", text: "Offline notes", level: 1 },
@@ -91,7 +93,7 @@ describe("with the hub stopped", () => {
     expect(created.uuid).toBeTruthy();
     expect(created.blocks).toHaveLength(4);
 
-    const target = await rig.ok("create_doc", { title: "Link target" });
+    const target = await rig.ok("create_doc", { title: "Link target", description: "A test document." });
     await rig.ok("set_links", {
       uuid: created.uuid,
       links: [target.uuid],
@@ -174,7 +176,7 @@ describe("with the hub stopped", () => {
   it("reports every mutating tool as applied but not synced", async () => {
     const rig = await offlineRig();
 
-    const created = await rig.ok("create_doc", { title: "Durability" });
+    const created = await rig.ok("create_doc", { title: "Durability", description: "A test document." });
     expect(created.applied).toBe(true);
     expect(created.synced).toBe(false);
 
@@ -213,7 +215,7 @@ describe("with the hub stopped", () => {
   // token and is pinned in sync.test.ts.
   it("reports the hub as down, with the unsynced work it is holding", async () => {
     const rig = await offlineRig();
-    const created = await rig.ok("create_doc", { title: "Held locally" });
+    const created = await rig.ok("create_doc", { title: "Held locally", description: "A test document." });
 
     const status = await rig.ok("sync_status", {});
     expect(status.hub.status).toBe("hub-down");
@@ -237,7 +239,7 @@ describe("with the hub stopped", () => {
     const off = await disabled.ok("sync_status", {});
     expect(off.hub.status).toBe("disabled");
     expect(off.hub.url).toBeNull();
-    const local = await disabled.ok("create_doc", { title: "Local only" });
+    const local = await disabled.ok("create_doc", { title: "Local only", description: "A test document." });
     expect(local.applied).toBe(true);
     expect(local.synced).toBe(false);
   });
@@ -249,7 +251,7 @@ describe("with the hub stopped", () => {
     const databasePath = tempDatabasePath();
     const first = await startServer(testConfig({ databasePath }));
     rigs.push(first);
-    const created = await first.ok("create_doc", { title: "Never left home" });
+    const created = await first.ok("create_doc", { title: "Never left home", description: "A test document." });
 
     const before = await first.ok("sync_status", {});
     expect(before.hub.status).toBe("disabled");

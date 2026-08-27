@@ -242,7 +242,11 @@ async function createDocument(box: Sandbox): Promise<void> {
   try {
     await client.callTool({
       name: "create_doc",
-      arguments: { title: "held here", blocks: [{ type: "paragraph", text: "body" }] },
+      arguments: {
+        title: "held here",
+        description: "A test document.",
+        blocks: [{ type: "paragraph", text: "body" }],
+      },
     });
   } finally {
     await client.close();

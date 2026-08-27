@@ -486,6 +486,7 @@ export class Replicas {
       uuid: meta.uuid,
       title: meta.title,
       tags: meta.tags,
+      description: meta.description ?? "",
       links: meta.links,
       body: getBlocks(replica.doc)
         .map((block) => block.text)
@@ -674,9 +675,16 @@ export class Replicas {
   /**
    * Bring the directory stub back in line with the document, and stamp it.
    *
-   * `meta.title` in the doc is authoritative; the stub is a cache. A tombstone
-   * is left alone — `upsertDirectoryEntry` keeps it sticky, but rewriting it on
-   * every observed update would churn the directory for nothing.
+   * `meta.title` and `meta.description` in the doc are authoritative; the stub
+   * is a cache. A tombstone is left alone — `upsertDirectoryEntry` keeps it
+   * sticky, but rewriting it on every observed update would churn the directory
+   * for nothing.
+   *
+   * The description is cached exactly like the title, and costs the directory
+   * exactly what a rename costs: it is written wholesale by `set_description`,
+   * so a change to it is a metadata change and publishes one directory update.
+   * There is no per-keystroke path into it — nothing edits a description a
+   * character at a time.
    *
    * Timestamps ride the same write, on this server's own clock:
    *
@@ -703,6 +711,7 @@ export class Replicas {
     const metaChanged =
       stub === null ||
       stub.title !== meta.title ||
+      (stub.description ?? null) !== meta.description ||
       !sameSet(stub.tags, meta.tags);
     const staleStamp =
       stub?.updatedAt === undefined ||
@@ -714,6 +723,14 @@ export class Replicas {
       uuid: meta.uuid,
       title: meta.title,
       tags: meta.tags,
+      // Always stated, never carried forward: this replica holds the document,
+      // so it knows the authoritative answer — including that there is none,
+      // which the empty string is how to say. It is stated from THIS replica's
+      // copy of the document, which is the same discipline the title has: two
+      // replicas describing one document converge last-write-wins on the stub,
+      // and whichever of them saw the newer document then repairs the entry on
+      // its next observed update. The cache heals; it is not arbitrated.
+      description: meta.description ?? "",
       createdAt: now,
       ...(metaChanged || staleStamp ? { updatedAt: now } : {}),
     });

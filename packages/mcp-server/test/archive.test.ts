@@ -78,6 +78,7 @@ const BODY = "A glossary of the terms this system keeps using.";
 async function seedDoc(rig: Rig): Promise<any> {
   return rig.ok("create_doc", {
     title: "Concepts",
+    description: "A test document.",
     tags: ["reference"],
     blocks: [{ type: "paragraph", text: BODY }],
   });
@@ -119,6 +120,7 @@ describe("archive_doc", () => {
       uuid: doc.uuid,
       title: "Concepts",
       tags: ["reference"],
+      description: "A test document.",
       deleted: true,
       pinned: false,
       // Stamped at creation and carried through the tombstone — see
@@ -147,7 +149,7 @@ describe("archive_doc", () => {
     rigs.push(rig);
 
     const renamed = await seedDoc(rig);
-    const bystander = await rig.ok("create_doc", { title: "Untouched" });
+    const bystander = await rig.ok("create_doc", { title: "Untouched", description: "A test document." });
 
     store.indexed.length = 0;
     upsertDirectoryEntry(rig.instance.replicas.directory().doc, {
@@ -293,6 +295,7 @@ describe("restore_doc", () => {
       uuid: doc.uuid,
       title: "Concepts",
       tags: ["reference"],
+      description: "A test document.",
       pinned: false,
       createdAt: expect.any(Number),
       updatedAt: expect.any(Number),
@@ -378,7 +381,7 @@ describe("restore_doc", () => {
     rigs.push(rig);
 
     for (const title of ["One", "Two", "Three"]) {
-      const doc = await rig.ok("create_doc", { title });
+      const doc = await rig.ok("create_doc", { title, description: "A test document." });
       await rig.ok("archive_doc", { uuid: doc.uuid });
     }
 
@@ -400,7 +403,7 @@ describe("restore_doc", () => {
 
     const uuids: string[] = [];
     for (const title of ["One", "Two", "Three"]) {
-      const doc = await rig.ok("create_doc", { title });
+      const doc = await rig.ok("create_doc", { title, description: "A test document." });
       await rig.ok("archive_doc", { uuid: doc.uuid });
       uuids.push(doc.uuid);
     }
@@ -408,7 +411,7 @@ describe("restore_doc", () => {
     // Rows for tombstoned documents, with nothing queued — what a rebuilt
     // mirror looks like before anything has noticed.
     for (const uuid of uuids) {
-      store.indexDoc({ uuid, title: "stale", tags: [], links: [], body: "" });
+      store.indexDoc({ uuid, title: "stale", tags: [], description: "", links: [], body: "" });
       expect(store.isIndexed(uuid)).toBe(true);
     }
     const before = store.unindexAttempts;
@@ -445,6 +448,7 @@ describe("restore_doc", () => {
       uuid: doc.uuid,
       title: "stale",
       tags: [],
+      description: "",
       links: [],
       body: "",
     });
@@ -482,6 +486,7 @@ describe("restore_doc", () => {
       uuid: doc.uuid,
       title: "Concepts",
       tags: ["retired"],
+      description: "A test document.",
       pinned: false,
       createdAt: expect.any(Number),
       updatedAt: expect.any(Number),

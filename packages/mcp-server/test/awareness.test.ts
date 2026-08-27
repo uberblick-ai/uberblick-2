@@ -57,6 +57,7 @@ describe("agent awareness", () => {
     const rig = await rigWith();
     const doc = await rig.ok("create_doc", {
       title: "Cursors",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "an agent" }],
     });
     const block = doc.blocks[0];
@@ -128,6 +129,7 @@ describe("agent awareness", () => {
     const rig = await rigWith(120);
     const doc = await rig.ok("create_doc", {
       title: "Transient",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "here" }],
     });
     await rig.ok("edit_block", {

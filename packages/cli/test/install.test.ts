@@ -1167,8 +1167,15 @@ describe("two entries, side by side", () => {
     const primary = await open(registered.uberblick, box);
     const pinned = await open(registered["uberblick-other"], box);
     try {
-      await call(primary, "create_doc", { title: "only in the primary" });
-      await call(pinned, "create_doc", { title: "only in the pinned one" });
+      const description = "A test document.";
+      await call(primary, "create_doc", {
+        title: "only in the primary",
+        description,
+      });
+      await call(pinned, "create_doc", {
+        title: "only in the pinned one",
+        description,
+      });
 
       const here = await call<Listing>(primary, "list_docs", {});
       const there = await call<Listing>(pinned, "list_docs", {});

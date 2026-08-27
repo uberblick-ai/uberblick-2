@@ -45,6 +45,7 @@ describe("edit_block", () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
       title: "Conflict",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "the current text" }],
     });
     const block = doc.blocks[0];
@@ -70,6 +71,7 @@ describe("edit_block", () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
       title: "Revs",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "first" }],
     });
     const staleRev = doc.blocks[0].rev;
@@ -101,6 +103,7 @@ describe("edit_block", () => {
     const first = await localRig(databasePath);
     const doc = await first.ok("create_doc", {
       title: "Two agents",
+      description: "A test document.",
       blocks: [
         { type: "paragraph", text: "block one" },
         { type: "paragraph", text: "block two" },
@@ -155,6 +158,7 @@ describe("duplicate blocks from concurrent re-types", () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
       title: "Re-types",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "shared text" }],
     });
     const blockId = doc.blocks[0].id;
@@ -201,6 +205,7 @@ describe("the directory stub as a cache", () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
       title: "The real title",
+      description: "A test document.",
       tags: ["reference"],
       blocks: [{ type: "paragraph", text: "body" }],
     });
@@ -260,6 +265,7 @@ describe("the derived index", () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
       title: "Searchable",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "aardvark" }],
     });
 
@@ -286,9 +292,9 @@ describe("the derived index", () => {
 
   it("follows set_links in both directions", async () => {
     const rig = await localRig();
-    const source = await rig.ok("create_doc", { title: "Source" });
-    const target = await rig.ok("create_doc", { title: "Target" });
-    const other = await rig.ok("create_doc", { title: "Other" });
+    const source = await rig.ok("create_doc", { title: "Source", description: "A test document." });
+    const target = await rig.ok("create_doc", { title: "Target", description: "A test document." });
+    const other = await rig.ok("create_doc", { title: "Other", description: "A test document." });
 
     await rig.ok("set_links", {
       uuid: source.uuid,
@@ -296,7 +302,9 @@ describe("the derived index", () => {
     });
     expect(
       (await rig.ok("backlinks", { uuid: target.uuid })).backlinks,
-    ).toEqual([{ uuid: source.uuid, title: "Source" }]);
+    ).toEqual([
+      { uuid: source.uuid, title: "Source", description: "A test document." },
+    ]);
 
     await rig.ok("set_links", { uuid: source.uuid, links: [other.uuid] });
     expect((await rig.ok("backlinks", { uuid: target.uuid })).backlinks).toEqual(
@@ -304,16 +312,19 @@ describe("the derived index", () => {
     );
     expect(
       (await rig.ok("backlinks", { uuid: other.uuid })).backlinks,
-    ).toEqual([{ uuid: source.uuid, title: "Source" }]);
+    ).toEqual([
+      { uuid: source.uuid, title: "Source", description: "A test document." },
+    ]);
   });
 
   it("is derived: it can be thrown away and rebuilt from the replicas", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
       title: "Rebuildable",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "pangolin" }],
     });
-    const target = await rig.ok("create_doc", { title: "Pointed at" });
+    const target = await rig.ok("create_doc", { title: "Pointed at", description: "A test document." });
     await rig.ok("set_links", { uuid: doc.uuid, links: [target.uuid] });
 
     // Asserted against the store, not through the tools: a tool call settles
@@ -337,6 +348,7 @@ describe("the derived index", () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
       title: "Tagged",
+      description: "A test document.",
       tags: ["alpha", "beta"],
       blocks: [{ type: "paragraph", text: "quokka" }],
     });
@@ -347,7 +359,12 @@ describe("the derived index", () => {
         uuid: doc.uuid,
         title: "Tagged",
         tags: ["alpha", "beta"],
-        snippet: "quokka",
+        description: "A test document.",
+        // The description leads the indexed body, so a short document's
+        // snippet window reaches back over it. That is the visible cost of
+        // indexing the description as body text rather than as a column FTS5
+        // cannot add — see MirrorStore's docs_fts.
+        snippet: "A test document.\nquokka",
       },
     ]);
 
@@ -362,6 +379,7 @@ describe("the derived index", () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
       title: "Awkward tags",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "bilby" }],
     });
 
@@ -382,6 +400,7 @@ describe("the derived index", () => {
       uuid: doc.uuid,
       title: "Awkward tags",
       tags: ["", "after"],
+      description: "",
       links: [],
       body: "bilby",
     });
@@ -395,10 +414,12 @@ describe("the derived index", () => {
     const rig = await localRig();
     const kept = await rig.ok("create_doc", {
       title: "Kept",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "numbat" }],
     });
     const deleted = await rig.ok("create_doc", {
       title: "Deleted elsewhere",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "numbat" }],
     });
 
@@ -428,7 +449,7 @@ describe("the derived index", () => {
 describe("identity at the boundary", () => {
   it("rejects a link that is not a UUID", async () => {
     const rig = await localRig();
-    const doc = await rig.ok("create_doc", { title: "Bad links" });
+    const doc = await rig.ok("create_doc", { title: "Bad links", description: "A test document." });
 
     // A path was already refused; an arbitrary string is the same violation,
     // and either one persists a target nothing can ever resolve.
@@ -440,7 +461,7 @@ describe("identity at the boundary", () => {
       expect(refused.isError).toBe(true);
     }
 
-    const target = await rig.ok("create_doc", { title: "Real target" });
+    const target = await rig.ok("create_doc", { title: "Real target", description: "A test document." });
     const accepted = await rig.ok("set_links", {
       uuid: doc.uuid,
       links: [target.uuid],
