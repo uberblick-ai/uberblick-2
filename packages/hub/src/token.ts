@@ -83,6 +83,17 @@ export const MAX_TOKEN_LIFETIME_SECONDS = 15 * 60;
  */
 export const CLOCK_SKEW_SECONDS = 60;
 
+/**
+ * The longest a token may be — 4096 characters, which for a base64url token is
+ * 4 KiB. A real one is a few hundred bytes.
+ *
+ * Both ends hold it. {@link inspectToken} refuses anything longer before it
+ * decodes or parses, so an unauthenticated caller cannot choose how much work
+ * the hub does; {@link mintToken} refuses to produce one, because the hub must
+ * not sign what it will not accept.
+ */
+export const MAX_TOKEN_LENGTH = 4096;
+
 export interface TokenClaims {
   typ: TokenType;
   /** Who the token was issued to — a user or agent session identifier. */
@@ -550,18 +561,19 @@ export async function mintToken(
     textEncoder.encode(payloadPart),
   );
 
-  return `${payloadPart}${SEPARATOR}${base64urlEncode(new Uint8Array(signature))}`;
+  const minted = `${payloadPart}${SEPARATOR}${base64urlEncode(new Uint8Array(signature))}`;
+  // The hub must not sign what it will not accept: `verifyToken` refuses a
+  // token past this length, and `sub` is the one claim long enough to reach it.
+  if (minted.length > MAX_TOKEN_LENGTH) {
+    throw new Error(
+      `mintToken: the token would be ${minted.length} characters, past the ${MAX_TOKEN_LENGTH} a token may be — sub is too long`,
+    );
+  }
+  return minted;
 }
 
-function parseClaims(payloadJson: string): TokenClaims | null {
-  const parsed: unknown = JSON.parse(payloadJson);
-  if (typeof parsed !== "object" || parsed === null) {
-    return null;
-  }
-  const { typ, sub, workspace, scope, kid, iat, exp } = parsed as Record<
-    string,
-    unknown
-  >;
+function parseClaims(payload: Record<string, unknown>): TokenClaims | null {
+  const { typ, sub, workspace, scope, kid, iat, exp } = payload;
   // `typ` and `exp` are also what refuses a v1 token: it carries neither, so it
   // is not a token, whoever signed it. There is no compatibility branch.
   if (typ !== "room") {
@@ -586,12 +598,127 @@ function parseClaims(payloadJson: string): TokenClaims | null {
 }
 
 /**
+ * Why a token did not verify. The hub's **log** vocabulary, never a wire
+ * reason: whoever presented the token still learns only `invalid-token`, so a
+ * forged token and a stale one are the same refusal to their sender.
+ */
+export type TokenFailure =
+  /**
+   * Not a token at all: not two segments, not canonical base64url, or a payload
+   * that is not a JSON object. Nothing about it can be believed or reported.
+   */
+  | "unparseable"
+  /** A readable payload signed by some key that is not the one presented here. */
+  | "bad-signature"
+  /**
+   * Correctly signed, but no mint could have produced these claims — a pre-v2
+   * token carrying no `typ`/`exp`, an unknown scope, a slug-decorated
+   * workspace. This is what a client from before the claims-v2 deploy looks
+   * like, which is why it is its own cause and not "invalid".
+   */
+  | "unsupported-claims";
+
+/**
+ * What a rejected token says about itself — **unverified, for logs only.**
+ *
+ * The point is precisely the token that did *not* verify: an operator hunting
+ * the machine that keeps presenting a stale token needs a name, and by
+ * definition cannot have an authenticated one. Never treat these as facts, and
+ * never widen this: the signature and the token string stay out, so that what a
+ * log line can carry is decided here rather than at each logging site.
+ */
+export interface TokenIdentity {
+  /** The `typ` claim when the payload carries one as a string; `null` otherwise — a pre-v2 token has none. */
+  typ: string | null;
+  /** The `sub` claim when the payload carries one as a string; `null` otherwise. */
+  sub: string | null;
+}
+
+export interface TokenRejection {
+  failure: TokenFailure;
+  /** `null` exactly when the failure is `"unparseable"` — nothing was readable. */
+  identity: TokenIdentity | null;
+}
+
+/**
+ * A claim value's length in a log line. A rejected token is unauthenticated
+ * input from anywhere, and the hub's log is not its megaphone.
+ */
+const LOG_FIELD_LIMIT = 128;
+
+function logString(value: unknown): string | null {
+  return typeof value === "string" && value !== ""
+    ? value.slice(0, LOG_FIELD_LIMIT)
+    : null;
+}
+
+const UNPARSEABLE: TokenRejection = { failure: "unparseable", identity: null };
+
+/**
+ * Verify a token, returning its claims or **why it was refused** — the same
+ * decision {@link verifyToken} makes, with the reason kept instead of dropped.
+ *
+ * For diagnostics, and nothing else: an admission decision reads the claims or
+ * refuses, and every failure is the same refusal. What the reason is *for* is
+ * the hub's rejection log, where "a fleet of pre-v2 clients" and "somebody
+ * signing with the wrong secret" have to read differently.
+ *
+ * Never throws, and the signature is still checked before the claims are
+ * believed — an unverified payload is only ever read for {@link TokenIdentity}.
+ */
+export async function inspectToken(
+  key: CryptoKey,
+  token: string,
+): Promise<TokenClaims | TokenRejection> {
+  if (token.length > MAX_TOKEN_LENGTH) {
+    return UNPARSEABLE;
+  }
+  const parts = token.split(SEPARATOR);
+  if (parts.length !== 2) {
+    return UNPARSEABLE;
+  }
+  const [payloadPart, signaturePart] = parts;
+  if (!payloadPart || !signaturePart) {
+    return UNPARSEABLE;
+  }
+
+  let payload: unknown;
+  let signed: boolean;
+  try {
+    payload = JSON.parse(textDecoder.decode(base64urlDecode(payloadPart)));
+    signed = await globalThis.crypto.subtle.verify(
+      "HMAC",
+      key,
+      base64urlDecode(signaturePart),
+      textEncoder.encode(payloadPart),
+    );
+  } catch {
+    return UNPARSEABLE;
+  }
+  if (typeof payload !== "object" || payload === null) {
+    return UNPARSEABLE;
+  }
+
+  const claims = payload as Record<string, unknown>;
+  const identity: TokenIdentity = {
+    typ: logString(claims.typ),
+    sub: logString(claims.sub),
+  };
+  if (!signed) {
+    return { failure: "bad-signature", identity };
+  }
+  return parseClaims(claims) ?? { failure: "unsupported-claims", identity };
+}
+
+/**
  * Verify a token and return its claims, or `null` for anything that is not a
  * well-formed, correctly signed token whose claims {@link mintToken} could have
  * produced — the two apply the same rules, so a signed payload with a
  * slug-decorated workspace, a fractional `iat` or no `exp` at all is not a
  * token. Never throws: every rejection reason collapses to `null` so callers
- * cannot accidentally distinguish "bad signature" from "bad shape".
+ * cannot accidentally distinguish "bad signature" from "bad shape". A caller
+ * that wants the distinction has to ask for it by name — {@link inspectToken} —
+ * and the only caller that may is a log line.
  *
  * Time is *not* checked here. Whether a well-signed token is fresh enough to
  * admit is the hub's decision against the hub's clock — {@link clampToken} —
@@ -601,32 +728,8 @@ export async function verifyToken(
   key: CryptoKey,
   token: string,
 ): Promise<TokenClaims | null> {
-  if (token === "") {
-    return null;
-  }
-  const parts = token.split(SEPARATOR);
-  if (parts.length !== 2) {
-    return null;
-  }
-  const [payloadPart, signaturePart] = parts;
-  if (!payloadPart || !signaturePart) {
-    return null;
-  }
-
-  try {
-    const valid = await globalThis.crypto.subtle.verify(
-      "HMAC",
-      key,
-      base64urlDecode(signaturePart),
-      textEncoder.encode(payloadPart),
-    );
-    if (!valid) {
-      return null;
-    }
-    return parseClaims(textDecoder.decode(base64urlDecode(payloadPart)));
-  } catch {
-    return null;
-  }
+  const inspected = await inspectToken(key, token);
+  return "failure" in inspected ? null : inspected;
 }
 
 /** Why a correctly signed token is still not admissible. */

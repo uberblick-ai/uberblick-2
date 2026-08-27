@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { ClampFailure, TokenClaims, TokenRequest } from "../src/token.js";
 import {
   CLOCK_SKEW_SECONDS,
+  MAX_TOKEN_LENGTH,
   MAX_TOKEN_LIFETIME_SECONDS,
   clampToken,
   formatCredential,
@@ -66,6 +67,27 @@ describe("mintToken / verifyToken", () => {
     // Hocuspocus's auth message and anything that reads it as one word.
     expect(token.split(".")).toHaveLength(2);
     expect(token).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  });
+
+  it("refuses to sign a token it would not read back", async () => {
+    // The hub must not sign what it will not accept. A `sub` is any non-empty
+    // string, so a long enough one would push a correctly minted token past
+    // the length `verifyToken` reads at all.
+    const skeleton = await mintToken(key, request({ sub: "s" }));
+    // Four base64url characters carry three payload bytes, so this is the
+    // longest `sub` that still fits under the bound.
+    const longest = "s".repeat(
+      1 + Math.floor(((MAX_TOKEN_LENGTH - skeleton.length) * 3) / 4),
+    );
+
+    const maximal = await mintToken(key, request({ sub: longest }));
+    expect(maximal.length).toBeLessThanOrEqual(MAX_TOKEN_LENGTH);
+    expect(maximal.length).toBeGreaterThan(MAX_TOKEN_LENGTH - 8);
+    expect((await verifyToken(key, maximal))?.sub).toBe(longest);
+
+    await expect(
+      mintToken(key, request({ sub: `${longest}${"s".repeat(64)}` })),
+    ).rejects.toThrow(/mintToken/);
   });
 
   it("carries a credential id in kid when one signed it", async () => {

@@ -11,6 +11,9 @@
  *    then refuses any room outside `claims.workspace`. Tokens arrive in the
  *    Hocuspocus auth message; a token in the URL query string is rejected
  *    outright, because query strings end up in access logs and proxy traces.
+ *    A refusal is one `hub.auth.rejected` line naming the peer, a stable cause
+ *    and whatever the token said about itself; the client still learns only
+ *    that it was refused.
  *
  * 2. **The flush is an operation, not a side effect.** Hocuspocus debounces
  *    `onStoreDocument` (2s by default), so a document lives in memory for a
@@ -46,8 +49,13 @@ import { DEFAULT_HOST, DEFAULT_PORT, defaultDatabasePath } from "./config.js";
 import type { HubLogger } from "./log.js";
 import { stderrLogger } from "./log.js";
 import { HubDatabase, isEphemeralDatabase } from "./persistence.js";
-import type { TokenClaims } from "./token.js";
-import { clampToken, importRootSecret, verifyToken } from "./token.js";
+import type {
+  ClampFailure,
+  TokenClaims,
+  TokenFailure,
+  TokenIdentity,
+} from "./token.js";
+import { clampToken, importRootSecret, inspectToken } from "./token.js";
 
 /**
  * Connection context. The claims *are* the context: everything downstream
@@ -83,6 +91,121 @@ export interface Hub {
 /** Query parameters that would carry a token. Their presence is a rejection. */
 const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
+/**
+ * The header the upgrade hook stamps the direct peer's address into, and the
+ * only way `onAuthenticate` can learn it.
+ *
+ * Hocuspocus hands the auth hook a web-standard `Request` rebuilt from the
+ * upgrade request's headers; the TCP socket, and with it `remoteAddress`, is
+ * not on it. `onUpgrade` is the last hook that still holds the Node request, so
+ * that is where the address is written. Stamped unconditionally: a client that
+ * sends this header itself has its value overwritten before anything reads it.
+ *
+ * Exported for the tests, which build the headers `onAuthenticate` would see.
+ */
+export const PEER_ADDRESS_HEADER = "x-uberblick-peer-address";
+
+/** The proxy's header, read only from a peer allowed to speak for others. */
+const FORWARDED_FOR_HEADER = "x-forwarded-for";
+
+/** What an address may be spelled with. A header is not a licence to write prose into the log. */
+const ADDRESS_CHARACTERS = /^[0-9a-fA-F:.%[\]]{1,64}$/;
+
+/** Who the hub is talking to, as far as it can honestly tell. */
+export interface PeerAddress {
+  /** The client's address, or `"unknown"` when the socket reported none. */
+  address: string;
+  /** True when the address came from the trusted proxy rather than the socket. */
+  proxied: boolean;
+}
+
+/**
+ * Loopback, private, or link-local: an address no client reaches this hub from.
+ *
+ * Node reports an IPv4 peer on a dual-stack socket as `::ffff:127.0.0.1`, so
+ * the mapped form is unwrapped first.
+ */
+function isLocalProxy(address: string): boolean {
+  const ip = address.startsWith("::ffff:") ? address.slice(7) : address;
+  const octets = ip.split(".");
+  if (octets.length === 4 && octets.every((octet) => /^\d{1,3}$/.test(octet))) {
+    const [first = -1, second = -1] = octets.map(Number);
+    return (
+      first === 127 ||
+      first === 10 ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168) ||
+      (first === 169 && second === 254)
+    );
+  }
+  // ::1, fc00::/7 (unique local), fe80::/10 (link-local).
+  const v6 = ip.toLowerCase();
+  return v6 === "::1" || /^f[cd]/.test(v6) || /^fe[89ab]/.test(v6);
+}
+
+/**
+ * The address to name in a log line: the socket's peer, or — when that peer is
+ * the deployment's own proxy — the address the proxy observed.
+ *
+ * Exported for the tests, which cannot open a socket from an untrusted address.
+ *
+ * **Which peers may speak for others.** Only one that is not globally routable.
+ * In the Compose deployment the hub publishes no port and Caddy reaches it over
+ * the bridge network, so a private address on that socket is the proxy; a
+ * client dialling the hub directly arrives from the tailnet (100.64/10,
+ * deliberately not in the list) and speaks only for itself.
+ *
+ * **Which hop of `X-Forwarded-For`.** The *last* one — the address the proxy
+ * itself saw. With this repo's Caddyfile, which configures no `trusted_proxies`,
+ * Caddy discards whatever the client put in that header and writes the single
+ * peer it observed, so the header has one hop today and both readings coincide.
+ * The last hop is taken because it stays correct if `trusted_proxies` is ever
+ * configured: Caddy would then preserve the client's entries and append its
+ * own, making the conventional leftmost entry client-controlled. Two chained
+ * proxies would make it the inner proxy's address, which is the reason the
+ * deployment stays one hop deep.
+ *
+ * **What this address is for.** A log field, and never an auth input: nothing
+ * downstream branches on it, so a wrong `peer` misleads a reader rather than
+ * admitting a connection. That matters because the trust rule is about the
+ * *shape* of the direct peer, not about a configured proxy — on a loopback-bound
+ * `mise run hub` any local client can send `X-Forwarded-For` and be logged with
+ * `proxied: true`, and `proxied: true` on a hub that has no proxy in front of it
+ * is exactly the tell. In the Compose deployment it cannot happen at all: the
+ * hub publishes no port, so Caddy on the bridge network is the only thing that
+ * can open that socket.
+ */
+export function resolvePeer(headers: Headers): PeerAddress {
+  const direct = headers.get(PEER_ADDRESS_HEADER) ?? "";
+  const forwarded = headers.get(FORWARDED_FOR_HEADER);
+  if (forwarded !== null && isLocalProxy(direct)) {
+    const hops = forwarded.split(",");
+    const observed = (hops[hops.length - 1] ?? "").trim();
+    if (ADDRESS_CHARACTERS.test(observed)) {
+      return { address: observed, proxied: true };
+    }
+  }
+  return { address: direct === "" ? "unknown" : direct, proxied: false };
+}
+
+/** Every reason the hub refuses a connection, as one closed vocabulary. */
+type RejectionCause =
+  | "token-in-query"
+  | TokenFailure
+  | ClampFailure
+  | "workspace-mismatch";
+
+/**
+ * The token's own account of itself on a rejection line: `typ` and `sub` when
+ * the payload was readable at all, and the fact that it was not otherwise.
+ * Unverified by construction — the token did not verify — and never the token,
+ * its signature or the secret.
+ */
+function tokenFields(identity: TokenIdentity | null): Record<string, unknown> {
+  return identity === null
+    ? { token: "unparseable" }
+    : { typ: identity.typ, sub: identity.sub };
+}
 
 class AuthError extends Error {
   /** Hocuspocus sends this to the client as the permission-denied reason. */
@@ -288,39 +411,62 @@ export async function createHub(config: HubConfig): Promise<Hub> {
       : { maxDebounce: config.maxDebounce }),
     extensions: [database],
 
+    /**
+     * Stamp the direct peer's address onto the upgrade request, the one place
+     * it is still reachable. See {@link PEER_ADDRESS_HEADER}. It must not throw:
+     * Hocuspocus rethrows out of an async `upgrade` listener, which nothing
+     * catches.
+     */
+    async onUpgrade({ request }) {
+      request.headers[PEER_ADDRESS_HEADER] = request.socket?.remoteAddress ?? "";
+    },
+
     async onAuthenticate({
       token,
       documentName,
+      requestHeaders,
       requestParameters,
       connectionConfig,
     }) {
+      // Every rejection names the peer. A rejection nobody can attribute is
+      // the operational problem this event exists to solve: several machines,
+      // browser tabs and long-lived agent sessions present tokens to the same
+      // hub, and only one of them is the one that has to be restarted.
+      const peer = resolvePeer(requestHeaders);
+      const rejected = (
+        cause: RejectionCause,
+        fields: Record<string, unknown> = {},
+      ) => ({
+        event: "hub.auth.rejected",
+        room: documentName,
+        peer: peer.address,
+        proxied: peer.proxied,
+        ...fields,
+        cause,
+      });
+
       const queried = TOKEN_QUERY_PARAMS.find((name) =>
         requestParameters.has(name),
       );
       if (queried !== undefined) {
-        log({
-          event: "hub.auth.rejected",
-          room: documentName,
-          cause: `token in query parameter ${queried}`,
-        });
+        // No token identity here: the connection is refused on the URL, before
+        // any token has been read, and the parameter is the whole finding.
+        log(rejected("token-in-query", { parameter: queried }));
         throw new AuthError(
           "token-in-query",
           `token must be sent in the auth message, not the "${queried}" query parameter`,
         );
       }
 
-      const claims = await verifyToken(rootKey, token);
-      if (claims === null) {
-        log({
-          event: "hub.auth.rejected",
-          room: documentName,
-          cause: "invalid token",
-        });
+      const inspected = await inspectToken(rootKey, token);
+      if ("failure" in inspected) {
+        log(rejected(inspected.failure, tokenFields(inspected.identity)));
         throw new AuthError(
           "invalid-token",
           "token is missing, malformed or badly signed",
         );
       }
+      const claims = inspected;
 
       // The lifetime ceiling, applied whatever the token claimed. Every MCP
       // server and every `ub` mints locally, so this is the only place a
@@ -329,12 +475,7 @@ export async function createHub(config: HubConfig): Promise<Hub> {
       // to whoever sent it.
       const clamped = clampToken(claims, Math.floor(Date.now() / 1000));
       if (clamped !== null) {
-        log({
-          event: "hub.auth.rejected",
-          room: documentName,
-          sub: claims.sub,
-          cause: `token ${clamped}`,
-        });
+        log(rejected(clamped, { typ: claims.typ, sub: claims.sub }));
         throw new AuthError(
           "invalid-token",
           "token is missing, malformed or badly signed",
@@ -343,12 +484,13 @@ export async function createHub(config: HubConfig): Promise<Hub> {
 
       const workspace = roomWorkspace(documentName);
       if (workspace === null || workspace !== claims.workspace) {
-        log({
-          event: "hub.auth.rejected",
-          room: documentName,
-          sub: claims.sub,
-          cause: `token is scoped to workspace ${claims.workspace}`,
-        });
+        log(
+          rejected("workspace-mismatch", {
+            typ: claims.typ,
+            sub: claims.sub,
+            workspace: claims.workspace,
+          }),
+        );
         throw new AuthError(
           "workspace-mismatch",
           `token for workspace "${claims.workspace}" may not open room "${documentName}"`,
