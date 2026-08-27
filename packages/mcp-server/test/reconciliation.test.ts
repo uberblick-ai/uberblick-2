@@ -316,11 +316,10 @@ describe("a rename that only half landed", () => {
       blocks: [{ type: "paragraph", text: "the document as it stands" }],
     });
 
-    // Half a rename from elsewhere, twice: once for a document this replica
-    // does not hold at all, once for one it does.
+    // Half a rename from elsewhere: a stub for a document this replica does not
+    // hold at all.
     const absent = randomUUID();
     stubOnly(rig, absent, "Renamed elsewhere");
-    stubOnly(rig, created.uuid, "Renamed elsewhere too");
 
     // Not held here: the cached title is what a listing can honestly show, and
     // the read says the document has not arrived rather than implying the
@@ -330,14 +329,27 @@ describe("a rename that only half landed", () => {
     expect(refused.payload.error).toBe("doc_not_hydrated");
     expect(refused.payload.inDirectory).toBe(true);
 
+    // And the same half-rename for a document this replica does hold. Written
+    // here, after the calls above, on purpose: repair rides *document* updates,
+    // and a settle replays a document's own unpolled log tail as one — so a
+    // stub written before this replica had caught up with its own log would be
+    // repaired by the next settle and the window below would never exist. This
+    // replica is caught up, so nothing but a write to the document can heal it.
+    stubOnly(rig, created.uuid, "Renamed elsewhere too");
+
     // Held here: the document's own title wins every answer that can ask it —
     // the read, and `titleFor` in the answers built from the stub.
     expect((await rig.ok("get_doc", { uuid: created.uuid })).title).toBe(
       "Old name",
     );
 
-    // And the cache heals from the document on the next write to it, which is
-    // the "repaired on write" half of the rule — in that direction only.
+    // The listing meanwhile answers from the cache, which is what a cache is.
+    expect((await listed(rig, created.uuid)).title).toBe(
+      "Renamed elsewhere too",
+    );
+
+    // The next write to the document is what heals it — the "repaired on write"
+    // half of the rule, in that direction only.
     await rig.ok("set_description", {
       uuid: created.uuid,
       description: "Described after the stub ran ahead.",
@@ -480,6 +492,10 @@ describe("a repair that originated on the other client", () => {
     expect(await listed(other, uuid)).toBeUndefined();
     expect(getDirectoryEntry(directoryOf(here), uuid)?.deleted).toBe(true);
     expect(getDirectoryEntry(directoryOf(other), uuid)?.deleted).toBe(true);
-    expect(getDirectoryEntry(browser.doc, uuid)?.deleted).toBe(true);
+    // The browser holds the directory over its own socket, so it gets its own
+    // wait rather than borrowing the timing of the two servers' waits.
+    await waitUntil("the tombstone to stand in the browser's directory", () =>
+      getDirectoryEntry(browser.doc, uuid)?.deleted === true,
+    );
   });
 });
