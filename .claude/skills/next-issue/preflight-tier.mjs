@@ -1,11 +1,12 @@
 /**
  * The `next-issue` preflight decision table, in executable form.
  *
- * `SKILL.md` next to this file renders the same table for the coordinator that
- * reads it; this file is the table a test can run. The two are checked against
- * each other in `packages/cli/test/preflight-tier.test.ts`, so the procedure a
- * coordinator follows and the routing this repository claims cannot drift
- * apart — which is the only reason an executable copy earns its place.
+ * `preflight.md` next to this file renders the same table for the coordinator
+ * that reads it; this file is the table a test can run. The two are checked
+ * against each other in `packages/cli/test/preflight-tier.test.ts`, so the
+ * procedure a coordinator follows and the routing this repository claims
+ * cannot drift apart — which is the only reason an executable copy earns its
+ * place.
  *
  * Nothing imports this at runtime. It is not loop machinery; it is the
  * machinery's specification. No dependencies, no scheduling: order,

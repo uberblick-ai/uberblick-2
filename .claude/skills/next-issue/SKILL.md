@@ -17,6 +17,9 @@ file contains only Claude coordinator machinery and does not restate either.
 
 ## Hard rules
 
+- **This file stays under 200 lines.** An addition pays with a deletion, or
+  moves its detail to a companion file beside this one. The core is reloaded on
+  every iteration, so length is a cost every rule in it pays.
 - Apply `AGENTS.md` to every implementer lane and external review. The
   coordinator owns validation and rulings, not feature code.
 - The coordinator's own repo edits (skill or docs changes, commits) happen in
@@ -48,119 +51,39 @@ file contains only Claude coordinator machinery and does not restate either.
    predicate in `AGENTS.md`.
 
 2. **Advance open PRs first** — an open PR is closer to value than a new
-   dispatch, and this includes PRs that predate the loop. For each, drive the
-   CLAUDE.md gates in order:
-   - resolve and record the PR's immutable `headRefOid`, fetch it, then run
-     `REVIEW_SHA=<headRefOid> mise run review` — one command, whatever the SHA
-     contains; never treat tests from a mutable shared checkout as review
-     evidence. Fetch the commit — never check the PR branch out to review it:
-     the runner takes its task definition and `Dockerfile.review` from
-     `origin/main`, and refuses unless the checkout it runs in is at that
-     freshly fetched commit with its runner files unmodified; `git archive`
-     only needs the object. The reviewed commit's own manifests still install
-     during the networked build stage — isolation is the verification
-     container, not the build;
-   - never pass the Docker build secrets, host mounts, privileged mode, or the
-     Docker socket. Run the verification container without network. Keep the
-     SHA-tagged image long enough for focused probes, then remove it when the
-     PR is settled;
-   - probe failure behavior when the change crosses persistence,
-     startup/shutdown, networking, concurrency, or another stateful boundary;
-     happy-path tests alone do not close those acceptance criteria;
+   dispatch, and this includes PRs that predate the loop. CLAUDE.md's
+   "Development workflow" owns *which* gates exist and when each applies, the
+   Codex round included; drive them in the order it lists. This file owns only
+   their mechanics:
+   - resolve and record the PR's immutable `headRefOid`, fetch that commit, and
+     run `REVIEW_SHA=<headRefOid> mise run review` — never check the PR branch
+     out to review it, and never treat tests from a mutable shared checkout as
+     review evidence. CLAUDE.md's review paragraph and README's "Review
+     isolation" state what the runner refuses and why;
+   - run the verification container without network, and pass it no secrets,
+     host mounts, privileged mode or Docker socket. Keep the SHA-tagged image
+     long enough for the failure-path probes CLAUDE.md requires at stateful
+     boundaries, then remove it when the PR is settled;
    - record every gate result against the commit SHA it ran at — container
      review, CI, your acceptance validation, the Codex verdict where that gate
      applied, the Copilot state. Any new commit on the branch (fix-ups
      included) invalidates the test/typecheck and review evidence: re-run
      those gates at the new `headRefOid` rather than carrying an older verdict
      forward;
-   - your validation against every acceptance checkbox on each linked issue —
-     check a box only with evidence (command output, test name);
-   - gate check: the diff stays within the declared `Touches` — the shared set
-     when the PR closes a batch;
-   - GitHub Copilot review requested and returned;
-   - local Codex review of the PR where CLAUDE.md's gate list calls for one —
-     it is the authority on scope; in short: a diff touching
-     `packages/schema`, `packages/mcp-server`, `packages/hub`, or
-     `pnpm-lock.yaml`, a large or architectural diff, or your own judgment
-     that an outside read helps; only when none of those fire may a trivial or
-     UI-only diff skip the round.
-     Mechanism depends on the environment: when running under herdr
-     (`test "${HERDR_ENV:-}" = 1`; use the herdr skill and `herdr agent` to
-     find the Codex pane), talk to that Codex session directly — answer its
-     findings, push fixes, and re-request within the re-review scoping
-     below, never open-endedly; otherwise use the codex plugin. Either way the review brief is
-     the same: be critical, and hunt specifically for overtesting and
-     overengineering per this repo's principles (KISS/YAGNI, least code wins,
-     tests defend contracts and invariants — not implementation trivia).
+   - check an acceptance box on a linked issue only with evidence (command
+     output, test name), and check that the diff stays within the declared
+     `Touches` — the shared set when the PR closes a batch.
    **Re-read before ruling.** Immediately before any ruling — a triage
    disposition, an acceptance validation, a tier call, a merge — re-read the
    linked issue thread and the PR thread (`gh issue view <n> --comments`,
    `gh pr view <n> --comments`). Owner decisions and coordinator notes land
    there mid-flight; a ruling made from session memory can contradict one that
    was written down while you were elsewhere.
-   **Finding triage — before any fix-up brief.** A finding is not
-   automatically a work item; every finding is triaged explicitly against
-   the supported usage model (single user, local-first, one hub, parallel
-   loop-dispatched agents, dev-stage data). Record three independent
-   decisions per finding — severity does not decide the other two:
-   - **Severity.** P1: supported usage can lose data, expose secrets,
-     violate a CLAUDE.md invariant, or become materially unusable. P2: a
-     real correctness, reliability, accessibility, or maintainability
-     defect within supported usage, without P1 impact. P3: minor, local,
-     or low-impact.
-   - **Disposition.** *Fix now* — the default for P1 and for contained
-     supported-usage P2s. *Defer* — only for a non-blocking P2/P3 whose
-     fix is disproportionate right now: create a linked issue and record
-     the concrete accepted risk on the PR; never defer data loss,
-     auth/security exposure, or a violated invariant. *Document boundary*
-     — reachable only outside the usage model: the smallest useful
-     code/doc statement naming the boundary; no behavior changes, no
-     mechanism tests for an unsupported scenario. *Reject* — not
-     reachable, factually wrong, or cost clearly exceeds stake: reply
-     with evidence on the thread. Never silent dismissal, and no category
-     shortcuts ("human-run commands can't race" is false here — parallel
-     agents, retries and multiple terminals make nominally human-run
-     commands concurrent).
-   - **Verification.** Who confirms the fix: the coordinator (focused
-     diff read, the finding's test failing-then-passing, failure-path
-     probe where stateful) or an external re-review round per the scoping
-     below. A subtle P2 fix may need outside eyes; a tiny P1 correction
-     with a focused proof may not.
-   **One batched fix-up wave per review head.** Collect Codex, Copilot
-   and coordinator findings against the same head and triage them all
-   first; then one decision-complete brief, one Opus dispatch, one
-   re-gate at the new head — never a dispatch per finding or per
-   reviewer. Standing brief constraints: smallest diff that closes the
-   accepted findings; tests only for the contract or invariant a finding
-   names, never for the mechanics of the fix. Fix-up diffs face the same
-   Touches, scope-escape and overtesting checks as feature diffs. Late
-   findings still get an explicit disposition, but reviewer timing must
-   not manufacture extra waves.
-   **Risk-scoped external re-review.** A further Codex round is required
-   while a P1 remains open; and for a P2/P3 fix when it sits at a
-   data-critical boundary (security/auth, persistence, concurrency,
-   schema/CRDT semantics, cross-process lifecycle) **and** is non-local,
-   introduces new state or synchronization, changes the design that
-   answered the original finding, or lacks a focused test proving it — a
-   one-line mechanical fix at such a boundary, proven by its test, is
-   coordinator territory; and whenever reviewer or coordinator names a
-   concrete risk rationale. Re-review briefs are delta-first: the fixes
-   and the invariants they touch, expanding to the whole PR only when a
-   fix invalidates earlier reasoning. After four external rounds, a
-   further full round needs a PR comment naming the concrete unresolved
-   risk. Record every round as a PR comment — `Codex round N (head
-   <sha>): <verdict>` — so round counts stay derivable from the thread.
-   **Exit and convergence.** Review exits only when: no P1 remains;
-   every supported-usage P2 is fixed or explicitly deferred (linked
-   issue, accepted-risk rationale); every remark is fixed, deferred,
-   documented or rejected explicitly; all gate evidence is fresh at the
-   exact merge head; and any earlier external-review reasoning carried
-   across a later local fix is recorded on the PR with scope and
-   rationale. If a confirmation round surfaces a net-new triaged P1, or
-   the open-P1 set fails to shrink after a directed correction wave, park
-   the PR `needs-human` with the finding list instead of looping — but
-   never park for a false positive, an unrelated pre-existing issue, or a
-   finding rejected with evidence.
+   **Findings.** `review-protocol.md` beside this file is the whole
+   findings-conditional protocol — the external round's mechanism and brief,
+   finding triage, the one batched fix-up wave per review head, risk-scoped
+   re-review with the round-count rule, and the exit condition. Read it
+   whenever a PR has a round to request or a finding to disposition.
    **Final gate, immediately before merging:** re-fetch the
    PR's reviews and comment threads (`gh pr view <n> --comments` plus review
    threads via `gh api graphql` — inline review comments don't show in the
@@ -205,22 +128,7 @@ file contains only Claude coordinator machinery and does not restate either.
    gates: re-run them at the new head. After merging, confirm every issue the
    PR closes auto-closed, then update the product docs to the new status quo
    (uberblick MCP tools once registered; until then, comment on the PR that
-   the doc update is pending).
-   **Dev stack, after every merge to `main`:** restart it so
-   http://localhost:5173/ always serves the just-merged `main`. Killing a
-   running dev server is sanctioned (owner directive) but bounded: terminate
-   only the hub/web processes the loop itself recorded starting (the background
-   task handles/PIDs it kept from launching them) — never any other process —
-   and confirm they exited, so their ports are free, before relaunching. Serve
-   from your own worktree, never the shared checkout, which belongs to other
-   sessions: `git fetch origin main` first, then require that worktree be clean
-   against the ref you just fetched — no uncommitted changes, no commits absent
-   from the fetched `origin/main` — and if it isn't, skip the restart and say so
-   rather than serve something that isn't `main`. Only then fast-forward to it,
-   verify `HEAD` equals the fetched `origin/main`, start `mise run hub` and
-   `mise run web` as background tasks, and confirm http://localhost:5173/
-   answers before you report the stack serving the new `main`. A fresh hub
-   store is fine: replicas rehydrate it over sync.
+   the doc update is pending), and restart the dev stack per `dev-stack.md`.
 
 3. **Lint `ready` issues** against the spec's checklist. Failures: comment
    exactly what's missing, remove `ready`, skip.
@@ -234,176 +142,33 @@ file contains only Claude coordinator machinery and does not restate either.
    the gates, not implementation.
 
 6. **Preflight — ground, classify, challenge, recheck.** Runs on every issue
-   selected in step 5, after conflict analysis and *before* the claim. This is
-   the loop's one cheap chance to be wrong: an objection raised here costs a
-   prompt, and the same objection after implementation costs a review wave, a
-   fix-up dispatch and a re-gate.
-
-   **Ground it at a commit.** `git fetch origin main` and record the exact
-   `origin/main` SHA you ground against — every later statement in the
-   preflight is a claim about that commit, not about your memory of the repo.
-   Against it, read what the issue targets: the current behavior, the modules,
-   interfaces, invariants and tests it lives in, related open issues and PRs,
-   and the files the change is likely to touch. Proportional, not exhaustive —
-   enough to fill the table below honestly, and no more. If `main` advances
-   while you are here, refresh only the grounding and the challenge the new
-   commits actually affect; a merge elsewhere in the tree does not invalidate a
-   challenge about this one.
-
-   **Classify from what the grounding found**, never from a package name, a
-   label or a keyword. Four axes, and only these four:
-
-   - **Materiality** — what the change decides. `mechanical`: no behavior or
-     contract choice is being made (a localized typo, routine documentation or
-     maintenance, an obvious isolated correction). `behavioral`: real
-     observable behavior with established patterns in this repo.
-     `architectural`: a public contract, schema, data shape or migration,
-     security/privacy, or concurrency semantics.
-   - **Uncertainty** — `high` when the grounding read left you unable to state
-     the outcome and the invariants it must hold.
-   - **Blast radius** — `wide` for cross-package or cross-repository contracts,
-     or for broad or ambiguous scope.
-   - **Reversibility** — `hard` when the choice is expensive to undo once
-     merged: persisted data, a published contract, a shape other work builds on.
-
-   | Materiality | Uncertainty | Blast radius | Reversibility | Tier | Challengers |
-   |---|---|---|---|---|---|
-   | mechanical | low | local | easy | trivial | 0 |
-   | mechanical | high | local | easy | bounded | 1 |
-   | behavioral | low | local | easy | bounded | 1 |
-   | behavioral | high | local | easy | substantial | 2 |
-   | behavioral | low | wide | easy | substantial | 2 |
-   | behavioral | low | local | hard | substantial | 2 |
-   | architectural | low | local | easy | substantial | 2 |
-
-   Read it as three rules. Substantial when the change is architectural, wide,
-   or hard to undo — *any* of the three, so a mechanical change with a wide
-   blast radius is substantial too, and deliberately so: a rename with two
-   hundred call sites decides nothing but breaks everything. Trivial only when
-   it is mechanical, local, easy to undo **and** understood. Everything else is
-   bounded — and `uncertainty: high` then moves the tier one step up, which is
-   what routes a genuinely ambiguous change to two challengers instead of one.
-   `.claude/skills/next-issue/preflight-tier.mjs` is this table in executable
-   form and `packages/cli/test/preflight-tier.test.ts` holds the two together;
-   if you change one, change both.
-
-   Two things the table deliberately cannot see: `Touches`, and any keyword. A
-   change proven mechanical by the grounding read is trivial even in
-   `schema` — a proven fact outranks a package name — and an innocuous-looking
-   change nobody can state the outcome of is not trivial anywhere.
-
-   **Challenge.** A challenger pokes holes; it does not implement, and it does
-   not write code. Each runs in a fresh context that neither authored the issue
-   nor will implement it. For two-challenger cases prefer diverse perspectives
-   — a different model family, harness or approach — and where none is
-   available, two separate fresh contexts satisfy independence; say which you
-   got. The brief asks for risks, questions and alternatives:
-
-   - Is this the real problem, and is the issue's outcome the smallest viable
-     one? What would KISS/YAGNI cut?
-   - Does it split usefully into smaller issues?
-   - Is anything over-prescribed — mechanics stated where an outcome would do?
-   - Does it conflict with current behavior, the decided architecture, existing
-     tests, migrations, contracts, security or concurrency semantics, or work
-     already in flight?
-   - Which edge cases and simpler alternatives does the issue not mention?
-
-   For the trivial tier this is a brief code-grounded self-check instead, at
-   the same commit.
-
-   **Recheck, then decide.** Last thing before handing the issue to step 7,
-   `git fetch origin main` **again** — the fetch you grounded against is
-   minutes old, and only a fresh one can tell you upstream moved while you were
-   reading. An advance that touches what you grounded sends you back to refresh
-   the affected grounding and challenge; an advance elsewhere in the tree does
-   not. Then re-read the issue and the current claims, and take the outcome off
-   this table.
-
-   | Still eligible at the recheck | What preflight found | Outcome | Labels | Claim | Comment |
-   |---|---|---|---|---|---|
-   | yes | nothing blocking (`none`) | dispatch | add `in-progress` — written by step 7's claim, not here | yes | only when a challenger ran or the self-check found something |
-   | yes | a stale or incorrect contract (`stale-spec`) | return-to-coordination | remove `ready` | no | yes |
-   | yes | an owner-only product decision (`product-decision`) | park-needs-decision | remove `ready`, add `needs-decision` | no | yes |
-   | no | anything (`any`) | requeue | none | no | no |
-
-   Step 6 never writes `in-progress` — step 7's claim does, after this gate —
-   so no preflight path can leave that label on an issue nobody is
-   implementing. The other two labels are step 6's: a stop takes `ready` off,
-   and an owner question adds `needs-decision`.
-
-   The recheck outranks every finding, which is the first row to read: if
-   someone else claimed the issue while you were grounding it, it is their work
-   now. Requeue silently — do not strip `ready`, do not comment. Findings you
-   hold go to the claim holder or wait for a fresh pickup; acting on live work
-   from the outside is worse than losing the finding.
-
-   Among the stops, which applies is the difference between evidence and
-   authority. A stale contract, a missing outcome or invariant, or a scope or
-   splitting decision the grounding read can settle goes back to coordination
-   with the evidence: `ready` comes off, the comment says what is wrong, and a
-   corrected body has to pass `.github/ISSUE_SPEC.md` and regain `ready` before
-   any later pickup. Only an unresolved *product* question — one the repository
-   cannot answer — takes `needs-decision`, with concrete options and your
-   recommendation per the spec's exit path.
-
-   **Record it once, and only after the recheck.** The comment is the
-   preflight's one durable side effect, so it is written when the outcome is
-   known, never before: posted ahead of the recheck it can land on an issue
-   another agent claimed a minute ago, which is exactly what the requeue row
-   forbids. One concise issue comment for every one- and two-challenger case
-   and for either stop, carrying the base SHA, the tier and one line of
-   rationale, how many challengers ran and how they were independent, the
-   material findings with their dispositions (or "none"), and proceed or stop.
-   Never transcripts, never timings, never round-by-round narration — one
-   comment, or the preflight becomes the thing it was meant to prevent. A
-   trivial self-check that found nothing writes none, and a requeue writes none
-   either.
-
-   **The comment is keyed by `<issue, base SHA>`.** Before posting, look for a
-   preflight comment on the issue already recording that same base SHA. If one
-   is there, this preflight ran before and died between the comment and the
-   claim: edit that comment instead of posting beside it. Exactly one preflight
-   comment per issue per base SHA, however many times the loop restarts. A
-   later pickup that grounds at a newer commit is a different key and gets its
-   own comment — not a duplicate, a second preflight.
-
-   **Findings are not requirements.** Material implementation risks and options
-   travel to the implementer in the brief, as options. They are never edited
-   into the issue body's acceptance criteria: an alternative written into the
-   contract becomes a requirement nobody chose, and out-of-scope prescription
-   is exactly what the challenge exists to remove. An issue that over-prescribes
-   mechanics is the same case and not a stop: name the freedom in the brief and
-   dispatch. Only a *missing* outcome, invariant or product decision stops one.
-
-   **Under `/loop`, a preflight is re-entrant.** An iteration that dies partway
-   through one repeats it on the next pass, and the repeat costs tokens and
-   nothing else, because both of its durable effects are guarded: the claim is
-   last, so a second run either re-reaches dispatch and claims once or finds
-   the first run's claim at its recheck and requeues; and the comment is keyed
-   by base SHA, so a second run at the same commit edits the first run's
-   comment rather than posting a second.
+   selected in step 5, after conflict analysis and *before* the claim: ground
+   the issue at a recorded `origin/main` commit, classify its risk on four
+   axes, challenge it in proportion, recheck eligibility, and take the outcome
+   off the lifecycle table. `preflight.md` beside this file is the whole
+   procedure and both of its tables — read it on every iteration that reaches
+   this step.
 
 7. **Dispatch.** Only issues step 6 returned as *dispatch* reach here; the
    others are already parked or requeued. For each, follow `AGENTS.md` for the
-   claim,
-   implementer brief, worktree, validation, PR, handoff, and notification
-   contract. **Announce the work to the user** in your visible output: one or
-   two plain sentences on what the issue is and why it is next, plus the direct
-   GitHub URL (from `gh issue view <n> --json url`).
+   claim, implementer brief, worktree, validation, PR, handoff, and
+   notification contract. **Announce the work to the user** in your visible
+   output: one or two plain sentences on what the issue is and why it is next,
+   plus the direct GitHub URL (from `gh issue view <n> --json url`).
 
    The brief instructs the implementer to read `AGENTS.md` first, before any
-   repository change. Prompt the implementer named by the claim: spawn an
-   Opus sub-agent (`model: opus`, `isolation: worktree`) by default, or use
-   the Herdr skill to dispatch a Codex session with the issue URL. The brief is decision-complete
-   but pulled, not pushed: pass the full issue body and applicable CLAUDE.md
-   invariants, and instruct the agent to start by reading the product docs its
-   Pointers cite through the uberblick MCP tools — `get_doc` on each cited
-   uuid, `search` for what the issue did not anticipate — before repository
-   changes. Inline only what those tools cannot serve: PR diffs, review
-   threads, and decisions taken in this session. Where the MCP server is not
-   registered, use the throwaway stdio-client pattern from #77 and #134 in a
-   scratch directory outside the committed worktree. The brief states which
-   route applies.
+   repository change. Prompt the implementer named by the claim: spawn an Opus
+   sub-agent (`model: opus`, `isolation: worktree`) by default, or use the
+   Herdr skill to dispatch a Codex session with the issue URL. The brief is
+   decision-complete but pulled, not pushed: pass the full issue body and
+   applicable CLAUDE.md invariants, and instruct the agent to start by reading
+   the product docs its Pointers cite through the uberblick MCP tools —
+   `get_doc` on each cited uuid, `search` for what the issue did not
+   anticipate — before repository changes. Inline only what those tools cannot
+   serve: PR diffs, review threads, and decisions taken in this session. Where
+   the MCP server is not registered, use the throwaway stdio-client pattern
+   from #77 and #134 in a scratch directory outside the committed worktree.
+   The brief states which route applies.
 
    Any live doc that contradicts the code is named in the PR body — the read
    side of the dogfooding contract, mirroring the post-merge doc update. Until

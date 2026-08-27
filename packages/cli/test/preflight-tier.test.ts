@@ -5,7 +5,7 @@
  * be run — so the tables it routes on also exist as
  * `.claude/skills/next-issue/preflight-tier.mjs`, and these tests hold the two
  * together. The tier table and the lifecycle table are each parsed out of
- * `SKILL.md` and replayed through the module, so a row edited in one home and
+ * `preflight.md` and replayed through the module, so a row edited in one home and
  * not the other is a red test. What is deliberately *not* here: assertions
  * that restate the module against its own definition.
  *
@@ -29,11 +29,10 @@ const MODULE_PATH = join(SKILL_DIR, "preflight-tier.mjs");
  * a drift guard switched off.
  *
  * The immutable review image is source-only: the runner archives the tree, and
- * `main`'s `.dockerignore` drops `.git` along with `.claude`. There the skill
- * genuinely is not there and cannot be, so the suite skips loudly rather than
- * reddening a gate it has no way to pass. (This branch un-ignores
- * `.claude/skills/**`, but a `.dockerignore` only takes effect from `main`, so
- * the skip is still needed for one review cycle.)
+ * `main`'s `.dockerignore` drops `.git`. It no longer drops `.claude/skills`,
+ * so the suite runs there for real — but a checkout that genuinely cannot
+ * carry the skill skips loudly rather than reddening a gate it has no way to
+ * pass.
  *
  * Anywhere with a `.git` at the root — CI, a worktree, a contributor's clone —
  * a missing skill directory means the fixture has come apart, and skipping
@@ -55,7 +54,7 @@ const { classify, preflight, AXES, BLOCKERS } = PRESENT
   ? await import(pathToFileURL(MODULE_PATH).href)
   : { classify: undefined, preflight: undefined, AXES: undefined, BLOCKERS: undefined };
 
-const SKILL = PRESENT ? readFileSync(join(SKILL_DIR, "SKILL.md"), "utf8") : "";
+const PREFLIGHT = PRESENT ? readFileSync(join(SKILL_DIR, "preflight.md"), "utf8") : "";
 
 type Axes = Record<string, string>;
 
@@ -69,16 +68,16 @@ function everyCombination(): Axes[] {
 }
 
 /**
- * The cells of one markdown table in `SKILL.md`, as rows of strings.
+ * The cells of one markdown table in `preflight.md`, as rows of strings.
  *
  * The header is matched on its column names rather than on its position, so
  * reordering the prose cannot silently make this parse a different table — and
  * a table that has gone missing throws here rather than passing vacuously.
  */
 function markdownTable(...columns: string[]): string[][] {
-  const lines = SKILL.split("\n");
+  const lines = PREFLIGHT.split("\n");
   const header = lines.findIndex((line) => columns.every((column) => line.includes(column)));
-  if (header === -1) throw new Error(`SKILL.md has no table with columns ${columns.join(", ")}`);
+  if (header === -1) throw new Error(`preflight.md has no table with columns ${columns.join(", ")}`);
 
   const rows: string[][] = [];
   // +2 skips the header and the `|---|` separator beneath it.
