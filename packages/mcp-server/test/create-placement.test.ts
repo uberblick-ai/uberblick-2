@@ -14,7 +14,12 @@
 
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { getMeta, listDirectory, readSidebar } from "@uberblick/schema";
+import {
+  deleteGroup,
+  getMeta,
+  listDirectory,
+  readSidebar,
+} from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
 import {
   FailingStore,
@@ -434,6 +439,57 @@ describe("a create that gets part-way", () => {
     expect(
       (await restarted.ok("get_doc", { uuid: refused.payload.uuid })).title,
     ).toBe("Undiscoverable");
+  });
+
+  it("says the document survived when the group disappears mid-call", async () => {
+    const rig = await server();
+    const group = await groupWith(rig, "Anchor");
+
+    // The group is deleted between the lookup at the top of create_doc and the
+    // sidebar stage: the first directory update of the call is the stub the
+    // document stage publishes, which is after the one and before the other.
+    const sidebarDoc = rig.instance.replicas.sidebar().doc;
+    rig.instance.replicas.directory().doc.once("update", () => {
+      deleteGroup(sidebarDoc, group);
+    });
+
+    const refused = await rig.call("create_doc", {
+      title: "Created, never pinned",
+      description: "A test document.",
+      sidebar: { group: { id: group } },
+    });
+
+    // The placement failed, but two rooms are durable and the answer says so —
+    // an agent that read `applied: false` alone would create the document twice.
+    expect(refused.isError).toBe(true);
+    expect(refused.payload.error).toBe("group_not_found");
+    expect(refused.payload.rolledBack).toBe(false);
+    expect(
+      refused.payload.completed.map((room: any) => room.purpose),
+    ).toEqual(["document", "directory"]);
+    expect(refused.payload.completed.every((room: any) => room.applied)).toBe(
+      true,
+    );
+    expect(refused.payload.failed).toEqual({
+      purpose: "sidebar",
+      room: `${WORKSPACE}/_sidebar`,
+    });
+    expect(refused.payload.recovery).toContain("pin_doc");
+    expect(refused.payload.recovery).toContain(refused.payload.uuid);
+
+    // And it is true: the document is there, unpinned, and pin_doc finishes it.
+    const uuid = refused.payload.uuid;
+    expect((await rig.ok("get_doc", { uuid })).title).toBe(
+      "Created, never pinned",
+    );
+    const listed = (await rig.ok("list_docs")).docs.find(
+      (doc: any) => doc.uuid === uuid,
+    );
+    expect(listed.pinned).toBe(false);
+    await rig.ok("pin_doc", { uuid, group: "Later" });
+    expect(shape(await rig.ok("get_sidebar"))).toEqual([
+      ["Later", ["Created, never pinned"]],
+    ]);
   });
 
   it("leaves a durable document unpinned when the sidebar refuses, and pin_doc finishes it", async () => {

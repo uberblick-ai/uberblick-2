@@ -399,7 +399,7 @@ const CREATE_DOC_DURABILITY =
   "restart that failure requires, pin_doc finishes a placement whose document survived.";
 
 /** What to do after a partial create, by the room whose write the log refused. */
-const RECOVERY: Record<string, string> = {
+const RECOVERY: Record<string, string> & { other: string } = {
   document:
     "Nothing survived: the refused write is the document's own room, and neither the directory stub nor the " +
     "sidebar was touched. Restart the MCP server — the failure is sticky and every tool refuses until then — " +
@@ -685,6 +685,34 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
        * why that is survivable — it tells the caller to re-verify with
        * list_docs and get_sidebar rather than trust `completed`.
        */
+      /**
+       * The one answer a create that stopped part-way gives, whichever way it
+       * stopped: what is durable, what is not, that nothing was rolled back,
+       * and what to do. One shape, because a caller that learns to read a
+       * refused append must not have to learn a second one for a group that
+       * disappeared underneath the same call.
+       */
+      const stoppedPartWay = (
+        code: string,
+        message: string,
+        failed: { purpose: string; room: string },
+        recovery: string,
+        extra: Record<string, unknown> = {},
+      ): ToolError =>
+        toolError(code, message, {
+          uuid,
+          applied: false,
+          synced: false,
+          rolledBack: false,
+          completed: completed.map((entry) => ({ ...entry, applied: true })),
+          failed,
+          // The room every other failure of this kind names, kept so a caller
+          // that reads one field reads the same field here.
+          room: failed.room,
+          recovery,
+          ...extra,
+        });
+
       const stage = (
         purpose: string,
         target: Replica,
@@ -700,23 +728,13 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         if (failure.room !== target.room) {
           completed.push({ purpose, room: target.room });
         }
-        throw toolError(
+        throw stoppedPartWay(
           "persistence_failed",
           `The update log refused the write to ${failure.room}, so create_doc stopped part-way. ` +
             "Nothing was rolled back: the rooms in `completed` are durable and the rooms after " +
             `the failure were never written. Cause: ${failure.message}`,
-          {
-            uuid,
-            applied: false,
-            synced: false,
-            rolledBack: false,
-            completed: completed.map((entry) => ({ ...entry, applied: true })),
-            failed: { purpose: failedAt, room: failure.room },
-            // The room every other `persistence_failed` names, kept so a caller
-            // that reads one field reads the same field here.
-            room: failure.room,
-            recovery: RECOVERY[failedAt] ?? RECOVERY.other,
-          },
+          { purpose: failedAt, room: failure.room },
+          RECOVERY[failedAt] ?? RECOVERY.other,
         );
       };
 
@@ -761,14 +779,38 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         stage("sidebar", sidebarReplica, () => {
           // The same pin operation pin_doc runs — see placeInGroup. A brand-new
           // uuid is pinned rather than moved, so it can only appear once.
-          const { position } = placeInGroup(
-            replicas,
-            group.id,
-            uuid,
-            sidebar.group.position,
-            toolError,
-          );
-          placement = { group: { id: group.id, name: group.name }, position };
+          try {
+            const { position } = placeInGroup(
+              replicas,
+              group.id,
+              uuid,
+              sidebar.group.position,
+              toolError,
+            );
+            placement = { group: { id: group.id, name: group.name }, position };
+          } catch (error) {
+            // A concurrent sidebar_group delete, landing between the lookup at
+            // the top of this call and this write. pin_doc answers that with
+            // its own `group_not_found` and nothing else to say; here the
+            // document and its stub are already durable, so the caller has to
+            // hear that before it retries a create it does not need.
+            if (
+              !(error instanceof ToolError) ||
+              error.code !== "group_not_found"
+            ) {
+              throw error;
+            }
+            throw stoppedPartWay(
+              "group_not_found",
+              `Document ${uuid} was created, but sidebar group ${group.id} disappeared before it ` +
+                "could be pinned there. Nothing was rolled back: the document and its directory " +
+                "stub are durable, and only the placement is missing.",
+              { purpose: "sidebar", room: sidebarReplica.room },
+              `The document exists — do NOT create it again. Call pin_doc with uuid ${uuid} and a ` +
+                "group that exists (get_sidebar lists them; pin_doc creates one by name).",
+              { group: group.id },
+            );
+          }
         });
       }
 
