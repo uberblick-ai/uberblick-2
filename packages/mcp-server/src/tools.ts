@@ -70,7 +70,13 @@ import { registerFeedbackTools, recordDocUsage } from "./feedback-tools.js";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
 import type { Replica, Replicas } from "./replica.js";
-import { pinnedUuids, registerSidebarTools } from "./sidebar-tools.js";
+import {
+  pinnedUuids,
+  placeInGroup,
+  registerSidebarTools,
+  requireGroup,
+} from "./sidebar-tools.js";
+import type { SidebarPlacement } from "./sidebar-tools.js";
 import { collectSyncStatus } from "./status.js";
 
 /** A tool failure with a stable machine-readable code. */
@@ -336,6 +342,80 @@ function toBlockInput(input: z.infer<typeof blockInputSchema>): BlockInput {
   };
 }
 
+/**
+ * Where a new document goes in the sidebar — optional, and the whole of it.
+ *
+ * Placement implies pinning, so there is no `pinned` boolean and no `state`
+ * enum: a contradictory pair like `{pinned: false, group: …}` is not a state
+ * this input can express. Both objects are `.strict()`, so a caller reaching
+ * for either is told rather than having it silently dropped — and the group is
+ * an object with an id rather than a bare name, because creating a group is
+ * pin_doc's job and must not happen as a side effect of creating a document.
+ */
+const sidebarPlacementArg = z
+  .object({
+    group: z
+      .object({
+        id: z
+          .string()
+          .min(1)
+          .describe(
+            "An EXISTING group's id, as get_sidebar returns it. Never a name: an unknown id fails the call.",
+          ),
+        position: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Position in the group, clamped into range. Omitted means last."),
+      })
+      .strict(),
+  })
+  .strict()
+  .optional()
+  .describe(
+    "Optional sidebar placement. Omitted, the document is created unpinned — alive and reachable, simply not an " +
+      "entry point.",
+  );
+
+/** What `create_doc` says about placement, in the words an agent reads. */
+const CREATE_DOC_PLACEMENT =
+  "`sidebar` is optional and is the only way to say where the document goes: omit it and the document is created " +
+  "unpinned (the default, unchanged), or pass `{group: {id, position?}}` to pin it into a group that ALREADY " +
+  "exists — the id comes from get_sidebar, `position` is clamped into range and omitted means last. There is no " +
+  "`pinned` flag and no `state`: placement implies pinning, so a contradiction cannot be expressed. An unknown or " +
+  "empty group id fails with `group_not_found` and creates nothing at all; this tool never creates a group, never " +
+  "resolves one by name, and never guesses a default — pin_doc is what brings a group into being. The answer " +
+  "echoes the placement it made as `sidebar: {group: {id, name}, position}`.";
+
+/** What `create_doc` says about touching three rooms, in the words an agent reads. */
+const CREATE_DOC_DURABILITY =
+  "This call writes up to three independently persisted rooms — the document, the directory, and the sidebar when " +
+  "you place it — so it reports them one by one. `rooms` lists every room it touched with its own `applied` and " +
+  "`synced`; the top-level `synced` is the AND over all of them and is never true while one is still pending. It " +
+  "is NOT transactional: there is no rollback and no remote atomicity. If the local update log refuses a write " +
+  "part-way, the call fails with `persistence_failed` carrying the `uuid`, the rooms already `completed`, the " +
+  "`failed` room, `rolledBack: false`, and a `recovery` line — the earlier rooms stay durable, and after the " +
+  "restart that failure requires, pin_doc finishes a placement whose document survived.";
+
+/** What to do after a partial create, by the room whose write the log refused. */
+const RECOVERY: Record<string, string> = {
+  document:
+    "Nothing survived: the refused write is the document's own room, and neither the directory stub nor the " +
+    "sidebar was touched. Restart the MCP server — the failure is sticky and every tool refuses until then — " +
+    "then call create_doc again.",
+  directory:
+    "The document's own room is durable, but it has no directory stub, so list_docs and search will not show it. " +
+    "Restart the MCP server, then get_doc with this uuid: hydrating the document republishes its stub. Add " +
+    "pin_doc afterwards if you wanted the sidebar placement.",
+  sidebar:
+    "The document and its directory stub are durable; only the sidebar placement is missing. Restart the MCP " +
+    "server, then pin_doc with this uuid and the same group id to finish it.",
+  other:
+    "The log refused a write to a room this call does not own — another document syncing while it ran. Restart " +
+    "the MCP server, then check with list_docs and get_sidebar what the rooms in `completed` left behind.",
+};
+
 export function registerTools(server: McpServer, replicas: Replicas): void {
   /**
    * Resolve a document, or fail with a hub-aware message: a uuid in the
@@ -477,6 +557,42 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     };
   };
 
+  /**
+   * The same honesty for a call that mutated more than one room.
+   *
+   * The rooms are independently logged, independently sent and independently
+   * acknowledged, so one boolean cannot describe them: `rooms` says where each
+   * one stands, and the aggregate `synced` is the AND over all of them — never
+   * true while a room this call touched is still pending. `applied` stays a
+   * single word because it is one: {@link Replicas.assertHealthy} throws unless
+   * every append reached the log, so the call either answers with all of them
+   * durable or fails as `persistence_failed`.
+   */
+  const durabilityAcross = (
+    primary: Replica,
+    rooms: { purpose: string; room: string }[],
+  ): Record<string, unknown> => {
+    replicas.assertHealthy();
+    const detail = rooms.map((entry) => ({
+      ...entry,
+      applied: true,
+      synced: replicas.isRoomQuiet(entry.room),
+    }));
+    return {
+      applied: true,
+      synced: detail.every((entry) => entry.synced),
+      rooms: detail,
+      hub: replicas.sync.state(),
+      ...descriptionGap(primary),
+    };
+  };
+
+  const toolError = (
+    code: string,
+    message: string,
+    detail?: Record<string, unknown>,
+  ): ToolError => new ToolError(code, message, detail);
+
   const annotationJson = (
     replica: Replica,
     annotation: Annotation,
@@ -498,6 +614,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "set_title is the repair for the untitled ones the web UI creates. " +
         DESCRIPTION_IS_FOR_CHOOSING +
         "\n\n" +
+        CREATE_DOC_PLACEMENT +
+        "\n\n" +
+        CREATE_DOC_DURABILITY +
+        "\n\n" +
         SYNCED_MEANS,
       inputSchema: {
         title: titleArg,
@@ -507,28 +627,101 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           .array(blockInputSchema)
           .optional()
           .describe("Initial blocks, in order."),
+        sidebar: sidebarPlacementArg,
       },
     },
-    guarded(async ({ title, description, tags, blocks }) => {
+    guarded(async ({ title, description, tags, blocks, sidebar }) => {
       await replicas.settle();
+
+      // Resolved before a uuid exists, because this is the one part of the call
+      // that can still be all-or-nothing: an unknown group must fail having
+      // created nothing. Everything after it is three independently persisted
+      // rooms, reported one by one.
+      const group =
+        sidebar === undefined
+          ? null
+          : requireGroup(replicas, sidebar.group.id, toolError);
 
       const uuid = randomUUID();
       const replica = replicas.replica(uuid);
-      initDoc(replica.doc, {
-        uuid,
-        title,
-        description,
-        ...(tags === undefined ? {} : { tags }),
+      const directory = replicas.directory();
+      const sidebarReplica = replicas.sidebar();
+      const completed: { purpose: string; room: string }[] = [];
+
+      /** Which of this call's rooms a failed append names. */
+      const purposeOf = (room: string): string => {
+        if (room === replica.room) return "document";
+        if (room === directory.room) return "directory";
+        if (room === sidebarReplica.room) return "sidebar";
+        return "other";
+      };
+
+      /**
+       * Write one room, then check the log took it before touching the next.
+       *
+       * A refused append is recorded rather than thrown (see replica.ts), so
+       * without this check the next room would be written on top of a failure
+       * and the caller would hear one room name for a call that had touched
+       * three. Stopping here is what makes `completed` true.
+       *
+       * The failed room is the one the log named, not the stage that noticed:
+       * writing a document publishes its directory stub through the observer,
+       * so the directory is where a document write can fail. The recorded
+       * failure is the first refused append, so a room written before it — this
+       * stage's own, when the two names differ — did reach the log.
+       */
+      const stage = (
+        purpose: string,
+        target: Replica,
+        write: () => void,
+      ): void => {
+        write();
+        const failure = replicas.persistenceError();
+        if (failure === null) {
+          completed.push({ purpose, room: target.room });
+          return;
+        }
+        const failedAt = purposeOf(failure.room);
+        if (failure.room !== target.room) {
+          completed.push({ purpose, room: target.room });
+        }
+        throw toolError(
+          "persistence_failed",
+          `The update log refused the write to ${failure.room}, so create_doc stopped part-way. ` +
+            "Nothing was rolled back: the rooms in `completed` are durable and the rooms after " +
+            `the failure were never written. Cause: ${failure.message}`,
+          {
+            uuid,
+            applied: false,
+            synced: false,
+            rolledBack: false,
+            completed: completed.map((entry) => ({ ...entry, applied: true })),
+            failed: { purpose: failedAt, room: failure.room },
+            // The room every other `persistence_failed` names, kept so a caller
+            // that reads one field reads the same field here.
+            room: failure.room,
+            recovery: RECOVERY[failedAt] ?? RECOVERY.other,
+          },
+        );
+      };
+
+      stage("document", replica, () => {
+        initDoc(replica.doc, {
+          uuid,
+          title,
+          description,
+          ...(tags === undefined ? {} : { tags }),
+        });
+        for (const block of blocks ?? []) {
+          appendBlock(replica.doc, toBlockInput(block));
+        }
       });
-      for (const block of blocks ?? []) {
-        appendBlock(replica.doc, toBlockInput(block));
-      }
 
       // Observing the document's own update repairs the stub, but a brand-new
       // document must be discoverable because create_doc said so, not because
       // a side effect happened to fire.
-      const directory = replicas.directory();
-      if (getDirectoryEntry(directory.doc, uuid) === null) {
+      stage("directory", directory, () => {
+        if (getDirectoryEntry(directory.doc, uuid) !== null) return;
         const now = Date.now();
         upsertDirectoryEntry(directory.doc, {
           uuid,
@@ -537,6 +730,21 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           ...(tags === undefined ? {} : { tags }),
           createdAt: now,
           updatedAt: now,
+        });
+      });
+
+      let placement: SidebarPlacement | null = null;
+      if (group !== null && sidebar !== undefined) {
+        stage("sidebar", sidebarReplica, () => {
+          // The same pin operation pin_doc runs — see placeInGroup. A brand-new
+          // uuid is pinned rather than moved, so it can only appear once.
+          const { position } = placeInGroup(
+            replicas,
+            group.id,
+            uuid,
+            sidebar.group.position,
+          );
+          placement = { group: { id: group.id, name: group.name }, position };
         });
       }
 
@@ -547,7 +755,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         description,
         tags: tags ?? [],
         blocks: getBlocks(replica.doc),
-        ...durability(replica),
+        ...(placement === null ? {} : { sidebar: placement }),
+        ...durabilityAcross(replica, completed),
       });
     }),
   );
@@ -1102,7 +1311,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     durability,
     guarded,
     json,
-    error: (code, message, detail) => new ToolError(code, message, detail),
+    error: toolError,
   });
 
   // Usage and helpfulness telemetry, on the same terms: ./feedback-tools.ts
