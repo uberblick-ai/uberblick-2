@@ -4,7 +4,8 @@
  * Each check answers one question somebody would otherwise answer by finding,
  * reading and translating prose: which storage layout is in force, is a
  * workspace configured, is a signing secret usable, can the database be
- * written, does a hub answer, do the two port settings agree, who holds the
+ * written, does a hub answer, is this machine's clock close enough to the
+ * hub's, do the two port settings agree, who holds the
  * port, is any MCP client wired up. Three of the
  * hub-side failures present identically as "offline" in the web UI, which is
  * the reason this command exists — it names the cause and the fix.
@@ -34,6 +35,10 @@
 import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
+import {
+  CLOCK_SKEW_SECONDS,
+  MAX_TOKEN_LIFETIME_SECONDS,
+} from "@uberblick/hub/token";
 import type { StoragePaths } from "@uberblick/hub/storage";
 import {
   AmbiguousStorageError,
@@ -62,6 +67,7 @@ import {
   hubBind,
   isLocalHost,
   probeHub,
+  probeHubClock,
   probePort,
 } from "./probes.js";
 import { ORIGIN_LABELS } from "./status.js";
@@ -141,6 +147,7 @@ const AFTER_STORAGE = [
   "credential",
   "database",
   "hub",
+  "clock",
   "port",
   "bind",
   "mcp",
@@ -304,10 +311,15 @@ async function hubCheck(
     return pass("hub", `${config.hubUrl} answered and served the directory room`);
   }
   if (status === "auth-failed") {
+    // Narrower here than for a long-running client: this probe minted its
+    // token seconds ago, in this process, in the current format, so the token's
+    // *shape* is not in question. Two causes survive that — a secret the hub
+    // does not share, and a clock far enough out that the hub's clamp refuses
+    // an otherwise correct token. The check below reads the second one.
     return fail(
       "hub",
       `${config.hubUrl} refused the signing secret`,
-      "give the hub and this machine the same secret — `ub status` says which layer this one came from",
+      "give the hub and this machine the same secret — `ub status` says which layer this one came from — and read the clock check below, because a clock far enough out of step is refused the same way",
     );
   }
   if (status === "unsettled") {
@@ -328,6 +340,66 @@ async function hubCheck(
     local
       ? "start a hub with `ub open --no-browser` — if one is running, the port check says whether HUB_URL disagrees with the port it bound"
       : "check that the deployment is running and that this machine can reach it — nothing is listening at that address from here",
+  );
+}
+
+/**
+ * Whether this machine's clock is close enough to the hub's to be trusted.
+ *
+ * Tokens carry `exp`, and the hub refuses one issued more than
+ * `CLOCK_SKEW_SECONDS` ahead of its own clock or already expired — so a machine
+ * whose clock has drifted cannot connect at all, and the failure it sees is an
+ * indistinguishable "invalid token". Naming the real cause is the only reason
+ * this check exists.
+ *
+ * **Two thresholds, because the two directions break differently.** A machine
+ * running fast trips `iat > now + CLOCK_SKEW_SECONDS`, which is 60 s. A machine
+ * running slow mints a token that is *already expired* when the hub reads it —
+ * `now > exp` — and since a room token is minted for
+ * {@link MAX_TOKEN_LIFETIME_SECONDS}, that is 900 s of room before it breaks.
+ * Neither bound is this command's invention; both are the clamp's, read from
+ * the same constants the hub applies.
+ *
+ * It needs no credential: the reading comes from the `Date` header of an
+ * unauthenticated GET, so it answers even on a machine that has never been
+ * provisioned. A hub that does not answer is a skip, not a failure — the hub
+ * check above is what reports an unreachable hub, and saying so twice would
+ * only bury it.
+ */
+async function clockCheck(config: McpConfig | null): Promise<Check> {
+  if (config === null) {
+    return skipped("clock", "no workspace configured, so no hub was dialled");
+  }
+  const skew = await probeHubClock(config.hubUrl);
+  if (skew === null) {
+    return skipped(
+      "clock",
+      `${config.hubUrl} answered no HTTP date, so the clocks were not compared`,
+    );
+  }
+  // The probe reports how far the hub reads ahead of us; both bounds below are
+  // stated from this machine's side, so flip it once, here.
+  const ahead = -skew;
+  const measured =
+    ahead === 0
+      ? `in step with ${config.hubUrl}`
+      : `${Math.abs(ahead)}s ${ahead > 0 ? "ahead of" : "behind"} ${config.hubUrl}`;
+
+  // Asymmetric because the two failures are different ones: running fast trips
+  // the 60s issued-in-the-future bound, running slow mints a token that has
+  // already expired, which takes a whole token lifetime to reach.
+  const limit = ahead > 0 ? CLOCK_SKEW_SECONDS : MAX_TOKEN_LIFETIME_SECONDS;
+  if (Math.abs(ahead) <= limit) {
+    return pass("clock", `this machine's clock is ${measured}`);
+  }
+  const rule =
+    ahead > 0
+      ? `more than the ${CLOCK_SKEW_SECONDS}s the hub tolerates ahead of its own`
+      : `more than the ${MAX_TOKEN_LIFETIME_SECONDS}s a token lives, so this machine mints tokens that have already expired`;
+  return fail(
+    "clock",
+    `this machine's clock is ${measured}, ${rule}`,
+    "synchronise this machine's clock — every token carries an expiry, and the hub refuses one issued ahead of its own time or already past it (`sudo timedatectl set-ntp true` on Linux, System Settings > General > Date & Time on macOS). The reading is an HTTP `Date` header, so a reverse proxy in front of the hub is whose clock this compares against",
   );
 }
 
@@ -579,6 +651,7 @@ export async function doctorReport(
     credentialCheck(resolved, resolvedEnv, platform),
     databaseCheck(config),
     await hubCheck(config, endpoint, dial),
+    await clockCheck(config),
     portCheck(config, endpoint, resolvedEnv),
     await bindCheck(config, endpoint, resolvedEnv, dial),
     mcpCheck(resolvedEnv, cwd),
@@ -626,9 +699,10 @@ export const DOCTOR_OPTIONS = {
 export const DOCTOR_HELP = `usage: ub doctor [--json]
 
 Check the local stack against its known failure modes — configuration, the
-signing secret and its file mode, the database, whether the hub is reachable,
-and the MCP client configs \`ub mcp install\` writes. Reads only; it fixes
-nothing and names what to run instead.
+signing secret and its file mode, the database, whether the hub is reachable
+and agrees with this machine's clock, and the MCP client configs
+\`ub mcp install\` writes. Reads only; it fixes nothing and names what to run
+instead.
 
 options:
   --json            the same checks as JSON on stdout, for a script to read

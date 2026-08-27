@@ -101,6 +101,34 @@ async function silentServer(): Promise<number> {
   return address.port;
 }
 
+/**
+ * A server that answers any HTTP request with a `Date` header `offsetSeconds`
+ * away from now — the hub's clock, as this machine would read it.
+ *
+ * The clock check reads that header and nothing else, so this is the whole of
+ * what it needs to see. It never speaks websocket, so the hub check reports it
+ * as unreachable; that is a different check and a different assertion.
+ */
+async function skewedClock(offsetSeconds: number): Promise<number> {
+  const sockets: Socket[] = [];
+  const server = createHttpServer((_request, response) => {
+    response.setHeader(
+      "Date",
+      new Date(Date.now() + offsetSeconds * 1_000).toUTCString(),
+    );
+    response.writeHead(200, { "Content-Type": "text/plain" });
+    response.end("not really a hub");
+  });
+  server.on("connection", (socket: Socket) => sockets.push(socket));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  servers.push({ server, sockets });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("the skewed clock did not bind a port");
+  }
+  return address.port;
+}
+
 /** A port nothing is listening on: bound, read back, and released. */
 async function freePort(): Promise<number> {
   const server = createServer();
@@ -160,6 +188,7 @@ describe("ub doctor", () => {
       "credential",
       "database",
       "hub",
+      "clock",
       "port",
       "bind",
       "mcp",
@@ -290,10 +319,52 @@ describe("ub doctor", () => {
     });
 
     expect(check(checks, "hub").status).toBe("pass");
+    // A hub on this machine reads this machine's clock, so they agree.
+    expect(check(checks, "clock").status).toBe("pass");
     expect(check(checks, "port").status).toBe("pass");
     // Taken is not a problem when we are the ones holding it.
     expect(check(checks, "bind").status).toBe("pass");
     expect(check(checks, "bind").reason).toMatch(/uberblick hub/);
+  });
+
+  // The two thresholds, and the asymmetry between them: running fast trips the
+  // hub's 60s issued-in-the-future bound, running slow mints a token that has
+  // already expired — which takes a whole 900s token lifetime to reach, so a
+  // minute slow is fine and a quarter of an hour slow is not.
+  //
+  // `offsetSeconds` is the hub's clock relative to ours, so a negative offset
+  // is *this machine* running fast.
+  it.each([
+    ["61s fast", "fail", -61, /ahead of/],
+    ["61s slow", "pass", 61, /behind/],
+    ["16 minutes slow", "fail", 16 * 60, /behind/],
+  ])(
+    "a clock %s is a %s",
+    async (_name, status, offsetSeconds, direction) => {
+      const box = sandbox({ credentials: { signingSecret: SECRET } });
+      const port = await skewedClock(offsetSeconds);
+      const { checks } = await doctor(box, {
+        WORKSPACE_ID: WORKSPACE,
+        HUB_URL: `ws://127.0.0.1:${port}`,
+      });
+
+      const clock = check(checks, "clock");
+      expect(clock.status).toBe(status);
+      expect(clock.reason).toMatch(direction);
+      if (status === "fail") {
+        expect(clock.remedy).toMatch(/clock/);
+      }
+    },
+  );
+
+  it("skips the clock check when nothing answers an HTTP request", async () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const { checks } = await doctor(box, {
+      WORKSPACE_ID: WORKSPACE,
+      HUB_URL: DEAD_HUB_URL,
+    });
+
+    expect(check(checks, "clock").status).toBe("skipped");
   });
 
   it("names both values when the hub's port and HUB_URL's disagree", async () => {

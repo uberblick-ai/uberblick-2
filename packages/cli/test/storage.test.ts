@@ -264,6 +264,7 @@ describe("state in both roots", () => {
       "credential",
       "database",
       "hub",
+      "clock",
       "port",
       "bind",
       "mcp",

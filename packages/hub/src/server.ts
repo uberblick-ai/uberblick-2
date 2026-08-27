@@ -47,7 +47,7 @@ import type { HubLogger } from "./log.js";
 import { stderrLogger } from "./log.js";
 import { HubDatabase, isEphemeralDatabase } from "./persistence.js";
 import type { TokenClaims } from "./token.js";
-import { verifyToken } from "./token.js";
+import { clampToken, importRootSecret, verifyToken } from "./token.js";
 
 /**
  * Connection context. The claims *are* the context: everything downstream
@@ -227,7 +227,9 @@ export async function createHub(config: HubConfig): Promise<Hub> {
   }
 
   const log = config.log ?? stderrLogger;
-  const authSecret = config.authSecret;
+  // Imported once, here: the root secret never changes for the life of a hub,
+  // and `onAuthenticate` wants a key rather than a string.
+  const rootKey = await importRootSecret(config.authSecret);
   const databasePath = config.databasePath ?? defaultDatabasePath();
   const address = config.address ?? DEFAULT_HOST;
   const shutdownTimeoutMs = config.shutdownTimeoutMs ?? 10_000;
@@ -307,12 +309,31 @@ export async function createHub(config: HubConfig): Promise<Hub> {
         );
       }
 
-      const claims = await verifyToken(authSecret, token);
+      const claims = await verifyToken(rootKey, token);
       if (claims === null) {
         log({
           event: "hub.auth.rejected",
           room: documentName,
           cause: "invalid token",
+        });
+        throw new AuthError(
+          "invalid-token",
+          "token is missing, malformed or badly signed",
+        );
+      }
+
+      // The lifetime ceiling, applied whatever the token claimed. Every MCP
+      // server and every `ub` mints locally, so this is the only place a
+      // decade-long token gets refused. The cause is logged and the wire
+      // reason is not: an expired token and a forged one are the same refusal
+      // to whoever sent it.
+      const clamped = clampToken(claims, Math.floor(Date.now() / 1000));
+      if (clamped !== null) {
+        log({
+          event: "hub.auth.rejected",
+          room: documentName,
+          sub: claims.sub,
+          cause: `token ${clamped}`,
         });
         throw new AuthError(
           "invalid-token",
