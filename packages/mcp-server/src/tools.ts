@@ -296,6 +296,10 @@ const descriptionArg = z
  * with by every discovery surface. Length is not bounded, because nothing
  * bounds a title anywhere else; emptiness is the only thing that makes a
  * document unfindable in a listing.
+ *
+ * `create_doc` and `set_title` share it so the MCP surface has one rule for
+ * titles: neither tool can put a document into a state the other refuses to
+ * leave it in.
  */
 const titleArg = z
   .string()
@@ -489,12 +493,14 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Create a document and publish its directory stub, so every client can discover it. " +
         "Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
         "The write applies to the local replica and syncs in the background.\n\n" +
-        "A `description` is REQUIRED here and the call fails without one. " +
+        "A `title` and a `description` are both REQUIRED here and the call fails without either, creating nothing. " +
+        "A title cannot be empty or whitespace: an untitled document cannot be picked out of a listing, and " +
+        "set_title is the repair for the untitled ones the web UI creates. " +
         DESCRIPTION_IS_FOR_CHOOSING +
         "\n\n" +
         SYNCED_MEANS,
       inputSchema: {
-        title: z.string().describe("Display title. Identity is the returned UUID."),
+        title: titleArg,
         description: descriptionArg,
         tags: z.array(z.string().min(1)).optional(),
         blocks: z

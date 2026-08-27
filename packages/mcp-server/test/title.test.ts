@@ -6,6 +6,9 @@
  * the call returns, that discovery answers from the stub rather than by opening
  * a room, and that two replicas renaming at once end up holding one title
  * rather than two.
+ *
+ * `create_doc` holds the same rule, so the MCP surface cannot create the state
+ * `set_title` refuses to leave a document in.
  */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -186,4 +189,26 @@ describe("set_title", () => {
       );
     }
   }, 45_000);
+});
+
+describe("create_doc requires a title", () => {
+  it("refuses the empty title and whitespace, and creates nothing", async () => {
+    const rig = await localRig();
+    const before = (await rig.ok("list_docs")).docs.length;
+
+    for (const title of ["", "   "]) {
+      const refused = await rig.call("create_doc", {
+        title,
+        description: "A document that should never come into existence.",
+      });
+      expect(refused.isError).toBe(true);
+      expect(refused.payload.message).toContain(
+        "a title cannot be empty or whitespace",
+      );
+    }
+
+    // The schema rejects before the handler runs, so there is no half-made
+    // document and no stub for one — the listing is exactly as it was.
+    expect((await rig.ok("list_docs")).docs).toHaveLength(before);
+  });
 });
