@@ -547,9 +547,21 @@ const TAIL_LINES = 3;
 const TAIL_CHARS = 500;
 
 /**
- * The last few lines a vendor said on stderr, bounded and stripped of control
- * characters — a remote host's output ends up on this terminal, and an escape
- * sequence in it is the host writing to the screen rather than reporting.
+ * A vendor's output as text, never as terminal instructions: every control
+ * character but the newline removed.
+ *
+ * The host at the far end of `ssh` is chosen by whoever ran the command, but
+ * what it writes lands on this terminal, where an OSC or CSI sequence is a
+ * command rather than a diagnosis. Everything quoted from a vendor — the
+ * bounded tail below and the two sites that print a whole stderr — goes
+ * through here.
+ */
+function printable(text: string): string {
+  return text.replace(/\p{Cc}/gu, (character) => (character === "\n" ? character : ""));
+}
+
+/**
+ * The last few lines a vendor said on stderr, printable and bounded.
  *
  * These programs run locally under the caller's own credentials, and their
  * diagnostics are the only place the cause of a failure is written — an exit
@@ -562,10 +574,9 @@ const TAIL_CHARS = 500;
  * nothing here has to be scrubbed.
  */
 function stderrTail(stderr: string): string {
-  const lines = stderr
+  const lines = printable(stderr)
     .split("\n")
-    // Newlines survive as the split; everything else in Cc does not.
-    .map((line) => line.replace(/\p{Cc}/gu, "").trimEnd())
+    .map((line) => line.trimEnd())
     .filter((line) => line !== "");
   const tail = lines.slice(-TAIL_LINES).join("\n");
   return tail.length > TAIL_CHARS ? `…${tail.slice(-TAIL_CHARS)}` : tail;
@@ -858,7 +869,7 @@ export async function remoteInitCommand(
     // shape. A clone that is refused the deploy key says so five lines from
     // the end, behind git's own boilerplate, so the tail alone loses it.
     io.err(
-      `${checkout.stderr}ub remote init: ${failed(existing ? "git fetch on the host" : "git clone on the host", checkout)}.\n`,
+      `${printable(checkout.stderr)}ub remote init: ${failed(existing ? "git fetch on the host" : "git clone on the host", checkout)}.\n`,
     );
     return 1;
   }
@@ -990,7 +1001,7 @@ export async function remoteUpdateCommand(
   if (ran.status !== 0) {
     // The whole log here rather than the tail `failed` quotes: a failed deploy
     // is diagnosed from the build output, and this command runs one thing.
-    io.err(`${ran.stderr}ub remote update: ${failed("remote-update.sh", ran)}.\n`);
+    io.err(`${printable(ran.stderr)}ub remote update: ${failed("remote-update.sh", ran)}.\n`);
     return 1;
   }
   return 0;

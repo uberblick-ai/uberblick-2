@@ -432,6 +432,19 @@ describe("ub remote init", () => {
     expect(await init(escaping)).toBe(1);
     expect(escaping.err()).toContain("exited 1: be]0;pwnedfore");
     expect(/\p{Cc}/u.test(escaping.err().replaceAll("\n", ""))).toBe(false);
+
+    // The same bytes by the other route: the clone site prints git's whole
+    // stderr, where the tail's bound is not what protects the terminal.
+    const cloning = harness({
+      ssh: `  *"uberblick:clone"*)
+    printf 'first\\033]0;pwned\\007 line\\r\\n' >&2
+    printf 'noise %s\\n' 1 2 3 4 >&2
+    exit 1 ;;`,
+    });
+    expect(await init(cloning)).toBe(1);
+    // Untruncated — this line sits five lines above the quoted tail.
+    expect(cloning.err()).toContain("first]0;pwned line");
+    expect(/\p{Cc}/u.test(cloning.err().replaceAll("\n", ""))).toBe(false);
   });
 
   it("names the usual causes when the deploy key is refused", async () => {
