@@ -27,6 +27,7 @@ import {
   initDoc,
   setTags,
   setTitle,
+  tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
@@ -226,6 +227,31 @@ describe("directory stamps from the web", () => {
       createdAt: T0,
       updatedAt: T0,
     });
+  });
+
+  it("leaves a tombstone alone, however far the stub has drifted (#81)", () => {
+    // The web repairs stubs from the document it has open, exactly as the MCP
+    // replica does — and a tombstone stops both. Archiving is a directory write
+    // that no document update may undo, so a rename arriving under an open pane
+    // must not republish the entry and revive what someone archived.
+    const client = rig("Retired protocol");
+    const before = client.crossed();
+    tombstoneDirectoryEntry(client.peer, UUID);
+
+    vi.setSystemTime(T0 + WINDOW * 2);
+    setTitle(client.doc, "Renamed after the archive");
+    const block = appendBlock(client.doc, { type: "paragraph", text: "" });
+    type(client, block, "", "and edited too");
+
+    // Still archived, still under the title it was archived with: the repair
+    // stood down rather than writing either half back.
+    expect(stub(client)).toMatchObject({
+      title: "Retired protocol",
+      deleted: true,
+    });
+    // And it wrote nothing at all — the tombstone is the only update that
+    // crossed since.
+    expect(client.crossed()).toBe(before + 1);
   });
 
   it("stands down for a window another replica has already stamped", () => {
