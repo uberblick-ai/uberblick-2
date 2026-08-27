@@ -157,6 +157,7 @@ describe("the replica database", () => {
     rigs.push(alpha);
     await alpha.ok("create_doc", {
       title: "Alpha plan",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "a shared word: corpus" }],
     });
 
@@ -172,6 +173,7 @@ describe("the replica database", () => {
     rigs.push(beta);
     await beta.ok("create_doc", {
       title: "Beta plan",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "a shared word: corpus" }],
     });
 

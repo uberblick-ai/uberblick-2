@@ -1,15 +1,22 @@
 /**
- * The seed import — contract level.
+ * The markdown template import — contract level.
  *
- * The importer's job is that the product's own docs end up inside the product
- * and stay there: every seed file becomes a discoverable document, a second run
- * writes nothing, the link graph is real, and the content survives the round
- * trip out to markdown. Each test here is one of those.
+ * This path is private: `ub init` writes the two starter templates that ship in
+ * `@uberblick/cli` through it, and nothing else does. Its job is that a
+ * template becomes a discoverable document and then stops being a template — a
+ * second run writes nothing, the link graph is real, and a live edit is never
+ * reached into. Each test here is one of those.
  *
- * The assertions go through the real MCP tools wherever an acceptance criterion
- * names one (list_docs, search, backlinks, export_markdown), on a server opened
- * over the same database the importer wrote — which is also the proof that the
- * import went into the shared update log and not somewhere private.
+ * The fixture corpus below is this suite's own. The repository holds no
+ * snapshot of the project's documents — they live in the live workspace — so a
+ * contract here is defended against files this file writes rather than against
+ * whatever a product document happens to say today. The starter templates
+ * themselves are proved end to end by the CLI's own suite.
+ *
+ * The assertions go through the real MCP tools wherever one names the contract
+ * (list_docs, search, backlinks, export_markdown), on a server opened over the
+ * same database the importer wrote — which is also the proof that the write
+ * went into the shared update log and not somewhere private.
  */
 
 import { writeFileSync } from "node:fs";
@@ -62,7 +69,7 @@ interface ImportRun {
  */
 async function runImport(
   databasePath: string,
-  dir?: string,
+  dir: string = corpusDir,
   port?: number,
 ): Promise<ImportRun> {
   const config = testConfig({
@@ -82,11 +89,38 @@ async function runImport(
   }
 }
 
-const seeds = readSeedDocs();
+const OVERVIEW = "a1e7d3f0-4c62-4b18-9d05-7e2a6b41c93d";
+const INSTALL = "c48b2a95-6f13-4d70-8b2e-1a5c09e7d284";
+const NOTES = "e37c9d21-0b48-4a6e-95f3-2d81b4c06fa7";
+
+/**
+ * Three documents in a throwaway directory, one citing another by uuid — enough
+ * corpus for "imports all of them", "writes nothing twice" and "links resolve"
+ * to mean something, and small enough to read.
+ */
+function writeCorpus(): string {
+  const dir = tempDir();
+  const files: [string, string, string, string][] = [
+    ["overview.md", OVERVIEW, "Overview", `links:\n  - ${INSTALL}\n`],
+    ["install.md", INSTALL, "Install and run", ""],
+    ["notes.md", NOTES, "Notes", ""],
+  ];
+  for (const [file, uuid, title, extra] of files) {
+    writeFileSync(
+      join(dir, file),
+      `---\nuuid: ${uuid}\ntitle: ${title}\ntags: [reference]\n${extra}---\n\n` +
+        `## ${title}\n\nOne paragraph in ${title}.\n`,
+    );
+  }
+  return dir;
+}
+
+const corpusDir = writeCorpus();
+const seeds = readSeedDocs(corpusDir);
 
 function seedUuid(file: string): string {
   const seed = seeds.find((candidate) => candidate.file === file);
-  if (seed === undefined) throw new Error(`no seed file ${file}`);
+  if (seed === undefined) throw new Error(`no fixture file ${file}`);
   return seed.uuid;
 }
 
@@ -107,18 +141,22 @@ afterAll(() => {
 });
 
 describe("seed import", () => {
-  // What the importer needs from a seed file, not what the corpus happens to
-  // look like today: identity it can key on, a title, and something to import.
-  it("parses every seed file with identity, a title and a tag", () => {
-    expect(seeds.length).toBeGreaterThanOrEqual(9);
-    for (const seed of seeds) {
-      expect(seed.uuid).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-      );
-      expect(seed.title).not.toBe("");
-      expect(seed.tags.length).toBeGreaterThanOrEqual(1);
-      expect(seed.blocks.length).toBeGreaterThan(0);
-    }
+  // Identity comes from the file and is never invented: a generated uuid would
+  // make every `ub init` write the starter documents again, as new ones.
+  it("refuses a template without identity rather than inventing one", () => {
+    const nameless = tempDir();
+    writeFileSync(
+      join(nameless, "nameless.md"),
+      "## No frontmatter\n\nProse.\n",
+    );
+    expect(() => readSeedDocs(nameless)).toThrow(/no `uuid` in frontmatter/);
+
+    const untitled = tempDir();
+    writeFileSync(
+      join(untitled, "untitled.md"),
+      `---\nuuid: ${NOTES}\ntags: [reference]\n---\n\nProse.\n`,
+    );
+    expect(() => readSeedDocs(untitled)).toThrow(/no `title` in frontmatter/);
   });
 
   it("imports every seed doc, and list_docs and search find all of them", async () => {
@@ -130,9 +168,8 @@ describe("seed import", () => {
       seeds.map(() => "created"),
     );
 
-    // A tenth document whose wording this test owns, so the FTS assertion below
-    // does not depend on what the real corpus happens to say today — editing a
-    // seed file must never break a test.
+    // A fourth document, in a directory of its own, so the FTS assertion below
+    // is about a word this test wrote rather than about the fixture's prose.
     const dir = tempDir();
     const extra = "5b1c0f8a-7d21-4e93-8a04-6c2f9d1b3e77";
     const phrase = "quarrelsome zeppelin";
@@ -286,7 +323,7 @@ describe("seed import", () => {
     );
     try {
       const seed = seeds[0];
-      if (seed === undefined) throw new Error("no seed docs");
+      if (seed === undefined) throw new Error("no fixture docs");
       upsertDirectoryEntry(replicas.directory().doc, {
         uuid: seed.uuid,
         title: seed.title,
@@ -303,8 +340,8 @@ describe("seed import", () => {
     }
   });
 
-  // The import is one-time: after it, the document belongs to whoever edits it
-  // through the MCP tools. A re-run — even against a seed file that has since
+  // The write is one-time: after it, the document belongs to whoever edits it
+  // through the MCP tools. A re-run — even against a template that has since
   // changed — must not reach into a live document, because the importer cannot
   // tell an edited file from an edited document.
   it("leaves live edits alone on a re-run, even when the file changed", async () => {
@@ -337,11 +374,11 @@ describe("seed import", () => {
       uuid,
       after_block_id: paragraph.id,
       type: "paragraph",
-      text: "A block the seed file never had.",
+      text: "A block the template never had.",
     });
     await editing.close();
 
-    // The seed file moves on too: different prose, a deleted block, new tags.
+    // The template moves on too: different prose, a deleted block, new tags.
     write("## First\n\nProse only the file has.\n", "verify");
     const second = await runImport(databasePath, dir);
     expect(second.results[0]?.action).toBe("unchanged");
@@ -354,7 +391,7 @@ describe("seed import", () => {
       expect((doc.blocks as { text: string }[]).map((block) => block.text)).toEqual([
         "First",
         "Prose an agent rewrote.",
-        "A block the seed file never had.",
+        "A block the template never had.",
       ]);
       expect(doc.tags).toEqual(["feature"]);
       expect((doc.blocks as { id: string }[])[1]?.id).toBe(paragraph.id);
@@ -373,7 +410,7 @@ describe("seed import", () => {
     const replicas = new Replicas(testConfig({ databasePath }), store);
     try {
       const seed = seeds[0];
-      if (seed === undefined) throw new Error("no seed docs");
+      if (seed === undefined) throw new Error("no fixture docs");
       tombstoneDirectoryEntry(replicas.directory().doc, seed.uuid);
 
       const results = await importSeedDocs(replicas, [seed]);
@@ -404,7 +441,8 @@ describe("seed import", () => {
       // And it stopped at the first failure rather than working through the rest:
       // the second document was never written.
       const later = seeds[1];
-      if (later === undefined) throw new Error("expected more than one seed doc");
+      if (later === undefined)
+        throw new Error("expected more than one fixture doc");
       expect(getMeta(replicas.replica(later.uuid).doc).uuid).toBe("");
     } finally {
       replicas.destroy();
@@ -434,8 +472,7 @@ describe("seed import", () => {
   });
 
   // The whole export round trip on one fixture this test owns: frontmatter, a
-  // heading, an unlabelled fence and a mermaid fence — the corpus happens to
-  // contain no mermaid block, and its wording is not this test's business.
+  // heading, an unlabelled fence and a mermaid fence.
   it("exports an imported doc with headings and both kinds of fence intact", async () => {
     const dir = tempDir();
     const uuid = "2c9e5b71-8d34-4a6f-9e12-7f0b3a4d8c56";

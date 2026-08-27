@@ -258,6 +258,7 @@ async function mcpDoc(box: Sandbox, hub: Hub, title: string): Promise<string> {
     async (call) => {
       const created = await call("create_doc", {
         title,
+        description: "A test document.",
         blocks: [{ type: "paragraph", text: `${title} body` }],
       });
       // `create_doc` returns before the hub has the write, by design, so wait

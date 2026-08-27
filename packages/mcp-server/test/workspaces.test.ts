@@ -103,14 +103,17 @@ describe("two workspaces on one hub", () => {
 
     const roadmap = await uberblick.ok("create_doc", {
       title: "Uberblick roadmap",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "a shared word: corpus" }],
     });
     const kickoff = await ablauf.ok("create_doc", {
       title: "Ablauf kickoff",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "a shared word: corpus" }],
     });
     const backlog = await ablauf.ok("create_doc", {
       title: "Ablauf backlog",
+      description: "A test document.",
       blocks: [{ type: "paragraph", text: "everything after the kickoff" }],
     });
     await ablauf.ok("set_links", { uuid: backlog.uuid, links: [kickoff.uuid] });

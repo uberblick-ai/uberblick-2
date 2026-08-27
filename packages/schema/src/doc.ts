@@ -45,6 +45,11 @@ export interface InitDocOptions {
   uuid: string;
   title: string;
   tags?: string[];
+  /**
+   * One or two sentences saying what the document is for. Optional here because
+   * the web UI creates documents without one; MCP's `create_doc` requires it.
+   */
+  description?: string;
 }
 
 /**
@@ -53,6 +58,8 @@ export interface InitDocOptions {
  *
  * Idempotent for uuid/title/tags (they are overwritten with what is passed);
  * `links` is only seeded when absent, so re-initialising never drops links.
+ * `description` is written only when one is given, so re-initialising a
+ * document without one does not erase the description it since acquired.
  */
 export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
   const meta = getMetaMap(ydoc);
@@ -60,6 +67,9 @@ export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
     meta.set("uuid", options.uuid);
     meta.set("title", options.title);
     meta.set("tags", [...(options.tags ?? [])]);
+    if (options.description !== undefined) {
+      meta.set("description", options.description);
+    }
     if (!meta.has("links")) meta.set("links", []);
     // Touch the other roots so they exist in the update stream from the start.
     getBlocksFragment(ydoc);
@@ -72,15 +82,24 @@ function readStringArray(value: unknown): string[] {
   return value.filter((entry): entry is string => typeof entry === "string");
 }
 
-/** Read metadata, with defaults for anything not yet written. */
+/**
+ * Read metadata, with defaults for anything not yet written.
+ *
+ * `description` is null rather than empty when there is none: absent and blank
+ * are the same fact — nobody has said what this document is for — and one shape
+ * for it keeps every reader from having to test for both.
+ */
 export function getMeta(ydoc: Y.Doc): DocMeta {
   const meta = getMetaMap(ydoc);
   const uuid = meta.get("uuid");
   const title = meta.get("title");
+  const description = meta.get("description");
   return {
     uuid: typeof uuid === "string" ? uuid : "",
     title: typeof title === "string" ? title : "",
     tags: readStringArray(meta.get("tags")),
+    description:
+      typeof description === "string" && description !== "" ? description : null,
     links: readStringArray(meta.get("links")),
   };
 }
@@ -89,6 +108,25 @@ export function setTitle(ydoc: Y.Doc, title: string): void {
   const meta = getMetaMap(ydoc);
   ydoc.transact(() => {
     meta.set("title", title);
+  });
+}
+
+/**
+ * Replace the description wholesale — there is no partial edit of it, because
+ * one or two sentences are rewritten, not patched.
+ *
+ * The document is authoritative; whoever writes here is responsible for
+ * bringing the directory stub along, exactly as a rename is. Length is not
+ * enforced here, as it is not for a title: {@link MAX_DESCRIPTION_LENGTH} is the
+ * number the write boundaries check against.
+ *
+ * The empty string is how a description is removed: `getMeta` reads it back as
+ * null, and a stub upsert given it drops the cached copy.
+ */
+export function setDescription(ydoc: Y.Doc, description: string): void {
+  const meta = getMetaMap(ydoc);
+  ydoc.transact(() => {
+    meta.set("description", description);
   });
 }
 

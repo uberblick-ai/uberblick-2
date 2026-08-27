@@ -57,6 +57,7 @@ function docRow(report: any, uuid: string): any {
 async function createDoc(rig: Rig, title: string): Promise<string> {
   const created = await rig.ok("create_doc", {
     title,
+    description: "A test document.",
     blocks: [{ type: "paragraph", text: "a document worth an opinion" }],
   });
   return created.uuid;

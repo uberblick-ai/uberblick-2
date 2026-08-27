@@ -40,6 +40,7 @@ describe("the update log", () => {
     try {
       const doc = await rig.ok("create_doc", {
         title: "Committed",
+        description: "A test document.",
         blocks: [{ type: "paragraph", text: "already durable" }],
       });
 
@@ -68,6 +69,7 @@ describe("the update log", () => {
     try {
       const doc = await first.ok("create_doc", {
         title: "Written once",
+        description: "A test document.",
         tags: ["kept"],
         blocks: [
           { type: "heading", text: "Written once", level: 2 },
@@ -89,6 +91,7 @@ describe("the update log", () => {
           uuid,
           title: "Written once",
           tags: ["kept"],
+          description: "A test document.",
           pinned: false,
           createdAt: expect.any(Number),
           updatedAt: expect.any(Number),
@@ -130,6 +133,7 @@ describe("the update log", () => {
       name: "create_doc",
       arguments: {
         title: "Survives a kill",
+        description: "A test document.",
         blocks: [{ type: "paragraph", text: "written just before the kill" }],
       },
     });
@@ -178,6 +182,7 @@ describe("the update log", () => {
     try {
       const doc = await rig.ok("create_doc", {
         title: "Compacted",
+        description: "A test document.",
         blocks: [{ type: "paragraph", text: "0" }],
       });
       uuid = doc.uuid;

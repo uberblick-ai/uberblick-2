@@ -21,9 +21,10 @@
  *    a working directory — `ub init` outside the repository seeds the same two
  *    documents. `package.json`'s `files` array is what carries them into a
  *    published tarball.
- * 2. **The import machinery is the existing one.** `importSeedDir` is the same
- *    markdown→blocks path `mise run import-seed` runs, so there is one
- *    converter and one set of rules about identity: the frontmatter `uuid` is
+ * 2. **The import machinery is package-private.** `importSeedDir` is the only
+ *    markdown→blocks path there is, and these two templates are its only
+ *    caller: no command imports a corpus, and no MCP tool reads markdown. One
+ *    converter, one set of rules about identity — the frontmatter `uuid` is
  *    the document's identity, and a uuid already in the system is never written
  *    again. The sidebar group goes through the same call, the same replica set
  *    and the same update log, after both documents are durable — which is what

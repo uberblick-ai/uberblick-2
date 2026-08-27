@@ -42,6 +42,15 @@ secret that already exists. `mise run init` re-runs just the `ub init` step.
 block it has not been told to trust — and it is a hard error, not a warning.
 `ub init` runs `mise trust` on the file it writes for the same reason.
 
+Entering the checkout prints a short quick-start — the two commands above, the
+check tasks, and `mise tasks` for the rest. It is a `mise` project hook, so it
+needs [mise activated in your
+shell](https://mise.jdx.dev/getting-started.html): shims put `node` and `pnpm`
+on PATH but never run hooks, so with shims alone nothing is printed and nothing
+is missing. `mise run welcome` prints the same thing on demand, activated or
+not. It stays silent when stdout is not a terminal, when `CI` is set, and when
+`MISE_QUIET=1`.
+
 What this supports is exactly one arrangement: **one workspace, one trusted user,
 multiple clients and machines; no login and no tenant isolation.** Everything
 below is a consequence of that.
@@ -84,6 +93,7 @@ present.
 ```
 mise run setup        # one-command bootstrap: toolchain, dependencies, `ub init`
 mise run init         # just the `ub init` step, idempotent
+mise run welcome      # the quick-start the `enter` hook prints
 
 mise run hub          # Hocuspocus sync hub
 mise run mcp          # MCP server, standalone smoke test only (see below)
@@ -233,9 +243,9 @@ deployed client reads its workspaces at runtime from the served
 deployment its workspaces is an environment variable and a container recreate,
 never a bundle rebuild.
 
-`mise run import-seed` is the one-time import of `docs-seed/` into the system.
-After it, the product docs live in the documents, and are read and written
-through the MCP tools rather than by editing the seed files.
+The project's own documents live in the live uberblick workspace, not in this
+repository. `list_docs` enumerates them and the MCP tools read and write them;
+there is no corpus import command and no snapshot to keep in step.
 
 ## The `ub` command line
 

@@ -310,6 +310,96 @@ describe("directory doc", () => {
     expect(winner?.createdAt).toBe(1_000);
   });
 
+  it("mirrors a description and carries it through every rewrite", () => {
+    const dir = new Y.Doc();
+    upsertDirectoryEntry(dir, {
+      uuid: ALPHA,
+      title: "Alpha",
+      description: "What Alpha is for.",
+    });
+    expect(getDirectoryEntry(dir, ALPHA)?.description).toBe(
+      "What Alpha is for.",
+    );
+
+    // The web client repairs stubs without knowing this field exists. A writer
+    // that only means to fix a title must not erase what it never mentioned.
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha, renamed" });
+    expect(getDirectoryEntry(dir, ALPHA)?.description).toBe(
+      "What Alpha is for.",
+    );
+
+    tombstoneDirectoryEntry(dir, ALPHA);
+    expect(getDirectoryEntry(dir, ALPHA)?.description).toBe(
+      "What Alpha is for.",
+    );
+    restoreDirectoryEntry(dir, ALPHA);
+    expect(getDirectoryEntry(dir, ALPHA)).toEqual({
+      uuid: ALPHA,
+      title: "Alpha, renamed",
+      tags: [],
+      description: "What Alpha is for.",
+    });
+  });
+
+  it("clears a description with the empty string, and never stores one", () => {
+    const dir = new Y.Doc();
+    upsertDirectoryEntry(dir, {
+      uuid: ALPHA,
+      title: "Alpha",
+      description: "What Alpha is for.",
+    });
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha", description: "" });
+
+    // Absent, not empty: a listing tests one thing to know there is no
+    // description, and blank is the same fact as missing.
+    expect(getDirectoryEntry(dir, ALPHA)).toEqual({
+      uuid: ALPHA,
+      title: "Alpha",
+      tags: [],
+    });
+  });
+
+  it("converges last-write-wins when two replicas describe the same document", () => {
+    const [a, b] = replicaPair((dir) => {
+      upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha" });
+    });
+
+    // Same shape as the timestamps: the stub is a cache written whole, so two
+    // replicas that describe one document converge on an update order rather
+    // than on whichever description someone meant more.
+    upsertDirectoryEntry(a, {
+      uuid: ALPHA,
+      title: "Alpha",
+      description: "Described by A.",
+    });
+    upsertDirectoryEntry(b, {
+      uuid: ALPHA,
+      title: "Alpha",
+      description: "Described by B.",
+    });
+    syncDocs(a, b);
+
+    const winner = getDirectoryEntry(a, ALPHA);
+    expect(getDirectoryEntry(b, ALPHA)).toEqual(winner);
+    expect(["Described by A.", "Described by B."]).toContain(
+      winner?.description,
+    );
+  });
+
+  it("ignores a malformed description written by a foreign client", () => {
+    const dir = new Y.Doc();
+    getDirectoryMap(dir).set(ALPHA, {
+      title: "Alpha",
+      tags: [],
+      description: 42,
+    });
+    expect(getDirectoryEntry(dir, ALPHA)).toEqual({
+      uuid: ALPHA,
+      title: "Alpha",
+      tags: [],
+    });
+  });
+
   it("ignores a malformed timestamp written by a foreign client", () => {
     const dir = new Y.Doc();
     getDirectoryMap(dir).set(ALPHA, {

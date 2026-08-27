@@ -331,8 +331,8 @@ what makes that one string, and one paste, rather than two.
 already**, pulls the whole remote directory and every live document into the
 local update log for it, verifies that by the same read-back, and only then
 persists the endpoint and the binding. It seeds nothing into a joined workspace:
-the documents come off the wire, so `mise run import-seed` is not part of this.
-An unreachable or auth-rejecting remote writes nothing at all.
+the documents come off the wire. An unreachable or auth-rejecting remote writes
+nothing at all.
 
 A machine that already had a workspace of its own keeps it. It is not merged and
 not moved: `ub workspace list` shows both, and `ub workspace use <id> --user`
