@@ -199,31 +199,17 @@ export interface AttachOptions {
   awareness: Awareness;
 }
 
-/** What {@link HubSyncOptions.onAdmissions} reports, on every change. */
-export interface AdmissionCounts {
-  /** The connection these counts belong to. See {@link HubSync.socketGeneration}. */
-  generation: number;
-  /** Rooms whose token is on the wire, unanswered. Never above the bound. */
-  inFlight: number;
-  /** Rooms that have not been let near the hub yet. */
-  waiting: number;
-}
-
 export interface HubSyncOptions {
   /**
    * Override {@link MAX_CONCURRENT_ROOM_ATTACHES}. A test seam: proving the
    * bound holds needs a corpus larger than a hub ceiling, and a ceiling of 100
    * would make that test a hundred rooms long.
+   *
+   * A positive integer, checked in the constructor: this number is both the
+   * admission gate and a count nothing else re-derives, so a zero would queue
+   * every room forever on a socket that is up and answering.
    */
   maxConcurrentAttaches?: number;
-
-  /**
-   * Every change to the admission accounting, as it happens. A test seam: the
-   * bound is a statement about a maximum, and sampling a counter can only ever
-   * miss one. Told every transition, a test computes that maximum exactly, and
-   * can drive a flap from an observed admission rather than from a timer.
-   */
-  onAdmissions?: (counts: AdmissionCounts) => void;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -267,9 +253,6 @@ export class HubSync {
 
   /** The bound on concurrent attach/auth. See {@link MAX_CONCURRENT_ROOM_ATTACHES}. */
   private readonly maxConcurrentAttaches: number;
-
-  /** Told every change to the accounting below. See {@link HubSyncOptions.onAdmissions}. */
-  private readonly onAdmissions: ((counts: AdmissionCounts) => void) | null;
 
   /**
    * Which connection the slots now held belong to.
@@ -362,7 +345,14 @@ export class HubSync {
     this.enabled = config.authSecret !== null;
     this.maxConcurrentAttaches =
       options.maxConcurrentAttaches ?? MAX_CONCURRENT_ROOM_ATTACHES;
-    this.onAdmissions = options.onAdmissions ?? null;
+    if (
+      !Number.isInteger(this.maxConcurrentAttaches) ||
+      this.maxConcurrentAttaches < 1
+    ) {
+      throw new Error(
+        `HubSync: maxConcurrentAttaches must be a positive integer, got ${this.maxConcurrentAttaches}`,
+      );
+    }
     const backoff = socketBackoff(config.reconnectMaxDelayMs);
     // The socket's first retry delay, and the first delay a rebuild waits out.
     this.reconnectDelayMs = backoff.delay;
@@ -389,7 +379,6 @@ export class HubSync {
           // need again on the next connection.
           this.socketGeneration += 1;
           this.attaching.clear();
-          this.admissionsChanged();
         }
         if (status === "connected") {
           this.sawFailure = false;
@@ -449,6 +438,13 @@ export class HubSync {
    * is what the caller checks before it lets anything leave.
    */
   private admission(room: string): Promise<number> {
+    if (this.destroyed || this.quarantined) {
+      // Terminal: every provider is inert and no connection will be opened
+      // again, so a queue entry made here would never be admitted, its caller
+      // would stay suspended, and both would be held until the process ends.
+      // Resolving on the current generation ends the call instead.
+      return Promise.resolve(this.socketGeneration);
+    }
     const queued = this.waiting.get(room);
     if (queued !== undefined) {
       return queued.promise;
@@ -479,16 +475,6 @@ export class HubSync {
         ticket.admit(this.socketGeneration);
       }
     }
-    this.admissionsChanged();
-  }
-
-  /** Report the accounting, for a test that has to see every transition. */
-  private admissionsChanged(): void {
-    this.onAdmissions?.({
-      generation: this.socketGeneration,
-      inFlight: this.attaching.size,
-      waiting: this.waiting.size,
-    });
   }
 
   /**
@@ -506,7 +492,10 @@ export class HubSync {
    * the rooms still waiting can be let go rather than left suspended forever.
    *
    * Let go on the *current* generation, so a suspended token call returns
-   * instead of queueing again — there is no next connection to queue for.
+   * instead of queueing again — there is no next connection to queue for. A
+   * call still minting when this runs is caught by the terminal-state guards in
+   * {@link admission} and in the token callable, because the disconnect that
+   * follows moves the generation out from under it.
    */
   private releaseAdmissions(): void {
     for (const [room, ticket] of this.waiting) {
@@ -514,7 +503,6 @@ export class HubSync {
       ticket.admit(this.socketGeneration);
     }
     this.attaching.clear();
-    this.admissionsChanged();
   }
 
   /** Mint a fresh token for this agent session. */
@@ -647,6 +635,14 @@ export class HubSync {
       token: async () => {
         for (;;) {
           const generation = await this.admission(room);
+          if (this.destroyed || this.quarantined) {
+            // Quarantined or destroyed while this call was suspended. Every
+            // provider is detached by then and `send()` on a detached provider
+            // is inert, so this token travels nowhere; ending the call is what
+            // matters, because looping would queue for a connection that is
+            // never opened again and leave the entry behind with it.
+            return "";
+          }
           const token = await this.token();
           if (generation === this.socketGeneration) {
             return token;
@@ -838,17 +834,37 @@ export class HubSync {
   }
 
   /**
+   * Whether rooms are still queued for, or holding, an attach slot.
+   *
+   * The queue drains a wave per round trip, and {@link waitForQuiet} is one
+   * budget: a corpus larger than the bound outlasts it by construction. So a
+   * caller that records hydration as complete asks this first — a wait that
+   * ended with the queue still draining spent its budget, not the drain, and
+   * the settle is owed again on the next call rather than waited out longer
+   * here.
+   *
+   * Only while connected: a queue nobody is draining is a hub that is down,
+   * which every call already answers through the connect grace, and re-owing
+   * the settle for it would make every offline tool call pay that grace again.
+   */
+  isDraining(): boolean {
+    return (
+      this.socketStatus === "connected" &&
+      (this.waiting.size > 0 || this.attaching.size > 0)
+    );
+  }
+
+  /**
    * Wait — briefly, and only when it can help — until every room this process
    * holds is in sync, including the ones still queued for an attach slot.
    *
-   * The queue drains in waves of {@link MAX_CONCURRENT_ROOM_ATTACHES}, so the
-   * budget is per wave, not per call: a fixed one sized for a single round trip
-   * expires mid-drain on a fresh client, and the caller then records the
-   * hydration as done — served from a corpus that is still queueing. Waiting
-   * `syncTimeoutMs` for each wave still queued is the same promise every wave
-   * gets, made once per wave rather than once per corpus. Where even that
-   * expires, the wait ends and every unfinished room reports `synced: false`
-   * through `isRoomQuiet`, which is the honest answer rather than a fast one.
+   * `syncTimeoutMs` is the whole budget, however large the corpus is: a tool
+   * call's wait is a promise to its caller, and a deadline multiplied by the
+   * queue depth would make that promise grow with the corpus. A drain longer
+   * than one budget is not hidden by waiting longer, it is *reported* — the
+   * wait ends, {@link isDraining} still says the queue is going, every
+   * unfinished room reports `synced: false` through `isRoomQuiet`, and the next
+   * call settles again from there.
    *
    * Returns as soon as the hub is known to be unavailable, so an offline tool
    * call costs at most one connect grace and never blocks on a hub that is not
@@ -870,16 +886,7 @@ export class HubSync {
       return;
     }
 
-    // One per-wave budget for every round trip the queue still has to make,
-    // counted here rather than while it drains: the number only falls from now
-    // on, and a deadline that shrank with it would cut the last wave short.
-    const waves = Math.max(
-      1,
-      Math.ceil(
-        (this.waiting.size + this.attaching.size) / this.maxConcurrentAttaches,
-      ),
-    );
-    const syncDeadline = Date.now() + this.config.syncTimeoutMs * waves;
+    const syncDeadline = Date.now() + this.config.syncTimeoutMs;
     while (!this.allQuiet()) {
       if (
         this.socketStatus !== "connected" ||

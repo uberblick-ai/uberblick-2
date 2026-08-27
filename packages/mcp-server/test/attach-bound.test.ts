@@ -9,42 +9,94 @@
  *
  * The bound has to hold on every connection, not only the first: every attached
  * provider re-sends its token from its own `onOpen`, so a hub restart
- * re-authenticates the whole corpus in a single tick, and a socket that flaps
- * *while the queue is draining* does it again on every flap. All of that is
- * here, against a real hub whose ceiling is small enough that an unbounded
- * client is *guaranteed* to breach it: 12 rooms, a ceiling of 5, a client bound
- * of 3.
+ * re-authenticates the whole corpus in a single tick. All of that is here,
+ * against a real hub whose ceiling is small enough that an unbounded client is
+ * *guaranteed* to breach it: 12 rooms, a ceiling of 4, a client bound of 3.
  *
- * Nothing here samples a counter. The admission accounting is reported on every
- * transition, so the maximum in flight is computed exactly rather than caught
- * in the act — and the flaps are driven from an observed admission rather than
- * from a timer, so the test does the same thing on a fast machine and a loaded
- * one.
+ * Nothing here samples a counter or reads `HubSync`'s own accounting — the
+ * accounting is what is under test. Two seams, both at a boundary the library
+ * owns: `mintToken` is held, which suspends a token call exactly where a real
+ * one is slow and the socket under it can die; and `getToken` is watched, which
+ * is the library's own call into the token callable and the moment a provider
+ * becomes free to send. Between them a token call's whole lifecycle — held
+ * across a reconnect, held across a quarantine — is driven rather than raced.
  *
  * The last suite is the other half of pacing a corpus: what a caller may call
- * hydrated. A queue drained in waves takes one round trip per wave, so a settle
- * that waits a single round trip's budget reports a corpus complete while it is
- * still joining.
+ * hydrated. A queue drained in waves takes one round trip per wave and a settle
+ * is one budget, so the wait ends where it promised to and says the drain is
+ * still going, rather than growing with the corpus or calling it complete.
  */
 
 import { randomUUID } from "node:crypto";
+import { HocuspocusProvider } from "@hocuspocus/provider";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHub, MAX_PENDING_DOCUMENTS, silentLogger } from "@uberblick/hub";
 import type { Hub } from "@uberblick/hub";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
-import type { AdmissionCounts } from "../src/sync.js";
 import { HubSync, MAX_CONCURRENT_ROOM_ATTACHES } from "../src/sync.js";
 import {
   hubUrl,
   LIVE_HUB_SETTLE,
   removeTempDirs,
+  sleep,
   tempDatabasePath,
   testConfig,
   TEST_SECRET,
   waitUntil,
   WORKSPACE,
 } from "./helpers.js";
+
+/**
+ * Every `mintToken` call, suspended until this suite releases it.
+ *
+ * Minting is where a real token call spends its time, and it is the window the
+ * generation scoping exists for: a socket can end while a slot's token is half
+ * made. Holding the mint puts a test inside that window deliberately instead of
+ * hoping to land in it.
+ */
+const mints = vi.hoisted(() => {
+  const suspended: Array<() => void> = [];
+  let holding = false;
+  return {
+    /** Suspend every mint from here on. */
+    hold: (): void => {
+      holding = true;
+    },
+    /** How many mint calls are suspended right now. */
+    held: (): number => suspended.length,
+    /** Let the oldest suspended mint finish; the rest stay suspended. */
+    release: (): void => {
+      suspended.shift()?.();
+    },
+    /** Stop holding, and let everything suspended finish. */
+    releaseAll: (): void => {
+      holding = false;
+      for (const resume of suspended.splice(0)) {
+        resume();
+      }
+    },
+    gate: async (): Promise<void> => {
+      if (!holding) {
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        suspended.push(resolve);
+      });
+    },
+  };
+});
+
+vi.mock("@uberblick/hub/token", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@uberblick/hub/token")>();
+  return {
+    ...actual,
+    mintToken: async (...args: Parameters<typeof actual.mintToken>) => {
+      await mints.gate();
+      return actual.mintToken(...args);
+    },
+  };
+});
 
 /**
  * Small enough that an unbounded client breaches it in one tick — and only one
@@ -56,13 +108,17 @@ const HUB_CEILING = 4;
 const CLIENT_BOUND = 3;
 /** More rooms than the ceiling, so the bound is what keeps the socket alive. */
 const ROOM_COUNT = 12;
-/** How many times the socket is dropped and restored mid-drain. */
-const FLAPS = 3;
+/**
+ * A bound of one: the room that holds the slot and the rooms queued behind it
+ * are then a matter of construction rather than of timing.
+ */
+const ONE_SLOT = 1;
 
 const hubs: Hub[] = [];
 const syncs: HubSync[] = [];
 
 afterEach(async () => {
+  mints.releaseAll();
   for (const sync of syncs.splice(0)) {
     sync.destroy();
   }
@@ -114,28 +170,25 @@ function watchForTermination(rooms: readonly string[]): () => string[] {
   return () => seen;
 }
 
-/** Every admission transition, and what can be read off the whole series. */
-function recordAdmissions() {
-  const seen: AdmissionCounts[] = [];
-  return {
-    record: (counts: AdmissionCounts) => seen.push(counts),
-    /** The largest number of rooms ever in flight, on any connection. */
-    peak: (from = 0) =>
-      seen.slice(from).reduce((most, counts) => Math.max(most, counts.inFlight), 0),
-    /** How many distinct connections let a room through. */
-    connections: () =>
-      new Set(seen.filter((counts) => counts.inFlight > 0).map((c) => c.generation))
-        .size,
-    /** The accounting as it stood at the last transition. */
-    latest: (): AdmissionCounts => {
-      const last = seen[seen.length - 1];
-      if (last === undefined) {
-        throw new Error("nothing has been admitted or queued yet");
-      }
-      return last;
+/**
+ * Which rooms' token calls have ended, in order.
+ *
+ * `getToken` is the library's own call into the token callable, and a provider
+ * sends nothing — no auth message, no sync step — until it returns. Watching it
+ * watches the gate itself, at the boundary, rather than the accounting inside
+ * `HubSync` that the gate is there to enforce.
+ */
+function watchTokenGate(): () => string[] {
+  const opened: string[] = [];
+  const getToken = HocuspocusProvider.prototype.getToken;
+  vi.spyOn(HocuspocusProvider.prototype, "getToken").mockImplementation(
+    async function (this: HocuspocusProvider) {
+      const token = await getToken.call(this);
+      opened.push(this.configuration.name);
+      return token;
     },
-    length: () => seen.length,
-  };
+  );
+  return () => [...opened];
 }
 
 /** A fresh room with something in it, attached to the hub. Returns its name. */
@@ -156,10 +209,22 @@ describe("bounded room attach", () => {
     expect(MAX_CONCURRENT_ROOM_ATTACHES).toBeLessThan(MAX_PENDING_DOCUMENTS);
   });
 
+  it("refuses a bound that is not a positive integer", () => {
+    // The bound is the admission gate: a zero admits nothing, so every room
+    // would queue forever on a socket that is up and answering.
+    for (const bound of [0, -1, 2.5]) {
+      expect(
+        () =>
+          new HubSync(testConfig(), () => {}, {
+            maxConcurrentAttaches: bound,
+          }),
+      ).toThrow(/positive integer/);
+    }
+  });
+
   it("joins a corpus larger than the hub's ceiling, and survives a restart", async () => {
     const rooms: string[] = [];
     const terminations = watchForTermination(rooms);
-    const admissions = recordAdmissions();
     const database = tempDatabasePath();
     const hub = await startHub({ databasePath: database });
     const port = hub.port;
@@ -171,7 +236,7 @@ describe("bounded room attach", () => {
         ...LIVE_HUB_SETTLE,
       }),
       () => {},
-      { maxConcurrentAttaches: CLIENT_BOUND, onAdmissions: admissions.record },
+      { maxConcurrentAttaches: CLIENT_BOUND },
     );
     syncs.push(sync);
 
@@ -188,14 +253,10 @@ describe("bounded room attach", () => {
     }
     rooms.push(...wave);
 
-    // Still in the tick that attached them: exactly the bound have been let
-    // through, and the rest are holding a ticket, having told the hub nothing
-    // at all. A room waiting there has not synced, and `isRoomQuiet` — what
-    // every mutating tool reports as `synced` — says so.
-    expect(admissions.latest()).toMatchObject({
-      inFlight: CLIENT_BOUND,
-      waiting: ROOM_COUNT - CLIENT_BOUND,
-    });
+    // Still in the tick that attached them: none of them has told the hub
+    // anything, the queue says so, and `isRoomQuiet` — what every mutating tool
+    // reports as `synced` — says so too.
+    expect(sync.isDraining()).toBe(true);
     for (const room of wave) {
       expect(sync.isRoomQuiet(room)).toBe(false);
     }
@@ -204,8 +265,7 @@ describe("bounded room attach", () => {
       rooms.every((room) => sync.isRoomQuiet(room)),
     );
 
-    expect(admissions.peak()).toBe(CLIENT_BOUND);
-    expect(admissions.latest().waiting).toBe(0);
+    expect(sync.isDraining()).toBe(false);
     // The whole point: an unbounded client would have named all 12 documents
     // before any of them authenticated, and the hub would have closed the
     // socket under every one of them.
@@ -218,38 +278,21 @@ describe("bounded room attach", () => {
       rooms.some((room) => !sync.isRoomQuiet(room)),
     );
 
-    const afterRestart = admissions.length();
     await startHub({ port, databasePath: database });
     await waitUntil("every room to sync again after the restart", () =>
       rooms.every((room) => sync.isRoomQuiet(room)),
     );
 
-    expect(admissions.peak(afterRestart)).toBe(CLIENT_BOUND);
-    expect(admissions.latest().waiting).toBe(0);
+    expect(sync.isDraining()).toBe(false);
     expect(terminations()).toEqual([]);
   });
 
-  it("holds the bound on every connection while the socket flaps mid-drain", async () => {
+  it("keeps a token minted on a dead connection from sending on the next one", async () => {
     const rooms: string[] = [];
     const terminations = watchForTermination(rooms);
-    const admissions = recordAdmissions();
+    const gateOpened = watchTokenGate();
     const database = tempDatabasePath();
     const port = (await startHub({ databasePath: database })).port;
-
-    // Each flap is a hub that goes away and comes back on the same address.
-    // Serialized, because a stop that overlaps the next start would race for
-    // the port rather than reconnect the client.
-    let restarts = Promise.resolve();
-    let flapsLeft = FLAPS;
-    const flapped = new Set<number>();
-    const flap = (generation: number) => {
-      flapped.add(generation);
-      flapsLeft -= 1;
-      restarts = restarts.then(async () => {
-        await hubs.shift()?.stop();
-        await startHub({ port, databasePath: database });
-      });
-    };
 
     const sync = new HubSync(
       testConfig({
@@ -258,69 +301,137 @@ describe("bounded room attach", () => {
         ...LIVE_HUB_SETTLE,
       }),
       () => {},
-      {
-        maxConcurrentAttaches: CLIENT_BOUND,
-        onAdmissions: (counts) => {
-          admissions.record(counts);
-          // Driven by the drain itself, never by a clock: a full wave is on the
-          // wire and rooms are still queued behind it, which is the middle of
-          // the drain on whatever machine this runs on. Once per connection, so
-          // that every flap interrupts a drain of its own.
-          if (
-            flapsLeft > 0 &&
-            !flapped.has(counts.generation) &&
-            counts.inFlight === CLIENT_BOUND &&
-            counts.waiting > 0
-          ) {
-            flap(counts.generation);
-          }
-        },
-      },
+      { maxConcurrentAttaches: ONE_SLOT },
     );
     syncs.push(sync);
 
-    for (let index = 0; index < ROOM_COUNT; index += 1) {
-      rooms.push(attach(sync, `room ${index}`));
-    }
+    // One room joined first, so the socket holds a room: a hub stopping sends
+    // no frame to a connection that holds none, and this test is about a
+    // connection that ends.
+    const first = attach(sync, "first");
+    rooms.push(first);
+    await waitUntil("the first room to sync", () => sync.isRoomQuiet(first));
 
-    await waitUntil("the socket to flap through the drain", () => flapsLeft === 0);
-    await restarts;
-    await waitUntil("every room to converge after the flaps", () =>
+    // The next room takes the only slot and stops there, mid-mint.
+    mints.hold();
+    const stale = attach(sync, "stale");
+    rooms.push(stale);
+    await waitUntil("the stale room's token call to reach the mint", () =>
+      mints.held() === 1,
+    );
+
+    // A third room queues behind it — the one that will hold the only slot on
+    // the *next* connection.
+    const next = attach(sync, "next");
+    rooms.push(next);
+
+    // The connection ends and a new one takes its place while that suspended
+    // call still holds a slot on it — a place on a connection nobody will
+    // answer on.
+    await hubs.shift()?.stop();
+    await waitUntil(
+      "the socket to go down under the suspended call",
+      () => sync.state().status !== "connected",
+    );
+    await startHub({ port, databasePath: database });
+    await waitUntil("the queued room to be admitted on the new connection", () =>
+      mints.held() === 2,
+    );
+
+    // Let the stale call finish minting. Its token is good and its provider is
+    // attached to a live socket — the only thing between it and the hub is that
+    // the slot it holds belongs to a connection that is gone.
+    mints.release();
+    await sleep(50);
+
+    // The contract: it cannot send. The one slot on this connection belongs to
+    // the room admitted on it, and the stale call has to be re-admitted here
+    // before anything of its leaves — which is what keeps a flapping socket
+    // from carrying one connection's wave into the next one's count.
+    expect(gateOpened()).not.toContain(stale);
+
+    mints.releaseAll();
+    await waitUntil("every room to converge", () =>
       rooms.every((room) => sync.isRoomQuiet(room)),
     );
 
-    // The contract, and the one a disconnect used to break: a slot is a place
-    // on one connection, so no connection ever carried more than the bound —
-    // not the one a flap interrupted, and not the one that inherited its
-    // half-minted tokens.
-    expect(admissions.peak()).toBe(CLIENT_BOUND);
-    expect(admissions.connections()).toBeGreaterThan(FLAPS);
-    expect(admissions.latest().waiting).toBe(0);
+    // Re-admitted, and behind the room that held the slot on this connection.
+    expect(gateOpened()).toContain(stale);
+    expect(gateOpened().indexOf(next)).toBeLessThan(gateOpened().indexOf(stale));
     expect(terminations()).toEqual([]);
   });
+
+  it.each(["quarantine", "destroy"] as const)(
+    "ends a token call suspended across %s instead of re-queueing it",
+    async (terminal) => {
+      const gateOpened = watchTokenGate();
+      const port = (await startHub({ databasePath: tempDatabasePath() })).port;
+
+      const sync = new HubSync(
+        testConfig({
+          authSecret: TEST_SECRET,
+          hubUrl: hubUrl(port),
+          ...LIVE_HUB_SETTLE,
+        }),
+        () => {},
+        { maxConcurrentAttaches: ONE_SLOT },
+      );
+      syncs.push(sync);
+
+      // A room joined first, so the socket holds one: a hub stopping sends no
+      // frame to a connection that holds no room at all.
+      const first = attach(sync, "first");
+      await waitUntil("the first room to sync", () => sync.isRoomQuiet(first));
+
+      mints.hold();
+      const room = attach(sync, "held");
+      await waitUntil("the held room's token call to reach the mint", () =>
+        mints.held() === 1,
+      );
+
+      // The connection dies under the suspended call first, so the generation
+      // has already moved when it wakes: this is the state a stale call queues
+      // again from, and the reason a terminal one must not.
+      await hubs.shift()?.stop();
+      await waitUntil(
+        "the socket to go down under the suspended call",
+        () => sync.state().status !== "connected",
+      );
+
+      if (terminal === "quarantine") {
+        sync.quarantine();
+      } else {
+        sync.destroy();
+      }
+      mints.releaseAll();
+
+      // The call ends. Nothing leaves — a quarantined or destroyed provider is
+      // detached and its `send` is inert — but ending is the point: a call that
+      // queued again here would wait for a connection that is never opened
+      // again, and its queue entry would outlive it.
+      await waitUntil("the suspended token call to end", () =>
+        gateOpened().includes(room),
+      );
+    },
+  );
 });
 
-/** Bound of one, so the corpus below needs one round trip per room. */
-const DRAIN_BOUND = 1;
-const DRAIN_ROOMS = 60;
-/**
- * A settle budget for one wave. The drain below takes sixty of them, so a wait
- * that spent this once — rather than once per wave — would give up on the queue
- * long before it emptied.
- */
-const ONE_WAVE_MS = 10;
+/** A budget large enough to measure, small enough to spend in a test. */
+const SETTLE_BUDGET_MS = 100;
+/** Rooms behind the one slot: a drain of several waves, at one wave per room. */
+const DRAIN_ROOMS = 8;
 
 describe("the settle budget", () => {
-  it("covers the whole drain, not the first wave of it", async () => {
+  it("ends at the configured budget and reports the drain unfinished", async () => {
     const sync = new HubSync(
       testConfig({
         authSecret: TEST_SECRET,
         hubUrl: hubUrl((await startHub({ databasePath: tempDatabasePath() })).port),
         ...LIVE_HUB_SETTLE,
-        syncTimeoutMs: ONE_WAVE_MS,
+        syncTimeoutMs: SETTLE_BUDGET_MS,
       }),
       () => {},
-      { maxConcurrentAttaches: DRAIN_BOUND },
+      { maxConcurrentAttaches: ONE_SLOT },
     );
     syncs.push(sync);
 
@@ -329,23 +440,41 @@ describe("the settle budget", () => {
     const first = attach(sync, "first");
     await waitUntil("the first room to sync", () => sync.isRoomQuiet(first));
 
+    // Every mint from here is suspended, so the queue cannot drain while the
+    // wait spends its budget — a fresh client's multi-wave corpus, without
+    // making the test's meaning depend on how fast the machine is.
+    mints.hold();
     const rooms: string[] = [];
     for (let index = 0; index < DRAIN_ROOMS; index += 1) {
       rooms.push(attach(sync, `room ${index}`));
     }
+    await waitUntil("the first queued room to reach the mint", () =>
+      mints.held() === 1,
+    );
 
     const started = Date.now();
     await sync.waitForQuiet();
     const waited = Date.now() - started;
 
-    // What a caller records as "hydrated": every room reached the hub, none
-    // left queued. A budget sized for one wave would have expired part way
-    // down the queue and reported this corpus complete while it was still
-    // joining — which is the elapsed time below, measured to prove the drain
-    // really did outlast a single wave's worth of budget.
+    // `syncTimeoutMs` is the whole budget, whatever the corpus is. A deadline
+    // multiplied by the queue depth would have waited eight of them here — and
+    // a hundred rooms would make an ordinary tool call wait a hundred.
+    expect(waited).toBeGreaterThanOrEqual(SETTLE_BUDGET_MS);
+    expect(waited).toBeLessThan(SETTLE_BUDGET_MS * 4);
+
+    // And nothing is called complete that is not: the drain is still going, and
+    // every room still in it reports unsynced.
+    expect(sync.isDraining()).toBe(true);
     for (const room of rooms) {
-      expect(sync.isRoomQuiet(room)).toBe(true);
+      expect(sync.isRoomQuiet(room)).toBe(false);
     }
-    expect(waited).toBeGreaterThan(ONE_WAVE_MS);
+
+    // The drain finishes in its own time — over as many settles as it takes —
+    // and only then does it say so.
+    mints.releaseAll();
+    await waitUntil("every room to join the hub", () =>
+      rooms.every((room) => sync.isRoomQuiet(room)),
+    );
+    expect(sync.isDraining()).toBe(false);
   });
 });
