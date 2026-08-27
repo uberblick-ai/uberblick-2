@@ -171,7 +171,7 @@ describe("the update log", () => {
     } finally {
       await rig.close();
     }
-  }, 30_000);
+  });
 
   it("compacts a long log into a snapshot without losing a document", async () => {
     const databasePath = tempDatabasePath();

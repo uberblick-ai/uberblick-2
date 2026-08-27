@@ -308,9 +308,12 @@ export async function startServer(
  * waiting for the directory itself tests hydration, and an empty listing after
  * this returns can only mean the corpus never came.
  *
- * It waits for the directory and nothing else: which document matches which
- * query is what the caller is there to assert, and a wait that already knew
- * the answer would assert nothing.
+ * It waits for the directory and nothing else, deliberately: which document
+ * matches which query is what the caller is there to assert, and a wait that
+ * already knew the answer would assert nothing. So this is not enough on its
+ * own for a caller that then reads the *index* — the FTS rows are filled by
+ * the settle, not by the directory, and a rig whose searches must land wants
+ * {@link LIVE_HUB_SETTLE} as well.
  */
 export async function waitForCorpus(
   rig: Rig,

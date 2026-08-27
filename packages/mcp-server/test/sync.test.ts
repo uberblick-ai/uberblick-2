@@ -152,8 +152,16 @@ describe("hub sync", () => {
 
     // Empty local state, same hub. Everything it knows, it learns by syncing —
     // and everything it learns, it logs.
+    //
+    // Both halves are needed, and they cover different things. LIVE_HUB_SETTLE
+    // gives the settle room to finish, which is what fills the FTS index the
+    // search assertions below read; waiting for the directory is what makes an
+    // empty listing mean a real bug rather than a settle that gave up. Neither
+    // is the other's belt and braces — starve the sync grace and the searches
+    // go red with the directory in hand.
     const fresh = await serverOn(running.port, {
       databasePath: tempDatabasePath(),
+      ...LIVE_HUB_SETTLE,
     });
     await waitForCorpus(fresh, [first.uuid, second.uuid]);
 

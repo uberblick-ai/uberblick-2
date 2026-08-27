@@ -60,5 +60,13 @@ export default defineConfig({
     // EditorView, which needs a DOM.
     environment: "jsdom",
     include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
+    // The reconnect suite runs real hubs on real sockets, and its `afterEach`
+    // stops two of them. Vitest's default 5s hook budget is what a shutdown
+    // under load overruns, and it overruns it anonymously — the hook has no
+    // label to fail with. Matches packages/mcp-server, for the same reason: the
+    // timeout that fires first is the one that gets to explain itself, so the
+    // anonymous one is kept out of the way. Per-test budgets are set in the
+    // file that needs them.
+    hookTimeout: 120_000,
   },
 });

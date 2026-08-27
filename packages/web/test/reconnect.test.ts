@@ -104,11 +104,12 @@ const WAIT_TIMEOUT_MS = 20_000;
 /**
  * Vitest's own budget per test.
  *
- * Far above the sum of the waits any one test here makes in sequence, on
- * purpose: whichever timeout fires first is the one that explains the failure,
- * and "test timed out" explains nothing.
+ * Above the waits any one test here makes in sequence, on purpose: whichever
+ * timeout fires first is the one that explains the failure, and "test timed
+ * out" explains nothing. The same number as packages/mcp-server's, because
+ * there is nothing about these tests that deserves a different one.
  */
-const TEST_TIMEOUT_MS = 240_000;
+const TEST_TIMEOUT_MS = 120_000;
 
 async function waitFor(
   label: string,

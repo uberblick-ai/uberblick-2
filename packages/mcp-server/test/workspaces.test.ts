@@ -200,5 +200,5 @@ describe("two workspaces on one hub", () => {
     // One data home, two files: the workspace is the whole difference.
     expect(dirname(databases[0] as string)).toBe(dirname(databases[1] as string));
     for (const path of databases) expect(existsSync(path)).toBe(true);
-  }, 30_000);
+  });
 });

@@ -188,7 +188,7 @@ describe("set_title", () => {
         async () => (await listedTitle(rig, doc.uuid)) === settled,
       );
     }
-  }, 45_000);
+  });
 });
 
 describe("create_doc requires a title", () => {
