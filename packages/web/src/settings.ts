@@ -2,11 +2,11 @@
  * Local settings: this machine, this browser, and nowhere else (#176).
  *
  * "Local" is the whole point. What lives here is what *cannot* be synced —
- * credentials, machine-bound endpoints, per-device preferences — so this module
- * deliberately imports nothing from the collab layer and holds no reference to
- * a Y.Doc. A settings value has no path to a document, an export, or the hub:
- * the only way one could get there is if some other module read it and wrote it
- * on, which is a review question rather than an accident waiting in this file.
+ * per-device preferences — so this module deliberately imports nothing from the
+ * collab layer and holds no reference to a Y.Doc. A settings value has no path
+ * to a document, an export, or the hub: the only way one could get there is if
+ * some other module read it and wrote it on, which is a review question rather
+ * than an accident waiting in this file.
  *
  * One namespaced, versioned key holds one JSON object. The version is in the
  * key itself, so a future shape is a new key and the old blob is simply never
@@ -16,8 +16,8 @@
  * cache would be a second copy to keep honest across tabs. Every read is
  * defensive — an unparseable blob, a JSON array, a field of the wrong type all
  * degrade to the default for that field. Corrupt storage returns defaults; it
- * never throws, because the alternative is a settings dialog that cannot open
- * to fix the thing that broke it.
+ * never throws, because the alternative is a user menu that cannot open to fix
+ * the thing that broke it.
  *
  * The subscription is same-tab only: `setSetting` notifies, so open UI reacts.
  * A write in another tab is not observed (no `storage` listener) — nobody has
@@ -39,17 +39,6 @@ export type Appearance = "system" | "light" | "dark";
  */
 export interface Settings {
   /**
-   * A GitHub fine-grained read-only token, pasted in Settings → Connections.
-   * Read by the reference hovercards (#175) to ask github.com for issue and
-   * pull-request titles. Never written to a document.
-   */
-  githubToken: string | null;
-  /**
-   * The login `GET /user` answered with when that token was saved. Kept so the
-   * connected state survives a reload without asking GitHub again.
-   */
-  githubLogin: string | null;
-  /**
    * The presence colour this browser picked, `#rrggbb`, or null for the random
    * one the tab was given (#74).
    *
@@ -64,8 +53,6 @@ export interface Settings {
 
 /** What every field reads as when storage holds nothing usable for it. */
 const DEFAULTS: Readonly<Settings> = {
-  githubToken: null,
-  githubLogin: null,
   presenceColor: null,
   appearance: null,
 };
@@ -73,11 +60,6 @@ const DEFAULTS: Readonly<Settings> = {
 type Listener = () => void;
 
 const listeners = new Set<Listener>();
-
-/** A stored string, or the default for a field that holds anything else. */
-function storedString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
 
 /**
  * A stored presence colour, or null for anything else.
@@ -121,8 +103,6 @@ function readAll(): Settings {
   }
   const stored = parsed as Record<string, unknown>;
   return {
-    githubToken: storedString(stored.githubToken),
-    githubLogin: storedString(stored.githubLogin),
     presenceColor: storedColor(stored.presenceColor),
     appearance: storedAppearance(stored.appearance),
   };
@@ -138,8 +118,8 @@ export function getSetting<K extends keyof Settings>(key: K): Settings[K] {
  *
  * Null is erasure, not a stored null: fields at their default are dropped from
  * the serialised object, and an object with nothing left in it removes the key
- * entirely. That is what makes "disconnect removes the token" literally true —
- * there is no residue to find in localStorage afterwards.
+ * entirely. Clearing a setting therefore leaves no residue to find in
+ * localStorage afterwards.
  *
  * Subscribers are notified even when the write itself failed. They re-read, so
  * what they see is the truth either way, and a UI frozen on a value storage

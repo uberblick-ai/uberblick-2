@@ -37,8 +37,8 @@ describe("mountEditor", () => {
     initDoc(ydoc, { uuid: "helpers-doc-2", title: "Helpers" });
     const blockId = appendBlock(ydoc, { type: "paragraph", text: "two" });
 
-    // The block-menu and changed-block tests both move the mount into a frame
-    // of their own, so the cleanup must not assume it is still a child of body.
+    // The block-menu tests move the mount into a frame of their own, so the
+    // cleanup must not assume it is still a child of body.
     const pane = document.createElement("div");
     document.body.appendChild(pane);
     const { editor, element } = mountEditor(ydoc);

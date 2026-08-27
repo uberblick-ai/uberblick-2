@@ -7,8 +7,6 @@ import * as Y from "yjs";
 import { getBlocksFragment } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
-import type { CreateEditorOptions } from "../src/editor/create-editor.js";
-import type { ChangedBlocks } from "../src/editor/changed-blocks.js";
 import { plainText } from "../src/editor/ytext.js";
 
 /** Every top-level child of the `blocks` fragment, as a comparable snapshot. */
@@ -47,14 +45,9 @@ export function snapshotFragment(ydoc: Y.Doc): FragmentSnapshot[] {
  * layout, and the editor is not the only thing reading this DOM.
  *
  * Anything that finds a block by its id needs the block to be in the document
- * to find it: `document.getElementById` (the outline's scroll-to, and the
- * changed-block watcher) returns nothing for a detached tree, and
- * IntersectionObserver's root is discovered by walking up to a scrolling
- * ancestor, which a detached element does not have. A test mounting into a
- * detached div would pass by exercising the fallbacks rather than the rules.
- *
- * Callers are free to move the returned element somewhere more specific — the
- * changed-block tests re-parent it into a stubbed scrolling pane.
+ * to find it: `document.getElementById` (the outline's scroll-to) returns
+ * nothing for a detached tree. A test mounting into a detached div would pass
+ * by exercising the fallbacks rather than the rules.
  *
  * Being in the document is also why destroying the editor takes the element
  * out of it again. One jsdom document is shared by every test in a file, and
@@ -67,12 +60,7 @@ export function snapshotFragment(ydoc: Y.Doc): FragmentSnapshot[] {
  */
 export function mountEditor(
   ydoc: Y.Doc,
-  options: {
-    newBlockId?: () => string;
-    changed?: ChangedBlocks;
-    typing?: CreateEditorOptions["typing"];
-    hovercard?: CreateEditorOptions["hovercard"];
-  } = {},
+  options: { newBlockId?: () => string } = {},
 ): { editor: Editor; element: HTMLElement } {
   const element = document.createElement("div");
   document.body.appendChild(element);
@@ -83,9 +71,6 @@ export function mountEditor(
     ...(options.newBlockId === undefined
       ? {}
       : { newBlockId: options.newBlockId }),
-    ...(options.changed === undefined ? {} : { changed: options.changed }),
-    ...(options.typing === undefined ? {} : { typing: options.typing }),
-    ...(options.hovercard === undefined ? {} : { hovercard: options.hovercard }),
   });
   editor.on("destroy", () => element.remove());
   return { editor, element };

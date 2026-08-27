@@ -89,16 +89,13 @@
   --radius: 0.625rem;
   --radius-sm: calc(var(--radius) - 4px);
 
-  /* The three floating-surface values, each of which was written out at more
-     than one call site before the vendored shadcn chrome needed the lift too
-     (#27). A popover that floats over the prose has to be the *same* lift as
-     the block menu and the comment composer, and the settings dialog names its
-     scrim here rather than inlining it — two spellings would read as two
-     surfaces. Theme-invariant: black over a light ground and black over a dark
-     one are both "less light here".*/
+  /* The floating-surface lift, written out at more than one call site before
+     the vendored shadcn chrome needed it too (#27). A popover that floats over
+     the prose has to be the *same* lift as the block menu and the comment
+     composer — two spellings would read as two surfaces. Theme-invariant:
+     black over a light ground and black over a dark one are both "less light
+     here".*/
   --shadow-float: 0 8px 24px oklch(0 0 0 / 25%);
-  --shadow-modal: 0 12px 32px rgb(0 0 0 / 0.28);
-  --scrim: rgb(0 0 0 / 0.45);
 
   /* The reading measure. Prose wider than ~75ch is hard to track back to the
      next line, so the content column is capped here and centred in whatever
@@ -486,25 +483,6 @@ body {
   margin-top: auto;
   padding-top: 0.5rem;
   border-top: 1px solid var(--border);
-}
-
-.ub-settings-open {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  width: 100%;
-  padding: 0.3rem 0.4rem;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--muted-foreground);
-  font: inherit;
-  cursor: pointer;
-}
-
-.ub-settings-open:hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
 }
 
 /* ---- the sidebar's two anchored menus (#74, design 1c) ----
@@ -988,151 +966,6 @@ body {
   .ub-rail-open .ub-outline {
     display: none;
   }
-}
-
-/* ---- local settings (#176) ---- */
-
-/* The scrim. `fixed`, over the viewport rather than over `.ub-body` — the
-   header is not part of the body, and a scrim that stopped short of it would
-   leave live controls above a dialog that is supposed to own the screen. The
-   dialog is portalled to `document.body` for the same reason. */
-.ub-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  background: var(--scrim);
-}
-
-.ub-settings {
-  width: min(32rem, 100%);
-  max-height: 100%;
-  overflow-y: auto;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--card);
-  color: var(--card-foreground);
-  box-shadow: var(--shadow-modal);
-  font-size: 0.85rem;
-}
-
-.ub-settings-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.ub-settings-scope {
-  margin: 0 0 1rem;
-}
-
-.ub-settings-section + .ub-settings-section {
-  margin-top: 1.25rem;
-}
-
-.ub-settings-section-title {
-  margin: 0 0 0.5rem;
-  font-size: 0.8rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted-foreground);
-}
-
-/* One entry in a section. A bordered card, so the next connection is a sibling
-   and needs no new layout. */
-.ub-setting {
-  padding: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.ub-setting + .ub-setting {
-  margin-top: 0.5rem;
-}
-
-.ub-setting-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.ub-setting-title {
-  margin: 0;
-  font-size: 0.9rem;
-  font-weight: 500;
-}
-
-.ub-setting-state {
-  color: var(--status-success);
-}
-
-.ub-setting-copy {
-  margin: 0.4rem 0 0;
-  line-height: 1.45;
-}
-
-.ub-setting-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-top: 0.6rem;
-}
-
-.ub-setting-input {
-  flex: 1;
-  font: inherit;
-  font-size: 0.8rem;
-  padding: 0.25rem 0.4rem;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-sm);
-  background: var(--background);
-  color: var(--foreground);
-}
-
-.ub-setting-error {
-  margin: 0.5rem 0 0;
-  color: var(--destructive);
-}
-
-/* One cached workspace inside the Storage entry (#198). */
-.ub-forget {
-  margin-top: 0.6rem;
-  padding: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.ub-forget-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.ub-forget-name {
-  font-size: 0.75rem;
-  word-break: break-all;
-}
-
-/* A gate that is not yet satisfied still has to look like one. */
-.ub-forget .ub-tool:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-/* The cost, stated above the field that accepts it — see `unsyncedSentence`. */
-.ub-forget-cost {
-  padding: 0.4rem 0.5rem;
-  border-left: 2px solid var(--destructive);
-  background: var(--destructive-subtle);
-  color: var(--foreground);
 }
 
 /* ---- the sync detail panel (#72, design surface 1e's right column) ---- */
@@ -1783,16 +1616,6 @@ body {
   color: var(--foreground);
 }
 
-/* The destructive tool button — the workspace forget (#198). Same construction
-   as `.ub-tool-on` and for the same reason: the accent carries the border and
-   the wash, while the label stays `--foreground`, which is the only pair that
-   holds its contrast in both themes. */
-.ub-tool-danger {
-  background: var(--destructive-subtle);
-  border-color: var(--destructive);
-  color: var(--foreground);
-}
-
 .ub-lang {
   font: inherit;
   font-size: 0.75rem;
@@ -1895,6 +1718,21 @@ h3.ub-heading {
 
 .ub-list-item[data-list="ordered"][data-number]::before {
   content: attr(data-number) ".";
+}
+
+/* Content for a screen reader and nobody else: the list container each run of
+   list items is announced inside (editor/list-keys.ts). Off-screen rather than
+   `display: none`, which would take it out of the accessibility tree too. */
+.ub-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .ub-quote {
@@ -2108,119 +1946,6 @@ h3.ub-heading {
   color: var(--brand);
   text-decoration: underline;
   text-underline-offset: 0.15em;
-}
-
-/* A pasted GitHub issue/PR link, shown as GitHub shows it (#58). Two
-   decorations: the URL text is hidden and the reference is drawn in its place —
-   display only, the document still holds the full URL. The caret stepping into
-   the link drops both, so the text is there to edit. */
-.ub-gh-url {
-  display: none;
-}
-
-.ub-gh-ref {
-  white-space: nowrap;
-}
-
-/* The hovercard on a reference (#175). A tooltip in a portal on <body>, so it
-   escapes the editor's overflow and cannot be clipped by a scrolling pane; it
-   holds nothing focusable, which is what keeps Tab order the prose's own.
-
-   The same card surface and lift as the block menu and the comment composer —
-   three things floating over the prose should read as one kind of thing. */
-.ub-hovercard {
-  position: fixed;
-  z-index: 7;
-  width: 22rem;
-  max-width: calc(100vw - 1rem);
-  padding: 0.6rem 0.7rem;
-  background: var(--card);
-  color: var(--card-foreground);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-float);
-  font-size: 0.85rem;
-  line-height: 1.45;
-}
-
-.ub-hovercard-head {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-/* The chip carries the state in colour *and* in a word: colour alone is not a
-   statement a reader who cannot see it can read. GitHub's purple has no
-   counterpart in this palette, so merged takes the info hue — the point is
-   that the three states are three colours, not that they are GitHub's. */
-.ub-hovercard-state {
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 0.1rem 0.4rem;
-  border-radius: 999px;
-  border: 1px solid currentcolor;
-}
-
-.ub-hovercard-state-open {
-  color: var(--status-success);
-  background: var(--status-success-subtle);
-}
-
-.ub-hovercard-state-merged {
-  color: var(--status-info);
-  background: var(--status-info-subtle);
-}
-
-.ub-hovercard-state-closed {
-  color: var(--destructive);
-  background: var(--destructive-subtle);
-}
-
-.ub-hovercard-ref {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--muted-foreground);
-}
-
-.ub-hovercard-title {
-  margin-top: 0.35rem;
-  font-weight: 500;
-}
-
-.ub-hovercard-meta,
-.ub-hovercard-size {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-top: 0.35rem;
-  font-size: 0.75rem;
-  color: var(--muted-foreground);
-}
-
-.ub-hovercard-avatar {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-}
-
-.ub-hovercard-size {
-  font-family: var(--font-mono);
-}
-
-.ub-hovercard-adds {
-  color: var(--status-success);
-}
-
-.ub-hovercard-dels {
-  color: var(--destructive);
-}
-
-/* No token: one line saying where one goes. The card never asks for it here —
-   entry, validation and removal are Settings → Connections and nowhere else. */
-.ub-hovercard-hint {
-  color: var(--muted-foreground);
 }
 
 /* ---- foreign-content fallback ---- */
@@ -2587,212 +2312,13 @@ h3.ub-heading {
   padding: 0.4rem;
 }
 
-/* ---- changed-block marks ---- */
-
-/* Two halves of one signal: an accent line in the block's gutter, and a dot on
- * the outline entry for the section that block is in. Both are session-local
- * and ephemeral — a reload starts clean, because nothing about them is stored
- * (see `src/editor/changed-blocks.ts`).
- *
- * The tokens live here rather than up in the main block so the whole feature is
- * one section to read, and one section to delete.
- */
-:root {
-  /* How far out into `--block-gutter` the accent line reaches, and how thick it
-     is. The insertion `+` is 22px wide against the gutter's outer edge, so the
-     6px nearest the text is free — the line lives there, and the two never
-     overlap. */
-  --changed-bar-inset: 0.375rem;
-  --changed-bar-width: 2px;
-}
-
-/* The line is a **box-shadow**, not a pseudo-element, and that is the whole
-   trick. `.ub-code` is a scroll container (`overflow-x: auto`), and an
-   element's own overflow clips its pseudo-elements — so a `::after` in the
-   gutter was invisible on exactly the block type an agent most often rewrites,
-   and the only way to show it was to turn that block's horizontal scrolling
-   off while it was marked. An outer box-shadow is a box decoration rather than
-   content: the element's own overflow does not clip it, so `code` keeps its
-   scrollbar and still gets its line.
-
-   The shape comes out of the offset and the spread. A negative spread shrinks
-   the shadow's rectangle before the offset moves it left, and the spec clips an
-   outer shadow so that nothing is painted inside the border box — what is left
-   is a bar `--changed-bar-width` wide sitting `--changed-bar-inset` out from the
-   block's edge, inset top and bottom by the same amount. It costs no layout: a
-   shadow is painted, never laid out, and the gutter it sits in is reserved
-   whether anything is in it or not. No prose moves, ever.
-
-   The class is applied by a ProseMirror node decoration, which lands on a
-   NodeView's outer element exactly as it lands on a plain paragraph. That is
-   why `code` and `mermaid` need no marker of their own: those blocks own their
-   DOM (`src/editor/source-chrome.ts`), and nothing here reaches into it. */
-.ub-changed {
-  box-shadow: calc(-1 * var(--changed-bar-inset)) 0 0
-    calc(var(--changed-bar-width) - var(--changed-bar-inset)) var(--brand);
-  animation: ub-changed-in 160ms ease-out;
-}
-
-/* Only `from` is given: the block's own box-shadow is the destination, so the
-   line fades up in place rather than being described twice. */
-@keyframes ub-changed-in {
-  from {
-    box-shadow: calc(-1 * var(--changed-bar-inset)) 0 0
-      calc(var(--changed-bar-width) - var(--changed-bar-inset)) transparent;
-  }
-}
-
-/* The rail's half — the only half a reader can see while the block is out of
-   viewport. The slot is always in the flow, so switching the dot on moves no
-   heading text sideways. */
-.ub-outline-dot {
-  display: inline-block;
-  vertical-align: middle;
-  width: 0.4rem;
-  height: 0.4rem;
-  margin-right: 0.4rem;
-  border-radius: 50%;
-  background: var(--brand);
-  opacity: 0;
-  transition: opacity 120ms ease-out;
-}
-
-.ub-outline-dot-on {
-  opacity: 1;
-}
-
-/* Content for a screen reader and nobody else: what the outline's dot means
-   for anyone who cannot see a colour, and the list container each run of list
-   items is announced inside (editor/list-keys.ts). Off-screen rather than
-   `display: none`, which would take it out of the accessibility tree too. */
-.ub-sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  border: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-/* Both are decoration on a state change that has already happened. */
-@media (prefers-reduced-motion: reduce) {
-  .ub-changed {
-    animation: none;
-  }
-
-  .ub-outline-dot {
-    transition: none;
-  }
-}
-
-/* ---------------------------------------------------------------------------
- * Agent typing theater (#121)
- *
- * Five classes, all applied by ProseMirror decorations over text that is
- * already correct — see `src/editor/typing-theater.ts`.
- *
- * The plugin is the off-switch for `prefers-reduced-motion`: under that
- * preference it builds no takes, so four of these five are never applied at
- * all and need no rule of their own. The fifth is `.ub-typed-pulse`, and it
- * gets a guard at the foot of this section — see the note there for why it
- * needs one, and why it has to be *there* rather than in the reduced-motion
- * block further up the file.
- * ------------------------------------------------------------------------- */
-
-/* Text the agent removed, drawn back in as a widget so it can be seen leaving.
-   It is not in the document — the document already says the new thing. */
-.ub-typed-out {
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
-  opacity: 0.5;
-}
-
-/* The collapse is `font-size`, which is the only way inline text can shrink to
-   nothing and still wrap while it does. Width and `max-width` do not apply to
-   an inline box, and making it `inline-block` to give them something to act on
-   would stop a removed paragraph from wrapping at all — one very long line
-   sliding out of the column. `forwards` holds it at zero for the frame between
-   the animation ending and the widget being dropped. */
-.ub-typed-out-going {
-  /* Matches STRIKE_MS in typing-theater.ts. */
-  animation: ub-typed-out 350ms ease-in forwards;
-}
-
-@keyframes ub-typed-out {
-  to {
-    font-size: 0;
-    opacity: 0;
-  }
-}
-
-/* Text the agent has written but the reader has not been shown yet. `display:
-   none` rather than `visibility: hidden`, so the line grows as it is typed
-   instead of the whole final paragraph sitting there as blank space — and so a
-   screen reader is not read text that is, as far as this reader is concerned,
-   still being written. Nothing is ever hidden under the local caret: a block
-   the reader's selection is in is not animated at all. */
-.ub-typing-veil {
-  display: none;
-}
-
-/* The frontier the text is arriving at. The negative margin is what keeps it
-   free: the bar is painted in the space the next character will occupy, so no
-   prose moves when it does. One colour for now — a caret per agent session
-   needs the awareness attribution that #73 will bring. */
-.ub-typing-caret {
-  display: inline-block;
-  width: 2px;
-  height: 1.05em;
-  margin-right: -2px;
-  vertical-align: text-bottom;
-  background: var(--brand);
-}
-
-/* A block that was fast-forwarded rather than played, because the reader had
-   more waiting for them than the backlog allows. The gutter line has already
-   said the block changed; this only says "and it changed just now". */
-.ub-typed-pulse {
-  /* Matches PULSE_MS in typing-theater.ts. */
-  animation: ub-typed-pulse 600ms ease-out;
-}
-
-@keyframes ub-typed-pulse {
-  from {
-    background: color-mix(in oklch, var(--brand) 20%, transparent);
-  }
-}
-
-/* The pulse is the one part of the theater that can still be on screen when the
-   plugin stops drawing, so it is the one part that needs a CSS guard.
-   `prefers-reduced-motion` can be turned on *during* a pulse, and the plugin's
-   own answer — clearing everything in the disabled branch of `reduce` — only
-   reaches the screen on the next transaction. This settles it immediately, and
-   settles it for any path that puts the class on a block while the preference
-   is true, including ones nobody has thought of.
-
-   It has to live **here, after the rule it turns off**, not up in the
-   reduced-motion block with `.ub-changed`. A media query contributes nothing to
-   specificity: both rules are one class, so the later one in the file wins. Up
-   there it would be overridden by `.ub-typed-pulse` below it and quietly do
-   nothing at all — which is a hard thing to notice, since the plugin usually
-   clears the pulse anyway and the animation is 600ms long. The ordering is
-   pinned by a test in `test/typing-theater.test.ts` for that reason. */
-@media (prefers-reduced-motion: reduce) {
-  .ub-typed-pulse {
-    animation: none;
-  }
-}
-
 /* ---- all docs (#118) ------------------------------------------------------
    The corpus listing and its fixed sidebar entry. Self-contained: nothing here
    touches the tokens or the rules above, and nothing above knows about it. */
 
 /* The sidebar's fixed entry. It lives in the footer, below the line the
-   curated groups end at — quiet like Settings, but a place to go rather than a
-   dialog, so it keeps the foreground colour. */
+   curated groups end at, and shares the footer's row shape with the user card
+   under it. */
 .ub-all-open-entry {
   display: flex;
   align-items: center;

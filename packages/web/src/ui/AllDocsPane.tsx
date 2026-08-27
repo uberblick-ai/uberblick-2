@@ -35,8 +35,35 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
-import { relativeAge } from "../editor/github-hovercard.js";
 import { useRoomStatus } from "./hooks.js";
+
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+const WEEK = 7 * DAY;
+const MONTH = 30 * DAY;
+const YEAR = 365 * DAY;
+
+/** `3 days ago`, at the coarseness a reader actually reads. */
+export function relativeAge(iso: string, now: number = Date.now()): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const ago = Math.max(0, now - then);
+  const [amount, unit] =
+    ago < HOUR
+      ? [Math.floor(ago / MINUTE), "minute"]
+      : ago < DAY
+        ? [Math.floor(ago / HOUR), "hour"]
+        : ago < WEEK
+          ? [Math.floor(ago / DAY), "day"]
+          : ago < MONTH
+            ? [Math.floor(ago / WEEK), "week"]
+            : ago < YEAR
+              ? [Math.floor(ago / MONTH), "month"]
+              : [Math.floor(ago / YEAR), "year"];
+  if (amount < 1) return "just now";
+  return `${amount} ${unit}${amount === 1 ? "" : "s"} ago`;
+}
 
 /** How the listing is ordered. */
 export type DocSort = "title" | "changed" | "created";
@@ -149,7 +176,7 @@ function Stamp({ at }: { at: number | undefined }): ReactElement {
 }
 
 /**
- * The changing stamp uses the same coarse clock language as GitHub cards.
+ * The changing stamp, in coarse clock language.
  *
  * "3 days ago" answers *is this fresh?* at a glance, which is the question a
  * listing is scanned for — but it is the only question it answers. The exact

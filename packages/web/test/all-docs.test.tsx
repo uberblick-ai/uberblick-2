@@ -32,9 +32,12 @@ import {
 } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { allPath, canonicalPath, parseRoute } from "../src/ui/route.js";
-import { AllDocsPane, sortDirectory } from "../src/ui/AllDocsPane.js";
+import {
+  AllDocsPane,
+  relativeAge,
+  sortDirectory,
+} from "../src/ui/AllDocsPane.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
-import { relativeAge } from "../src/editor/github-hovercard.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const ONE = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";

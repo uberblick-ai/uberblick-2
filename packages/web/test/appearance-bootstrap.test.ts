@@ -65,7 +65,7 @@ describe("the appearance bootstrap in index.html", () => {
     expect(stamped(holding(JSON.stringify({ appearance: "light" })))).toBe("light");
     // Alongside the other settings, which is how it actually sits in storage.
     expect(
-      stamped(holding(JSON.stringify({ githubLogin: "someone", appearance: "dark" }))),
+      stamped(holding(JSON.stringify({ presenceColor: "#0675c9", appearance: "dark" }))),
     ).toBe("dark");
   });
 
@@ -74,7 +74,7 @@ describe("the appearance bootstrap in index.html", () => {
     // never having chosen: no attribute, and the media query decides.
     for (const raw of [
       JSON.stringify({ appearance: "system" }),
-      JSON.stringify({ githubToken: "ghp_x" }),
+      JSON.stringify({ presenceColor: "#0675c9" }),
       JSON.stringify({ appearance: "DARK" }),
       JSON.stringify(["dark"]),
       JSON.stringify(null),
