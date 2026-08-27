@@ -9,13 +9,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import * as Y from "yjs";
 import type { Hub } from "../src/server.js";
-import { importRootSecret } from "../src/token.js";
 import {
   OTHER_WORKSPACE,
   TEST_SECRET,
   WORKSPACE,
   TEXT_KEY,
   createClient,
+  forgeToken,
   removeTempDatabases,
   sleep,
   startHub,
@@ -27,19 +27,6 @@ import {
 
 let hub: Hub;
 const clients: TestClient[] = [];
-
-/**
- * Correctly sign an arbitrary payload with the hub's own secret — a token the
- * minter would refuse to produce, which is exactly what the clamp is for.
- */
-async function forgeToken(claims: Record<string, unknown>): Promise<string> {
-  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
-  const key = await importRootSecret(TEST_SECRET);
-  const signature = Buffer.from(
-    await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload)),
-  ).toString("base64url");
-  return `${payload}.${signature}`;
-}
 
 function client(room: string, jwt: string, doc?: Y.Doc): TestClient {
   const created = createClient({

@@ -111,6 +111,23 @@ export async function token(
   });
 }
 
+/**
+ * Correctly sign an arbitrary payload with the hub's own secret — a token the
+ * minter would refuse to produce, which is exactly what the hub's own clamp and
+ * claim checks are for. `secret` is the wrong-key case.
+ */
+export async function forgeToken(
+  claims: Record<string, unknown>,
+  secret: string = TEST_SECRET,
+): Promise<string> {
+  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  const key = await importRootSecret(secret);
+  const signature = Buffer.from(
+    await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload)),
+  ).toString("base64url");
+  return `${payload}.${signature}`;
+}
+
 export class AuthenticationFailed extends Error {
   readonly reason: string;
 
@@ -138,10 +155,16 @@ export interface ClientOptions {
   token: string;
   /** Reuse a document — for reconnecting a client that edited while offline. */
   doc?: Y.Doc;
+  /**
+   * Extra headers on the WebSocket upgrade — how a test plays the proxy that
+   * sits in front of the deployed hub.
+   */
+  headers?: Record<string, string>;
 }
 
 export function createClient(options: ClientOptions): TestClient {
   const doc = options.doc ?? new Y.Doc();
+  const headers = options.headers;
 
   const provider = new HocuspocusProvider({
     // Loopback is a test concern: the hub itself never names an address.
@@ -149,6 +172,18 @@ export function createClient(options: ClientOptions): TestClient {
     name: options.room,
     token: options.token,
     document: doc,
+    ...(headers === undefined
+      ? {}
+      : {
+          // Node's WebSocket takes headers in its options argument; the
+          // provider constructs the socket with the URL alone, so the headers
+          // ride in on a subclass.
+          WebSocketPolyfill: class extends WebSocket {
+            constructor(url: string | URL) {
+              super(url, { headers } as unknown as string[]);
+            }
+          },
+        }),
   });
 
   const denied = new Promise<string>((resolve) => {
