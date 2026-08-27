@@ -42,6 +42,15 @@ secret that already exists. `mise run init` re-runs just the `ub init` step.
 block it has not been told to trust — and it is a hard error, not a warning.
 `ub init` runs `mise trust` on the file it writes for the same reason.
 
+Entering the checkout prints a short quick-start — the two commands above, the
+check tasks, and `mise tasks` for the rest. It is a `mise` project hook, so it
+needs [mise activated in your
+shell](https://mise.jdx.dev/getting-started.html): shims put `node` and `pnpm`
+on PATH but never run hooks, so with shims alone nothing is printed and nothing
+is missing. `mise run welcome` prints the same thing on demand, activated or
+not. It is also silent whenever the output would be captured rather than read —
+no terminal, `CI` set, or `MISE_QUIET=1`.
+
 What this supports is exactly one arrangement: **one workspace, one trusted user,
 multiple clients and machines; no login and no tenant isolation.** Everything
 below is a consequence of that.
@@ -84,6 +93,7 @@ present.
 ```
 mise run setup        # one-command bootstrap: toolchain, dependencies, `ub init`
 mise run init         # just the `ub init` step, idempotent
+mise run welcome      # the quick-start the `enter` hook prints
 
 mise run hub          # Hocuspocus sync hub
 mise run mcp          # MCP server, standalone smoke test only (see below)
