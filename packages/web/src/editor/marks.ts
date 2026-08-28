@@ -60,7 +60,7 @@ import {
 import {
   COMMENT_MARK,
   INLINE_MARKS,
-  isDocId,
+  canonicalDocumentUuid,
   isExternalHref,
 } from "@uberblick/schema";
 
@@ -290,8 +290,13 @@ export const DocLink = Mark.create({
     return {
       docId: {
         default: null as string | null,
+        // Canonicalizing rather than shape-checking, because this is a *write*
+        // door: an upper-cased uuid names the same document, and the schema
+        // package's write boundary lowercases it exactly the same way. The
+        // attribute's own parser is where it has to happen — Tiptap runs it
+        // after the rule's `getAttrs` and its value wins.
         parseHTML: (element: HTMLElement): string | null =>
-          element.getAttribute("data-doc-id"),
+          canonicalDocumentUuid(element.getAttribute("data-doc-id")),
         renderHTML: (attributes: Record<string, unknown>): Record<string, string> =>
           typeof attributes.docId === "string"
             ? { "data-doc-id": attributes.docId }
@@ -303,9 +308,11 @@ export const DocLink = Mark.create({
     return [
       {
         tag: "a[data-doc-id]",
+        // The paste door: a target that is not a document uuid is not a
+        // reference, and the text comes through unmarked.
         getAttrs: (element: HTMLElement): { docId: string } | false => {
-          const docId = element.getAttribute("data-doc-id") ?? "";
-          return isDocId(docId) ? { docId } : false;
+          const docId = canonicalDocumentUuid(element.getAttribute("data-doc-id"));
+          return docId === null ? false : { docId };
         },
       },
     ];

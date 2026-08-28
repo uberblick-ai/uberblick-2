@@ -19,6 +19,7 @@ import {
   INLINE_MARKS,
   PROSE_BLOCK_TYPES,
   appendBlock,
+  getBlockInline,
   getBlocks,
   getBlocksFragment,
   initDoc,
@@ -120,6 +121,16 @@ describe("the palette is exactly the schema's block types", () => {
       const type = uberblickSchema.marks[name]!;
       expect(type.excludes(type), name).toBe(true);
     }
+
+    // The two link marks name their exclusions explicitly, which is why the
+    // rule above is the pointed one for them: `excludes` *replaces* the
+    // self-exclusion default, so naming the other mark without naming itself
+    // would have cost the bare key. They exclude each other both ways — one
+    // range is a reference to one place.
+    const link = uberblickSchema.marks.link!;
+    const docLink = uberblickSchema.marks.docLink!;
+    expect(link.excludes(docLink)).toBe(true);
+    expect(docLink.excludes(link)).toBe(true);
   });
 
   it("rejects an unknown node or mark type instead of normalising it", () => {
@@ -174,6 +185,15 @@ describe("the palette is exactly the schema's block types", () => {
       // Binding did not rewrite the document: the Yjs key is still the bare
       // mark name, with the attrs the schema package wrote.
       expect(getBlocks(ydoc)[0]?.text).toBe("see the hub");
+
+      // The HTML door is a *write* door, so it canonicalizes where the reader
+      // only checks the stored shape: an upper-cased uuid names the same
+      // document, and dropping it would lose a reference the model accepts.
+      editor.commands.insertContent(
+        `<p><a data-doc-id="${target.toUpperCase()}">also the hub</a></p>`,
+      );
+      expect(editor.getHTML()).not.toContain(target.toUpperCase());
+      expect(editor.getHTML()).toContain(`data-doc-id="${target}">also the hub`);
     } finally {
       editor.destroy();
     }
@@ -186,6 +206,7 @@ describe("the palette is exactly the schema's block types", () => {
     expect(findForeignBlocks(getBlocksFragment(malformed))[0]?.nodeName).toBe(
       "#mark:docLink",
     );
+
   });
 
   it("refuses nested blocks — the document is flat", () => {
@@ -357,6 +378,63 @@ describe("foreign blocks already in the document", () => {
     expect(second.refused).toBe(false);
     expect(second.editor?.state.doc.childCount).toBe(1);
     second.destroy();
+  });
+
+  /**
+   * The precedence half of the gate, and the only case a *legitimate* merge can
+   * produce: two replicas format one range as different kinds of link, and the
+   * CRDT keeps both keys. The schema package reads that as the docLink alone
+   * (its two-replica test pins the rule); y-prosemirror would bind both, since
+   * it builds a mark per attribute and never asks ProseMirror's `excludes` —
+   * rendering an external anchor wrapped around a document anchor, which is the
+   * document meaning two things at once. So the gate refuses, and both marks
+   * stay in the CRDT for a writer to resolve.
+   */
+  it("refuses a range a merge left carrying both link marks", () => {
+    const target = "0189abcd-2222-4333-8444-555566667777";
+    const a = new Y.Doc();
+    initDoc(a, { uuid: "doc-merged-links", title: "Both at once" });
+    appendBlock(a, { type: "paragraph", text: "see the hub" });
+    const b = new Y.Doc();
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+
+    const textOf = (ydoc: Y.Doc): Y.XmlText =>
+      (getBlocksFragment(ydoc).get(0) as Y.XmlElement).firstChild as Y.XmlText;
+    textOf(a).format(0, 7, {
+      link: { href: "https://example.com/hub" },
+      docLink: null,
+    });
+    textOf(b).format(0, 7, { docLink: { docId: target }, link: null });
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b));
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+
+    const foreign = findForeignBlocks(getBlocksFragment(a));
+    expect(foreign.map((block) => block.nodeName)).toEqual(["#mark:link"]);
+
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    const binding = bindGuardedEditor({
+      element,
+      fragment: getBlocksFragment(a),
+      awareness: null,
+    });
+    expect(binding.refused).toBe(true);
+
+    // Nothing was dropped, and the schema package still reads the range the way
+    // it always did — one docLink, on both replicas.
+    expect((textOf(a).toDelta() as Array<{ attributes?: unknown }>)[0]?.attributes)
+      .toEqual({
+        link: { href: "https://example.com/hub" },
+        docLink: { docId: target },
+      });
+    expect(getBlockInline(a, getBlocks(a)[0]?.id ?? "")).toEqual([
+      { text: "see the", marks: { docLink: target } },
+      { text: " hub", marks: {} },
+    ]);
+    expect(getBlockInline(b, getBlocks(b)[0]?.id ?? "")).toEqual(
+      getBlockInline(a, getBlocks(a)[0]?.id ?? ""),
+    );
+    binding.destroy();
   });
 });
 

@@ -11,7 +11,7 @@
  *
  * The single Y.XmlText child holds the block's plain-text source, plus its
  * formatting marks: the closed inline set (`bold`, `italic`, `strike`,
- * `inlineCode`, `link` — see `marks.ts`) and the `comment` mark anchoring
+ * `inlineCode`, `link`, `docLink` — see `marks.ts`) and the `comment` mark anchoring
  * annotation threads. `code` and `mermaid` are text-source blocks too — a rich
  * block is a text block with a fancy renderer, never a different storage shape —
  * and they carry no inline marks, only `comment`.

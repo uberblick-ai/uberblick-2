@@ -5,7 +5,7 @@
  * formatting keys with ProseMirror-shaped values), the markdown round trip in
  * both directions, that literal markdown stays literal, that source blocks carry
  * no inline marks, and that the CRDT properties the `comment` mark already has
- * hold for these five too — a re-type and a block-scoped edit keep them.
+ * hold for these six too — a re-type and a block-scoped edit keep them.
  */
 
 import { describe, expect, it } from "vitest";

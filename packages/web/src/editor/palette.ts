@@ -52,6 +52,12 @@
  * both are the document meaning two things at once. So the gate asks the reader's
  * own question, {@link readsAsMark}, and refuses to bind when the answer is no.
  *
+ * The same hazard has a *precedence* form, for the two link marks: a merge can
+ * leave both on one range, the schema package reads that as the docLink alone,
+ * and y-prosemirror — which builds one mark per attribute and never consults
+ * ProseMirror's `excludes` — would bind both and render two nested anchors. So
+ * the gate asks the reader's precedence question too.
+ *
  * A Y.XmlText's *content* is the third case, and the quietest one.
  * `createTextNodesFromYText` only ever calls `schema.text(delta.insert, marks)`,
  * so a delta op whose `insert` is not a string (an embed, written with
@@ -125,6 +131,18 @@ function foreignInsideBlock(
       // a value the reader calls "not marked" would bind as marked and be written
       // back as the real thing.
       if (!readsAsMark(mark, value)) return `#mark:${mark}`;
+      // …and the same *precedence*, for the one range that can carry both link
+      // marks. A merge of two replicas that formatted it differently leaves
+      // both keys behind (the schema package's `inlineLinkTarget` resolves that
+      // to the docLink), but y-prosemirror's `attributesToMarks` builds a mark
+      // per attribute without consulting ProseMirror's `excludes`, so binding
+      // would render an external anchor wrapping a document anchor: the
+      // document meaning two things at once, which is exactly what this gate is
+      // for. Nothing is dropped — the loud fallback shows the block and both
+      // marks stay in the CRDT until a writer resolves them.
+      if (mark === "link" && readsAsMark("docLink", op.attributes?.docLink)) {
+        return "#mark:link";
+      }
     }
   }
   return null;
