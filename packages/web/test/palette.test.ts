@@ -29,6 +29,7 @@ import { bindGuardedEditor } from "../src/editor/guarded-binding.js";
 import type { GuardedBinding } from "../src/editor/guarded-binding.js";
 import {
   BLOCK_NODE_NAMES,
+  LINK_CONFLICT,
   describeForeignBlocks,
   findForeignBlocks,
 } from "../src/editor/palette.js";
@@ -409,7 +410,15 @@ describe("foreign blocks already in the document", () => {
     Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
 
     const foreign = findForeignBlocks(getBlocksFragment(a));
-    expect(foreign.map((block) => block.nodeName)).toEqual(["#mark:link"]);
+    expect(foreign.map((block) => block.nodeName)).toEqual([LINK_CONFLICT]);
+
+    // The reason is its own, and so is what the reader is told: `link` is a
+    // supported mark, so calling this an unsupported type would name the wrong
+    // thing and leave nobody anything to do about it.
+    const said = describeForeignBlocks(foreign);
+    expect(said).not.toMatch(/unsupported type/i);
+    expect(said).toContain("conflicting external and document links");
+    expect(said).toContain("MCP tools");
 
     const element = document.createElement("div");
     document.body.appendChild(element);
