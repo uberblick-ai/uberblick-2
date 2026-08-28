@@ -52,6 +52,12 @@
  * both are the document meaning two things at once. So the gate asks the reader's
  * own question, {@link readsAsMark}, and refuses to bind when the answer is no.
  *
+ * The same hazard has a *precedence* form, for the two link marks: a merge can
+ * leave both on one range, the schema package reads that as the docLink alone,
+ * and y-prosemirror — which builds one mark per attribute and never consults
+ * ProseMirror's `excludes` — would bind both and render two nested anchors. So
+ * the gate asks the reader's precedence question too.
+ *
  * A Y.XmlText's *content* is the third case, and the quietest one.
  * `createTextNodesFromYText` only ever calls `schema.text(delta.insert, marks)`,
  * so a delta op whose `insert` is not a string (an embed, written with
@@ -71,14 +77,26 @@ import { uberblickSchema } from "./create-editor.js";
 /** The node names the editor may render. Identical to the schema's block types. */
 export const BLOCK_NODE_NAMES: readonly string[] = BLOCK_TYPES;
 
+/**
+ * The gate's reason for a range a merge left carrying both link marks.
+ *
+ * Not a `#mark:` reason, deliberately: `link` and `docLink` are both supported,
+ * and naming either one as unsupported would point at the wrong thing. This is
+ * a conflict between two supported marks, and it has its own recovery — see
+ * {@link describeForeignBlocks}.
+ */
+export const LINK_CONFLICT = "#conflict:link+docLink";
+
 /** Content in the `blocks` fragment that the palette cannot render. */
 export interface ForeignBlock {
   /** Position of the *top-level* element in the fragment, in document order. */
   index: number;
   /**
    * What the palette cannot represent: an unknown node name, `#text`/`#hook`
-   * for a stray non-element, `#mark:<name>` for an undeclared mark, or
-   * `#embed` for a non-string delta insertion.
+   * for a stray non-element, `#mark:<name>` for an undeclared mark, `#embed`
+   * for a non-string delta insertion, or {@link LINK_CONFLICT} — the one
+   * reason that is not "unsupported" at all, but two supported marks a merge
+   * left on one range.
    */
   nodeName: string;
   /** The element's `id` attribute, when it has one. */
@@ -125,6 +143,18 @@ function foreignInsideBlock(
       // a value the reader calls "not marked" would bind as marked and be written
       // back as the real thing.
       if (!readsAsMark(mark, value)) return `#mark:${mark}`;
+      // …and the same *precedence*, for the one range that can carry both link
+      // marks. A merge of two replicas that formatted it differently leaves
+      // both keys behind (the schema package's `inlineLinkTarget` resolves that
+      // to the docLink), but y-prosemirror's `attributesToMarks` builds a mark
+      // per attribute without consulting ProseMirror's `excludes`, so binding
+      // would render an external anchor wrapping a document anchor: the
+      // document meaning two things at once, which is exactly what this gate is
+      // for. Nothing is dropped — the loud fallback shows the block and both
+      // marks stay in the CRDT until a writer resolves them.
+      if (mark === "link" && readsAsMark("docLink", op.attributes?.docLink)) {
+        return LINK_CONFLICT;
+      }
     }
   }
   return null;
@@ -170,10 +200,35 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
   return foreign;
 }
 
-/** A single-line, human-readable summary for the loud placeholder. */
+/**
+ * A single-line, human-readable summary for the loud placeholder.
+ *
+ * The two reasons are said separately, because they are not the same problem
+ * and do not have the same recovery. An unsupported type is content this
+ * client cannot represent at all; a link conflict is two marks it supports
+ * perfectly well, on one range, where the model reads only one of them. Rolling
+ * the second into "unsupported type (#mark:link)" would name a mark that *is*
+ * supported and leave the reader with nothing to do about it.
+ */
 export function describeForeignBlocks(foreign: ForeignBlock[]): string {
   if (foreign.length === 0) return "";
-  const names = [...new Set(foreign.map((block) => block.nodeName))].join(", ");
-  const count = foreign.length;
-  return `${count} block${count === 1 ? "" : "s"} of unsupported type (${names}) — editing is disabled so nothing gets destroyed.`;
+  const blocks = (count: number): string =>
+    `${count} block${count === 1 ? "" : "s"}`;
+  const conflicting = foreign.filter((block) => block.nodeName === LINK_CONFLICT);
+  const unsupported = foreign.filter((block) => block.nodeName !== LINK_CONFLICT);
+  const sentences: string[] = [];
+  if (unsupported.length > 0) {
+    const names = [...new Set(unsupported.map((block) => block.nodeName))].join(
+      ", ",
+    );
+    sentences.push(
+      `${blocks(unsupported.length)} of unsupported type (${names}) — editing is disabled so nothing gets destroyed.`,
+    );
+  }
+  if (conflicting.length > 0) {
+    sentences.push(
+      `${blocks(conflicting.length)} with conflicting external and document links on one range — both are retained, and editing is disabled in the browser; the document is still editable through the MCP tools (delete and re-insert the block to clear the marks).`,
+    );
+  }
+  return sentences.join(" ");
 }

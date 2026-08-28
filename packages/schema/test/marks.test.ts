@@ -5,12 +5,14 @@
  * formatting keys with ProseMirror-shaped values), the markdown round trip in
  * both directions, that literal markdown stays literal, that source blocks carry
  * no inline marks, and that the CRDT properties the `comment` mark already has
- * hold for these five too — a re-type and a block-scoped edit keep them.
+ * hold for these six too — a re-type and a block-scoped edit keep them.
  */
 
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
+  ConflictingLinkMarksError,
+  InvalidDocLinkTargetError,
   InvalidLinkHrefError,
   MarksNotAllowedError,
   appendBlock,
@@ -32,6 +34,9 @@ import type { InlineRun } from "../src/index.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
 const UUID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+
+/** A document a `docLink` points at. Hex letters, so case is visible. */
+const TARGET = "0189abcd-2222-4333-8444-555566667777";
 
 /** Every mark in one paragraph — the fixture the round trip is built on. */
 const ALL_FIVE =
@@ -862,6 +867,179 @@ describe("inline marks in the document", () => {
     expect(exportMarkdown(doc, { frontmatter: false })).toBe("click me\n");
   });
 
+  /**
+   * A docLink's target is the *document identity* this repository already has —
+   * what a room name accepts, not uuid v4 — so a document minted elsewhere is
+   * still reachable. Two spellings of one id would be two documents to
+   * everything that compares them, so the write canonicalizes rather than
+   * refusing; a reserved room name is not a document at all.
+   */
+  it("refuses a docLink target that is not a document uuid, and stores it lowercase", () => {
+    for (const docId of [
+      "_directory",
+      "_sidebar",
+      "not-a-uuid",
+      "https://example.com/doc",
+      `${TARGET} `,
+      "",
+    ]) {
+      const doc = seeded();
+      expect(
+        () =>
+          appendBlock(doc, {
+            type: "paragraph",
+            inline: [{ text: "x", marks: { docLink: docId } }],
+          }),
+        docId,
+      ).toThrow(InvalidDocLinkTargetError);
+      expect(getBlocks(doc), docId).toEqual([]);
+    }
+
+    // Version and variant are unconstrained — this is a v1 uuid, and it names a
+    // document just as well.
+    const v1 = seeded();
+    const legacy = "a4a70900-0000-11e1-b000-001122334455";
+    appendBlock(v1, {
+      type: "paragraph",
+      inline: [{ text: "x", marks: { docLink: legacy } }],
+    });
+    expect(delta(v1)).toEqual([["x", { docLink: { docId: legacy } }]]);
+
+    // Written upper-cased, stored canonical.
+    const doc = seeded();
+    const id = appendBlock(doc, {
+      type: "paragraph",
+      inline: [{ text: "the hub", marks: { docLink: TARGET.toUpperCase() } }],
+    });
+    expect(delta(doc)).toEqual([["the hub", { docLink: { docId: TARGET } }]]);
+    expect(getBlockInline(doc, id)).toEqual([
+      { text: "the hub", marks: { docLink: TARGET } },
+    ]);
+
+    // Read the other way: a foreign writer's uncanonical target is not a
+    // docLink here, and a uuid in a link href is still not an external URL —
+    // never quietly promoted to a document reference.
+    const foreign = seeded();
+    const other = appendBlock(foreign, { type: "paragraph", text: "click me" });
+    text(foreign).format(0, 5, { docLink: { docId: TARGET.toUpperCase() } });
+    expect(getBlockInline(foreign, other)).toEqual([
+      { text: "click me", marks: {} },
+    ]);
+    expect(() =>
+      appendBlock(seeded(), {
+        type: "paragraph",
+        inline: [{ text: "x", marks: { link: TARGET } }],
+      }),
+    ).toThrow(InvalidLinkHrefError);
+  });
+
+  /**
+   * The two link marks are one affordance over two target spaces, so a range is
+   * never both — but "never" is a promise only the *write* side can keep. Two
+   * Yjs keys have no cross-key exclusion, so replicas that formatted one range
+   * differently merge into a range carrying both, and refusing to read that
+   * would mean a legitimate concurrent edit damaging text. So writing refuses
+   * and reading resolves, deterministically and identically on both replicas.
+   */
+  it("refuses both link marks on one range, and reads a merged pair as the docLink", () => {
+    const doc = seeded();
+    expect(() =>
+      appendBlock(doc, {
+        type: "paragraph",
+        inline: [
+          {
+            text: "x",
+            marks: { link: "https://example.com", docLink: TARGET },
+          },
+        ],
+      }),
+    ).toThrow(ConflictingLinkMarksError);
+    expect(getBlocks(doc)).toEqual([]);
+
+    let id = "";
+    const [a, b] = replicaPair((replica) => {
+      initDoc(replica, { uuid: UUID, title: "Marks" });
+      id = appendBlock(replica, { type: "paragraph", text: "see the hub docs" });
+    });
+    // One replica makes the range an external link and clears the other mark;
+    // the other does exactly the reverse.
+    text(a).format(0, 7, {
+      link: { href: "https://example.com/hub" },
+      docLink: null,
+    });
+    text(b).format(0, 7, { docLink: { docId: TARGET }, link: null });
+    syncDocs(a, b);
+
+    // Both marks really did survive — this is the case the read rule exists for.
+    expect(delta(a)).toEqual(delta(b));
+    expect(delta(a)).toEqual([
+      [
+        "see the",
+        { link: { href: "https://example.com/hub" }, docLink: { docId: TARGET } },
+      ],
+      [" hub docs", null],
+    ]);
+
+    // And every reader resolves it the same way: the docLink wins.
+    expect(getBlockInline(a, id)).toEqual(getBlockInline(b, id));
+    expect(getBlockInline(a, id)).toEqual([
+      { text: "see the", marks: { docLink: TARGET } },
+      { text: " hub docs", marks: {} },
+    ]);
+    expect(exportMarkdown(a, { frontmatter: false })).toBe(
+      `[see the](${TARGET}) hub docs\n`,
+    );
+  });
+
+  /**
+   * The markdown round trip dispatches on the target's shape, in both
+   * directions: a uuid is a docLink, an `http(s)` URL is a link, and everything
+   * else stays literal text. Same nesting, same escaping — a docLink is the
+   * link mark's twin, not a second syntax.
+   */
+  it("round-trips a doc reference by the shape of its target", () => {
+    const body = `See [the **hub** \\] doc](${TARGET}) and [the site](https://example.com/a_(b)).`;
+    const { doc, ids } = docFromBody(body);
+    expect(getBlockInline(doc, ids[0] ?? "")).toEqual([
+      { text: "See ", marks: {} },
+      { text: "the ", marks: { docLink: TARGET } },
+      { text: "hub", marks: { docLink: TARGET, bold: true } },
+      { text: " ] doc", marks: { docLink: TARGET } },
+      { text: " and ", marks: {} },
+      { text: "the site", marks: { link: "https://example.com/a_(b)" } },
+      { text: ".", marks: {} },
+    ]);
+    expect(exportMarkdown(doc, { frontmatter: false })).toBe(`${body}\n`);
+  });
+
+  /**
+   * The shorthand spellings the owner asked for are the *callers'* — the
+   * editor's input rule and the MCP write path, which have the directory a
+   * title has to come from. This package neither reads nor writes them: an
+   * empty label is not a link in either direction.
+   */
+  it("neither reads nor writes a label-less doc reference", () => {
+    const source = `See [](${TARGET}) and [${TARGET}] and [ok](${TARGET}).`;
+    const { doc, ids } = docFromBody(source);
+    expect(getBlockText(doc, ids[0] ?? "")).toBe(
+      `See [](${TARGET}) and [${TARGET}] and ok.`,
+    );
+    expect(
+      getBlockInline(doc, ids[0] ?? "").filter((run) => run.marks.docLink),
+    ).toEqual([{ text: "ok", marks: { docLink: TARGET } }]);
+
+    // And the writer cannot emit one: a run with no text is not a run.
+    const empty = seeded();
+    appendBlock(empty, {
+      type: "paragraph",
+      inline: [
+        { text: "", marks: { docLink: TARGET } },
+        { text: "end", marks: {} },
+      ],
+    });
+    expect(exportMarkdown(empty, { frontmatter: false })).toBe("end\n");
+  });
+
   it("reads a flag only from the values it writes", () => {
     const doc = seeded();
     const id = appendBlock(doc, { type: "paragraph", text: "abcdef" });
@@ -973,6 +1151,19 @@ describe("export and import are closed over the marks the model allows", () => {
   ];
 
   /**
+   * What a link mark can point at. Both marks are spelled `[label](target)` and
+   * told apart by the target's shape alone, so the corpus has to draw from both
+   * spaces — a docLink that nests, escapes and settles differently from a link
+   * would show up here and nowhere else.
+   */
+  const LINK_TARGETS: InlineRun["marks"][] = [
+    { link: "https://e.com/a" },
+    { link: "https://e.com/a_(b)" },
+    { docLink: TARGET },
+    { docLink: "a4a70900-0000-11e1-b000-001122334455" },
+  ];
+
+  /**
    * A tiny deterministic PRNG, so a failure is always reproducible.
    *
    * mulberry32, and the choice matters: the obvious textbook LCG
@@ -1007,7 +1198,7 @@ describe("export and import are closed over the marks the model allows", () => {
       if (pick(4) === 0) marks.strike = true;
       if (pick(5) === 0) marks.inlineCode = true;
       if (pick(5) === 0) {
-        marks.link = pick(2) === 0 ? "https://e.com/a" : "https://e.com/a_(b)";
+        Object.assign(marks, LINK_TARGETS[pick(LINK_TARGETS.length)]);
       }
       runs.push({ text: content, marks });
     }
@@ -1076,6 +1267,7 @@ describe("export and import are closed over the marks the model allows", () => {
     let marked = 0;
     let expressible = 0;
     let blank = 0;
+    let docLinked = 0;
 
     for (let round = 0; round < 200; round += 1) {
       const runs = randomDocument(next);
@@ -1128,6 +1320,7 @@ describe("export and import are closed over the marks the model allows", () => {
       checked += 1;
       if (runs.length > 1) multiRun += 1;
       if (runs.some((run) => Object.keys(run.marks).length > 0)) marked += 1;
+      if (runs.some((run) => run.marks.docLink !== undefined)) docLinked += 1;
     }
 
     // The corpus has to be worth checking, and a generator can go quietly
@@ -1143,5 +1336,8 @@ describe("export and import are closed over the marks the model allows", () => {
     expect(expressible).toBeGreaterThan(100);
     // The blank-paragraph branch above is exercised too, not dead weight.
     expect(blank).toBeGreaterThan(0);
+    // And both link marks are really in the corpus: a docLink drawn only for
+    // documents that never got checked would prove nothing about its bytes.
+    expect(docLinked).toBeGreaterThan(10);
   });
 });

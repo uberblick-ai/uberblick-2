@@ -182,7 +182,11 @@ the fallback, which is exactly why CI is high priority.
   edits, unlike relative positions). Inline formatting rides the same
   mechanism: a closed set of Yjs text-formatting marks on the block's
   Y.XmlText — `bold`, `italic`, `strike`, `inlineCode`, `link` (external
-  http(s) URLs only) — plus `comment`, and nothing else. Prose blocks
+  http(s) URLs only), `docLink` (a document uuid, never a URL or a path) —
+  plus `comment`, and nothing else. The two link marks are one affordance over
+  two disjoint target spaces: a write refuses a range carrying both, and
+  because two Yjs keys have no cross-key exclusion, a read of a merged pair
+  resolves to `docLink`. Prose blocks
   (paragraph, heading, list-item, quote) carry inline marks; `code`, `mermaid`
   and `table` are source text and carry only `comment`. A list is a *run of
   adjacent `list-item` blocks* carrying `list` (bullet|ordered) and `indent`
@@ -192,7 +196,9 @@ the fallback, which is exactly why CI is high priority.
   `inlineCode` rather than
   `code` because ProseMirror forbids one name being both a node and a mark,
   and a mark's name is its Yjs key. Links reference UUIDs, never paths or
-  titles.
+  titles — the curated doc-level list is `meta.links`, and inline doc-to-doc
+  references are `docLink` marks (labels are display text, resolved once when
+  the link is made).
 - `packages/schema` is the keystone; everything imports it. Its only runtime
   deps are `yjs` and a diff library.
 - Agent edits are block-scoped, never document-scoped. `edit_block` does

@@ -285,12 +285,17 @@ export function StatusLine({
 
 /**
  * The loud fallback. Rendered instead of the editor whenever the document holds
- * a block the palette cannot represent.
+ * a block the palette cannot bind.
  *
  * It refuses to edit on purpose: y-prosemirror's node factory deletes
  * Y.XmlElements whose node name its ProseMirror schema does not know, so
  * binding the editor here would destroy the very blocks this screen is warning
  * about. Read-only means nothing is dropped.
+ *
+ * The lead says only that the editor is off, because the reasons differ and
+ * `summary` is what names them: unsupported content is one, and two supported
+ * link marks a merge left on one range is another — calling that "unsupported"
+ * would name a mark this client renders perfectly well.
  */
 function ForeignFallback({
   connection,
@@ -303,7 +308,7 @@ function ForeignFallback({
   return (
     <div className="ub-foreign">
       <p className="ub-foreign-banner">
-        <strong>Unsupported content — editor disabled.</strong> {summary}
+        <strong>Editor disabled.</strong> {summary}
       </p>
       <ol className="ub-foreign-list">
         {blocks.map((block, index) => (

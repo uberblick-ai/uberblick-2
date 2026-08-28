@@ -1,33 +1,35 @@
 /**
- * The inline marks: bold, italic, strike, inlineCode, link. Five marks,
+ * The inline marks: bold, italic, strike, inlineCode, link, docLink. Six marks,
  * hand-written, because the wire format is the contract and stock extensions do
  * not respect it.
  *
  * The schema package owns the vocabulary (`INLINE_MARKS`) and the storage: a mark
  * is a Yjs formatting attribute on the block's Y.XmlText, keyed by the bare mark
  * name, holding that mark's ProseMirror attrs — `{}` for the four flags,
- * `{ href }` for a link. Four constraints follow, and each one is the reason a
- * stock Tiptap mark is not used here:
+ * `{ href }` for a link and `{ docId }` for a docLink. Four constraints follow,
+ * and each one is the reason a stock Tiptap mark is not used here:
  *
- * 1. **`excludes` stays at its ProseMirror default** ("exclusive with marks of
- *    the same type"). y-prosemirror's `marksToAttributes` checks
+ * 1. **Every mark excludes itself.** y-prosemirror's `marksToAttributes` checks
  *    `mark.type.excludes(mark.type)` and, for a mark that does not exclude
  *    itself, writes the Yjs attribute under a *hashed* key (`bold--A1b2C3d4`)
- *    instead of `bold`. Tiptap's own `Code` mark sets `excludes: "_"`, which is
- *    still self-excluding and would work — but writing it out here keeps every
- *    mark on the one rule the annotation anchor already documents. See the
- *    module comment in nodes.ts.
- * 2. **Only `link` declares an attribute, and only `href`.** Every declared
+ *    instead of `bold`. Most marks get that from the ProseMirror default
+ *    ("exclusive with marks of the same type"); the two link marks name their
+ *    exclusions explicitly and so have to name *themselves* too, because
+ *    `excludes` replaces the default rather than adding to it.
+ * 2. **Only the link marks declare an attribute, and only one each** — `href`
+ *    and `docId`. Every declared
  *    attribute lands in the Yjs value; Tiptap's Link ships `target`, `rel` and
  *    `class` attributes, which would put three keys of rendering policy into the
  *    document. `target`/`rel` are render-time only here.
- * 3. **Links are external URLs only.** Doc-to-doc references are `meta.links` by
- *    UUID — never a link mark. The invariant is enforced at the model boundary
+ * 3. **A `link` is an external URL; a `docLink` is a document uuid.** They are
+ *    one affordance over two disjoint target spaces, so they exclude each other
+ *    both ways and a uuid in an `href` is never reinterpreted as a document
+ *    reference. The invariant is enforced at the model boundary
  *    (the schema package refuses to write another scheme, and its palette gate
- *    refuses to bind one that arrived over the wire); the three doors here — the
+ *    refuses to bind one that arrived over the wire); the doors here — the
  *    input rule, the paste rule and HTML parsing — keep it from being reached in
- *    the first place, and share the schema's `isExternalHref` so there is one
- *    definition. No validation registry, no link resolver.
+ *    the first place, and share the schema's `isExternalHref` and `isDocId` so
+ *    there is one definition. No validation registry, no link resolver.
  * 4. **The `inlineCode` mark declares `code: true`.** Tiptap's input-rule runner
  *    skips every rule adjacent to a mark whose spec says `code`, which is what
  *    keeps `**x**` from turning into bold inside an inline code span. (Code
@@ -55,7 +57,12 @@ import {
   markPasteRule,
   mergeAttributes,
 } from "@tiptap/core";
-import { COMMENT_MARK, INLINE_MARKS, isExternalHref } from "@uberblick/schema";
+import {
+  COMMENT_MARK,
+  INLINE_MARKS,
+  canonicalDocumentUuid,
+  isExternalHref,
+} from "@uberblick/schema";
 
 /**
  * The marks a prose block may carry: the closed inline set plus the annotation
@@ -183,6 +190,9 @@ export const Link = Mark.create({
   // Typing after a link must not extend it — an href is a property of the words
   // it was put on, not of the caret.
   inclusive: false,
+  // Itself (constraint 1) and the other link mark: one range is a reference to
+  // one place.
+  excludes: "link docLink",
   addAttributes() {
     return {
       href: {
@@ -255,5 +265,69 @@ export const Link = Mark.create({
   },
 });
 
+/**
+ * An inline reference to another document, stored as the target's uuid alone.
+ *
+ * Storage and rendering only, deliberately: no input rule, no click navigation,
+ * and no directory lookup — the label is ordinary text, and resolving a title,
+ * routing a click and telling an unresolved target from an archived one are
+ * #444's. What this declaration buys today is that the mark can exist at all:
+ * the palette gate binds a text only when every attribute on it is a mark this
+ * schema declares and the schema package's reader accepts, so a `docLink`
+ * written by an agent would otherwise stop the editor from binding the block.
+ *
+ * `data-doc-id` rather than `href`: nothing here navigates yet, and an `<a>`
+ * with no href is inert rather than a dead link. It is also what keeps the two
+ * link marks' HTML doors apart — `a[href]` parses a `link`, `a[data-doc-id]` a
+ * `docLink` — and the attribute is validated on the way in, because pasted HTML
+ * is the one place a foreign value walks in.
+ */
+export const DocLink = Mark.create({
+  name: "docLink",
+  inclusive: false,
+  excludes: "docLink link",
+  addAttributes() {
+    return {
+      docId: {
+        default: null as string | null,
+        // Canonicalizing rather than shape-checking, because this is a *write*
+        // door: an upper-cased uuid names the same document, and the schema
+        // package's write boundary lowercases it exactly the same way. The
+        // attribute's own parser is where it has to happen — Tiptap runs it
+        // after the rule's `getAttrs` and its value wins.
+        parseHTML: (element: HTMLElement): string | null =>
+          canonicalDocumentUuid(element.getAttribute("data-doc-id")),
+        renderHTML: (attributes: Record<string, unknown>): Record<string, string> =>
+          typeof attributes.docId === "string"
+            ? { "data-doc-id": attributes.docId }
+            : {},
+      },
+    };
+  },
+  parseHTML() {
+    return [
+      {
+        tag: "a[data-doc-id]",
+        // The paste door: a target that is not a document uuid is not a
+        // reference, and the text comes through unmarked.
+        getAttrs: (element: HTMLElement): { docId: string } | false => {
+          const docId = canonicalDocumentUuid(element.getAttribute("data-doc-id"));
+          return docId === null ? false : { docId };
+        },
+      },
+    ];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["a", mergeAttributes({ class: "ub-doclink" }, HTMLAttributes), 0];
+  },
+});
+
 /** The inline marks, in the order the ProseMirror schema should see them. */
-export const inlineMarkExtensions = [Bold, Italic, Strike, InlineCode, Link];
+export const inlineMarkExtensions = [
+  Bold,
+  Italic,
+  Strike,
+  InlineCode,
+  Link,
+  DocLink,
+];

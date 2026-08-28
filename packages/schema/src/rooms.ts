@@ -148,6 +148,25 @@ const DOCUMENT_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
+ * `value` as a document uuid, lowercased — or null when it is not one.
+ *
+ * The one door for "is this a document identity?", so the `docLink` mark
+ * (`marks.ts`) refuses exactly what a room name refuses and accepts exactly
+ * what one accepts: an id minted somewhere other than `crypto.randomUUID`
+ * passes, and an upper-cased spelling is canonicalized down rather than
+ * becoming a second identity for one document.
+ *
+ * The reserved document ids above are not uuids, so they are refused here for
+ * free: `_directory` and its siblings are rooms this workspace opens, never
+ * documents a reader can be sent to.
+ */
+export function canonicalDocumentUuid(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const lowered = value.toLowerCase();
+  return DOCUMENT_UUID.test(lowered) ? lowered : null;
+}
+
+/**
  * Assert that a room name is *canonical*: structurally a room name, and its
  * document segment either a uuid or one of the reserved names above.
  *

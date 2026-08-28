@@ -7,7 +7,8 @@
  *                   single Y.XmlText of plain-text source
  *                   (types: paragraph, heading, code, mermaid, list-item,
  *                   quote, table), formatted by the closed inline-mark set
- *                   (bold, italic, strike, inlineCode, link) on prose blocks
+ *                   (bold, italic, strike, inlineCode, link, docLink) on
+ *                   prose blocks
  *   - `annotations` Y.Map of thread JSON, anchored by `comment` formatting
  *                   marks on the block's text
  *
@@ -57,7 +58,7 @@ export {
 } from "./blocks.js";
 export type { BlockTypeAttrs, EditBlockOptions } from "./blocks.js";
 
-export { isExternalHref, readsAsMark } from "./marks.js";
+export { isDocId, isExternalHref, readsAsMark } from "./marks.js";
 
 export { blockRev } from "./rev.js";
 export type { RevInput } from "./rev.js";
@@ -94,6 +95,7 @@ export {
   FEEDBACK_SUFFIX,
   SIDEBAR_SUFFIX,
   assertCanonicalRoom,
+  canonicalDocumentUuid,
   directoryRoom,
   feedbackRoom,
   isCanonicalRoom,
@@ -156,6 +158,8 @@ export type { DirectoryUpsert, ListDirectoryOptions } from "./directory.js";
 export {
   AnnotationRangeError,
   BlockNotFoundError,
+  ConflictingLinkMarksError,
+  InvalidDocLinkTargetError,
   InvalidLinkHrefError,
   InvalidRoomError,
   InvalidWorkspaceIdError,

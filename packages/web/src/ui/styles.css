@@ -1948,6 +1948,14 @@ h3.ub-heading {
   text-underline-offset: 0.15em;
 }
 
+/* An inline reference to another document. Dotted where an external link is
+   solid, so the two read apart at a glance; it does not navigate yet (#444). */
+.ub-doclink {
+  color: var(--brand);
+  text-decoration: underline dotted;
+  text-underline-offset: 0.15em;
+}
+
 /* ---- foreign-content fallback ---- */
 
 /* Loud comes from the ground and the 2px border; the prose stays

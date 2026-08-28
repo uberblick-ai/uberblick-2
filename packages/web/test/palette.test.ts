@@ -19,6 +19,7 @@ import {
   INLINE_MARKS,
   PROSE_BLOCK_TYPES,
   appendBlock,
+  getBlockInline,
   getBlocks,
   getBlocksFragment,
   initDoc,
@@ -28,6 +29,7 @@ import { bindGuardedEditor } from "../src/editor/guarded-binding.js";
 import type { GuardedBinding } from "../src/editor/guarded-binding.js";
 import {
   BLOCK_NODE_NAMES,
+  LINK_CONFLICT,
   describeForeignBlocks,
   findForeignBlocks,
 } from "../src/editor/palette.js";
@@ -35,7 +37,7 @@ import { plainText } from "../src/editor/ytext.js";
 import { mountEditor } from "./helpers.js";
 
 describe("the palette is exactly the schema's block types", () => {
-  it("declares the schema's block nodes, six marks, and nothing else", () => {
+  it("declares the schema's block nodes, seven marks, and nothing else", () => {
     expect(Object.keys(uberblickSchema.nodes).sort()).toEqual([
       "code",
       "doc",
@@ -56,7 +58,7 @@ describe("the palette is exactly the schema's block types", () => {
       "quote",
       "table",
     ]);
-    // The closed mark set: the schema package's five inline marks, plus the
+    // The closed mark set: the schema package's six inline marks, plus the
     // annotation anchor.
     expect(Object.keys(uberblickSchema.marks).sort()).toEqual(
       [...INLINE_MARKS, COMMENT_MARK].sort(),
@@ -120,6 +122,16 @@ describe("the palette is exactly the schema's block types", () => {
       const type = uberblickSchema.marks[name]!;
       expect(type.excludes(type), name).toBe(true);
     }
+
+    // The two link marks name their exclusions explicitly, which is why the
+    // rule above is the pointed one for them: `excludes` *replaces* the
+    // self-exclusion default, so naming the other mark without naming itself
+    // would have cost the bare key. They exclude each other both ways — one
+    // range is a reference to one place.
+    const link = uberblickSchema.marks.link!;
+    const docLink = uberblickSchema.marks.docLink!;
+    expect(link.excludes(docLink)).toBe(true);
+    expect(docLink.excludes(link)).toBe(true);
   });
 
   it("rejects an unknown node or mark type instead of normalising it", () => {
@@ -144,6 +156,58 @@ describe("the palette is exactly the schema's block types", () => {
         ],
       }),
     ).toThrow();
+  });
+
+  /**
+   * The docLink half of the palette, end to end: a reference an agent wrote is
+   * bindable (the gate opens), renders as marked text carrying its class, and
+   * one whose target the schema package's reader rejects keeps the editor shut
+   * — a web `Y.Text` write bypasses the model boundary, so the gate is where
+   * the shape is checked. Input rules and navigation are #444's.
+   */
+  it("binds and renders a stored docLink, and refuses a malformed one", () => {
+    const target = "0189abcd-2222-4333-8444-555566667777";
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "doc-doclink", title: "References" });
+    appendBlock(ydoc, {
+      type: "paragraph",
+      inline: [
+        { text: "see ", marks: {} },
+        { text: "the hub", marks: { docLink: target } },
+      ],
+    });
+    expect(findForeignBlocks(getBlocksFragment(ydoc))).toEqual([]);
+
+    const { editor } = mountEditor(ydoc);
+    try {
+      const html = editor.getHTML();
+      expect(html).toContain("ub-doclink");
+      expect(html).toContain(`data-doc-id="${target}"`);
+      // Binding did not rewrite the document: the Yjs key is still the bare
+      // mark name, with the attrs the schema package wrote.
+      expect(getBlocks(ydoc)[0]?.text).toBe("see the hub");
+
+      // The HTML door is a *write* door, so it canonicalizes where the reader
+      // only checks the stored shape: an upper-cased uuid names the same
+      // document, and dropping it would lose a reference the model accepts.
+      editor.commands.insertContent(
+        `<p><a data-doc-id="${target.toUpperCase()}">also the hub</a></p>`,
+      );
+      expect(editor.getHTML()).not.toContain(target.toUpperCase());
+      expect(editor.getHTML()).toContain(`data-doc-id="${target}">also the hub`);
+    } finally {
+      editor.destroy();
+    }
+
+    const malformed = new Y.Doc();
+    initDoc(malformed, { uuid: "doc-doclink-bad", title: "Not a reference" });
+    appendBlock(malformed, { type: "paragraph", text: "see the hub" });
+    const block = getBlocksFragment(malformed).get(0) as Y.XmlElement;
+    (block.firstChild as Y.XmlText).format(4, 7, { docLink: { docId: "nope" } });
+    expect(findForeignBlocks(getBlocksFragment(malformed))[0]?.nodeName).toBe(
+      "#mark:docLink",
+    );
+
   });
 
   it("refuses nested blocks — the document is flat", () => {
@@ -315,6 +379,71 @@ describe("foreign blocks already in the document", () => {
     expect(second.refused).toBe(false);
     expect(second.editor?.state.doc.childCount).toBe(1);
     second.destroy();
+  });
+
+  /**
+   * The precedence half of the gate, and the only case a *legitimate* merge can
+   * produce: two replicas format one range as different kinds of link, and the
+   * CRDT keeps both keys. The schema package reads that as the docLink alone
+   * (its two-replica test pins the rule); y-prosemirror would bind both, since
+   * it builds a mark per attribute and never asks ProseMirror's `excludes` —
+   * rendering an external anchor wrapped around a document anchor, which is the
+   * document meaning two things at once. So the gate refuses, and both marks
+   * stay in the CRDT for a writer to resolve.
+   */
+  it("refuses a range a merge left carrying both link marks", () => {
+    const target = "0189abcd-2222-4333-8444-555566667777";
+    const a = new Y.Doc();
+    initDoc(a, { uuid: "doc-merged-links", title: "Both at once" });
+    appendBlock(a, { type: "paragraph", text: "see the hub" });
+    const b = new Y.Doc();
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+
+    const textOf = (ydoc: Y.Doc): Y.XmlText =>
+      (getBlocksFragment(ydoc).get(0) as Y.XmlElement).firstChild as Y.XmlText;
+    textOf(a).format(0, 7, {
+      link: { href: "https://example.com/hub" },
+      docLink: null,
+    });
+    textOf(b).format(0, 7, { docLink: { docId: target }, link: null });
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b));
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+
+    const foreign = findForeignBlocks(getBlocksFragment(a));
+    expect(foreign.map((block) => block.nodeName)).toEqual([LINK_CONFLICT]);
+
+    // The reason is its own, and so is what the reader is told: `link` is a
+    // supported mark, so calling this an unsupported type would name the wrong
+    // thing and leave nobody anything to do about it.
+    const said = describeForeignBlocks(foreign);
+    expect(said).not.toMatch(/unsupported type/i);
+    expect(said).toContain("conflicting external and document links");
+    expect(said).toContain("MCP tools");
+
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    const binding = bindGuardedEditor({
+      element,
+      fragment: getBlocksFragment(a),
+      awareness: null,
+    });
+    expect(binding.refused).toBe(true);
+
+    // Nothing was dropped, and the schema package still reads the range the way
+    // it always did — one docLink, on both replicas.
+    expect((textOf(a).toDelta() as Array<{ attributes?: unknown }>)[0]?.attributes)
+      .toEqual({
+        link: { href: "https://example.com/hub" },
+        docLink: { docId: target },
+      });
+    expect(getBlockInline(a, getBlocks(a)[0]?.id ?? "")).toEqual([
+      { text: "see the", marks: { docLink: target } },
+      { text: " hub", marks: {} },
+    ]);
+    expect(getBlockInline(b, getBlocks(b)[0]?.id ?? "")).toEqual(
+      getBlockInline(a, getBlocks(a)[0]?.id ?? ""),
+    );
+    binding.destroy();
   });
 });
 
