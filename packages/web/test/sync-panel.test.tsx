@@ -218,6 +218,43 @@ describe("the sync panel renders the state this client holds", () => {
     }
   });
 
+  /**
+   * The quiet state — and, in the same breath, that no two states read alike.
+   *
+   * `synced` with an empty backlog is the reading the two cases above leave
+   * out, and it is the one a reader opens the panel *not* expecting to be told
+   * about: both rows have to say so in words, because a Backlog row that went
+   * silent at zero would leave "nothing waiting" and "not reported" looking the
+   * same.
+   *
+   * The three are then compared pairwise rather than counted. One state
+   * collapsing into another is how this panel stops being worth opening, and
+   * that is what this catches; the *number* of readings is not a contract —
+   * #96 adds an auth-failure one — so a test that pinned it would fail the day
+   * a fourth earns its place.
+   */
+  it("says synced with nothing unacked, and no two states read the same", () => {
+    vi.useFakeTimers();
+    const reading = (status: Partial<RoomStatus>): Record<string, string> => {
+      const { host, root } = mount(fixture(status));
+      try {
+        return facts(host);
+      } finally {
+        act(() => root.unmount());
+        host.remove();
+      }
+    };
+    const offline = reading({ connected: false, synced: false, unsyncedChanges: 0 });
+    const busy = reading({ connected: true, synced: true, unsyncedChanges: 4 });
+    const quiet = reading({ connected: true, synced: true, unsyncedChanges: 0 });
+
+    expect(quiet.State).toBe("synced");
+    expect(quiet.Backlog).toBe("0 sync messages unacked");
+
+    const words = [offline.State, busy.State, quiet.State];
+    expect(new Set(words).size).toBe(words.length);
+  });
+
   it("lists both sessions, with the caret's block only where there is one", () => {
     vi.useFakeTimers();
     const fix = fixture();
