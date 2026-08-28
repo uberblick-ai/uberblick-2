@@ -132,9 +132,10 @@ export class MarksNotAllowedError extends Error {
 /**
  * Thrown when a `link` mark's target is not an external `http(s)` URL.
  *
- * Inline links are external URLs only — a doc-to-doc reference is `meta.links`
- * by UUID — and this is the model-level door, not a UI nicety: refusing here is
- * what keeps a `javascript:` target out of the CRDT, and therefore out of every
+ * A `link` is external only — an inline reference to another document is the
+ * `docLink` mark, and a bare uuid in an href is never reinterpreted as one —
+ * and this is the model-level door, not a UI nicety: refusing here is what
+ * keeps a `javascript:` target out of the CRDT, and therefore out of every
  * renderer downstream of it.
  */
 export class InvalidLinkHrefError extends Error {
@@ -143,10 +144,59 @@ export class InvalidLinkHrefError extends Error {
   constructor(href: string) {
     super(
       `Not an external link target: ${JSON.stringify(href)}. Inline links are ` +
-        `http(s) URLs only; a reference to another document is meta.links by UUID.`,
+        `http(s) URLs only; an inline reference to another document is the ` +
+        `docLink mark, which carries a document uuid.`,
     );
     this.name = "InvalidLinkHrefError";
     this.href = href;
+  }
+}
+
+/**
+ * Thrown when a `docLink` mark's target is not a document uuid.
+ *
+ * The mirror of {@link InvalidLinkHrefError}, and the same door: a docLink
+ * names a document by uuid, so a URL, a path, a title or a reserved room name
+ * (`_directory` and its siblings are not documents) is refused before it
+ * reaches the CRDT. An upper-cased uuid is not refused — it is canonicalized
+ * down, because two spellings of one id would be two documents to everything
+ * that compares them.
+ */
+export class InvalidDocLinkTargetError extends Error {
+  readonly docId: string;
+
+  constructor(docId: string) {
+    super(
+      `Not a document reference: ${JSON.stringify(docId)}. A docLink mark ` +
+        `carries a document uuid; an external link is the link mark.`,
+    );
+    this.name = "InvalidDocLinkTargetError";
+    this.docId = docId;
+  }
+}
+
+/**
+ * Thrown when one range of text would carry both `link` and `docLink`.
+ *
+ * They are one affordance over two target spaces, and a range that is both has
+ * no honest rendering. Writing refuses; reading cannot, because two Yjs keys
+ * have no cross-key exclusion and a merge of two replicas that formatted the
+ * same range differently can leave both behind. So a reader resolves in
+ * `docLink`'s favour instead of breaking (see `marks.ts`), and this error keeps
+ * writers from creating the situation on purpose.
+ */
+export class ConflictingLinkMarksError extends Error {
+  readonly href: string;
+  readonly docId: string;
+
+  constructor(href: string, docId: string) {
+    super(
+      `One range cannot be both an external link (${JSON.stringify(href)}) and ` +
+        `a reference to document ${JSON.stringify(docId)}. Write one or the other.`,
+    );
+    this.name = "ConflictingLinkMarksError";
+    this.href = href;
+    this.docId = docId;
   }
 }
 

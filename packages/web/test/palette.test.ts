@@ -35,7 +35,7 @@ import { plainText } from "../src/editor/ytext.js";
 import { mountEditor } from "./helpers.js";
 
 describe("the palette is exactly the schema's block types", () => {
-  it("declares the schema's block nodes, six marks, and nothing else", () => {
+  it("declares the schema's block nodes, seven marks, and nothing else", () => {
     expect(Object.keys(uberblickSchema.nodes).sort()).toEqual([
       "code",
       "doc",
@@ -56,7 +56,7 @@ describe("the palette is exactly the schema's block types", () => {
       "quote",
       "table",
     ]);
-    // The closed mark set: the schema package's five inline marks, plus the
+    // The closed mark set: the schema package's six inline marks, plus the
     // annotation anchor.
     expect(Object.keys(uberblickSchema.marks).sort()).toEqual(
       [...INLINE_MARKS, COMMENT_MARK].sort(),
@@ -144,6 +144,48 @@ describe("the palette is exactly the schema's block types", () => {
         ],
       }),
     ).toThrow();
+  });
+
+  /**
+   * The docLink half of the palette, end to end: a reference an agent wrote is
+   * bindable (the gate opens), renders as marked text carrying its class, and
+   * one whose target the schema package's reader rejects keeps the editor shut
+   * — a web `Y.Text` write bypasses the model boundary, so the gate is where
+   * the shape is checked. Input rules and navigation are #444's.
+   */
+  it("binds and renders a stored docLink, and refuses a malformed one", () => {
+    const target = "0189abcd-2222-4333-8444-555566667777";
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "doc-doclink", title: "References" });
+    appendBlock(ydoc, {
+      type: "paragraph",
+      inline: [
+        { text: "see ", marks: {} },
+        { text: "the hub", marks: { docLink: target } },
+      ],
+    });
+    expect(findForeignBlocks(getBlocksFragment(ydoc))).toEqual([]);
+
+    const { editor } = mountEditor(ydoc);
+    try {
+      const html = editor.getHTML();
+      expect(html).toContain("ub-doclink");
+      expect(html).toContain(`data-doc-id="${target}"`);
+      // Binding did not rewrite the document: the Yjs key is still the bare
+      // mark name, with the attrs the schema package wrote.
+      expect(getBlocks(ydoc)[0]?.text).toBe("see the hub");
+    } finally {
+      editor.destroy();
+    }
+
+    const malformed = new Y.Doc();
+    initDoc(malformed, { uuid: "doc-doclink-bad", title: "Not a reference" });
+    appendBlock(malformed, { type: "paragraph", text: "see the hub" });
+    const block = getBlocksFragment(malformed).get(0) as Y.XmlElement;
+    (block.firstChild as Y.XmlText).format(4, 7, { docLink: { docId: "nope" } });
+    expect(findForeignBlocks(getBlocksFragment(malformed))[0]?.nodeName).toBe(
+      "#mark:docLink",
+    );
   });
 
   it("refuses nested blocks — the document is flat", () => {

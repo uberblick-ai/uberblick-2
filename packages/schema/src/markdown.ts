@@ -6,7 +6,8 @@
  * dependency-free, line-based reader used to bring seed documents in once.
  *
  * Both directions carry the closed inline-mark set — `**bold**`, `*italic*`,
- * `~~strike~~`, `` `code` `` and `[text](https://…)` — because a block's text
+ * `~~strike~~`, `` `code` ``, `[text](https://…)` and `[text](<uuid>)` — because
+ * a block's text
  * does store inline formatting (as Yjs formatting attributes; see `marks.ts`).
  * Block structure stays line-based, which is exactly what the flat block model
  * needs: a list is a run of `list-item` blocks and a quote is a `quote` block,
@@ -28,9 +29,13 @@
  *     open and close (`** x **` is literal), a closer takes the nearest opener,
  *     and a long run splits between matches — which is what makes `***both***`,
  *     `**a***b*` and `*a **b** c*` each mean what they should.
- *   - A link is a link only when its target is an external `http(s)` URL.
- *     Doc-to-doc references are `meta.links` by UUID and never a link mark, so
- *     anything else stays literal text. Balanced parentheses inside a target
+ *   - `[label](target)` is a link only when the target is one of the two things
+ *     a link mark can hold: an external `http(s)` URL (`link`) or a document
+ *     uuid (`docLink`). The target's own shape decides which, in both
+ *     directions; anything else stays literal text, and so does an empty label,
+ *     so the shorthand spellings (`[](uuid)`, `[uuid]`) are neither read nor
+ *     written here — resolving a title needs the directory, which is the
+ *     caller's. Balanced parentheses inside a target
  *     belong to it, again per CommonMark.
  *   - `\` escapes `` \ ` * [ ``, `~` and `_` where they could delimit, and `]`
  *     inside a link label. Nothing else, in both directions.
@@ -42,11 +47,13 @@ import { getMeta } from "./doc.js";
 import { listAnnotations, resolveAnnotationRange } from "./annotations.js";
 import {
   hasInlineMarks,
+  inlineLinkTarget,
   inlinePlainText,
   isExternalHref,
   pushInlineRun,
   sameInlineMarks,
 } from "./marks.js";
+import { canonicalDocumentUuid } from "./rooms.js";
 import { listNumbers } from "./lists.js";
 import { parseGfmTable } from "./table.js";
 import { MAX_LIST_INDENT } from "./types.js";
@@ -119,7 +126,13 @@ function fenceFor(text: string): string {
 
 /* --------------------------------------------------------------- inline: out */
 
-/** The marks that nest. `inlineCode` is not one: it is always innermost. */
+/**
+ * The marks that nest. `inlineCode` is not one: it is always innermost.
+ *
+ * `"link"` here means *either* link mark: both are spelled `[label](target)`,
+ * so they nest identically and the emitter keeps one stack entry for both. What
+ * distinguishes them is the target string alone — see {@link inlineLinkTarget}.
+ */
 const NESTING = ["link", "bold", "italic", "strike"] as const;
 
 type NestedMark = (typeof NESTING)[number];
@@ -142,7 +155,7 @@ const DELIMITER: Record<Exclude<NestedMark, "link">, string> = {
 
 function nestedMarksOf(marks: InlineMarkSet): NestedMark[] {
   const out: NestedMark[] = [];
-  if (marks.link !== undefined) out.push("link");
+  if (inlineLinkTarget(marks) !== undefined) out.push("link");
   if (marks.bold === true) out.push("bold");
   if (marks.italic === true) out.push("italic");
   if (marks.strike === true) out.push("strike");
@@ -232,17 +245,17 @@ function parensBalanced(href: string): boolean {
 }
 
 /**
- * A link target, written so the reader gets it back *unchanged* — an href is
+ * A link target, written so the reader gets it back *unchanged* — a target is
  * data, so escaping it is fine but rewriting it is not.
  *
  * Balanced parentheses belong to a bare target (the rule the reader implements),
  * so `https://example.com/a_(b)` goes out as it is. Anything a bare target cannot
  * hold — an unbalanced paren, an angle bracket — goes in CommonMark's `<…>` form,
- * where a backslash covers the rest.
+ * where a backslash covers the rest. A document uuid is bare by construction.
  */
-function renderHref(href: string): string {
-  if (parensBalanced(href) && !/[<>]/.test(href)) return href;
-  return `<${href.replace(/[\\<>]/g, (char) => `\\${char}`)}>`;
+function renderTarget(target: string): string {
+  if (parensBalanced(target) && !/[<>]/.test(target)) return target;
+  return `<${target.replace(/[\\<>]/g, (char) => `\\${char}`)}>`;
 }
 
 /**
@@ -329,7 +342,11 @@ function sharedMarks(a: InlineMarkSet, b: InlineMarkSet): InlineMarkSet {
   for (const mark of EMPHASIS_MARKS) {
     if (a[mark] === true && b[mark] === true) marks[mark] = true;
   }
-  if (a.link !== undefined && a.link === b.link) marks.link = a.link;
+  const target = inlineLinkTarget(a);
+  if (target !== undefined && target === inlineLinkTarget(b)) {
+    if (a.docLink === target) marks.docLink = target;
+    else marks.link = target;
+  }
   return marks;
 }
 
@@ -381,7 +398,8 @@ function coalesceCodeRuns(runs: readonly InlineRun[]): InlineRun[] {
 /** One mark on the open stack, with the exact delimiter that will close it. */
 interface OpenMark {
   name: NestedMark;
-  href: string;
+  /** For a link, what goes in its `(…)`: an external URL or a document uuid. */
+  target: string;
   /** The spelling this mark was opened with; a closer must match it. */
   spelling: string;
 }
@@ -404,6 +422,10 @@ interface OpenMark {
 function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
   const starts = new Map<NestedMark, number[]>();
   const ends = new Map<NestedMark, number[]>();
+  const target = (index: number): string | undefined => {
+    const marks = runs[index]?.marks;
+    return marks === undefined ? undefined : inlineLinkTarget(marks);
+  };
 
   for (const mark of NESTING) {
     const start: number[] = [];
@@ -411,12 +433,10 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
     const carries = (index: number): boolean => {
       const marks = runs[index]?.marks;
       if (marks === undefined) return false;
-      return mark === "link" ? marks.link !== undefined : marks[mark] === true;
+      return mark === "link" ? target(index) !== undefined : marks[mark] === true;
     };
     const same = (a: number, b: number): boolean =>
-      mark === "link"
-        ? runs[a]?.marks.link === runs[b]?.marks.link
-        : carries(a) && carries(b);
+      mark === "link" ? target(a) === target(b) : carries(a) && carries(b);
 
     for (let i = 0; i < runs.length; i += 1) {
       start[i] = carries(i) && i > 0 && same(i - 1, i) ? (start[i - 1] as number) : i;
@@ -511,7 +531,8 @@ function renderInline(source: readonly InlineRun[]): string {
     for (let i = open.length - 1; i >= depth; i -= 1) {
       const entry = open[i];
       if (entry === undefined) continue;
-      out += entry.name === "link" ? `](${renderHref(entry.href)})` : entry.spelling;
+      out +=
+        entry.name === "link" ? `](${renderTarget(entry.target)})` : entry.spelling;
       if (i === lastEmphasis) out += held;
     }
     if (lastEmphasis === -1) out += held;
@@ -521,13 +542,13 @@ function renderInline(source: readonly InlineRun[]): string {
   for (const [index, run] of runs.entries()) {
     const marks = run.marks;
     const desired = orders[index] ?? [];
-    const href = marks.link ?? "";
+    const target = inlineLinkTarget(marks) ?? "";
     let common = 0;
     while (
       common < open.length &&
       common < desired.length &&
       open[common]?.name === desired[common] &&
-      (desired[common] !== "link" || open[common]?.href === href)
+      (desired[common] !== "link" || open[common]?.target === target)
     ) {
       common += 1;
     }
@@ -570,7 +591,7 @@ function renderInline(source: readonly InlineRun[]): string {
       }
       const spelling = name === "link" ? "[" : DELIMITER[name];
       out += spelling;
-      open.push({ name, href, spelling });
+      open.push({ name, target, spelling });
     }
 
 
@@ -985,8 +1006,14 @@ function runLength(source: string, from: number, char: string): number {
 }
 
 /**
- * The link opening at `start`, or null — including for a target that is not an
- * external URL, which stays literal text rather than becoming a mark.
+ * The link opening at `start`, or null — including for a target that is neither
+ * an external URL nor a document uuid, which stays literal text rather than
+ * becoming a mark.
+ *
+ * The target's shape picks the mark: `http(s)` is a `link`, a uuid is a
+ * `docLink`, and `marks` is the one to add. An *empty* label is neither, in
+ * both directions: a mark needs text to cover, and filling one in from a
+ * document's title needs the directory, which this package does not have.
  *
  * The label ends at the first unescaped `]`. The target is either bare — running
  * to the `)` that matches, counting nested pairs, so `https://example.com/a_(b)`
@@ -996,7 +1023,7 @@ function runLength(source: string, from: number, char: string): number {
 function matchLink(
   source: string,
   start: number,
-): { label: string; href: string; next: number } | null {
+): { label: string; marks: InlineMarkSet; next: number } | null {
   if (source[start] !== "[") return null;
   let i = start + 1;
   for (; i < source.length; i += 1) {
@@ -1024,8 +1051,11 @@ function matchLink(
     source[i + 2] === "<"
       ? matchAngleTarget(source, i + 3)
       : matchBareTarget(source, i + 2);
-  if (target === null || label === "" || !isExternalHref(target.href)) return null;
-  return { label, href: target.href, next: target.next };
+  if (target === null || label === "") return null;
+  const docId = canonicalDocumentUuid(target.href);
+  if (docId !== null) return { label, marks: { docLink: docId }, next: target.next };
+  if (!isExternalHref(target.href)) return null;
+  return { label, marks: { link: target.href }, next: target.next };
 }
 
 /** A bare `(target)`, ending at the `)` that balances. */
@@ -1188,13 +1218,11 @@ function tokenizeInline(source: string, marks: InlineMarkSet): Token[] {
       }
     }
 
-    if (char === "[" && marks.link === undefined) {
+    if (char === "[" && inlineLinkTarget(marks) === undefined) {
       const link = matchLink(source, i);
       if (link !== null) {
         flush();
-        tokens.push(
-          ...tokenizeInline(link.label, { ...marks, link: link.href }),
-        );
+        tokens.push(...tokenizeInline(link.label, { ...marks, ...link.marks }));
         i = link.next;
         continue;
       }

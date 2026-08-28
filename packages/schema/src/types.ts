@@ -82,6 +82,7 @@ export const INLINE_MARKS = [
   "strike",
   "inlineCode",
   "link",
+  "docLink",
 ] as const;
 
 export type InlineMarkName = (typeof INLINE_MARKS)[number];
@@ -93,9 +94,11 @@ export function isInlineMark(value: string): value is InlineMarkName {
 /**
  * The inline marks covering one run of text.
  *
- * Four of them are flags; `link` carries its href, which is always an external
- * `http(s)` URL. Doc-to-doc references are `meta.links` by UUID and never a
- * link mark.
+ * Four of them are flags; the two link marks carry a target. `link` is always
+ * an external `http(s)` URL, and `docLink` is always a document uuid — an
+ * inline doc-to-doc reference. They are the same affordance over two disjoint
+ * target spaces, which is why nothing carries both: a write refuses the pair,
+ * and a read resolves it in `docLink`'s favour (see `marks.ts`).
  */
 export interface InlineMarkSet {
   bold?: boolean;
@@ -104,6 +107,8 @@ export interface InlineMarkSet {
   inlineCode?: boolean;
   /** External http(s) URL. */
   link?: string;
+  /** A document uuid, lowercase — never a path, a title or a URL. */
+  docLink?: string;
 }
 
 /** A maximal run of a block's text carrying one set of inline marks. */

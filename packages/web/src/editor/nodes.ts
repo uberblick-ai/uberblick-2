@@ -1,8 +1,9 @@
 /**
- * The editor palette: seven custom block nodes, six marks, nothing else.
+ * The editor palette: seven custom block nodes, seven marks, nothing else.
  *
- * The marks live in marks.ts — the five inline ones (`bold`, `italic`, `strike`,
- * `inlineCode`, `link`) plus the `comment` anchor defined below. StarterKit is
+ * The marks live in marks.ts — the six inline ones (`bold`, `italic`, `strike`,
+ * `inlineCode`, `link`, `docLink`) plus the `comment` anchor defined below.
+ * StarterKit is
  * deliberately absent. Every node here mirrors a schema-owned Y.XmlElement
  * one-for-one:
  *

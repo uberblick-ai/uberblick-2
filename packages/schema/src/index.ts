@@ -57,7 +57,7 @@ export {
 } from "./blocks.js";
 export type { BlockTypeAttrs, EditBlockOptions } from "./blocks.js";
 
-export { isExternalHref, readsAsMark } from "./marks.js";
+export { isDocId, isExternalHref, readsAsMark } from "./marks.js";
 
 export { blockRev } from "./rev.js";
 export type { RevInput } from "./rev.js";
@@ -94,6 +94,7 @@ export {
   FEEDBACK_SUFFIX,
   SIDEBAR_SUFFIX,
   assertCanonicalRoom,
+  canonicalDocumentUuid,
   directoryRoom,
   feedbackRoom,
   isCanonicalRoom,
@@ -156,6 +157,8 @@ export type { DirectoryUpsert, ListDirectoryOptions } from "./directory.js";
 export {
   AnnotationRangeError,
   BlockNotFoundError,
+  ConflictingLinkMarksError,
+  InvalidDocLinkTargetError,
   InvalidLinkHrefError,
   InvalidRoomError,
   InvalidWorkspaceIdError,
