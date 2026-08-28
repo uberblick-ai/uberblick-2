@@ -114,6 +114,67 @@ describe("ub status", () => {
     expect(report.pendingRooms.length).toBe(report.unsyncedChanges);
   });
 
+  it("lists every configuration layer, marking the one in force", () => {
+    // The environment outranks the files by design, so the report has to say
+    // what it outranked and not only what it chose (#454). Both values here
+    // disagree, which is also the case where two secrets must stay unprintable.
+    const shadowed = "1f0c6d3b-5e42-4a17-9d88-6b2e04c7a591";
+    const envSecret = "cli-test-env-secret-4b81aa";
+    const fileSecret = "cli-test-file-secret-c07d13";
+    const box = sandbox({
+      userConfig: { workspace: shadowed, hubUrl: DEAD_HUB_URL },
+      credentials: { signingSecret: fileSecret },
+    });
+    const pinned = { WORKSPACE_ID: WORKSPACE, HUB_AUTH_TOKEN: envSecret };
+
+    const json = runUb(["status", "--json"], box, pinned);
+    expect(json.status).toBe(0);
+    const report = JSON.parse(json.stdout);
+    // The winner is still reported the way it always was.
+    expect(report.sources.workspace).toBe("environment");
+    expect(report.credentialSource).toBe("environment");
+    expect(report.layers).toEqual({
+      workspace: [
+        {
+          source: "environment",
+          state: "present",
+          value: WORKSPACE,
+          winner: true,
+        },
+        {
+          source: "user config",
+          state: "present",
+          value: shadowed,
+          winner: false,
+        },
+      ],
+      credential: [
+        { source: "environment", state: "present", winner: true },
+        { source: "credentials file", state: "present", winner: false },
+      ],
+    });
+    // Both disagreements reach stderr through the warnings every surface
+    // already prints, leaving stdout one parseable object.
+    expect(json.stderr).toMatch(/different workspaces are configured/);
+    expect(json.stderr).toContain(shadowed);
+    expect(json.stderr).toMatch(/HUB_AUTH_TOKEN .* differ/);
+
+    const human = runUb(["status"], box, pinned);
+    expect(human.status).toBe(0);
+    expect(human.stdout).toMatch(
+      new RegExp(`environment\\s+${WORKSPACE}\\s+\\(in force\\)`),
+    );
+    expect(human.stdout).toMatch(new RegExp(`user config\\s+${shadowed}`));
+    expect(human.stdout).toMatch(/credentials file\s+configured/);
+
+    // Neither secret is on either stream of either run, in any form.
+    for (const run of [json, human]) {
+      for (const secret of [envSecret, fileSecret]) {
+        expect(run.output).not.toContain(secret);
+      }
+    }
+  });
+
   it("reports a configured credential without printing it", () => {
     const secret = "cli-test-signing-secret-3f9a1c";
     const box = sandbox({

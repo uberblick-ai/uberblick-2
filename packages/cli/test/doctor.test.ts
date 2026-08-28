@@ -235,6 +235,24 @@ describe("ub doctor", () => {
     );
   });
 
+  it("says the environment shadows a different workspace, and still passes", async () => {
+    // The observed failure of #454: `ub doctor` printed `ok  workspace  …
+    // (environment)` for a workspace this machine had left, holding both facts
+    // and comparing neither. The check still passes — the pin is in force and
+    // it is a workspace id — but the disagreement now reaches stderr through
+    // the warnings `ub doctor` already prints, leaving stdout its one object.
+    const shadowed = "3d5a91c0-7b62-4f18-8e04-1c9d6a2b7f33";
+    const box = sandbox({
+      userConfig: { workspace: shadowed, hubUrl: DEAD_HUB_URL },
+    });
+    const { run, checks } = await doctor(box, { WORKSPACE_ID: WORKSPACE });
+
+    expect(check(checks, "workspace").status).toBe("pass");
+    expect(check(checks, "workspace").reason).toContain(WORKSPACE);
+    expect(run.stderr).toMatch(/different workspaces are configured/);
+    expect(run.stderr).toContain(shadowed);
+  });
+
   it("calls an absent credential a skip that keeps every MCP tool working", async () => {
     const { checks, ok } = await doctor(
       sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } }),

@@ -12,8 +12,10 @@
  * stays parseable by a pipe.
  *
  * No secret is ever printed. `credentialPresent` is the whole of what this
- * command says about the hub signing secret. The `storage` object is
- * directories and database paths, never anything out of `credentials.json`.
+ * command says about the hub signing secret, and the per-layer report beside it
+ * says only which layers hold one and which of them won — a credential layer
+ * has no field a value could sit in. The `storage` object is directories and
+ * database paths, never anything out of `credentials.json`.
  */
 
 import { parseArgs } from "node:util";
@@ -24,7 +26,13 @@ import {
   resolveMcpConfig,
 } from "@uberblick/mcp-server";
 import type { SyncStatus } from "@uberblick/mcp-server";
-import type { CredentialOrigin, Origin } from "./config.js";
+import type {
+  CredentialLayer,
+  CredentialOrigin,
+  LayerState,
+  Origin,
+  WorkspaceLayer,
+} from "./config.js";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
@@ -76,6 +84,15 @@ export interface StatusReport {
   credentialPresent: boolean;
   credentialSource: CredentialOrigin | null;
   sources: { workspace: Origin; hubUrl: Origin };
+  /**
+   * Every layer that could have supplied the workspace and the signing secret,
+   * in precedence order, marking the one in force. `sources` and
+   * `credentialSource` answer "which layer won"; this answers "what did the
+   * others hold", which is the question a machine pinned at a workspace it has
+   * left could not otherwise be asked. Credential layers carry no value and no
+   * derivation of one — presence and refusal are the whole of it.
+   */
+  layers: { workspace: WorkspaceLayer[]; credential: CredentialLayer[] };
   /** `disabled` means no signing secret, so this machine is local-only. */
   hub: SyncStatus["hub"];
   rooms: SyncStatus["rooms"];
@@ -127,6 +144,7 @@ export async function statusReport(
           workspace: resolved.origins.workspace,
           hubUrl: resolved.origins.hubUrl,
         },
+        layers: resolved.layers,
         hub: sync.hub,
         rooms: sync.rooms,
         unsyncedChanges: sync.unsyncedChanges,
@@ -158,6 +176,55 @@ function field(name: string, value: string): string {
   return `${name.padEnd(12)}${value}\n`;
 }
 
+/**
+ * Is there a layer the one-line summary above does not account for?
+ *
+ * The summary already names the winner and the layer it came from, so a lone
+ * winning layer needs no expansion — and printing "user config: none" under
+ * every ordinary configuration would be noise a reader learns to skip. What is
+ * invisible without a listing is a layer that lost or was refused, which is
+ * precisely the state this report exists to surface.
+ */
+function hasShadowedLayer(layers: { state: LayerState; winner: boolean }[]): boolean {
+  return layers.some((layer) => layer.state !== "absent" && !layer.winner);
+}
+
+function layerLine(source: string, detail: string, winner: boolean): string {
+  return `  ${source.padEnd(18)}${detail}${winner ? "  (in force)" : ""}\n`;
+}
+
+function renderWorkspaceLayers(layers: WorkspaceLayer[]): string {
+  if (!hasShadowedLayer(layers)) return "";
+  let text = "";
+  for (const layer of layers) {
+    // A refused value is never printed — it may be the secret somebody
+    // exported as `WORKSPACE_ID` by mistake.
+    const detail =
+      layer.state === "present"
+        ? (layer.value ?? "")
+        : layer.state === "refused"
+          ? "not a workspace id"
+          : "none";
+    text += layerLine(ORIGIN_LABELS[layer.source], detail, layer.winner);
+  }
+  return text;
+}
+
+function renderCredentialLayers(layers: CredentialLayer[]): string {
+  if (!hasShadowedLayer(layers)) return "";
+  let text = "";
+  for (const layer of layers) {
+    const detail =
+      layer.state === "present"
+        ? "configured"
+        : layer.state === "refused"
+          ? "refused"
+          : "none";
+    text += layerLine(layer.source, detail, layer.winner);
+  }
+  return text;
+}
+
 export function renderStatus(report: StatusReport): string {
   const hub = report.hub;
   const reason = hub.reason === undefined ? "" : ` — ${hub.reason}`;
@@ -176,6 +243,7 @@ export function renderStatus(report: StatusReport): string {
   if (report.workspaceUuid !== report.workspace) {
     text += field("uuid", report.workspaceUuid);
   }
+  text += renderWorkspaceLayers(report.layers.workspace);
   text += field(
     "hub",
     `${report.hubUrl} (${ORIGIN_LABELS[report.sources.hubUrl]})`,
@@ -184,6 +252,7 @@ export function renderStatus(report: StatusReport): string {
   // "credential", not "token": HUB_AUTH_TOKEN is the secret tokens are signed
   // with, and the two words must not blur into each other.
   text += field("credential", credential);
+  text += renderCredentialLayers(report.layers.credential);
   text += field("database", report.databasePath);
   // The data root, named once: everything durable is under it, and "where is my
   // data" is the question this line exists to answer.
@@ -225,6 +294,10 @@ What this directory resolves to right now: the workspace and which layer chose
 it, the hub endpoint, whether a signing secret is configured, the local database
 and the sync state of every room attached to it. Reads only — nothing here
 changes any configuration.
+
+When more than one layer has something to say about the workspace or the signing
+secret, every layer is listed under it and the one in force is marked — so a pin
+nobody remembers exporting is visible rather than merely obeyed.
 
 options:
   --json            the same report as JSON on stdout, for a script to read

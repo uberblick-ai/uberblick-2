@@ -31,7 +31,10 @@
  * Absent files are a default, never an error: nothing here requires `ub init` to
  * have run. A file that exists but cannot be read, parsed, or believed is a
  * warning, and warnings go to stderr — in the `ub mcp serve` path stdout is the
- * JSON-RPC transport.
+ * JSON-RPC transport. Two layers that *disagree* are a warning too, not an
+ * error: the environment winning is the point of the pin, but a pin nobody
+ * remembers exporting is how a machine works in a workspace it has left while
+ * every command endorses it (#454).
  *
  * `HUB_AUTH_TOKEN` holds the hub's HMAC **signing secret**, not a token (see
  * `packages/hub/src/token.ts`). It is read from `credentials.json`, passed to the
@@ -67,6 +70,41 @@ export type Origin = "environment" | "user config" | "default";
 /** Where a signing secret came from, or null when none is configured. */
 export type CredentialOrigin = "environment" | "credentials file";
 
+/** What a layer had to say: a usable value, nothing, or something refused. */
+export type LayerState = "present" | "absent" | "refused";
+
+/**
+ * One layer's contribution to the workspace, whether or not it won.
+ *
+ * `origins` names the winner; these say what the layers *under* it hold. That
+ * is the whole of #454: an environment pin nobody remembers exporting outranks
+ * a `config.json` naming a different workspace, and every command endorsed the
+ * winner without ever mentioning the disagreement.
+ */
+export interface WorkspaceLayer {
+  source: Origin;
+  state: LayerState;
+  /**
+   * The workspace id as typed, or null when this layer has none — including
+   * when it holds something that is not a workspace id. A refused value is
+   * never reported: the mistake worth catching here is a secret exported as
+   * `WORKSPACE_ID`, and naming the layer is enough to go and look.
+   */
+  value: string | null;
+  winner: boolean;
+}
+
+/**
+ * The same for the signing secret — with no field that could hold one.
+ * Presence, refusal, and which layer won are the whole of what may be said
+ * about a credential layer, so there is nowhere for a value to appear.
+ */
+export interface CredentialLayer {
+  source: CredentialOrigin;
+  state: LayerState;
+  winner: boolean;
+}
+
 export interface ResolvedConfig {
   /**
    * The environment the MCP server is handed: the process environment with what
@@ -81,6 +119,15 @@ export interface ResolvedConfig {
      * holding it refused for its mode. Either way: local-only, by design.
      */
     credential: CredentialOrigin | null;
+  };
+  /**
+   * Every layer consulted for the two values more than one source may supply,
+   * in precedence order. `origins` names the winner; this is what makes a
+   * shadowed layer visible to `ub status`.
+   */
+  layers: {
+    workspace: WorkspaceLayer[];
+    credential: CredentialLayer[];
   };
   /** The files consulted, whether or not they exist. */
   paths: {
@@ -353,6 +400,132 @@ export function readCredentials(env: NodeJS.ProcessEnv = process.env): {
   };
 }
 
+/**
+ * Report the workspace layers, and warn when they disagree.
+ *
+ * The environment outranking `config.json` is deliberate — a repository binds
+ * itself to a workspace by pinning `WORKSPACE_ID` in its project MCP entry —
+ * so a disagreement is a warning and never a failure. What it must not be any
+ * longer is silent: an ambient pin for a workspace this machine has left is
+ * the same class of failure as the ambient `HUB_URL` that #376/#385 removed,
+ * and the one command meant to catch it held both facts and never compared
+ * them (#454).
+ *
+ * **Identity is compared, not spelling.** `<slug>-<uuid>` and the bare uuid
+ * name one workspace, so a pin that merely decorates the id the file already
+ * holds stays silent — that is the ordinary repository pin, not a conflict.
+ *
+ * **A losing layer is validated too, and never quoted.** Only the winner is
+ * parsed for use, so without this a valid pin masks a `config.json` holding
+ * anything at all. Such a layer is named by its label and its reason: the
+ * observed way to get a non-id in there is pasting a secret, and the whole
+ * point of {@link parseWorkspaceId} keeping the value out of its own error is
+ * that the value may be one.
+ */
+function describeWorkspaceLayers(
+  layers: Layer[],
+  winner: Origin,
+  warnings: string[],
+): WorkspaceLayer[] {
+  const reports: WorkspaceLayer[] = [];
+  const identified: { layer: Layer; uuid: string }[] = [];
+
+  for (const layer of layers) {
+    if (layer.value === null) {
+      reports.push({
+        source: layer.origin,
+        state: "absent",
+        value: null,
+        winner: false,
+      });
+      continue;
+    }
+    let uuid: string;
+    try {
+      uuid = parseWorkspaceId(layer.value, layer.label).uuid;
+    } catch {
+      // Not the winner — resolveConfig has already parsed that one and thrown
+      // if it was bad — so this is a diagnostic, not a refusal to run.
+      warnings.push(
+        `ignoring ${layer.label}: it is not a workspace id, and a layer above ` +
+          "it supplies one",
+      );
+      reports.push({
+        source: layer.origin,
+        state: "refused",
+        value: null,
+        winner: false,
+      });
+      continue;
+    }
+    reports.push({
+      source: layer.origin,
+      state: "present",
+      value: layer.value,
+      winner: layer.origin === winner,
+    });
+    identified.push({ layer, uuid });
+  }
+
+  const [inForce, ...shadowed] = identified;
+  if (inForce !== undefined) {
+    for (const other of shadowed) {
+      if (other.uuid !== inForce.uuid) {
+        warnings.push(
+          `different workspaces are configured: ${inForce.layer.label} is ` +
+            `${inForce.layer.value}, ${other.layer.label} is ` +
+            `${other.layer.value} — ${inForce.layer.label} wins`,
+        );
+      }
+    }
+  }
+  return reports;
+}
+
+/**
+ * Report the credential layers, and warn when they disagree.
+ *
+ * Only *that* they differ, and which layer won. Nothing derived from either
+ * secret — no prefix, no length, no hash — reaches a warning: this text lands
+ * in an MCP client's log, a screen-shared terminal or a CI transcript, exactly
+ * like every other warning this module writes.
+ *
+ * An exposed file is compared as absent, because that is how {@link
+ * resolveConfig} already treats it. The refusal is the one actionable thing to
+ * say about such a file, and adding "and it differs" would leave a reader with
+ * two problems to think about and one fix to make.
+ */
+function describeCredentialLayers(
+  fromEnv: string | null,
+  file: { path: string; secret: string | null; exposed: boolean },
+  winner: CredentialOrigin | null,
+  warnings: string[],
+): CredentialLayer[] {
+  const usableFromFile = file.exposed ? null : file.secret;
+  if (fromEnv !== null && usableFromFile !== null && fromEnv !== usableFromFile) {
+    warnings.push(
+      `HUB_AUTH_TOKEN in the environment and the signing secret in ${file.path} ` +
+        "differ — the environment wins, so the one in the file is not used",
+    );
+  }
+  return [
+    {
+      source: "environment",
+      state: fromEnv === null ? "absent" : "present",
+      winner: winner === "environment",
+    },
+    {
+      source: "credentials file",
+      state: file.exposed
+        ? "refused"
+        : file.secret === null
+          ? "absent"
+          : "present",
+      winner: winner === "credentials file",
+    },
+  ];
+}
+
 export interface ResolveOptions {
   env?: NodeJS.ProcessEnv;
 }
@@ -370,7 +543,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   const userConfig = readJsonObject(paths.userConfig, warnings);
   warnAboutMisplacedSecret(userConfig, paths.userConfig, warnings);
 
-  const workspace = pick([
+  const workspaceLayers: Layer[] = [
     {
       origin: "environment",
       value: trimmed(env.WORKSPACE_ID),
@@ -381,7 +554,8 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
       value: stringField(userConfig, "workspace", paths.userConfig, warnings),
       label: `"workspace" in ${paths.userConfig}`,
     },
-  ]);
+  ];
+  const workspace = pick(workspaceLayers);
   if (workspace.value !== null) {
     // The same rule the MCP server applies, applied to file-sourced values too.
     // The value is kept as typed — a `<slug>-<uuid>` spelling is stored and
@@ -389,6 +563,13 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
     // the database is the bare uuid, and that parse happens where it is used.
     parseWorkspaceId(workspace.value, workspace.label);
   }
+  // After that parse, never before: a winner that is not a workspace id is a
+  // refusal to run, not a line in a layer report.
+  const workspaceReport = describeWorkspaceLayers(
+    workspaceLayers,
+    workspace.origin,
+    warnings,
+  );
 
   // One layer, and deliberately one: `hubUrl` in this machine's `config.json`,
   // or the built-in default. Nothing ambient outranks it — see the module note.
@@ -416,6 +597,16 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
     secret = secretFromFile;
     credentialOrigin = "credentials file";
   }
+  const credentialReport = describeCredentialLayers(
+    secretFromEnv,
+    {
+      path: credentials.path,
+      secret: credentials.signingSecret,
+      exposed: credentials.exposed,
+    },
+    credentialOrigin,
+    warnings,
+  );
 
   const resolvedEnv: NodeJS.ProcessEnv = { ...env };
   if (workspace.value !== null) {
@@ -441,6 +632,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
       hubUrl: hubUrl.origin,
       credential: credentialOrigin,
     },
+    layers: { workspace: workspaceReport, credential: credentialReport },
     paths,
     storage,
     warnings,

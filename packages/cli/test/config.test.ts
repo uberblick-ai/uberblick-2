@@ -157,6 +157,114 @@ describe("resolveConfig", () => {
     expect(mcpConfig(fromEnv.env).authSecret).toBe("from-env");
   });
 
+  it("warns when the environment and the user config name different workspaces", () => {
+    // The pin still wins — that is what a project MCP entry's `WORKSPACE_ID`
+    // is for — but a pin nobody remembers exporting is how a machine works in
+    // a workspace it has left with every command endorsing it (#454). Both
+    // values are named: a workspace id is an identifier, not a secret.
+    const box = sandbox({ userConfig: { workspace: FROM_USER } });
+    const resolved = resolveConfig({
+      env: { ...box.env, WORKSPACE_ID: FROM_ENV },
+    });
+
+    const warning = resolved.warnings.join("\n");
+    expect(warning).toMatch(/different workspaces are configured/);
+    expect(warning).toContain(FROM_ENV);
+    expect(warning).toContain(FROM_USER);
+    expect(warning).toMatch(/WORKSPACE_ID wins/);
+
+    // Precedence is untouched: this is a warning, never a refusal.
+    expect(resolved.origins.workspace).toBe("environment");
+    expect(mcpConfig(resolved.env).workspaceId).toBe(FROM_ENV);
+    expect(resolved.layers.workspace).toEqual([
+      { source: "environment", state: "present", value: FROM_ENV, winner: true },
+      {
+        source: "user config",
+        state: "present",
+        value: FROM_USER,
+        winner: false,
+      },
+    ]);
+  });
+
+  it("stays silent when the layers agree, or when only one of them speaks", () => {
+    // Identity, not spelling: `<slug>-<uuid>` and the bare uuid are one
+    // workspace, and the ordinary repository pin is exactly that — a decorated
+    // spelling of what `config.json` already names. Warning about it would
+    // train everyone to ignore the warning.
+    const decorated = sandbox({ userConfig: { workspace: FROM_USER } });
+    expect(
+      resolveConfig({
+        env: { ...decorated.env, WORKSPACE_ID: `team-${FROM_USER}` },
+      }).warnings,
+    ).toEqual([]);
+
+    // A deliberate pin with no competing file, and a file with no pin.
+    const pinOnly = sandbox();
+    expect(
+      resolveConfig({ env: { ...pinOnly.env, WORKSPACE_ID: FROM_ENV } })
+        .warnings,
+    ).toEqual([]);
+    const fileOnly = sandbox({ userConfig: { workspace: FROM_USER } });
+    expect(resolveConfig({ env: fileOnly.env }).warnings).toEqual([]);
+  });
+
+  it("names a shadowed workspace by its layer, never by its value", () => {
+    // Only the winner is parsed for use, so without validating the loser a
+    // valid pin masks a `config.json` holding anything at all — and the
+    // observed way to get a non-id in there is pasting a secret.
+    const secret = "config-test-shadowed-secret-5c1d0e";
+    const box = sandbox({ userConfig: { workspace: secret } });
+    const resolved = resolveConfig({
+      env: { ...box.env, WORKSPACE_ID: FROM_ENV },
+    });
+
+    const warning = resolved.warnings.join("\n");
+    expect(warning).toMatch(/config\.json: it is not a workspace id/);
+    expect(warning).not.toContain(secret);
+    // Reported as refused, and with no field the value could have reached.
+    expect(resolved.layers.workspace[1]).toEqual({
+      source: "user config",
+      state: "refused",
+      value: null,
+      winner: false,
+    });
+    // A losing layer is a diagnostic, not a refusal to run.
+    expect(mcpConfig(resolved.env).workspaceId).toBe(FROM_ENV);
+  });
+
+  it("reports that two signing secrets differ, and neither of them", () => {
+    const inFile = "config-test-file-secret-a41b70";
+    const inEnv = "config-test-env-secret-9e02cd";
+    const box = sandbox({ credentials: { signingSecret: inFile } });
+    const resolved = resolveConfig({
+      env: { ...box.env, HUB_AUTH_TOKEN: inEnv },
+    });
+
+    const warning = resolved.warnings.join("\n");
+    expect(warning).toMatch(/HUB_AUTH_TOKEN .* differ/);
+    expect(warning).toContain(credentialsPath(box.env));
+    // Neither secret reaches a warning or the layer report. (`resolved.env` is
+    // the map handed to the server, and of course carries the one in force.)
+    const reported = `${warning}\n${JSON.stringify(resolved.layers)}`;
+    for (const secret of [inEnv, inFile]) {
+      expect(reported).not.toContain(secret);
+    }
+    expect(resolved.origins.credential).toBe("environment");
+    expect(resolved.layers.credential).toEqual([
+      { source: "environment", state: "present", winner: true },
+      { source: "credentials file", state: "present", winner: false },
+    ]);
+
+    // Two layers holding the same secret is not a disagreement.
+    const same = "config-test-shared-secret-77aa10";
+    const agreeing = sandbox({ credentials: { signingSecret: same } });
+    expect(
+      resolveConfig({ env: { ...agreeing.env, HUB_AUTH_TOKEN: same } })
+        .warnings,
+    ).toEqual([]);
+  });
+
   it("rejects a workspace that is not a workspace id, naming the source", () => {
     // Schema's rule, applied to file-sourced values too. `main` is in the list
     // because it used to be the default: a checkout that still names it is
@@ -219,7 +327,15 @@ describe("resolveConfig", () => {
     });
     expect(fromEnv.origins.credential).toBe("environment");
     expect(mcpConfig(fromEnv.env).authSecret).toBe("from-env");
+    // The mode is the one actionable thing to say about this file, so it is
+    // the only thing said: an exposed layer is compared as absent, and the
+    // reader is left with one problem and one fix rather than two.
+    expect(fromEnv.warnings).toHaveLength(1);
     expect(fromEnv.warnings.join("\n")).toMatch(/refusing/);
+    expect(fromEnv.layers.credential).toEqual([
+      { source: "environment", state: "present", winner: true },
+      { source: "credentials file", state: "refused", winner: false },
+    ]);
   });
 
   it("keeps a malformed file's contents out of the warning, whichever file it is", () => {
