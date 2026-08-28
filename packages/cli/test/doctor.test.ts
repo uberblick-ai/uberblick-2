@@ -22,6 +22,7 @@ import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import { afterEach, describe, expect, it } from "vitest";
+import { userConfigPath } from "../src/config.js";
 import type { Run, Sandbox } from "./helpers.js";
 import {
   DEAD_HUB_URL,
@@ -211,6 +212,11 @@ describe("ub doctor", () => {
     expect(check(checks, "workspace").status).toBe("fail");
     expect(check(checks, "workspace").remedy).toMatch(/ub init/);
     expect(check(checks, "workspace").remedy).toMatch(/ub workspace use/);
+    expect(check(checks, "workspace").remedy).toMatch(/ub remote join/);
+    // ...and says where a workspace is written, so the line answers "where did
+    // it look?" without a second command. Same resolver as the cli's, never a
+    // literal: a path that drifted from `ub`'s own would fail here.
+    expect(check(checks, "workspace").reason).toContain(userConfigPath(box.env));
     expect(ok).toBe(false);
     expect(run.status).not.toBe(0);
   });

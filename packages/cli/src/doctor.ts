@@ -42,7 +42,7 @@ import { AUTH_REJECTED, SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import type { McpConfig } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import type { ResolvedConfig } from "./config.js";
-import { readCredentials, resolveConfig } from "./config.js";
+import { readCredentials, resolveConfig, userConfigPath } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
@@ -98,7 +98,9 @@ function skipped(name: string, reason: string, remedy: string | null = null): Ch
 }
 
 const WORKSPACE_REMEDY =
-  "`ub init` creates a workspace; `ub workspace use <id>` adopts an existing one";
+  "`ub init` creates a workspace; `ub remote join <hub>/<workspace-id>` binds " +
+  "this machine to one that already exists; `ub workspace use <id>` adopts one " +
+  "this machine already has";
 
 /**
  * The hub's bind address and the endpoint the clients dial are two settings, and
@@ -123,7 +125,7 @@ function workspaceCheck(
     const configured = env.WORKSPACE_ID?.trim();
     const reason =
       configured === undefined || configured === ""
-        ? "none configured — a workspace id names the rooms, the token claim and the local database, and there is no default"
+        ? `none configured — a workspace id names the rooms, the token claim and the local database, and there is no default; this machine's belongs in ${userConfigPath(env)}`
         : (error ?? `${configured} was refused`);
     return fail("workspace", reason, WORKSPACE_REMEDY);
   }
