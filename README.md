@@ -69,7 +69,11 @@ There are two ways to have one, and they do not fight:
   `fnox exec --if-missing warn` warns and leaves the variable alone, and
   `ub init` writes 32 random bytes to `credentials.json` (mode 0600) in this
   machine's config root — see [Where your files live](#where-your-files-live).
-  That file is the authority, and there is no copy of it anywhere else.
+  That file is the authority, and there is no copy of it anywhere else. It is
+  generated only while this machine has **no hub endpoint stored**: a machine
+  bound to a hub needs *that* hub's secret, so with none visible `ub init`
+  refuses and names the two places it looked rather than writing a random value
+  the hub would reject.
 
 A mise task reaches it the same way an MCP client's server does: every task that
 needs configuration wraps its command in `fnox exec -- ub env -- …`, and
@@ -284,6 +288,7 @@ the checkout does:
 
 ```
 ub init            # identity, workspace, signing secret
+ub init <hub-url>  # the same, with the new workspace created on that hub
 ub open            # serve the web app and a hub, and open the browser
 ub status          # workspace, hub, credential, sync state
 ub status --json   # the same, as one JSON object
@@ -308,7 +313,15 @@ Inside a checkout prefer `mise run init` over calling `ub init` directly: the
 task wraps it in `fnox exec`, which is how a decryptable secret becomes visible
 to it in the first place. Every question `ub init` asks has a flag (`--name`,
 `--color`, `--workspace`, `--yes`), and a non-interactive stdin takes the
-defaults rather than blocking, so it needs no TTY. `--mcp` ends by printing what
+defaults rather than blocking, so it needs no TTY. Given a hub —
+`ub init hub.example.ts.net`, or the `wss://…` endpoint in full — it creates the
+new workspace *on that hub*: it dials and authenticates before writing anything,
+stores the endpoint, and the starter documents are there by the time it returns.
+That needs the hub's signing secret to be here already (`HUB_AUTH_TOKEN`, or
+`credentials.json`), since a secret generated here would be random and the hub
+would refuse it. It only ever fills the endpoint in: the same one again changes
+nothing, and a *different* one is refused rather than overwritten, because
+moving a machine between hubs is `ub remote join`. `--mcp` ends by printing what
 `ub mcp install --print` prints — the snippet and the file it goes in — and
 `--no-mcp` says not to mention it. A bootstrap never registers a server with
 somebody's agent on its own, even with a vendor CLI installed: running
@@ -334,7 +347,9 @@ Precedence, highest first:
 it is not read, and it is not passed on to anything `ub` spawns. Two ambient
 sources for an endpoint is what silently redirected a machine bound to a remote
 hub at a local one while its writes reported `synced` (#376) — so the value in
-`config.json` is the answer, and `ub remote join` is how it changes.
+`config.json` is the answer, and two commands write it: `ub init <hub-url>`
+fills it in on a machine that has none, and `ub remote join` is how it changes.
+Neither is a file to edit by hand.
 
 There is no per-directory config file either: a repository that needs its own
 workspace pins `WORKSPACE_ID` in the project MCP entry the client already reads,
@@ -393,9 +408,10 @@ ub remote join wss://<host>.ts.net/ws/<workspace id> \
 
 That URL is what `ub remote init` prints: the endpoint with the workspace id as
 its **last path segment**. Two journeys, two verbs, and that is the whole of the
-command surface — a *new* workspace is `ub init` (which seeds starter
-documents), and a workspace that already exists somewhere is `ub remote join`
-(which seeds nothing). There is no operator suite beside them: nothing that
+command surface — a *new* workspace is `ub init [hub-url]`, which seeds starter
+documents and, given the hub's address, creates that workspace on it in the same
+command; a workspace that already exists somewhere is `ub remote join` (which
+seeds nothing). There is no operator suite beside them: nothing that
 repoints the clients without moving anything. The id has to travel,
 because a workspace id is a uuid and `ub init` generates a *new* one: a machine
 that invented its own would join the remote hub and find nothing of yours on it,

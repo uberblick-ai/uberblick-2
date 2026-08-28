@@ -46,9 +46,10 @@ import {
 import * as Y from "yjs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Sandbox } from "./helpers.js";
-import { parseJoinTarget, setRemote } from "../src/remote.js";
+import { normalizeRemoteUrl, parseJoinTarget, setRemote } from "../src/remote.js";
 import {
   DEAD_HUB_URL,
+  pointAt,
   removeTempDirs,
   runUbAsync,
   sandbox,
@@ -282,6 +283,91 @@ describe("ub remote", () => {
     expect(run.stderr).toContain('unknown command "invite"');
   });
 
+  // One normalizer for `ub remote join` and `ub init` alike (#436): the host
+  // `tailscale status` prints and the address a browser hands back both name
+  // the deployment's endpoint, and an endpoint somebody typed in full is what
+  // they meant — including a plain hub, which has no path at all.
+  it.each([
+    ["hub.example.ts.net", "wss://hub.example.ts.net/ws"],
+    ["https://hub.example.ts.net", "wss://hub.example.ts.net/ws"],
+    ["https://hub.example.ts.net/", "wss://hub.example.ts.net/ws"],
+    ["http://hub.example.ts.net", "ws://hub.example.ts.net/ws"],
+    ["https://hub.example.ts.net/proxy", "wss://hub.example.ts.net/proxy"],
+    ["hub.example.ts.net/ws", "wss://hub.example.ts.net/ws"],
+    // An invented form is rewritten, so it is folded as `URL` folds: the host's
+    // case, a trailing slash and the scheme's own default port all go.
+    ["Hub.Example.TS.net", "wss://hub.example.ts.net/ws"],
+    ["hub.example.ts.net/", "wss://hub.example.ts.net/ws"],
+    ["https://hub.example.ts.net:443", "wss://hub.example.ts.net/ws"],
+    ["http://hub.example.ts.net:80/", "ws://hub.example.ts.net/ws"],
+    ["wss://hub.example.ts.net/ws", "wss://hub.example.ts.net/ws"],
+    ["ws://127.0.0.1:1234", "ws://127.0.0.1:1234"],
+  ])("reads %s as %s", (typed, stored) => {
+    expect(normalizeRemoteUrl(typed)).toBe(stored);
+  });
+
+  // An endpoint somebody typed in full comes back byte for byte. Folding the
+  // host's case, dropping an explicit :443 or eating a trailing slash would each
+  // rewrite a value this then stores and compares against on every later run.
+  it.each([
+    ["wss://Hub.Example.TS.net/ws"],
+    ["wss://hub.example.ts.net:443/ws"],
+    ["ws://hub.example.ts.net/"],
+  ])("keeps %s exactly as it was typed", (typed) => {
+    expect(normalizeRemoteUrl(typed)).toBe(typed);
+  });
+
+  // `join` gets the same acceptance from the same reader: the id is split off
+  // after the URL has been understood, never by a second parser beside it — so
+  // a host with nothing but the id after it still names the deployed path, and
+  // a root slash the id left behind collapses into it rather than standing as
+  // a path nobody typed.
+  it.each([
+    ["hub.example.ts.net/ws", "wss://hub.example.ts.net/ws"],
+    ["https://hub.example.ts.net/ws", "wss://hub.example.ts.net/ws"],
+    ["hub.example.ts.net", "wss://hub.example.ts.net/ws"],
+    ["https://hub.example.ts.net", "wss://hub.example.ts.net/ws"],
+    ["https://hub.example.ts.net/", "wss://hub.example.ts.net/ws"],
+    // Folded, unlike the explicit spellings below: an invented form has no
+    // spelling to preserve, and :443 is what wss:// dials anyway.
+    ["https://Hub.Example.TS.net:443", "wss://hub.example.ts.net/ws"],
+  ])("takes a join URL written as %s", (typed, endpoint) => {
+    expect(parseJoinTarget(`${typed}/${WORKSPACE}`).endpoint).toBe(endpoint);
+  });
+
+  // The other half of the same rule: an endpoint typed in full is cut out of
+  // the string it was typed in, so `join` stores exactly what `ub init` would.
+  // Rebuilding it through `URL` would fold the case and drop the port, and the
+  // two verbs would then disagree about the endpoint they had both been given.
+  it.each([
+    ["wss://Hub.Example.TS.net:443/ws"],
+    ["ws://127.0.0.1:1234"],
+    ["wss://hub.example.ts.net/proxy//ws"],
+  ])("keeps the endpoint of a join URL written as %s", (endpoint) => {
+    expect(parseJoinTarget(`${endpoint}/${WORKSPACE}`).endpoint).toBe(endpoint);
+  });
+
+  it("still refuses what is not an endpoint at all, and repeats none of it", () => {
+    // The value that could not be read is exactly the one somebody may have
+    // pasted a credential into, so no refusal quotes it back.
+    const refusal = (value: string): string => {
+      try {
+        normalizeRemoteUrl(value);
+        return "accepted";
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    };
+    expect(refusal("ftp://hub.example.ts.net")).toMatch(/ws:\/\/ or wss:\/\//);
+    expect(refusal("not a hub")).toMatch(/is not a URL/);
+    for (const pasted of [
+      "wss://user:hunter2@hub.example.ts.net:notaport/ws",
+      "ftp://user:hunter2@hub.example.ts.net",
+    ]) {
+      expect(refusal(pasted)).not.toContain("hunter2");
+    }
+  });
+
   // A credential in the URL would be persisted into two files and echoed on
   // stdout. The hub takes its secret in the connection's auth message only.
   it.each([
@@ -440,10 +526,14 @@ describe("ub remote join", () => {
     const theirs = await webDoc(remote, "Shared note", OTHER_SECRET);
 
     // A machine that has already been set up: `ub init` generated a workspace
-    // of its own and seeded the starter documents into it. The dead endpoint
-    // stands in for the local hub that is not running.
-    const box = sandbox({ userConfig: { hubUrl: DEAD_HUB_URL } });
+    // of its own and seeded the starter documents into it, locally, and was
+    // pointed at an endpoint afterwards — the dead one standing in for the
+    // local hub that is not running. In that order because the two halves are
+    // ordered in life too: a machine bound to a hub is one `ub init` expects to
+    // hold that hub's credential and to reach it (#436).
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
     expect((await runUbAsync(["init", "--yes"], box)).status).toBe(0);
+    pointAt(box, DEAD_HUB_URL);
     const mine = readConfigFile(box, "config.json").workspace as string;
     expect(mine).not.toBe(WORKSPACE);
     const seeded = await readMirror(box, mine);

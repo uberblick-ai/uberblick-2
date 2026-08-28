@@ -230,43 +230,72 @@ export function setRemote(
   return { written, warnings, replacedSecret: changingSecret };
 }
 
+/** A value carrying its own scheme, as opposed to a bare host. */
+const SCHEME = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
+
 /**
- * Accept a websocket endpoint, or explain what one looks like.
+ * The path the deployed stack serves the hub under (REMOTE.md).
  *
- * `http(s)` is the mistake worth catching by name — it is what a browser
- * address bar hands you, and the hub speaks websockets.
+ * The one deployment convention this CLI encodes, by the owner's decision, and
+ * it is applied only where a scheme had to be invented — see below.
+ */
+const DEPLOYED_PATH = "/ws";
+
+/** An endpoint, read and validated, in the pieces both callers below need. */
+interface RemoteUrl {
+  /** Exactly what was typed, trimmed. */
+  text: string;
+  scheme: "ws" | "wss";
+  host: string;
+  /** The path, or "" where none was given. */
+  path: string;
+  /** Whether the scheme was invented here — a bare host or a web address. */
+  invented: boolean;
+}
+
+/**
+ * Read an endpoint from whatever form of it somebody has to hand, or refuse.
+ *
+ * Three forms, because three are what people actually hold: the host name
+ * `tailscale status` prints, the `https://…` address a browser's bar hands
+ * back, and a websocket endpoint somebody already knows in full. The first two
+ * name the deployment REMOTE.md stands up, which serves the hub at
+ * `wss://<host>/ws`, so they are read as it rather than refused with a lecture
+ * — and `http://` likewise, to `ws://`, since a plaintext address means a
+ * plaintext hub.
  *
  * Userinfo, query and fragment are refused rather than carried. A hub token
  * travels in Hocuspocus' auth message and never in the URL, by invariant, so
  * `wss://user:secret@host/ws?token=…` is at best a misunderstanding and at
  * worst a credential this command would persist into two files and echo back
- * on stdout.
+ * on stdout. **No refusal here repeats the value**, for the same reason: the
+ * one that fails to parse is exactly the one somebody may have pasted a secret
+ * into, so the message describes the shape that is expected instead.
  */
-export function normalizeRemoteUrl(value: string): string {
+function readRemoteUrl(value: string): RemoteUrl {
+  const text = value.trim();
+  // Read from the text, not from what the parser makes of it: `new URL` reads
+  // `localhost:1234` as a scheme with a path, so a bare host with a port would
+  // otherwise be understood as something else entirely.
+  const invented = !SCHEME.test(text);
   let url: URL;
   try {
-    url = new URL(value.trim());
+    url = new URL(invented ? `wss://${text}` : text);
   } catch {
     throw new Error(
-      `${JSON.stringify(value)} is not a URL. The hub speaks websockets, so an ` +
-        "endpoint looks like wss://hub.example.ts.net",
+      "that is not a URL. The hub speaks websockets, so an endpoint looks " +
+        "like wss://hub.example.ts.net/ws — a bare hub.example.ts.net, or its " +
+        "https:// address, is read as one",
     );
   }
-  if (url.protocol === "http:" || url.protocol === "https:") {
-    const scheme = url.protocol === "https:" ? "wss" : "ws";
+  const websocket = url.protocol === "ws:" || url.protocol === "wss:";
+  const web = url.protocol === "http:" || url.protocol === "https:";
+  if (!websocket && !web) {
     throw new Error(
-      `${url.protocol}// is a web address; the hub speaks websockets. Try ` +
-        `${scheme}://${url.host}${url.pathname === "/" ? "" : url.pathname}`,
+      "that is not a websocket endpoint: it must start with ws:// or wss://, " +
+        "or be a bare host or an https:// address",
     );
   }
-  if (url.protocol !== "ws:" && url.protocol !== "wss:") {
-    throw new Error(
-      `${JSON.stringify(value)} is not a websocket endpoint: it must start ` +
-        "with ws:// or wss://",
-    );
-  }
-  // Never echo the offending component back — if somebody did put a secret in
-  // the URL, repeating it is how it reaches a terminal log.
   if (url.username !== "" || url.password !== "") {
     throw new Error(
       "an endpoint must not carry a username or password. The hub is " +
@@ -284,10 +313,39 @@ export function normalizeRemoteUrl(value: string): string {
   if (url.hash !== "") {
     throw new Error("an endpoint must not carry a fragment; nothing reads one");
   }
-  // Keep the plain form a human typed. `new URL` appends a root path, and an
-  // endpoint that reads differently from the one they gave invites a second
-  // guess about whether it was understood.
-  return url.pathname === "/" ? `${url.protocol}//${url.host}` : url.toString();
+  return {
+    text,
+    scheme: url.protocol === "wss:" || url.protocol === "https:" ? "wss" : "ws",
+    host: url.host,
+    path: url.pathname === "/" ? "" : url.pathname,
+    invented: invented || web,
+  };
+}
+
+/**
+ * The endpoint to store, built back from its pieces.
+ *
+ * The deployed path fills in for a path nobody gave — but only where the scheme
+ * was invented too, which is the whole of what that convenience buys. An
+ * endpoint somebody typed in full names its own path, empty included.
+ */
+function formatRemoteUrl(url: RemoteUrl, path = url.path): string {
+  return `${url.scheme}://${url.host}${path === "" && url.invented ? DEPLOYED_PATH : path}`;
+}
+
+/**
+ * The endpoint to store, from whatever form of it somebody typed.
+ *
+ * A `ws://` or `wss://` endpoint comes back **exactly as typed**: it is what
+ * somebody who knows their hub wrote down, and rebuilding it through `URL`
+ * would fold the host's case, drop an explicit `:443` and eat a trailing slash
+ * — three silent rewrites of a value this then stores and compares against on
+ * every later run. Only an invented scheme produces a rewritten string, because
+ * there the whole point is to produce one.
+ */
+export function normalizeRemoteUrl(value: string): string {
+  const url = readRemoteUrl(value);
+  return url.invented ? formatRemoteUrl(url) : url.text;
 }
 
 /**
@@ -304,8 +362,10 @@ export function normalizeRemoteUrl(value: string): string {
  * is not restated here. The spelling is kept as typed, the way `ub workspace
  * use` keeps it; only what reaches a room, a token or the database filename is
  * the bare uuid. Everything before the last segment is an ordinary endpoint and
- * goes through {@link normalizeRemoteUrl}, so a credential smuggled into the URL
- * is refused there rather than in two places.
+ * goes through the same reader {@link normalizeRemoteUrl} uses, so a credential
+ * smuggled into the URL is refused there rather than in two places — and a bare
+ * host or an `https://` address gets the deployed path here too, since the id
+ * is removed *before* the endpoint is built rather than after.
  *
  * Neither refusal echoes the URL back. `ub remote init` prints this string and
  * people paste it about, so the actionable half is the *form*, and repeating a
@@ -315,16 +375,16 @@ export function parseJoinTarget(value: string): {
   endpoint: string;
   workspace: string;
 } {
-  const url = new URL(normalizeRemoteUrl(value));
+  const url = readRemoteUrl(value);
   // The last segment and its own separator; everything before them is the
   // endpoint, **verbatim**. Splitting the path and rejoining the non-empty
   // parts would rewrite it — `/proxy//ws/<id>` would come back as `/proxy/ws`
   // — and an empty segment is somebody's reverse proxy path, which may well
   // route differently from the tidied version. Only the id is this command's
-  // to remove. A path of "/" leaves an empty workspace, which is the refusal
+  // to remove. A path of "" leaves an empty workspace, which is the refusal
   // below rather than a special case.
-  const cut = url.pathname.lastIndexOf("/");
-  const workspace = url.pathname.slice(cut + 1);
+  const cut = url.path.lastIndexOf("/");
+  const workspace = url.path.slice(cut + 1);
   if (workspace === "") {
     throw new Error(
       "that URL names no workspace. A join URL is the endpoint with the " +
@@ -342,15 +402,20 @@ export function parseJoinTarget(value: string): {
         "wss://hub.example.ts.net/ws/<workspace-id> — `ub remote init` prints it",
     );
   }
-  return {
-    // Back through the same normaliser, so an endpoint that is nothing but a
-    // host reads as one — the one thing it does to a path is collapse a bare
-    // root, which is exactly what removing `/<id>` leaves behind.
-    endpoint: normalizeRemoteUrl(
-      `${url.protocol}//${url.host}${url.pathname.slice(0, cut)}`,
-    ),
-    workspace,
-  };
+  // Everything the id's segment leaves behind. An endpoint somebody typed in
+  // full is cut out of the string they typed, so the half that is stored is
+  // byte for byte the half they wrote — `wss://Host:443/ws/<id>` keeps its
+  // case, its explicit port and its path, none of which survive a rebuild
+  // through `URL`. An invented form has no spelling to preserve: it is rebuilt,
+  // and a path left as nothing but a root slash (`https://host//<id>`) collapses
+  // so that it takes the deployed path like every other invented form.
+  const suffix = `/${workspace}`;
+  const path = url.path.slice(0, cut);
+  const endpoint =
+    url.invented || !url.text.endsWith(suffix)
+      ? formatRemoteUrl(url, path === "/" ? "" : path)
+      : url.text.slice(0, -suffix.length);
+  return { endpoint, workspace };
 }
 
 /** A secret file only its owner may read — ssh's rule for a private key. */
@@ -449,6 +514,21 @@ function hubProblem(url: string, hub: HubState): string {
     return `no signing secret is configured, so ${url} cannot be authenticated to`;
   }
   return `${url} did not answer`;
+}
+
+/**
+ * Dial a hub as a client would and say why it cannot be used, or null when it
+ * can. Reads; writes nothing on either side.
+ *
+ * `ub init <hub-url>` asks this before it writes a line of configuration, so
+ * that a machine is never bound to an endpoint that would refuse it — and asks
+ * it through {@link corpusProblem}, the same verdict `join` uses, so that
+ * nothing answered, a refused credential, a protocol skew and a hub that
+ * accepts the socket without ever serving its directory are worded once for
+ * both verbs.
+ */
+export async function remoteProblem(config: McpConfig): Promise<string | null> {
+  return corpusProblem(config.hubUrl, await inspectRemote(config));
 }
 
 interface Credential {
@@ -590,8 +670,9 @@ operands:
                         segment, like wss://hub.example.ts.net/ws/<workspace-id>.
                         \`ub remote init\` prints it, and \`ub status\` on the
                         machine that has the workspace names the id. ws:// or
-                        wss:// (an https:// or http:// address is accepted and
-                        normalized); a URL without an id is refused before
+                        wss:// is stored as given; a bare host and an https://
+                        or http:// address are read as the deployed
+                        wss://<host>/ws; a URL without an id is refused before
                         anything is written
 
 options:

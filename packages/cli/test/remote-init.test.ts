@@ -455,6 +455,35 @@ describe("ub remote init", () => {
 
   // The whole of what a second machine has to be told, in one string it can
   // paste: the endpoint with this workspace's id on the end.
+  // The publish is the one step that writes this machine's configuration, and
+  // `ub init` writes the same two files. Without the shared lock the two
+  // interleave: an endpoint published here lands under a concurrent run's
+  // reading, which then writes its own decision over the top.
+  it("refuses to publish over an endpoint that arrived while it was deploying", async () => {
+    const rig = harness();
+    const other = "ws://127.0.0.1:2";
+
+    const status = await remoteInitCommand([TARGET], rig.io, {
+      env: rig.env,
+      // The last thing before the publish: another `ub init` or `ub remote
+      // join` binds this machine while the stack is coming up.
+      reach: async () => {
+        writeFileSync(
+          join(rig.box.configHome, "uberblick", "config.json"),
+          `${JSON.stringify({ workspace: WORKSPACE, hubUrl: other }, null, 2)}\n`,
+          "utf8",
+        );
+        return null;
+      },
+    });
+
+    expect(status).toBe(1);
+    // One endpoint, and it is the one that got there first.
+    expect(readUserConfig(rig.env).raw?.hubUrl).toBe(other);
+    // The stack is up, so the refusal says how to reach what was deployed.
+    expect(rig.err()).toContain(`ub remote join wss://${MAGIC_DNS}/ws/${WORKSPACE}`);
+  });
+
   it("prints the join URL a second machine binds to", async () => {
     const empty = harness();
     expect(await init(empty)).toBe(0);

@@ -482,7 +482,8 @@ that ran it at the new endpoint. Every other computer joins. Which process runs
 where matters: everything in this section runs on **your** computers, not on the
 remote host, which only ever runs `sh remote-compose.sh`.
 
-There is one verb, and it is the same on every machine:
+There is one verb for joining a workspace that exists, and it is the same on
+every machine:
 
 ```sh
 ub remote join wss://<TAILSCALE_HOST>/ws/<WORKSPACE_ID> \
@@ -511,6 +512,32 @@ workspace that was here syncs with this hub too, under its own rooms.
 A URL with no workspace id, or with something that is not one, is refused before
 anything is written, and the refusal names the form.
 
+**A workspace that does not exist yet is the other verb.** To put a *new*
+workspace on this hub — the first one, or another one later — the machine that
+creates it runs:
+
+```sh
+fnox exec -- ub init <TAILSCALE_HOST>
+```
+
+The bare host is read as `wss://<TAILSCALE_HOST>/ws`, this deployment's
+endpoint, and the `wss://` form in full works the same; `ub init` dials and
+authenticates before it writes anything, stores the endpoint, generates the
+workspace id and has its starter documents on the hub by the time it returns —
+if the hub does not acknowledge them it says so and exits non-zero rather than
+reporting a workspace the hub does not hold.
+
+The hub's secret has to reach that command's **environment**, because a secret
+generated locally is random and this hub would refuse it. `fnox exec` is how
+this repository supplies it; any other way of exporting `HUB_AUTH_TOKEN` into
+the shell works, and a `credentials.json` this machine already holds is read
+without any of that. Never put the secret in the command itself: a command line
+is in every `ps` listing and every shell history. Every *other* machine then joins that workspace with the URL
+above — `ub status` on this one names the id. `ub init` never replaces an
+endpoint already stored: the same one changes nothing, and a different one is
+refused, naming `ub remote join` as the move. Neither command asks anybody to
+edit `config.json`.
+
 To run the web client on this machine against the remote hub, from a clone:
 
 ```sh
@@ -520,8 +547,9 @@ ub remote join wss://<TAILSCALE_HOST>/ws/<WORKSPACE_ID> \
 mise run web
 ```
 
-`ub init` (which `mise run setup` runs) creates a *local* workspace with its
-starter documents; the join then binds this machine to the remote one, and
+`ub init` with no hub argument (which is how `mise run setup` runs it) creates a
+*local* workspace with its starter documents; the join then binds this machine
+to the remote one, and
 `mise run web` serves it because the task runs its command through `ub env`,
 which resolves this machine's own configuration. Nothing is written into the
 checkout.
