@@ -16,12 +16,13 @@
 
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
 import { join } from "node:path";
 import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it } from "vitest";
 import { bundlePlan } from "../src/open.js";
@@ -97,7 +98,23 @@ async function startHub(box: Sandbox, port = 0): Promise<Hub> {
   return hub;
 }
 
-/** A bundle the way `ub open` finds one: a directory with an index.html in it. */
+/** What the web build stamps the protocol it speaks into; `ub open` reads it. */
+const BUILD_STAMP = "uberblick-build.json";
+
+/** Give a fixture bundle the stamp of a build — `version`, or none at all. */
+function stamp(dir: string, version: number | null): void {
+  if (version === null) {
+    rmSync(join(dir, BUILD_STAMP), { force: true });
+    return;
+  }
+  writeFileSync(join(dir, BUILD_STAMP), JSON.stringify({ syncProtocolVersion: version }), "utf8");
+}
+
+/**
+ * A bundle the way `ub open` finds one: a directory with an index.html in it —
+ * and, since #452, a stamp saying it speaks the protocol this command does.
+ * Everything below serves rather than refuses because of that one line.
+ */
 function fixtureBundle(box: Sandbox): string {
   const dir = join(box.cwd, "bundle");
   mkdirSync(join(dir, "assets"), { recursive: true });
@@ -107,6 +124,7 @@ function fixtureBundle(box: Sandbox): string {
     "utf8",
   );
   writeFileSync(join(dir, "assets", "app.js"), "export const marker = 42;\n", "utf8");
+  stamp(dir, SYNC_PROTOCOL_VERSION);
   return dir;
 }
 
@@ -434,6 +452,45 @@ describe("ub open", () => {
     // And in a checkout, an absent bundle is one to build rather than to
     // refuse: the web package is right there and the plan says so.
     expect(bundlePlan({}).action).not.toBe("missing");
+  });
+
+  it("refuses a bundle that speaks another sync protocol, and starts nothing", async () => {
+    const { box, env, bundle } = configured();
+    const hubPort = await freePort();
+    pointAt(box, `ws://127.0.0.1:${hubPort}`);
+    stamp(bundle, SYNC_PROTOCOL_VERSION + 1);
+
+    const refused = await openFails(box, [], env);
+
+    expect(refused.status).toBe(1);
+    // Both versions, so the reader can see which side is behind, and the way
+    // out named rather than implied.
+    expect(refused.output).toContain(bundle);
+    expect(refused.output).toContain(`speaks sync protocol ${SYNC_PROTOCOL_VERSION + 1}`);
+    expect(refused.output).toContain(`this uberblick speaks ${SYNC_PROTOCOL_VERSION}`);
+    expect(refused.output).toContain("mise run build-web");
+
+    // It served nothing and started nothing: a refusal that had bound a port or
+    // opened a hub database would be the unsyncable page, served anyway.
+    expect(refused.output).not.toMatch(BANNER);
+    expect((await probePort("127.0.0.1", hubPort)).state).toBe("free");
+    expect(existsSync(join(box.cwd, "started-hub.sqlite"))).toBe(false);
+  });
+
+  it("treats a bundle with no readable stamp as one that cannot sync", async () => {
+    const { box, env, bundle } = configured();
+    stamp(bundle, null);
+
+    // The stale bundle actually observed: built before the stamp existed.
+    const unstamped = await openFails(box, [], env);
+    expect(unstamped.status).toBe(1);
+    expect(unstamped.output).toContain("no sync protocol stamp");
+
+    // A stamp that is not JSON is the same refusal, not a stack trace.
+    writeFileSync(join(bundle, BUILD_STAMP), "{ not json", "utf8");
+    const unparseable = await openFails(box, [], env);
+    expect(unparseable.status).toBe(1);
+    expect(unparseable.output).toContain("no sync protocol stamp");
   });
 
   it("--no-browser prints the URL and opens nothing; --port chooses the port", async () => {

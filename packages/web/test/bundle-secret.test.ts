@@ -19,12 +19,18 @@
  * identifier, which is what makes its verdict trustworthy rather than
  * suggestive. `vite` is a devDependency, so this is honest under
  * `--network none`.
+ *
+ * That one build is also where the protocol stamp is checked (#452). It is the
+ * only real build in any suite, and a stamp asserted against a fixture would
+ * prove nothing about what Vite emits — which is the whole claim `ub open`
+ * rests its refusal on.
  */
 
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { build } from "vite";
 
@@ -113,6 +119,12 @@ describe("the built web bundle", () => {
     // A build that emitted nothing would pass a scan trivially.
     expect(filesUnder(outDir).length).toBeGreaterThan(1);
     expect(leaks(outDir)).toEqual([]);
+
+    // And it stamps the protocol it speaks, which is what `ub open` refuses a
+    // stale bundle on. The value is the one the client itself compiles in.
+    expect(JSON.parse(readFileSync(join(outDir, "uberblick-build.json"), "utf8"))).toEqual({
+      syncProtocolVersion: SYNC_PROTOCOL_VERSION,
+    });
   }, 300_000);
 
   it("would fail if a build put the define back", async () => {
