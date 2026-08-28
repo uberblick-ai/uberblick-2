@@ -1,7 +1,6 @@
-import { registerHooks } from "node:module";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import type { Plugin } from "vite";
+import { type Plugin, runnerImport } from "vite";
 import { defineConfig } from "vitest/config";
 import { devConfigDocumentPlugin } from "./dev-config-document.js";
 
@@ -64,49 +63,31 @@ const BUILD_STAMP = "uberblick-build.json";
  *
  * The version is *imported* from the definition the client itself compiles in;
  * a second literal here is a copy that can disagree with the wire it describes.
- * The import waits until a build asks for it, so a dev server and a test run
- * pay for neither it nor the resolve hook below.
+ *
+ * Through `runnerImport` rather than a plain `import`, because a plain one does
+ * not work here: Vite bundles a config file but externalises every bare import
+ * in it, so `@uberblick/hub/protocol` is handed to Node — which runs
+ * TypeScript, but does not rewrite that module's own `./token.js` specifier to
+ * `token.ts` the way every bundler in this repo does. `runnerImport` resolves
+ * it with Vite's resolver, the one that already resolves the client's import of
+ * the same module, in an environment scoped to this call: nothing else in the
+ * process resolves differently for it, and a dev server never runs it at all.
  */
 function buildStampPlugin(): Plugin {
   return {
     name: "uberblick:build-stamp",
     apply: "build",
     async generateBundle() {
-      const { SYNC_PROTOCOL_VERSION } = await import("@uberblick/hub/protocol");
+      const { module } =
+        await runnerImport<typeof import("@uberblick/hub/protocol")>("@uberblick/hub/protocol");
       this.emitFile({
         type: "asset",
         fileName: BUILD_STAMP,
-        source: `${JSON.stringify({ syncProtocolVersion: SYNC_PROTOCOL_VERSION })}\n`,
+        source: `${JSON.stringify({ syncProtocolVersion: module.SYNC_PROTOCOL_VERSION })}\n`,
       });
     },
   };
 }
-
-/**
- * Let this file import a workspace package's TypeScript.
- *
- * Vite bundles a config file but externalises every bare import in it, so
- * `@uberblick/hub/protocol` is handed to Node — which runs TypeScript, but does
- * not rewrite the `./token.js` specifier *inside* that module to `token.ts` the
- * way every bundler here does. Without this the import fails and no other
- * mechanism is left: the value has to cross a package boundary, and the config
- * is the only place a plugin can be declared.
- *
- * A fallback, never an override: it runs only where resolution has already
- * thrown, and the retry is one extension. Registered at module scope so it is
- * in place before the deferred import above runs, and nothing else in this
- * process resolves differently for it.
- */
-registerHooks({
-  resolve(specifier, context, next) {
-    try {
-      return next(specifier, context);
-    } catch (error) {
-      if (!specifier.endsWith(".js")) throw error;
-      return next(`${specifier.slice(0, -".js".length)}.ts`, context);
-    }
-  },
-});
 
 export default defineConfig({
   // Tailwind is chrome-only (#27): it compiles `src/ui/tailwind.css`, which the
