@@ -299,20 +299,48 @@ describe("ub remote", () => {
     expect(normalizeRemoteUrl(typed)).toBe(stored);
   });
 
-  // `join` gets the same acceptance from the same function: the id is split off
-  // after the URL has been understood, never by a second parser beside it.
+  // An endpoint somebody typed in full comes back byte for byte. Folding the
+  // host's case, dropping an explicit :443 or eating a trailing slash would each
+  // rewrite a value this then stores and compares against on every later run.
+  it.each([
+    ["wss://Hub.Example.TS.net/ws"],
+    ["wss://hub.example.ts.net:443/ws"],
+    ["ws://hub.example.ts.net/"],
+  ])("keeps %s exactly as it was typed", (typed) => {
+    expect(normalizeRemoteUrl(typed)).toBe(typed);
+  });
+
+  // `join` gets the same acceptance from the same reader: the id is split off
+  // after the URL has been understood, never by a second parser beside it — so
+  // a host with nothing but the id after it still names the deployed path.
   it.each([
     ["hub.example.ts.net/ws", "wss://hub.example.ts.net/ws"],
     ["https://hub.example.ts.net/ws", "wss://hub.example.ts.net/ws"],
+    ["hub.example.ts.net", "wss://hub.example.ts.net/ws"],
+    ["https://hub.example.ts.net", "wss://hub.example.ts.net/ws"],
   ])("takes a join URL written as %s", (typed, endpoint) => {
     expect(parseJoinTarget(`${typed}/${WORKSPACE}`).endpoint).toBe(endpoint);
   });
 
-  it("still refuses what is not an endpoint at all", () => {
-    expect(() => normalizeRemoteUrl("ftp://hub.example.ts.net")).toThrow(
-      /must start with ws:\/\/ or wss:\/\//,
-    );
-    expect(() => normalizeRemoteUrl("not a hub")).toThrow(/is not a URL/);
+  it("still refuses what is not an endpoint at all, and repeats none of it", () => {
+    // The value that could not be read is exactly the one somebody may have
+    // pasted a credential into, so no refusal quotes it back.
+    const refusal = (value: string): string => {
+      try {
+        normalizeRemoteUrl(value);
+        return "accepted";
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    };
+    expect(refusal("ftp://hub.example.ts.net")).toMatch(/ws:\/\/ or wss:\/\//);
+    expect(refusal("not a hub")).toMatch(/is not a URL/);
+    for (const pasted of [
+      "wss://user:hunter2@hub.example.ts.net:notaport/ws",
+      "ftp://user:hunter2@hub.example.ts.net",
+    ]) {
+      expect(refusal(pasted)).not.toContain("hunter2");
+    }
   });
 
   // A credential in the URL would be persisted into two files and echoed on
@@ -474,8 +502,13 @@ describe("ub remote join", () => {
 
     // A machine that has already been set up: `ub init` generated a workspace
     // of its own and seeded the starter documents into it. The dead endpoint
-    // stands in for the local hub that is not running.
-    const box = sandbox({ userConfig: { hubUrl: DEAD_HUB_URL } });
+    // stands in for the local hub that is not running, and it comes with the
+    // credential such a machine has — `ub init` invents no secret for a machine
+    // already bound to a hub (#436).
+    const box = sandbox({
+      userConfig: { hubUrl: DEAD_HUB_URL },
+      credentials: { signingSecret: SECRET },
+    });
     expect((await runUbAsync(["init", "--yes"], box)).status).toBe(0);
     const mine = readConfigFile(box, "config.json").workspace as string;
     expect(mine).not.toBe(WORKSPACE);

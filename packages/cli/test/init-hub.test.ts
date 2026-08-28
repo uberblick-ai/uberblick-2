@@ -11,8 +11,8 @@
  * overwritten, and that every refusal happens before a single file exists.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
@@ -24,7 +24,7 @@ import {
 import type { Corpus } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Sandbox } from "./helpers.js";
-import { removeTempDirs, runUbAsync, sandbox } from "./helpers.js";
+import { removeTempDirs, runUbAsync, sandbox, waitUntil } from "./helpers.js";
 
 const SECRET = "test-signing-secret-for-ub-init";
 const OTHER_SECRET = "the-secret-that-hub-was-actually-deployed-with";
@@ -138,15 +138,122 @@ describe("ub init <hub-url>", () => {
     expect(first.status).toBe(0);
     const settled = readFileSync(configPath(box), "utf8");
 
-    const again = await runUbAsync(["init", url(hub), "--yes"], box, {
+    // Without the secret this time, which is the case that has to be a real
+    // no-op: falling through would generate a random local secret for a machine
+    // whose hub has its own, write it, and seed with a credential that hub
+    // refuses.
+    const again = await runUbAsync(["init", url(hub), "--yes"], box);
+
+    expect(again.status).toBe(0);
+    expect(again.stdout).toContain("already set up");
+    // The same workspace, the same identity, the same endpoint — byte for byte.
+    expect(readFileSync(configPath(box), "utf8")).toBe(settled);
+    expect(existsSync(credentialsPath(box))).toBe(false);
+  });
+
+  it("decides on the endpoint under the lock, not on what it read before it", async () => {
+    // Two runs can both find no binding, both pass their probe, and then
+    // serialize on the init lock. The second must not overwrite the endpoint the
+    // first published — that is the endpoint-only retarget this command refuses,
+    // arrived at by a race rather than by an argument. Held by hand, so the
+    // interleave is a fact rather than a hope.
+    const hub = await startHub();
+    const first = "ws://127.0.0.1:2";
+    const box = sandbox();
+    const lock = join(box.configHome, "uberblick", ".init.lock");
+    mkdirSync(dirname(lock), { recursive: true });
+    writeFileSync(lock, "999999\n");
+
+    let waiting = false;
+    const running = runUbAsync(
+      ["init", url(hub), "--yes"],
+      box,
+      { HUB_AUTH_TOKEN: SECRET },
+      undefined,
+      (stderr) => {
+        waiting ||= stderr.includes("waiting for another `ub init`");
+      },
+    );
+    await waitUntil("`ub init` to say it is waiting for the lock", () => waiting);
+    // What the run that got there first left behind.
+    writeFileSync(
+      configPath(box),
+      `${JSON.stringify({ workspace: WORKSPACE, hubUrl: first }, null, 2)}\n`,
+    );
+    rmSync(lock);
+
+    const run = await running;
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain(first);
+    expect(run.stderr).toContain("Nothing was written");
+    // One endpoint, and it is the one that got there first.
+    expect(config(box).hubUrl).toBe(first);
+    expect(config(box).workspace).toBe(WORKSPACE);
+  });
+
+  it("refuses two different signing secrets rather than picking one", async () => {
+    // The environment and the file must not disagree about the credential a
+    // bound machine sends: whichever this run preferred, the other is what some
+    // other reader on this machine would use.
+    const box = sandbox({ credentials: { signingSecret: OTHER_SECRET } });
+
+    const run = await runUbAsync(["init", CLOSED, "--yes"], box, {
       HUB_AUTH_TOKEN: SECRET,
     });
 
-    expect(again.status).toBe(0);
-    // The same workspace, the same identity, the same endpoint — byte for byte.
-    expect(readFileSync(configPath(box), "utf8")).toBe(settled);
-    // And no starter document was written a second time.
-    expect(again.stdout).not.toContain("documents");
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain("different signing secrets");
+    // Refused on what is on disk, before anything is dialled or written.
+    expect(run.stderr).not.toContain("did not answer");
+    expect(existsSync(configPath(box))).toBe(false);
+    expect(run.output).not.toContain(SECRET);
+    expect(run.output).not.toContain(OTHER_SECRET);
+    expect(
+      (
+        JSON.parse(readFileSync(credentialsPath(box), "utf8")) as {
+          signingSecret: string;
+        }
+      ).signingSecret,
+    ).toBe(OTHER_SECRET);
+  });
+
+  it("exits non-zero when the starter documents do not reach the hub", async () => {
+    // The promise a hub argument adds is that the hub *holds* the workspace when
+    // this returns, so an unacknowledged seed is a failure and not a warning.
+    // The hub goes away between the probe and the seed, which the lock makes an
+    // exact moment rather than a race.
+    const hub = await startHub();
+    const endpoint = url(hub);
+    const box = sandbox();
+    const lock = join(box.configHome, "uberblick", ".init.lock");
+    mkdirSync(dirname(lock), { recursive: true });
+    writeFileSync(lock, "999999\n");
+
+    let waiting = false;
+    const running = runUbAsync(
+      ["init", endpoint, "--yes"],
+      box,
+      { HUB_AUTH_TOKEN: SECRET },
+      undefined,
+      (stderr) => {
+        waiting ||= stderr.includes("waiting for another `ub init`");
+      },
+    );
+    await waitUntil("`ub init` to say it is waiting for the lock", () => waiting);
+    for (const started of hubs.splice(0)) {
+      await started.stop();
+    }
+    rmSync(lock);
+
+    const run = await running;
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain("did not reach");
+    expect(run.stderr).toContain("ub open");
+    // Local state stands: this machine is configured, and the documents are in
+    // its update log — there is nothing to repair, only to get up.
+    expect(run.stdout).toContain("uberblick initialised");
+    expect(config(box).hubUrl).toBe(endpoint);
+    expect(typeof config(box).workspace).toBe("string");
   });
 
   it("refuses a second endpoint, naming the verb that moves a machine", async () => {
@@ -225,7 +332,7 @@ describe("ub init <hub-url>", () => {
     expect(existsSync(credentialsPath(box))).toBe(false);
   });
 
-  it("refuses something that is not an endpoint at all", async () => {
+  it("refuses something that is not an endpoint at all, echoing none of it", async () => {
     const box = sandbox();
 
     const run = await runUbAsync(["init", "not a hub", "--yes"], box, {
@@ -234,6 +341,17 @@ describe("ub init <hub-url>", () => {
 
     expect(run.status).toBe(2);
     expect(run.stderr).toContain("is not a URL");
+    expect(existsSync(configPath(box))).toBe(false);
+
+    // A URL somebody pasted a credential into is exactly the kind that fails to
+    // parse, and repeating it is how the credential reaches a terminal log.
+    const pasted = await runUbAsync(
+      ["init", "wss://user:hunter2@hub.example.ts.net:notaport/ws", "--yes"],
+      box,
+      { HUB_AUTH_TOKEN: SECRET },
+    );
+    expect(pasted.status).toBe(2);
+    expect(pasted.output).not.toContain("hunter2");
     expect(existsSync(configPath(box))).toBe(false);
   });
 });

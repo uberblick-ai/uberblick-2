@@ -517,16 +517,22 @@ workspace on this hub — the first one, or another one later — the machine th
 creates it runs:
 
 ```sh
-HUB_AUTH_TOKEN=<the hub's secret> ub init <TAILSCALE_HOST>
+fnox exec -- ub init <TAILSCALE_HOST>
 ```
 
 The bare host is read as `wss://<TAILSCALE_HOST>/ws`, this deployment's
 endpoint, and the `wss://` form in full works the same; `ub init` dials and
 authenticates before it writes anything, stores the endpoint, generates the
-workspace id and has its starter documents on the hub by the time it returns.
-The hub's secret has to be in the environment (or already in
-`credentials.json`), because a secret generated locally is random and this hub
-would refuse it. Every *other* machine then joins that workspace with the URL
+workspace id and has its starter documents on the hub by the time it returns —
+if the hub does not acknowledge them it says so and exits non-zero rather than
+reporting a workspace the hub does not hold.
+
+The hub's secret has to reach that command's **environment**, because a secret
+generated locally is random and this hub would refuse it. `fnox exec` is how
+this repository supplies it; any other way of exporting `HUB_AUTH_TOKEN` into
+the shell works, and a `credentials.json` this machine already holds is read
+without any of that. Never put the secret in the command itself: a command line
+is in every `ps` listing and every shell history. Every *other* machine then joins that workspace with the URL
 above — `ub status` on this one names the id. `ub init` never replaces an
 endpoint already stored: the same one changes nothing, and a different one is
 refused, naming `ub remote join` as the move. Neither command asks anybody to

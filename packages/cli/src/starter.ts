@@ -113,11 +113,27 @@ function pinnedUuids(starters: SeedDoc[]): string[] {
   });
 }
 
+/** What a seed did, and whether the hub has it. */
+export interface StarterResult {
+  /** Titles of the documents this run created. */
+  created: string[];
+  /**
+   * Whether the hub has acknowledged everything this run wrote.
+   *
+   * True when there was nothing to write — a seed that wrote nothing has
+   * nothing outstanding. False is not a failure of the write: it is durable in
+   * the local update log either way. It is the answer to the one question
+   * `ub init <hub-url>` promises, which is whether the hub holds the workspace
+   * by the time the command returns.
+   */
+  synced: boolean;
+}
+
 /**
  * Write whatever the workspace `env` names is still missing of the starter
  * corpus — documents and sidebar group alike — and report the titles actually
- * created. Empty means no document was written, which is the normal outcome of
- * every run after the first.
+ * created, with whether the hub acknowledged them. No title means no document
+ * was written, which is the normal outcome of every run after the first.
  *
  * The workspace is read local-only first (the update log, no hub round trip),
  * because two questions have to be answered before anything is written: whether
@@ -148,7 +164,7 @@ function pinnedUuids(starters: SeedDoc[]): string[] {
  */
 export async function seedStarterDocs(
   env: NodeJS.ProcessEnv,
-): Promise<string[]> {
+): Promise<StarterResult> {
   const config = resolveMcpConfig(env);
   const starters = readSeedDocs(TEMPLATE_DIR);
   const uuids = new Set(starters.map((doc) => doc.uuid));
@@ -162,21 +178,29 @@ export async function seedStarterDocs(
   // the live ones are: this workspace is somebody's already.
   const stubs = (await syncWorkspace(bridgeConfig(config, { authSecret: null })))
     .entries;
-  if (stubs.some((stub) => !uuids.has(stub.uuid))) return [];
+  const nothingToDo: StarterResult = { created: [], synced: true };
+  if (stubs.some((stub) => !uuids.has(stub.uuid))) return nothingToDo;
   const known = new Set(stubs.map((stub) => stub.uuid));
   // Nothing left to write and nothing left to pin: every starter document is
   // here, and one of them is archived, so the sidebar has nothing to be
   // repaired to. Returning here is also what keeps the importer — and its
   // refusal to write over a tombstone — out of a run that has no work.
   const complete = starters.every((doc) => known.has(doc.uuid));
-  if (complete && stubs.some((stub) => stub.deleted)) return [];
+  if (complete && stubs.some((stub) => stub.deleted)) return nothingToDo;
 
-  const { results } = await importSeedDir(TEMPLATE_DIR, config, {
+  const { results, hub } = await importSeedDir(TEMPLATE_DIR, config, {
     id: STARTER_GROUP_ID,
     name: STARTER_GROUP_NAME,
     docs: pinnedUuids(starters),
   });
-  return results
-    .filter((result) => result.action === "created")
-    .map((result) => result.title);
+  return {
+    created: results
+      .filter((result) => result.action === "created")
+      .map((result) => result.title),
+    // Every room acknowledged, and the connection that acknowledged them still
+    // standing. Both, because a per-room flag says nothing about a hub that was
+    // never reached, and a connected hub says nothing about a room it has not
+    // answered for yet.
+    synced: hub === "connected" && results.every((result) => result.synced),
+  };
 }

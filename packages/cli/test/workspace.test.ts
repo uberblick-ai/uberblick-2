@@ -36,11 +36,18 @@ const OTHER = "4d8e0000-1111-4222-8333-444455556666";
 const UNRELATED = "b7c3d914-5a20-4e6f-8d13-9f04a2c68e75";
 
 /**
- * A machine as `ub init` leaves it: a generated signing secret, a workspace, and
- * an endpoint. Built by running the real `ub init` rather than by hand.
+ * A machine as `ub init` leaves it: a signing secret, a workspace, and an
+ * endpoint. Built by running the real `ub init` rather than by hand.
+ *
+ * The credential is part of the fixture rather than something `ub init`
+ * generates here: a machine with an endpoint in force is bound to a hub that has
+ * its own secret, and `ub init` refuses to invent one for it (#436).
  */
 function initialisedMachine(workspace: string): Sandbox {
-  const box = sandbox({ userConfig: { hubUrl: DEAD_HUB_URL } });
+  const box = sandbox({
+    userConfig: { hubUrl: DEAD_HUB_URL },
+    credentials: { signingSecret: "test-signing-secret-for-the-workspace-suite" },
+  });
   const init = runUb(["init", "--yes", "--no-mcp", "--workspace", workspace], box);
   expect(init.status, init.output).toBe(0);
   return box;
