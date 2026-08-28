@@ -18,8 +18,12 @@ export class BlockNotFoundError extends Error {
 
 export interface StaleBlockDetails {
   blockId: string;
-  /** The text the caller expected to find, as passed to `editBlock`. */
-  expectedText: string;
+  /**
+   * The text the caller expected to find, as passed to `editBlock` — absent
+   * when the caller asserted only a `rev`, which is the whole of what
+   * `setInlineLink` has to go on.
+   */
+  expectedText?: string | undefined;
   /** The rev the caller asserted, when it passed one. */
   expectedRev?: string | undefined;
   /** The text actually in the document right now. */
@@ -30,7 +34,8 @@ export interface StaleBlockDetails {
 
 /**
  * Thrown by `editBlock` when the block no longer matches what the caller
- * believed it was editing — either `oldText` or an asserted `rev` is stale.
+ * believed it was editing — either `oldText` or an asserted `rev` is stale —
+ * and by `setInlineLink`, whose only assertion is the `rev`.
  *
  * `currentText` and `currentRev` carry the live state so the caller can
  * re-read, re-diff and retry without a second round trip.
@@ -44,7 +49,7 @@ export interface StaleBlockDetails {
  */
 export class StaleBlockError extends Error {
   readonly blockId: string;
-  readonly expectedText: string;
+  readonly expectedText: string | undefined;
   readonly expectedRev: string | undefined;
   readonly currentText: string;
   readonly currentRev: string;
@@ -197,6 +202,48 @@ export class ConflictingLinkMarksError extends Error {
     this.name = "ConflictingLinkMarksError";
     this.href = href;
     this.docId = docId;
+  }
+}
+
+export type InlineLinkRangeErrorReason = "empty" | "not-prose";
+
+/**
+ * Thrown when a `docLink` cannot be written over a range of a block's text —
+ * see `setInlineLink`, the one write that marks text that is already there.
+ *
+ * `"empty"`: the clamped range carries no characters, so the link would have no
+ * label and nothing to anchor to. The same rule {@link AnnotationRangeError}
+ * has, for the same reason.
+ *
+ * `"not-prose"`: `code`, `mermaid` and `table` blocks hold source text and
+ * carry only the annotation anchor, so an inline link has nowhere to live in
+ * one.
+ *
+ * A range already carrying an external `link` is refused with
+ * {@link ConflictingLinkMarksError} instead — that error names both targets,
+ * and it is the boundary the invariant already lives at.
+ */
+export class InlineLinkRangeError extends Error {
+  readonly reason: InlineLinkRangeErrorReason;
+  readonly blockId: string;
+  /** For `"not-prose"`, the block type that cannot hold the mark. */
+  readonly blockType: string | undefined;
+
+  constructor(
+    reason: InlineLinkRangeErrorReason,
+    blockId: string,
+    blockType?: string,
+  ) {
+    super(
+      reason === "empty"
+        ? `Cannot link an empty range in block ${blockId}`
+        : `Block ${blockId} is a ${blockType ?? "source"} block: it holds source ` +
+          "text and carries no inline links. Link a prose block instead.",
+    );
+    this.name = "InlineLinkRangeError";
+    this.reason = reason;
+    this.blockId = blockId;
+    this.blockType = blockType;
   }
 }
 

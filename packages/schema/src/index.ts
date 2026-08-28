@@ -50,13 +50,20 @@ export {
   getBlockRev,
   getBlockText,
   getBlocks,
+  getBlocksWithInline,
   insertBlock,
   repairDuplicateBlocks,
   setBlockLanguage,
   setBlockLevel,
   setBlockType,
+  setInlineLink,
 } from "./blocks.js";
-export type { BlockTypeAttrs, EditBlockOptions } from "./blocks.js";
+export type {
+  BlockTypeAttrs,
+  EditBlockOptions,
+  InlineLinkRange,
+  SetInlineLinkOptions,
+} from "./blocks.js";
 
 export { isDocId, isExternalHref, readsAsMark } from "./marks.js";
 
@@ -159,6 +166,7 @@ export {
   AnnotationRangeError,
   BlockNotFoundError,
   ConflictingLinkMarksError,
+  InlineLinkRangeError,
   InvalidDocLinkTargetError,
   InvalidLinkHrefError,
   InvalidRoomError,
@@ -168,6 +176,7 @@ export {
 } from "./errors.js";
 export type {
   AnnotationRangeErrorReason,
+  InlineLinkRangeErrorReason,
   StaleBlockDetails,
 } from "./errors.js";
 

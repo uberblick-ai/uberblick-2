@@ -68,7 +68,7 @@ export function createMcpServer(
   const server = new McpServer(
     { name: "uberblick", version: "0.0.0" },
     {
-      // The failure contract lives here, once, rather than on all twenty-three
+      // The failure contract lives here, once, rather than on all twenty-four
       // tool descriptions: it is the same contract for every tool, and a client
       // reads `instructions` once per session instead of paying for it in every
       // `tools/list`. Each tool description still names the shape it answers

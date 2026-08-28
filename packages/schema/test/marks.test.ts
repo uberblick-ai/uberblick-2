@@ -12,15 +12,18 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   ConflictingLinkMarksError,
+  InlineLinkRangeError,
   InvalidDocLinkTargetError,
   InvalidLinkHrefError,
   MarksNotAllowedError,
+  StaleBlockError,
   appendBlock,
   createAnnotation,
   editBlock,
   exportMarkdown,
   getBlock,
   getBlockInline,
+  getBlockRev,
   getBlockText,
   getBlocks,
   getBlocksFragment,
@@ -29,6 +32,7 @@ import {
   listAnnotationRanges,
   resolveAnnotationRange,
   setBlockType,
+  setInlineLink,
 } from "../src/index.js";
 import type { InlineRun } from "../src/index.js";
 import { replicaPair, syncDocs } from "./helpers.js";
@@ -37,6 +41,9 @@ const UUID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 
 /** A document a `docLink` points at. Hex letters, so case is visible. */
 const TARGET = "0189abcd-2222-4333-8444-555566667777";
+
+/** A second document, for the retarget. */
+const OTHER_TARGET = "0189abcd-9999-4aaa-8bbb-ccccddddeeee";
 
 /** Every mark in one paragraph — the fixture the round trip is built on. */
 const ALL_FIVE =
@@ -1128,6 +1135,112 @@ describe("inline marks in the document", () => {
  * Fixed seed and a small count, so it is a deterministic sub-second test rather
  * than a fuzzer.
  */
+/**
+ * `setInlineLink` — the one write that marks text already in the document.
+ *
+ * What is defended here is what a caller relies on: the text and its `rev` are
+ * untouched (so a prepared edit stays valid), a range that is already a
+ * reference is retargeted rather than duplicated, and every refusal happens
+ * before anything is written — a Yjs transaction does not roll back.
+ */
+describe("linking a range to another document", () => {
+  it("writes a mark and nothing else, and retargets a range that is already one", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "paragraph", text: "See the hub docs" });
+    const text = getBlockText(doc, id);
+    const rev = getBlockRev(doc, id);
+
+    setInlineLink(doc, id, { start: 4, end: 11 }, TARGET, { rev });
+    expect(getBlockInline(doc, id)).toEqual([
+      { text: "See ", marks: {} },
+      { text: "the hub", marks: { docLink: TARGET } },
+      { text: " docs", marks: {} },
+    ]);
+    // The whole point: marks are not part of a rev, so the edit a caller
+    // prepared against this block is still good.
+    expect(getBlockText(doc, id)).toBe(text);
+    expect(getBlockRev(doc, id)).toBe(rev);
+
+    // The same range at another target is a deliberate write of the same kind —
+    // and an upper-cased uuid is canonicalized down, not refused.
+    setInlineLink(doc, id, { start: 4, end: 11 }, OTHER_TARGET.toUpperCase(), {
+      rev,
+    });
+    expect(exportMarkdown(doc, { frontmatter: false })).toBe(
+      `See [the hub](${OTHER_TARGET}) docs\n`,
+    );
+  });
+
+  it("refuses a range that is already an external link, and writes nothing", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, {
+      type: "paragraph",
+      inline: [
+        { text: "See ", marks: {} },
+        { text: "the hub", marks: { link: "https://example.com/hub" } },
+        { text: " docs", marks: {} },
+      ],
+    });
+    createAnnotation(doc, id, 0, 3, "tester", "which hub?");
+    const before = delta(doc);
+    const anchors = listAnnotationRanges(doc, id);
+
+    // Overlapping the link at all is enough: one range cannot be both.
+    expect(() =>
+      setInlineLink(doc, id, { start: 2, end: 8 }, TARGET),
+    ).toThrow(ConflictingLinkMarksError);
+    expect(delta(doc)).toEqual(before);
+    expect(listAnnotationRanges(doc, id)).toEqual(anchors);
+  });
+
+  it("refuses a source block, and a range that covers no characters", () => {
+    const doc = seeded();
+    const code = appendBlock(doc, { type: "code", text: "const x = 1;" });
+    const prose = appendBlock(doc, { type: "paragraph", text: "See the hub" });
+
+    expect(() =>
+      setInlineLink(doc, code, { start: 0, end: 5 }, TARGET),
+    ).toThrow(InlineLinkRangeError);
+    expect(() =>
+      setInlineLink(doc, prose, { start: 4, end: 4 }, TARGET),
+    ).toThrow(InlineLinkRangeError);
+    // Indices are clamped rather than rejected, so a range past the end of the
+    // text is simply a range with nothing in it.
+    expect(() =>
+      setInlineLink(doc, prose, { start: 99, end: 120 }, TARGET),
+    ).toThrow(InlineLinkRangeError);
+    expect(delta(doc, 0)).toEqual([["const x = 1;", null]]);
+    expect(delta(doc, 1)).toEqual([["See the hub", null]]);
+  });
+
+  it("refuses a stale rev, and never makes one stale itself", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "paragraph", text: "See the hub docs" });
+    const stale = getBlockRev(doc, id);
+    editBlock(doc, id, "See the hub docs", "See the hub document");
+
+    expect(() =>
+      setInlineLink(doc, id, { start: 4, end: 11 }, TARGET, { rev: stale }),
+    ).toThrow(StaleBlockError);
+    expect(getBlockInline(doc, id)).toEqual([
+      { text: "See the hub document", marks: {} },
+    ]);
+
+    // Two links under one rev: the first cannot invalidate the second.
+    const rev = getBlockRev(doc, id);
+    setInlineLink(doc, id, { start: 4, end: 7 }, TARGET, { rev });
+    setInlineLink(doc, id, { start: 8, end: 11 }, OTHER_TARGET, { rev });
+    expect(getBlockRev(doc, id)).toBe(rev);
+    expect(getBlockInline(doc, id)).toEqual([
+      { text: "See ", marks: {} },
+      { text: "the", marks: { docLink: TARGET } },
+      { text: " ", marks: {} },
+      { text: "hub", marks: { docLink: OTHER_TARGET } },
+      { text: " document", marks: {} },
+    ]);
+  });
+});
+
 describe("export and import are closed over the marks the model allows", () => {
   const CHUNKS = [
     "a",

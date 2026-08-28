@@ -31,6 +31,9 @@ import fastDiff from "fast-diff";
 import { getBlocksFragment } from "./doc.js";
 import {
   BlockNotFoundError,
+  ConflictingLinkMarksError,
+  InlineLinkRangeError,
+  InvalidDocLinkTargetError,
   MarksNotAllowedError,
   StaleBlockError,
 } from "./errors.js";
@@ -41,6 +44,7 @@ import {
   readInlineRuns,
 } from "./marks.js";
 import { blockRev } from "./rev.js";
+import { canonicalDocumentUuid } from "./rooms.js";
 import {
   MAX_LIST_INDENT,
   isBlockType,
@@ -297,7 +301,9 @@ export function getBlockInline(ydoc: Y.Doc, blockId: string): InlineRun[] {
  * whole-document reader wants. Looking each block's marks up by id instead would
  * rescan the fragment per block, which is quadratic in the block count.
  *
- * @internal — shared with the markdown module.
+ * The linear read for anything that has to see the marks of a whole document at
+ * once: the markdown writer, a document read that reports its inline links, and
+ * the derived index that unions them into its link rows.
  */
 export function getBlocksWithInline(
   ydoc: Y.Doc,
@@ -656,5 +662,113 @@ export function editBlock(
     if (findBlockElement(ydoc, blockId) === null) {
       throw new BlockNotFoundError(blockId);
     }
+  });
+}
+
+/** A half-open character range in a block's text, in UTF-16 code units. */
+export interface InlineLinkRange {
+  start: number;
+  /** Exclusive. */
+  end: number;
+}
+
+export interface SetInlineLinkOptions {
+  /**
+   * The `rev` the caller read. When given and it no longer matches, the write
+   * is refused — the offsets were measured against a text that has changed.
+   * `rev` excludes marks (see `rev.ts`), so a link that lands leaves it exactly
+   * as it was, and a second link over another range is not made stale by the
+   * first.
+   */
+  rev?: string;
+}
+
+/**
+ * The external `link` target anywhere in `[lo, hi)`, or null.
+ *
+ * Checked explicitly because `Y.XmlText.format` writes one key and asks nothing
+ * about the others: `attributesOf` — where a run carrying both link marks is
+ * refused — never sees this write. A run carrying both already reads as the
+ * `docLink` alone (the merge rule in `marks.ts`), so what surfaces here is a
+ * range a writer really did mark as an external link.
+ */
+function linkInRange(text: Y.XmlText, lo: number, hi: number): string | null {
+  let index = 0;
+  for (const run of readInlineRuns(text)) {
+    const end = index + run.text.length;
+    if (index < hi && lo < end && run.marks.link !== undefined) {
+      return run.marks.link;
+    }
+    index = end;
+  }
+  return null;
+}
+
+/**
+ * Mark `[range.start, range.end)` of a block's text as a reference to another
+ * document — the write that makes an inline mention out of text already there.
+ *
+ * It writes a mark and nothing else: the range's own characters are the link's
+ * label, the block's `text` is untouched, and `rev` excludes marks, so a caller
+ * holding a prepared `editBlock` still holds a valid one afterwards. Indices are
+ * clamped to the text's length and swapped if reversed, exactly as
+ * `createAnnotation` treats them.
+ *
+ * A range that already carries a `docLink` is **retargeted** — a deliberate
+ * write of the same kind, under the same `rev` guard. A range carrying an
+ * external `link` is refused instead: one range cannot honestly be both.
+ *
+ * @throws BlockNotFoundError when the block does not exist.
+ * @throws InlineLinkRangeError when the block holds source text rather than
+ * prose, or when the clamped range is empty.
+ * @throws StaleBlockError when an asserted `rev` no longer matches.
+ * @throws InvalidDocLinkTargetError when the target is not a document uuid; one
+ * that is is written in its canonical lowercase spelling.
+ * @throws ConflictingLinkMarksError when the range carries an external `link`.
+ */
+export function setInlineLink(
+  ydoc: Y.Doc,
+  blockId: string,
+  range: InlineLinkRange,
+  docId: string,
+  options: SetInlineLinkOptions = {},
+): void {
+  const element = findBlockElement(ydoc, blockId);
+  if (element === null) throw new BlockNotFoundError(blockId);
+
+  // Everything is checked before anything is written: a Yjs transaction does
+  // not roll back, so a refusal has to happen while there is nothing to undo.
+  const current = toBlock(element);
+  if (!isProseBlockType(current.type)) {
+    throw new InlineLinkRangeError("not-prose", blockId, current.type);
+  }
+  if (options.rev !== undefined && options.rev !== current.rev) {
+    throw new StaleBlockError({
+      blockId,
+      expectedRev: options.rev,
+      currentText: current.text,
+      currentRev: current.rev,
+    });
+  }
+
+  const target = canonicalDocumentUuid(docId);
+  if (target === null) throw new InvalidDocLinkTargetError(docId);
+
+  // Deliberately not `requireBlockText`: that creates the text node when it is
+  // missing, which is a write, and a call about to refuse must not make one. A
+  // block with no text has nothing to link.
+  const ytext = textOf(element);
+  const length = ytext === null ? 0 : ytext.length;
+  const lo = Math.max(0, Math.min(length, Math.min(range.start, range.end)));
+  const hi = Math.max(0, Math.min(length, Math.max(range.start, range.end)));
+  if (ytext === null || lo === hi) {
+    throw new InlineLinkRangeError("empty", blockId);
+  }
+
+  const href = linkInRange(ytext, lo, hi);
+  if (href !== null) throw new ConflictingLinkMarksError(href, target);
+
+  ydoc.transact(() => {
+    ytext.format(lo, hi - lo, { docLink: { docId: target } });
   });
 }
