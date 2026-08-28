@@ -319,7 +319,8 @@ async function hubToken(room: string, identity: AwarenessUser): Promise<string> 
     sub: identity.name,
     workspace: parseRoom(room).workspaceId,
     scope: "read-write",
-    // Root-signed: the bundle carries the root secret, not a credential.
+    // Root-signed: what this client was handed is the root secret itself —
+    // served to it at runtime (#426) — and not a credential minted for it.
     kid: null,
       // The ceiling itself. Hocuspocus calls this before every connect, so each
       // reconnect mints a fresh token rather than replaying an expired one.

@@ -32,8 +32,10 @@ FROM workspace AS web-build
 #
 # And no secret of any kind (#426). The signing secret is served in that same
 # document, so this stage needs none: the bundle it produces carries no
-# credential, is identical for every deployment, and rotating the secret is a
-# Caddy restart rather than a rebuild.
+# credential at all, and rotating the secret is a Caddy restart rather than a
+# rebuild. Not *identical* across deployments — HUB_URL above is still compiled
+# in as the fallback — but independent of who deploys it and of what their
+# secret is, which is what makes the image publishable.
 ARG HUB_URL
 RUN test -n "$HUB_URL" \
     && HUB_URL="$HUB_URL" pnpm --filter @uberblick/web build

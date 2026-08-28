@@ -477,14 +477,38 @@ async function main() {
     // `/uberblick-config.json` a deployment does, and that document is now the
     // whole of what configures the client. Bodies are never printed from here —
     // the signing secret is in this one.
+    //
+    // Parsed, and read out of `workspaces` specifically: a substring search
+    // over the whole body would also be satisfied by a uuid that happened to
+    // sit in `hubAuthToken`, and this assertion is about the workspace list `/`
+    // redirects through. Entries may be decorated (`<slug>-<uuid>`), so an
+    // entry *containing* the uuid is what counts.
     const carrier = "/uberblick-config.json";
     const document = await get(carrier, "application/json").catch(() => ({
       status: 0,
       body: "",
     }));
-    if (!document.body.includes(report.workspaceUuid)) {
+    let workspaces = [];
+    try {
+      const parsed = JSON.parse(document.body).workspaces;
+      // The client reads a JSON array and one comma-separated string as the
+      // same list; so does this.
+      workspaces = Array.isArray(parsed)
+        ? parsed
+        : typeof parsed === "string"
+          ? parsed.split(",")
+          : [];
+    } catch {
+      // Not JSON at all — the SPA fallback, or nothing served. `workspaces`
+      // stays empty and the message below is the same one either way.
+    }
+    if (
+      !workspaces.some(
+        (entry) => typeof entry === "string" && entry.includes(report.workspaceUuid),
+      )
+    ) {
       throw new Error(
-        `the served client carries no workspace (${carrier} answered HTTP ${document.status}), so / renders 'no workspace' instead of redirecting into one`,
+        `the served client carries no workspace (${carrier} answered HTTP ${document.status} with ${workspaces.length} workspace(s)), so / renders 'no workspace' instead of redirecting into one`,
       );
     }
 

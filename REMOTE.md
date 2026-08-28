@@ -16,9 +16,12 @@ Server-minted sessions are the planned replacement; see
 - A Linux host with Docker Engine and Docker Compose 2.6.0 or newer —
   `ub remote init` clones the repository onto it, and only the by-hand procedure
   below needs a checkout you made yourself. Compose 5 also satisfies this
-  requirement; check with `docker compose version --short`. Compose 2.5 added
-  build secrets, and 2.6 is the minimum that also supports the
-  environment-backed secret source and top-level project name used here.
+  requirement; check with `docker compose version --short`. The build secrets
+  and the environment-backed secret source that first set this floor are gone
+  with #426; what the file still uses beyond long-standing Compose v2 features
+  is the top-level project `name`. The floor stays at 2.6 because that is the
+  oldest version this deployment has been verified on, not because a lower one
+  is known to fail.
 - Tailscale installed on the host and connected to the private tailnet. MagicDNS
   and HTTPS must be enabled for the tailnet. Enabling HTTPS publishes the
   machine names used in certificates to a public certificate transparency log;

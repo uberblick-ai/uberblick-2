@@ -190,8 +190,8 @@ const BUILT_IN_HUB_URL: Pick<ClientConfig, "hubUrl" | "hubUrlSource"> =
  *
  * One ordered list, because the served document is one ordered list and the
  * client must not hold two different ideas of what a workspace list is. Both
- * defines are the *dev server's* answer now: `mise run dev` serves no
- * configuration document, and that is the only place they are the whole answer.
+ * defines are fallbacks behind that document, on every path: the dev server
+ * serves one too (#426), so they are the answer only where none arrives at all.
  *
  * Repeats are dropped, because naming the default workspace in `WORKSPACES` as
  * well is the ordinary configuration and the count in the diagnostic has to

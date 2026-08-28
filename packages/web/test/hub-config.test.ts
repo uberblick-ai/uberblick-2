@@ -37,8 +37,10 @@
  * configuration, because this suite runs in jsdom and serves nothing.
  */
 
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { devConfigDocument } from "../dev-config-document.js";
@@ -470,32 +472,6 @@ describe("the endpoint as it is shown", () => {
 });
 
 describe("the deployments that serve it", () => {
-  it("answers `mise run web`, `mise run dev` and the e2e harness from one middleware", () => {
-    // The dev server used to serve nothing here and the injected `define`s were
-    // the whole answer — which stopped being possible when the secret moved
-    // into the document (#426). One mechanism now covers every server that is
-    // not a deployment, reading the environment `ub env` resolves.
-    const environment = {
-      HUB_URL: "ws://127.0.0.1:4321",
-      HUB_AUTH_TOKEN: "dev-secret",
-      WORKSPACE_ID: FIRST,
-      // Repeating the default is the ordinary configuration; the menu must not
-      // show it twice.
-      WORKSPACES: `${FIRST},${SECOND}`,
-    };
-
-    expect(JSON.parse(devConfigDocument(environment))).toEqual({
-      hubUrl: "ws://127.0.0.1:4321",
-      workspaces: [FIRST, SECOND],
-      hubAuthToken: "dev-secret",
-    });
-    // Vite copies `public/` verbatim, and a file there would win over the
-    // middleware while carrying whatever the checkout was last configured with.
-    expect(() =>
-      readFileSync(resolve(webRoot, `public${HUB_CONFIG_PATH}`)),
-    ).toThrow();
-  });
-
   it("serves the document uncached, ahead of the SPA fallback, from run-time config", () => {
     const caddyfile = readFileSync(resolve(repoRoot, "Caddyfile"), "utf8");
     const configRoute = caddyfile.indexOf(`handle ${HUB_CONFIG_PATH}`);
@@ -534,5 +510,67 @@ describe("the deployments that serve it", () => {
     expect(wrapper).toContain("*[!A-Za-z0-9,-]*)");
     expect(wrapper).toContain("*[!A-Za-z0-9._-]*)");
     expect(wrapper).toContain("CHECKED_HUB_AUTH_TOKEN=$HUB_AUTH_TOKEN");
+
+    // The dev server answers the same path from one middleware, out of the
+    // environment `ub env` resolves — `mise run web`, `mise run dev`, the e2e
+    // harness and the first-user proof all read this. Repeating the default
+    // workspace in `WORKSPACES` is the ordinary configuration, and the menu
+    // must not show it twice.
+    expect(
+      JSON.parse(
+        devConfigDocument({
+          HUB_URL: "ws://127.0.0.1:4321",
+          HUB_AUTH_TOKEN: "dev-secret",
+          WORKSPACE_ID: FIRST,
+          WORKSPACES: `${FIRST},${SECOND}`,
+        }),
+      ),
+    ).toEqual({
+      hubUrl: "ws://127.0.0.1:4321",
+      workspaces: [FIRST, SECOND],
+      hubAuthToken: "dev-secret",
+    });
+    // Vite copies `public/` verbatim, and a file there would win over the
+    // middleware while carrying whatever the checkout was last configured with.
+    expect(() =>
+      readFileSync(resolve(webRoot, `public${HUB_CONFIG_PATH}`)),
+    ).toThrow();
+  });
+
+  it("refuses an endpoint that could inject into the document, before it calls Docker", () => {
+    // The endpoint reaches the same JSON string the workspaces and the secret
+    // do — by `WEB_HUB_URL`, or through the `wss://<host>/ws` default built
+    // from `TAILSCALE_HOST` — so it needs the same guarantee. Run rather than
+    // read: the *order* is the second half of the contract, and a file cannot
+    // show it. A host without Docker must be told about its `.env`, not about
+    // the daemon.
+    //
+    // PATH is an empty directory, which is the proof of that order: nothing
+    // external is reachable, `docker` included, and the refusal still arrives.
+    // The cwd is empty too, so no developer's own `.env` is sourced over these.
+    const injecting = {
+      WEB_HUB_URL: 'wss://ok.example.ts.net/ws","hubUrl":"wss://elsewhere',
+      TAILSCALE_HOST: 'ok.example.ts.net","hubUrl":"wss://elsewhere',
+    };
+    const empty = mkdtempSync(join(tmpdir(), "uberblick-wrapper-"));
+    try {
+      for (const [name, value] of Object.entries(injecting)) {
+        const run = spawnSync(
+          "/bin/sh",
+          [resolve(repoRoot, "remote-compose.sh"), "config"],
+          {
+            cwd: empty,
+            env: { PATH: empty, HUB_AUTH_TOKEN: "safe-secret", [name]: value },
+            encoding: "utf8",
+          },
+        );
+
+        expect(run.status, name).toBe(1);
+        expect(run.stderr, name).toContain(`${name} may only contain`);
+        expect(run.stdout, name).toBe("");
+      }
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
   });
 });
