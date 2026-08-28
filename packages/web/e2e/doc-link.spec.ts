@@ -8,7 +8,7 @@
  * inside a `contenteditable` (where a browser's own click handling is what
  * makes the interception necessary), and real session history.
  *
- * Everything else is pinned without a browser in `test/doc-links.test.ts`: what
+ * Everything else is pinned without a browser in `test/doc-links.test.tsx`: what
  * the doors accept and refuse, the shorthand's label, the unresolved/archived
  * states, and that a reference inside a comment highlight is one action rather
  * than two. What is asserted here beyond the click is only what the browser

@@ -284,10 +284,10 @@ export const Link = Mark.create({
  * address of one is derived from the workspace the reader is in — so an `<a>`
  * here carries no href, and the live one a mark view paints gets its own. It is
  * also what keeps the two link marks' HTML doors apart — `a[href]` parses a
- * `link`, `a[data-doc-id]` a `docLink`, and a rendered document anchor carrying
- * both is a `docLink`, because `link` refuses an href that is not external —
- * and the attribute is validated on the way in, because pasted HTML is the one
- * place a foreign value walks in.
+ * `link`, `a[data-doc-id]` a `docLink`, and an anchor carrying both is a
+ * `docLink`, because this rule outranks that one — and the attribute is
+ * validated on the way in, because pasted HTML is the one place a foreign value
+ * walks in.
  */
 export const DocLink = Mark.create({
   name: "docLink",
@@ -315,6 +315,13 @@ export const DocLink = Mark.create({
     return [
       {
         tag: "a[data-doc-id]",
+        // Ahead of `link`'s `a[href]` (default 50), which is declared first and
+        // would otherwise consume an anchor carrying both — turning a reference
+        // copied out of a document into a link to whatever href travelled with
+        // it. ProseMirror takes the first rule whose `getAttrs` does not refuse,
+        // so a `data-doc-id` that is not a document still falls through to that
+        // external door and the href decides, exactly as before.
+        priority: 60,
         // The paste door: a target that is not a document uuid is not a
         // reference, and the text comes through unmarked.
         getAttrs: (element: HTMLElement): { docId: string } | false => {

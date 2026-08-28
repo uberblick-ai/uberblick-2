@@ -290,6 +290,35 @@ describe("pasting a reference", () => {
   });
 
   /**
+   * The two doors on one element. A pasted anchor can carry both a valid
+   * `data-doc-id` and an href, and `link` is declared before `docLink` — so
+   * without a rule precedence the general `a[href]` door consumes it first and
+   * the reference becomes a link to whatever the clipboard said. A
+   * `data-doc-id` that is not a document is not a reference at all, and still
+   * falls through to that same external door.
+   */
+  it("prefers a valid document reference over the href beside it", () => {
+    const ydoc = emptyDoc();
+    const { editor } = mountEditor(ydoc);
+    try {
+      caretAtStart(editor);
+      editor.commands.insertContent(
+        `<a data-doc-id="${TARGET}" href="https://evil.example/">the hub</a>` +
+          '<a data-doc-id="../../etc/passwd" href="https://example.com/">elsewhere</a>',
+      );
+      expect(delta(ydoc)).toEqual([
+        { insert: "the hub", attributes: { docLink: { docId: TARGET } } },
+        {
+          insert: "elsewhere",
+          attributes: { link: { href: "https://example.com/" } },
+        },
+      ]);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  /**
    * Asked of the clipboard parser itself, which is the door pasted HTML comes
    * through: the text survives, the mark does not, and nothing downstream is
    * handed a target nobody validated.
@@ -406,7 +435,7 @@ describe("following a reference", () => {
       comment: { threadId: "t-1" },
     });
 
-    const { context, opened } = directoryWith([
+    const { directory, context, opened } = directoryWith([
       { uuid: TARGET, title: "The hub" },
     ]);
     const selected: string[] = [];
@@ -468,6 +497,14 @@ describe("following a reference", () => {
       click(highlight);
       expect(selected).toEqual(["t-1"]);
       expect(opened).toEqual([TARGET]);
+
+      // ---- and an archived target is still somewhere you can go ----
+      // Archiving says which document this is, not whether it opens: the read
+      // view is still the destination (#146), so the click keeps navigating.
+      tombstoneDirectoryEntry(directory, TARGET);
+      expect(anchor?.getAttribute("data-doc-link-state")).toBe("archived");
+      expect(click(anchor).defaultPrevented).toBe(true);
+      expect(opened).toEqual([TARGET, TARGET]);
     } finally {
       await act(async () => root.unmount());
       host.remove();
