@@ -52,14 +52,18 @@ case "$1" in
     printf '{"Name":"uberblick-remote-hub-1","Service":"hub","State":"exited","ExitCode":%s}\\n' \\
       "\${UB_TEST_HUB_EXIT:-0}"
     ;;
+  start | up)
+    if [ -n "\${UB_TEST_START_FAIL:-}" ]; then exit 1; fi
+    ;;
   cp)
+    if [ -n "\${UB_TEST_CP_FAIL:-}" ]; then exit 1; fi
     case "$2" in
       hub:*)
         cp "$UB_TEST_VOLUME/hub.sqlite" "$3"
         chmod 644 "$3"
         ;;
       *)
-        cp "$2" "$UB_TEST_VOLUME/hub.sqlite"
+        cp "$2" "$UB_TEST_VOLUME/\${3#hub:/data/}"
         ;;
     esac
     ;;
@@ -71,6 +75,14 @@ case "$1" in
           sed "s#/tmp/uberblick-restore-check.sqlite#$UB_TEST_VERIFY_DB#g")
         PATH="$UB_TEST_NODE_DIR:$PATH" sh -c "$script"
         exit $?
+        ;;
+      *"mv -f /data/hub.sqlite.restoring /data/hub.sqlite"*)
+        chmod 600 "$UB_TEST_VOLUME/hub.sqlite.restoring"
+        rm -f "$UB_TEST_VOLUME"/hub.sqlite-*
+        mv -f "$UB_TEST_VOLUME/hub.sqlite.restoring" "$UB_TEST_VOLUME/hub.sqlite"
+        ;;
+      *"rm -f /data/hub.sqlite.restoring"*)
+        rm -f "$UB_TEST_VOLUME/hub.sqlite.restoring"
         ;;
     esac
     ;;
@@ -159,7 +171,11 @@ describe("hub-backup.sh", () => {
     expect(ran.status).toBe(0);
     expect(subcommands(fix)).toEqual(["stop", "ps", "cp", "start"]);
     expect(calls(fix)[0]).toBe("stop hub");
-    expect(calls(fix)[2]).toBe(`cp hub:/data/hub.sqlite ${target}`);
+    // Copied to a temporary sibling and renamed, so the target never wears a
+    // half-written file's name.
+    expect(calls(fix)[2]).toMatch(
+      new RegExp(`^cp hub:/data/hub\\.sqlite ${target}\\.tmp\\.[0-9]+$`),
+    );
     expect(mode(target)).toBe("600");
     expect(readFileSync(target)).toEqual(readFileSync(join(fix.volume, "hub.sqlite")));
   });
@@ -172,20 +188,56 @@ describe("hub-backup.sh", () => {
   it("writes no file when the hub's exit code is non-zero, and starts it again", () => {
     const fix = fixture();
     hubDatabase(join(fix.volume, "hub.sqlite"), 3);
-    const target = join(fix.checkout, "backup.sqlite");
+    fix.env.UB_TEST_HUB_EXIT = "137";
 
-    const ran = run(fix, "hub-backup.sh", [target]);
-    expect(ran.status).toBe(0);
-
-    const failing = fixture();
-    hubDatabase(join(failing.volume, "hub.sqlite"), 3);
-    failing.env.UB_TEST_HUB_EXIT = "137";
-    const refused = run(failing, "hub-backup.sh", [join(failing.checkout, "backup.sqlite")]);
+    const refused = run(fix, "hub-backup.sh", [join(fix.checkout, "backup.sqlite")]);
 
     expect(refused.status).not.toBe(0);
     expect(refused.stderr).toContain("137");
-    expect(existsSync(join(failing.checkout, "backup.sqlite"))).toBe(false);
-    expect(subcommands(failing)).toEqual(["stop", "ps", "start"]);
+    expect(existsSync(join(fix.checkout, "backup.sqlite"))).toBe(false);
+    expect(subcommands(fix)).toEqual(["stop", "ps", "start"]);
+  });
+
+  /** An interrupted copy must not leave a truncated file wearing the backup's name. */
+  it("leaves the previous backup untouched when the copy fails", () => {
+    const fix = fixture();
+    hubDatabase(join(fix.volume, "hub.sqlite"), 3);
+    const target = join(fix.checkout, "backup.sqlite");
+    writeFileSync(target, "the backup from yesterday", "utf8");
+    fix.env.UB_TEST_CP_FAIL = "1";
+
+    const ran = run(fix, "hub-backup.sh", [target]);
+
+    expect(ran.status).not.toBe(0);
+    expect(readFileSync(target, "utf8")).toBe("the backup from yesterday");
+    expect(subcommands(fix)).toEqual(["stop", "ps", "cp", "start"]);
+  });
+
+  it("refuses a target that is a directory, before stopping anything", () => {
+    const fix = fixture();
+    hubDatabase(join(fix.volume, "hub.sqlite"), 3);
+    const target = join(fix.checkout, "a-directory");
+    mkdirSync(target);
+
+    const ran = run(fix, "hub-backup.sh", [target]);
+
+    expect(ran.status).not.toBe(0);
+    expect(ran.stderr).toContain("Nothing was stopped");
+    expect(calls(fix)).toEqual([]);
+    expect(mode(target)).toBe("755");
+  });
+
+  /** A backup taken at the price of a hub nobody noticed is not a success. */
+  it("exits non-zero, loudly, when the hub cannot be started again", () => {
+    const fix = fixture();
+    hubDatabase(join(fix.volume, "hub.sqlite"), 3);
+    fix.env.UB_TEST_START_FAIL = "1";
+
+    const ran = run(fix, "hub-backup.sh", [join(fix.checkout, "backup.sqlite")]);
+
+    expect(ran.status).not.toBe(0);
+    expect(ran.stderr).toContain("THE HUB IS STILL DOWN");
+    expect(subcommands(fix)).toEqual(["stop", "ps", "cp", "start", "up"]);
   });
 });
 
@@ -224,7 +276,7 @@ describe("hub-restore.sh", () => {
     expect(existsSync(join(fix.volume, "hub.sqlite"))).toBe(false);
   });
 
-  it("verifies, then stops, copies in and starts again", () => {
+  it("verifies, then stops, stages, renames into place and starts again", () => {
     const fix = fixture();
     const backup = join(fix.checkout, "good.sqlite");
     hubDatabase(backup, 2);
@@ -233,7 +285,35 @@ describe("hub-restore.sh", () => {
 
     expect(ran.status).toBe(0);
     expect(subcommands(fix)).toEqual(["run", "stop", "ps", "cp", "run", "start"]);
-    expect(calls(fix)[3]).toBe(`cp ${backup} hub:/data/hub.sqlite`);
+    // Never onto the name the hub opens: staged first, renamed by the container.
+    expect(calls(fix)[3]).toBe(`cp ${backup} hub:/data/hub.sqlite.restoring`);
+    expect(calls(fix)[4]).toContain("mv -f /data/hub.sqlite.restoring /data/hub.sqlite");
     expect(readFileSync(join(fix.volume, "hub.sqlite"))).toEqual(readFileSync(backup));
+    expect(existsSync(join(fix.volume, "hub.sqlite.restoring"))).toBe(false);
+  });
+
+  /**
+   * The reason the copy is staged: a copy that dies half way must leave the
+   * database that is already there whole, and say so.
+   */
+  it("leaves the live database alone when the copy into the volume fails", () => {
+    const fix = fixture();
+    const live = join(fix.volume, "hub.sqlite");
+    hubDatabase(live, 7);
+    const before = readFileSync(live);
+    const backup = join(fix.checkout, "good.sqlite");
+    hubDatabase(backup, 2);
+    fix.env.UB_TEST_CP_FAIL = "1";
+
+    const ran = run(fix, "hub-restore.sh", [backup]);
+
+    expect(ran.status).not.toBe(0);
+    expect(ran.stderr).toContain("NOT replaced");
+    expect(readFileSync(live)).toEqual(before);
+    expect(calls(fix).some((line) => line.includes("mv -f /data/hub.sqlite.restoring"))).toBe(
+      false,
+    );
+    // Verify, stop, ps, the failed cp, the best-effort discard, and the restart.
+    expect(subcommands(fix)).toEqual(["run", "stop", "ps", "cp", "run", "start"]);
   });
 });

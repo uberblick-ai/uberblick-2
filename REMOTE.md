@@ -13,17 +13,26 @@ Server-minted sessions are the planned replacement; see
 
 ## Host prerequisites
 
-`ub remote init` probes the host over SSH before it changes anything on it, and
-refuses naming the piece that is missing rather than guessing. This is that
-list:
+`ub remote init` probes most of this over SSH before it changes anything on the
+host, and refuses naming the piece that is missing rather than guessing. Two
+entries are marked **not probed** — check those yourself, with the commands
+given, before you deploy.
 
 - **SSH access to the host**, as the user the target names
   (`uberblick@box.tailnet.ts.net`). Tailscale SSH is enough. The same access is
   how the host is updated later, since nothing on it updates itself.
-- **That user able to drive Docker without `sudo`.** The probe runs
-  `docker compose version --short` *as the SSH user*, so a user outside the
-  host's `docker` group reads exactly like a host with no Docker at all; add
-  them to it there.
+- **That user able to reach the Docker socket** — *not probed*. What the probe
+  runs, `docker compose version --short`, asks the CLI plugin its own version
+  and never contacts the daemon, so a user outside the host's `docker` group
+  passes it and then fails at the first command that does any work. Check it by
+  hand with something that changes nothing:
+
+  ```sh
+  ssh uberblick@box.tailnet.ts.net docker info
+  ```
+
+  A permission error on `/var/run/docker.sock` is fixed on the host by adding
+  the user to the `docker` group (and opening a new session).
 - **Docker Engine, with Docker Compose 2.6.0 or newer.** Compose 5 satisfies it
   too; `docker compose version --short` is what both the probe and
   `remote-compose.sh` read. The build secrets and the environment-backed secret
@@ -43,10 +52,9 @@ list:
   [Enabling HTTPS](https://tailscale.com/docs/how-to/set-up-https-certificates).
   The probe also reads `tailscale status --json` and `tailscale ip -4` for the
   MagicDNS name and the address.
-- **TCP port 443 free on the host's Tailscale IPv4 address** — the one
-  prerequisite nothing probes. Compose publishes `<TAILSCALE_IP>:443` only, so
-  an address already in use surfaces as Caddy failing to start, in
-  `sh remote-compose.sh logs caddy`.
+- **TCP port 443 free on the host's Tailscale IPv4 address** — *not probed*
+  either. Compose publishes `<TAILSCALE_IP>:443` only, so an address already in
+  use surfaces as Caddy failing to start, in `sh remote-compose.sh logs caddy`.
 
 Nothing else belongs on the host: no Node, no pnpm, no `sqlite3`. Every process
 here runs in a container built from the checkout, which is why the backup and
@@ -378,8 +386,12 @@ restored. The hub is started again from an `EXIT` trap on every path: with
 `restart: unless-stopped`, a manual stop survives a Docker restart, so a run that
 died between the stop and the start would leave the hub down for good.
 
-The file lands at mode `0600`. It is every document in the workspace in one
-readable file; treat it exactly like the signing secret.
+The file lands at mode `0600`, and it lands whole: the copy goes to a temporary
+sibling and is renamed onto the name you gave, so an interrupted run leaves the
+previous backup exactly as it was rather than a truncated file wearing its name.
+It is every document in the workspace in one readable file; treat it exactly
+like the signing secret. Naming an existing directory, or a directory that is
+not writable, is refused before the hub is stopped.
 
 **Clients keep working while the hub is stopped.** Caddy stays up and serves the
 app; `/ws` answers 502 for those seconds; every MCP server and browser tab goes
@@ -404,9 +416,16 @@ candidate to the container's `/tmp`, never to `/data`. A missing, corrupt or
 empty backup exits non-zero **with the hub still running and the volume
 untouched**.
 
-Only then does it stop the hub, copy the file into `hub:/data/hub.sqlite`, drop
-any rollback-journal sidecar the replaced database left behind, hand the file to
-the container's `node` user, and start the hub. It restores into an empty volume
+Only then does it stop the hub — and even then it **never writes over the live
+database**. The file is copied in as `/data/hub.sqlite.restoring`, a name the
+hub does not open; only once that copy is whole and owned by the container's
+`node` user does a single `mv -f` put it in place, which within one filesystem
+is atomic. So a copy that dies half way — a full disk, a killed daemon, an
+interrupted script — leaves the database that was already there intact, and the
+script says the live database was **not** replaced and exits non-zero. The same
+container drops any rollback-journal sidecar the replaced database left behind,
+because a stale journal would be replayed over the file that just arrived.
+Then the hub starts. It restores into an empty volume
 just as well as over an existing one, which is the case the drill on #404
 exercises: `down --volumes`, `up`, restore, and a fresh client with empty local
 state enumerating and reading the pre-backup corpus.

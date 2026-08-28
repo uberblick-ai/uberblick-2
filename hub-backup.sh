@@ -23,9 +23,18 @@
 # wrapper exports, and Compose interpolates the whole model for every
 # subcommand, so a bare `docker compose stop hub` fails on this host.
 #
-# The hub is restarted from an EXIT trap on every path after the stop. With
-# `restart: unless-stopped`, a manual stop survives a daemon restart, so a run
-# that died between the stop and the start would leave the hub down for good.
+# The hub is restarted from a trap on every path after the stop — on the normal
+# exit and on HUP/INT/TERM, because in POSIX `sh` an EXIT-only trap does not run
+# when a signal kills the script. With `restart: unless-stopped`, a manual stop
+# survives a daemon restart, so a run that died between the stop and the start
+# would leave the hub down for good. If both restart attempts fail the script
+# exits non-zero however well the copy went: a backup taken at the price of a
+# hub nobody noticed is not a success.
+#
+# The file appears at its name only once it is whole. The copy goes to a
+# temporary sibling and is renamed onto the target, so an interrupted run leaves
+# the previous backup exactly as it was rather than a truncated file wearing its
+# name.
 #
 # While the hub is stopped, Caddy stays up and clients keep working: they edit
 # offline against their own replicas and converge when the socket comes back.
@@ -52,6 +61,21 @@ case "$target" in
   *) target="$PWD/$target" ;;
 esac
 
+# Checked before the hub is touched, so a mistyped path costs nobody an outage.
+# A directory is the one that would otherwise half-work: Compose would copy
+# `hub.sqlite` *into* it and the chmod would then strip the directory's execute
+# bits, leaving no backup and a directory nobody can enter.
+if [ -d "$target" ]; then
+  printf 'hub-backup: %s is a directory — name the file to write. Nothing was stopped.\n' "$target" >&2
+  exit 2
+fi
+
+parent=$(dirname -- "$target")
+if [ ! -d "$parent" ] || [ ! -w "$parent" ]; then
+  printf 'hub-backup: %s is not a directory this user can write to. Nothing was stopped.\n' "$parent" >&2
+  exit 2
+fi
+
 # The file is every document in the corpus. Nothing this script creates is
 # readable by anyone else, not even for the instant before the chmod.
 umask 077
@@ -65,21 +89,30 @@ compose() {
 
 hub_stopped=
 
-restart_hub() {
+# Takes the status to exit with, so the signal traps can report a failure the
+# `$?` of an interrupted command would not.
+finish() {
+  status=$1
   if [ -n "$hub_stopped" ]; then
     hub_stopped=
     if ! compose start hub; then
       if ! compose up --detach hub; then
         printf 'hub-backup: THE HUB IS STILL DOWN. Start it with: sh remote-compose.sh up --detach hub\n' >&2
+        if [ "$status" -eq 0 ]; then
+          status=1
+        fi
       fi
     fi
   fi
+  trap - 0 HUP INT TERM
+  exit "$status"
 }
 
 # Set before the stop is issued, not after it succeeds: a stop that fails
 # halfway has still taken the container down.
 hub_stopped=yes
-trap restart_hub EXIT
+trap 'finish $?' 0
+trap 'finish 1' HUP INT TERM
 compose stop hub
 
 # `tr` splits the object into one field per line so the code is read whether
@@ -101,10 +134,25 @@ for code in $codes; do
   fi
 done
 
-compose cp hub:/data/hub.sqlite "$target"
+# A sibling, so the rename below is within one filesystem and therefore atomic.
+temp="$target.tmp.$$"
+rm -f "$temp"
+
+if ! compose cp hub:/data/hub.sqlite "$temp"; then
+  rm -f "$temp"
+  printf 'hub-backup: copying the database out of the container failed; %s is unchanged.\n' "$target" >&2
+  exit 1
+fi
+
 # `umask` does not reach this file: `docker compose cp` reproduces the mode the
 # file has in the container. The hub creates its database 0600 and this keeps
-# the copy there whatever the container end turns out to hold.
-chmod 600 "$target"
+# the copy there whatever the container end turns out to hold — and it is set
+# before the rename, so the file is never readable by anyone else under the name
+# an operator will reach for.
+if ! chmod 600 "$temp" || ! mv -f "$temp" "$target"; then
+  rm -f "$temp"
+  printf 'hub-backup: could not put the copy in place at %s; it is unchanged.\n' "$target" >&2
+  exit 1
+fi
 
 printf 'hub-backup: wrote %s\n' "$target"
