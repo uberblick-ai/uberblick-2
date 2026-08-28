@@ -402,13 +402,20 @@ export function parseJoinTarget(value: string): {
         "wss://hub.example.ts.net/ws/<workspace-id> — `ub remote init` prints it",
     );
   }
-  return {
-    // The same endpoint, with the id's segment taken off its path — so
-    // `hub.example.ts.net/<id>` names the deployed `wss://hub.example.ts.net/ws`
-    // and not a hub at the root, which is nothing anybody deployed.
-    endpoint: formatRemoteUrl(url, url.path.slice(0, cut)),
-    workspace,
-  };
+  // Everything the id's segment leaves behind. An endpoint somebody typed in
+  // full is cut out of the string they typed, so the half that is stored is
+  // byte for byte the half they wrote — `wss://Host:443/ws/<id>` keeps its
+  // case, its explicit port and its path, none of which survive a rebuild
+  // through `URL`. An invented form has no spelling to preserve: it is rebuilt,
+  // and a path left as nothing but a root slash (`https://host//<id>`) collapses
+  // so that it takes the deployed path like every other invented form.
+  const suffix = `/${workspace}`;
+  const path = url.path.slice(0, cut);
+  const endpoint =
+    url.invented || !url.text.endsWith(suffix)
+      ? formatRemoteUrl(url, path === "/" ? "" : path)
+      : url.text.slice(0, -suffix.length);
+  return { endpoint, workspace };
 }
 
 /** A secret file only its owner may read — ssh's rule for a private key. */

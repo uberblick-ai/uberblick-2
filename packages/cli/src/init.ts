@@ -281,6 +281,68 @@ function field(name: string, value: string): string {
   return `${name.padEnd(12)}${value}\n`;
 }
 
+/** What this machine holds to authenticate a hub with, and where each came from. */
+interface Credential {
+  /** What this run sends: the environment's, then the file's, then nothing. */
+  secret: string | null;
+  supplied: string | null;
+  onFile: string | null;
+  path: string;
+}
+
+/**
+ * The one credential this run uses, chosen once — before the probe, so the
+ * value that authenticated to a hub is the value the seed then writes with.
+ *
+ * The environment wins over the file, which is `resolveConfig`'s rule and every
+ * other reader's. A file whose mode is wrong is **read** here rather than
+ * treated as absent: `ub init` is the command that repairs that mode and keeps
+ * the value, so ignoring it would both refuse a machine whose secret is right
+ * and whose file is merely loose, and — worse — let a *different* value in it
+ * past the conflict check below and into the seed, after the probe had used the
+ * environment's.
+ */
+function readCredential(): Credential {
+  const stored = readCredentials();
+  const supplied = trimmed(process.env.HUB_AUTH_TOKEN);
+  const onFile = trimmed(stored.signingSecret ?? undefined);
+  return { secret: supplied ?? onFile, supplied, onFile, path: stored.path };
+}
+
+/**
+ * Why a machine syncing with `endpoint` cannot use what it holds, or null.
+ *
+ * Both answers are refusals rather than repairs, because both are about a hub
+ * that exists and has its own secret: one generated here would be random, and
+ * picking a winner between two configured values would leave every other reader
+ * on this machine sending the other one.
+ */
+function credentialRefusal(
+  endpoint: string,
+  credential: Credential,
+): string | null {
+  if (credential.secret === null) {
+    return (
+      `${endpoint} needs that hub's signing secret, and this machine has none ` +
+      "it can use: HUB_AUTH_TOKEN is not set (fnox, or your shell) and no " +
+      `signing secret was readable in ${credential.path}. One generated here ` +
+      "would be random, and the hub would refuse it."
+    );
+  }
+  if (
+    credential.supplied !== null &&
+    credential.onFile !== null &&
+    credential.supplied !== credential.onFile
+  ) {
+    return (
+      `HUB_AUTH_TOKEN and ${credential.path} hold different signing secrets, ` +
+      `and ${endpoint} can only be authenticated to with one of them. Make ` +
+      "them equal, or unset one, and run this again."
+    );
+  }
+  return null;
+}
+
 /**
  * A workspace for a machine that has none: a fresh uuid, plus an optional slug
  * to read it by.
@@ -403,31 +465,14 @@ export async function initCommand(
   // something to invent: the generating branch below must never be reached for
   // one, and it is refused here instead — before a write, and naming both
   // places a secret is read from.
+  // Read once here and again under the lock, and never printed: this is the
+  // value the probe below sends, and the one the seed sends afterwards.
+  let credential = readCredential();
   const endpoint = binding ?? bound;
   if (endpoint !== null) {
-    const supplied = trimmed(process.env.HUB_AUTH_TOKEN);
-    const credentials = readCredentials();
-    const onFile = credentials.exposed ? null : credentials.signingSecret;
-    if (supplied === null && onFile === null) {
-      io.err(
-        `ub init: ${endpoint} needs that hub's signing secret, and this ` +
-          "machine has none it can use: HUB_AUTH_TOKEN is not set (fnox, or " +
-          `your shell) and no signing secret was readable in ${credentials.path}. ` +
-          "One generated here would be random, and the hub would refuse it. " +
-          "Nothing was written.\n",
-      );
-      return 1;
-    }
-    // Two different secrets is not something to pick a winner from: whichever
-    // one this run happened to prefer, the other is what some other reader on
-    // this machine would send. Neither value is printed.
-    if (supplied !== null && onFile !== null && supplied !== onFile) {
-      io.err(
-        `ub init: HUB_AUTH_TOKEN and ${credentials.path} hold different ` +
-          `signing secrets, and ${endpoint} can only be authenticated to with ` +
-          "one of them. Make them equal, or unset one, and run this again. " +
-          "Nothing was written.\n",
-      );
+    const refusal = credentialRefusal(endpoint, credential);
+    if (refusal !== null) {
+      io.err(`ub init: ${refusal} Nothing was written.\n`);
       return 1;
     }
   }
@@ -507,6 +552,13 @@ export async function initCommand(
           ...resolved.env,
           WORKSPACE_ID: workspace,
           HUB_URL: binding,
+          // The credential chosen above, named explicitly: `resolved.env`
+          // drops a file whose mode is wrong, and this run's own repair is
+          // what fixes that — probing without it would refuse a machine whose
+          // secret is right and then seed with the value it just repaired.
+          ...(credential.secret === null
+            ? {}
+            : { HUB_AUTH_TOKEN: credential.secret }),
         }),
       ),
     );
@@ -549,6 +601,10 @@ export async function initCommand(
   let credentialNote: string;
   let wroteCredentials = false;
   let persistedWorkspace: string;
+  // The endpoint this machine syncs with once the write phase is over — this
+  // run's binding, or one that was already there. Settled under the lock,
+  // because that is the only reading of it nothing can race.
+  let hubInForce: string | null = null;
   // Replaced once the workspace on disk is known.
   let mcpEnv: NodeJS.ProcessEnv = resolved.env;
   try {
@@ -586,6 +642,21 @@ export async function initCommand(
           `${binding}/<workspace-id>\`.\n`,
       );
       return 1;
+    }
+    hubInForce = binding ?? settledHub;
+    // And the credential rules with it, on every path rather than only on the
+    // one that carried a hub argument. A no-argument run can pass its pre-lock
+    // checks on an unbound machine, lose the lock to an `ub init <hub-url>`,
+    // and reach the generating branch below with an endpoint now stored — a
+    // random secret written for a hub that has its own, arrived at by a race.
+    // Re-read here, because the winner may have published a credential too.
+    credential = readCredential();
+    if (hubInForce !== null) {
+      const refusal = credentialRefusal(hubInForce, credential);
+      if (refusal !== null) {
+        io.err(`ub init: ${refusal} Nothing was written.\n`);
+        return 1;
+      }
     }
     // A uuid this run generated is claimed the way the signing secret is: the
     // loser adopts the winner's. Another `ub init` may have published a
@@ -642,6 +713,11 @@ export async function initCommand(
       secret = null;
       credentialNote = "supplied by the environment (fnox, or your shell)";
     } else {
+      // Unreachable on a machine with an endpoint: this branch is the case
+      // where neither the environment nor the file has a secret, and that is
+      // exactly what `credentialRefusal` turned away above — from the same two
+      // readings, taken under this lock. A hub that exists has its own secret;
+      // what is generated here is for a local hub that does not exist yet.
       secret = claimSigningSecret(generateSecret());
       wroteCredentials = true;
       credentialNote = "generated for local development";
@@ -671,11 +747,17 @@ export async function initCommand(
   // before the write phase would send the starter documents to the built-in
   // default rather than the hub this run just bound to — and print that one in
   // the report.
+  //
+  // The credential is the one the probe used, and the write phase can only have
+  // *added* one — a local secret generated where there was none — never
+  // replaced it, so there is no path where the hub is authenticated to with one
+  // value and written to with another.
+  const seedSecret = credential.secret ?? secret;
   mcpEnv = {
     ...resolved.env,
     WORKSPACE_ID: persistedWorkspace,
-    ...(binding === null ? {} : { HUB_URL: binding }),
-    ...(secret === null ? {} : { HUB_AUTH_TOKEN: secret }),
+    ...(hubInForce === null ? {} : { HUB_URL: hubInForce }),
+    ...(seedSecret === null ? {} : { HUB_AUTH_TOKEN: seedSecret }),
   };
 
   // Under the seed's own lock, not the one above: what to write is decided by
@@ -689,8 +771,8 @@ export async function initCommand(
   // A failure is a warning rather than an exit code: everything `ub init` was
   // asked to settle is settled by now, and the seed is not lost with the run —
   // it is decided by what the workspace is missing, so the next `ub init`
-  // writes whatever this one did not. The one exception is the run that just
-  // bound this machine to a hub, which promised the documents would be *there*:
+  // writes whatever this one did not. The one exception is a machine with an
+  // endpoint in force, where the documents were promised to be *on the hub*:
   // see `seeded` and the refusal it drives after the report.
   let starter: string[] = [];
   // Whether the starter corpus is settled on the hub. Every path that leaves it
@@ -788,9 +870,9 @@ export async function initCommand(
   // state stands — the configuration is settled and the documents are durable
   // in this machine's update log — so the remedy is to get them up, not to
   // repair anything.
-  if (binding !== null && !seeded) {
+  if (hubInForce !== null && !seeded) {
     io.err(
-      `ub init: the starter documents did not reach ${binding}, so that hub ` +
+      `ub init: the starter documents did not reach ${hubInForce}, so that hub ` +
         "does not hold this workspace yet. This machine is configured and the " +
         "documents are in its update log — `ub status` shows the endpoint, and " +
         "they go up the next time a client runs against it (`ub open`, or an " +

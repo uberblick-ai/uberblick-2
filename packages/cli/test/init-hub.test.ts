@@ -191,6 +191,53 @@ describe("ub init <hub-url>", () => {
     expect(config(box).workspace).toBe(WORKSPACE);
   });
 
+  it("applies the bound-machine rules to an endpoint that arrived under the lock", async () => {
+    // A run with no hub argument passes its pre-lock checks on an unbound
+    // machine, loses the lock to an `ub init <hub-url>`, and would otherwise
+    // reach the generating branch with an endpoint now stored — a random secret
+    // written for a hub that has its own, arrived at by a race. The winner's
+    // credential is not visible to this process, which is the case that has to
+    // refuse rather than invent one.
+    const box = sandbox();
+    const lock = join(box.configHome, "uberblick", ".init.lock");
+    mkdirSync(dirname(lock), { recursive: true });
+    writeFileSync(lock, "999999\n");
+
+    let waiting = false;
+    const running = runUbAsync(["init", "--yes"], box, {}, undefined, (stderr) => {
+      waiting ||= stderr.includes("waiting for another `ub init`");
+    });
+    await waitUntil("`ub init` to say it is waiting for the lock", () => waiting);
+    writeFileSync(
+      configPath(box),
+      `${JSON.stringify({ workspace: WORKSPACE, hubUrl: CLOSED }, null, 2)}\n`,
+    );
+    rmSync(lock);
+
+    const run = await running;
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain("HUB_AUTH_TOKEN");
+    expect(run.stderr).toContain("credentials.json");
+    expect(run.stderr).toContain("Nothing was written");
+    // No random secret for a machine somebody else bound.
+    expect(existsSync(credentialsPath(box))).toBe(false);
+    expect(config(box).hubUrl).toBe(CLOSED);
+  });
+
+  it("refuses a bound machine with no credential, hub argument or not", async () => {
+    // The accepted exception to "no argument is what it always was": a machine
+    // with an endpoint needs that hub's secret, and `ub init` says so instead of
+    // writing a random one every later run would send and every hub reject.
+    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: CLOSED } });
+
+    const run = await runUbAsync(["init", "--yes"], box);
+
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain("HUB_AUTH_TOKEN");
+    expect(run.stderr).toContain("credentials.json");
+    expect(existsSync(credentialsPath(box))).toBe(false);
+  });
+
   it("refuses two different signing secrets rather than picking one", async () => {
     // The environment and the file must not disagree about the credential a
     // bound machine sends: whichever this run preferred, the other is what some
@@ -215,6 +262,27 @@ describe("ub init <hub-url>", () => {
         }
       ).signingSecret,
     ).toBe(OTHER_SECRET);
+  });
+
+  it("counts a credentials file whose mode is wrong as a value that must agree", async () => {
+    // The file `ub init` would repair and keep. Read as absent, its value would
+    // slip past the conflict check and then win the seed — the run would
+    // authenticate with the environment's secret and write with this one.
+    const box = sandbox({
+      credentials: { signingSecret: OTHER_SECRET },
+      credentialsMode: 0o644,
+    });
+
+    const run = await runUbAsync(["init", CLOSED, "--yes"], box, {
+      HUB_AUTH_TOKEN: SECRET,
+    });
+
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain("different signing secrets");
+    expect(run.stderr).not.toContain("did not answer");
+    expect(existsSync(configPath(box))).toBe(false);
+    expect(run.output).not.toContain(SECRET);
+    expect(run.output).not.toContain(OTHER_SECRET);
   });
 
   it("exits non-zero when the starter documents do not reach the hub", async () => {
@@ -330,6 +398,51 @@ describe("ub init <hub-url>", () => {
     expect(run.stderr).not.toContain("did not answer");
     expect(existsSync(configPath(box))).toBe(false);
     expect(existsSync(credentialsPath(box))).toBe(false);
+  });
+
+  it("fails the same way on a machine that was already bound", async () => {
+    // The promise is about the endpoint in force, not about which run stored
+    // it: a retry on a bound machine whose hub is down must not report a hub
+    // holding a corpus it has never seen.
+    const box = sandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: CLOSED },
+      credentials: { signingSecret: SECRET },
+    });
+
+    const run = await runUbAsync(["init", "--yes"], box);
+
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain("did not reach");
+    expect(run.stderr).toContain("ub open");
+    expect(run.stdout).toContain("uberblick initialised");
+    expect(config(box).hubUrl).toBe(CLOSED);
+  });
+
+  it("agrees with `ub remote join` about the endpoint that is stored", async () => {
+    // The two verbs write the same file, so a spelling one accepts and the
+    // other rewrites would make `ub init` refuse the hub this machine is
+    // already joined to. Same string in, same string stored, and the second
+    // command has nothing left to do.
+    const hub = await startHub();
+    const box = sandbox();
+
+    const joined = await runUbAsync(
+      ["remote", "join", `${url(hub)}/${WORKSPACE}`],
+      box,
+      { HUB_AUTH_TOKEN: SECRET },
+    );
+    expect(joined.status, joined.output).toBe(0);
+    expect(config(box).hubUrl).toBe(url(hub));
+    const settled = readFileSync(configPath(box), "utf8");
+
+    const run = await runUbAsync(["init", url(hub), "--yes"], box, {
+      HUB_AUTH_TOKEN: SECRET,
+    });
+
+    expect(run.status, run.output).toBe(0);
+    expect(run.stdout).toContain("already set up");
+    expect(config(box).workspace).toBe(WORKSPACE);
+    expect(readFileSync(configPath(box), "utf8")).toBe(settled);
   });
 
   it("refuses something that is not an endpoint at all, echoing none of it", async () => {

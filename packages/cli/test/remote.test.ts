@@ -49,6 +49,7 @@ import type { Sandbox } from "./helpers.js";
 import { normalizeRemoteUrl, parseJoinTarget, setRemote } from "../src/remote.js";
 import {
   DEAD_HUB_URL,
+  pointAt,
   removeTempDirs,
   runUbAsync,
   sandbox,
@@ -293,6 +294,12 @@ describe("ub remote", () => {
     ["http://hub.example.ts.net", "ws://hub.example.ts.net/ws"],
     ["https://hub.example.ts.net/proxy", "wss://hub.example.ts.net/proxy"],
     ["hub.example.ts.net/ws", "wss://hub.example.ts.net/ws"],
+    // An invented form is rewritten, so it is folded as `URL` folds: the host's
+    // case, a trailing slash and the scheme's own default port all go.
+    ["Hub.Example.TS.net", "wss://hub.example.ts.net/ws"],
+    ["hub.example.ts.net/", "wss://hub.example.ts.net/ws"],
+    ["https://hub.example.ts.net:443", "wss://hub.example.ts.net/ws"],
+    ["http://hub.example.ts.net:80/", "ws://hub.example.ts.net/ws"],
     ["wss://hub.example.ts.net/ws", "wss://hub.example.ts.net/ws"],
     ["ws://127.0.0.1:1234", "ws://127.0.0.1:1234"],
   ])("reads %s as %s", (typed, stored) => {
@@ -312,14 +319,32 @@ describe("ub remote", () => {
 
   // `join` gets the same acceptance from the same reader: the id is split off
   // after the URL has been understood, never by a second parser beside it — so
-  // a host with nothing but the id after it still names the deployed path.
+  // a host with nothing but the id after it still names the deployed path, and
+  // a root slash the id left behind collapses into it rather than standing as
+  // a path nobody typed.
   it.each([
     ["hub.example.ts.net/ws", "wss://hub.example.ts.net/ws"],
     ["https://hub.example.ts.net/ws", "wss://hub.example.ts.net/ws"],
     ["hub.example.ts.net", "wss://hub.example.ts.net/ws"],
     ["https://hub.example.ts.net", "wss://hub.example.ts.net/ws"],
+    ["https://hub.example.ts.net/", "wss://hub.example.ts.net/ws"],
+    // Folded, unlike the explicit spellings below: an invented form has no
+    // spelling to preserve, and :443 is what wss:// dials anyway.
+    ["https://Hub.Example.TS.net:443", "wss://hub.example.ts.net/ws"],
   ])("takes a join URL written as %s", (typed, endpoint) => {
     expect(parseJoinTarget(`${typed}/${WORKSPACE}`).endpoint).toBe(endpoint);
+  });
+
+  // The other half of the same rule: an endpoint typed in full is cut out of
+  // the string it was typed in, so `join` stores exactly what `ub init` would.
+  // Rebuilding it through `URL` would fold the case and drop the port, and the
+  // two verbs would then disagree about the endpoint they had both been given.
+  it.each([
+    ["wss://Hub.Example.TS.net:443/ws"],
+    ["ws://127.0.0.1:1234"],
+    ["wss://hub.example.ts.net/proxy//ws"],
+  ])("keeps the endpoint of a join URL written as %s", (endpoint) => {
+    expect(parseJoinTarget(`${endpoint}/${WORKSPACE}`).endpoint).toBe(endpoint);
   });
 
   it("still refuses what is not an endpoint at all, and repeats none of it", () => {
@@ -501,15 +526,14 @@ describe("ub remote join", () => {
     const theirs = await webDoc(remote, "Shared note", OTHER_SECRET);
 
     // A machine that has already been set up: `ub init` generated a workspace
-    // of its own and seeded the starter documents into it. The dead endpoint
-    // stands in for the local hub that is not running, and it comes with the
-    // credential such a machine has — `ub init` invents no secret for a machine
-    // already bound to a hub (#436).
-    const box = sandbox({
-      userConfig: { hubUrl: DEAD_HUB_URL },
-      credentials: { signingSecret: SECRET },
-    });
+    // of its own and seeded the starter documents into it, locally, and was
+    // pointed at an endpoint afterwards — the dead one standing in for the
+    // local hub that is not running. In that order because the two halves are
+    // ordered in life too: a machine bound to a hub is one `ub init` expects to
+    // hold that hub's credential and to reach it (#436).
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
     expect((await runUbAsync(["init", "--yes"], box)).status).toBe(0);
+    pointAt(box, DEAD_HUB_URL);
     const mine = readConfigFile(box, "config.json").workspace as string;
     expect(mine).not.toBe(WORKSPACE);
     const seeded = await readMirror(box, mine);

@@ -69,7 +69,11 @@ There are two ways to have one, and they do not fight:
   `fnox exec --if-missing warn` warns and leaves the variable alone, and
   `ub init` writes 32 random bytes to `credentials.json` (mode 0600) in this
   machine's config root — see [Where your files live](#where-your-files-live).
-  That file is the authority, and there is no copy of it anywhere else.
+  That file is the authority, and there is no copy of it anywhere else. It is
+  generated only while this machine has **no hub endpoint stored**: a machine
+  bound to a hub needs *that* hub's secret, so with none visible `ub init`
+  refuses and names the two places it looked rather than writing a random value
+  the hub would reject.
 
 A mise task reaches it the same way an MCP client's server does: every task that
 needs configuration wraps its command in `fnox exec -- ub env -- …`, and
