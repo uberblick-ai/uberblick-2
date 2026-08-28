@@ -29,7 +29,14 @@ import {
   userConfigPath,
   writeCredentials,
 } from "../src/config.js";
-import { REPO_ROOT, removeTempDirs, sandbox } from "./helpers.js";
+import {
+  REPO_ROOT,
+  SECRET_IN_ENV,
+  SECRET_ON_FILE,
+  removeTempDirs,
+  sandbox,
+  tracesOf,
+} from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -301,9 +308,9 @@ describe("resolveConfig", () => {
     // The losing layer is parsed here for the first time — resolution validates
     // only the winner — so this must not start throwing where a valid pin used
     // to carry the run. And a secret pasted into that field is the mistake
-    // actually observed, so the value is named nowhere.
-    const pasted = "pasted-signing-secret-3f9c";
-    const box = sandbox({ userConfig: { workspace: pasted } });
+    // actually observed, so the value is named nowhere: not whole, not in
+    // fragments, not by its length.
+    const box = sandbox({ userConfig: { workspace: SECRET_ON_FILE } });
     const resolved = resolveConfig({
       env: { ...box.env, WORKSPACE_ID: FROM_ENV },
     });
@@ -311,29 +318,34 @@ describe("resolveConfig", () => {
     const warning = resolved.warnings.join("\n");
     expect(warning).toContain(userConfigPath(box.env));
     expect(warning).toMatch(/is not a workspace id/);
-    expect(warning).not.toContain(pasted);
+    expect(tracesOf(SECRET_ON_FILE, warning)).toEqual([]);
     expect(mcpConfig(resolved.env).workspaceId).toBe(FROM_ENV);
     // Nothing proves it names a *different* workspace, so nothing claims it.
     expect(resolved.shadowed).toEqual([]);
   });
 
-  it("warns that two signing secrets differ, and says nothing else about them", () => {
-    const onFile = "file-signing-secret-7b21ae";
-    const inEnv = "env-signing-secret-4c08fd";
-    const box = sandbox({ credentials: { signingSecret: onFile } });
+  it("warns that two signing secrets differ, in one fixed sentence", () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET_ON_FILE } });
     const resolved = resolveConfig({
-      env: { ...box.env, HUB_AUTH_TOKEN: inEnv },
+      env: { ...box.env, HUB_AUTH_TOKEN: SECRET_IN_ENV },
     });
 
-    const warning = resolved.warnings.join("\n");
-    expect(warning).toMatch(/HUB_AUTH_TOKEN/);
-    expect(warning).toContain(credentialsPath(box.env));
-    // `ub init`'s own refusal of this conflict, so the two tell one story.
-    expect(warning).toMatch(/make them equal, or unset one/);
-    // Neither value, nor any part of one.
-    expect(warning).not.toContain(onFile);
-    expect(warning).not.toContain(inEnv);
-    expect(mcpConfig(resolved.env).authSecret).toBe(inEnv);
+    // The whole warning, asserted whole. Nothing in it is derived from either
+    // secret, and equality is what keeps it that way: a length, a prefix or a
+    // digest added later fails here rather than shipping. The path is the one
+    // interpolation, and it comes from the resolver so the two cannot drift.
+    // `ub init`'s own refusal ends the same way, so they tell one story.
+    expect(resolved.warnings).toEqual([
+      "HUB_AUTH_TOKEN in the environment is in force; " +
+        `${credentialsPath(box.env)} holds a different signing secret — ` +
+        "make them equal, or unset one",
+    ]);
+    // And nothing of either value survives anywhere in it — not a fragment,
+    // not a size. (`ub status`'s own output is checked in storage.test.ts.)
+    expect(tracesOf(SECRET_IN_ENV, resolved.warnings.join("\n"))).toEqual([]);
+    expect(tracesOf(SECRET_ON_FILE, resolved.warnings.join("\n"))).toEqual([]);
+
+    expect(mcpConfig(resolved.env).authSecret).toBe(SECRET_IN_ENV);
     expect(resolved.shadowed).toEqual([
       { setting: "credential", layer: "credentials file" },
     ]);
@@ -341,7 +353,7 @@ describe("resolveConfig", () => {
     // Equal layers are not a conflict — the common case of `fnox exec` handing
     // over the very secret `ub init` wrote.
     const agreeing = resolveConfig({
-      env: { ...box.env, HUB_AUTH_TOKEN: onFile },
+      env: { ...box.env, HUB_AUTH_TOKEN: SECRET_ON_FILE },
     });
     expect(agreeing.warnings).toEqual([]);
     expect(agreeing.shadowed).toEqual([]);
