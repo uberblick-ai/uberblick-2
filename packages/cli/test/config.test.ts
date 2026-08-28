@@ -61,7 +61,14 @@ describe("resolveConfig", () => {
     // The workspace is the one value with no default: nothing may guess which
     // corpus this machine belongs to.
     expect(resolved.env.WORKSPACE_ID).toBeUndefined();
+    // And the refusal is the whole answer for a machine that is not bound
+    // yet: the exact file `ub` takes a workspace from, and both commands that
+    // write it — `ub remote join` being the one a flag-day re-bind runs.
+    expect(() => resolveMcpConfig(resolved.env)).toThrow(
+      join(box.configHome, "uberblick", "config.json"),
+    );
     expect(() => resolveMcpConfig(resolved.env)).toThrow(/ub init/);
+    expect(() => resolveMcpConfig(resolved.env)).toThrow(/ub remote join/);
 
     // The rest of the defaults are the MCP server's, reached by handing it the
     // resolved environment — one definition of the hub and the database path.

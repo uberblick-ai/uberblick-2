@@ -211,6 +211,12 @@ describe("ub doctor", () => {
     expect(check(checks, "workspace").status).toBe("fail");
     expect(check(checks, "workspace").remedy).toMatch(/ub init/);
     expect(check(checks, "workspace").remedy).toMatch(/ub workspace use/);
+    expect(check(checks, "workspace").remedy).toMatch(/ub remote join/);
+    // ...and says where a workspace is written, so the line answers "where did
+    // it look?" without a second command.
+    expect(check(checks, "workspace").reason).toContain(
+      join(box.configHome, "uberblick", "config.json"),
+    );
     expect(ok).toBe(false);
     expect(run.status).not.toBe(0);
   });

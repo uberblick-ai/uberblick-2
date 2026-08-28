@@ -137,19 +137,41 @@ function trimmed(value: string | undefined): string | null {
   return text === undefined || text === "" ? null : text;
 }
 
-/** Every room, the token claim and the database file are keyed by this. */
-const MISSING_WORKSPACE =
-  "WORKSPACE_ID is not set. It names the rooms this server opens, the " +
-  "workspace claim in its hub token, and its local database — there is no " +
-  "default. Run `ub init` to create a workspace, or export WORKSPACE_ID " +
-  "yourself (`ub status` prints the one in force).";
+/**
+ * The file `ub` keeps this machine's workspace in. Named here rather than
+ * imported because the dependency runs cli → mcp-server: `packages/cli` owns
+ * the file and its own `USER_CONFIG_FILE`, and `packages/cli/test/config.test.ts`
+ * asserts that the path this message prints is the one the cli resolves.
+ */
+const USER_CONFIG_FILE = "config.json";
+
+/**
+ * Every room, the token claim and the database file are keyed by this — so a
+ * machine with none configured gets the whole answer in one line: where `ub`
+ * takes it from, and both commands that write there. `ub remote join` is the
+ * one a machine binding to an existing hub runs, and the one a flag-day
+ * re-bind needs.
+ *
+ * The path is a directory and a filename and never a secret: the signing
+ * secret lives in `credentials.json`, which nothing here opens or names.
+ */
+function missingWorkspace(env: NodeJS.ProcessEnv): string {
+  const path = join(resolveStorage({ env }).configDir, USER_CONFIG_FILE);
+  return (
+    "WORKSPACE_ID is not set. It names the rooms this server opens, the " +
+    "workspace claim in its hub token, and its local database — there is no " +
+    `default. \`ub\` takes it from ${path}. Run \`ub init\` to create a ` +
+    "workspace, or `ub remote join <hub>/<workspace>` to bind this machine to " +
+    "one that already exists (`ub status` prints the one in force)."
+  );
+}
 
 export function resolveMcpConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): McpConfig {
   const configured = trimmed(env.WORKSPACE_ID);
   if (configured === null) {
-    throw new Error(MISSING_WORKSPACE);
+    throw new Error(missingWorkspace(env));
   }
   // A decorated value is accepted and parsed down: the slug is display, the
   // uuid is the identity, and only the identity goes any further.
