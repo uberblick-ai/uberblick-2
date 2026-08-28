@@ -8,7 +8,11 @@
  * (#376, #385), and an endpoint is not the kind of thing two sources may
  * disagree about. `WORKSPACE_ID` and `HUB_AUTH_TOKEN` keep theirs: a repository
  * binds itself to a workspace by pinning `WORKSPACE_ID` in its project MCP
- * entry (see `install.ts`), and `fnox exec` supplies the signing secret.
+ * entry (see `install.ts`), and `fnox exec` supplies the signing secret. When
+ * such a layer names something *different* from the file below it, the
+ * environment still wins — that is the point of it — and the disagreement is
+ * reported rather than left to whoever notices the wrong corpus: see
+ * {@link ShadowedLayer}.
  *
  * *Where* that `config.json` is belongs to `@uberblick/hub/storage`:
  * `$XDG_CONFIG_HOME/uberblick`, or `~/.config/uberblick` — one layout on every
@@ -67,6 +71,30 @@ export type Origin = "environment" | "user config" | "default";
 /** Where a signing secret came from, or null when none is configured. */
 export type CredentialOrigin = "environment" | "credentials file";
 
+/**
+ * A layer that named a value, and lost to a *different* one above it.
+ *
+ * Precedence is deliberate — a repository binds itself to a workspace by
+ * pinning `WORKSPACE_ID` in its project MCP entry, and that pin is meant to
+ * outrank this machine's default — but an ambient layer that silently
+ * disagrees with a file is the failure #376/#385 removed for the endpoint:
+ * `ub doctor` endorsed a workspace as healthy while `config.json` named
+ * another one. So a disagreement is reported and nothing else: the same layer
+ * still wins, and no disagreement is ever fatal.
+ *
+ * The layer above is the environment in both cases — it is the only one there
+ * is — so the winner is the origin already reported for that setting. An entry
+ * means the layers were compared and found to name different things: a value
+ * that could not be read as a workspace id at all is a warning and no entry,
+ * because nothing proves it names a *different* workspace.
+ */
+export interface ShadowedLayer {
+  /** The setting the layers disagree about. */
+  setting: "workspace" | "credential";
+  /** The layer that lost. */
+  layer: Origin | CredentialOrigin;
+}
+
 export interface ResolvedConfig {
   /**
    * The environment the MCP server is handed: the process environment with what
@@ -92,6 +120,11 @@ export interface ResolvedConfig {
    * directories that go with them.
    */
   storage: StoragePaths;
+  /**
+   * Layers a higher one overrode with a different value. Empty is the norm —
+   * agreeing layers, and a layer nothing competes with, are not a conflict.
+   */
+  shadowed: ShadowedLayer[];
   /** Everything questionable about the configuration. For stderr, never stdout. */
   warnings: string[];
 }
@@ -284,6 +317,49 @@ function warnAboutMisplacedSecret(
   }
 }
 
+/**
+ * Say when the environment's workspace and the file's are different
+ * workspaces. True when they are.
+ *
+ * **Identity, not spelling.** `<slug>-<uuid>` and the bare uuid are one
+ * workspace, so both sides are parsed and their uuids compared; otherwise
+ * every legitimately decorated pin would report a conflict it does not have.
+ *
+ * The losing layer is parsed *here* — resolution validates only the winner, so
+ * a malformed `config.json` under a valid pin is tolerated today and stays
+ * tolerated. Hence the try/catch: this warns, it never throws. Workspace ids
+ * are not secrets and both are named, but a value that did not parse is not,
+ * because the mistake this catches in the field is a pasted secret.
+ */
+function warnAboutShadowedWorkspace(
+  winner: { value: string; uuid: string },
+  loser: { value: string; path: string },
+  warnings: string[],
+): boolean {
+  let uuid: string;
+  try {
+    uuid = parseWorkspaceId(loser.value, `"workspace" in ${loser.path}`).uuid;
+  } catch {
+    warnings.push(
+      `WORKSPACE_ID in the environment is in force (${winner.value}); ` +
+        `"workspace" in ${loser.path} is not a workspace id, so the two ` +
+        "could not be compared — fix that file, or unset one",
+    );
+    return false;
+  }
+  if (uuid === winner.uuid) {
+    return false;
+  }
+  // Informative, not alarmed: a repository pin exists *because* it differs
+  // from the machine default, and whoever set one sees this at every start.
+  warnings.push(
+    `WORKSPACE_ID in the environment is in force (${winner.value}); ` +
+      `${loser.path} names a different workspace (${loser.value}) — expected ` +
+      "for a pinned checkout, otherwise unset one",
+  );
+  return true;
+}
+
 /** True when the file exists and no other user can read it. */
 export function isOwnerOnly(path: string): boolean {
   try {
@@ -361,6 +437,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   const env = options.env ?? process.env;
   const storage = resolveStorage({ env });
   const warnings: string[] = [];
+  const shadowed: ShadowedLayer[] = [];
 
   const paths = {
     userConfig: join(storage.configDir, USER_CONFIG_FILE),
@@ -370,24 +447,51 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   const userConfig = readJsonObject(paths.userConfig, warnings);
   warnAboutMisplacedSecret(userConfig, paths.userConfig, warnings);
 
+  const workspaceFromEnv = trimmed(env.WORKSPACE_ID);
+  const workspaceFromFile = stringField(
+    userConfig,
+    "workspace",
+    paths.userConfig,
+    warnings,
+  );
   const workspace = pick([
     {
       origin: "environment",
-      value: trimmed(env.WORKSPACE_ID),
+      value: workspaceFromEnv,
       label: "WORKSPACE_ID",
     },
     {
       origin: "user config",
-      value: stringField(userConfig, "workspace", paths.userConfig, warnings),
+      value: workspaceFromFile,
       label: `"workspace" in ${paths.userConfig}`,
     },
   ]);
+  let workspaceUuid: string | null = null;
   if (workspace.value !== null) {
     // The same rule the MCP server applies, applied to file-sourced values too.
     // The value is kept as typed — a `<slug>-<uuid>` spelling is stored and
     // shown the way its owner wrote it; only what reaches a room, a token or
     // the database is the bare uuid, and that parse happens where it is used.
-    parseWorkspaceId(workspace.value, workspace.label);
+    workspaceUuid = parseWorkspaceId(workspace.value, workspace.label).uuid;
+  }
+  // Both layers name a workspace, so the file's is being overridden — say
+  // which, and by what. Only a value the file actually supplied: a field of the
+  // wrong type was warned about above and is no layer at all. (The environment
+  // is the winner whenever it has a value, so `workspaceUuid` is its uuid; the
+  // null check is how the types say so.)
+  if (
+    workspaceFromEnv !== null &&
+    workspaceFromFile !== null &&
+    workspaceUuid !== null
+  ) {
+    const differs = warnAboutShadowedWorkspace(
+      { value: workspaceFromEnv, uuid: workspaceUuid },
+      { value: workspaceFromFile, path: paths.userConfig },
+      warnings,
+    );
+    if (differs) {
+      shadowed.push({ setting: "workspace", layer: "user config" });
+    }
   }
 
   // One layer, and deliberately one: `hubUrl` in this machine's `config.json`,
@@ -408,6 +512,22 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   warnings.push(...credentials.warnings);
   const secretFromFile = credentials.exposed ? null : credentials.signingSecret;
   const secretFromEnv = trimmed(env.HUB_AUTH_TOKEN);
+  // **That** they differ, and nothing else: not either value, not a length, not
+  // a prefix. Compared after the exposure refusal above, so a file nobody may
+  // read costs one warning — its mode — rather than two.
+  if (
+    secretFromEnv !== null &&
+    secretFromFile !== null &&
+    secretFromEnv !== secretFromFile
+  ) {
+    // `ub init` refuses this outright when a hub is in force; everywhere else
+    // it is a warning. The same sentence, so the two tell one story.
+    warnings.push(
+      `HUB_AUTH_TOKEN in the environment is in force; ${paths.credentials} ` +
+        "holds a different signing secret — make them equal, or unset one",
+    );
+    shadowed.push({ setting: "credential", layer: "credentials file" });
+  }
 
   let secret: string | null = secretFromEnv;
   let credentialOrigin: CredentialOrigin | null =
@@ -443,6 +563,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
     },
     paths,
     storage,
+    shadowed,
     warnings,
   };
 }

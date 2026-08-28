@@ -24,7 +24,7 @@ import {
   resolveMcpConfig,
 } from "@uberblick/mcp-server";
 import type { SyncStatus } from "@uberblick/mcp-server";
-import type { CredentialOrigin, Origin } from "./config.js";
+import type { CredentialOrigin, Origin, ShadowedLayer } from "./config.js";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
@@ -76,6 +76,12 @@ export interface StatusReport {
   credentialPresent: boolean;
   credentialSource: CredentialOrigin | null;
   sources: { workspace: Origin; hubUrl: Origin };
+  /**
+   * The layers that lost to a *different* value above them — which is what
+   * `sources` and `credentialSource` name. Absent unless something disagrees,
+   * so a reader of the JSON can treat the key's presence as the conflict.
+   */
+  shadowed?: ShadowedLayer[] | undefined;
   /** `disabled` means no signing secret, so this machine is local-only. */
   hub: SyncStatus["hub"];
   rooms: SyncStatus["rooms"];
@@ -127,6 +133,9 @@ export async function statusReport(
           workspace: resolved.origins.workspace,
           hubUrl: resolved.origins.hubUrl,
         },
+        ...(resolved.shadowed.length === 0
+          ? {}
+          : { shadowed: resolved.shadowed }),
         hub: sync.hub,
         rooms: sync.rooms,
         unsyncedChanges: sync.unsyncedChanges,
@@ -184,6 +193,15 @@ export function renderStatus(report: StatusReport): string {
   // "credential", not "token": HUB_AUTH_TOKEN is the secret tokens are signed
   // with, and the two words must not blur into each other.
   text += field("credential", credential);
+  // Only when something disagrees. The line above it says what is in force;
+  // this one says what that overrode, which is the question `ub status` could
+  // not answer while it reported the winner alone.
+  for (const shadowed of report.shadowed ?? []) {
+    text += field(
+      "shadowed",
+      `${shadowed.setting} in ${shadowed.layer} — the environment is in force`,
+    );
+  }
   text += field("database", report.databasePath);
   // The data root, named once: everything durable is under it, and "where is my
   // data" is the question this line exists to answer.
@@ -222,9 +240,9 @@ export const STATUS_OPTIONS = {
 export const STATUS_HELP = `usage: ub status [--json]
 
 What this directory resolves to right now: the workspace and which layer chose
-it, the hub endpoint, whether a signing secret is configured, the local database
-and the sync state of every room attached to it. Reads only — nothing here
-changes any configuration.
+it, any layer that named something different and lost, the hub endpoint, whether
+a signing secret is configured, the local database and the sync state of every
+room attached to it. Reads only — nothing here changes any configuration.
 
 options:
   --json            the same report as JSON on stdout, for a script to read
