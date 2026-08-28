@@ -13,23 +13,45 @@ Server-minted sessions are the planned replacement; see
 
 ## Host prerequisites
 
-- A Linux host with Docker Engine and Docker Compose 2.6.0 or newer —
-  `ub remote init` clones the repository onto it, and only the by-hand procedure
-  below needs a checkout you made yourself. Compose 5 also satisfies this
-  requirement; check with `docker compose version --short`. The build secrets
-  and the environment-backed secret source that first set this floor are gone
-  with #426; what the file still uses beyond long-standing Compose v2 features
-  is the top-level project `name`. The floor stays at 2.6 because that is the
-  oldest version this deployment has been verified on, not because a lower one
-  is known to fail.
-- Tailscale installed on the host and connected to the private tailnet. MagicDNS
-  and HTTPS must be enabled for the tailnet. Enabling HTTPS publishes the
-  machine names used in certificates to a public certificate transparency log;
-  Tailscale documents that tradeoff in
+`ub remote init` probes the host over SSH before it changes anything on it, and
+refuses naming the piece that is missing rather than guessing. This is that
+list:
+
+- **SSH access to the host**, as the user the target names
+  (`uberblick@box.tailnet.ts.net`). Tailscale SSH is enough. The same access is
+  how the host is updated later, since nothing on it updates itself.
+- **That user able to drive Docker without `sudo`.** The probe runs
+  `docker compose version --short` *as the SSH user*, so a user outside the
+  host's `docker` group reads exactly like a host with no Docker at all; add
+  them to it there.
+- **Docker Engine, with Docker Compose 2.6.0 or newer.** Compose 5 satisfies it
+  too; `docker compose version --short` is what both the probe and
+  `remote-compose.sh` read. The build secrets and the environment-backed secret
+  source that first set this floor are gone with #426; what the compose file
+  still uses beyond long-standing Compose v2 features is the top-level project
+  `name`. The floor stays at 2.6 because that is the oldest version this
+  deployment has been verified on, not because a lower one is known to fail.
+- **`git`.** `ub remote init` clones this repository onto the host and
+  `ub remote update` fetches into that checkout: the deployment is *built there,
+  from source*, so the host always holds a checkout and there is no registry and
+  no published image anywhere in this procedure. Only the by-hand walk-through
+  below needs a checkout you made yourself.
+- **Tailscale, connected to the private tailnet**, with MagicDNS and HTTPS
+  enabled for the tailnet — that is where the certificate comes from. Enabling
+  HTTPS publishes the machine names used in certificates to a public certificate
+  transparency log; Tailscale documents that tradeoff in
   [Enabling HTTPS](https://tailscale.com/docs/how-to/set-up-https-certificates).
-- TCP port 443 free on the host's Tailscale IPv4 address.
-- `git` on the host, and SSH access to it (Tailscale SSH is enough) — that SSH
-  access is also how the host is updated, since nothing on it updates itself.
+  The probe also reads `tailscale status --json` and `tailscale ip -4` for the
+  MagicDNS name and the address.
+- **TCP port 443 free on the host's Tailscale IPv4 address** — the one
+  prerequisite nothing probes. Compose publishes `<TAILSCALE_IP>:443` only, so
+  an address already in use surfaces as Caddy failing to start, in
+  `sh remote-compose.sh logs caddy`.
+
+Nothing else belongs on the host: no Node, no pnpm, no `sqlite3`. Every process
+here runs in a container built from the checkout, which is why the backup and
+restore procedures below borrow the hub's own image rather than asking for tools
+of their own.
 
 `ub remote init` runs from your own machine, which must itself be on the tailnet
 (it is what verifies the deployment afterwards) and must hold a GitHub login with
@@ -127,16 +149,32 @@ discarded. The host's `.env` is untracked and survives; nothing runs `git clean`
 ## What the command does, by hand
 
 The manual procedure, kept as the reference for what `ub remote init` automates
-and for repairing a host by hand. From the repository checkout on the remote
-host:
+and for repairing a host by hand.
+
+**`docker-compose.yml` in this repository is the recipe** — the one canonical
+copy of what runs, which image each service is built from, which volume holds
+what, and which port is published where. It is not restated here and there is no
+second copy to keep in step: read it when you want the shape of the deployment.
+Caddy's configuration is the same story — `Caddyfile` is `COPY`'d into the web
+image from the checkout (see `Dockerfile`) and is fully `{$VAR}`-parameterised,
+so nothing writes or edits a Caddyfile on the host. **The only file the host
+supplies is `.env`.**
+
+From the repository checkout on the remote host:
 
 ```sh
 cp remote.env.example .env
+chmod 600 .env
 tailscale ip -4
 ```
 
-Edit `.env` and set the four required values (`WEB_HUB_URL` is optional; see
-[Pointing the client at another hub](#pointing-the-client-at-another-hub)):
+Mode `0600`, because that file holds the signing secret — `ub remote init`
+writes it under `umask 077` and chmods it for exactly this reason.
+
+Then edit `.env`. Its keys are the ones `docker-compose.yml` and
+`remote.env.example` name, and there are no others: four required, plus optional
+`WEB_HUB_URL` (see
+[Pointing the client at another hub](#pointing-the-client-at-another-hub)).
 
 - `TAILSCALE_HOST` is the host's full `*.ts.net` MagicDNS name, with no scheme
   or trailing slash.
@@ -183,8 +221,25 @@ sh remote-compose.sh ps
 sh remote-compose.sh logs --tail=100 hub caddy
 ```
 
-Open `https://<TAILSCALE_HOST>` from a second computer on the same tailnet. It
-opens the first workspace in `WEB_WORKSPACES`. In the browser developer tools,
+Two things say the deployment is up, and they are what `ub remote init` checks
+for you: **the site answers** on `https://<TAILSCALE_HOST>/`, and **`/ws`
+upgrades** to a WebSocket. The first request is what makes Tailscale issue the
+certificate, so a check that fails immediately after `up` is a false negative —
+give it up to 90 seconds. From another machine on the tailnet:
+
+```sh
+curl -sS -o /dev/null -w '%{http_code}\n' https://<TAILSCALE_HOST>/
+curl -sS -o /dev/null -D - https://<TAILSCALE_HOST>/ws \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA=='
+```
+
+`200` from the first, `101 Switching Protocols` from the second. A `502` on
+`/ws` is Caddy up and the hub down — expected while the hub is stopped for a
+backup, and otherwise a job for `sh remote-compose.sh logs hub`.
+
+Then open `https://<TAILSCALE_HOST>` from a second computer on the same tailnet.
+It opens the first workspace in `WEB_WORKSPACES`. In the browser developer tools,
 `https://<TAILSCALE_HOST>/uberblick-config.json` must return
 `{"hubUrl":"wss://<TAILSCALE_HOST>/ws","workspaces":"<the list from .env>","hubAuthToken":"<the secret from .env>"}`
 and the collaboration WebSocket must be that same address; a `ws://localhost`
@@ -296,8 +351,86 @@ systemctl --user list-timers --all | grep uberblick   # expect no output
 
 The hub handles Compose's `SIGTERM` by flushing pending document updates before
 it exits. SQLite is `/data/hub.sqlite` in the `hub-data` named volume, so normal
-container replacement and `sh remote-compose.sh down` preserve it. Backups are a
-separate follow-up (#85).
+container replacement and `sh remote-compose.sh down` preserve it.
+
+### Backing the hub up
+
+```sh
+sh hub-backup.sh ~/uberblick-hub-$(date +%Y-%m-%d).sqlite
+```
+
+In the host's checkout, beside `remote-compose.sh`. It **stops the hub, copies,
+and starts it again** — and the stop is the point, not an inconvenience.
+Hocuspocus debounces the store (2s, at most 10s; the hub leaves both at their
+defaults), so a document edited a moment ago may exist only in the hub's memory.
+The only flush an operator can reach is a shutdown: `SIGTERM` makes the hub
+write every pending update and close the database, and `stop_grace_period: 30s`
+already leaves room for that 10s ceiling. Copying a *live* file instead would
+capture whatever SQLite happened to have on disk — a file that opens perfectly
+and is missing the last few minutes of work.
+
+**The hub's own verdict is what decides.** `docker compose stop` exits 0 whatever
+the container did, so the script reads the exit code separately, from
+`ps -a --format json` → `ExitCode`. Non-zero — including `137`, the grace period
+expiring — means the flush did not finish, and **no file is written at all**. A
+backup nobody can trust is worse than no backup, because it is the one that gets
+restored. The hub is started again from an `EXIT` trap on every path: with
+`restart: unless-stopped`, a manual stop survives a Docker restart, so a run that
+died between the stop and the start would leave the hub down for good.
+
+The file lands at mode `0600`. It is every document in the workspace in one
+readable file; treat it exactly like the signing secret.
+
+**Clients keep working while the hub is stopped.** Caddy stays up and serves the
+app; `/ws` answers 502 for those seconds; every MCP server and browser tab goes
+on editing its own replica offline and converges when the socket returns. The
+window is a few seconds — but take backups when you would take a deploy, not
+mid-sentence for somebody.
+
+### Restoring one
+
+```sh
+sh hub-restore.sh ~/uberblick-hub-2026-08-28.sqlite
+```
+
+**Verified before anything is touched.** A restore runs on somebody's worst day,
+against a file nobody has opened since it was written, over the only copy that is
+left. So the backup is read first — `PRAGMA integrity_check`, *and* a non-empty
+`documents` table, because an empty but perfectly valid database passes the
+pragma and would restore a corpus of nothing. That check runs inside the hub's
+own image through `node:sqlite`, the module the hub itself persists with (the
+image is `node:26-bookworm-slim` and carries no `sqlite3` CLI), and writes the
+candidate to the container's `/tmp`, never to `/data`. A missing, corrupt or
+empty backup exits non-zero **with the hub still running and the volume
+untouched**.
+
+Only then does it stop the hub, copy the file into `hub:/data/hub.sqlite`, drop
+any rollback-journal sidecar the replaced database left behind, hand the file to
+the container's `node` user, and start the hub. It restores into an empty volume
+just as well as over an existing one, which is the case the drill on #404
+exercises: `down --volumes`, `up`, restore, and a fresh client with empty local
+state enumerating and reading the pre-backup corpus.
+
+Both scripts drive Compose only through `sh remote-compose.sh`. That is not
+style: `docker-compose.yml` gates Caddy's secret on a variable only the wrapper
+exports, and Compose interpolates the whole model for every subcommand, so a bare
+`docker compose stop hub` fails on this host.
+
+### What a backup is actually for
+
+Every MCP server holds the **entire** workspace and hydrates from its own
+append-only update log; `_directory`, `_sidebar` and `_feedback` are synced
+documents like any other, and the hub keeps no non-synced tables today. So the
+*content* is restorable without a backup at all: stand up an empty hub, let one
+machine reconnect, and the corpus comes back off that replica.
+
+What no replica gives you is **point-in-time recovery** — yesterday's text of a
+document somebody has since mangled, in a system where every mangling replicates
+within a second. That is the backup's job, and the only job it has here.
+
+**Retention and encryption at rest are the owner's**, deliberately: how many of
+these files to keep, where they live, whether they are encrypted or copied off
+the host. Nothing here schedules a backup, rotates one, or sends one anywhere.
 
 ## Binding a computer to this hub's workspace
 
