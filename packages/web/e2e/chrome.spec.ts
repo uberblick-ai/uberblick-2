@@ -32,6 +32,7 @@ import {
   MAX_TOKEN_LIFETIME_SECONDS,
   mintToken,
 } from "@uberblick/hub";
+import { wrapToken } from "@uberblick/hub/protocol";
 import { directoryRoom } from "@uberblick/schema";
 import * as Y from "yjs";
 import { startHarness } from "./harness.js";
@@ -199,15 +200,19 @@ test("MCP connections counts a connected agent session, and stops when it goes",
     url: harness().hubUrl,
     name: directoryRoom(harness().workspaceUuid),
     document: doc,
+    // Wrapped like every real client — the hub reads the protocol version out
+    // of the auth message before it reads the token.
     token: async () =>
-      mintToken(await importRootSecret(harness().authSecret), {
-        typ: "room",
-        sub: `agent-${randomUUID()}`,
-        workspace: harness().workspaceUuid,
-        scope: "read-write",
-        kid: null,
-        lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-      }),
+      wrapToken(
+        await mintToken(await importRootSecret(harness().authSecret), {
+          typ: "room",
+          sub: `agent-${randomUUID()}`,
+          workspace: harness().workspaceUuid,
+          scope: "read-write",
+          kid: null,
+          lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+        }),
+      ),
   });
   agent.setAwarenessField("user", { name: "an agent", color: "#7b5ec7" });
 

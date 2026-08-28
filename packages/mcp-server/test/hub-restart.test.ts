@@ -298,6 +298,9 @@ describe("a hub that restarts under connected servers", () => {
 
     const status = await rig.ok("sync_status", {});
     expect(status.hub.status).toBe("auth-failed");
-    expect(status.hub.reason).toBe("authentication rejected by hub");
+    expect(status.hub.reason).toBe(
+      "the hub rejected this client's token: the secret is wrong, or this hub is " +
+        "older than this client — update the hub",
+    );
   });
 });

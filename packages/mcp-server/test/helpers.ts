@@ -26,6 +26,7 @@ import {
   mintToken,
   silentLogger,
 } from "@uberblick/hub";
+import { wrapToken } from "@uberblick/hub/protocol";
 import { parseRoom } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { McpConfig } from "../src/config.js";
@@ -344,6 +345,8 @@ export interface HubOptions {
    * here rather than inventing a seam for it.
    */
   log?: HubLogger;
+  /** A hub from another release, for the tests about protocol skew. */
+  protocolVersion?: number;
 }
 
 export function startHub(options: HubOptions = {}): Promise<Hub> {
@@ -352,6 +355,9 @@ export function startHub(options: HubOptions = {}): Promise<Hub> {
     port: options.port ?? 0,
     databasePath: options.databasePath ?? tempDatabasePath(),
     log: options.log ?? silentLogger,
+    ...(options.protocolVersion === undefined
+      ? {}
+      : { protocolVersion: options.protocolVersion }),
     debounce: 20,
     maxDebounce: 200,
     shutdownTimeoutMs: 5_000,
@@ -384,14 +390,18 @@ export async function peerClient(
   room: string,
   doc: Y.Doc = new Y.Doc(),
 ): Promise<PeerClient> {
-  const token = await mintToken(await importRootSecret(TEST_SECRET), {
-    typ: "room",
-    sub: "test-peer",
-    workspace: parseRoom(room).workspaceId,
-    scope: "read-write",
-    kid: null,
-    lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-  });
+  // Wrapped like every real client: the hub reads the protocol version out of
+  // the auth message before it looks at the token at all.
+  const token = wrapToken(
+    await mintToken(await importRootSecret(TEST_SECRET), {
+      typ: "room",
+      sub: "test-peer",
+      workspace: parseRoom(room).workspaceId,
+      scope: "read-write",
+      kid: null,
+      lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+    }),
+  );
   const provider = new HocuspocusProvider({
     url: hubUrl(port),
     name: room,

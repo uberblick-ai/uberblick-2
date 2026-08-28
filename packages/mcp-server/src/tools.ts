@@ -1315,7 +1315,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       description:
         "What this replica holds and what the hub has acknowledged.\n\n" +
         "`hub.status` distinguishes a hub that is down from a token the hub rejected — the first resolves itself, " +
-        "the second needs a human — and `disabled` means no secret was configured, so this server is local-only.\n\n" +
+        "the second needs a human — and `disabled` means no secret was configured, so this server is local-only. " +
+        "`update-required` is the third kind: this replica and the hub speak different sync protocol versions, so " +
+        "the hub refuses the connection outright. `hub.protocolVersion` is this replica's and " +
+        "`hub.hubProtocolVersion` the hub's, and `hub.reason` says which side is older; nothing syncs until that " +
+        "side is updated, and no amount of waiting changes it. Every tool still works locally throughout.\n\n" +
         "The two counts here are in different units, so they are not expected to agree. `unsyncedChanges` counts " +
         "ROOMS, not updates: the rooms holding local changes the hub has not acknowledged, the ones `pendingRooms` " +
         "names. It is read from the durable pending set, so it survives a restart and is non-zero in local-only " +

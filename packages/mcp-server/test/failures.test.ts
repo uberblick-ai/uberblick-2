@@ -342,6 +342,9 @@ describe("the failure contract", () => {
       "hub-down": "retry",
       disabled: "manual",
       "auth-failed": "manual",
+      // A version skew is the clearest case of all: the hub refuses the
+      // connection before the token, so waiting is advice that loops forever.
+      "update-required": "manual",
       quarantined: "manual",
     };
     for (const [status, recoveryClass] of Object.entries(expected)) {
@@ -352,6 +355,7 @@ describe("the failure contract", () => {
     // The two a caller cannot wait out say what to do instead.
     expect(hydrationRecovery("disabled").recovery).toContain("dangling");
     expect(hydrationRecovery("auth-failed").recovery).toContain("human");
+    expect(hydrationRecovery("update-required").recovery).toContain("updated");
   });
 
   it("names the durable half of a partial write, and promises no rollback", async () => {

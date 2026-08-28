@@ -38,6 +38,7 @@ import {
   CLOCK_SKEW_SECONDS,
   MAX_TOKEN_LIFETIME_SECONDS,
 } from "@uberblick/hub/token";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import type { McpConfig } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import type { ResolvedConfig } from "./config.js";
@@ -275,6 +276,18 @@ async function hubCheck(
       "give the hub and this machine the same secret — `ub status` says which layer this one came from — and read the clock check below, because a clock far enough out of step is refused the same way",
     );
   }
+  if (status === "update-required") {
+    // Not a credential problem and not a reachability one: the hub refuses the
+    // connection before the token, so nothing this machine can be given fixes
+    // it. Which side is old takes both integers, and a `Dial` carries only a
+    // status — so this names ours and sends the reader to `ub status`, which
+    // holds the whole `HubState` and prints both.
+    return fail(
+      "hub",
+      `${config.hubUrl} refuses this machine: it speaks a different sync protocol than this build's ${SYNC_PROTOCOL_VERSION}`,
+      "`ub status` names the hub's version beside this one and says which side is older; update that side — a hub and a client on different sync protocols exchange nothing at all, so no credential and no retry changes this",
+    );
+  }
   if (status === "unsettled") {
     // Up, and not serving: the socket opened and the directory room never
     // arrived. Reporting this as reachable is how a client that will never sync
@@ -453,15 +466,22 @@ async function bindCheck(
   if (status === "connected") {
     return pass("bind", `${address} is held by an uberblick hub — it is already running`);
   }
-  if (status === "auth-failed" || status === "unsettled") {
+  if (
+    status === "auth-failed" ||
+    status === "unsettled" ||
+    status === "update-required"
+  ) {
     // It speaks the protocol, and that is all it proved. Only a directory read
     // with our own token identifies our hub; anything else could be somebody
     // else's Hocuspocus server, and calling it ours would send a person looking
-    // for a hub that is not there.
+    // for a hub that is not there. A version skew belongs here rather than in
+    // the verdict below for the same reason read the other way: something that
+    // refuses us over a *sync protocol* version is certainly a hub, so calling
+    // it "not an uberblick hub" would be the false answer.
     return skipped(
       "bind",
-      `${address} is held by something that speaks the protocol but did not serve this workspace with our credential`,
-      `if it is your hub, give it and this machine the same signing secret; if it is not, ${PORT_REMEDY}`,
+      `${address} is held by something that speaks the protocol but did not serve this workspace to this machine`,
+      `if it is your hub, give it and this machine the same signing secret — and read the hub check above, which says whether it refused the secret or this machine's sync protocol version; if it is not, ${PORT_REMEDY}`,
     );
   }
   return fail(

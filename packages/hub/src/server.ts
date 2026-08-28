@@ -58,6 +58,11 @@ import {
 import type { HubLogger } from "./log.js";
 import { stderrLogger } from "./log.js";
 import { HubDatabase, isEphemeralDatabase } from "./persistence.js";
+import {
+  protocolMismatchReason,
+  readAuthEnvelope,
+  SYNC_PROTOCOL_VERSION,
+} from "./protocol.js";
 import type {
   ClampFailure,
   TokenClaims,
@@ -218,6 +223,7 @@ export function resolvePeer(headers: Headers): PeerAddress {
 /** Every reason the hub refuses a connection, as one closed vocabulary. */
 type RejectionCause =
   | "token-in-query"
+  | "protocol-mismatch"
   | TokenFailure
   | ClampFailure
   | "workspace-mismatch";
@@ -429,6 +435,8 @@ export async function createHub(config: HubConfig): Promise<Hub> {
   // Imported once, here: the root secret never changes for the life of a hub,
   // and `onAuthenticate` wants a key rather than a string.
   const rootKey = await importRootSecret(config.authSecret);
+  // The build's, unless a test moved one end to observe a skew. See HubConfig.
+  const protocolVersion = config.protocolVersion ?? SYNC_PROTOCOL_VERSION;
   const databasePath = config.databasePath ?? defaultDatabasePath();
   const address = config.address ?? DEFAULT_HOST;
   const shutdownTimeoutMs = config.shutdownTimeoutMs ?? 10_000;
@@ -539,7 +547,28 @@ export async function createHub(config: HubConfig): Promise<Hub> {
         );
       }
 
-      const inspected = await inspectToken(rootKey, token);
+      // The version exchange, before anything about the token is believed —
+      // and before `JSON.parse` sees the string, which is what keeps
+      // `MAX_TOKEN_LENGTH`'s promise that an unauthenticated caller cannot
+      // choose how much work the hub does. A bare token is a mismatch too:
+      // it is what every not-yet-updated client looks like on the flag day.
+      const envelope = readAuthEnvelope(token);
+      if (envelope === null || envelope.protocolVersion !== protocolVersion) {
+        log(
+          rejected("protocol-mismatch", {
+            // The client's is absent when there was no readable envelope. Both
+            // integers and nothing else: never the token, never the envelope.
+            clientProtocol: envelope?.protocolVersion ?? null,
+            hubProtocol: protocolVersion,
+          }),
+        );
+        throw new AuthError(
+          protocolMismatchReason(protocolVersion),
+          `this hub speaks sync protocol ${protocolVersion}`,
+        );
+      }
+
+      const inspected = await inspectToken(rootKey, envelope.token);
       if ("failure" in inspected) {
         log(rejected(inspected.failure, tokenFields(inspected.identity)));
         throw new AuthError(

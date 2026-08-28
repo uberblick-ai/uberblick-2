@@ -436,8 +436,14 @@ function plural(count: number, noun: string): string {
 
 /** Why a hub could not be read, in one line. Never the hub's own words. */
 function hubProblem(url: string, hub: HubState): string {
+  if (hub.status === "update-required") {
+    // `HubState.reason` is composed locally from two integers and already names
+    // both versions and the side to update — the same sentence `ub status`
+    // prints, so a person reads one wording wherever they meet this.
+    return `${url} speaks a different sync protocol: ${hub.reason}`;
+  }
   if (hub.status === "auth-failed") {
-    return `${url} rejected the credential`;
+    return `${url} rejected the credential — the secret is wrong, or that hub is older than this client`;
   }
   if (hub.status === "disabled") {
     return `no signing secret is configured, so ${url} cannot be authenticated to`;

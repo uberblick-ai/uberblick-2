@@ -125,10 +125,15 @@ const cases: Case[] = [
     // Refused on length before anything decodes it: a real token is a few
     // hundred bytes, and an unauthenticated caller does not get to choose how
     // much work the hub does.
+    //
+    // Past MAX_TOKEN_LENGTH and still inside MAX_AUTH_MESSAGE_LENGTH, so it is
+    // the *token* ceiling this case reaches. The envelope's own bound is the
+    // outer one and refuses a longer string earlier, under a different cause —
+    // see `protocol.test.ts`, which pins that one.
     name: "a token far longer than any token",
     cause: "unparseable",
     identity: "unparseable",
-    token: async () => `${"A".repeat(8192)}.${"B".repeat(8192)}`,
+    token: async () => `${"A".repeat(2074)}.${"B".repeat(2075)}`,
   },
   {
     name: "a token signed with somebody else's secret",

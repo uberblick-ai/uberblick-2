@@ -12,6 +12,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { appendBlock, getBlocks, getMeta, listDirectory } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import {
   hubUrl,
   LIVE_HUB_SETTLE,
@@ -45,7 +46,9 @@ afterEach(async () => {
   removeTempDirs();
 });
 
-async function hub(options: { port?: number; databasePath?: string } = {}) {
+async function hub(
+  options: { port?: number; databasePath?: string; protocolVersion?: number } = {},
+) {
   const started = await startHub(options);
   hubs.push(started);
   return started;
@@ -319,6 +322,53 @@ describe("hub sync", () => {
     }
   });
 
+  it("reports a protocol skew as update-required, and keeps serving", async () => {
+    // A hub from another release. The version is compared for exact equality
+    // and refused before the token, so this is not a credential problem and no
+    // retry reaches past it — which is the whole reason it is its own status.
+    const running = await hub({ protocolVersion: SYNC_PROTOCOL_VERSION + 1 });
+    const rig = await serverOn(running.port);
+
+    await waitUntil("the hub to refuse the protocol version", async () => {
+      const status = await rig.ok("sync_status", {});
+      return status.hub.status === "update-required";
+    });
+
+    const status = await rig.ok("sync_status", {});
+    // Both integers and, in words, which side is old: a person who can only see
+    // one of the two numbers cannot tell what to update.
+    expect(status.hub.protocolVersion).toBe(SYNC_PROTOCOL_VERSION);
+    expect(status.hub.hubProtocolVersion).toBe(SYNC_PROTOCOL_VERSION + 1);
+    expect(status.hub.reason).toContain("update this client");
+    expect(status.rooms.every((room: { synced: boolean }) => !room.synced)).toBe(true);
+
+    // Refused on the wire, and still a working replica: this is the property
+    // that makes the refusal safe to be strict about.
+    const created = await rig.ok("create_doc", {
+      title: "Written against a hub that refuses us",
+      description: "A test document.",
+    });
+    const read = await rig.ok("get_doc", { uuid: created.uuid });
+    expect(read.title).toBe("Written against a hub that refuses us");
+  });
+
+  it("reports the client's own protocol version even with the hub down", async () => {
+    // Nothing to compare against, and the number is still the one a person has
+    // to quote when they ask why two machines disagree.
+    const rig = await serverOn(1, {});
+    await waitUntil("the hub to be given up on", async () => {
+      const seen = await rig.ok("sync_status", {});
+      return seen.hub.status === "hub-down";
+    });
+
+    const status = await rig.ok("sync_status", {});
+
+    expect(status.hub.protocolVersion).toBe(SYNC_PROTOCOL_VERSION);
+    // Absent, not zero: a hub that has not refused us has not said what it
+    // speaks, and inventing a number here would be a guess on a status line.
+    expect(status.hub.hubProtocolVersion).toBeUndefined();
+  });
+
   it("reports a rejected token as auth-failed, and keeps serving", async () => {
     const running = await hub();
     const wrongSecret = "a-different-secret-the-hub-will-not-accept";
@@ -335,7 +385,10 @@ describe("hub sync", () => {
     // rejecting is a token we just sent it, and this reason is rendered by every
     // consumer — tool result, `ub status`, stderr log. A hostile or careless hub
     // must not get to put text there, let alone echo the credential back.
-    expect(status.hub.reason).toBe("authentication rejected by hub");
+    expect(status.hub.reason).toBe(
+      "the hub rejected this client's token: the secret is wrong, or this hub is " +
+        "older than this client — update the hub",
+    );
     expect(status.hub.reason).not.toContain(wrongSecret);
 
     // A rejected token is a sync problem, never a local one.

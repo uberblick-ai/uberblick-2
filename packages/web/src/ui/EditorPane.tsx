@@ -181,6 +181,28 @@ export function StatusLine({
   const peers = usePeers(connection);
   const state = useCalmSyncState(rawSyncState(status));
   const label = state === "syncing" ? "syncing…" : state;
+  const mismatch = status.protocolMismatch;
+  if (mismatch !== null) {
+    // A fourth reading, not a fourth sync state: the three above describe a
+    // connection that is working or coming back, and this one describes a page
+    // that will not sync again until somebody updates something. Nothing here
+    // is the hub's text — both numbers were validated before they arrived.
+    return (
+      <div className="ub-status">
+        <span className="ub-status-mark" aria-hidden="true">
+          <span className="ub-dot ub-dot-off" />
+        </span>
+        <span className="ub-status-word">update required</span>
+        <span className="ub-muted">
+          {mismatch.hub > mismatch.client
+            ? "this app is older than the hub — update it and reload"
+            : "the hub is older than this app — update the hub"}
+          {` (app ${mismatch.client}, hub ${mismatch.hub})`}
+        </span>
+        <CopyLink room={connection.room} segment={segment} />
+      </div>
+    );
+  }
   return (
     <div className="ub-status">
       {/* The word carries the meaning; the mark is decoration beside it. */}

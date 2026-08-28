@@ -28,6 +28,7 @@ function stubConnection(
     unsyncedChanges,
     localReplicaLoaded: false,
     hasLocalCache: false,
+    protocolMismatch: null,
     ...patch,
   };
   return {
@@ -74,6 +75,48 @@ describe("the status line names the unit of its backlog count", () => {
     expect(label(0)).toBeNull();
   });
 
+});
+
+/** The whole line, for a room in the given state. */
+function line(patch: Partial<RoomStatus>): string {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+    true;
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  act(() =>
+    root.render(
+      <StatusLine connection={stubConnection(0, patch)} segment={WORKSPACE} />,
+    ),
+  );
+  const text = host.querySelector(".ub-status")?.textContent ?? "";
+  act(() => root.unmount());
+  host.remove();
+  return text.replace(/\s+/g, " ").trim();
+}
+
+describe("a hub that refuses this page's sync protocol", () => {
+  it("says an update is needed, and which side needs it", () => {
+    // A reading of its own, not a fourth sync state: the other three describe a
+    // connection that works or is coming back, and this one describes a page
+    // that will not sync again until somebody updates something. Both integers
+    // are shown because "which side" is the only actionable part.
+    const older = line({ protocolMismatch: { hub: 2, client: 1 } });
+    expect(older).toContain("update required");
+    expect(older).toContain("this app is older than the hub");
+    expect(older).toContain("(app 1, hub 2)");
+
+    const newer = line({ protocolMismatch: { hub: 1, client: 2 } });
+    expect(newer).toContain("the hub is older than this app");
+    expect(newer).toContain("(app 2, hub 1)");
+  });
+
+  it("says nothing of the sort while there is no mismatch", () => {
+    // The new reading replaces the line; a room with no refusal must never see
+    // it, whichever of the three sync states it is in.
+    expect(line({})).not.toContain("update required");
+    expect(line({ connected: true, synced: true })).not.toContain("update required");
+  });
 });
 
 /** Whether the line claims a local cache, for a room in the given state. */

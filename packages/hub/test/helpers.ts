@@ -23,6 +23,7 @@ import type { Hub } from "../src/server.js";
 import { createHub } from "../src/server.js";
 import type { TokenScope } from "../src/token.js";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "../src/token.js";
+import { SYNC_PROTOCOL_VERSION, wrapToken } from "../src/protocol.js";
 
 /** The hub's HMAC secret in tests. Never a valid token itself. */
 export const TEST_SECRET = "test-hmac-secret-for-the-hub";
@@ -167,17 +168,30 @@ export interface ClientOptions {
    * client eventually timed itself out.
    */
   messageReconnectTimeout?: number;
+  /**
+   * The protocol version this client claims, or `null` to send the token bare —
+   * a client from before the envelope, which is what the flag day refuses.
+   *
+   * Defaults to this build's, because a real client always wraps: a test that
+   * hands this rig a garbage or forged *token* is asking what the hub makes of
+   * the token, and it must reach the token check to find out.
+   */
+  protocolVersion?: number | null;
 }
 
 export function createClient(options: ClientOptions): TestClient {
   const doc = options.doc ?? new Y.Doc();
   const headers = options.headers;
+  const claimed = options.protocolVersion;
 
   const provider = new HocuspocusProvider({
     // Loopback is a test concern: the hub itself never names an address.
     url: `ws://127.0.0.1:${options.port}`,
     name: options.room,
-    token: options.token,
+    token:
+      claimed === null
+        ? options.token
+        : wrapToken(options.token, claimed ?? SYNC_PROTOCOL_VERSION),
     document: doc,
     // The provider builds its socket from this same object, so the socket's
     // options travel through it — its public type just does not say so.

@@ -29,6 +29,7 @@ import {
   silentLogger,
 } from "@uberblick/hub";
 import type { Hub } from "@uberblick/hub";
+import { wrapToken } from "@uberblick/hub/protocol";
 import { getBlocks, initDoc, insertBlock } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
@@ -166,14 +167,16 @@ function peer(port: number, room: string): { doc: Y.Doc; destroy(): void } {
     name: room,
     document: doc,
     token: async () =>
-      mintToken(await importRootSecret(SECRET), {
-        typ: "room",
-        sub: "peer",
-        workspace: WORKSPACE,
-        scope: "read-write",
-        kid: null,
-        lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-      }),
+      wrapToken(
+        await mintToken(await importRootSecret(SECRET), {
+          typ: "room",
+          sub: "peer",
+          workspace: WORKSPACE,
+          scope: "read-write",
+          kid: null,
+          lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+        }),
+      ),
   });
   return { doc, destroy: () => provider.destroy() };
 }

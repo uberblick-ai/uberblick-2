@@ -104,6 +104,7 @@ const OFFLINE: RoomStatus = {
   unsyncedChanges: 0,
   localReplicaLoaded: false,
   hasLocalCache: false,
+  protocolMismatch: null,
 };
 
 export function useRoomStatus(connection: RoomConnection | null): RoomStatus {

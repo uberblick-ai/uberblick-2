@@ -13,6 +13,11 @@
  * MCP server import to resolve the same config and data roots this hub does.
  * It lives here because the hub is the lowest of the three in the dependency
  * graph, not because the layout is the hub's.
+ *
+ * And so is the sync protocol version — `@uberblick/hub/protocol` — for the
+ * same reason and one more: it is deliberately *not* re-exported from this
+ * entry point, so that `SYNC_PROTOCOL_VERSION` is named in exactly one module
+ * and a second definition of it cannot appear anywhere without being obvious.
  */
 
 export { createHub } from "./server.js";

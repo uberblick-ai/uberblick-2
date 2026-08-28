@@ -34,6 +34,7 @@ import {
   mintToken,
   silentLogger,
 } from "@uberblick/hub";
+import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/hub/protocol";
 import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
 import {
   appendBlock,
@@ -69,10 +70,16 @@ afterEach(async () => {
   removeTempDirs();
 });
 
-async function startHub(authSecret = SECRET): Promise<Hub> {
+async function startHub(
+  authSecret = SECRET,
+  options: { protocolVersion?: number } = {},
+): Promise<Hub> {
   const hub = await createHub({
     authSecret,
     port: 0,
+    ...(options.protocolVersion === undefined
+      ? {}
+      : { protocolVersion: options.protocolVersion }),
     databasePath: join(
       // Its own database, so "two isolated hubs" is a fact rather than a hope.
       sandbox().cwd,
@@ -123,14 +130,16 @@ async function openRoom(
   const provider = new HocuspocusProvider({
     url: url(hub),
     name: room,
-    token: await mintToken(await importRootSecret(secret), {
-      typ: "room",
-      sub: "test-web-client",
-      workspace: WORKSPACE,
-      scope: "read-write",
-      kid: null,
-      lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-    }),
+    token: wrapToken(
+      await mintToken(await importRootSecret(secret), {
+        typ: "room",
+        sub: "test-web-client",
+        workspace: WORKSPACE,
+        scope: "read-write",
+        kid: null,
+        lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+      }),
+    ),
     document: doc,
   });
   await waitUntil(`${room} to sync`, () => provider.isSynced);
@@ -555,6 +564,36 @@ describe("ub remote join", () => {
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("did not answer");
     expect(persistedHubUrl(box)).toBe("ws://127.0.0.1:2");
+  });
+
+  it("persists nothing when the remote speaks another sync protocol", async () => {
+    // A hub from another release. `join` refuses it upstream of the only write,
+    // and the wording is the point: "did not answer" would send a person to
+    // check whether the deployment is running, which it is.
+    const remote = await startHub(SECRET, {
+      protocolVersion: SYNC_PROTOCOL_VERSION + 1,
+    });
+    const box = sandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      credentials: { signingSecret: SECRET },
+    });
+
+    const run = await runUbAsync(["remote", "join", joinUrl(remote)], box);
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("different sync protocol");
+    expect(run.stderr).toContain("update this client");
+    expect(run.stderr).toContain("Nothing was written");
+    expect(run.stderr).not.toContain("did not answer");
+    // A different credential cannot fix a version skew, so `join` must not
+    // suggest one: that is `credentialCouldFix` answering false for the new
+    // status, read here through the sentence it gates.
+    expect(run.stderr).not.toContain("--secret-file");
+    // Zero writes on this side; nothing on the remote either, because `join`
+    // reads it as a fresh client and never got past the refusal.
+    expect(persistedHubUrl(box)).toBe(DEAD_HUB_URL);
+    expect(run.output).not.toContain(SECRET);
+    expect(run.output).not.toMatch(TOKEN_SHAPE);
   });
 
   it("persists nothing when the remote rejects the credential", async () => {
