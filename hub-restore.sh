@@ -24,15 +24,21 @@
 # non-zero rather than leaving a torn file where the hub will look. A `cp`
 # straight onto `hub.sqlite` has no such moment.
 #
-# So: stop the hub (its exit code is reported — a hub that crashed on the way
-# down is usually *why* somebody is restoring, so it does not block the
-# restore), stage the file, then one root container that owns it to `node`,
-# moves any rollback journal of the database being replaced *aside*, renames the
-# staged file into place, and only then drops the aside copies — putting them
-# back if the rename failed, so a database and the journal it needs are never
-# separated. The trap starts the hub again on every path after the
-# stop — on the normal exit and on HUP/INT/TERM, because in POSIX `sh` an
-# EXIT-only trap does not run when a signal kills the script — because
+# **And it refuses to work around a rollback journal.** If `/data/hub.sqlite-*`
+# exists after the stop, the database is mid-transaction and the journal is the
+# half of it that says what to undo — one unit, and not one this script will take
+# apart. Every way of getting the new file past it has a window where a failure
+# leaves either a journal describing a database that is gone or a database
+# stripped of the rollback it needs. So it stops there, touching nothing, and
+# says the one thing that clears it: let SQLite recover the journal itself by
+# starting the hub once and stopping it cleanly, then run the restore again.
+#
+# So: stop the hub (a non-zero exit is reported but does not block the restore —
+# a hub that crashed on the way down is usually *why* somebody is restoring),
+# check for a journal, stage the file, then one root container that owns it to
+# `node` and renames it into place. The trap starts the hub again on every path
+# after the stop — on the normal exit and on HUP/INT/TERM, because in POSIX `sh`
+# an EXIT-only trap does not run when a signal kills the script — because
 # `restart: unless-stopped` makes a manual stop survive a daemon restart. If
 # both restart attempts fail the script exits non-zero however well the restore
 # went.
@@ -130,9 +136,11 @@ finish() {
   # leave the hub down while two copies of it argue about whose status wins.
   trap '' HUP INT TERM
   status=$1
+  # Best effort, every one of them: a cleanup that fails must not skip the
+  # restart below, which is the part somebody is depending on.
   if [ -n "$staged" ]; then
     staged=
-    discard_staged
+    discard_staged || true
   fi
   if [ -n "$hub_stopped" ]; then
     hub_stopped=
@@ -159,11 +167,43 @@ compose stop hub
 ps_json=$(compose ps -a --format json hub)
 codes=$(printf '%s\n' "$ps_json" | tr ',' '\n' |
   sed -n 's/.*"ExitCode":[[:space:]]*\([0-9][0-9]*\).*/\1/p')
+hub_exit=0
 for code in $codes; do
   if [ "$code" -ne 0 ]; then
-    printf 'hub-restore: note — the hub exited %s, so whatever it held unflushed is gone. Restoring anyway: that is what the backup is for.\n' "$code" >&2
+    hub_exit=$code
   fi
 done
+
+# A `hub.sqlite-journal` beside the database means SQLite was interrupted
+# mid-transaction and the pair is one unit: the journal holds what the database
+# has to undo. This script will not take that on. Replacing the database while
+# its journal is there leaves a journal that describes a file which no longer
+# exists; deleting the journal first strips the old database of the rollback it
+# needs, and every variant of moving it out of the way has a window where a
+# failure — or a Ctrl-C — leaves exactly one of those two states behind.
+#
+# So the restore refuses, and says how to clear it: SQLite recovers a journal
+# itself, on the next clean open. Read-only; nothing in the volume is touched.
+probe=0
+compose run --rm --no-deps --entrypoint sh hub \
+  -c 'for sidecar in /data/hub.sqlite-*; do if [ -e "$sidecar" ]; then exit 3; fi; done; exit 0' ||
+  probe=$?
+
+if [ "$probe" -eq 3 ]; then
+  if [ "$hub_exit" -ne 0 ]; then
+    printf 'hub-restore: the hub exited %s and left a rollback journal beside its database.\n' "$hub_exit" >&2
+  else
+    printf 'hub-restore: there is a rollback journal beside the hub database, so it did not shut down cleanly.\n' >&2
+  fi
+  printf 'hub-restore: nothing was copied and the volume was not touched. Let SQLite finish that transaction — start the hub once and stop it cleanly, then run this restore again:\n' >&2
+  printf '  sh remote-compose.sh up --detach hub\n  sh remote-compose.sh stop hub\n  sh hub-restore.sh %s\n' "$backup" >&2
+  exit 1
+fi
+
+if [ "$probe" -ne 0 ]; then
+  printf 'hub-restore: could not check the volume for a rollback journal (exit %s); nothing was copied and the volume was not touched.\n' "$probe" >&2
+  exit 1
+fi
 
 staged=yes
 if ! compose cp "$backup" hub:/data/hub.sqlite.restoring; then
@@ -171,44 +211,14 @@ if ! compose cp "$backup" hub:/data/hub.sqlite.restoring; then
   exit 1
 fi
 
-# One container, as root, for everything that must be true before the hub sees
-# the file. The order is the whole of the correctness:
-#
-# - `chown node:node`, because `docker compose cp` carries the *host* file's
-#   ownership into the volume and the hub runs as the image's `node` user — a
-#   host account with any other uid would hand it a database it cannot open;
-# - any sidecar of the database being replaced moved *aside*, not deleted. A
-#   rollback journal belongs to the file it was written for: delete it and the
-#   old database loses the half-finished transaction it needs to roll back, and
-#   between that delete and the rename there is a window where a failure leaves
-#   exactly that. Moving it aside keeps the pair together until the rename has
-#   actually happened;
-# - the rename, which is the only moment `hub.sqlite` changes at all;
-# - and only then the aside files, dropped — a stale journal beside the restored
-#   database would be replayed over the file that just arrived.
-#
-# If the rename fails the aside files go back where they were and the container
-# exits non-zero, so the old database and its journal are found together.
-place_command=$(
-  cat <<'CONTAINER'
-set -e
-chown node:node /data/hub.sqlite.restoring
-chmod 600 /data/hub.sqlite.restoring
-for sidecar in /data/hub.sqlite-*; do
-  if [ -e "$sidecar" ]; then mv -f "$sidecar" "$sidecar.aside"; fi
-done
-if mv -f /data/hub.sqlite.restoring /data/hub.sqlite; then
-  rm -f /data/hub.sqlite-*.aside
-else
-  for aside in /data/hub.sqlite-*.aside; do
-    if [ -e "$aside" ]; then mv -f "$aside" "${aside%.aside}"; fi
-  done
-  exit 1
-fi
-CONTAINER
-)
-
-if ! compose run --rm --no-deps --user 0 --entrypoint sh hub -c "$place_command"; then
+# One container, as root, and only two things in it. `chown node:node` because
+# `docker compose cp` carries the *host* file's ownership into the volume and the
+# hub runs as the image's `node` user — a host account with any other uid would
+# hand it a database it cannot open. Then the rename, which is the only moment
+# `hub.sqlite` changes at all, and is a single atomic step within one filesystem.
+# There is no sidecar to deal with here: the probe above refused if there was.
+if ! compose run --rm --no-deps --user 0 --entrypoint sh hub \
+  -c 'chown node:node /data/hub.sqlite.restoring && chmod 600 /data/hub.sqlite.restoring && mv -f /data/hub.sqlite.restoring /data/hub.sqlite'; then
   printf 'hub-restore: putting %s in place failed; the live database was NOT replaced.\n' "$backup" >&2
   exit 1
 fi

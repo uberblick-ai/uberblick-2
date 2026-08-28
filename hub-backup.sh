@@ -98,9 +98,11 @@ finish() {
   trap '' HUP INT TERM
   status=$1
   # A half-copied file, killed mid-copy, is not something to leave lying next to
-  # the backups. Gone by the time the target is looked at either way.
+  # the backups. Gone by the time the target is looked at either way — and best
+  # effort, because a cleanup that fails must not skip the restart below, which
+  # is the part somebody is depending on.
   if [ -n "$temp" ]; then
-    rm -f "$temp"
+    rm -f "$temp" || true
   fi
   if [ -n "$hub_stopped" ]; then
     hub_stopped=

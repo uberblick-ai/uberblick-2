@@ -53,8 +53,12 @@ printf '\\n' >> "$UB_TEST_COMPOSE_LOG"
 
 case "$1" in
   ps)
-    printf '{"Name":"uberblick-remote-hub-1","Service":"hub","State":"exited","ExitCode":%s}\\n' \\
-      "\${UB_TEST_HUB_EXIT:-0}"
+    if [ "\${UB_TEST_HUB_EXIT:-0}" = "none" ]; then
+      printf '{"Name":"uberblick-remote-hub-1","Service":"hub","State":"exited"}\\n'
+    else
+      printf '{"Name":"uberblick-remote-hub-1","Service":"hub","State":"exited","ExitCode":%s}\\n' \\
+        "\${UB_TEST_HUB_EXIT:-0}"
+    fi
     ;;
   start | up)
     if [ -n "\${UB_TEST_START_FAIL:-}" ]; then exit 1; fi
@@ -80,12 +84,16 @@ case "$1" in
         PATH="$UB_TEST_NODE_DIR:$PATH" sh -c "$script"
         exit $?
         ;;
+      *"rm -f /data/hub.sqlite.restoring"*)
+        if [ -n "\${UB_TEST_DISCARD_FAIL:-}" ]; then exit 1; fi
+        rm -f "$UB_TEST_VOLUME/hub.sqlite.restoring"
+        ;;
       *)
         # The payload verbatim, with /data pointing at the directory standing in
         # for the volume — so the ordering, the globs and the failure handling
         # under test are the script's own and not this stub's idea of them.
-        # UB_TEST_BIN holds a chown that always succeeds (the container runs as
-        # root; the test runner does not) and an mv that can be made to fail.
+        # UB_TEST_BIN holds a chown that always succeeds (the container is root;
+        # the test runner is not).
         script=$(printf '%s' "$payload" | sed "s#/data#$UB_TEST_VOLUME#g")
         PATH="$UB_TEST_BIN:$PATH" sh -c "$script"
         exit $?
@@ -103,22 +111,6 @@ exit 0
  */
 const CHOWN_STUB = `#!/bin/sh
 exit 0
-`;
-
-/**
- * A real `mv`, except that with `UB_TEST_MV_FAIL` set it refuses the one rename
- * that puts the staged file in place. That is the only way to reach the window
- * the sidecar handling exists for: the aside moves have happened, and the rename
- * they were made safe for does not.
- */
-const MV_STUB = `#!/bin/sh
-if [ -n "\${UB_TEST_MV_FAIL:-}" ]; then
-  for destination in "$@"; do :; done
-  case "$destination" in
-    */hub.sqlite) exit 1 ;;
-  esac
-fi
-exec /bin/mv "$@"
 `;
 
 interface Fixture {
@@ -145,7 +137,6 @@ function fixture(): Fixture {
   const bin = join(checkout, "bin");
   mkdirSync(bin, { recursive: true });
   writeFileSync(join(bin, "chown"), CHOWN_STUB, { mode: 0o755 });
-  writeFileSync(join(bin, "mv"), MV_STUB, { mode: 0o755 });
 
   return {
     checkout,
@@ -265,6 +256,23 @@ describe("hub-backup.sh", () => {
   });
 
   /** A backup taken at the price of a hub nobody noticed is not a success. */
+  /**
+   * A `ps` answer with no `ExitCode` in it is not a zero: the hub's verdict was
+   * not read, so there is nothing to say the file is trustworthy.
+   */
+  it("writes no file when the exit code cannot be read at all", () => {
+    const fix = fixture();
+    hubDatabase(join(fix.volume, "hub.sqlite"), 3);
+    fix.env.UB_TEST_HUB_EXIT = "none";
+
+    const ran = run(fix, "hub-backup.sh", [join(fix.checkout, "backup.sqlite")]);
+
+    expect(ran.status).not.toBe(0);
+    expect(ran.stderr).toContain("could not read the hub container exit code");
+    expect(existsSync(join(fix.checkout, "backup.sqlite"))).toBe(false);
+    expect(subcommands(fix)).toEqual(["stop", "ps", "start"]);
+  });
+
   it("exits non-zero, loudly, when the hub cannot be started again", () => {
     const fix = fixture();
     hubDatabase(join(fix.volume, "hub.sqlite"), 3);
@@ -317,32 +325,26 @@ describe("hub-restore.sh", () => {
     const fix = fixture();
     const live = join(fix.volume, "hub.sqlite");
     hubDatabase(live, 9);
-    // The database being replaced left a rollback journal behind, which is what
-    // an unclean shutdown looks like — and what must not survive the restore.
-    const journal = join(fix.volume, "hub.sqlite-journal");
-    writeFileSync(journal, "a rollback journal for the old database", "utf8");
     const backup = join(fix.checkout, "good.sqlite");
     hubDatabase(backup, 2);
 
     const ran = run(fix, "hub-restore.sh", [backup]);
 
     expect(ran.status).toBe(0);
-    expect(subcommands(fix)).toEqual(["run", "stop", "ps", "cp", "run", "start"]);
+    // Verify, stop, ps, the journal probe, cp, the placement, and the restart.
+    expect(subcommands(fix)).toEqual(["run", "stop", "ps", "run", "cp", "run", "start"]);
     // Never onto the name the hub opens: staged first, renamed by the container.
-    expect(calls(fix)[3]).toBe(`cp ${backup} hub:/data/hub.sqlite.restoring`);
+    expect(calls(fix)[4]).toBe(`cp ${backup} hub:/data/hub.sqlite.restoring`);
     expect(readFileSync(live)).toEqual(readFileSync(backup));
-    expect(existsSync(join(fix.volume, "hub.sqlite.restoring"))).toBe(false);
-    // The old database's journal is gone, and nothing was left aside.
-    expect(existsSync(journal)).toBe(false);
     expect(readdirSync(fix.volume)).toEqual(["hub.sqlite"]);
   });
 
   /**
-   * The window the aside dance exists for: the journal has been moved out of the
-   * way and the rename it was moved for does not happen. A `rm` there would have
-   * stripped a hot rollback journal off a database that still needs it.
+   * A journal is the half of an interrupted transaction that says what to undo.
+   * Every way of getting a new database past it can leave the pair broken, so
+   * the restore refuses and tells the operator to let SQLite recover it.
    */
-  it("puts the old database's journal back when the rename fails", () => {
+  it("refuses while a rollback journal is beside the database, touching nothing", () => {
     const fix = fixture();
     const live = join(fix.volume, "hub.sqlite");
     hubDatabase(live, 9);
@@ -352,17 +354,17 @@ describe("hub-restore.sh", () => {
     const journalBefore = readFileSync(journal);
     const backup = join(fix.checkout, "good.sqlite");
     hubDatabase(backup, 2);
-    fix.env.UB_TEST_MV_FAIL = "1";
 
     const ran = run(fix, "hub-restore.sh", [backup]);
 
     expect(ran.status).not.toBe(0);
-    expect(ran.stderr).toContain("NOT replaced");
+    expect(ran.stderr).toContain("rollback journal");
+    expect(ran.stderr).toContain("sh remote-compose.sh up --detach hub");
     expect(readFileSync(live)).toEqual(liveBefore);
     expect(readFileSync(journal)).toEqual(journalBefore);
-    expect(readdirSync(fix.volume).sort()).toEqual(["hub.sqlite", "hub.sqlite-journal"]);
-    // Verify, stop, ps, cp, the failed placement, the discard, and the restart.
-    expect(subcommands(fix)).toEqual(["run", "stop", "ps", "cp", "run", "run", "start"]);
+    // Nothing was copied and nothing was placed; the hub is running again.
+    expect(subcommands(fix)).toEqual(["run", "stop", "ps", "run", "start"]);
+    expect(calls(fix).some((line) => line.startsWith("cp "))).toBe(false);
   });
 
   /**
@@ -386,7 +388,27 @@ describe("hub-restore.sh", () => {
     expect(calls(fix).some((line) => line.includes("mv -f /data/hub.sqlite.restoring"))).toBe(
       false,
     );
-    // Verify, stop, ps, the failed cp, the best-effort discard, and the restart.
-    expect(subcommands(fix)).toEqual(["run", "stop", "ps", "cp", "run", "start"]);
+    // Verify, stop, ps, probe, the failed cp, the discard, and the restart.
+    expect(subcommands(fix)).toEqual(["run", "stop", "ps", "run", "cp", "run", "start"]);
+  });
+
+  /**
+   * The restart is the part somebody is depending on, so nothing in `finish` may
+   * stand in front of it — here the best-effort discard of the staged file fails
+   * and the hub still comes back.
+   */
+  it("restarts the hub even when the staged file cannot be discarded", () => {
+    const fix = fixture();
+    hubDatabase(join(fix.volume, "hub.sqlite"), 7);
+    const backup = join(fix.checkout, "good.sqlite");
+    hubDatabase(backup, 2);
+    fix.env.UB_TEST_CP_FAIL = "1";
+    fix.env.UB_TEST_DISCARD_FAIL = "1";
+
+    const ran = run(fix, "hub-restore.sh", [backup]);
+
+    expect(ran.status).not.toBe(0);
+    expect(ran.stderr).not.toContain("THE HUB IS STILL DOWN");
+    expect(subcommands(fix)).toEqual(["run", "stop", "ps", "run", "cp", "run", "start"]);
   });
 });

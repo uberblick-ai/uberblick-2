@@ -428,14 +428,26 @@ is atomic. So a copy that dies half way — a full disk, a killed daemon, an
 interrupted script — leaves the database that was already there intact, and the
 script says the live database was **not** replaced and exits non-zero.
 
-A rollback journal is handled in the same container, and it is moved *aside*
-rather than deleted. The journal belongs to the database it was written for —
-delete it and the old file loses the half-finished transaction it needs to roll
-back, which is exactly the state an unclean shutdown leaves. So any
-`hub.sqlite-*` is renamed out of the way, the rename happens, and only then are
-the aside copies dropped; if the rename fails they go back where they were. The
-pair is never separated, and no stale journal is ever left beside the restored
-file for the hub to replay over it.
+**A rollback journal stops the restore rather than being worked around.** After
+the stop, the script looks in the volume for a `hub.sqlite-*` sidecar. If one is
+there the database is mid-transaction and the journal is the half that says what
+to undo — one unit, and not one a restore should take apart: replace the
+database and the journal describes a file that is gone; delete the journal and
+the old database loses the rollback it needs; and every way of moving it out of
+the way has a window where an interruption leaves exactly one of those. So it
+copies nothing, touches nothing, and says so.
+
+Clearing it is one line, and SQLite does the work: a journal is recovered on the
+next clean open.
+
+```sh
+sh remote-compose.sh up --detach hub
+sh remote-compose.sh stop hub
+sh hub-restore.sh ~/uberblick-hub-2026-08-28.sqlite
+```
+
+A hub that exited non-zero but left no journal is not blocked — that is often
+exactly why somebody is restoring. The exit code is reported either way.
 
 Then the hub starts. It restores into an empty volume
 just as well as over an existing one, which is the case the drill on #404
