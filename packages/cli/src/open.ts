@@ -34,7 +34,13 @@
  *    #91 exists to remove.
  *
  * 4. **It never serves a blank page.** With no bundle and no toolchain it exits
- *    non-zero naming what is missing, rather than opening a browser onto 404s.
+ *    non-zero naming what is missing, rather than opening a browser onto 404s —
+ *    and a bundle that is there but was built for another sync protocol is the
+ *    same blank page with extra steps (#452), so the version the build stamps
+ *    into {@link BUNDLE_STAMP} is compared to this build's before anything is
+ *    served. That is a comparison between two local halves, not a hub
+ *    compatibility check: whether the *hub* speaks it is still settled by the
+ *    handshake, which is exactly what a stale bundle cannot survive.
  *
  * The build shells out to pnpm rather than to `mise run build-web`: that task
  * wraps the build in `fnox exec`, and a user of `ub` has no age key. Tasks are
@@ -48,7 +54,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { createReadStream, statSync } from "node:fs";
+import { createReadStream, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import { isIPv4 } from "node:net";
@@ -57,6 +63,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import type { Hub } from "@uberblick/hub";
 import { createHub, resolveHubConfig } from "@uberblick/hub";
+import { SYNC_PROTOCOL_VERSION, isProtocolVersion } from "@uberblick/hub/protocol";
 import { DEFAULT_HUB_URL, resolveMcpConfig } from "@uberblick/mcp-server";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
@@ -171,6 +178,58 @@ export function bundlePlan(env: NodeJS.ProcessEnv = process.env): BundleAction {
     };
   }
   return { action: "build", dir };
+}
+
+/**
+ * The file the web build writes its sync protocol version into.
+ *
+ * Contract, not detail: `packages/web/build-stamp.ts` emits this name into the
+ * bundle, and a deployment ships it beside `index.html`.
+ */
+export const BUNDLE_STAMP = "uberblick-build.json";
+
+/**
+ * The sync protocol a bundle was built for, or `null` when it does not say.
+ *
+ * Absent, unreadable, not JSON, or not a protocol version at all are one
+ * answer, deliberately: each of them means the same thing to somebody about to
+ * open a browser — nothing here vouches for this bundle — and a raw
+ * `JSON.parse` throw would report it as a crash instead of as a refusal.
+ */
+function bundleProtocol(dir: string): number | null {
+  let stamp: unknown;
+  try {
+    stamp = JSON.parse(readFileSync(join(dir, BUNDLE_STAMP), "utf8"));
+  } catch {
+    return null;
+  }
+  const version = (stamp as { protocolVersion?: unknown } | null)?.protocolVersion;
+  return isProtocolVersion(version) ? version : null;
+}
+
+/**
+ * Why this bundle cannot be served, or `null` when it can.
+ *
+ * Exact equality, the same comparison the hub makes: a bundle newer than this
+ * `ub` is as unable to sync as an older one, and reads the same way here. The
+ * refusal names the rebuild both kinds of user can run — the task in a
+ * checkout, and the command underneath it for somebody who has `ub` and no age
+ * key (which is why the build below shells out to pnpm).
+ */
+export function staleBundle(dir: string): string | null {
+  const found = bundleProtocol(dir);
+  if (found === SYNC_PROTOCOL_VERSION) return null;
+  const speaks =
+    found === null
+      ? `carries no readable ${BUNDLE_STAMP}, so nothing says which sync protocol it speaks`
+      : `speaks sync protocol ${found}`;
+  return (
+    `the web app at ${dir} ${speaks}, and this \`ub\` speaks ` +
+    `${SYNC_PROTOCOL_VERSION} — a bundle that disagrees with the hub it is ` +
+    "served against cannot sync, and the page would sit at `syncing…` with " +
+    "nothing naming why. Rebuild it with `mise run build-web` in a checkout, " +
+    "or `pnpm --filter @uberblick/web build`."
+  );
 }
 
 /**
@@ -766,6 +825,15 @@ export async function openCommand(
   }
   if (plan.action === "build" && !(await buildBundle(env, io))) {
     io.err("ub open: the web build failed, so there is nothing to serve\n");
+    return await foreground.shutdown(1);
+  }
+  // After the build, so both the bundle that was already there and the one this
+  // command just made are held to it, and before `ensureHub`: a refusal that
+  // had already started a hub would leave a database file behind for a bundle
+  // it never served.
+  const stale = staleBundle(plan.dir);
+  if (stale !== null) {
+    io.err(`ub open: ${stale}\n`);
     return await foreground.shutdown(1);
   }
   if (foreground.interrupted()) {

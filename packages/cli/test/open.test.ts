@@ -16,15 +16,16 @@
 
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
 import { join } from "node:path";
 import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it } from "vitest";
-import { bundlePlan } from "../src/open.js";
+import { BUNDLE_STAMP, bundlePlan } from "../src/open.js";
 import { probeHub, probePort } from "../src/probes.js";
 import type { Sandbox } from "./helpers.js";
 import {
@@ -97,7 +98,11 @@ async function startHub(box: Sandbox, port = 0): Promise<Hub> {
   return hub;
 }
 
-/** A bundle the way `ub open` finds one: a directory with an index.html in it. */
+/**
+ * A bundle the way `ub open` finds one: a directory with an index.html in it —
+ * and the protocol stamp a real `vite build` emits beside it (#452), without
+ * which every test here would be about the refusal rather than about serving.
+ */
 function fixtureBundle(box: Sandbox): string {
   const dir = join(box.cwd, "bundle");
   mkdirSync(join(dir, "assets"), { recursive: true });
@@ -107,7 +112,15 @@ function fixtureBundle(box: Sandbox): string {
     "utf8",
   );
   writeFileSync(join(dir, "assets", "app.js"), "export const marker = 42;\n", "utf8");
+  stampBundle(dir, JSON.stringify({ protocolVersion: SYNC_PROTOCOL_VERSION }));
   return dir;
+}
+
+/** Write the bundle's protocol stamp, or remove it when `content` is null. */
+function stampBundle(dir: string, content: string | null): void {
+  const stamp = join(dir, BUNDLE_STAMP);
+  if (content === null) rmSync(stamp, { force: true });
+  else writeFileSync(stamp, content, "utf8");
 }
 
 /** A `BROWSER` command that records the URL it was handed instead of opening it. */
@@ -434,6 +447,42 @@ describe("ub open", () => {
     // And in a checkout, an absent bundle is one to build rather than to
     // refuse: the web package is right there and the plan says so.
     expect(bundlePlan({}).action).not.toBe("missing");
+  });
+
+  it("refuses a bundle that does not speak this build's sync protocol, and serves nothing", async () => {
+    const { box, env, bundle } = configured();
+    const newer = SYNC_PROTOCOL_VERSION + 1;
+    const unusable = [
+      // The bundle observed in #452: built before the version existed, so it
+      // sends a bare token the hub cannot read and says nothing about itself.
+      { what: "no stamp at all", stamp: null, named: BUNDLE_STAMP },
+      {
+        what: "a stamp from another protocol",
+        stamp: `{"protocolVersion":${newer}}`,
+        named: String(newer),
+      },
+      { what: "a stamp that is not JSON", stamp: "half a build\n", named: BUNDLE_STAMP },
+    ];
+
+    for (const { what, stamp, named } of unusable) {
+      stampBundle(bundle, stamp);
+      const refused = await openFails(box, [], env);
+
+      expect(refused.status, what).toBe(1);
+      expect(refused.output, what).toContain(bundle);
+      expect(refused.output, what).toContain(named);
+      expect(refused.output, what).toContain(String(SYNC_PROTOCOL_VERSION));
+      expect(refused.output, what).toContain("mise run build-web");
+      // It served nothing and started nothing: the hub this command would have
+      // brought up never got as far as creating its database.
+      expect(existsSync(join(box.cwd, "started-hub.sqlite")), what).toBe(false);
+    }
+
+    // The same bundle, stamped with this build's version, serves.
+    stampBundle(bundle, JSON.stringify({ protocolVersion: SYNC_PROTOCOL_VERSION }));
+    const app = await open(box, ["--port", String(await freePort())], env);
+    expect((await get(app.url)).status).toBe(200);
+    expect((await app.interrupt()).status).toBe(0);
   });
 
   it("--no-browser prints the URL and opens nothing; --port chooses the port", async () => {

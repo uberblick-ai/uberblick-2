@@ -1,6 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
+import { buildStampPlugin } from "./build-stamp.js";
 import { devConfigDocumentPlugin } from "./dev-config-document.js";
 
 /**
@@ -40,7 +41,7 @@ export default defineConfig({
   // is deliberately not imported there — see that file. The plugin is a no-op
   // for every module that does not import that stylesheet, the editor's and the
   // sidebar's plain CSS included.
-  plugins: [tailwindcss(), react(), devConfigDocumentPlugin()],
+  plugins: [tailwindcss(), react(), devConfigDocumentPlugin(), buildStampPlugin()],
   define: {
     __HUB_URL__: JSON.stringify(process.env.HUB_URL ?? "ws://localhost:1234"),
     __WORKSPACE_ID__: JSON.stringify(process.env.WORKSPACE_ID ?? ""),

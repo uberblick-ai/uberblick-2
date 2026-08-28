@@ -19,14 +19,22 @@
  * identifier, which is what makes its verdict trustworthy rather than
  * suggestive. `vite` is a devDependency, so this is honest under
  * `--network none`.
+ *
+ * That one build is also where the protocol stamp is proved (#452): the file
+ * `ub open` reads before it serves anything is emitted by the build, so only a
+ * real build can show it is there and carries this build's
+ * `SYNC_PROTOCOL_VERSION`. A second build to assert one small JSON file would
+ * cost the same minute for nothing.
  */
 
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { build } from "vite";
+import { BUILD_STAMP_FILE } from "../build-stamp.js";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -98,7 +106,7 @@ async function withSecretInEnvironment(run: () => Promise<void>): Promise<void> 
 }
 
 describe("the built web bundle", () => {
-  it("carries neither the secret in the build environment nor the define that used to inject it", async () => {
+  it("carries neither the secret in the build environment nor the define that used to inject it, and stamps the protocol it speaks", async () => {
     const outDir = scratch();
 
     await withSecretInEnvironment(async () => {
@@ -113,6 +121,12 @@ describe("the built web bundle", () => {
     // A build that emitted nothing would pass a scan trivially.
     expect(filesUnder(outDir).length).toBeGreaterThan(1);
     expect(leaks(outDir)).toEqual([]);
+
+    // And it says which sync protocol it speaks, in the file `ub open` reads
+    // and from the same constant the client imports — a bundle that cannot say
+    // is the silent `syncing…` of #452.
+    const stamp: unknown = JSON.parse(readFileSync(join(outDir, BUILD_STAMP_FILE), "utf8"));
+    expect(stamp).toEqual({ protocolVersion: SYNC_PROTOCOL_VERSION });
   }, 300_000);
 
   it("would fail if a build put the define back", async () => {
