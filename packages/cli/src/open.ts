@@ -35,6 +35,16 @@
  *
  * 4. **It never serves a blank page.** With no bundle and no toolchain it exits
  *    non-zero naming what is missing, rather than opening a browser onto 404s.
+ *    A bundle that is *there* but stale is that blank page with extra steps: one
+ *    built before a `SYNC_PROTOCOL_VERSION` bump sends a pre-envelope auth
+ *    message, the hub refuses it as an unparseable one, and the page sits at
+ *    `syncing…` and `0 docs` with nothing naming the cause (#452). So the build
+ *    stamps the protocol it speaks into {@link BUILD_STAMP}, this command
+ *    compares it to its own before it starts anything, and a bundle that
+ *    differs — or carries no stamp, which is what one built before the stamp
+ *    looks like — is refused with both versions and the rebuild named. Two
+ *    local builds are what that compares: whether the *hub* speaks it too is
+ *    still settled at connect, where it always was.
  *
  * The build shells out to pnpm rather than to `mise run build-web`: that task
  * wraps the build in `fnox exec`, and a user of `ub` has no age key. Tasks are
@@ -48,7 +58,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { createReadStream, statSync } from "node:fs";
+import { createReadStream, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import { isIPv4 } from "node:net";
@@ -57,6 +67,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import type { Hub } from "@uberblick/hub";
 import { createHub, resolveHubConfig } from "@uberblick/hub";
+import { SYNC_PROTOCOL_VERSION, isProtocolVersion } from "@uberblick/hub/protocol";
 import { DEFAULT_HUB_URL, resolveMcpConfig } from "@uberblick/mcp-server";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
@@ -213,6 +224,55 @@ async function buildBundle(
     child.on("close", (status) => done(status ?? 1));
   });
   return code === 0;
+}
+
+/**
+ * The file the web build stamps its sync protocol version into.
+ *
+ * Contract, shared with `packages/web/vite.config.ts`, which emits it: this
+ * name and the `syncProtocolVersion` in it.
+ */
+const BUILD_STAMP = "uberblick-build.json";
+
+/**
+ * The protocol version a bundle says it speaks, or `null` when it says nothing
+ * this command can believe.
+ *
+ * One answer for every unreadable case — no stamp, unreadable file, not JSON,
+ * not an object, no usable version — because a bundle is refused the same way
+ * for all of them, and because a stale bundle is far more often one from before
+ * the stamp existed than one with a broken stamp. Never throws: an unparseable
+ * file is a refusal to print, not a stack trace.
+ */
+function stampedProtocol(dir: string): number | null {
+  try {
+    const stamp: unknown = JSON.parse(readFileSync(join(dir, BUILD_STAMP), "utf8"));
+    const version = (stamp as { syncProtocolVersion?: unknown } | null)?.syncProtocolVersion;
+    return isProtocolVersion(version) ? version : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Why a bundle is not being served, and what makes it servable.
+ *
+ * Both rebuilds are named because their audiences are different, and it is the
+ * same split the build above makes: `pnpm` is the one a user of `ub` can run,
+ * while `mise run build-web` is the documented task and wraps `fnox exec`,
+ * which wants an age key a user has no reason to have.
+ */
+function staleBundle(dir: string, stamped: number | null): string {
+  const speaks =
+    stamped === null
+      ? "carries no sync protocol stamp"
+      : `speaks sync protocol ${stamped}`;
+  return (
+    `ub open: the web app at ${dir} ${speaks}, and this uberblick speaks ` +
+    `${SYNC_PROTOCOL_VERSION} — it could not sync, so it is not being served. ` +
+    "Rebuild it with `pnpm --filter @uberblick/web build`, or with " +
+    "`mise run build-web` from a checkout.\n"
+  );
 }
 
 // --- the served files --------------------------------------------------------
@@ -766,6 +826,14 @@ export async function openCommand(
   }
   if (plan.action === "build" && !(await buildBundle(env, io))) {
     io.err("ub open: the web build failed, so there is nothing to serve\n");
+    return await foreground.shutdown(1);
+  }
+  // After the build, so it judges the bundle that will actually be served: one
+  // that was already there, or the one just produced. Before `ensureHub`,
+  // because a refusal must start no hub and create no database file.
+  const stamped = stampedProtocol(plan.dir);
+  if (stamped !== SYNC_PROTOCOL_VERSION) {
+    io.err(staleBundle(plan.dir, stamped));
     return await foreground.shutdown(1);
   }
   if (foreground.interrupted()) {

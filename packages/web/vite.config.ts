@@ -1,5 +1,6 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { type Plugin, runnerImport } from "vite";
 import { defineConfig } from "vitest/config";
 import { devConfigDocumentPlugin } from "./dev-config-document.js";
 
@@ -33,14 +34,68 @@ import { devConfigDocumentPlugin } from "./dev-config-document.js";
  * separated and empty by default because the ids are a uuid per machine.
  * Switching workspaces is navigating, so the list changes what is on the menu,
  * never which corpus an address opens. See src/ui/route.ts.
+ *
+ * A build writes one thing of its own beside the assets — the stamp naming the
+ * sync protocol it speaks. That is output rather than configuration; see
+ * {@link buildStampPlugin}.
  */
+
+/**
+ * What a build says about itself, for a server deciding whether to serve it.
+ *
+ * Contract, shared with `packages/cli/src/open.ts`: the file name and the
+ * `syncProtocolVersion` in it. A bundle built before a `SYNC_PROTOCOL_VERSION`
+ * bump sends an auth message the hub reads as unparseable and refuses, and the
+ * page sits at `syncing…` with nothing naming the cause (#452) — so `ub open`
+ * reads this and refuses to serve a bundle whose version is not its own.
+ */
+const BUILD_STAMP = "uberblick-build.json";
+
+/**
+ * Stamp the built bundle with the sync protocol version it speaks.
+ *
+ * A plugin rather than a `package.json` postbuild step because that would run
+ * for one entrance only: `ub open`, the Dockerfile and `mise run build-web` all
+ * shell out to `pnpm --filter @uberblick/web build`, but
+ * `test/bundle-secret.test.ts` calls Vite's `build()` directly.
+ * `generateBundle` is common to all four, so no build produces an unstamped
+ * bundle — including the one the suite scans.
+ *
+ * The version is *imported* from the definition the client itself compiles in;
+ * a second literal here is a copy that can disagree with the wire it describes.
+ *
+ * Through `runnerImport` rather than a plain `import`, because a plain one does
+ * not work here: Vite bundles a config file but externalises every bare import
+ * in it, so `@uberblick/hub/protocol` is handed to Node — which runs
+ * TypeScript, but does not rewrite that module's own `./token.js` specifier to
+ * `token.ts` the way every bundler in this repo does. `runnerImport` resolves
+ * it with Vite's resolver, the one that already resolves the client's import of
+ * the same module, in an environment scoped to this call: nothing else in the
+ * process resolves differently for it, and a dev server never runs it at all.
+ */
+function buildStampPlugin(): Plugin {
+  return {
+    name: "uberblick:build-stamp",
+    apply: "build",
+    async generateBundle() {
+      const { module } =
+        await runnerImport<typeof import("@uberblick/hub/protocol")>("@uberblick/hub/protocol");
+      this.emitFile({
+        type: "asset",
+        fileName: BUILD_STAMP,
+        source: `${JSON.stringify({ syncProtocolVersion: module.SYNC_PROTOCOL_VERSION })}\n`,
+      });
+    },
+  };
+}
+
 export default defineConfig({
   // Tailwind is chrome-only (#27): it compiles `src/ui/tailwind.css`, which the
   // vendored shadcn components under `src/ui/shadcn` are styled with. Preflight
   // is deliberately not imported there — see that file. The plugin is a no-op
   // for every module that does not import that stylesheet, the editor's and the
   // sidebar's plain CSS included.
-  plugins: [tailwindcss(), react(), devConfigDocumentPlugin()],
+  plugins: [tailwindcss(), react(), devConfigDocumentPlugin(), buildStampPlugin()],
   define: {
     __HUB_URL__: JSON.stringify(process.env.HUB_URL ?? "ws://localhost:1234"),
     __WORKSPACE_ID__: JSON.stringify(process.env.WORKSPACE_ID ?? ""),
