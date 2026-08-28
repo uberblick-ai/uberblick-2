@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { StatusLine } from "../src/ui/EditorPane.js";
+import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 /** The workspace these stub room keys sit in. A workspace id is a uuid. */
@@ -28,6 +29,8 @@ function stubConnection(
     unsyncedChanges,
     localReplicaLoaded: false,
     hasLocalCache: false,
+    protocolMismatch: null,
+    authFailed: false,
     ...patch,
   };
   return {
@@ -74,6 +77,55 @@ describe("the status line names the unit of its backlog count", () => {
     expect(label(0)).toBeNull();
   });
 
+});
+
+/** The whole line, for a room in the given state. */
+function line(patch: Partial<RoomStatus>): string {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+    true;
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  act(() =>
+    root.render(
+      <StatusLine connection={stubConnection(0, patch)} segment={WORKSPACE} />,
+    ),
+  );
+  const text = host.querySelector(".ub-status")?.textContent ?? "";
+  act(() => root.unmount());
+  host.remove();
+  return text.replace(/\s+/g, " ").trim();
+}
+
+describe("a hub that refuses this page", () => {
+  it("says an update is needed, and which side needs it", () => {
+    // A reading of its own, not a fourth sync state: the other three describe a
+    // connection that works or is coming back, and this one describes a page
+    // that will not sync again until somebody updates something. Both integers
+    // are shown because "which side" is the only actionable part.
+    const older = line({ protocolMismatch: { hub: 2, client: 1 } });
+    expect(older).toContain("update required");
+    expect(older).toContain("this app is older than the hub");
+    expect(older).toContain("(app 1, hub 2)");
+
+    const newer = line({ protocolMismatch: { hub: 1, client: 2 } });
+    expect(newer).toContain("the hub is older than this app");
+    expect(newer).toContain("(app 2, hub 1)");
+
+    // Neither reading appears without its refusal, whichever sync state the
+    // room is in — they replace the line, so a false positive hides the truth.
+    expect(line({})).not.toContain("update required");
+    expect(line({ connected: true, synced: true })).not.toContain("update required");
+    expect(line({})).not.toContain(AUTH_REJECTED);
+  });
+
+  it("names both causes when the refusal was not a version mismatch", () => {
+    // An older hub cannot read our envelope and answers exactly as a wrong
+    // secret does, so this is the one direction nothing can detect: the copy
+    // names both causes rather than guessing, and it is composed locally —
+    // the hub's own words never reach the line.
+    expect(line({ authFailed: true })).toContain(AUTH_REJECTED);
+  });
 });
 
 /** Whether the line claims a local cache, for a room in the given state. */

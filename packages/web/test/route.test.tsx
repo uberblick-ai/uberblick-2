@@ -356,6 +356,8 @@ function openingConnection(room: string): {
     unsyncedChanges: 0,
     localReplicaLoaded: false,
     hasLocalCache: false,
+    protocolMismatch: null,
+    authFailed: false,
   };
   const listeners = new Set<(next: RoomStatus) => void>();
   // Deferred, so the promise and the flag say the same thing: both are the
@@ -471,6 +473,8 @@ function stubConnection(room: string): RoomConnection {
     unsyncedChanges: 0,
     localReplicaLoaded: true,
     hasLocalCache: false,
+    protocolMismatch: null,
+    authFailed: false,
   };
   return {
     room,

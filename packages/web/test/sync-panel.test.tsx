@@ -56,6 +56,8 @@ function fixture(status: Partial<RoomStatus> = {}): Fixture {
     unsyncedChanges: 0,
     localReplicaLoaded: true,
     hasLocalCache: false,
+    protocolMismatch: null,
+    authFailed: false,
     ...status,
   };
   const connection = {

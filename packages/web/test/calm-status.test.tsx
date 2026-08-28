@@ -34,6 +34,8 @@ function room(patch: Partial<RoomStatus> = {}): RoomStatus {
     unsyncedChanges: 0,
     localReplicaLoaded: true,
     hasLocalCache: false,
+    protocolMismatch: null,
+    authFailed: false,
     ...patch,
   };
 }

@@ -71,6 +71,7 @@
  */
 
 import { HocuspocusProvider } from "@hocuspocus/provider";
+import { wrapToken } from "@uberblick/hub/protocol";
 import * as Y from "yjs";
 import {
   directoryRoom,
@@ -116,14 +117,18 @@ let signingKey: Promise<CryptoKey> | null = null;
 
 async function token(): Promise<string> {
   signingKey ??= importRootSecret(HUB_AUTH_TOKEN);
-  return mintToken(await signingKey, {
-    typ: "room",
-    sub: AGENT_NAME,
-    workspace: WORKSPACE,
-    scope: "read-write",
-    kid: null,
-    lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-  });
+  // Wrapped like every real client: a bare token is refused as a protocol
+  // mismatch, which is exactly what a not-yet-updated client looks like.
+  return wrapToken(
+    await mintToken(await signingKey, {
+      typ: "room",
+      sub: AGENT_NAME,
+      workspace: WORKSPACE,
+      scope: "read-write",
+      kid: null,
+      lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+    }),
+  );
 }
 
 function connect(room: string): { provider: HocuspocusProvider; ydoc: Y.Doc } {

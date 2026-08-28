@@ -93,6 +93,21 @@ export interface HubConfig {
    */
   maxPendingDocuments?: number;
   /**
+   * The sync protocol this hub speaks, defaulting to `SYNC_PROTOCOL_VERSION`
+   * (`./protocol.ts`).
+   *
+   * A test seam, not an operator dial — a hub's protocol version is a property
+   * of the build, and nothing in production sets it. It is settable because the
+   * skew this hub refuses cannot otherwise be *observed*: every process in this
+   * repository compiles the same constant, so a client-side test that could not
+   * move one end would only be asserting the constant against itself.
+   *
+   * Validated by `createHub` against the range the wire can carry (an integer
+   * 1..999999): a hub outside it would refuse every client with a reason none
+   * of them could read.
+   */
+  protocolVersion?: number;
+  /**
    * How long `stop()` waits for Hocuspocus to drain its documents before it
    * gives up and closes the socket anyway (ms). The flush has already run by
    * then, so this bounds shutdown without risking data.

@@ -11,12 +11,14 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { appendBlock, getBlocks, getMeta, listDirectory } from "@uberblick/schema";
-import type { Hub } from "@uberblick/hub";
+import type { Hub, HubLogRecord } from "@uberblick/hub";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import {
   hubUrl,
   LIVE_HUB_SETTLE,
   peerClient,
   removeTempDirs,
+  sleep,
   startHub,
   startServer,
   tempDatabasePath,
@@ -26,7 +28,7 @@ import {
   waitUntil,
   WORKSPACE,
 } from "./helpers.js";
-import type { PeerClient, Rig, TestConfigOptions } from "./helpers.js";
+import type { HubOptions, PeerClient, Rig, TestConfigOptions } from "./helpers.js";
 
 const hubs: Hub[] = [];
 const rigs: Rig[] = [];
@@ -45,7 +47,7 @@ afterEach(async () => {
   removeTempDirs();
 });
 
-async function hub(options: { port?: number; databasePath?: string } = {}) {
+async function hub(options: HubOptions = {}) {
   const started = await startHub(options);
   hubs.push(started);
   return started;
@@ -319,6 +321,152 @@ describe("hub sync", () => {
     }
   });
 
+  it("reports a protocol skew as update-required, and keeps serving", async () => {
+    // A hub from another release. The version is compared for exact equality
+    // and refused before the token, so this is not a credential problem and no
+    // retry reaches past it — which is the whole reason it is its own status.
+    const running = await hub({ protocolVersion: SYNC_PROTOCOL_VERSION + 1 });
+    const rig = await serverOn(running.port);
+
+    await waitUntil("the hub to refuse the protocol version", async () => {
+      const status = await rig.ok("sync_status", {});
+      return status.hub.status === "update-required";
+    });
+
+    const status = await rig.ok("sync_status", {});
+    // Both integers and, in words, which side is old: a person who can only see
+    // one of the two numbers cannot tell what to update.
+    expect(status.hub.protocolVersion).toBe(SYNC_PROTOCOL_VERSION);
+    expect(status.hub.hubProtocolVersion).toBe(SYNC_PROTOCOL_VERSION + 1);
+    expect(status.hub.reason).toContain("update this client");
+    expect(status.rooms.every((room: { synced: boolean }) => !room.synced)).toBe(true);
+
+    // Refused on the wire, and still a working replica: this is the property
+    // that makes the refusal safe to be strict about.
+    const created = await rig.ok("create_doc", {
+      title: "Written against a hub that refuses us",
+      description: "A test document.",
+    });
+    const read = await rig.ok("get_doc", { uuid: created.uuid });
+    expect(read.title).toBe("Written against a hub that refuses us");
+  });
+
+  it("mints nothing more, even for a hub that restarts willing to accept it", async () => {
+    // The strong form of terminal. A skew is not a connection fault, so neither
+    // losing the transport nor the hub coming back as a build that *would*
+    // accept us may put another token on the wire: a client told it is the
+    // wrong version does not become the right one by reconnecting, and only a
+    // restart of this process re-reads that.
+    const records: HubLogRecord[] = [];
+    const databasePath = tempDatabasePath();
+    const log = (record: HubLogRecord) => {
+      records.push(record);
+    };
+    const first = await hub({
+      databasePath,
+      log,
+      protocolVersion: SYNC_PROTOCOL_VERSION + 1,
+    });
+    const port = first.port;
+    const rig = await serverOn(port);
+
+    await waitUntil("the hub to refuse the protocol version", async () => {
+      const seen = await rig.ok("sync_status", {});
+      return seen.hub.status === "update-required";
+    });
+    const session = (await rig.ok("sync_status", {})).session;
+    // Minting is the thing being claimed about, so it is what is counted. The
+    // hub's log alone cannot carry this claim: a hub that logged nothing cannot
+    // tell a client that stopped from one whose reconnect has not come round
+    // yet, which is exactly the delayed re-offer this test has to catch.
+    const sync = rig.instance.replicas.sync;
+    const mintedByThen = sync.mintCount;
+    expect(mintedByThen).toBeGreaterThan(0);
+
+    // The transport goes, and the hub comes back on the same address speaking
+    // *our* version — the most inviting thing that can happen to a client that
+    // is still trying.
+    await hubs.pop()?.stop();
+    records.length = 0;
+    const second = await hub({ port, databasePath, log });
+    expect(second.port).toBe(port);
+
+    // A fresh client authenticating proves the new hub is up and serving, so
+    // the silence below is the client's and not the hub's.
+    const peer = await peerClient(port, `${WORKSPACE}/_directory`);
+    peers.push(peer);
+    await peer.synced;
+
+    // And then past a full retry window, because the failure this guards is a
+    // *delayed* re-offer: the socket's backoff is capped at
+    // `reconnectMaxDelayMs`, so a client still trying has had its chance by
+    // twice that. Derived from the configuration rather than picked.
+    await sleep(rig.config.reconnectMaxDelayMs * 2);
+
+    // And a brand-new room, which is the one thing that would still put a token
+    // on this reconnected socket: `create_doc` attaches its rooms, so without
+    // the terminal guard the attach mints and the hub logs the refusal. This is
+    // what gives the assertion below teeth — the reconnect alone does not, since
+    // a Hocuspocus provider that has been refused does not re-authenticate on
+    // its own.
+    await rig.ok("create_doc", {
+      title: "A room that would attach",
+      description: "A test document.",
+    });
+    await sleep(rig.config.reconnectMaxDelayMs * 2);
+
+    expect(sync.mintCount).toBe(mintedByThen);
+    // And nothing of ours reached the hub either — the same claim from the far
+    // side, where a mint we somehow missed would still show up.
+    expect(
+      records.filter(
+        (record) =>
+          record.event === "hub.auth.accepted" && record.sub === session,
+      ),
+    ).toEqual([]);
+    expect(records.filter((r) => r.cause === "protocol-mismatch")).toEqual([]);
+
+    const status = await rig.ok("sync_status", {});
+    expect(status.hub.status).toBe("update-required");
+  });
+
+  it("settles at once under a mismatch instead of waiting out the budget", async () => {
+    // `waitForQuiet` used to wait the full sync budget here: the socket stayed
+    // connected and no room ever synced, so every tool call — and every fresh
+    // `inspectRemote` probe — paid the whole timeout to learn what the first
+    // refusal already knew.
+    const running = await hub({ protocolVersion: SYNC_PROTOCOL_VERSION + 1 });
+    const rig = await serverOn(running.port, { syncTimeoutMs: 30_000 });
+
+    await waitUntil("the hub to refuse the protocol version", async () => {
+      const seen = await rig.ok("sync_status", {});
+      return seen.hub.status === "update-required";
+    });
+
+    const started = Date.now();
+    await rig.ok("sync_status", {});
+    // A wide margin against a 30s budget: this asserts "did not wait", not a
+    // particular speed, so a loaded machine cannot turn it red.
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it("reports the client's own protocol version even with the hub down", async () => {
+    // Nothing to compare against, and the number is still the one a person has
+    // to quote when they ask why two machines disagree.
+    const rig = await serverOn(1, {});
+    await waitUntil("the hub to be given up on", async () => {
+      const seen = await rig.ok("sync_status", {});
+      return seen.hub.status === "hub-down";
+    });
+
+    const status = await rig.ok("sync_status", {});
+
+    expect(status.hub.protocolVersion).toBe(SYNC_PROTOCOL_VERSION);
+    // Absent, not zero: a hub that has not refused us has not said what it
+    // speaks, and inventing a number here would be a guess on a status line.
+    expect(status.hub.hubProtocolVersion).toBeUndefined();
+  });
+
   it("reports a rejected token as auth-failed, and keeps serving", async () => {
     const running = await hub();
     const wrongSecret = "a-different-secret-the-hub-will-not-accept";
@@ -335,7 +483,10 @@ describe("hub sync", () => {
     // rejecting is a token we just sent it, and this reason is rendered by every
     // consumer — tool result, `ub status`, stderr log. A hostile or careless hub
     // must not get to put text there, let alone echo the credential back.
-    expect(status.hub.reason).toBe("authentication rejected by hub");
+    expect(status.hub.reason).toBe(
+      "the hub rejected this client's token: the secret is wrong, or this hub is " +
+        "older than this client — update the hub",
+    );
     expect(status.hub.reason).not.toContain(wrongSecret);
 
     // A rejected token is a sync problem, never a local one.

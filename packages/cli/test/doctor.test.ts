@@ -20,6 +20,7 @@ import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
+import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Run, Sandbox } from "./helpers.js";
 import {
@@ -330,6 +331,21 @@ describe("ub doctor", () => {
     // Taken is not a problem when we are the ones holding it.
     expect(check(checks, "bind").status).toBe("pass");
     expect(check(checks, "bind").reason).toMatch(/uberblick hub/);
+  });
+
+  it("names both causes when the hub refuses the secret", async () => {
+    // The refusal an older hub sends is byte-identical to the one a wrong
+    // secret sends — it cannot read this client's envelope at all — so the
+    // remedy has to name both rather than send the reader after the secret
+    // alone. Same sentence every other surface prints.
+    const box = sandbox({ credentials: { signingSecret: "a-secret-this-hub-was-not-deployed-with" } });
+    const hub = await startHub(box);
+    pointAt(box, `ws://127.0.0.1:${hub.port}`);
+    const { checks } = await doctor(box, { WORKSPACE_ID: WORKSPACE });
+
+    expect(check(checks, "hub").status).toBe("fail");
+    expect(check(checks, "hub").remedy).toContain(AUTH_REJECTED);
+    expect(check(checks, "hub").remedy).toMatch(/same secret/);
   });
 
   // The two thresholds, and the asymmetry between them: running fast trips the

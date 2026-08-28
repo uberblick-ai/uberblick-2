@@ -71,6 +71,8 @@ function fixture(status: Partial<RoomStatus> = {}): Fixture {
     // those words — so both flags are off and the pills are read on their own.
     localReplicaLoaded: false,
     hasLocalCache: false,
+    protocolMismatch: null,
+    authFailed: false,
     ...status,
   };
   const connection = {

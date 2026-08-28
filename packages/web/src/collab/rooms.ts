@@ -35,6 +35,11 @@ import {
 import { IndexeddbPersistence } from "y-indexeddb";
 import * as Y from "yjs";
 import { parseRoom } from "@uberblick/schema";
+import {
+  readProtocolMismatch,
+  SYNC_PROTOCOL_VERSION,
+  wrapToken,
+} from "@uberblick/hub/protocol";
 import { HUB_AUTH_TOKEN, hubUrl } from "../config.js";
 import { getSetting, subscribeSettings } from "../settings.js";
 import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "./token.js";
@@ -111,6 +116,20 @@ export function forcedDropCooldownMs(random: () => number = Math.random): number
   return Math.round(minMs + (maxMs - minMs) * random());
 }
 
+/**
+ * Set once the hub has refused this page for speaking a different sync
+ * protocol: our version and its.
+ *
+ * Page-wide rather than per room, because the refusal is about the *socket*.
+ * Every room shares one (see {@link sharedSocket}), `provider.disconnect()` is
+ * a no-op on a socket the provider does not manage, and a permission denial
+ * never closes the socket by itself — so "this room stops retrying" would not
+ * be a mechanism. What stops is the socket, and nothing re-dials it: a client
+ * the hub cannot talk to is not made compatible by connecting again. A reload
+ * starts over, which is exactly what a person does after updating.
+ */
+let protocolMismatch: { hub: number; client: number } | null = null;
+
 let lastForcedDrop = 0;
 /**
  * The window the last drop opened. Only read after a drop has set it — the
@@ -125,6 +144,38 @@ function cancelPendingDrop(): void {
   if (pendingDrop === null) return;
   clearTimeout(pendingDrop);
   pendingDrop = null;
+}
+
+/**
+ * Stop this page: the hub refuses the protocol it speaks.
+ *
+ * Idempotent, and deliberately at socket granularity — one refusal ends the
+ * page's sync, not one room's. The socket is disconnected (which also clears
+ * its own retry), any deferred forced drop is cancelled and the redial flag is
+ * cleared, so nothing dials again; then every open room is told, because they
+ * are all on the socket that just stopped.
+ */
+function haltForProtocolMismatch(hub: number): void {
+  if (protocolMismatch !== null) return;
+  protocolMismatch = { hub, client: SYNC_PROTOCOL_VERSION };
+  cancelPendingDrop();
+  redialAfterDrop = false;
+  socket?.disconnect();
+  for (const entry of entries.values()) {
+    const status = entry.connection.status;
+    status.protocolMismatch = protocolMismatch;
+    // Said here rather than left to the socket's close event, which lands a
+    // tick or more later: `disconnect()` above only *asks*, so `socket.status`
+    // still reads connected right now and a reader told "refused, and
+    // connected" would be told something that is already untrue. A halted page
+    // never connects or syncs again, so both are settled at the halt — and
+    // `refresh` keeps them settled when the close finally arrives.
+    status.connected = false;
+    status.synced = false;
+    for (const listener of entry.listeners) {
+      listener({ ...status });
+    }
+  }
 }
 
 function sharedSocket(): HocuspocusProviderWebsocket {
@@ -163,6 +214,10 @@ function sharedSocket(): HocuspocusProviderWebsocket {
  * reconnect without ever forgetting that we owe a reconnect.
  */
 function dropSocket(): void {
+  // A page the hub has refused has nothing to repair by reconnecting, and the
+  // close that refusal produces would otherwise land here and redial straight
+  // back into the same refusal. See {@link protocolMismatch}.
+  if (protocolMismatch !== null) return;
   const current = sharedSocket();
   // Only meaningful while the socket believes it is connected: a socket that
   // already knows it is down is reconnecting on its own — and every attached
@@ -211,17 +266,21 @@ async function hubToken(room: string, identity: AwarenessUser): Promise<string> 
     );
   }
   signingKey ??= importRootSecret(HUB_AUTH_TOKEN);
-  return mintToken(await signingKey, {
+  // Wrapped for the wire: the hub reads the protocol version out of the auth
+  // message before it reads the token. The token itself is unchanged.
+  return wrapToken(
+    await mintToken(await signingKey, {
     typ: "room",
     sub: identity.name,
     workspace: parseRoom(room).workspaceId,
     scope: "read-write",
     // Root-signed: the bundle carries the root secret, not a credential.
     kid: null,
-    // The ceiling itself. Hocuspocus calls this before every connect, so each
-    // reconnect mints a fresh token rather than replaying an expired one.
-    lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-  });
+      // The ceiling itself. Hocuspocus calls this before every connect, so each
+      // reconnect mints a fresh token rather than replaying an expired one.
+      lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+    }),
+  );
 }
 
 export interface RoomStatus {
@@ -258,6 +317,28 @@ export interface RoomStatus {
    * exactly the environments that cannot keep it.
    */
   hasLocalCache: boolean;
+  /**
+   * Set when the hub refused this page for speaking a different sync protocol
+   * version: `hub` is the hub's, `client` is ours. `null` while it has not.
+   *
+   * Both integers, because "which side is old" is the whole of what a reader
+   * can act on. Page-wide and terminal — see {@link protocolMismatch} — so
+   * every open room carries the same object and a room opened after the
+   * refusal carries it too, without dialling.
+   */
+  protocolMismatch: { hub: number; client: number } | null;
+  /**
+   * True while the hub's last word on this room's token was a refusal that is
+   * *not* a protocol mismatch — a wrong secret, or a hub too old to read our
+   * envelope, which answers identically and cannot be told apart.
+   *
+   * A flag, not the hub's message: what is rendered is composed locally (see
+   * `AUTH_REJECTED`). Unlike {@link RoomStatus.protocolMismatch} this is not
+   * terminal — a refusal is not proof the secret is wrong, since a hub on its
+   * way out refuses the room it is unloading — so the socket goes on retrying
+   * and the next accepted token clears it.
+   */
+  authFailed: boolean;
 }
 
 export interface RoomConnection {
@@ -302,7 +383,13 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // the socket's provider map, no connection at all — until `attach()` is
   // called. `destroy()` detaches again on its own, and leaves the shared socket
   // alone. This is silent when you get it wrong: the UI just reads "offline".
-  provider.attach();
+  // Not on a page the hub has already refused: attaching is what subscribes the
+  // provider to the socket and sends its token, and there is nothing to send an
+  // envelope this hub will not read. The room still opens — its local replica
+  // loads and the status line says why it is not syncing.
+  if (protocolMismatch === null) {
+    provider.attach();
+  }
 
   /**
    * Publish who is here: the tab's identity, with the browser's chosen presence
@@ -331,11 +418,15 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // fires on socket transitions, and the socket is not transitioning — so a
   // second room would read "offline" forever.
   const status: RoomStatus = {
-    connected: socket.status === WebSocketStatus.Connected,
-    synced: provider.isSynced,
+    connected: protocolMismatch === null && socket.status === WebSocketStatus.Connected,
+    synced: protocolMismatch === null && provider.isSynced,
     unsyncedChanges: provider.unsyncedChanges,
     localReplicaLoaded: false,
     hasLocalCache: false,
+    // A room opened after the refusal reads the same terminal state as the
+    // rooms that were open when it arrived.
+    protocolMismatch,
+    authFailed: false,
   };
   const listeners = new Set<(status: RoomStatus) => void>();
   const emit = (): void => {
@@ -348,11 +439,33 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // every disconnect, which is the indicator claiming "synced" over a
   // connection that stopped delivering anything.
   const refresh = (): void => {
-    status.connected = socket.status === WebSocketStatus.Connected;
-    status.synced = provider.isSynced;
+    // The halt is terminal, so nothing the socket or the provider says
+    // afterwards may raise either flag again — including the close event that
+    // arrives after `haltForProtocolMismatch` has already settled them, and a
+    // provider still reporting the sync it had before it was refused.
+    const halted = protocolMismatch !== null;
+    status.connected = !halted && socket.status === WebSocketStatus.Connected;
+    status.synced = !halted && provider.isSynced;
     status.unsyncedChanges = provider.unsyncedChanges;
     emit();
   };
+  // The hub's one string about our token, read by strict match and never
+  // rendered. A mismatch is terminal and stops the whole page; every other
+  // refusal is a room-level reading the socket keeps retrying underneath.
+  provider.on("authenticationFailed", ({ reason }: { reason: string }) => {
+    const hub = readProtocolMismatch(reason);
+    if (hub !== null) {
+      haltForProtocolMismatch(hub);
+      return;
+    }
+    status.authFailed = true;
+    emit();
+  });
+  provider.on("authenticated", () => {
+    status.authFailed = false;
+    emit();
+  });
+
   provider.on("status", refresh);
   provider.on("synced", refresh);
   provider.on("unsyncedChanges", refresh);

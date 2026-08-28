@@ -221,7 +221,8 @@ const RECOVERIES: Record<string, Recovery> = {
  * picture — connected, connecting, or down and reconnecting on its own —
  * because the same call then succeeds unchanged and nothing was written. Where
  * no hub can deliver it — none configured, a credential the hub refused, a
- * replica quarantined after a refused log write — waiting is advice that loops,
+ * protocol version the hub refuses, a replica quarantined after a refused log
+ * write — waiting is advice that loops,
  * so it is `manual` and says what a human has to change. In that state the
  * directory stub stays dangling: an entry pointing at a room this replica will
  * never receive.
@@ -247,6 +248,14 @@ export function hydrationRecovery(hubStatus: string): {
         recovery:
           `${stub}The hub rejected this replica's credential, so nothing will arrive until a human fixes it — ` +
           "sync_status carries the reason. Retrying cannot help, and the stub stays dangling meanwhile.",
+      };
+    case "update-required":
+      return {
+        recoveryClass: "manual",
+        recovery:
+          `${stub}This replica and the hub speak different sync protocols, so the hub refuses the connection ` +
+          "outright and no room will arrive until the older side is updated — sync_status names both versions " +
+          "and which one that is. Retrying cannot help, and the stub stays dangling meanwhile.",
       };
     case "quarantined":
       return {

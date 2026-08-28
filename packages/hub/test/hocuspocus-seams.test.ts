@@ -218,6 +218,62 @@ describe("ClientConnection.ts:427 — the pre-auth queue drains before `connecte
   });
 });
 
+describe("ClientConnection.ts:517-543 — a refused token sets up no connection", () => {
+  /**
+   * `onAuthenticate` throwing takes the branch that answers `writePermissionDenied`
+   * and closes (`:520-531`); `setUpNewConnection` at `:543` never runs, so the
+   * frames the provider queued behind its token — the sync step it sent without
+   * waiting to be authenticated — are dropped with the connection rather than
+   * handed to a `Connection` afterwards.
+   *
+   * The hub's protocol refusal rides entirely on that: it is the reason a
+   * client the hub has decided not to talk to receives no document state at
+   * all. Pinned here with the server *holding* content the refused client does
+   * not have, because "the client's document is empty" proves nothing if there
+   * was never anything for it to be given.
+   */
+  it("sends a refused client none of the document it is holding", async () => {
+    const room = randomUUID();
+    const { port, hocuspocus } = await startServer({
+      onAuthenticate: async ({ token }) => {
+        if (token === "refused") {
+          throw new Error("no");
+        }
+        return { name: "welcome" };
+      },
+    });
+
+    // Something to leak: an accepted client writes, and the server has it.
+    const holder = connect({ port, room, token: "welcome" });
+    await holder.synced;
+    holder.text.insert(0, "state the refused client must not receive");
+    await waitUntil("the server to hold the text", () =>
+      hocuspocus.documents.get(room) !== undefined &&
+      hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString() !== "",
+    );
+
+    // Refused, on a reconnect delay far out of reach so nothing it observes can
+    // be explained by a second attempt.
+    const refused = connect({
+      port,
+      room,
+      token: "refused",
+      reconnectDelayMs: 60_000,
+    });
+    let denied = false;
+    refused.provider.on("authenticationFailed", () => {
+      denied = true;
+    });
+    await waitUntil("the refusal to reach the client", () => denied);
+
+    expect(hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString()).toBe(
+      "state the refused client must not receive",
+    );
+    expect(refused.text.toString()).toBe("");
+    expect(refused.provider.isSynced).toBe(false);
+  });
+});
+
 describe("MessageReceiver.ts:157 — the token dispatch is fire-and-forget", () => {
   /**
    * An auth message on an established connection reaches
