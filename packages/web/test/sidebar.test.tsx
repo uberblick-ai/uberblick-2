@@ -51,6 +51,7 @@ const OFFLINE: RoomStatus = {
   localReplicaLoaded: false,
   hasLocalCache: false,
   protocolMismatch: null,
+  authFailed: false,
 };
 
 const rooms = new Map<string, RoomConnection>();

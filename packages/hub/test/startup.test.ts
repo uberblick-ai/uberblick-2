@@ -94,6 +94,15 @@ describe("createHub", () => {
     expect(after.port).toBe(port);
   });
 
+  it("rejects a protocol version the refusal sentinel could not spell", async () => {
+    // The sentinel is the only way a client learns this number and it can only
+    // carry 1..999999, so a hub outside that range would refuse every client
+    // with a reason none of them could read.
+    await expect(startHub({ protocolVersion: 0 })).rejects.toThrow(
+      /protocolVersion must be an integer between 1 and 999999/,
+    );
+  });
+
   it("rejects when the port is already bound", async () => {
     const first = await startHub();
     hubs.push(first);

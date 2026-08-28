@@ -24,8 +24,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { WebSocketStatus } from "@hocuspocus/provider";
-import { createHub, silentLogger } from "@uberblick/hub";
-import type { Hub } from "@uberblick/hub";
+import { createHub } from "@uberblick/hub";
+import type { Hub, HubLogRecord } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
@@ -46,6 +46,7 @@ const dirs: string[] = [];
 const teardown: Array<() => void> = [];
 
 afterEach(async () => {
+  refusals.length = 0;
   for (const undo of teardown.splice(0).reverse()) undo();
   for (const hub of hubs.splice(0)) await hub.stop().catch(() => {});
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -65,6 +66,9 @@ async function waitFor(label: string, predicate: () => boolean): Promise<void> {
   }
 }
 
+/** Every auth attempt the hub refused — the count this test is really about. */
+const refusals: HubLogRecord[] = [];
+
 /** A hub from another release: one integer away, which is the whole test. */
 async function hubFromAnotherRelease(): Promise<Hub> {
   const dir = mkdtempSync(join(tmpdir(), "uberblick-web-protocol-"));
@@ -73,7 +77,9 @@ async function hubFromAnotherRelease(): Promise<Hub> {
     authSecret: SECRET,
     port: 0,
     databasePath: join(dir, "hub.sqlite"),
-    log: silentLogger,
+    log: (record) => {
+      if (record.cause === "protocol-mismatch") refusals.push(record);
+    },
     protocolVersion: SYNC_PROTOCOL_VERSION + 1,
     debounce: 200,
     maxDebounce: 1_000,
@@ -108,12 +114,7 @@ function sharedSocket(connection: RoomConnection) {
   return connection.provider.configuration.websocketProvider;
 }
 
-/**
- * One real hub, one real socket, and a deliberate 2.5s quiet window — past the
- * socket's own backoff band, which is the only way to observe "and it did not
- * come back". Generous rather than tight, because the review container runs
- * every package's suite at once.
- */
+/** One real hub over one real socket; generous because the review container runs every suite at once. */
 const TEST_TIMEOUT_MS = 60_000;
 
 it("stops the page's socket for good when the hub refuses its protocol version", async () => {
@@ -137,15 +138,16 @@ it("stops the page's socket for good when the hub refuses its protocol version",
   // client the hub cannot talk to is not made compatible by dialling again.
   const socket = sharedSocket(first.connection);
   expect(socket.shouldConnect).toBe(false);
-
-  // Long enough that the socket's own backoff band (max 2s) would have redialled
-  // several times over had anything been left running.
-  await sleep(2_500);
   expect(socket.status).not.toBe(WebSocketStatus.Connected);
-  expect(socket.shouldConnect).toBe(false);
+
+  // Counted at the hub rather than waited out: exactly one attempt for the one
+  // room the page opened, so nothing retried behind it.
+  const afterFirst = refusals.length;
+  expect(afterFirst).toBe(1);
 
   // A room opened after the refusal reads the same terminal state, and sends
-  // nothing: attaching is what would put its token on the wire.
+  // nothing: attaching is what would put its token on the wire, and its absence
+  // is what keeps the count still.
   const later = await openTab(`${WORKSPACE}/${randomUUID()}`, hub.port);
   expect(later.latest().protocolMismatch).toEqual({
     hub: SYNC_PROTOCOL_VERSION + 1,
@@ -153,4 +155,5 @@ it("stops the page's socket for good when the hub refuses its protocol version",
   });
   expect(later.connection.provider.isAttached).toBe(false);
   expect(socket.shouldConnect).toBe(false);
+  expect(refusals.length).toBe(afterFirst);
 }, TEST_TIMEOUT_MS);

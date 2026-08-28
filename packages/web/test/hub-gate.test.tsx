@@ -45,6 +45,7 @@ function fakeHandle(room: string): unknown {
         localReplicaLoaded: false,
         hasLocalCache: false,
         protocolMismatch: null,
+        authFailed: false,
       },
       onStatusChange: () => () => {},
       whenLocalReplicaLoaded: Promise.resolve(),

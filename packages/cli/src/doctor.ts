@@ -38,7 +38,7 @@ import {
   CLOCK_SKEW_SECONDS,
   MAX_TOKEN_LIFETIME_SECONDS,
 } from "@uberblick/hub/token";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { AUTH_REJECTED, SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import type { McpConfig } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import type { ResolvedConfig } from "./config.js";
@@ -267,13 +267,16 @@ async function hubCheck(
   if (status === "auth-failed") {
     // Narrower here than for a long-running client: this probe minted its
     // token seconds ago, in this process, in the current format, so the token's
-    // *shape* is not in question. Two causes survive that — a secret the hub
-    // does not share, and a clock far enough out that the hub's clamp refuses
-    // an otherwise correct token. The check below reads the second one.
+    // *shape* is not in question. Three causes survive that — a secret the hub
+    // does not share, a clock far enough out that the hub's clamp refuses an
+    // otherwise correct token, and a hub older than this client, which reads
+    // our envelope as unparseable and answers exactly as a wrong secret does.
+    // The clock check below reads the second; the third is why the remedy
+    // carries AUTH_REJECTED, since no probe can tell it from the first.
     return fail(
       "hub",
       `${config.hubUrl} refused the signing secret`,
-      "give the hub and this machine the same secret — `ub status` says which layer this one came from — and read the clock check below, because a clock far enough out of step is refused the same way",
+      `${AUTH_REJECTED}. Give the hub and this machine the same secret — \`ub status\` says which layer this one came from — and read the clock check below, because a clock far enough out of step is refused the same way`,
     );
   }
   if (status === "update-required") {

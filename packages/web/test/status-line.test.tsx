@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { StatusLine } from "../src/ui/EditorPane.js";
+import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 /** The workspace these stub room keys sit in. A workspace id is a uuid. */
@@ -29,6 +30,7 @@ function stubConnection(
     localReplicaLoaded: false,
     hasLocalCache: false,
     protocolMismatch: null,
+    authFailed: false,
     ...patch,
   };
   return {
@@ -95,7 +97,7 @@ function line(patch: Partial<RoomStatus>): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-describe("a hub that refuses this page's sync protocol", () => {
+describe("a hub that refuses this page", () => {
   it("says an update is needed, and which side needs it", () => {
     // A reading of its own, not a fourth sync state: the other three describe a
     // connection that works or is coming back, and this one describes a page
@@ -109,13 +111,20 @@ describe("a hub that refuses this page's sync protocol", () => {
     const newer = line({ protocolMismatch: { hub: 1, client: 2 } });
     expect(newer).toContain("the hub is older than this app");
     expect(newer).toContain("(app 2, hub 1)");
-  });
 
-  it("says nothing of the sort while there is no mismatch", () => {
-    // The new reading replaces the line; a room with no refusal must never see
-    // it, whichever of the three sync states it is in.
+    // Neither reading appears without its refusal, whichever sync state the
+    // room is in — they replace the line, so a false positive hides the truth.
     expect(line({})).not.toContain("update required");
     expect(line({ connected: true, synced: true })).not.toContain("update required");
+    expect(line({})).not.toContain(AUTH_REJECTED);
+  });
+
+  it("names both causes when the refusal was not a version mismatch", () => {
+    // An older hub cannot read our envelope and answers exactly as a wrong
+    // secret does, so this is the one direction nothing can detect: the copy
+    // names both causes rather than guessing, and it is composed locally —
+    // the hub's own words never reach the line.
+    expect(line({ authFailed: true })).toContain(AUTH_REJECTED);
   });
 });
 

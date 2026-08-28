@@ -59,6 +59,7 @@ import type { HubLogger } from "./log.js";
 import { stderrLogger } from "./log.js";
 import { HubDatabase, isEphemeralDatabase } from "./persistence.js";
 import {
+  isProtocolVersion,
   protocolMismatchReason,
   readAuthEnvelope,
   SYNC_PROTOCOL_VERSION,
@@ -437,6 +438,14 @@ export async function createHub(config: HubConfig): Promise<Hub> {
   const rootKey = await importRootSecret(config.authSecret);
   // The build's, unless a test moved one end to observe a skew. See HubConfig.
   const protocolVersion = config.protocolVersion ?? SYNC_PROTOCOL_VERSION;
+  // Held to the range the wire can carry: the refusal sentinel is the only way
+  // a client learns this number, and it can only spell 1..999999. A hub outside
+  // it would refuse every client with a reason none of them could read.
+  if (!isProtocolVersion(protocolVersion)) {
+    throw new Error(
+      `createHub: protocolVersion must be an integer between 1 and 999999, got ${protocolVersion}`,
+    );
+  }
   const databasePath = config.databasePath ?? defaultDatabasePath();
   const address = config.address ?? DEFAULT_HOST;
   const shutdownTimeoutMs = config.shutdownTimeoutMs ?? 10_000;

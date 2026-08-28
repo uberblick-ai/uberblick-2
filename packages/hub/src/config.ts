@@ -101,6 +101,10 @@ export interface HubConfig {
    * skew this hub refuses cannot otherwise be *observed*: every process in this
    * repository compiles the same constant, so a client-side test that could not
    * move one end would only be asserting the constant against itself.
+   *
+   * Validated by `createHub` against the range the wire can carry (an integer
+   * 1..999999): a hub outside it would refuse every client with a reason none
+   * of them could read.
    */
   protocolVersion?: number;
   /**

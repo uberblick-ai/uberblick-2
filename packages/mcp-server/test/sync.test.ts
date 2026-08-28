@@ -11,7 +11,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { appendBlock, getBlocks, getMeta, listDirectory } from "@uberblick/schema";
-import type { Hub } from "@uberblick/hub";
+import type { Hub, HubLogRecord } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import {
   hubUrl,
@@ -27,7 +27,7 @@ import {
   waitUntil,
   WORKSPACE,
 } from "./helpers.js";
-import type { PeerClient, Rig, TestConfigOptions } from "./helpers.js";
+import type { HubOptions, PeerClient, Rig, TestConfigOptions } from "./helpers.js";
 
 const hubs: Hub[] = [];
 const rigs: Rig[] = [];
@@ -46,9 +46,7 @@ afterEach(async () => {
   removeTempDirs();
 });
 
-async function hub(
-  options: { port?: number; databasePath?: string; protocolVersion?: number } = {},
-) {
+async function hub(options: HubOptions = {}) {
   const started = await startHub(options);
   hubs.push(started);
   return started;
@@ -350,6 +348,78 @@ describe("hub sync", () => {
     });
     const read = await rig.ok("get_doc", { uuid: created.uuid });
     expect(read.title).toBe("Written against a hub that refuses us");
+  });
+
+  it("mints nothing more, even for a hub that restarts willing to accept it", async () => {
+    // The strong form of terminal. A skew is not a connection fault, so neither
+    // losing the transport nor the hub coming back as a build that *would*
+    // accept us may put another token on the wire: a client told it is the
+    // wrong version does not become the right one by reconnecting, and only a
+    // restart of this process re-reads that.
+    const records: HubLogRecord[] = [];
+    const databasePath = tempDatabasePath();
+    const log = (record: HubLogRecord) => {
+      records.push(record);
+    };
+    const first = await hub({
+      databasePath,
+      log,
+      protocolVersion: SYNC_PROTOCOL_VERSION + 1,
+    });
+    const port = first.port;
+    const rig = await serverOn(port);
+
+    await waitUntil("the hub to refuse the protocol version", async () => {
+      const seen = await rig.ok("sync_status", {});
+      return seen.hub.status === "update-required";
+    });
+    const session = (await rig.ok("sync_status", {})).session;
+
+    // The transport goes, and the hub comes back on the same address speaking
+    // *our* version — the most inviting thing that can happen to a client that
+    // is still trying.
+    await hubs.pop()?.stop();
+    records.length = 0;
+    const second = await hub({ port, databasePath, log });
+    expect(second.port).toBe(port);
+
+    // The barrier is an event, not a duration: a fresh client authenticating
+    // proves the new hub is up and serving before anything below is asserted.
+    const peer = await peerClient(port, `${WORKSPACE}/_directory`);
+    peers.push(peer);
+    await peer.synced;
+
+    // Nothing of ours reached it — no accepted handshake, and no rejected one
+    // either, which is what "minted nothing" looks like from the far side.
+    const ours = records.filter(
+      (record) =>
+        record.event === "hub.auth.accepted" && record.sub === session,
+    );
+    expect(ours).toEqual([]);
+    expect(records.filter((r) => r.cause === "protocol-mismatch")).toEqual([]);
+
+    const status = await rig.ok("sync_status", {});
+    expect(status.hub.status).toBe("update-required");
+  });
+
+  it("settles at once under a mismatch instead of waiting out the budget", async () => {
+    // `waitForQuiet` used to wait the full sync budget here: the socket stayed
+    // connected and no room ever synced, so every tool call — and every fresh
+    // `inspectRemote` probe — paid the whole timeout to learn what the first
+    // refusal already knew.
+    const running = await hub({ protocolVersion: SYNC_PROTOCOL_VERSION + 1 });
+    const rig = await serverOn(running.port, { syncTimeoutMs: 30_000 });
+
+    await waitUntil("the hub to refuse the protocol version", async () => {
+      const seen = await rig.ok("sync_status", {});
+      return seen.hub.status === "update-required";
+    });
+
+    const started = Date.now();
+    await rig.ok("sync_status", {});
+    // A wide margin against a 30s budget: this asserts "did not wait", not a
+    // particular speed, so a loaded machine cannot turn it red.
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 
   it("reports the client's own protocol version even with the hub down", async () => {

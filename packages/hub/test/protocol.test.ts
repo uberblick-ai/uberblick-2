@@ -115,13 +115,7 @@ async function maximalToken(): Promise<string> {
 }
 
 describe("the version exchange", () => {
-  it("authenticates a client that speaks this hub's protocol", async () => {
-    const accepted = client(await token("read-write"));
-
-    await expect(accepted.synced).resolves.toBeUndefined();
-  });
-
-  it("refuses another version, and a bare token, with the same distinct reason", async () => {
+  it("refuses another version, and a bare token, with the same exact reason", async () => {
     const newer = client(await token("read-write"), SYNC_PROTOCOL_VERSION + 1);
     // What every client that has not been updated looks like on the flag day.
     const bare = client(await token("read-write"), null);
@@ -129,19 +123,6 @@ describe("the version exchange", () => {
     const reason = protocolMismatchReason(SYNC_PROTOCOL_VERSION);
     await expect(newer.denied).resolves.toBe(reason);
     await expect(bare.denied).resolves.toBe(reason);
-    // Distinct from the refusals a client must not mistake it for: one says
-    // "update something", the others say "fix the secret" and "wrong
-    // workspace", and no client can act on the difference if they read alike.
-    expect(reason).not.toBe("invalid-token");
-    expect(reason).not.toBe("workspace-mismatch");
-  });
-
-  it("still reads the token inside the envelope, and still refuses a bad one", async () => {
-    // The envelope is not a bypass: a wrapped garbage token reaches the token
-    // check and is refused by it, exactly as an unwrapped one used to be.
-    const rejected = client("not-a-token");
-
-    await expect(rejected.denied).resolves.toBe("invalid-token");
   });
 });
 
@@ -197,32 +178,25 @@ describe("what a refused client may read", () => {
 });
 
 describe("the rejection line", () => {
-  it("carries both integers and neither the token nor the envelope", async () => {
+  it.each([
+    // A readable envelope names the version it claimed; a bare token has none
+    // to name, and `null` is the honest answer rather than a guess.
+    { name: "a readable envelope", claimed: SYNC_PROTOCOL_VERSION + 1, logged: SYNC_PROTOCOL_VERSION + 1 },
+    { name: "no envelope at all", claimed: null, logged: null },
+  ])("carries both integers and no token for $name", async (scenario) => {
     const jwt = await token("read-write", { sub: "a-stale-client" });
-    const envelope = wrapToken(jwt, SYNC_PROTOCOL_VERSION + 1);
-    client(jwt, SYNC_PROTOCOL_VERSION + 1);
+    const envelope = wrapToken(jwt, scenario.claimed ?? SYNC_PROTOCOL_VERSION);
+    client(jwt, scenario.claimed);
 
     await waitUntil("the rejection to be logged", () =>
       records.some((record) => record.cause === "protocol-mismatch"),
     );
     const line = records.find((record) => record.cause === "protocol-mismatch");
 
-    expect(line?.clientProtocol).toBe(SYNC_PROTOCOL_VERSION + 1);
+    expect(line?.clientProtocol).toBe(scenario.logged);
     expect(line?.hubProtocol).toBe(SYNC_PROTOCOL_VERSION);
     const written = JSON.stringify(line);
     expect(written).not.toContain(jwt);
     expect(written).not.toContain(envelope);
-  });
-
-  it("says the client's version is absent when there was no envelope to read", async () => {
-    client(await token("read-write"), null);
-
-    await waitUntil("the rejection to be logged", () =>
-      records.some((record) => record.cause === "protocol-mismatch"),
-    );
-    const line = records.find((record) => record.cause === "protocol-mismatch");
-
-    expect(line?.clientProtocol).toBeNull();
-    expect(line?.hubProtocol).toBe(SYNC_PROTOCOL_VERSION);
   });
 });

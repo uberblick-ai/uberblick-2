@@ -318,6 +318,18 @@ export interface RoomStatus {
    * refusal carries it too, without dialling.
    */
   protocolMismatch: { hub: number; client: number } | null;
+  /**
+   * True while the hub's last word on this room's token was a refusal that is
+   * *not* a protocol mismatch — a wrong secret, or a hub too old to read our
+   * envelope, which answers identically and cannot be told apart.
+   *
+   * A flag, not the hub's message: what is rendered is composed locally (see
+   * `AUTH_REJECTED`). Unlike {@link RoomStatus.protocolMismatch} this is not
+   * terminal — a refusal is not proof the secret is wrong, since a hub on its
+   * way out refuses the room it is unloading — so the socket goes on retrying
+   * and the next accepted token clears it.
+   */
+  authFailed: boolean;
 }
 
 export interface RoomConnection {
@@ -354,14 +366,6 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     websocketProvider: socket,
     // Async callable form: re-minted on every (re)connect.
     token: () => hubToken(room, identity),
-    onAuthenticationFailed: ({ reason }: { reason: string }) => {
-      // The hub's one string, read by strict match and never rendered. A
-      // mismatch yields a validated integer and stops the page; anything else
-      // is a token the hub refused, which is the pre-existing path and is left
-      // exactly as it was.
-      const hub = readProtocolMismatch(reason);
-      if (hub !== null) haltForProtocolMismatch(hub);
-    },
   });
 
   // Required when the socket is shared. `HocuspocusProvider` only attaches
@@ -413,6 +417,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     // A room opened after the refusal reads the same terminal state as the
     // rooms that were open when it arrived.
     protocolMismatch,
+    authFailed: false,
   };
   const listeners = new Set<(status: RoomStatus) => void>();
   const emit = (): void => {
@@ -430,6 +435,23 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     status.unsyncedChanges = provider.unsyncedChanges;
     emit();
   };
+  // The hub's one string about our token, read by strict match and never
+  // rendered. A mismatch is terminal and stops the whole page; every other
+  // refusal is a room-level reading the socket keeps retrying underneath.
+  provider.on("authenticationFailed", ({ reason }: { reason: string }) => {
+    const hub = readProtocolMismatch(reason);
+    if (hub !== null) {
+      haltForProtocolMismatch(hub);
+      return;
+    }
+    status.authFailed = true;
+    emit();
+  });
+  provider.on("authenticated", () => {
+    status.authFailed = false;
+    emit();
+  });
+
   provider.on("status", refresh);
   provider.on("synced", refresh);
   provider.on("unsyncedChanges", refresh);

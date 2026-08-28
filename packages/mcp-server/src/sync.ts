@@ -41,6 +41,7 @@ import {
   mintToken,
 } from "@uberblick/hub/token";
 import {
+  AUTH_REJECTED,
   protocolSkew,
   readProtocolMismatch,
   SYNC_PROTOCOL_VERSION,
@@ -82,21 +83,6 @@ export interface HubState {
    */
   hubProtocolVersion?: number;
 }
-
-/**
- * What a rejected token reports, in place of whatever the endpoint said.
- *
- * The hub's rejection message is remote-supplied text, and the thing it is
- * rejecting is a token we just sent it: an endpoint that is hostile or merely
- * careless can echo that token straight back, and this reason is rendered by
- * `sync_status`, by every mutating tool's `{applied, synced}`, by `ub status`,
- * and by the stderr log. So the reason is fixed locally and the remote string is
- * dropped where it arrives. Which endpoint refused is already in `url`, and the
- * fix — the secret — is local either way.
- */
-const AUTH_REJECTED =
-  "the hub rejected this client's token: the secret is wrong, or this hub is " +
-  "older than this client — update the hub";
 
 /**
  * How many times a connection the hub has disowned is rebuilt before the
@@ -275,11 +261,35 @@ export class HubSync {
    *
    * An integer rather than a flag because both numbers are what makes the
    * answer actionable — which side is old is the whole of what a person needs.
-   * Terminal while it stands: nothing re-mints, no rebuild is spent, and the
-   * refusal is logged once. Cleared only by an authentication that actually
-   * succeeds, which is the one event that proves the skew is gone.
+   * Set once and never cleared: see {@link stopForProtocolMismatch}, which is
+   * the only thing that sets it and stops the client with it.
    */
   private hubProtocolVersion: number | null = null;
+
+  /**
+   * Whether this process has stopped talking to the hub for good.
+   *
+   * Three ways in and no way out of any of them without a restart: destroyed,
+   * quarantined, or refused for speaking a different sync protocol. Everything
+   * that would mint a token, take an admission slot, attach a room or dial the
+   * socket asks this first, so "terminal" is one condition rather than a rule
+   * each call site remembers separately.
+   */
+  private get stopped(): boolean {
+    return this.destroyed || this.quarantined || this.hubProtocolVersion !== null;
+  }
+
+  /**
+   * Whether the hub has refused this client outright — its token or its
+   * protocol version.
+   *
+   * What {@link waitForQuiet} settles for: neither refusal is resolved by
+   * waiting, so a tool call that waited its full budget on one would spend the
+   * budget to learn what was already known.
+   */
+  private refusedByHub(): boolean {
+    return this.authRejected || this.hubProtocolVersion !== null;
+  }
 
   /** The socket's own first retry delay, reused by {@link rebuild}. */
   private readonly reconnectDelayMs: number;
@@ -431,7 +441,7 @@ export class HubSync {
         // where the socket has just said it is down, rather than guessing when.
         if (status === "disconnected" && this.rebuilding) {
           this.rebuilding = false;
-          if (this.destroyed || this.quarantined) {
+          if (this.stopped) {
             return;
           }
           void this.socket?.connect().catch(() => {
@@ -450,7 +460,7 @@ export class HubSync {
     // before the socket could carry it. Registered after construction, this one
     // runs once the payload is in place and still ahead of every provider.
     this.socket.on("open", () => {
-      if (this.destroyed || this.quarantined) {
+      if (this.stopped) {
         return;
       }
       this.pumpAdmissions();
@@ -471,7 +481,7 @@ export class HubSync {
    * is what the caller checks before it lets anything leave.
    */
   private admission(room: string): Promise<number> {
-    if (this.destroyed || this.quarantined) {
+    if (this.stopped) {
       // Terminal: every provider is inert and no connection will be opened
       // again, so a queue entry made here would never be admitted, its caller
       // would stay suspended, and both would be held until the process ends.
@@ -611,8 +621,7 @@ export class HubSync {
   private rebuild(): void {
     if (
       this.socket === null ||
-      this.destroyed ||
-      this.quarantined ||
+      this.stopped ||
       this.rebuildTimer !== null ||
       this.rebuilding ||
       this.socketStatus !== "connected" ||
@@ -630,11 +639,7 @@ export class HubSync {
     this.rebuildTimer = setTimeout(() => {
       this.rebuildTimer = null;
       // A socket that went down on its own in the meantime is already retrying.
-      if (
-        this.destroyed ||
-        this.quarantined ||
-        this.socketStatus !== "connected"
-      ) {
+      if (this.stopped || this.socketStatus !== "connected") {
         return;
       }
       this.rebuilding = true;
@@ -648,12 +653,7 @@ export class HubSync {
    * syncs in the background.
    */
   attach({ room, doc, awareness }: AttachOptions): void {
-    if (
-      this.socket === null ||
-      this.destroyed ||
-      this.quarantined ||
-      this.providers.has(room)
-    ) {
+    if (this.socket === null || this.stopped || this.providers.has(room)) {
       return;
     }
 
@@ -668,8 +668,8 @@ export class HubSync {
       token: async () => {
         for (;;) {
           const generation = await this.admission(room);
-          if (this.destroyed || this.quarantined) {
-            // Quarantined or destroyed while this call was suspended. Every
+          if (this.stopped) {
+            // Stopped while this call was suspended. Every
             // provider is detached by then and `send()` on a detached provider
             // is inert, so this token travels nowhere; ending the call is what
             // matters, because looping would queue for a connection that is
@@ -693,9 +693,6 @@ export class HubSync {
       },
       onAuthenticated: () => {
         this.authRejected = false;
-        // A hub that accepts us is a hub we speak the same protocol as, which
-        // is the only honest way out of `update-required`.
-        this.hubProtocolVersion = null;
         this.roomAnswered(room);
       },
       onSynced: ({ state }) => {
@@ -710,20 +707,7 @@ export class HubSync {
         // token rejection below, exactly as before. See readProtocolMismatch.
         const hubProtocol = readProtocolMismatch(reason);
         if (hubProtocol !== null) {
-          // Terminal, and terminal cheaply. A version skew is not a connection
-          // fault: re-minting the same envelope on a fresh socket produces the
-          // same refusal, so this spends none of the rebuild budget and says so
-          // once for the process rather than once per room per rebuild.
-          if (this.hubProtocolVersion === null) {
-            this.hubProtocolVersion = hubProtocol;
-            log.error("the hub speaks a different sync protocol: update required", {
-              protocolVersion: SYNC_PROTOCOL_VERSION,
-              hubProtocolVersion: hubProtocol,
-            });
-          }
-          // The slot still goes back: the hub has answered for this room, and a
-          // room left pending would hold the attach bound shut behind it.
-          this.roomAnswered(room);
+          this.stopForProtocolMismatch(hubProtocol);
           return;
         }
         // Distinct from an unreachable hub: a human has to fix the secret. The
@@ -801,6 +785,48 @@ export class HubSync {
     this.releaseAdmissions();
     this.socket?.disconnect();
     log.error("quarantined the hub connection: this replica is not durable");
+  }
+
+  /**
+   * Stop talking to this hub: it speaks a different sync protocol.
+   *
+   * Terminal for the process, which is what makes it different from every other
+   * refusal here. A version skew is not a connection fault — re-minting the
+   * same envelope on a fresh socket produces the same refusal — so nothing is
+   * retried and no rebuild budget is spent. It is also not something a *later*
+   * event can undo: a transport loss, or the hub restarting as a build that
+   * would accept us, must still mint nothing, because a client that has been
+   * told it is the wrong version does not become the right one by reconnecting.
+   * Only a restart of this process re-reads that.
+   *
+   * So every provider is detached (a detached provider never asks for a token
+   * again, and its `send()` is inert), the queue is let go, any rebuild waiting
+   * out its backoff is dropped, and the shared socket is disconnected — which
+   * also stops its own retry. `hubProtocolVersion` is set *first*, so the
+   * suspended token calls released below wake to a stopped client and end
+   * rather than queue for a connection nobody will open.
+   *
+   * Idempotent, and logged once for the process rather than once per room.
+   */
+  private stopForProtocolMismatch(hubProtocol: number): void {
+    if (this.hubProtocolVersion !== null) {
+      return;
+    }
+    this.hubProtocolVersion = hubProtocol;
+    log.error("the hub speaks a different sync protocol: update required", {
+      protocolVersion: SYNC_PROTOCOL_VERSION,
+      hubProtocolVersion: hubProtocol,
+    });
+    if (this.rebuildTimer !== null) {
+      clearTimeout(this.rebuildTimer);
+      this.rebuildTimer = null;
+    }
+    this.rebuilding = false;
+    for (const provider of this.providers.values()) {
+      provider.detach();
+    }
+    this.releaseAdmissions();
+    this.socket?.disconnect();
   }
 
   isQuarantined(): boolean {
@@ -960,12 +986,12 @@ export class HubSync {
 
     const connectDeadline = Date.now() + this.config.connectTimeoutMs;
     while (this.socketStatus !== "connected") {
-      if (this.authRejected || Date.now() >= connectDeadline) {
+      if (this.refusedByHub() || Date.now() >= connectDeadline) {
         return;
       }
       await sleep(25);
     }
-    if (this.authRejected) {
+    if (this.refusedByHub()) {
       return;
     }
 
@@ -973,7 +999,7 @@ export class HubSync {
     while (!this.allQuiet()) {
       if (
         this.socketStatus !== "connected" ||
-        this.authRejected ||
+        this.refusedByHub() ||
         Date.now() >= syncDeadline
       ) {
         return;
