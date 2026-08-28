@@ -1949,11 +1949,29 @@ h3.ub-heading {
 }
 
 /* An inline reference to another document. Dotted where an external link is
-   solid, so the two read apart at a glance; it does not navigate yet (#444). */
+   solid, so the two read apart at a glance (#444). */
 .ub-doclink {
   color: var(--brand);
   text-decoration: underline dotted;
   text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+/* The two states a reference can be in that its label cannot say, and they are
+   *not* the same thing: an unresolved target is one the directory has not
+   named — most often one that has not synced yet, which is why it is muted
+   rather than alarming — while an archived target is a document this workspace
+   really does have and really has tombstoned. Both stay clickable: the first
+   opens the waiting screen, the second the read-only view. The anchor's
+   `title` carries the sentence; this carries the glance. */
+.ub-doclink[data-doc-link-state="unresolved"] {
+  color: var(--muted-foreground);
+  text-decoration-style: wavy;
+}
+
+.ub-doclink[data-doc-link-state="archived"] {
+  color: var(--muted-foreground);
+  text-decoration-line: underline line-through;
 }
 
 /* ---- foreign-content fallback ---- */

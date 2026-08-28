@@ -293,6 +293,7 @@ function LinkedPane({
       author="tester"
       knownTags={[]}
       archived={false}
+      docLinks={null}
       onRestore={() => {}}
       onSelectThread={() => {}}
     />
@@ -513,6 +514,7 @@ function paneText(target: Route, docMeta: DocMeta | null): string {
         author="tester"
         knownTags={[]}
         archived={false}
+        docLinks={null}
         onRestore={() => {}}
         onSelectThread={() => {}}
       />,

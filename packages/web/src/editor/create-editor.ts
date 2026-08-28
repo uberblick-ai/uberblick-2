@@ -10,6 +10,8 @@ import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { BlockIds } from "./block-ids.js";
 import { Collaboration } from "./collaboration.js";
+import { DocLinks } from "./doc-links.js";
+import type { DocLinkContext } from "./doc-links.js";
 import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
 import { paletteExtensions } from "./nodes.js";
@@ -34,6 +36,13 @@ export interface CreateEditorOptions {
   editable?: boolean;
   /** Block-id source; injectable for deterministic tests. */
   newBlockId?: () => string;
+  /**
+   * The workspace half of a document reference — its address, the directory
+   * that names it, and where a click goes (`doc-links.ts`). Null in an editor
+   * with no workspace behind it: the input and paste rules still make
+   * references, and a stored one still renders, but nothing navigates.
+   */
+  docLinks?: DocLinkContext | null;
 }
 
 export function createUberblickEditor(options: CreateEditorOptions): Editor {
@@ -54,6 +63,11 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // …and the table block's own two: the class that opens a table's source
     // under the caret, and the typed and pasted doors a table comes in through.
     TableBlocks,
+    // …and the document reference's: the two typed and pasted spellings, the
+    // live anchor, and the address they resolve against. Behaviour again — the
+    // mark itself is schema, declared once in `marks.ts`, because
+    // `uberblickSchema` above is one object for the whole process.
+    DocLinks.configure({ context: options.docLinks ?? null }),
     Collaboration.configure({
       fragment: options.fragment,
       awareness: options.awareness ?? null,
