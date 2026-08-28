@@ -41,6 +41,7 @@ import {
   MAX_DESCRIPTION_LENGTH,
   addComment,
   appendBlock,
+  canonicalDocumentUuid,
   createAnnotation,
   deleteBlock,
   editBlock,
@@ -254,6 +255,28 @@ const INLINE_RUNS =
  */
 const EXTERNAL_HREF = /^https?:\/\/\S+$/i;
 
+/**
+ * A document reference's target, canonicalised at the boundary.
+ *
+ * One document has one spelling. An upper-cased uuid names the same document —
+ * room names are case-sensitive keys, so `A…` and `a…` would be two rooms
+ * holding one document — and the schema canonicalises it down at the write. Do
+ * it here instead, once, so the directory lookup, the label, the write and the
+ * answer all speak the id the model stores rather than the one the caller
+ * happened to type. The refusal branch is `z.uuid`'s leftovers: this is the
+ * model's own rule, not a second one.
+ */
+const docLinkTargetArg = z
+  .uuid("a document reference is a target document UUID, never a path or a title")
+  .transform((value, ctx) => {
+    const docId = canonicalDocumentUuid(value);
+    if (docId === null) {
+      ctx.addIssue({ code: "custom", message: "not a document UUID" });
+      return z.NEVER;
+    }
+    return docId;
+  });
+
 const inlineArg = z
   .array(
     z
@@ -269,11 +292,16 @@ const inlineArg = z
               .string()
               .regex(EXTERNAL_HREF, "a link is an external http(s) URL")
               .optional(),
-            docLink: z
-              .uuid("a docLink is a target document UUID, never a path or a title")
-              .optional(),
+            docLink: docLinkTargetArg.optional(),
           })
-          .strict(),
+          .strict()
+          // Refused as the wrong argument it is, not as a range conflict: one
+          // run carrying both link marks has no honest rendering, and there is
+          // nothing to re-read that would make the call valid.
+          .refine(
+            (marks) => marks.link === undefined || marks.docLink === undefined,
+            "a run is an external link or a document reference, never both",
+          ),
       })
       .strict(),
   )
@@ -1041,7 +1069,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     {
       title: "Documents linking here",
       description:
-        "Documents whose `links` name this document. Links are by UUID, never by path or title. " +
+        "Documents that reference this one, by UUID and never by path or title. The answer is the union of two " +
+        "kinds of edge, which it does not distinguish: the curated doc-level `links` set_links owns, and every " +
+        "inline reference in a prose block — the `doc_links` get_doc reports, written by link_range or by an " +
+        "`inline` run. A document citing this one in a sentence needs no `links` entry to appear here.\n\n" +
         "Each one carries its `description` — null where it has none — so a citing document can be judged without " +
         "opening it." +
         failureContract("backlinks"),
@@ -1134,10 +1165,13 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         resolveInline(inline),
       );
       const blockId = insertBlock(replica.doc, after_block_id ?? null, input);
-      replicas.publishCursor(replica, blockId, (text ?? "").length);
+      const block = getBlock(replica.doc, blockId);
+      // The caret goes after what was actually written, which is not `text`
+      // when `inline` replaced it — and joined runs are usually longer.
+      replicas.publishCursor(replica, blockId, block?.text.length ?? 0);
       return json({
         uuid,
-        block: getBlock(replica.doc, blockId),
+        block,
         ...durability(replica),
       });
     }),
@@ -1459,7 +1493,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         block_id: z.string().min(1),
         start: z.number().int().min(0).describe("Range start, in characters."),
         end: z.number().int().min(0).describe("Range end, exclusive."),
-        doc_id: linkArg,
+        doc_id: docLinkTargetArg.describe("Target document UUID."),
         rev: z
           .string()
           .min(1)

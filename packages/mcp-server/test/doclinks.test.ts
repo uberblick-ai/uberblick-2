@@ -134,6 +134,119 @@ describe("inline document references", () => {
     ]);
   });
 
+  it("takes a target in any case, and stores the one spelling", async () => {
+    const rig = await localRig();
+    const target = await rig.ok("create_doc", {
+      title: "Hub",
+      description: DESCRIPTION,
+    });
+    const shouted = target.uuid.toUpperCase();
+    const source = await rig.ok("create_doc", {
+      title: "Source",
+      description: DESCRIPTION,
+      blocks: [
+        { type: "paragraph", text: "See the hub docs" },
+        {
+          type: "paragraph",
+          inline: [{ text: "", marks: { docLink: shouted } }],
+        },
+      ],
+    });
+
+    // Upper-cased in, canonical out — of the resolution, the write and the
+    // answer alike. A second spelling would be a second document to everything
+    // that compares ids, starting with the room name.
+    expect(source.blocks[1].text).toBe("Hub");
+    expect(source.blocks[1].doc_links).toEqual([
+      { start: 0, end: 3, docId: target.uuid },
+    ]);
+
+    const linked = await rig.ok("link_range", {
+      uuid: source.uuid,
+      block_id: source.blocks[0].id,
+      start: 4,
+      end: 11,
+      doc_id: shouted,
+      rev: source.blocks[0].rev,
+    });
+    expect(linked.docId).toBe(target.uuid);
+    expect(linked.title).toBe("Hub");
+    const read = await rig.ok("get_doc", { uuid: source.uuid });
+    expect(read.blocks[0].doc_links).toEqual([
+      { start: 4, end: 11, docId: target.uuid },
+    ]);
+    expect(
+      (await rig.ok("backlinks", { uuid: target.uuid })).backlinks.map(
+        (row: { uuid: string }) => row.uuid,
+      ),
+    ).toEqual([source.uuid]);
+  });
+
+  it("refuses a run that is both an external link and a reference, at the boundary", async () => {
+    const rig = await localRig();
+    const target = await rig.ok("create_doc", {
+      title: "Hub",
+      description: DESCRIPTION,
+    });
+    const doc = await rig.ok("create_doc", {
+      title: "Citing",
+      description: DESCRIPTION,
+    });
+
+    // Not a range conflict to re-read: the argument itself has no honest
+    // meaning, so it never reaches a handler.
+    const refused = await rig.call("insert_block", {
+      uuid: doc.uuid,
+      type: "paragraph",
+      inline: [
+        {
+          text: "both at once",
+          marks: { link: "https://example.com/hub", docLink: target.uuid },
+        },
+      ],
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.payload.error).toBe("schema_validation");
+    expect((await rig.ok("get_doc", { uuid: doc.uuid })).blocks).toEqual([]);
+  });
+
+  it("refuses a stale rev without inventing a text the caller never passed", async () => {
+    const rig = await localRig();
+    const target = await rig.ok("create_doc", {
+      title: "Hub",
+      description: DESCRIPTION,
+    });
+    const doc = await rig.ok("create_doc", {
+      title: "Citing",
+      description: DESCRIPTION,
+      blocks: [{ type: "paragraph", text: "See the hub docs" }],
+    });
+    const block = doc.blocks[0];
+    await rig.ok("edit_block", {
+      uuid: doc.uuid,
+      block_id: block.id,
+      old_text: "See the hub docs",
+      new_text: "See the hub document",
+      rev: block.rev,
+    });
+
+    const refused = await rig.call("link_range", {
+      uuid: doc.uuid,
+      block_id: block.id,
+      start: 4,
+      end: 11,
+      doc_id: target.uuid,
+      rev: block.rev,
+    });
+    expect(refused.payload.error).toBe("stale_block");
+    // A link asserts a rev and nothing else, so the answer says so rather than
+    // reporting a text the caller never claimed.
+    expect(refused.payload.expectedText).toBeNull();
+    expect(refused.payload.expectedRev).toBe(block.rev);
+    expect(refused.payload.currentText).toBe("See the hub document");
+    expect(refused.payload.currentRev).toBeTruthy();
+  });
+
   it("refuses a target this replica cannot resolve, and accepts an archived one", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {

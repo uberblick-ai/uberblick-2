@@ -417,7 +417,7 @@ export function toFailure(tool: string, error: unknown): CallToolResult {
       error: "stale_block",
       message: error.message,
       blockId: error.blockId,
-      expectedText: error.expectedText,
+      expectedText: error.expectedText ?? null,
       expectedRev: error.expectedRev ?? null,
       currentText: error.currentText,
       currentRev: error.currentRev,
