@@ -15,10 +15,22 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import { hubDatabasePath } from "@uberblick/hub/config";
 import { credentialsPath, resolveConfig, userConfigPath, writeCredentials } from "../src/config.js";
 import { doctorReport } from "../src/doctor.js";
-import { statusReport } from "../src/status.js";
-import { REPO_ROOT, removeTempDirs, runUbAsync, sandbox } from "./helpers.js";
+import type { StatusReport } from "../src/status.js";
+import { renderStatus, statusReport } from "../src/status.js";
+import {
+  DEAD_HUB_URL,
+  REPO_ROOT,
+  SECRET_IN_ENV,
+  SECRET_ON_FILE,
+  removeTempDirs,
+  runUbAsync,
+  sandbox,
+  tracesOf,
+} from "./helpers.js";
 
 const WORKSPACE = "0d4a1e7c-2b93-4f18-9a55-6c7e8d1b2f30";
+/** A second workspace, for the case where two layers name different ones. */
+const PINNED = "7b6e5d4c-3a29-4180-b5c6-1d2e3f405162";
 
 const tempDirs: string[] = [];
 
@@ -141,6 +153,66 @@ describe("`ub status`", () => {
       workspace: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`),
     });
     expect(run.output).not.toContain("storage-test-secret-91af3c");
+  });
+
+  it("says two signing secrets differ without leaking either, in text and JSON", async () => {
+    // The conflict is reported on the one surface a human runs, and the report
+    // is the *fact* and nothing else: the two secrets are distinct and of
+    // different lengths, and neither may survive in either stream — not whole,
+    // not in four-character fragments, not as a size. See `tracesOf`.
+    const box = sandbox({
+      credentials: { signingSecret: SECRET_ON_FILE },
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+    });
+    const pinned = { HUB_AUTH_TOKEN: SECRET_IN_ENV };
+
+    const text = await runUbAsync(["status"], box, pinned);
+    expect(text.status).toBe(0);
+    expect(text.stderr).toContain("holds a different signing secret");
+    expect(text.stdout).toMatch(/^shadowed .*credential in credentials file/m);
+    expect(tracesOf(SECRET_IN_ENV, text.output)).toEqual([]);
+    expect(tracesOf(SECRET_ON_FILE, text.output)).toEqual([]);
+
+    const json = await runUbAsync(["status", "--json"], box, pinned);
+    expect(json.status).toBe(0);
+    const report = JSON.parse(json.stdout) as StatusReport;
+    // Which layer lost, and that one is in force. Never a value out of either.
+    expect(report.shadowed).toEqual([
+      { setting: "credential", layer: "credentials file" },
+    ]);
+    expect(report.credentialSource).toBe("environment");
+    expect(report.credentialPresent).toBe(true);
+    expect(tracesOf(SECRET_IN_ENV, json.output)).toEqual([]);
+    expect(tracesOf(SECRET_ON_FILE, json.output)).toEqual([]);
+  });
+
+  it("names the layer a pin shadowed, and only when they disagree", async () => {
+    // The report answered "which layer won?" and nothing else, so a machine
+    // whose environment named one workspace and whose config.json named
+    // another looked healthy. In-process rather than spawned: no secret, so
+    // nothing is dialled, and the render is checked off the same report.
+    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    const conflict = await statusReport({
+      env: { ...box.env, WORKSPACE_ID: PINNED },
+    });
+
+    expect(conflict.report.sources.workspace).toBe("environment");
+    expect(conflict.report.shadowed).toEqual([
+      { setting: "workspace", layer: "user config" },
+    ]);
+    expect(renderStatus(conflict.report)).toMatch(
+      /^shadowed .*workspace in user config/m,
+    );
+    expect(conflict.warnings.join("\n")).toMatch(/names a different workspace/);
+
+    // Agreeing layers leave the key out entirely, so `--json` carries the
+    // conflict by its presence and the human output stays one line shorter.
+    const agreed = await statusReport({
+      env: { ...box.env, WORKSPACE_ID: WORKSPACE },
+    });
+    expect(agreed.report.shadowed).toBeUndefined();
+    expect(renderStatus(agreed.report)).not.toMatch(/shadowed/);
+    expect(agreed.warnings).toEqual([]);
   });
 
   it("names the data root once in the human output", async () => {

@@ -272,6 +272,48 @@ export function runUbAsync(
 export const DEAD_HUB_URL = "ws://127.0.0.1:1";
 
 /**
+ * Two signing secrets to put in conflicting layers, and never to find again.
+ *
+ * Distinct, and of different lengths, so a report that leaked *either* one —
+ * or either one's size — is caught rather than hidden by the other. Opaque by
+ * construction: every four-character window carries an uppercase letter and a
+ * digit, so no fragment of one can turn up inside a lowercase uuid, a hex
+ * digest or a path and fail a run for a coincidence. The lengths are 64 and
+ * 72, above every field of a log timestamp, so a bare `64` in the output is a
+ * leak and not a clock.
+ */
+export const SECRET_IN_ENV =
+  "K7yJ8tG7iE7xB7kW3gG4uH5xR5gS5xV8zX8wA5nY6eJ4uK5vS2yL4jV2bX5nA7rG";
+export const SECRET_ON_FILE =
+  "W5tA6bD4tF6rM3vD9xA2bR3iM4zX7xS8zC7pB9rZ9gV3jV3uE9sT4jY8xF6nL2cX3iT2pT6y";
+
+/**
+ * Every trace of `secret` left in `text`. Empty is the only passing answer.
+ *
+ * A secret does not have to be printed whole to be leaked: a prefix, a suffix,
+ * a middle, a "first 8 characters" or a "32-character secret" all narrow it,
+ * and a test that only rejects the complete value would pass for every one of
+ * them. So the check is every four-character fragment — the shortest worth
+ * calling a leak, and enough to catch any longer one, which contains one —
+ * plus the length as a standalone number.
+ */
+export function tracesOf(secret: string, text: string): string[] {
+  const found = new Set<string>();
+  for (let start = 0; start + 4 <= secret.length; start += 1) {
+    const fragment = secret.slice(start, start + 4);
+    if (text.includes(fragment)) {
+      found.add(fragment);
+    }
+  }
+  // Bounded, because a hex uuid or a temp directory can carry the same two
+  // digits by accident; a leak of the size reads as a number in prose.
+  if (new RegExp(`\\b${secret.length}\\b`).test(text)) {
+    found.add(`length ${secret.length}`);
+  }
+  return [...found];
+}
+
+/**
  * How long one awaited condition gets before the wait gives up.
  *
  * Generous rather than tight, and deliberately so: these suites spawn real

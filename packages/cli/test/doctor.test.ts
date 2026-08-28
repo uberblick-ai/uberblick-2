@@ -33,6 +33,8 @@ import {
 } from "./helpers.js";
 
 const WORKSPACE = "9f2c47a1-5b83-4e60-91d7-2a6c8b40e3f5";
+/** A second workspace, for the case where the environment pins another. */
+const PINNED = "3e8b1d09-47af-4c62-8f10-95d3c7b6a204";
 const SECRET = "doctor-test-signing-secret-4b91c7";
 
 const hubs: Hub[] = [];
@@ -233,6 +235,23 @@ describe("ub doctor", () => {
     expect(check(checks, "database").reason).toBe(
       join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`),
     );
+  });
+
+  it("passes the workspace check, and still says a pin shadowed the file", async () => {
+    // The failure that asked for this: `ok  workspace … (environment)` while
+    // config.json named a different workspace, and the hub check then read as
+    // a bad credential. The check still passes — a repository pin is meant to
+    // win — and the disagreement arrives on stderr from `resolveConfig`, which
+    // is the one place that compares the layers.
+    const box = sandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+    });
+    const { run, checks } = await doctor(box, { WORKSPACE_ID: PINNED });
+
+    expect(check(checks, "workspace").status).toBe("pass");
+    expect(check(checks, "workspace").reason).toContain("environment");
+    expect(run.stderr).toMatch(/names a different workspace/);
+    expect(run.stderr).toContain(WORKSPACE);
   });
 
   it("calls an absent credential a skip that keeps every MCP tool working", async () => {
