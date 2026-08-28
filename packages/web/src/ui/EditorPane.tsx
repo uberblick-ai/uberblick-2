@@ -9,6 +9,8 @@ import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import { getBlocksFragment, parseRoom, setTitle } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { bindGuardedEditor } from "../editor/guarded-binding.js";
+import { docLinkFromTarget } from "../editor/doc-links.js";
+import type { DocLinkContext } from "../editor/doc-links.js";
 import { describeForeignBlocks } from "../editor/palette.js";
 import { writeToClipboard } from "../editor/source-chrome.js";
 import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
@@ -366,12 +368,15 @@ function BoundEditor({
   connection,
   author,
   archived,
+  docLinks,
   onSelectThread,
 }: {
   connection: RoomConnection;
   author: string;
   /** Read-only, and none of the chrome that writes. */
   archived: boolean;
+  /** See {@link EditorPane}. Must be referentially stable — it binds the editor. */
+  docLinks: DocLinkContext | null;
   onSelectThread: SelectThread;
 }): ReactElement {
   const host = useRef<HTMLDivElement | null>(null);
@@ -402,11 +407,33 @@ function BoundEditor({
       fragment: getBlocksFragment(connection.ydoc),
       awareness: connection.provider.awareness,
       editable: !archivedNow.current,
+      docLinks,
     });
     // A comment highlight is a plain span ProseMirror renders from the `comment`
     // mark, so the click that focuses its thread is read by delegation on the
-    // host: no ProseMirror plugin, and nothing competing with the caret.
-    const focusThread = (event: MouseEvent): void => {
+    // host: no ProseMirror plugin, and nothing competing with the caret. A
+    // document reference is read the same way, and *first*: the two can overlap,
+    // and a click that both navigated and opened a thread would be two actions
+    // from one gesture. The reference wins, and the thread stays reachable by
+    // clicking the highlight beside the link or its card in the rail.
+    const activate = (event: MouseEvent): void => {
+      const docId = docLinkFromTarget(event.target);
+      if (docId !== null) {
+        // A modifier or a middle button is the browser's business — the anchor
+        // carries a real address, so cmd-click still opens a tab. Everything
+        // else navigates in-app, which is what keeps Back working.
+        const modified =
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey;
+        if (!modified && docLinks !== null) {
+          event.preventDefault();
+          docLinks.open(docId);
+        }
+        return;
+      }
       const threadId = threadIdFromTarget(event.target);
       if (threadId !== null) onSelectThread(threadId);
     };
@@ -420,22 +447,36 @@ function BoundEditor({
     // in the prose targets the contenteditable, which is no highlight's
     // descendant, so `threadIdFromActivation` reads it as null.
     const activateThread = (event: KeyboardEvent): void => {
+      // The same one-action rule as the click, for the one place the anchor is
+      // a tab stop: a read-only pane. Enter on a focused reference follows it
+      // in-app rather than selecting the thread it happens to sit inside — and
+      // rather than letting the browser reload the whole app on the href. The
+      // caret's own keystrokes target the contenteditable, which no anchor is
+      // an ancestor of, so typing never reaches this.
+      const docId = docLinkFromTarget(event.target);
+      if (docId !== null) {
+        if (event.key !== "Enter" || docLinks === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        docLinks.open(docId);
+        return;
+      }
       const threadId = threadIdFromActivation(event);
       if (threadId === null) return;
       event.preventDefault();
       event.stopPropagation();
       onSelectThread(threadId, true);
     };
-    element.addEventListener("click", focusThread);
+    element.addEventListener("click", activate);
     element.addEventListener("keydown", activateThread, true);
     setEditor(binding.editor);
     return () => {
-      element.removeEventListener("click", focusThread);
+      element.removeEventListener("click", activate);
       element.removeEventListener("keydown", activateThread, true);
       setEditor(null);
       binding.destroy();
     };
-  }, [connection, onSelectThread]);
+  }, [connection, docLinks, onSelectThread]);
 
   /**
    * Read-only is a *setting* on the live editor, never a reason to rebind.
@@ -491,6 +532,7 @@ export function EditorPane({
   author,
   knownTags,
   archived,
+  docLinks,
   onRestore,
   onSelectThread,
 }: {
@@ -509,6 +551,14 @@ export function EditorPane({
    * the value changes under an open pane when anyone archives or restores.
    */
   archived: boolean;
+  /**
+   * What a `docLink` resolves against: the address of a document in the
+   * workspace on screen, the directory that names it, and where a click goes
+   * (`editor/doc-links.ts`). Null before a workspace is known. Must be
+   * referentially stable — it is an effect dependency, and a new object every
+   * render would rebind the editor under the reader's caret.
+   */
+  docLinks: DocLinkContext | null;
   /** Lift the tombstone. */
   onRestore: () => void;
   /**
@@ -571,6 +621,7 @@ export function EditorPane({
             connection={connection}
             author={author}
             archived={archived}
+            docLinks={docLinks}
             onSelectThread={onSelectThread}
           />
         )}

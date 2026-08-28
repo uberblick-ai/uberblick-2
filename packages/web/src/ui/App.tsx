@@ -24,6 +24,8 @@ import { configuredWorkspaces, hubEndpoint } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
 import { watchDocumentStub } from "../collab/directory-stub.js";
 import { randomIdentity } from "../collab/identity.js";
+import { createDocLinkContext } from "../editor/doc-links.js";
+import type { DocLinkContext } from "../editor/doc-links.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { DocChrome } from "./DocChrome.js";
 import { Sidebar, togglePin } from "./Sidebar.js";
@@ -81,6 +83,7 @@ export function RoutePane({
   author,
   knownTags,
   archived,
+  docLinks,
   onRestore,
   onSelectThread,
 }: {
@@ -113,6 +116,8 @@ export function RoutePane({
   knownTags: readonly string[];
   /** Whether the directory tombstones this document — see `useArchived`. */
   archived: boolean;
+  /** What an inline document reference resolves against — see {@link EditorPane}. */
+  docLinks: DocLinkContext | null;
   /** Lift that tombstone. The only action an archived document offers. */
   onRestore: () => void;
   onSelectThread: SelectThread;
@@ -194,6 +199,7 @@ export function RoutePane({
       author={author}
       knownTags={knownTags}
       archived={archived}
+      docLinks={docLinks}
       onRestore={onRestore}
       onSelectThread={onSelectThread}
     />
@@ -462,6 +468,33 @@ export function App(): ReactElement {
     [navigate, segment],
   );
 
+  /**
+   * What an inline document reference resolves against (#444).
+   *
+   * Three things the mark deliberately does not store, assembled where they are
+   * all already known: the address of a document in the workspace the reader is
+   * *in* — the same `docPath` the sidebar and a copied link use, so a reference
+   * never carries an address of its own — the directory room already joined
+   * above, which is what tells a title, an unresolved target and a tombstoned
+   * one apart without opening a single target room, and `onSelect`, so
+   * following a reference is the same navigation as clicking a document in the
+   * list and Back therefore works.
+   *
+   * Memoised on exactly what it closes over: the editor binds to this, so a new
+   * object every render would tear the editor down under the reader's caret.
+   */
+  const docLinks = useMemo<DocLinkContext | null>(
+    () =>
+      segment === null
+        ? null
+        : createDocLinkContext({
+            directory: directory?.ydoc ?? null,
+            href: (uuid) => docPath(segment, uuid),
+            open: onSelect,
+          }),
+    [directory, onSelect, segment],
+  );
+
   /** Going to the listing is navigating to it, like opening a document. */
   const onOpenAll = useCallback(() => {
     if (segment !== null) navigate(allPath(segment));
@@ -612,6 +645,7 @@ export function App(): ReactElement {
             author={identity.name}
             knownTags={knownTags}
             archived={archived}
+            docLinks={docLinks}
             onRestore={onRestore}
             onSelectThread={onFocusThread}
           />

@@ -27,7 +27,7 @@ import * as Y from "yjs";
 import { appendBlock, editBlock, getBlocks, initDoc } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { BLOCK_MENU_ENTRIES } from "../src/editor/block-menu.js";
-import { mountEditor } from "./helpers.js";
+import { mountEditor, typeText } from "./helpers.js";
 
 /** The entries a reader can type their way to — the input rules' whole subject. */
 const TRIGGERS = BLOCK_MENU_ENTRIES.filter((entry) => entry.trigger !== null);
@@ -37,27 +37,6 @@ function docWith(texts: string[]): { ydoc: Y.Doc; ids: string[] } {
   initDoc(ydoc, { uuid: "rules-doc", title: "Rules" });
   const ids = texts.map((text) => appendBlock(ydoc, { type: "paragraph", text }));
   return { ydoc, ids };
-}
-
-/**
- * One keypress, delivered the way prosemirror-view delivers one: offer it to
- * `handleTextInput` first, insert it plainly when nothing claims it. Copied from
- * `editHandlers.keypress` because a test that dispatched an insertion directly
- * would never reach an input rule, and would be testing nothing.
- */
-function press(editor: Editor, char: string): void {
-  const { view } = editor;
-  const { from, to } = view.state.selection;
-  const deflt = (): ReturnType<typeof view.state.tr.insertText> =>
-    view.state.tr.insertText(char, from, to);
-  if (!view.someProp("handleTextInput", (f) => f(view, from, to, char, deflt))) {
-    view.dispatch(deflt());
-  }
-}
-
-/** Type `text` a character at a time, as a reader does. */
-function type(editor: Editor, text: string): void {
-  for (const char of text) press(editor, char);
 }
 
 /** Put the caret `offset` characters into block `index`. */
@@ -80,7 +59,7 @@ describe("typing a markdown prefix", () => {
       const { editor } = mountEditor(ydoc);
       try {
         caret(editor, 0, 0);
-        type(editor, entry.trigger ?? "");
+        typeText(editor, entry.trigger ?? "");
 
         const blocks = getBlocks(ydoc);
         expect(blocks).toHaveLength(1);
@@ -105,7 +84,7 @@ describe("typing a markdown prefix", () => {
     try {
       // At the end of a sentence: a hash is a hash.
       caret(editor, 0, "already written".length);
-      type(editor, " # ");
+      typeText(editor, " # ");
       expect(getBlocks(ydoc)[0]).toMatchObject({
         type: "paragraph",
         text: "already written # ",
@@ -114,7 +93,7 @@ describe("typing a markdown prefix", () => {
       // At the *start* of a block that already holds text, too: the prefix has
       // prose behind it, so the block is not a fresh one.
       caret(editor, 1, 0);
-      type(editor, "# ");
+      typeText(editor, "# ");
       expect(getBlocks(ydoc)[1]).toMatchObject({
         type: "paragraph",
         text: "# later",
@@ -136,7 +115,7 @@ describe("typing a markdown prefix", () => {
     const { editor } = mountEditor(ydoc);
     try {
       caret(editor, 0, 0);
-      type(editor, "## ");
+      typeText(editor, "## ");
       expect(getBlocks(ydoc)[0]).toMatchObject({ type: "heading", level: 2 });
 
       expect(editor.commands.keyboardShortcut("Mod-z")).toBe(true);
@@ -148,7 +127,7 @@ describe("typing a markdown prefix", () => {
 
       // And it stays text: carrying on typing does not re-fire the rule.
       caret(editor, 0, 3);
-      type(editor, "x");
+      typeText(editor, "x");
       expect(getBlocks(ydoc)[0]).toMatchObject({
         type: "paragraph",
         text: "## x",

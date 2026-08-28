@@ -98,6 +98,7 @@ function LinkedPane({ connection }: { connection: RoomConnection }): ReactElemen
       author="tester"
       knownTags={[]}
       archived={false}
+      docLinks={null}
       onRestore={() => {}}
       onSelectThread={() => {}}
     />

@@ -26,10 +26,12 @@
  *    both ways and a uuid in an `href` is never reinterpreted as a document
  *    reference. The invariant is enforced at the model boundary
  *    (the schema package refuses to write another scheme, and its palette gate
- *    refuses to bind one that arrived over the wire); the doors here — the
- *    input rule, the paste rule and HTML parsing — keep it from being reached in
- *    the first place, and share the schema's `isExternalHref` and `isDocId` so
- *    there is one definition. No validation registry, no link resolver.
+ *    refuses to bind one that arrived over the wire); the doors in front of it —
+ *    the input rule, the paste rule and HTML parsing, here for `link` and in
+ *    `doc-links.ts` for the typed and pasted `docLink` — keep it from being
+ *    reached in the first place, and share the schema's `isExternalHref` and
+ *    `canonicalDocumentUuid` so there is one definition. No validation
+ *    registry, no link resolver.
  * 4. **The `inlineCode` mark declares `code: true`.** Tiptap's input-rule runner
  *    skips every rule adjacent to a mark whose spec says `code`, which is what
  *    keeps `**x**` from turning into bold inside an inline code span. (Code
@@ -268,19 +270,24 @@ export const Link = Mark.create({
 /**
  * An inline reference to another document, stored as the target's uuid alone.
  *
- * Storage and rendering only, deliberately: no input rule, no click navigation,
- * and no directory lookup — the label is ordinary text, and resolving a title,
- * routing a click and telling an unresolved target from an archived one are
- * #444's. What this declaration buys today is that the mark can exist at all:
- * the palette gate binds a text only when every attribute on it is a mark this
+ * Storage and rendering only, deliberately: the typed and pasted spellings, the
+ * title a shorthand borrows from the directory, the unresolved/archived states
+ * and the click that follows a reference all live in `doc-links.ts` instead.
+ * They need the workspace on screen, and `uberblickSchema` is one object for
+ * the whole process — so the mark stays schema and the rest is behaviour, added
+ * per editor. What this declaration buys is that the mark can exist at all: the
+ * palette gate binds a text only when every attribute on it is a mark this
  * schema declares and the schema package's reader accepts, so a `docLink`
  * written by an agent would otherwise stop the editor from binding the block.
  *
- * `data-doc-id` rather than `href`: nothing here navigates yet, and an `<a>`
- * with no href is inert rather than a dead link. It is also what keeps the two
- * link marks' HTML doors apart — `a[href]` parses a `link`, `a[data-doc-id]` a
- * `docLink` — and the attribute is validated on the way in, because pasted HTML
- * is the one place a foreign value walks in.
+ * `data-doc-id` rather than `href`: a reference names a document, and the
+ * address of one is derived from the workspace the reader is in — so an `<a>`
+ * here carries no href, and the live one a mark view paints gets its own. It is
+ * also what keeps the two link marks' HTML doors apart — `a[href]` parses a
+ * `link`, `a[data-doc-id]` a `docLink`, and an anchor carrying both is a
+ * `docLink`, because this rule outranks that one — and the attribute is
+ * validated on the way in, because pasted HTML is the one place a foreign value
+ * walks in.
  */
 export const DocLink = Mark.create({
   name: "docLink",
@@ -308,6 +315,13 @@ export const DocLink = Mark.create({
     return [
       {
         tag: "a[data-doc-id]",
+        // Ahead of `link`'s `a[href]` (default 50), which is declared first and
+        // would otherwise consume an anchor carrying both — turning a reference
+        // copied out of a document into a link to whatever href travelled with
+        // it. ProseMirror takes the first rule whose `getAttrs` does not refuse,
+        // so a `data-doc-id` that is not a document still falls through to that
+        // external door and the href decides, exactly as before.
+        priority: 60,
         // The paste door: a target that is not a document uuid is not a
         // reference, and the text comes through unmarked.
         getAttrs: (element: HTMLElement): { docId: string } | false => {

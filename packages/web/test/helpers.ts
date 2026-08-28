@@ -7,6 +7,7 @@ import * as Y from "yjs";
 import { getBlocksFragment } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
+import type { DocLinkContext } from "../src/editor/doc-links.js";
 import { plainText } from "../src/editor/ytext.js";
 
 /** Every top-level child of the `blocks` fragment, as a comparable snapshot. */
@@ -60,7 +61,7 @@ export function snapshotFragment(ydoc: Y.Doc): FragmentSnapshot[] {
  */
 export function mountEditor(
   ydoc: Y.Doc,
-  options: { newBlockId?: () => string } = {},
+  options: { newBlockId?: () => string; docLinks?: DocLinkContext | null } = {},
 ): { editor: Editor; element: HTMLElement } {
   const element = document.createElement("div");
   document.body.appendChild(element);
@@ -71,9 +72,33 @@ export function mountEditor(
     ...(options.newBlockId === undefined
       ? {}
       : { newBlockId: options.newBlockId }),
+    // Absent by default: most tests have no workspace behind them, which is a
+    // real state of the app too (see `CreateEditorOptions.docLinks`).
+    ...(options.docLinks === undefined ? {} : { docLinks: options.docLinks }),
   });
   editor.on("destroy", () => element.remove());
   return { editor, element };
+}
+
+/**
+ * One keypress, delivered the way prosemirror-view delivers one: offer it to
+ * `handleTextInput` first, insert it plainly when nothing claims it. Copied from
+ * `editHandlers.keypress`, because a test that dispatched an insertion directly
+ * would never reach an input rule and would be testing nothing.
+ */
+function press(editor: Editor, char: string): void {
+  const { view } = editor;
+  const { from, to } = view.state.selection;
+  const deflt = (): ReturnType<typeof view.state.tr.insertText> =>
+    view.state.tr.insertText(char, from, to);
+  if (!view.someProp("handleTextInput", (f) => f(view, from, to, char, deflt))) {
+    view.dispatch(deflt());
+  }
+}
+
+/** Type `text` a character at a time, as a reader does. */
+export function typeText(editor: Editor, text: string): void {
+  for (const char of text) press(editor, char);
 }
 
 /** A counter-based id source, so assertions can name exact ids. */
