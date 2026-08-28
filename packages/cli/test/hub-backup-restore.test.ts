@@ -327,10 +327,15 @@ describe("hub-restore.sh", () => {
     hubDatabase(live, 9);
     const backup = join(fix.checkout, "good.sqlite");
     hubDatabase(backup, 2);
+    // A hub that crashed on the way down is often exactly why somebody is
+    // restoring, so with no journal beside the database this proceeds — and
+    // still says what the hub did.
+    fix.env.UB_TEST_HUB_EXIT = "137";
 
     const ran = run(fix, "hub-restore.sh", [backup]);
 
     expect(ran.status).toBe(0);
+    expect(ran.stderr).toContain("the hub exited 137");
     // Verify, stop, ps, the journal probe, cp, the placement, and the restart.
     expect(subcommands(fix)).toEqual(["run", "stop", "ps", "run", "cp", "run", "start"]);
     // Never onto the name the hub opens: staged first, renamed by the container.

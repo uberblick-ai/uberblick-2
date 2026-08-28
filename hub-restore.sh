@@ -174,6 +174,13 @@ for code in $codes; do
   fi
 done
 
+# Reported whatever happens next, because it is true whatever happens next: the
+# hub did not shut down cleanly, and the operator should hear that whether the
+# restore then goes ahead or refuses.
+if [ "$hub_exit" -ne 0 ]; then
+  printf 'hub-restore: the hub exited %s, so it did not shut down cleanly.\n' "$hub_exit" >&2
+fi
+
 # A `hub.sqlite-journal` beside the database means SQLite was interrupted
 # mid-transaction and the pair is one unit: the journal holds what the database
 # has to undo. This script will not take that on. Replacing the database while
@@ -190,11 +197,7 @@ compose run --rm --no-deps --entrypoint sh hub \
   probe=$?
 
 if [ "$probe" -eq 3 ]; then
-  if [ "$hub_exit" -ne 0 ]; then
-    printf 'hub-restore: the hub exited %s and left a rollback journal beside its database.\n' "$hub_exit" >&2
-  else
-    printf 'hub-restore: there is a rollback journal beside the hub database, so it did not shut down cleanly.\n' >&2
-  fi
+  printf 'hub-restore: there is a rollback journal beside the hub database.\n' >&2
   printf 'hub-restore: nothing was copied and the volume was not touched. Let SQLite finish that transaction — start the hub once and stop it cleanly, then run this restore again:\n' >&2
   printf '  sh remote-compose.sh up --detach hub\n  sh remote-compose.sh stop hub\n  sh hub-restore.sh %s\n' "$backup" >&2
   exit 1
