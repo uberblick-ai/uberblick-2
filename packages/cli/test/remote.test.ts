@@ -46,7 +46,7 @@ import {
 import * as Y from "yjs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Sandbox } from "./helpers.js";
-import { parseJoinTarget, setRemote } from "../src/remote.js";
+import { normalizeRemoteUrl, parseJoinTarget, setRemote } from "../src/remote.js";
 import {
   DEAD_HUB_URL,
   removeTempDirs,
@@ -280,6 +280,39 @@ describe("ub remote", () => {
     );
     expect(run.status).toBe(2);
     expect(run.stderr).toContain('unknown command "invite"');
+  });
+
+  // One normalizer for `ub remote join` and `ub init` alike (#436): the host
+  // `tailscale status` prints and the address a browser hands back both name
+  // the deployment's endpoint, and an endpoint somebody typed in full is what
+  // they meant — including a plain hub, which has no path at all.
+  it.each([
+    ["hub.example.ts.net", "wss://hub.example.ts.net/ws"],
+    ["https://hub.example.ts.net", "wss://hub.example.ts.net/ws"],
+    ["https://hub.example.ts.net/", "wss://hub.example.ts.net/ws"],
+    ["http://hub.example.ts.net", "ws://hub.example.ts.net/ws"],
+    ["https://hub.example.ts.net/proxy", "wss://hub.example.ts.net/proxy"],
+    ["hub.example.ts.net/ws", "wss://hub.example.ts.net/ws"],
+    ["wss://hub.example.ts.net/ws", "wss://hub.example.ts.net/ws"],
+    ["ws://127.0.0.1:1234", "ws://127.0.0.1:1234"],
+  ])("reads %s as %s", (typed, stored) => {
+    expect(normalizeRemoteUrl(typed)).toBe(stored);
+  });
+
+  // `join` gets the same acceptance from the same function: the id is split off
+  // after the URL has been understood, never by a second parser beside it.
+  it.each([
+    ["hub.example.ts.net/ws", "wss://hub.example.ts.net/ws"],
+    ["https://hub.example.ts.net/ws", "wss://hub.example.ts.net/ws"],
+  ])("takes a join URL written as %s", (typed, endpoint) => {
+    expect(parseJoinTarget(`${typed}/${WORKSPACE}`).endpoint).toBe(endpoint);
+  });
+
+  it("still refuses what is not an endpoint at all", () => {
+    expect(() => normalizeRemoteUrl("ftp://hub.example.ts.net")).toThrow(
+      /must start with ws:\/\/ or wss:\/\//,
+    );
+    expect(() => normalizeRemoteUrl("not a hub")).toThrow(/is not a URL/);
   });
 
   // A credential in the URL would be persisted into two files and echoed on

@@ -230,11 +230,32 @@ export function setRemote(
   return { written, warnings, replacedSecret: changingSecret };
 }
 
+/** A value carrying its own scheme, as opposed to a bare host. */
+const SCHEME = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
+
 /**
- * Accept a websocket endpoint, or explain what one looks like.
+ * The path the deployed stack serves the hub under (REMOTE.md).
  *
- * `http(s)` is the mistake worth catching by name — it is what a browser
- * address bar hands you, and the hub speaks websockets.
+ * The one deployment convention this CLI encodes, by the owner's decision, and
+ * it is applied only where a scheme had to be invented — see below.
+ */
+const DEPLOYED_PATH = "/ws";
+
+/**
+ * The endpoint to store, from whatever form of it somebody has to hand.
+ *
+ * Three of them, because three are what people actually hold: the host name
+ * `tailscale status` prints, the `https://…` address a browser's bar hands
+ * back, and a websocket endpoint somebody already knows in full. The first two
+ * name the deployment REMOTE.md stands up, which serves the hub at
+ * `wss://<host>/ws`, so they are normalized to it rather than refused with a
+ * lecture — and `http://` likewise, to `ws://`, since a plaintext address means
+ * a plaintext hub.
+ *
+ * That default path is applied **only** where the scheme was invented. A
+ * `ws://` or `wss://` endpoint is what somebody who knows their hub typed — a
+ * plain one is `ws://host:1234` with no path at all — and is kept verbatim,
+ * which is also what keeps {@link parseJoinTarget} lossless.
  *
  * Userinfo, query and fragment are refused rather than carried. A hub token
  * travels in Hocuspocus' auth message and never in the URL, by invariant, so
@@ -243,23 +264,24 @@ export function setRemote(
  * on stdout.
  */
 export function normalizeRemoteUrl(value: string): string {
+  const text = value.trim();
+  // Read from the text, not from what the parser makes of it: `new URL` reads
+  // `localhost:1234` as a scheme with a path, so a bare host with a port would
+  // otherwise be understood as something else entirely.
+  const bare = !SCHEME.test(text);
   let url: URL;
   try {
-    url = new URL(value.trim());
+    url = new URL(bare ? `wss://${text}` : text);
   } catch {
     throw new Error(
       `${JSON.stringify(value)} is not a URL. The hub speaks websockets, so an ` +
-        "endpoint looks like wss://hub.example.ts.net",
+        "endpoint looks like wss://hub.example.ts.net/ws — a bare " +
+        "hub.example.ts.net, or its https:// address, is read as one",
     );
   }
-  if (url.protocol === "http:" || url.protocol === "https:") {
-    const scheme = url.protocol === "https:" ? "wss" : "ws";
-    throw new Error(
-      `${url.protocol}// is a web address; the hub speaks websockets. Try ` +
-        `${scheme}://${url.host}${url.pathname === "/" ? "" : url.pathname}`,
-    );
-  }
-  if (url.protocol !== "ws:" && url.protocol !== "wss:") {
+  const websocket = url.protocol === "ws:" || url.protocol === "wss:";
+  const web = url.protocol === "http:" || url.protocol === "https:";
+  if (!websocket && !web) {
     throw new Error(
       `${JSON.stringify(value)} is not a websocket endpoint: it must start ` +
         "with ws:// or wss://",
@@ -284,10 +306,16 @@ export function normalizeRemoteUrl(value: string): string {
   if (url.hash !== "") {
     throw new Error("an endpoint must not carry a fragment; nothing reads one");
   }
-  // Keep the plain form a human typed. `new URL` appends a root path, and an
-  // endpoint that reads differently from the one they gave invites a second
-  // guess about whether it was understood.
-  return url.pathname === "/" ? `${url.protocol}//${url.host}` : url.toString();
+  const scheme = url.protocol === "wss:" || url.protocol === "https:" ? "wss" : "ws";
+  // A path is kept as typed. Where none was given the answer depends on what
+  // was: a websocket endpoint gets the plain form back, because `new URL`
+  // appends a root path and an endpoint reading differently from the one
+  // somebody gave invites a second guess about whether it was understood; a
+  // host or a web address gets the deployed path, which is the whole of what
+  // that convenience buys.
+  const path =
+    url.pathname === "/" ? (bare || web ? DEPLOYED_PATH : "") : url.pathname;
+  return `${scheme}://${url.host}${path}`;
 }
 
 /**
@@ -451,6 +479,21 @@ function hubProblem(url: string, hub: HubState): string {
   return `${url} did not answer`;
 }
 
+/**
+ * Dial a hub as a client would and say why it cannot be used, or null when it
+ * can. Reads; writes nothing on either side.
+ *
+ * `ub init <hub-url>` asks this before it writes a line of configuration, so
+ * that a machine is never bound to an endpoint that would refuse it — and asks
+ * it *here*, so that the four answers a person can act on (nothing answered,
+ * the credential was refused, no credential is configured, the protocols
+ * differ) are worded once for both verbs.
+ */
+export async function remoteProblem(config: McpConfig): Promise<string | null> {
+  const { hub } = await inspectRemote(config);
+  return hub.status === "connected" ? null : hubProblem(config.hubUrl, hub);
+}
+
 interface Credential {
   secret: string | null;
   /** Whether this value is new and should be stored once the bridge succeeds. */
@@ -590,8 +633,9 @@ operands:
                         segment, like wss://hub.example.ts.net/ws/<workspace-id>.
                         \`ub remote init\` prints it, and \`ub status\` on the
                         machine that has the workspace names the id. ws:// or
-                        wss:// (an https:// or http:// address is accepted and
-                        normalized); a URL without an id is refused before
+                        wss:// is stored as given; a bare host and an https://
+                        or http:// address are read as the deployed
+                        wss://<host>/ws; a URL without an id is refused before
                         anything is written
 
 options:

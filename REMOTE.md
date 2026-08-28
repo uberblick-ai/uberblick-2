@@ -482,7 +482,8 @@ that ran it at the new endpoint. Every other computer joins. Which process runs
 where matters: everything in this section runs on **your** computers, not on the
 remote host, which only ever runs `sh remote-compose.sh`.
 
-There is one verb, and it is the same on every machine:
+There is one verb for joining a workspace that exists, and it is the same on
+every machine:
 
 ```sh
 ub remote join wss://<TAILSCALE_HOST>/ws/<WORKSPACE_ID> \
@@ -511,6 +512,26 @@ workspace that was here syncs with this hub too, under its own rooms.
 A URL with no workspace id, or with something that is not one, is refused before
 anything is written, and the refusal names the form.
 
+**A workspace that does not exist yet is the other verb.** To put a *new*
+workspace on this hub — the first one, or another one later — the machine that
+creates it runs:
+
+```sh
+HUB_AUTH_TOKEN=<the hub's secret> ub init <TAILSCALE_HOST>
+```
+
+The bare host is read as `wss://<TAILSCALE_HOST>/ws`, this deployment's
+endpoint, and the `wss://` form in full works the same; `ub init` dials and
+authenticates before it writes anything, stores the endpoint, generates the
+workspace id and has its starter documents on the hub by the time it returns.
+The hub's secret has to be in the environment (or already in
+`credentials.json`), because a secret generated locally is random and this hub
+would refuse it. Every *other* machine then joins that workspace with the URL
+above — `ub status` on this one names the id. `ub init` never replaces an
+endpoint already stored: the same one changes nothing, and a different one is
+refused, naming `ub remote join` as the move. Neither command asks anybody to
+edit `config.json`.
+
 To run the web client on this machine against the remote hub, from a clone:
 
 ```sh
@@ -520,8 +541,9 @@ ub remote join wss://<TAILSCALE_HOST>/ws/<WORKSPACE_ID> \
 mise run web
 ```
 
-`ub init` (which `mise run setup` runs) creates a *local* workspace with its
-starter documents; the join then binds this machine to the remote one, and
+`ub init` with no hub argument (which is how `mise run setup` runs it) creates a
+*local* workspace with its starter documents; the join then binds this machine
+to the remote one, and
 `mise run web` serves it because the task runs its command through `ub env`,
 which resolves this machine's own configuration. Nothing is written into the
 checkout.

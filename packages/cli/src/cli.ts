@@ -28,7 +28,8 @@ export const HELP = `uberblick — local-first, CRDT-backed collaborative docume
 usage: ub <command> [options]
 
 commands:
-  init [options]         identity, workspace and a local development signing secret
+  init [hub-url]         identity, workspace and a signing secret — with a hub
+                         given, the new workspace is created on that hub
   open [options]         serve the web app and a hub in the foreground, and
                          open the browser (--no-browser, --port <n>)
   status [--json]        workspace, hub, credential, database and sync state

@@ -23,6 +23,20 @@
  * its emptiness here means only that it has not been hydrated yet. See
  * `starter.ts`. They are ordinary documents from the moment they land.
  *
+ * **The hub, when one is named.** `ub init <hub-url>` is the fresh-machine
+ * one-liner: a new workspace, on a hub that exists already, in one command and
+ * with no file edited by hand. It only ever *fills in* the endpoint — a
+ * different one already stored is refused rather than overwritten, because
+ * repointing the clients moves nothing and would leave the workspace on the old
+ * hub (#376, #385); `ub remote join` is the verb that moves a machine. What the
+ * hub argument adds beyond storing an endpoint is two guarantees: the hub is
+ * dialled and authenticated before a single file is written, so a refusal
+ * leaves the machine exactly as it was, and the seed below runs against the
+ * endpoint just stored, so the starter documents are on that hub by the time
+ * this returns rather than at the next client's convenience. The secret it
+ * authenticates with has to be here already — a generated one is random, and a
+ * hub that exists has its own.
+ *
  * It is convenience, never a precondition. Every other command works without it
  * — absent configuration is a default, not an error (see `config.ts`) — so
  * nothing here is the thing that makes `ub status` or `ub mcp serve` possible.
@@ -50,11 +64,12 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { userInfo } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
-import { resolveMcpConfig } from "@uberblick/mcp-server";
+import { bridgeConfig, resolveMcpConfig } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { findCheckoutRoot } from "./checkout.js";
 import {
   claimSigningSecret,
+  credentialsPath,
   isOwnerOnly,
   readCredentials,
   readUserConfig,
@@ -69,6 +84,7 @@ import { acquireInitLock, seedLockPath } from "./init-lock.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
+import { normalizeRemoteUrl, remoteProblem, setRemote } from "./remote.js";
 import { seedStarterDocs } from "./starter.js";
 
 /**
@@ -144,6 +160,8 @@ interface Flags {
   workspace: string | undefined;
   /** Undefined means "not asked either way". */
   mcp: boolean | undefined;
+  /** The hub to put this workspace on, normalized, or undefined for none. */
+  hub: string | undefined;
 }
 
 /** Exported so the help below can be checked against the parser it describes. */
@@ -157,11 +175,29 @@ export const INIT_OPTIONS = {
   "no-mcp": { type: "boolean" },
 } as const;
 
-export const INIT_HELP = `usage: ub init [options]
+export const INIT_HELP = `usage: ub init [hub-url] [options]
 
 Settle what every other command needs: your awareness identity, the workspace
 this machine works in, and a hub signing secret. Idempotent — it never replaces
 a secret that already exists, and it is safe to run again.
+
+Given a hub, it puts the new workspace on that hub: the endpoint is dialled and
+stored, and the starter documents are there by the time this returns — nothing
+syncs in the background afterwards. Given none, nothing is dialled and the
+workspace is local to this machine.
+
+operands:
+  [hub-url]          the hub to create this workspace on. A bare host or an
+                     https:// address is read as the deployed wss://<host>/ws;
+                     a ws:// or wss:// endpoint is stored as given. That hub's
+                     signing secret has to be here already — in HUB_AUTH_TOKEN
+                     (fnox, or your shell) or in credentials.json — since one
+                     generated here would be random and the hub would refuse
+                     it. An endpoint this machine already stores is never
+                     replaced: the same one changes nothing, and a different
+                     one is refused, because moving a workspace between hubs is
+                     \`ub remote join <url>/<workspace-id>\`, which hydrates and
+                     verifies first
 
 options:
   -y, --yes          take every default and never prompt (also what a
@@ -178,16 +214,23 @@ options:
 
 The signing secret is generated only when none is visible, is written to
 $XDG_CONFIG_HOME/uberblick/credentials.json at mode 0600, and is never printed.
+
+A WORKSPACE_ID in the environment — a project .mcp.json's pin, or your own
+shell — outranks the workspace in config.json, whatever this run settles.
 `;
 
 function parseFlags(argv: string[]): Flags {
-  const { values } = parseArgs({
+  const { values, positionals } = parseArgs({
     args: argv,
     options: INIT_OPTIONS,
-    allowPositionals: false,
+    allowPositionals: true,
   });
   if (values.mcp === true && values["no-mcp"] === true) {
     throw new Error("--mcp and --no-mcp contradict each other");
+  }
+  const [hub, ...rest] = positionals;
+  if (rest.length > 0) {
+    throw new Error("expected at most one hub URL");
   }
   return {
     yes: values.yes === true,
@@ -196,6 +239,10 @@ function parseFlags(argv: string[]): Flags {
     workspace: values.workspace,
     mcp:
       values.mcp === true ? true : values["no-mcp"] === true ? false : undefined,
+    // The one normalizer, shared with `ub remote join`: a bare host and an
+    // https:// address are the deployment's endpoint, and this refuses
+    // everything that is not an endpoint before the command does anything.
+    hub: hub === undefined ? undefined : normalizeRemoteUrl(hub),
   };
 }
 
@@ -300,6 +347,43 @@ export async function initCommand(
   const generatingWorkspace =
     inForceWorkspace === null && flags.workspace === undefined;
 
+  // --- the hub, when one was given -----------------------------------------
+  //
+  // The endpoint has one authority — this machine's `config.json` — and this
+  // command may only *fill it in*. Overwriting it would be `ub remote set`
+  // reborn: pointing the clients at another hub moves nothing, and the
+  // workspace stays on the old one with nothing dialling it (#376, #385). So a
+  // stored endpoint that is not the one asked for is refused outright, and the
+  // refusal names the verb that does move a machine.
+  const bound = trimmed(existing.config.hubUrl);
+  if (flags.hub !== undefined && bound !== null && bound !== flags.hub) {
+    io.err(
+      `ub init: this machine already syncs with ${bound}, and \`ub init\` never ` +
+        `replaces an endpoint — pointing it at ${flags.hub} would leave this ` +
+        "workspace on the old hub with nothing dialling it. Nothing was " +
+        `written. To move this machine: \`ub remote join ${flags.hub}/` +
+        `${inForceWorkspace ?? "<workspace-id>"}\`, which hydrates and verifies ` +
+        "before it persists anything.\n",
+    );
+    return 1;
+  }
+  // The endpoint this run has to store, or null when there is nothing to bind:
+  // no hub was named, or the one named is already the one in force.
+  const binding = flags.hub !== undefined && bound === null ? flags.hub : null;
+  // A secret generated here is random, and a hub that exists already would
+  // refuse it — so the one that hub verifies with has to be here before
+  // anything is written, rather than after a report says the machine is bound.
+  if (binding !== null && trimmed(resolved.env.HUB_AUTH_TOKEN) === null) {
+    io.err(
+      `ub init: ${binding} needs that hub's signing secret, and this machine ` +
+        "has none it can use: HUB_AUTH_TOKEN is not set (fnox, or your shell) " +
+        `and no signing secret was readable in ${credentialsPath()}. One ` +
+        "generated here would be random, and the hub would refuse it. Nothing " +
+        "was written.\n",
+    );
+    return 1;
+  }
+
   // A pipe is not a person: it gets the defaults rather than a blocked prompt.
   const interactive = !flags.yes && process.stdin.isTTY === true;
   const rl = interactive
@@ -362,6 +446,28 @@ export async function initCommand(
     io.err(`ub init: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
   }
+  // The hub is read before anything is written, and as a real client: a
+  // machine bound to an endpoint that never answers, or that refuses its
+  // credential, is a machine whose every later command reports a hub problem
+  // for a binding this command chose. Identity, workspace and secret exist only
+  // in memory at this point, so a refusal here leaves the machine untouched.
+  if (binding !== null) {
+    io.err(`ub init: checking ${binding}…\n`);
+    const problem = await remoteProblem(
+      bridgeConfig(
+        resolveMcpConfig({
+          ...resolved.env,
+          WORKSPACE_ID: workspace,
+          HUB_URL: binding,
+        }),
+      ),
+    );
+    if (problem !== null) {
+      io.err(`ub init: ${problem}. Nothing was written.\n`);
+      return 1;
+    }
+  }
+
   // Whether this is a checkout, which decides only whether the report below
   // names the contributor tasks. Nothing is written into one.
   const root = findCheckoutRoot(process.cwd());
@@ -438,6 +544,12 @@ export async function initCommand(
       displayName: name,
       color,
     });
+    // The endpoint goes through the writer `ub remote join` uses, in the same
+    // file and under the same lock — one place that decides what being bound to
+    // a hub means, rather than a second one that has to be kept in step.
+    if (binding !== null) {
+      setRemote(binding);
+    }
 
     // --- the signing secret -------------------------------------------------
     // The raw environment, not `resolved.env`: what matters here is whether
@@ -484,10 +596,15 @@ export async function initCommand(
   // What the MCP server would resolve for the workspace that is now on disk.
   // `secret` is added explicitly because it may have been generated moments ago,
   // after `resolved` was read — and a seed written without it stays local
-  // instead of reaching a hub that is up.
+  // instead of reaching a hub that is up. The endpoint for the same reason: it
+  // was stored moments ago too, and seeding against the configuration resolved
+  // before the write phase would send the starter documents to the built-in
+  // default rather than the hub this run just bound to — and print that one in
+  // the report.
   mcpEnv = {
     ...resolved.env,
     WORKSPACE_ID: persistedWorkspace,
+    ...(binding === null ? {} : { HUB_URL: binding }),
     ...(secret === null ? {} : { HUB_AUTH_TOKEN: secret }),
   };
 
