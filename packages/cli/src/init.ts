@@ -650,7 +650,21 @@ export async function initCommand(
     // and reach the generating branch below with an endpoint now stored — a
     // random secret written for a hub that has its own, arrived at by a race.
     // Re-read here, because the winner may have published a credential too.
-    credential = readCredential();
+    const settledCredential = readCredential();
+    // The value the hub actually verified is the value the seed has to send. A
+    // file-only credential that changed while this run was waiting means the
+    // probe proved nothing about what would be written, so this refuses rather
+    // than writing with a secret no hub has answered for. Neither value is
+    // printed.
+    if (binding !== null && settledCredential.secret !== credential.secret) {
+      io.err(
+        `ub init: the signing secret changed while this run was checking ` +
+          `${binding} — that hub verified one value and this would write with ` +
+          "another. Nothing was written. Run this again.\n",
+      );
+      return 1;
+    }
+    credential = settledCredential;
     if (hubInForce !== null) {
       const refusal = credentialRefusal(hubInForce, credential);
       if (refusal !== null) {

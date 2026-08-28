@@ -40,10 +40,13 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import type { McpConfig } from "@uberblick/mcp-server";
-import { resolveConfig } from "./config.js";
+import { readUserConfig, resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
+import type { InitLock } from "./init-lock.js";
+import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
+import type { RemotePersistence } from "./remote.js";
 import { setRemote } from "./remote.js";
 
 /** The repository the host tracks. Public or private, this is the only source. */
@@ -633,6 +636,12 @@ export async function remoteInitCommand(
   const reach = deps.reach ?? reachStack;
   const resolved = resolveConfig({ env });
   for (const warning of resolved.warnings) io.err(`ub: warning: ${warning}\n`);
+  // The endpoint this machine had before the deploy. Standing a hub up and
+  // pointing this machine at it is what this command does, so an endpoint that
+  // was here when it started is one it may replace; one that *arrives* while it
+  // is deploying belongs to a run that knows something this one does not, and
+  // the publish below refuses rather than overwriting it.
+  const endpointBefore = readUserConfig(env).config.hubUrl?.trim() ?? null;
 
   let base: McpConfig;
   try {
@@ -909,7 +918,41 @@ export async function remoteInitCommand(
   // string is compared by two machines, and only the uuid is the identity.
   const joinUrl = `${endpoint}/${base.workspaceId}`;
 
-  const persistence = setRemote(endpoint, { env });
+  // Under the lock `ub init` and `ub remote join` take, because this writes the
+  // same two files and answers the same question they do. Without it, a
+  // concurrent `ub init` can read the configuration, have this publish land
+  // underneath it, and then write its own decision over the top — an endpoint
+  // replaced, or a random local secret generated for a hub that has its own.
+  let lock: InitLock;
+  try {
+    lock = await acquireInitLock(env, {
+      onWait: (path) =>
+        io.err(`ub remote: waiting for \`ub init\` to finish (${path})\n`),
+    });
+  } catch (error) {
+    io.err(
+      `ub remote init: ${error instanceof Error ? error.message : String(error)}\n` +
+        `The stack is up at https://${magicDns}/ — nothing was persisted here.\n` +
+        `Bind this machine to it with: ub remote join ${joinUrl}\n`,
+    );
+    return 1;
+  }
+  let persistence: RemotePersistence;
+  try {
+    const endpointNow = readUserConfig(env).config.hubUrl?.trim() ?? null;
+    if (endpointNow !== endpointBefore && endpointNow !== endpoint) {
+      io.err(
+        `ub remote init: this machine was bound to ${endpointNow ?? "no endpoint"} ` +
+          "while the stack was being deployed, so the endpoint here was not " +
+          `replaced. The stack is up at https://${magicDns}/ — bind this ` +
+          `machine to it with: ub remote join ${joinUrl}\n`,
+      );
+      return 1;
+    }
+    persistence = setRemote(endpoint, { env });
+  } finally {
+    lock.release();
+  }
   for (const warning of persistence.warnings) io.err(`ub: warning: ${warning}\n`);
   report +=
     `\nThe endpoint is now ${endpoint}\n` +

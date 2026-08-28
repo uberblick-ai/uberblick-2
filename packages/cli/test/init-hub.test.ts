@@ -238,6 +238,41 @@ describe("ub init <hub-url>", () => {
     expect(existsSync(credentialsPath(box))).toBe(false);
   });
 
+  it("refuses when the credential changes between the probe and the write", async () => {
+    // The probe proves one value works on that hub. If the file it came from
+    // has changed by the time the write phase runs, the run would seed with a
+    // secret no hub has answered for — so it refuses instead.
+    const hub = await startHub();
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const lock = join(box.configHome, "uberblick", ".init.lock");
+    mkdirSync(dirname(lock), { recursive: true });
+    writeFileSync(lock, "999999\n");
+
+    let waiting = false;
+    const running = runUbAsync(
+      ["init", url(hub), "--yes"],
+      box,
+      {},
+      undefined,
+      (stderr) => {
+        waiting ||= stderr.includes("waiting for another `ub init`");
+      },
+    );
+    await waitUntil("`ub init` to say it is waiting for the lock", () => waiting);
+    writeFileSync(
+      credentialsPath(box),
+      `${JSON.stringify({ signingSecret: OTHER_SECRET }, null, 2)}\n`,
+    );
+    rmSync(lock);
+
+    const run = await running;
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain("signing secret changed");
+    expect(existsSync(configPath(box))).toBe(false);
+    expect(run.output).not.toContain(SECRET);
+    expect(run.output).not.toContain(OTHER_SECRET);
+  });
+
   it("refuses two different signing secrets rather than picking one", async () => {
     // The environment and the file must not disagree about the credential a
     // bound machine sends: whichever this run preferred, the other is what some
