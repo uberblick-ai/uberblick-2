@@ -18,6 +18,7 @@ import {
   LIVE_HUB_SETTLE,
   peerClient,
   removeTempDirs,
+  sleep,
   startHub,
   startServer,
   tempDatabasePath,
@@ -374,6 +375,13 @@ describe("hub sync", () => {
       return seen.hub.status === "update-required";
     });
     const session = (await rig.ok("sync_status", {})).session;
+    // Minting is the thing being claimed about, so it is what is counted. The
+    // hub's log alone cannot carry this claim: a hub that logged nothing cannot
+    // tell a client that stopped from one whose reconnect has not come round
+    // yet, which is exactly the delayed re-offer this test has to catch.
+    const sync = rig.instance.replicas.sync;
+    const mintedByThen = sync.mintCount;
+    expect(mintedByThen).toBeGreaterThan(0);
 
     // The transport goes, and the hub comes back on the same address speaking
     // *our* version — the most inviting thing that can happen to a client that
@@ -383,19 +391,39 @@ describe("hub sync", () => {
     const second = await hub({ port, databasePath, log });
     expect(second.port).toBe(port);
 
-    // The barrier is an event, not a duration: a fresh client authenticating
-    // proves the new hub is up and serving before anything below is asserted.
+    // A fresh client authenticating proves the new hub is up and serving, so
+    // the silence below is the client's and not the hub's.
     const peer = await peerClient(port, `${WORKSPACE}/_directory`);
     peers.push(peer);
     await peer.synced;
 
-    // Nothing of ours reached it — no accepted handshake, and no rejected one
-    // either, which is what "minted nothing" looks like from the far side.
-    const ours = records.filter(
-      (record) =>
-        record.event === "hub.auth.accepted" && record.sub === session,
-    );
-    expect(ours).toEqual([]);
+    // And then past a full retry window, because the failure this guards is a
+    // *delayed* re-offer: the socket's backoff is capped at
+    // `reconnectMaxDelayMs`, so a client still trying has had its chance by
+    // twice that. Derived from the configuration rather than picked.
+    await sleep(rig.config.reconnectMaxDelayMs * 2);
+
+    // And a brand-new room, which is the one thing that would still put a token
+    // on this reconnected socket: `create_doc` attaches its rooms, so without
+    // the terminal guard the attach mints and the hub logs the refusal. This is
+    // what gives the assertion below teeth — the reconnect alone does not, since
+    // a Hocuspocus provider that has been refused does not re-authenticate on
+    // its own.
+    await rig.ok("create_doc", {
+      title: "A room that would attach",
+      description: "A test document.",
+    });
+    await sleep(rig.config.reconnectMaxDelayMs * 2);
+
+    expect(sync.mintCount).toBe(mintedByThen);
+    // And nothing of ours reached the hub either — the same claim from the far
+    // side, where a mint we somehow missed would still show up.
+    expect(
+      records.filter(
+        (record) =>
+          record.event === "hub.auth.accepted" && record.sub === session,
+      ),
+    ).toEqual([]);
     expect(records.filter((r) => r.cause === "protocol-mismatch")).toEqual([]);
 
     const status = await rig.ok("sync_status", {});

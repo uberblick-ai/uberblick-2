@@ -23,7 +23,6 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { WebSocketStatus } from "@hocuspocus/provider";
 import { createHub } from "@uberblick/hub";
 import type { Hub, HubLogRecord } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
@@ -136,9 +135,13 @@ it("stops the page's socket for good when the hub refuses its protocol version",
   // Stopped, and not merely down: `shouldConnect` is the library's own record
   // of whether it intends to come back, and the socket's retry reads it. A
   // client the hub cannot talk to is not made compatible by dialling again.
+  //
+  // Intent rather than the socket's momentary `status`: `disconnect()` only
+  // asks, and the close lands a tick or more later, so reading `status` here
+  // races the transport — which is why the page's own reading is settled at the
+  // halt (`haltForProtocolMismatch`) instead of derived from it.
   const socket = sharedSocket(first.connection);
   expect(socket.shouldConnect).toBe(false);
-  expect(socket.status).not.toBe(WebSocketStatus.Connected);
 
   // Counted at the hub rather than waited out: exactly one attempt for the one
   // room the page opened, so nothing retried behind it.

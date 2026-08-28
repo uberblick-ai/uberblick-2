@@ -548,8 +548,19 @@ export class HubSync {
     this.attaching.clear();
   }
 
+  /**
+   * How many tokens this process has minted, ever.
+   *
+   * Read by the tests that pin the terminal states: "nothing was re-offered" is
+   * a claim about minting, and every other observation of it is indirect — a
+   * hub that logs nothing cannot distinguish a client that stopped from one
+   * whose reconnect had not come round yet.
+   */
+  mintCount = 0;
+
   /** Mint a fresh token for this agent session. */
   private token(): Promise<string> {
+    this.mintCount += 1;
     const secret = this.config.authSecret;
     if (secret === null) {
       throw new Error("HubSync.token: sync is disabled");

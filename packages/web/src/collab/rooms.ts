@@ -162,9 +162,18 @@ function haltForProtocolMismatch(hub: number): void {
   redialAfterDrop = false;
   socket?.disconnect();
   for (const entry of entries.values()) {
-    entry.connection.status.protocolMismatch = protocolMismatch;
+    const status = entry.connection.status;
+    status.protocolMismatch = protocolMismatch;
+    // Said here rather than left to the socket's close event, which lands a
+    // tick or more later: `disconnect()` above only *asks*, so `socket.status`
+    // still reads connected right now and a reader told "refused, and
+    // connected" would be told something that is already untrue. A halted page
+    // never connects or syncs again, so both are settled at the halt — and
+    // `refresh` keeps them settled when the close finally arrives.
+    status.connected = false;
+    status.synced = false;
     for (const listener of entry.listeners) {
-      listener({ ...entry.connection.status });
+      listener({ ...status });
     }
   }
 }
@@ -409,8 +418,8 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // fires on socket transitions, and the socket is not transitioning — so a
   // second room would read "offline" forever.
   const status: RoomStatus = {
-    connected: socket.status === WebSocketStatus.Connected,
-    synced: provider.isSynced,
+    connected: protocolMismatch === null && socket.status === WebSocketStatus.Connected,
+    synced: protocolMismatch === null && provider.isSynced,
     unsyncedChanges: provider.unsyncedChanges,
     localReplicaLoaded: false,
     hasLocalCache: false,
@@ -430,8 +439,13 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // every disconnect, which is the indicator claiming "synced" over a
   // connection that stopped delivering anything.
   const refresh = (): void => {
-    status.connected = socket.status === WebSocketStatus.Connected;
-    status.synced = provider.isSynced;
+    // The halt is terminal, so nothing the socket or the provider says
+    // afterwards may raise either flag again — including the close event that
+    // arrives after `haltForProtocolMismatch` has already settled them, and a
+    // provider still reporting the sync it had before it was refused.
+    const halted = protocolMismatch !== null;
+    status.connected = !halted && socket.status === WebSocketStatus.Connected;
+    status.synced = !halted && provider.isSynced;
     status.unsyncedChanges = provider.unsyncedChanges;
     emit();
   };
