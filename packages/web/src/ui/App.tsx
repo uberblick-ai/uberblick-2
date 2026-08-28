@@ -34,7 +34,7 @@ import { ThreadsPane } from "./ThreadsPane.js";
 import { workspaceTags } from "./tags.js";
 import { focusThread } from "./threads.js";
 import type { SelectThread, ThreadFocus } from "./threads.js";
-import { AllDocsPane } from "./AllDocsPane.js";
+import { DocumentList } from "../shell/DocumentList.js";
 import {
   allPath,
   canonicalPath,
@@ -187,9 +187,9 @@ export function RoutePane({
   return (
     <EditorPane
       connection={connection}
-      // Only `list` and `doc` reach here — the shell renders the corpus
-      // listing itself — and both carry the workspace the address spelled,
-      // which is what a copied link has to keep.
+      // Only `doc` reaches here — the shell renders the corpus journey itself
+      // (#406) — and it carries the workspace the address spelled, which is
+      // what a copied link has to keep.
       segment={route.workspace.segment}
       author={author}
       knownTags={knownTags}
@@ -224,6 +224,9 @@ export function App(): ReactElement {
   // and then there are no rooms to join at all.
   const workspace = route.kind === "no-workspace" ? null : route.workspace;
   const selected = route.kind === "doc" ? route.uuid : null;
+  // Both addresses that name the workspace render the document list, so the
+  // sidebar's entry for it is the current page at either one.
+  const listing = route.kind === "all" || route.kind === "list";
   const [collapsed, setCollapsed] = useStoredFlag(SIDEBAR_COLLAPSED_KEY, false);
   /**
    * The thread the reader is looking at. It lives here because the two ends of
@@ -574,16 +577,26 @@ export function App(): ReactElement {
             onSelect={onSelect}
             onCreate={onCreate}
             onOpenAll={onOpenAll}
-            allOpen={route.kind === "all"}
+            allOpen={listing}
           />
         )}
-        {/* The corpus listing is its own address (#118), and the only pane
-            that is about the workspace rather than about one document — so it
-            takes the pane rather than passing four more props through
-            `RoutePane`, which exists to say what a *document* address resolves
-            to. */}
-        {route.kind === "all" ? (
-          <AllDocsPane
+        {/* The corpus journey (#406): both addresses that name the workspace
+            rather than a document — `/<workspace>`, the first screen of a
+            session, and `/<workspace>/all` — are the document list. It is the
+            only pane that is about the workspace rather than about one
+            document, so it takes the pane rather than passing four more props
+            through `RoutePane`, which exists to say what a *document* address
+            resolves to. */}
+        {listing ? (
+          /* Keyed by the workspace, because everything the pane holds is
+             about one corpus: a filter typed in workspace A would otherwise
+             survive the switch and make workspace B's first screen look
+             empty. The uuid, not the segment — the slug is cosmetic, and two
+             spellings of one workspace are one corpus — so `/<workspace>` and
+             `/<workspace>/all` keep the query, and only a real switch clears
+             it. */
+          <DocumentList
+            key={workspace?.uuid}
             connection={directory}
             entries={entries}
             groups={sidebarGroups}
