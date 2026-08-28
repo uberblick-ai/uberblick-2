@@ -26,6 +26,7 @@ import {
   claimSigningSecret,
   credentialsPath,
   resolveConfig,
+  userConfigPath,
   writeCredentials,
 } from "../src/config.js";
 import { REPO_ROOT, removeTempDirs, sandbox } from "./helpers.js";
@@ -63,9 +64,11 @@ describe("resolveConfig", () => {
     expect(resolved.env.WORKSPACE_ID).toBeUndefined();
     // And the refusal is the whole answer for a machine that is not bound
     // yet: the exact file `ub` takes a workspace from, and both commands that
-    // write it — `ub remote join` being the one a flag-day re-bind runs.
+    // write it — `ub remote join` being the one a flag-day re-bind runs. The
+    // path comes from the cli's own resolver rather than a literal, so the
+    // message and `ub` cannot drift apart without failing here.
     expect(() => resolveMcpConfig(resolved.env)).toThrow(
-      join(box.configHome, "uberblick", "config.json"),
+      userConfigPath(box.env),
     );
     expect(() => resolveMcpConfig(resolved.env)).toThrow(/ub init/);
     expect(() => resolveMcpConfig(resolved.env)).toThrow(/ub remote join/);
