@@ -106,6 +106,7 @@ const OFFLINE: RoomStatus = {
   hasLocalCache: false,
   protocolMismatch: null,
   authFailed: false,
+  tokenMissing: false,
 };
 
 export function useRoomStatus(connection: RoomConnection | null): RoomStatus {

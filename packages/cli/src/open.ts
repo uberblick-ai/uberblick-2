@@ -27,25 +27,24 @@
  *    both, never a silent bind of a socket nobody will connect to.
  *
  * 3. **It serves #91's configuration document** at {@link CONFIG_PATH}, with
- *    the resolved endpoint and workspace in it and `Cache-Control: no-store` on
- *    it, matched *ahead* of the SPA fallback. That document is what lets one
- *    prebuilt bundle target any hub; the fallback answering it with the app's
- *    own HTML is precisely the production failure #91 exists to remove.
+ *    the resolved endpoint, workspace and signing secret in it and
+ *    `Cache-Control: no-store` on it, matched *ahead* of the SPA fallback. That
+ *    document is what lets one prebuilt bundle target any hub; the fallback
+ *    answering it with the app's own HTML is precisely the production failure
+ *    #91 exists to remove.
  *
  * 4. **It never serves a blank page.** With no bundle and no toolchain it exits
  *    non-zero naming what is missing, rather than opening a browser onto 404s.
  *
  * The build shells out to pnpm rather than to `mise run build-web`: that task
- * wraps the build in `fnox exec --if-missing error`, and a user of `ub` has no
- * age key. Tasks are the documented way for *contributors* to run things; this
- * is a program running a build for somebody who was never told about either.
+ * wraps the build in `fnox exec`, and a user of `ub` has no age key. Tasks are
+ * the documented way for *contributors* to run things; this is a program
+ * running a build for somebody who was never told about either.
  *
- * ============================ LOUD WARNING ============================
- * A bundle built here embeds `HUB_AUTH_TOKEN`, exactly as `mise run build-web`
- * does. That is PRIVATE-SPIKE-ONLY: anything served to a browser is public.
- * `ub open` binds loopback, so the bundle reaches this machine only; serving it
- * to a network is #75's job and #84 removes the secret from the bundle.
- * =====================================================================
+ * The bundle embeds no secret (#426): the signing secret travels in the
+ * document this command serves, so the build is handed none and the bundle it
+ * produces is the same one any deployment can serve. `ub open` binds loopback,
+ * so that document reaches this machine only.
  */
 
 import { spawn } from "node:child_process";
@@ -196,10 +195,15 @@ async function buildBundle(
   io.err(
     "ub open: no built web app yet — building it now with pnpm; this takes a moment\n",
   );
+  // Without the secret. The bundle has carried none since #426 — it reads the
+  // token from the document this command serves — so handing it to the build
+  // would put a credential in a child process that has no use for it.
+  const buildEnv = { ...env };
+  delete buildEnv.HUB_AUTH_TOKEN;
   const code = await new Promise<number>((done) => {
     const child = spawn("pnpm", ["--filter", "@uberblick/web", "build"], {
       cwd: dirname(packageRoot),
-      env,
+      env: buildEnv,
       // Both of the build's streams to stderr: stdout is where this command
       // prints the URL, and a caller reading it must not have to sift a build
       // log out of it first.
@@ -266,18 +270,26 @@ function fileFor(root: string, pathname: string): string {
 /**
  * The configuration document, byte for byte.
  *
- * One key was #91's contract and `workspaces` is #189's second; both are read
- * by `packages/web/src/config.ts` and anything else is ignored. The workspace
- * is the spelling that is configured, decoration and all — the client parses
- * the uuid out of it, and the slug is what makes the switcher readable.
+ * One key was #91's contract, `workspaces` is #189's second and `hubAuthToken`
+ * is #426's third; all three are read by `packages/web/src/config.ts` and
+ * anything else is ignored. The workspace is the spelling that is configured,
+ * decoration and all — the client parses the uuid out of it, and the slug is
+ * what makes the switcher readable.
+ *
+ * Rendered once, at startup, and served unchanged: the secret is this machine's
+ * resolved configuration, and a `ub open` that outlived a rotation is stopped
+ * and started like anything else. Empty when there is none — the client then
+ * says it cannot authenticate rather than pretending it can.
  */
 export function configDocument(
   hubUrl: string,
   workspace: string | null,
+  hubAuthToken: string,
 ): string {
   return JSON.stringify({
     hubUrl,
     workspaces: workspace === null ? [] : [workspace],
+    hubAuthToken,
   });
 }
 
@@ -773,7 +785,10 @@ export async function openCommand(
   }
 
   const workspace = trimmed(env.WORKSPACE_ID);
-  const server = serveBundle(plan.dir, configDocument(hubUrl, workspace));
+  const server = serveBundle(
+    plan.dir,
+    configDocument(hubUrl, workspace, trimmed(env.HUB_AUTH_TOKEN) ?? ""),
+  );
   try {
     await listen(server, WEB_HOST, options.port);
     owned.server = server;

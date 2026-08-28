@@ -34,10 +34,10 @@ const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 /** Same shape as `reconnect.test.ts`: the config module is the hub's address. */
 const injected = vi.hoisted(() => ({ url: "", secret: "" }));
 vi.mock("../src/config.js", () => ({
+  HUB_CONFIG_PATH: "/uberblick-config.json",
   hubUrl: () => injected.url,
-  get HUB_AUTH_TOKEN() {
-    return injected.secret;
-  },
+  hubAuthToken: () => injected.secret,
+  resolveClientConfig: async () => ({}),
 }));
 
 const hubs: Hub[] = [];

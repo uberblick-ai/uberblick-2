@@ -2,8 +2,8 @@
  * `ub remote` — where this workspace syncs, and the one-time bridge onto it.
  *
  * `ub remote` says which endpoint is in force and what sharing it actually
- * buys, in plain words. There is no `invite` (#92): today the served web bundle
- * carries the shared signing secret, so "sharing" is handing somebody an address
+ * buys, in plain words. There is no `invite` (#92): today the host serves the
+ * shared signing secret to the app, so "sharing" is handing somebody an address
  * and a secret, and a command named `invite` would imply an access model that
  * does not exist yet. `ub remote init` and `ub remote update` stand up and
  * deploy the host; `ub remote join <url>/<workspace-id>` binds this machine to a
@@ -112,14 +112,14 @@ options:
 /**
  * What the endpoint buys you today, stated wherever a remote is named.
  *
- * The web client is a static bundle with the shared signing secret compiled
- * into it, so reaching the app *is* holding the credential. Until accounts land
- * (#84) the network is the access control, and saying so is the honest version
- * of "sharing".
+ * The web client is handed the shared signing secret in the configuration
+ * document its host serves (#426), so reaching the app *is* holding the
+ * credential. Until accounts land (#84) the network is the access control, and
+ * saying so is the honest version of "sharing".
  */
 const SHARING_BOUNDARY =
   "Everyone who can reach this endpoint and load the web app receives the\n" +
-  "shared signing secret — it is compiled into the served bundle — so reaching\n" +
+  "shared signing secret — the host serves it to the app — so reaching\n" +
   "the app is the same as holding the credential. The network is the whole of\n" +
   "the access control: keep the hub on a private network (Tailscale or\n" +
   "equivalent) until accounts land (#84). There is no invite command; sharing\n" +

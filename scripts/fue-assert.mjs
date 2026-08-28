@@ -469,22 +469,46 @@ async function main() {
     }
 
     // Where `/` goes is decided in the browser, so the no-browser proof is that
-    // the client was *served* this machine's workspace. With an empty
-    // `__WORKSPACE_ID__` the app renders "no workspace" instead of redirecting —
-    // the deployed root-route gap, in the one form a plain fetch can see.
+    // the client was *served* this machine's workspace. With no workspace in
+    // that document the app renders "no workspace" instead of redirecting — the
+    // deployed root-route gap, in the one form a plain fetch can see.
     //
-    // Two candidates because Vite has moved where a dev build's `define` values
-    // live: it inlines them into each transformed module in some versions and
-    // assigns them as globals from `/@vite/env` in others. Either counts; both
-    // missing means the workspace never reached the browser. Bodies are never
-    // printed from here — the signing secret is one of those defines.
-    const carriers = ["/@vite/env", "/src/config.ts"];
-    const responses = await Promise.all(
-      carriers.map((path) => get(path, "*/*").catch(() => ({ status: 0, body: "" }))),
-    );
-    if (!responses.some((response) => response.body.includes(report.workspaceUuid))) {
+    // One carrier since #426: the dev server answers the same
+    // `/uberblick-config.json` a deployment does, and that document is now the
+    // whole of what configures the client. Bodies are never printed from here —
+    // the signing secret is in this one.
+    //
+    // Parsed, and read out of `workspaces` specifically: a substring search
+    // over the whole body would also be satisfied by a uuid that happened to
+    // sit in `hubAuthToken`, and this assertion is about the workspace list `/`
+    // redirects through. Entries may be decorated (`<slug>-<uuid>`), so an
+    // entry *containing* the uuid is what counts.
+    const carrier = "/uberblick-config.json";
+    const document = await get(carrier, "application/json").catch(() => ({
+      status: 0,
+      body: "",
+    }));
+    let workspaces = [];
+    try {
+      const parsed = JSON.parse(document.body).workspaces;
+      // The client reads a JSON array and one comma-separated string as the
+      // same list; so does this.
+      workspaces = Array.isArray(parsed)
+        ? parsed
+        : typeof parsed === "string"
+          ? parsed.split(",")
+          : [];
+    } catch {
+      // Not JSON at all — the SPA fallback, or nothing served. `workspaces`
+      // stays empty and the message below is the same one either way.
+    }
+    if (
+      !workspaces.some(
+        (entry) => typeof entry === "string" && entry.includes(report.workspaceUuid),
+      )
+    ) {
       throw new Error(
-        `the served client carries no workspace (checked ${carriers.join(" and ")}), so / renders 'no workspace' instead of redirecting into one`,
+        `the served client carries no workspace (${carrier} answered HTTP ${document.status} with ${workspaces.length} workspace(s)), so / renders 'no workspace' instead of redirecting into one`,
       );
     }
 

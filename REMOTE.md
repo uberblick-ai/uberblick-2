@@ -6,7 +6,7 @@ serves the client's runtime configuration at `/uberblick-config.json`, proxies
 `/ws` to the hub, and asks the host's Tailscale daemon for the HTTPS
 certificate. The hub is not published directly.
 
-> the served bundle contains the shared write-token signing secret — this deployment is supported only on a private Tailscale network until server-minted sessions exist; an unguessable public hostname is not a security boundary.
+> the host serves the shared write-token signing secret to the app, in `/uberblick-config.json` — anyone who can fetch that document has full read-write. This deployment is supported only on a private Tailscale network until server-minted sessions exist; an unguessable public hostname is not a security boundary.
 
 Server-minted sessions are the planned replacement; see
 [Hosted future](CLAUDE.md#hosted-future-directional--shapes-cheap-now-choices-only).
@@ -16,9 +16,12 @@ Server-minted sessions are the planned replacement; see
 - A Linux host with Docker Engine and Docker Compose 2.6.0 or newer —
   `ub remote init` clones the repository onto it, and only the by-hand procedure
   below needs a checkout you made yourself. Compose 5 also satisfies this
-  requirement; check with `docker compose version --short`. Compose 2.5 added
-  build secrets, and 2.6 is the minimum that also supports the
-  environment-backed secret source and top-level project name used here.
+  requirement; check with `docker compose version --short`. The build secrets
+  and the environment-backed secret source that first set this floor are gone
+  with #426; what the file still uses beyond long-standing Compose v2 features
+  is the top-level project `name`. The floor stays at 2.6 because that is the
+  oldest version this deployment has been verified on, not because a lower one
+  is known to fail.
 - Tailscale installed on the host and connected to the private tailnet. MagicDNS
   and HTTPS must be enabled for the tailnet. Enabling HTTPS publishes the
   machine names used in certificates to a public certificate transparency log;
@@ -161,13 +164,14 @@ Edit `.env` and set the four required values (`WEB_HUB_URL` is optional; see
   to the host's ignored `.env`. Never copy the age key to the host. The secret
   must consist only of letters, digits, `.`, `_`, and `-`; `remote-compose.sh`
   refuses other characters because the shell and Compose parse `.env`
-  differently.
+  differently — and because the value is substituted into the JSON
+  configuration document Caddy serves, where a quote could inject further keys.
 
-The wrapper reads `.env`, derives a SHA-256 cache key from `HUB_AUTH_TOKEN`
-without printing or passing the token as a Docker build argument, then invokes
-Compose. Always use it for this deployment: BuildKit deliberately excludes
-secret contents from cache keys, so the derived non-secret build argument is
-what forces a web rebuild after token rotation.
+The wrapper reads `.env`, checks both substituted values against that alphabet,
+and re-exports the secret under a name only it sets, which `docker-compose.yml`
+requires. Always use it for this deployment: that requirement is what makes a
+bare `docker compose up` fail rather than serve an unchecked value into the
+document.
 
 Validate the configuration without rendering its secret values, build the web
 bundle, and start both services:
@@ -182,10 +186,13 @@ sh remote-compose.sh logs --tail=100 hub caddy
 Open `https://<TAILSCALE_HOST>` from a second computer on the same tailnet. It
 opens the first workspace in `WEB_WORKSPACES`. In the browser developer tools,
 `https://<TAILSCALE_HOST>/uberblick-config.json` must return
-`{"hubUrl":"wss://<TAILSCALE_HOST>/ws","workspaces":"<the list from .env>"}` and
-the collaboration WebSocket must be that same address; a `ws://localhost`
+`{"hubUrl":"wss://<TAILSCALE_HOST>/ws","workspaces":"<the list from .env>","hubAuthToken":"<the secret from .env>"}`
+and the collaboration WebSocket must be that same address; a `ws://localhost`
 request means the document did not arrive and the client fell back to the values
-compiled into the bundle. The client logs one line naming both sources in force,
+compiled into the bundle. That document is a credential — do not paste it
+anywhere. If the status line reads "no hub token", the document arrived without
+`hubAuthToken`: check that the deployment commands went through
+`remote-compose.sh`. The client logs one line naming both sources in force,
 which is the fastest way to tell a served value from a fallback. The directory
 should hydrate after the socket connects.
 
@@ -194,13 +201,15 @@ configuration contains `HUB_AUTH_TOKEN` in the hub environment.
 
 ### Pointing the client at another hub
 
-Neither the hub endpoint nor the workspaces are baked into the bundle. The
-client fetches `/uberblick-config.json` from the origin it was served from and
-takes `hubUrl` and `workspaces` from it; the compiled-in values are only the
-fallback for when no such document is deployed. Caddy renders that document from
-the `HUB_URL` and `WORKSPACES` it is given, which `docker-compose.yml` fills
-from `WEB_HUB_URL` and `WEB_WORKSPACES` in `.env` — the first defaulting to
-`wss://<TAILSCALE_HOST>/ws`, the second to empty.
+Nothing about this deployment is baked into the bundle. The client fetches
+`/uberblick-config.json` from the origin it was served from and takes `hubUrl`,
+`workspaces` and `hubAuthToken` from it; the compiled-in endpoint is only the
+fallback for when no such document is deployed, and there is no compiled-in
+secret at all. Caddy renders that document from the `HUB_URL`, `WORKSPACES` and
+`HUB_AUTH_TOKEN` it is given, which `docker-compose.yml` fills from
+`WEB_HUB_URL` and `WEB_WORKSPACES` in `.env` — the first defaulting to
+`wss://<TAILSCALE_HOST>/ws`, the second to empty — and from the checked secret
+`remote-compose.sh` exports.
 
 So retargeting the client, or changing which workspaces it offers, is an edit to
 that document, not a rebuild — set the value in `.env` and recreate the Caddy
@@ -211,19 +220,22 @@ sh remote-compose.sh up --detach caddy
 ```
 
 The document is served with `Cache-Control: no-store`, so the next page load
-picks up the change. It carries configuration and nothing else: the client reads
-`hubUrl` and `workspaces` and ignores every other key, so there is no field a
-token could be added to. `hubUrl` must be a plain `ws://` or `wss://` address —
-one carrying userinfo, a query string or a fragment is refused, and the client
-falls back to the endpoint compiled into the bundle rather than dialling it. An
-entry of `workspaces` that is not a workspace id is dropped rather than offered,
-and a list with nothing usable in it degrades to the bundle's own — which on
-this deployment is empty, so `/` says there is no workspace while document links
-keep working.
+picks up the change. The client reads `hubUrl`, `workspaces` and `hubAuthToken`
+and ignores every other key. `hubUrl` must be a plain `ws://` or `wss://`
+address — one carrying userinfo, a query string or a fragment is refused, and
+the client falls back to the endpoint compiled into the bundle rather than
+dialling it. An entry of `workspaces` that is not a workspace id is dropped
+rather than offered, and a list with nothing usable in it degrades to the
+bundle's own — which on this deployment is empty, so `/` says there is no
+workspace while document links keep working. A document with no `hubAuthToken`
+leaves a client that renders from its local cache and says "no hub token"; there
+is no fallback secret, and the client re-reads the document on its next connect
+attempt rather than giving up for the life of the tab.
 
-`HUB_AUTH_TOKEN` is still compiled into the bundle, so rotating it does need
-`sh remote-compose.sh up --build --detach`. Removing it from the bundle
-entirely is separate work (#84).
+Rotating the secret is the same edit: set it in `.env` and recreate the two
+containers with `sh remote-compose.sh up --detach`. It is no longer a rebuild —
+the bundle carries no secret (#426) — but every open tab keeps minting with the
+one it was served until it is reloaded.
 
 ## Two-computer verification protocol
 

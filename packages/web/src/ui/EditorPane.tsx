@@ -149,6 +149,18 @@ function CopyLink({
 }
 
 /**
+ * What a reader is told when no token could be minted at all (#426).
+ *
+ * Composed here rather than shared with `AUTH_REJECTED`: nothing was sent, so
+ * the hub has said nothing, and this names the one thing that can be acted on —
+ * the app was served without the secret it needs. Local text by construction:
+ * the missing value is the whole subject, so there is nothing remote to echo.
+ */
+export const TOKEN_MISSING =
+  "this app was served without a hub token, so it cannot authenticate — the " +
+  "deployment serving it is incomplete";
+
+/**
  * Exported for the label test only.
  *
  * The backlog count names its unit (`backlogLabel`, shared with the sync
@@ -200,6 +212,22 @@ export function StatusLine({
             : "the hub is older than this app — update the hub"}
           {` (app ${mismatch.client}, hub ${mismatch.hub})`}
         </span>
+        <CopyLink room={connection.room} segment={segment} />
+      </div>
+    );
+  }
+  if (status.tokenMissing) {
+    // Ahead of `authFailed`, which can still be carrying a refusal from before
+    // the secret went missing: no token was sent this time, so "the hub refused
+    // us" would name the wrong half. Not terminal either — the next connect
+    // attempt re-reads the served document (see `hubToken`).
+    return (
+      <div className="ub-status">
+        <span className="ub-status-mark" aria-hidden="true">
+          <span className="ub-dot ub-dot-off" />
+        </span>
+        <span className="ub-status-word">no hub token</span>
+        <span className="ub-muted">{TOKEN_MISSING}</span>
         <CopyLink room={connection.room} segment={segment} />
       </div>
     );

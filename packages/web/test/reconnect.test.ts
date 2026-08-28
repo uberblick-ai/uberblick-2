@@ -13,6 +13,11 @@
  * and tells clients their document is gone, but the process stays alive, so the
  * client's socket is never closed for it. A tab in that state is exactly the
  * reported bug — "synced", and receiving nothing until a reload.
+ *
+ * The last test is the same shape of claim about a different input: since #426
+ * the signing secret arrives in the served document, so "no secret yet" is a
+ * state a healthy tab can start in — a host still booting, a proxy holding one
+ * request. It must also end without a reload.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -47,10 +52,12 @@ const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
  */
 const injected = vi.hoisted(() => ({ url: "", secret: "" }));
 vi.mock("../src/config.js", () => ({
+  HUB_CONFIG_PATH: "/uberblick-config.json",
   hubUrl: () => injected.url,
-  get HUB_AUTH_TOKEN() {
-    return injected.secret;
-  },
+  hubAuthToken: () => injected.secret,
+  // `rooms.ts` re-reads the configuration before every connect attempt; a
+  // resolved one is what the mock stands for, so this is the settled read.
+  resolveClientConfig: async () => ({}),
 }));
 
 const hubs: Hub[] = [];
@@ -196,9 +203,9 @@ interface Tab {
  * status subscription. The status is recorded as a history rather than sampled,
  * so a sync that is lost and regained between polls cannot be missed.
  */
-async function openTab(room: string, port: number): Promise<Tab> {
+async function openTab(room: string, port: number, secret = SECRET): Promise<Tab> {
   injected.url = `ws://127.0.0.1:${port}`;
-  injected.secret = SECRET;
+  injected.secret = secret;
   const { acquireRoom } = await import("../src/collab/rooms.js");
   const handle = acquireRoom(room, { name: "tab", color: "#abcdef" });
   const history: RoomStatus[] = [];
@@ -366,4 +373,29 @@ it("leaves the socket alone when it is the client that leaves a room", async () 
   await expectLiveWrite(second, hub.port, room, "after re-joining");
 
   expect(drops).toBe(0);
+}, TEST_TIMEOUT_MS);
+
+it("says it has no token, and syncs once the document supplies one", async () => {
+  const hub = await startHub(0, databasePath());
+  const room = `${WORKSPACE}/${randomUUID()}`;
+
+  // A tab that loaded while its configuration document was answering with
+  // nothing usable: an endpoint, and no secret.
+  const tab = await openTab(room, hub.port, "");
+  teardown.push(() => sharedSocket(tab.connection).destroy());
+
+  // The reading a person gets, and it is not "synced": nothing was ever sent to
+  // the hub, so what is incomplete is the deployment serving this app.
+  await waitFor("the missing-token reading", () => tab.latest().tokenMissing);
+  expect(tab.latest().synced).toBe(false);
+
+  // The deployment finishes coming up. Nothing reloads and nothing re-mounts:
+  // `hubToken` re-reads the document before every connect attempt, and a mint
+  // it cannot make drops the socket so that the next attempt is seconds away.
+  // Without that drop this took ~60s — Hocuspocus sends a token only on an
+  // `open`, and its own message-reconnect needed two cycles to produce one,
+  // which is a tab dead for a minute after its host came up.
+  injected.secret = SECRET;
+  await waitFor("the room to sync on a later attempt", () => tab.latest().synced);
+  expect(tab.latest().tokenMissing).toBe(false);
 }, TEST_TIMEOUT_MS);

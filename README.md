@@ -455,7 +455,7 @@ these commands.
 
 `ub remote` with no remote configured says
 so and exits 0; with one, it prints the endpoint and states the boundary you
-actually get: the served web bundle carries the shared signing secret, so
+actually get: the host serves the shared signing secret to the web app, so
 reaching the app is the same as holding the credential, and the deployment is
 supported only on a private network until accounts land (#84). There is no
 `invite` command (#92) for that reason.

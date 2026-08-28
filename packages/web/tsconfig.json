@@ -13,6 +13,7 @@
     "test/**/*.tsx",
     "scripts/**/*.ts",
     "e2e/**/*.ts",
+    "dev-config-document.ts",
     "vite.config.ts",
     "playwright.config.ts"
   ]

@@ -11,7 +11,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { StatusLine } from "../src/ui/EditorPane.js";
+import { StatusLine, TOKEN_MISSING } from "../src/ui/EditorPane.js";
 import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
@@ -31,6 +31,7 @@ function stubConnection(
     hasLocalCache: false,
     protocolMismatch: null,
     authFailed: false,
+    tokenMissing: false,
     ...patch,
   };
   return {
@@ -125,6 +126,26 @@ describe("a hub that refuses this page", () => {
     // names both causes rather than guessing, and it is composed locally —
     // the hub's own words never reach the line.
     expect(line({ authFailed: true })).toContain(AUTH_REJECTED);
+  });
+});
+
+describe("an app served without a token", () => {
+  it("names the missing token rather than blaming the hub", () => {
+    // Since #426 the secret arrives in the served configuration document, so a
+    // deployment can be complete in every other way and still hand out an app
+    // that cannot authenticate. The reader is told which half is missing: no
+    // token was ever sent, so "the hub refused us" would be false, and the
+    // deployment is what can be fixed. Composed locally — the missing value is
+    // the whole subject, so there is nothing remote to echo.
+    const missing = line({ tokenMissing: true });
+    expect(missing).toContain("no hub token");
+    expect(missing).toContain(TOKEN_MISSING);
+    expect(missing).not.toContain(AUTH_REJECTED);
+
+    // It outranks a refusal left over from before the secret went missing, and
+    // it never appears without one.
+    expect(line({ tokenMissing: true, authFailed: true })).toContain(TOKEN_MISSING);
+    expect(line({ connected: true, synced: true })).not.toContain(TOKEN_MISSING);
   });
 });
 

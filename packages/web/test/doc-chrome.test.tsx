@@ -73,6 +73,7 @@ function fixture(status: Partial<RoomStatus> = {}): Fixture {
     hasLocalCache: false,
     protocolMismatch: null,
     authFailed: false,
+    tokenMissing: false,
     ...status,
   };
   const connection = {

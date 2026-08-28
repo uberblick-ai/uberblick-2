@@ -28,15 +28,17 @@ FROM workspace AS web-build
 # There is deliberately no WORKSPACE_ID/WORKSPACES build argument. The same
 # document names the workspaces, and a deployed bundle that carried its own
 # would be a second answer to retarget — the build-time defines exist for the
-# dev server, which serves no such document.
+# dev server, which serves that document from vite instead.
+#
+# And no secret of any kind (#426). The signing secret is served in that same
+# document, so this stage needs none: the bundle it produces carries no
+# credential at all, and rotating the secret is a Caddy restart rather than a
+# rebuild. Not *identical* across deployments — HUB_URL above is still compiled
+# in as the fallback — but independent of who deploys it and of what their
+# secret is, which is what makes the image publishable.
 ARG HUB_URL
-ARG HUB_AUTH_TOKEN_DIGEST
-RUN --mount=type=secret,id=hub-auth-token \
-    test -n "$HUB_URL" \
-    && test -n "$HUB_AUTH_TOKEN_DIGEST" \
-    && test -s /run/secrets/hub-auth-token \
-    && HUB_URL="$HUB_URL" HUB_AUTH_TOKEN="$(cat /run/secrets/hub-auth-token)" \
-       pnpm --filter @uberblick/web build
+RUN test -n "$HUB_URL" \
+    && HUB_URL="$HUB_URL" pnpm --filter @uberblick/web build
 
 FROM caddy:2.10.2-alpine AS web
 

@@ -2,8 +2,9 @@
  * Where the client configuration comes from, and what happens when the answer
  * is unusable.
  *
- * Two values travel in one document — the hub endpoint and the workspaces this
- * client offers — and the contracts are the same for both:
+ * Three values travel in one document — the hub endpoint, the workspaces this
+ * client offers and the secret it mints tokens with — and the contracts are
+ * largely the same for all three:
  *
  * - **Precedence, and saying which source won.** A bundle nobody can rebuild
  *   has no other way to be retargeted or to be told which workspaces exist, and
@@ -16,19 +17,33 @@
  * - **The keys fail independently.** A deployment that serves an endpoint but
  *   no workspaces is an ordinary deployment: it must keep its endpoint, and
  *   deep links must keep working — only `/` and the switcher degrade.
- * - **Freshness, and nothing but configuration.** A cached document keeps a
- *   retargeted deployment dialling the old hub; a document that could carry
- *   more than this would become the credential channel #84 exists to close.
+ * - **Freshness.** A cached document keeps a retargeted deployment dialling the
+ *   old hub.
+ *
+ * **The secret is the exception, and the overturn (#426).** This file used to
+ * pin the opposite: that the document carried configuration and nothing else,
+ * so no credential could ride along. That is now the mechanism. The secret was
+ * compiled into the bundle, which pinned every image to one hub and is the
+ * single reason the image cannot be published; serving it changes where the
+ * same secret is published, not whether. Anyone who can fetch this document has
+ * full read-write, and the boundary that makes that acceptable is the tailnet
+ * (#410, CLAUDE.md, REMOTE.md) — the owner's own devices, nothing else. It has
+ * no fallback and one further contract of its own: a read that carried no
+ * secret is *not* remembered, because a tab that could never authenticate for
+ * as long as it stayed open would be worse than one that tries again.
  *
  * The fetch itself is a stub: what is defended is the decision, not whether
  * `fetch` works. The Caddy half of the no-store contract is checked against the
  * configuration, because this suite runs in jsdom and serves nothing.
  */
 
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { devConfigDocument } from "../dev-config-document.js";
 import {
   HUB_CONFIG_PATH,
   configuredWorkspaces,
@@ -51,6 +66,9 @@ const INJECTED = "ws://localhost:1234";
 /** Two workspaces a served document could name — one decorated, one bare. */
 const FIRST = "uberblick-6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const SECOND = "b2d9e4c7-5a13-4f80-8e6b-71c0a9d35f2e";
+
+/** A secret arriving on a *second* read, after the first document missed. */
+const LATE_SECRET = "late-arriving-signing-secret";
 
 /**
  * A `fetch` that never answers on its own — a proxy holding the connection
@@ -106,14 +124,19 @@ afterEach(() => {
 });
 
 describe("the served configuration", () => {
-  it("answers the SPA fallback's HTML with a diagnostic and a working fallback", async () => {
+  it("answers the SPA fallback's HTML with a diagnostic and a working fallback, and tries again for a secret it never got", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
     // `try_files {path} /index.html` answering an absent document: 200, HTML.
-    const { fetch } = serving({ body: '<!doctype html>\n<html lang="en">' });
+    // Then the same read, after the deployment came up.
+    const { fetch, calls } = serving(
+      { body: '<!doctype html>\n<html lang="en">' },
+      { body: `{"hubUrl":"wss://hub.example/ws","hubAuthToken":"${LATE_SECRET}"}` },
+    );
 
-    // The one `resolveClientConfig` call in this file — it memoises per
+    // The only `resolveClientConfig` calls in this file — it memoises per
     // session, so every other case goes through `readClientConfig`. This is the
-    // case worth spending it on: the whole app is downstream of what happens
+    // case worth spending them on: the whole app is downstream of what happens
     // here.
     const config = await resolveClientConfig(fetch);
 
@@ -143,6 +166,16 @@ describe("the served configuration", () => {
     expect(message).not.toContain("<!doctype");
     expect(message).not.toContain("<html");
     expect(message).toContain("text/plain");
+
+    // And the read is not remembered, because it produced no secret: with the
+    // fallback gone (#426) a memoised miss is a tab that can never authenticate
+    // for as long as it stays open. `rooms.ts` calls this before every connect
+    // attempt, so "not memoised" is what makes the next attempt try again — and
+    // the answer it gets is the one now being served.
+    const again = await resolveClientConfig(fetch);
+    expect(calls).toHaveLength(2);
+    expect(again.hubAuthToken).toBe(LATE_SECRET);
+    expect(hubUrl()).toBe("wss://hub.example/ws");
   });
 
   it("refuses a hubUrl that is not a bare ws(s) address, without echoing it", async () => {
@@ -224,17 +257,34 @@ describe("the served configuration", () => {
     for (const call of calls) expect(call.cache).toBe("no-store");
   });
 
-  it("takes configuration and nothing else, so no credential can ride along", async () => {
-    const { fetch } = serving({
-      body: '{"hubUrl":"wss://hub.example/ws","hubAuthToken":"s3cret"}',
-    });
+  it("carries the signing secret, and refuses one that is not a string", async () => {
+    // The overturn (#426, see the file comment): this key used to be ignored on
+    // purpose. It is now how the secret reaches the client at all, which is
+    // what lets one bundle serve every deployment.
+    const carried = await readClientConfig(
+      serving({
+        body: '{"hubUrl":"wss://hub.example/ws","hubAuthToken":"s3cret"}',
+      }).fetch,
+    );
+    expect(carried.hubAuthToken).toBe("s3cret");
 
-    const config = await readClientConfig(fetch);
-
-    // The extra key is ignored, not adopted and not fatal — and there is no
-    // field it could have reached (#84 owns the secret still in the bundle).
-    expect(config.hubUrl).toBe("wss://hub.example/ws");
-    expect(JSON.stringify(config)).not.toContain("s3cret");
+    // A non-string is refused rather than coerced: `String(42)` would be minted
+    // with, and a client authenticating with a plausible-looking wrong secret
+    // is harder to diagnose than one that says it has none. Every unusable
+    // shape lands in the same state as a document that named no secret at all.
+    const unusable = {
+      "a number": '{"hubUrl":"wss://hub.example/ws","hubAuthToken":42}',
+      "an object": '{"hubUrl":"wss://hub.example/ws","hubAuthToken":{"v":"s3cret"}}',
+      null: '{"hubUrl":"wss://hub.example/ws","hubAuthToken":null}',
+      absent: '{"hubUrl":"wss://hub.example/ws"}',
+    };
+    for (const [kind, body] of Object.entries(unusable)) {
+      const config = await readClientConfig(serving({ body }).fetch);
+      expect(config.hubAuthToken, kind).toBe("");
+      // …and the endpoint survives it: the keys fail independently here too.
+      expect(config.hubUrl, kind).toBe("wss://hub.example/ws");
+      expect(JSON.stringify(config), kind).not.toContain("s3cret");
+    }
   });
 });
 
@@ -289,6 +339,44 @@ describe("the workspaces it names", () => {
     expect(config.hubUrlSource).toBe("define");
     expect(config.workspaces).toEqual(await builtInWorkspaces());
     expect(config.rejected).toContain("names hubUrl more than once");
+
+    // The secret's key is covered too: a second one would be the credential
+    // every client mints with, chosen by whoever wrote it.
+    const twice = await readClientConfig(
+      serving({
+        body: '{"hubUrl":"wss://hub.example/ws","hubAuthToken":"first","hubAuthToken":"second"}',
+      }).fetch,
+    );
+    expect(twice.hubAuthToken).toBe("");
+    expect(twice.rejected).toContain("names hubAuthToken more than once");
+  });
+
+  it("does not mistake key-like text inside the secret for a second key", async () => {
+    // The other direction, and the one that would break a working deployment:
+    // the secret is opaque, so its own characters must never make the document
+    // unreadable. A real key's quote follows `{` or `,`; inside a JSON string a
+    // quote is written `\"`, so the two cannot be confused — and every value
+    // here is a legitimate secret that happens to read like a document.
+    const secrets = [
+      'a","hubUrl":"wss://elsewhere.example/ws',
+      '{"hubAuthToken": "nested"}',
+      '"workspaces":',
+    ];
+
+    for (const secret of secrets) {
+      const config = await readClientConfig(
+        serving({
+          body: JSON.stringify({
+            hubUrl: "wss://hub.example/ws",
+            workspaces: [FIRST],
+            hubAuthToken: secret,
+          }),
+        }).fetch,
+      );
+      expect(config.hubAuthToken, secret).toBe(secret);
+      expect(config.hubUrl, secret).toBe("wss://hub.example/ws");
+      expect(config.rejected, secret).toBeUndefined();
+    }
   });
 
   it("drops an entry that is not a workspace id, and counts it in the diagnostic", async () => {
@@ -384,18 +472,6 @@ describe("the endpoint as it is shown", () => {
 });
 
 describe("the deployments that serve it", () => {
-  it("leaves `mise run dev` with no configuration document at all", () => {
-    // Vite copies `public/` verbatim, so a file there would be served by the
-    // dev server too — and the dev server is the one place the injected
-    // `define`s must remain the whole answer.
-    expect(() =>
-      readFileSync(resolve(webRoot, `public${HUB_CONFIG_PATH}`)),
-    ).toThrow();
-    const viteConfig = readFileSync(resolve(webRoot, "vite.config.ts"), "utf8");
-    expect(viteConfig).toContain("__HUB_URL__");
-    expect(viteConfig).toContain("__WORKSPACE_ID__");
-  });
-
   it("serves the document uncached, ahead of the SPA fallback, from run-time config", () => {
     const caddyfile = readFileSync(resolve(repoRoot, "Caddyfile"), "utf8");
     const configRoute = caddyfile.indexOf(`handle ${HUB_CONFIG_PATH}`);
@@ -404,28 +480,97 @@ describe("the deployments that serve it", () => {
     expect(configRoute).toBeGreaterThan(-1);
     expect(spaFallback).toBeGreaterThan(configRoute);
     expect(caddyfile).toContain('header Cache-Control "no-store"');
-    // The served body: the agreed shape, with both values substituted at run
-    // time — so retargeting the client, or giving it its workspaces, is not a
-    // bundle rebuild.
+    // The served body: the agreed shape, with all three values substituted at
+    // run time — so retargeting the client, giving it its workspaces or
+    // rotating the secret is not a bundle rebuild.
     expect(caddyfile).toContain(
-      'respond `{"hubUrl":"{$HUB_URL}","workspaces":"{$WORKSPACES}"}`',
+      'respond `{"hubUrl":"{$HUB_URL}","workspaces":"{$WORKSPACES}","hubAuthToken":"{$HUB_AUTH_TOKEN}"}`',
     );
 
-    // Both are host-side `.env` values, renamed on the way in for the same
-    // reason: the undecorated names already mean "what my local tools use".
+    // The first two are host-side `.env` values, renamed on the way in for the
+    // same reason: the undecorated names already mean "what my local tools
+    // use". The secret arrives under a name only the wrapper sets, and its
+    // `:?` gate is what forces every deployment command through the wrapper's
+    // checks — the chokehold must not lapse exactly when the document starts
+    // carrying a credential.
     const compose = readFileSync(resolve(repoRoot, "docker-compose.yml"), "utf8");
     expect(compose).toContain('HUB_URL: "${WEB_HUB_URL:-wss://');
     expect(compose).toContain('WORKSPACES: "${WEB_WORKSPACES');
+    expect(compose).toContain('HUB_AUTH_TOKEN: "${CHECKED_HUB_AUTH_TOKEN:?');
     expect(readFileSync(resolve(repoRoot, "remote.env.example"), "utf8")).toContain(
       "WEB_WORKSPACES=",
     );
 
-    // …and the value is substituted *inside* a JSON string, so the wrapper that
+    // …and both are substituted *inside* a JSON string, so the wrapper that
     // renders it refuses anything that could close that string and append a
     // second `hubUrl`. The client refuses such a document too, but this is
     // where the value is stopped before it is ever served.
     const wrapper = readFileSync(resolve(repoRoot, "remote-compose.sh"), "utf8");
     expect(wrapper).toContain("WEB_WORKSPACES");
     expect(wrapper).toContain("*[!A-Za-z0-9,-]*)");
+    expect(wrapper).toContain("*[!A-Za-z0-9._-]*)");
+    expect(wrapper).toContain("CHECKED_HUB_AUTH_TOKEN=$HUB_AUTH_TOKEN");
+
+    // The dev server answers the same path from one middleware, out of the
+    // environment `ub env` resolves — `mise run web`, `mise run dev`, the e2e
+    // harness and the first-user proof all read this. Repeating the default
+    // workspace in `WORKSPACES` is the ordinary configuration, and the menu
+    // must not show it twice.
+    expect(
+      JSON.parse(
+        devConfigDocument({
+          HUB_URL: "ws://127.0.0.1:4321",
+          HUB_AUTH_TOKEN: "dev-secret",
+          WORKSPACE_ID: FIRST,
+          WORKSPACES: `${FIRST},${SECOND}`,
+        }),
+      ),
+    ).toEqual({
+      hubUrl: "ws://127.0.0.1:4321",
+      workspaces: [FIRST, SECOND],
+      hubAuthToken: "dev-secret",
+    });
+    // Vite copies `public/` verbatim, and a file there would win over the
+    // middleware while carrying whatever the checkout was last configured with.
+    expect(() =>
+      readFileSync(resolve(webRoot, `public${HUB_CONFIG_PATH}`)),
+    ).toThrow();
+  });
+
+  it("refuses an endpoint that could inject into the document, before it calls Docker", () => {
+    // The endpoint reaches the same JSON string the workspaces and the secret
+    // do — by `WEB_HUB_URL`, or through the `wss://<host>/ws` default built
+    // from `TAILSCALE_HOST` — so it needs the same guarantee. Run rather than
+    // read: the *order* is the second half of the contract, and a file cannot
+    // show it. A host without Docker must be told about its `.env`, not about
+    // the daemon.
+    //
+    // PATH is an empty directory, which is the proof of that order: nothing
+    // external is reachable, `docker` included, and the refusal still arrives.
+    // The cwd is empty too, so no developer's own `.env` is sourced over these.
+    const injecting = {
+      WEB_HUB_URL: 'wss://ok.example.ts.net/ws","hubUrl":"wss://elsewhere',
+      TAILSCALE_HOST: 'ok.example.ts.net","hubUrl":"wss://elsewhere',
+    };
+    const empty = mkdtempSync(join(tmpdir(), "uberblick-wrapper-"));
+    try {
+      for (const [name, value] of Object.entries(injecting)) {
+        const run = spawnSync(
+          "/bin/sh",
+          [resolve(repoRoot, "remote-compose.sh"), "config"],
+          {
+            cwd: empty,
+            env: { PATH: empty, HUB_AUTH_TOKEN: "safe-secret", [name]: value },
+            encoding: "utf8",
+          },
+        );
+
+        expect(run.status, name).toBe(1);
+        expect(run.stderr, name).toContain(`${name} may only contain`);
+        expect(run.stdout, name).toBe("");
+      }
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
   });
 });
