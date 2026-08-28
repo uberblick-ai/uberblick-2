@@ -88,11 +88,20 @@ compose() {
 }
 
 hub_stopped=
+temp=
 
 # Takes the status to exit with, so the signal traps can report a failure the
 # `$?` of an interrupted command would not.
 finish() {
+  # First, so a second Ctrl-C during the restart below cannot re-enter this and
+  # leave the hub down while two copies of it argue about whose status wins.
+  trap '' HUP INT TERM
   status=$1
+  # A half-copied file, killed mid-copy, is not something to leave lying next to
+  # the backups. Gone by the time the target is looked at either way.
+  if [ -n "$temp" ]; then
+    rm -f "$temp"
+  fi
   if [ -n "$hub_stopped" ]; then
     hub_stopped=
     if ! compose start hub; then
@@ -104,7 +113,7 @@ finish() {
       fi
     fi
   fi
-  trap - 0 HUP INT TERM
+  trap - 0
   exit "$status"
 }
 
@@ -118,8 +127,8 @@ compose stop hub
 # `tr` splits the object into one field per line so the code is read whether
 # Compose prints an array or one JSON object per line, and whether there is one
 # container or several.
-status=$(compose ps -a --format json hub)
-codes=$(printf '%s\n' "$status" | tr ',' '\n' |
+ps_json=$(compose ps -a --format json hub)
+codes=$(printf '%s\n' "$ps_json" | tr ',' '\n' |
   sed -n 's/.*"ExitCode":[[:space:]]*\([0-9][0-9]*\).*/\1/p')
 
 if [ -z "$codes" ]; then
@@ -138,8 +147,9 @@ done
 temp="$target.tmp.$$"
 rm -f "$temp"
 
+# Every exit from here on removes the temporary file — `finish` does it, so the
+# signal paths are covered by the same line as the failure paths.
 if ! compose cp hub:/data/hub.sqlite "$temp"; then
-  rm -f "$temp"
   printf 'hub-backup: copying the database out of the container failed; %s is unchanged.\n' "$target" >&2
   exit 1
 fi
@@ -150,7 +160,6 @@ fi
 # before the rename, so the file is never readable by anyone else under the name
 # an operator will reach for.
 if ! chmod 600 "$temp" || ! mv -f "$temp" "$target"; then
-  rm -f "$temp"
   printf 'hub-backup: could not put the copy in place at %s; it is unchanged.\n' "$target" >&2
   exit 1
 fi

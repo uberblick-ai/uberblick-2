@@ -27,8 +27,10 @@
 # So: stop the hub (its exit code is reported — a hub that crashed on the way
 # down is usually *why* somebody is restoring, so it does not block the
 # restore), stage the file, then one root container that owns it to `node`,
-# drops any rollback-journal sidecar left from the database being replaced, and
-# renames it into place. The trap starts the hub again on every path after the
+# moves any rollback journal of the database being replaced *aside*, renames the
+# staged file into place, and only then drops the aside copies — putting them
+# back if the rename failed, so a database and the journal it needs are never
+# separated. The trap starts the hub again on every path after the
 # stop — on the normal exit and on HUP/INT/TERM, because in POSIX `sh` an
 # EXIT-only trap does not run when a signal kills the script — because
 # `restart: unless-stopped` makes a manual stop survive a daemon restart. If
@@ -112,11 +114,26 @@ if ! compose run --rm --no-deps -T --entrypoint sh hub -c "$verify_command" <"$b
 fi
 
 hub_stopped=
+staged=
+
+# Best effort, and deliberately not fatal: the staged file is inert — the hub
+# never opens that name — so failing to remove it costs disk, not correctness.
+discard_staged() {
+  compose run --rm --no-deps --user 0 --entrypoint sh hub \
+    -c 'rm -f /data/hub.sqlite.restoring' || true
+}
 
 # Takes the status to exit with, so the signal traps can report a failure the
 # `$?` of an interrupted command would not.
 finish() {
+  # First, so a second Ctrl-C during the restart below cannot re-enter this and
+  # leave the hub down while two copies of it argue about whose status wins.
+  trap '' HUP INT TERM
   status=$1
+  if [ -n "$staged" ]; then
+    staged=
+    discard_staged
+  fi
   if [ -n "$hub_stopped" ]; then
     hub_stopped=
     if ! compose start hub; then
@@ -128,15 +145,8 @@ finish() {
       fi
     fi
   fi
-  trap - 0 HUP INT TERM
+  trap - 0
   exit "$status"
-}
-
-# Best effort, and deliberately not fatal: the staged file is inert — the hub
-# never opens that name — so failing to remove it costs disk, not correctness.
-discard_staged() {
-  compose run --rm --no-deps --user 0 --entrypoint sh hub \
-    -c 'rm -f /data/hub.sqlite.restoring' || true
 }
 
 # Set before the stop is issued, not after it succeeds: a stop that fails
@@ -146,8 +156,8 @@ trap 'finish $?' 0
 trap 'finish 1' HUP INT TERM
 compose stop hub
 
-status=$(compose ps -a --format json hub)
-codes=$(printf '%s\n' "$status" | tr ',' '\n' |
+ps_json=$(compose ps -a --format json hub)
+codes=$(printf '%s\n' "$ps_json" | tr ',' '\n' |
   sed -n 's/.*"ExitCode":[[:space:]]*\([0-9][0-9]*\).*/\1/p')
 for code in $codes; do
   if [ "$code" -ne 0 ]; then
@@ -155,26 +165,53 @@ for code in $codes; do
   fi
 done
 
+staged=yes
 if ! compose cp "$backup" hub:/data/hub.sqlite.restoring; then
-  discard_staged
   printf 'hub-restore: copying %s into the volume failed; the live database was NOT replaced.\n' "$backup" >&2
   exit 1
 fi
 
-# One container, as root, for the three things that must all be true before the
-# hub sees the file:
+# One container, as root, for everything that must be true before the hub sees
+# the file. The order is the whole of the correctness:
 #
 # - `chown node:node`, because `docker compose cp` carries the *host* file's
 #   ownership into the volume and the hub runs as the image's `node` user — a
 #   host account with any other uid would hand it a database it cannot open;
-# - the sidecar of the database being replaced, dropped, because a stale
-#   rollback journal would be replayed over the file that just arrived;
-# - the rename, last, which is the only moment `hub.sqlite` changes at all.
-if ! compose run --rm --no-deps --user 0 --entrypoint sh hub \
-  -c 'chown node:node /data/hub.sqlite.restoring && chmod 600 /data/hub.sqlite.restoring && rm -f /data/hub.sqlite-* && mv -f /data/hub.sqlite.restoring /data/hub.sqlite'; then
-  discard_staged
+# - any sidecar of the database being replaced moved *aside*, not deleted. A
+#   rollback journal belongs to the file it was written for: delete it and the
+#   old database loses the half-finished transaction it needs to roll back, and
+#   between that delete and the rename there is a window where a failure leaves
+#   exactly that. Moving it aside keeps the pair together until the rename has
+#   actually happened;
+# - the rename, which is the only moment `hub.sqlite` changes at all;
+# - and only then the aside files, dropped — a stale journal beside the restored
+#   database would be replayed over the file that just arrived.
+#
+# If the rename fails the aside files go back where they were and the container
+# exits non-zero, so the old database and its journal are found together.
+place_command=$(
+  cat <<'CONTAINER'
+set -e
+chown node:node /data/hub.sqlite.restoring
+chmod 600 /data/hub.sqlite.restoring
+for sidecar in /data/hub.sqlite-*; do
+  if [ -e "$sidecar" ]; then mv -f "$sidecar" "$sidecar.aside"; fi
+done
+if mv -f /data/hub.sqlite.restoring /data/hub.sqlite; then
+  rm -f /data/hub.sqlite-*.aside
+else
+  for aside in /data/hub.sqlite-*.aside; do
+    if [ -e "$aside" ]; then mv -f "$aside" "${aside%.aside}"; fi
+  done
+  exit 1
+fi
+CONTAINER
+)
+
+if ! compose run --rm --no-deps --user 0 --entrypoint sh hub -c "$place_command"; then
   printf 'hub-restore: putting %s in place failed; the live database was NOT replaced.\n' "$backup" >&2
   exit 1
 fi
+staged=
 
 printf 'hub-restore: restored %s into hub:/data/hub.sqlite\n' "$backup"

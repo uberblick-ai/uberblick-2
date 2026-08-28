@@ -10,11 +10,14 @@
  * it is the seam (`remote-update.test.ts` uses the same one). No Docker runs
  * here.
  *
- * The verification step is not faked: the stub takes the `sh -c` payload the
- * restore script hands the hub image, rewrites the container path to a file in
- * the sandbox, and runs it with the real `node` — so `PRAGMA integrity_check`
- * and the `documents` count are performed by the same `node:sqlite` the hub
- * persists with, against real fixture databases.
+ * Nothing the scripts hand the hub image is faked either. The stub executes the
+ * `sh -c` payload it is given, with the container paths rewritten into the
+ * sandbox: the verification runs under the real `node`, so `PRAGMA
+ * integrity_check` and the `documents` count are performed by the same
+ * `node:sqlite` the hub persists with; the placement payload runs against a
+ * directory standing in for the volume, so its ordering, its globs and its
+ * failure handling are the script's own. Only `chown` is answered rather than
+ * executed — the container is root and the test runner is not.
  */
 
 import { spawnSync } from "node:child_process";
@@ -23,6 +26,7 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   statSync,
   writeFileSync,
@@ -76,18 +80,45 @@ case "$1" in
         PATH="$UB_TEST_NODE_DIR:$PATH" sh -c "$script"
         exit $?
         ;;
-      *"mv -f /data/hub.sqlite.restoring /data/hub.sqlite"*)
-        chmod 600 "$UB_TEST_VOLUME/hub.sqlite.restoring"
-        rm -f "$UB_TEST_VOLUME"/hub.sqlite-*
-        mv -f "$UB_TEST_VOLUME/hub.sqlite.restoring" "$UB_TEST_VOLUME/hub.sqlite"
-        ;;
-      *"rm -f /data/hub.sqlite.restoring"*)
-        rm -f "$UB_TEST_VOLUME/hub.sqlite.restoring"
+      *)
+        # The payload verbatim, with /data pointing at the directory standing in
+        # for the volume — so the ordering, the globs and the failure handling
+        # under test are the script's own and not this stub's idea of them.
+        # UB_TEST_BIN holds a chown that always succeeds (the container runs as
+        # root; the test runner does not) and an mv that can be made to fail.
+        script=$(printf '%s' "$payload" | sed "s#/data#$UB_TEST_VOLUME#g")
+        PATH="$UB_TEST_BIN:$PATH" sh -c "$script"
+        exit $?
         ;;
     esac
     ;;
 esac
 exit 0
+`;
+
+/**
+ * The container runs as root and the test runner does not, so `chown` is the one
+ * command in the payload that cannot be executed for real. It is answered rather
+ * than edited out, which keeps the payload the script's own text.
+ */
+const CHOWN_STUB = `#!/bin/sh
+exit 0
+`;
+
+/**
+ * A real `mv`, except that with `UB_TEST_MV_FAIL` set it refuses the one rename
+ * that puts the staged file in place. That is the only way to reach the window
+ * the sidecar handling exists for: the aside moves have happened, and the rename
+ * they were made safe for does not.
+ */
+const MV_STUB = `#!/bin/sh
+if [ -n "\${UB_TEST_MV_FAIL:-}" ]; then
+  for destination in "$@"; do :; done
+  case "$destination" in
+    */hub.sqlite) exit 1 ;;
+  esac
+fi
+exec /bin/mv "$@"
 `;
 
 interface Fixture {
@@ -111,6 +142,11 @@ function fixture(): Fixture {
     copyFileSync(join(REPO_ROOT, script), join(checkout, script));
   }
 
+  const bin = join(checkout, "bin");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, "chown"), CHOWN_STUB, { mode: 0o755 });
+  writeFileSync(join(bin, "mv"), MV_STUB, { mode: 0o755 });
+
   return {
     checkout,
     volume,
@@ -121,6 +157,7 @@ function fixture(): Fixture {
       UB_TEST_VOLUME: volume,
       UB_TEST_VERIFY_DB: join(checkout, "verify.sqlite"),
       UB_TEST_NODE_DIR: dirname(process.execPath),
+      UB_TEST_BIN: bin,
     },
   };
 }
@@ -278,6 +315,12 @@ describe("hub-restore.sh", () => {
 
   it("verifies, then stops, stages, renames into place and starts again", () => {
     const fix = fixture();
+    const live = join(fix.volume, "hub.sqlite");
+    hubDatabase(live, 9);
+    // The database being replaced left a rollback journal behind, which is what
+    // an unclean shutdown looks like — and what must not survive the restore.
+    const journal = join(fix.volume, "hub.sqlite-journal");
+    writeFileSync(journal, "a rollback journal for the old database", "utf8");
     const backup = join(fix.checkout, "good.sqlite");
     hubDatabase(backup, 2);
 
@@ -287,9 +330,39 @@ describe("hub-restore.sh", () => {
     expect(subcommands(fix)).toEqual(["run", "stop", "ps", "cp", "run", "start"]);
     // Never onto the name the hub opens: staged first, renamed by the container.
     expect(calls(fix)[3]).toBe(`cp ${backup} hub:/data/hub.sqlite.restoring`);
-    expect(calls(fix)[4]).toContain("mv -f /data/hub.sqlite.restoring /data/hub.sqlite");
-    expect(readFileSync(join(fix.volume, "hub.sqlite"))).toEqual(readFileSync(backup));
+    expect(readFileSync(live)).toEqual(readFileSync(backup));
     expect(existsSync(join(fix.volume, "hub.sqlite.restoring"))).toBe(false);
+    // The old database's journal is gone, and nothing was left aside.
+    expect(existsSync(journal)).toBe(false);
+    expect(readdirSync(fix.volume)).toEqual(["hub.sqlite"]);
+  });
+
+  /**
+   * The window the aside dance exists for: the journal has been moved out of the
+   * way and the rename it was moved for does not happen. A `rm` there would have
+   * stripped a hot rollback journal off a database that still needs it.
+   */
+  it("puts the old database's journal back when the rename fails", () => {
+    const fix = fixture();
+    const live = join(fix.volume, "hub.sqlite");
+    hubDatabase(live, 9);
+    const liveBefore = readFileSync(live);
+    const journal = join(fix.volume, "hub.sqlite-journal");
+    writeFileSync(journal, "a rollback journal for the old database", "utf8");
+    const journalBefore = readFileSync(journal);
+    const backup = join(fix.checkout, "good.sqlite");
+    hubDatabase(backup, 2);
+    fix.env.UB_TEST_MV_FAIL = "1";
+
+    const ran = run(fix, "hub-restore.sh", [backup]);
+
+    expect(ran.status).not.toBe(0);
+    expect(ran.stderr).toContain("NOT replaced");
+    expect(readFileSync(live)).toEqual(liveBefore);
+    expect(readFileSync(journal)).toEqual(journalBefore);
+    expect(readdirSync(fix.volume).sort()).toEqual(["hub.sqlite", "hub.sqlite-journal"]);
+    // Verify, stop, ps, cp, the failed placement, the discard, and the restart.
+    expect(subcommands(fix)).toEqual(["run", "stop", "ps", "cp", "run", "run", "start"]);
   });
 
   /**

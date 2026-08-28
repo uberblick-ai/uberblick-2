@@ -53,8 +53,11 @@ given, before you deploy.
   The probe also reads `tailscale status --json` and `tailscale ip -4` for the
   MagicDNS name and the address.
 - **TCP port 443 free on the host's Tailscale IPv4 address** — *not probed*
-  either. Compose publishes `<TAILSCALE_IP>:443` only, so an address already in
-  use surfaces as Caddy failing to start, in `sh remote-compose.sh logs caddy`.
+  either. Compose publishes `<TAILSCALE_IP>:443`, and Docker binds that port
+  *before* the container starts, so an address already in use fails
+  `sh remote-compose.sh up` outright with the daemon's bind error. Read that
+  error, not the logs: Caddy never ran, so `logs caddy` is empty and says
+  nothing.
 
 Nothing else belongs on the host: no Node, no pnpm, no `sqlite3`. Every process
 here runs in a container built from the checkout, which is why the backup and
@@ -382,7 +385,8 @@ the container did, so the script reads the exit code separately, from
 `ps -a --format json` → `ExitCode`. Non-zero — including `137`, the grace period
 expiring — means the flush did not finish, and **no file is written at all**. A
 backup nobody can trust is worse than no backup, because it is the one that gets
-restored. The hub is started again from an `EXIT` trap on every path: with
+restored. The hub is started again from the exit and signal traps on every path
+— an `EXIT` trap alone does not run when a signal kills the script: with
 `restart: unless-stopped`, a manual stop survives a Docker restart, so a run that
 died between the stop and the start would leave the hub down for good.
 
@@ -422,9 +426,17 @@ hub does not open; only once that copy is whole and owned by the container's
 `node` user does a single `mv -f` put it in place, which within one filesystem
 is atomic. So a copy that dies half way — a full disk, a killed daemon, an
 interrupted script — leaves the database that was already there intact, and the
-script says the live database was **not** replaced and exits non-zero. The same
-container drops any rollback-journal sidecar the replaced database left behind,
-because a stale journal would be replayed over the file that just arrived.
+script says the live database was **not** replaced and exits non-zero.
+
+A rollback journal is handled in the same container, and it is moved *aside*
+rather than deleted. The journal belongs to the database it was written for —
+delete it and the old file loses the half-finished transaction it needs to roll
+back, which is exactly the state an unclean shutdown leaves. So any
+`hub.sqlite-*` is renamed out of the way, the rename happens, and only then are
+the aside copies dropped; if the rename fails they go back where they were. The
+pair is never separated, and no stale journal is ever left beside the restored
+file for the hub to replay over it.
+
 Then the hub starts. It restores into an empty volume
 just as well as over an existing one, which is the case the drill on #404
 exercises: `down --volumes`, `up`, restore, and a fresh client with empty local
