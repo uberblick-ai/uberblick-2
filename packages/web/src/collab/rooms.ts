@@ -40,7 +40,7 @@ import {
   SYNC_PROTOCOL_VERSION,
   wrapToken,
 } from "@uberblick/hub/protocol";
-import { HUB_AUTH_TOKEN, hubUrl } from "../config.js";
+import { HUB_CONFIG_PATH, hubAuthToken, hubUrl, resolveClientConfig } from "../config.js";
 import { getSetting, subscribeSettings } from "../settings.js";
 import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "./token.js";
 import type { AwarenessUser } from "./identity.js";
@@ -245,8 +245,38 @@ function dropSocket(): void {
   current.disconnect();
 }
 
-/** The signing key, imported once for the life of the page. */
+/**
+ * The signing key, imported once for the life of the page.
+ *
+ * Once, not per connect: it is derived from the secret the *first* usable
+ * document supplied, so a secret rotated under a tab that already has one keeps
+ * minting with the old one until the page is reloaded. Stated rather than
+ * solved — a rotation is a redeploy, and a redeploy is a reload (REMOTE.md).
+ */
 let signingKey: Promise<CryptoKey> | null = null;
+
+/**
+ * Set while the served document has supplied no secret to mint with.
+ *
+ * Page-wide, like {@link protocolMismatch} and for the same reason: there is
+ * one configuration document for the page, so this is never one room's problem.
+ * Unlike that one it is not terminal — {@link hubToken} re-reads the document
+ * before every connect attempt, and the flag clears the moment one arrives.
+ */
+let tokenMissing = false;
+
+/** Tell every open room whether a secret is missing. See {@link tokenMissing}. */
+function setTokenMissing(missing: boolean): void {
+  if (tokenMissing === missing) return;
+  tokenMissing = missing;
+  for (const entry of entries.values()) {
+    const status = entry.connection.status;
+    status.tokenMissing = missing;
+    for (const listener of entry.listeners) {
+      listener({ ...status });
+    }
+  }
+}
 
 /**
  * Mint a fresh hub token for one room. Called by Hocuspocus before every
@@ -256,16 +286,31 @@ let signingKey: Promise<CryptoKey> | null = null;
  * the hub compares the two as strings, so reading them out of one place is what
  * keeps them equal. A room name carries the bare uuid by construction
  * (`roomForDoc` parses any slug off), which is exactly what the claim must be.
+ *
+ * The secret comes from the served document (#426), re-read here rather than
+ * captured at page load: `resolveClientConfig` does not memoise a read that
+ * produced no secret, so a document that missed its deadline is fetched again
+ * on this attempt, under the same deadline. A page that already has one pays
+ * nothing — the resolved answer is memoised and this returns immediately.
  */
 async function hubToken(room: string, identity: AwarenessUser): Promise<string> {
-  if (HUB_AUTH_TOKEN === "") {
-    // `fnox exec --if-missing warn` leaves the secret unset for contributors
-    // without the age key. Fail loudly here rather than sending garbage.
+  await resolveClientConfig();
+  const secret = hubAuthToken();
+  setTokenMissing(secret === "");
+  if (secret === "") {
+    // Ask for a fresh socket, because nothing else would. A token that cannot
+    // be minted leaves the provider unauthenticated on a socket that is open
+    // and staying open: Hocuspocus only re-sends a token on an `open`, and the
+    // only thing that eventually produces one is its 30s message-reconnect —
+    // measured at ~60s end to end, which is a tab dead for a minute after its
+    // deployment came up. The window in {@link dropSocket} bounds this to one
+    // attempt every few seconds, and each attempt re-reads the document.
+    dropSocket();
     throw new Error(
-      "uberblick web: HUB_AUTH_TOKEN is empty — run through `mise run web` with a decryptable fnox.toml",
+      `uberblick web: ${HUB_CONFIG_PATH} carries no hubAuthToken, so this client cannot authenticate`,
     );
   }
-  signingKey ??= importRootSecret(HUB_AUTH_TOKEN);
+  signingKey ??= importRootSecret(secret);
   // Wrapped for the wire: the hub reads the protocol version out of the auth
   // message before it reads the token. The token itself is unchanged.
   return wrapToken(
@@ -339,6 +384,16 @@ export interface RoomStatus {
    * and the next accepted token clears it.
    */
   authFailed: boolean;
+  /**
+   * True while no token could be minted at all: the served configuration
+   * document carried no signing secret (#426).
+   *
+   * A different reading from {@link RoomStatus.authFailed} — nothing was ever
+   * sent, so the hub has said nothing — and the one a reader can act on: the
+   * deployment serving this app is what is incomplete. Page-wide and not
+   * terminal; see {@link tokenMissing}.
+   */
+  tokenMissing: boolean;
 }
 
 export interface RoomConnection {
@@ -427,6 +482,9 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     // rooms that were open when it arrived.
     protocolMismatch,
     authFailed: false,
+    // Same reasoning: a room opened while the page already knows it has no
+    // secret reads that from the start rather than after its first attempt.
+    tokenMissing,
   };
   const listeners = new Set<(status: RoomStatus) => void>();
   const emit = (): void => {

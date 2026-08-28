@@ -23,7 +23,8 @@
  *
  * And the served configuration (#189), because the deployed client is the one
  * this repository keeps getting wrong: a real bundle, a real fetch of
- * `/uberblick-config.json`, and a workspace the build was never told about.
+ * `/uberblick-config.json`, and a workspace — and a credential — the build was
+ * never told about.
  * Where the value comes from is pinned in `test/hub-config.test.ts`; that a
  * whole browser then opens the right corpus is only provable here.
  */
@@ -289,10 +290,11 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
 test("the served configuration names the workspaces, and the build's define is only the fallback", async ({
   browser,
 }) => {
-  // A deployed host answers `/uberblick-config.json`; the dev server does not,
-  // so this browser context answers it instead. Everything downstream is real:
-  // the bundle reads it, dials the endpoint it names, and joins the rooms of a
-  // workspace this build was never told about.
+  // Every context reads `/uberblick-config.json`; this one is answered by the
+  // browser rather than by the dev server, with a document naming workspaces
+  // the build was never told about. Everything downstream is real: the bundle
+  // reads it, mints from the secret it carries, dials the endpoint it names,
+  // and joins that workspace's rooms.
   const served = [`served-${randomUUID()}`, randomUUID()];
   const context = await browser.newContext();
   contexts.push(context);
@@ -300,7 +302,13 @@ test("the served configuration names the workspaces, and the build's define is o
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ hubUrl: harness().hubUrl, workspaces: served }),
+      body: JSON.stringify({
+        hubUrl: harness().hubUrl,
+        workspaces: served,
+        // The whole configuration comes from this document since #426, the
+        // credential included — a body without it could not connect at all.
+        hubAuthToken: harness().authSecret,
+      }),
     });
   });
   const page = await context.newPage();

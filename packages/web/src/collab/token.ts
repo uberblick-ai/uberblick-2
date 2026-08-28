@@ -18,15 +18,15 @@
  *
  * `iat` defaults to now, so tokens are not byte-stable across calls, and every
  * token expires — `mintToken` takes a `CryptoKey`, which is what
- * `importRootSecret` turns the bundle's secret into.
+ * `importRootSecret` turns the served secret into.
  *
- * ============================ LOUD WARNING ============================
- * The client mints its own token from a secret compiled into the bundle. That
- * is PRIVATE-SPIKE-ONLY: a browser bundle is public, so `HUB_AUTH_TOKEN` is not
- * a secret once served. REMOTE.md limits the remote deployment to a private
- * Tailscale network. Hosted, the hub mints per OAuth session and the secret
- * never leaves the server. See vite.config.ts.
- * =====================================================================
+ * The client mints its own token from the shared signing secret, which reaches
+ * it in the served configuration document (#426, `src/config.ts`). Anyone who
+ * can fetch that document has full read-write: the tailnet is the boundary that
+ * makes it acceptable (CLAUDE.md, REMOTE.md), and per-session credentials are
+ * the replacement, deferred with #388. Hosted, the hub mints per OAuth session
+ * and the secret never leaves the server — which is the change this module
+ * exists to confine.
  */
 
 export {

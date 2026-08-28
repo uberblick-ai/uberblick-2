@@ -18,9 +18,6 @@ services:
       target: web
       args:
         HUB_URL: "wss://${TAILSCALE_HOST:?set TAILSCALE_HOST in .env}/ws"
-        HUB_AUTH_TOKEN_DIGEST: "${HUB_AUTH_TOKEN_DIGEST:?run commands through sh remote-compose.sh}"
-      secrets:
-        - hub-auth-token
     depends_on:
       - hub
     environment:
@@ -40,6 +37,13 @@ services:
       # sensible to guess: the host is given its own with `WEB_WORKSPACES` in
       # `.env`.
       WORKSPACES: "${WEB_WORKSPACES:-}"
+      # The signing secret, served in that same document because the bundle no
+      # longer carries one (#426). Gated on the name only `remote-compose.sh`
+      # sets: that gate is the chokehold which forces every deployment command
+      # through the wrapper's safe-alphabet checks, and those checks are what
+      # keep a value substituted into the Caddyfile's raw JSON from closing its
+      # string and injecting further keys.
+      HUB_AUTH_TOKEN: "${CHECKED_HUB_AUTH_TOKEN:?run commands through sh remote-compose.sh}"
     ports:
       - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:443:443"
     restart: unless-stopped
@@ -53,7 +57,3 @@ volumes:
   hub-data:
   caddy-data:
   caddy-config:
-
-secrets:
-  hub-auth-token:
-    environment: HUB_AUTH_TOKEN

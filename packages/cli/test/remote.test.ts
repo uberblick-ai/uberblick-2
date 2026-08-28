@@ -264,7 +264,10 @@ describe("ub remote", () => {
     const run = await runUbAsync(["remote"], box);
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("wss://hub.example.ts.net");
-    expect(run.stdout).toContain("served bundle");
+    // The boundary as it now works: the host serves the secret to the app
+    // (#426), rather than the bundle carrying it. Same consequence, and it is
+    // the consequence this line exists to keep on screen.
+    expect(run.stdout).toContain("the host serves it to the app");
     expect(run.stdout).toContain("private network");
     // And where it came from: the user config is the only place it can be.
     expect(run.stdout).toContain("user config");

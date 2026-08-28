@@ -57,6 +57,7 @@ const OFFLINE: RoomStatus = {
   hasLocalCache: false,
   protocolMismatch: null,
   authFailed: false,
+  tokenMissing: false,
 };
 
 /**

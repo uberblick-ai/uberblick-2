@@ -37,6 +37,7 @@ const OFFLINE: RoomStatus = {
   hasLocalCache: false,
   protocolMismatch: null,
   authFailed: false,
+  tokenMissing: false,
 };
 
 /** Rooms open instantly and never talk to anything. */

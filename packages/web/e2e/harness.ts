@@ -14,14 +14,13 @@
  *   is read back before the dev server starts, because the bundle needs it.
  *
  * - **The bundle is configured the way `mise run web` configures it.**
- *   `vite.config.ts` reads `HUB_URL`, `HUB_AUTH_TOKEN` and `WORKSPACE_ID` from
- *   the environment
- *   at config time (fnox supplies them in the real task), so setting them here
- *   before `createServer` is what points the browser at *this* hub with a token
- *   it accepts. No committed `.env`, no second copy of that wiring. The dev
- *   server serves no `/uberblick-config.json`, so the client falls back to those
- *   injected values — the same path `mise run dev` takes. A deployed host does
- *   serve that document, and the one spec that proves it fulfils the request in
+ *   The dev server answers `/uberblick-config.json` from `process.env` — the
+ *   endpoint, the workspaces and the signing secret (`dev-config-document.ts`,
+ *   #426) — so setting those here before `createServer` is what points the
+ *   browser at *this* hub with a token it accepts. fnox supplies the same
+ *   variables in the real task; there is no committed `.env` and no second copy
+ *   of that wiring. A deployed host serves the same document from Caddy, and
+ *   the one spec that proves a *different* document wins fulfils the request in
  *   its own browser context (see deep-link.spec.ts).
  *
  * The hub is startable and stoppable on its own: the offline proof point needs
@@ -71,9 +70,10 @@ export interface Harness {
   /** Where the browser goes. The dev server's real, ephemeral address. */
   readonly appUrl: string;
   /**
-   * This run's hub, as a client dials it. The bundle already carries it as its
-   * fallback; a test that serves a configuration document has to name it there
-   * too, because that document supplies the endpoint as well as the workspaces.
+   * This run's hub, as a client dials it. The dev server's own document already
+   * names it; a test that fulfils that request with a document of its own has
+   * to name it there too, because that document supplies the endpoint and the
+   * signing secret as well as the workspaces.
    */
   readonly hubUrl: string;
   /**
@@ -119,8 +119,8 @@ export async function startHarness(): Promise<Harness> {
   // than a cleanup error on top of it.
   try {
     hub = await createHub(config);
-    // Every later start reuses the port the first one was given, so the
-    // bundle's baked-in HUB_URL keeps pointing at the hub across a restart.
+    // Every later start reuses the port the first one was given, so the served
+    // HUB_URL keeps pointing at the hub across a restart.
     const port = hub.port;
 
     const hubUrl = `ws://127.0.0.1:${port}`;

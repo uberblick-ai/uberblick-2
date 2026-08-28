@@ -98,11 +98,20 @@ description = "Start the Vite dev server"
 # Through `ub env` like the hub: the endpoint the bundle dials is this machine's
 # configured one, so a checkout follows a `ub remote join` without anything
 # being written into it.
+#
+# The dev server serves this environment — the signing secret included — at
+# /uberblick-config.json (#426, packages/web/dev-config-document.ts). `vite`
+# binds loopback; adding `--host` would publish the owner's own secret to
+# everything on the LAN, which is acceptable only inside the tailnet boundary
+# REMOTE.md records.
 run = "fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web dev"
 
 [tasks.build-web]
-description = "Build the web client into packages/web/dist (HUB_AUTH_TOKEN baked in; HUB_URL only as the fallback)"
-run = "fnox exec --if-missing error -- ub env -- pnpm --filter @uberblick/web build"
+description = "Build the web client into packages/web/dist (no secret in the bundle; HUB_URL only as the fallback)"
+# `--if-missing warn`, not `error`: since #426 the build needs no secret at all,
+# so a contributor without the age key builds the same bundle the deployment
+# does.
+run = "fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web build"
 
 # hub + web only. The MCP server is a stdio process spawned by its client
 # (Claude Code et al.), so it is not part of the dev loop; use `mise run mcp`

@@ -469,22 +469,22 @@ async function main() {
     }
 
     // Where `/` goes is decided in the browser, so the no-browser proof is that
-    // the client was *served* this machine's workspace. With an empty
-    // `__WORKSPACE_ID__` the app renders "no workspace" instead of redirecting —
-    // the deployed root-route gap, in the one form a plain fetch can see.
+    // the client was *served* this machine's workspace. With no workspace in
+    // that document the app renders "no workspace" instead of redirecting — the
+    // deployed root-route gap, in the one form a plain fetch can see.
     //
-    // Two candidates because Vite has moved where a dev build's `define` values
-    // live: it inlines them into each transformed module in some versions and
-    // assigns them as globals from `/@vite/env` in others. Either counts; both
-    // missing means the workspace never reached the browser. Bodies are never
-    // printed from here — the signing secret is one of those defines.
-    const carriers = ["/@vite/env", "/src/config.ts"];
-    const responses = await Promise.all(
-      carriers.map((path) => get(path, "*/*").catch(() => ({ status: 0, body: "" }))),
-    );
-    if (!responses.some((response) => response.body.includes(report.workspaceUuid))) {
+    // One carrier since #426: the dev server answers the same
+    // `/uberblick-config.json` a deployment does, and that document is now the
+    // whole of what configures the client. Bodies are never printed from here —
+    // the signing secret is in this one.
+    const carrier = "/uberblick-config.json";
+    const document = await get(carrier, "application/json").catch(() => ({
+      status: 0,
+      body: "",
+    }));
+    if (!document.body.includes(report.workspaceUuid)) {
       throw new Error(
-        `the served client carries no workspace (checked ${carriers.join(" and ")}), so / renders 'no workspace' instead of redirecting into one`,
+        `the served client carries no workspace (${carrier} answered HTTP ${document.status}), so / renders 'no workspace' instead of redirecting into one`,
       );
     }
 

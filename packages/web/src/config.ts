@@ -1,54 +1,61 @@
 /**
  * Client configuration.
  *
- * The hub endpoint *and* the workspaces this client offers are resolved at
- * *runtime*, from a JSON document the same origin serves at
- * {@link HUB_CONFIG_PATH}. A bundle reaches users who cannot rebuild it — `ub`
- * serves the web UI — so a value baked at our build time would pin every one of
- * those bundles to one hub and one workspace. Everything else here is still
- * injected by Vite `define` (see vite.config.ts).
+ * The hub endpoint, the workspaces this client offers *and* the signing secret
+ * it mints tokens with are resolved at *runtime*, from a JSON document the same
+ * origin serves at {@link HUB_CONFIG_PATH}. A bundle reaches users who cannot
+ * rebuild it — `ub` serves the web UI — so a value baked at our build time
+ * would pin every one of those bundles to one hub, one workspace and one
+ * secret. Everything else here is still injected by Vite `define` (see
+ * vite.config.ts).
  *
  * The path and the shape are contract, not implementation detail: this module,
- * the Caddy config and `ub open` (#97) all have to agree on them. The document
- * is
+ * the Caddy config, the dev server's own plugin (`dev-config-document.ts`) and
+ * `ub open` (#97) all have to agree on them. The document is
  *
- *     {"hubUrl": "wss://host/ws", "workspaces": ["uberblick-<uuid>", "<uuid>"]}
+ *     {"hubUrl": "wss://host/ws", "workspaces": ["uberblick-<uuid>", "<uuid>"],
+ *      "hubAuthToken": "<the hub's signing secret>"}
  *
- * — two keys, anything else ignored. `hubUrl` must be a bare `ws://` or
- * `wss://` address: no userinfo, no query, no fragment. It carries the endpoint
- * and nothing else, which is what keeps it from becoming a credential channel;
- * #84 owns the signing secret that is still compiled into the bundle.
- * `workspaces` is the menu, in order, and its first entry is what `/` — the one
- * address that names no workspace — redirects to. It may also be written as one
- * comma-separated string, because the environments that serve this document
- * substitute plain strings and cannot build a JSON array (see the Caddyfile).
- * A document that plainly names either key more than once is refused, because
- * `JSON.parse` would otherwise keep the *last* occurrence — what a value
- * injected through such a substitution produces. That check is best-effort
- * defence in depth; what guarantees it cannot happen is the deploy wrapper
- * refusing a value that could close a JSON string in the first place.
+ * — three keys, anything else ignored. `hubUrl` must be a bare `ws://` or
+ * `wss://` address: no userinfo, no query, no fragment. `workspaces` is the
+ * menu, in order, and its first entry is what `/` — the one address that names
+ * no workspace — redirects to. It may also be written as one comma-separated
+ * string, because the environments that serve this document substitute plain
+ * strings and cannot build a JSON array (see the Caddyfile).
+ * A document that plainly names any of the keys more than once is refused,
+ * because `JSON.parse` would otherwise keep the *last* occurrence — what a
+ * value injected through such a substitution produces. That check is
+ * best-effort defence in depth; what guarantees it cannot happen is the deploy
+ * wrapper refusing a value that could close a JSON string in the first place.
+ *
+ * **This document is the credential channel, by design (#426, #410).** An
+ * earlier version of this comment said the opposite — that carrying the
+ * endpoint and nothing else was what kept it from becoming one. That is
+ * deliberately overturned: the secret used to be compiled into the bundle,
+ * which pinned every image and every `ub open` build to one hub's secret and is
+ * the single reason the image cannot be published. Serving it instead changes
+ * *where* the same secret is published, not *whether*: anyone who can fetch
+ * this document has full read-write on the workspaces it names. The boundary
+ * that makes that acceptable is the tailnet (REMOTE.md, CLAUDE.md) — the
+ * owner's own devices and nothing else — and it includes `mise run web`, which
+ * serves the owner's own secret to anything that can reach the dev server.
+ * Real per-session credentials are the replacement, deferred with #388.
  *
  * Rule from CLAUDE.md: no hardcoded hub addresses anywhere except the in-code
  * fallback default. There are still exactly two, both fallbacks behind the
  * served document: the one vite.config.ts substitutes when HUB_URL is unset in
  * the build environment, and FALLBACK_HUB_URL below, which applies when this
  * module is loaded outside a Vite build and nothing was injected.
- * {@link resolveClientConfig} reports which of the three it used.
- *
- * ============================ LOUD WARNING ============================
- * HUB_AUTH_TOKEN is compiled into the bundle. That is PRIVATE-SPIKE-ONLY — a
- * browser bundle is public, so this is not a secret once served. REMOTE.md
- * limits the remote deployment to a private Tailscale network. The hosted
- * design mints a per-OAuth-session token server-side and the signing secret
- * never reaches the client.
- * =====================================================================
+ * {@link resolveClientConfig} reports which of the three it used. The secret
+ * has no such fallback: a document that does not carry one leaves this client
+ * unable to authenticate, and {@link resolveClientConfig} does not memoise that
+ * answer.
  */
 
 import { parseWorkspaceId } from "@uberblick/schema";
 
 // Injected as string literals at build time. Declared, never imported.
 declare const __HUB_URL__: string;
-declare const __HUB_AUTH_TOKEN__: string;
 declare const __WORKSPACE_ID__: string;
 declare const __WORKSPACES__: string;
 
@@ -87,6 +94,16 @@ export interface ClientConfig {
   workspaces: readonly string[];
   /** No `"fallback"`: there is no in-code workspace, only a build without one. */
   workspacesSource: "document" | "define";
+  /**
+   * The hub's signing secret, as the served document supplied it — empty when
+   * it supplied none.
+   *
+   * No source field and no built-in alternative: this is the one value with
+   * nothing to fall back *to*, so "where did it come from" has one answer and
+   * "is there one at all" is the whole question. Empty is a state the UI names
+   * rather than a state it hides — see `RoomStatus.tokenMissing`.
+   */
+  hubAuthToken: string;
 }
 
 /**
@@ -196,6 +213,9 @@ const BUILT_IN: ClientConfig = {
   ...BUILT_IN_HUB_URL,
   workspaces: BUILT_IN_WORKSPACES,
   workspacesSource: "define",
+  // Nothing to fall back to: no build injects a secret any more (#426), so a
+  // client whose document did not arrive has none.
+  hubAuthToken: "",
 };
 
 /**
@@ -284,6 +304,8 @@ function usableWorkspaces(
 interface DocumentConfig {
   hubUrl: { url: string } | { rejected: string };
   workspaces: { list: string[]; dropped: number } | { rejected: string };
+  /** Empty when the document named no usable secret. */
+  hubAuthToken: string;
 }
 
 /**
@@ -334,29 +356,44 @@ function readDocument(
   // the Caddyfile), so a value carrying a quote could close its string and
   // append `,"hubUrl":"wss://elsewhere"` — which `JSON.parse` would then keep,
   // last occurrence winning. The *guarantee* against that is `remote-compose.sh`
-  // refusing any `WEB_WORKSPACES` outside `[A-Za-z0-9,-]`: no quote and no
-  // backslash ever reaches the body, so no escape can be written into it.
+  // refusing any `WEB_WORKSPACES` or `HUB_AUTH_TOKEN` outside a safe alphabet:
+  // no quote and no backslash ever reaches the body, so no escape can be
+  // written into it.
   //
   // This check is defence in depth for the plainly spelled case, and it reads
   // raw JSON *spelling*: an escaped key (`"hub\u0055rl"`) decodes to a second
   // `hubUrl` and passes it. That is not a hole worth a tokenizer — anyone who
   // can write escapes into the served document can set `hubUrl` outright, and a
-  // document an attacker controls is outside this model. `\s*:` so a value
-  // containing the text `"hubUrl"` is not mistaken for a second key.
-  const twice = ["hubUrl", "workspaces"].find(
-    (key) => (body.match(new RegExp(`"${key}"\\s*:`, "g")) ?? []).length > 1,
+  // document an attacker controls is outside this model.
+  //
+  // Two anchors keep it from firing on a *value* rather than on a key, which
+  // since #426 would mean refusing a whole document — the credential in it
+  // included — over the text of an opaque secret. `\s*:` so a value that merely
+  // contains `"hubUrl"` is not taken for a key, and a leading `[^\\]` so one
+  // spelling out `,"hubUrl":` is not either: the body parsed as JSON above, so
+  // a quote inside a string is written `\"`, while a real key's opening quote
+  // can only follow `{` or `,`.
+  const twice = ["hubUrl", "workspaces", "hubAuthToken"].find(
+    (key) => (body.match(new RegExp(`(^|[^\\\\])"${key}"\\s*:`, "g")) ?? []).length > 1,
   );
   if (twice !== undefined) {
     return { rejected: `it names ${twice} more than once` };
   }
   const document = parsed as Record<string, unknown>;
   const url = document.hubUrl;
+  const secret = document.hubAuthToken;
   return {
     hubUrl:
       typeof url === "string" && url !== ""
         ? usableEndpoint(url)
         : { rejected: "it has no string hubUrl" },
     workspaces: usableWorkspaces(document.workspaces),
+    // A non-string is refused rather than coerced, and without a reason: an
+    // unusable secret leaves the client in exactly the state an absent one
+    // does, and this is the one value whose shape must never reach a
+    // diagnostic. What a reader is told is the state, not the document — see
+    // `RoomStatus.tokenMissing`.
+    hubAuthToken: typeof secret === "string" ? secret.trim() : "",
   };
 }
 
@@ -434,6 +471,7 @@ export async function readClientConfig(
     ...("rejected" in outcome.workspaces
       ? { workspaces: BUILT_IN_WORKSPACES, workspacesSource: "define" as const }
       : { workspaces: outcome.workspaces.list, workspacesSource: "document" as const }),
+    hubAuthToken: outcome.hubAuthToken,
     ...(notes.length === 0 ? {} : { rejected: notes.join("; ") }),
   };
 }
@@ -447,12 +485,22 @@ let pending: Promise<ClientConfig> | null = null;
  * Memoised rather than merely idempotent: the entry module starts the read as
  * early as it can, and the hook that gates room acquisition on it joins that
  * same read instead of issuing a second one.
+ *
+ * **Except when no secret arrived.** With the secret served rather than
+ * compiled in (#426), a document that missed its deadline — a proxy holding the
+ * request open, a host still starting — used to leave a tab that could never
+ * authenticate for as long as it stayed open, because the miss was remembered.
+ * So that one answer is not kept: the endpoint and the workspaces settle as
+ * they always did, and the next caller re-reads the document under the same
+ * deadline. `rooms.ts` calls this before every connect attempt, which is what
+ * turns "not memoised" into "tries again".
  */
 export function resolveClientConfig(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<ClientConfig> {
   pending ??= readClientConfig(fetchImpl).then(({ rejected, ...config }) => {
     resolved = config;
+    if (config.hubAuthToken === "") pending = null;
     // One line, always: the sources in force, and — when there was one — why
     // the document was not used. A hub that is merely misconfigured otherwise
     // looks exactly like a hub that is down, and a switcher with nothing on it
@@ -482,6 +530,17 @@ export function resolveClientConfig(
  */
 export function hubUrl(): string {
   return settled().hubUrl;
+}
+
+/**
+ * The signing secret in force, for the one caller that mints tokens with it.
+ *
+ * Gated exactly like {@link hubUrl}, and for the same reason: it is not known
+ * until a `fetch` completes. Empty means the served document carried none —
+ * which is a state, not an error, and the caller is what says so.
+ */
+export function hubAuthToken(): string {
+  return settled().hubAuthToken;
 }
 
 /** The resolved configuration, or the error every reader of it shares. */
@@ -517,11 +576,3 @@ export function hubEndpoint(): HubEndpoint {
 export function configuredWorkspaces(): readonly string[] {
   return resolved?.workspaces ?? [];
 }
-
-/**
- * The hub's dev signing secret. Empty when `fnox exec` could not decrypt it
- * (`--if-missing warn`), which is a legitimate state: contributors without the
- * age key still get a running dev server, they just cannot authenticate.
- */
-export const HUB_AUTH_TOKEN: string =
-  typeof __HUB_AUTH_TOKEN__ === "string" ? __HUB_AUTH_TOKEN__ : "";

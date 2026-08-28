@@ -47,10 +47,12 @@ const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
  */
 const injected = vi.hoisted(() => ({ url: "", secret: "" }));
 vi.mock("../src/config.js", () => ({
+  HUB_CONFIG_PATH: "/uberblick-config.json",
   hubUrl: () => injected.url,
-  get HUB_AUTH_TOKEN() {
-    return injected.secret;
-  },
+  hubAuthToken: () => injected.secret,
+  // `rooms.ts` re-reads the configuration before every connect attempt; a
+  // resolved one is what the mock stands for, so this is the settled read.
+  resolveClientConfig: async () => ({}),
 }));
 
 const hubs: Hub[] = [];

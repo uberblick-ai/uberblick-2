@@ -29,9 +29,15 @@ fi
 
 : "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
 
+# The alphabet is now load-bearing twice over. Compose and the shell parse other
+# characters differently, so the deployed secret could silently diverge from the
+# one MCP clients use — and since #426 the secret is also substituted *inside*
+# the JSON string Caddy responds with, where a quote or a backslash would close
+# that string and append further keys, exactly as it would for WEB_WORKSPACES
+# below.
 case "$HUB_AUTH_TOKEN" in
   *[!A-Za-z0-9._-]*)
-    printf 'HUB_AUTH_TOKEN may only contain A-Z a-z 0-9 . _ - : shell and Docker Compose parse other characters differently, so the deployed secret could silently diverge from the one MCP clients use. Regenerate the secret with safe characters.\n' >&2
+    printf 'HUB_AUTH_TOKEN may only contain A-Z a-z 0-9 . _ - : shell and Docker Compose parse other characters differently, so the deployed secret could silently diverge from the one MCP clients use, and it is substituted into the JSON configuration document Caddy serves, where a quote or a backslash would let the value inject further keys. Regenerate the secret with safe characters.\n' >&2
     exit 1
     ;;
 esac
@@ -51,8 +57,13 @@ case "${WEB_WORKSPACES-}" in
     ;;
 esac
 
-token_digest=$(printf '%s' "$HUB_AUTH_TOKEN" | sha256sum)
-HUB_AUTH_TOKEN_DIGEST=${token_digest%% *}
-export HUB_AUTH_TOKEN_DIGEST
+# The checked copy, and the only variable this script sets. `docker-compose.yml`
+# gates Caddy's secret on this name with `:?`, so a bare `docker compose up` —
+# which would read HUB_AUTH_TOKEN straight out of `.env` and skip every check
+# above — fails instead of serving an unchecked value into the Caddyfile's raw
+# JSON. It is exported rather than passed so the value never reaches a command
+# line, an argument list or a shell history.
+CHECKED_HUB_AUTH_TOKEN=$HUB_AUTH_TOKEN
+export CHECKED_HUB_AUTH_TOKEN
 
 exec docker compose "$@"

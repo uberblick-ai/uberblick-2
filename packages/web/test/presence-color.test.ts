@@ -59,8 +59,10 @@ vi.mock("@hocuspocus/provider", async () => {
 });
 
 vi.mock("../src/config.js", () => ({
+  HUB_CONFIG_PATH: "/uberblick-config.json",
   hubUrl: () => "ws://127.0.0.1:1",
-  HUB_AUTH_TOKEN: "test-secret",
+  hubAuthToken: () => "test-secret",
+  resolveClientConfig: async () => ({}),
 }));
 
 const { acquireRoom } = await import("../src/collab/rooms.js");

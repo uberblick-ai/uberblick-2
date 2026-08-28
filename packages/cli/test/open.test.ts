@@ -361,10 +361,12 @@ describe("ub open", () => {
 
     // Byte-exact: the path and the shape are #91's contract, and the web
     // client's fallback is silent enough that a wrong document looks like an
-    // offline hub rather than a misconfiguration.
+    // offline hub rather than a misconfiguration. The secret is in it since
+    // #426 — the bundle carries none, so a document without it would serve an
+    // app that cannot authenticate.
     const document = await get(`${app.url}uberblick-config.json`);
     expect(await document.text()).toBe(
-      `{"hubUrl":"${remote}","workspaces":["${WORKSPACE}"]}`,
+      `{"hubUrl":"${remote}","workspaces":["${WORKSPACE}"],"hubAuthToken":"${SECRET}"}`,
     );
     expect(app.stdout()).toContain("remote — nothing started here");
 
@@ -469,7 +471,7 @@ describe("ub open", () => {
     // reason no hub was started is said out loud rather than left to look like
     // an offline one.
     expect(await (await get(`${app.url}uberblick-config.json`)).text()).toBe(
-      '{"hubUrl":"ws://localhost:1234","workspaces":[]}',
+      '{"hubUrl":"ws://localhost:1234","workspaces":[],"hubAuthToken":""}',
     );
     expect(app.stdout()).toContain("no signing secret");
     expect(app.stdout()).toContain("ub init");
