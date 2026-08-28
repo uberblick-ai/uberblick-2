@@ -588,7 +588,15 @@ export function App(): ReactElement {
             through `RoutePane`, which exists to say what a *document* address
             resolves to. */}
         {listing ? (
+          /* Keyed by the workspace, because everything the pane holds is
+             about one corpus: a filter typed in workspace A would otherwise
+             survive the switch and make workspace B's first screen look
+             empty. The uuid, not the segment — the slug is cosmetic, and two
+             spellings of one workspace are one corpus — so `/<workspace>` and
+             `/<workspace>/all` keep the query, and only a real switch clears
+             it. */
           <DocumentList
+            key={workspace?.uuid}
             connection={directory}
             entries={entries}
             groups={sidebarGroups}

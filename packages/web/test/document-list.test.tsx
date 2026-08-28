@@ -51,6 +51,8 @@ import {
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
+/** A second corpus on the same hub — where the switcher goes. */
+const OTHER_WORKSPACE = "2d9b6e70-5c14-4a82-b7f3-0e6a91d84c25";
 const ONE = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
 const TWO = "1f77c0d9-6b42-4a18-9e35-2c8d0f6a1b73";
 const THREE = "7c2e5a11-3f80-4d66-b1a9-8e4d2c6f0a55";
@@ -151,6 +153,18 @@ async function mount(node: ReactNode): Promise<HTMLElement> {
 async function openApp(path: string): Promise<HTMLElement> {
   window.history.replaceState(null, "", path);
   return await mount(<App />);
+}
+
+/**
+ * Go somewhere else in the mounted app, the way the shell does: the address
+ * moves and `useRoutePath` reads it back. Whether a switcher click or the Back
+ * button put it there is the same event to everything downstream.
+ */
+async function goTo(path: string): Promise<void> {
+  await act(async () => {
+    window.history.pushState(null, "", path);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
 }
 
 function directoryDoc(): Y.Doc {
@@ -484,6 +498,28 @@ describe("the filter", () => {
     // And it says what it does *not* look at, which is the assumption a reader
     // would otherwise make: full text lives in the agents' `search`.
     expect(scope).toContain("not the text inside documents");
+  });
+
+  /**
+   * The query is about one corpus, so it does not travel to another. Carried
+   * across a switch it would hide every document in the workspace just opened
+   * — a first screen that looks empty for a reason nothing on it explains.
+   * Moving between the two addresses of the *same* workspace is not that, and
+   * keeps what was typed.
+   */
+  it("clears when the workspace changes, and not when the address does", async () => {
+    const peer = peerOf(directoryDoc());
+    upsertDirectoryEntry(peer, { uuid: ONE, title: "Overview" });
+
+    const host = await openApp(`/${WORKSPACE}`);
+    await act(async () => typeInto(search(host), "over"));
+    expect(rowTitles(host)).toEqual(["Overview"]);
+
+    await goTo(allPath(WORKSPACE));
+    expect(search(host).value).toBe("over");
+
+    await goTo(`/${OTHER_WORKSPACE}`);
+    expect(search(host).value).toBe("");
   });
 });
 
