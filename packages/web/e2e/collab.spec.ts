@@ -250,4 +250,11 @@ test("a reload with the hub stopped renders from the local cache, and the offlin
   await expect
     .poll(() => blockText(b), { timeout: 40_000 })
     .toBe("before-offline");
+  // And A says so about itself. Convergence on B proves the update travelled;
+  // what the writer needs to see is its *own* reading coming back off
+  // "offline" — a status that stuck there after the hub returned would leave
+  // the one person holding an unsynced edit unable to tell that it landed.
+  await expect(a.locator(".ub-status")).toContainText("synced", {
+    timeout: 40_000,
+  });
 });

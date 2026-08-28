@@ -322,6 +322,28 @@ test("the served configuration names the workspaces, and the build's define is o
   // itself *synced* is a hub that answered, not a socket that never opened.
   await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
 
+  // And the surfaces say *which* document decided it (#362). This is the only
+  // place that can be shown end to end: `resolveClientConfig` memoises per
+  // module, so a component test can hold one resolved endpoint, never the path
+  // from a served document through the shell to both surfaces. On a document
+  // route, because that is where the status surfaces are (#424).
+  await createDoc(page, docTitle("served"));
+  await page.locator(".ub-sync-toggle").click();
+  const source = page.locator('.ub-sync-fact:has(dt:text-is("Source")) dd');
+  // "served …", not either of the two "… not used" answers: falling back to
+  // the compiled value while still reading *synced* is the failure #362 exists
+  // to remove. The wording itself is `config.ts`'s, pinned in
+  // `test/sync-panel.test.tsx` — matched loosely here so this test says only
+  // what it is for.
+  await expect(source).toHaveText(/^served\b/);
+  // The pill a reader glances at carries the panel's own answer. Read from one
+  // surface and matched against the other, because what breaks is one of them
+  // keeping the resolved endpoint while the other quietly falls back.
+  expect(await page.locator(".ub-sync-toggle").getAttribute("title")).toContain(
+    `(${(await source.innerText()).trim()})`,
+  );
+  await page.keyboard.press("Escape");
+
   // And the menu navigates, exactly as it does for a configured build.
   await page.locator(".ub-workspace").click();
   await page.getByRole("menuitem", { name: served[1] as string }).click();
