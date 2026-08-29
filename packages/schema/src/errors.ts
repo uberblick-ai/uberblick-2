@@ -205,6 +205,39 @@ export class ConflictingLinkMarksError extends Error {
   }
 }
 
+/**
+ * Thrown when a sanctioned metadata write would store an illegal kind/status
+ * pair.
+ *
+ * Both values are retained as `unknown` because the error also reports foreign
+ * or stale values already present in the Y.Map. The refusal always happens
+ * before either key is written.
+ */
+export class InvalidDocumentLifecycleError extends Error {
+  readonly kind: unknown;
+  readonly status: unknown;
+
+  constructor(kind: unknown, status: unknown) {
+    super(
+      `Invalid document lifecycle: kind=${renderUnknown(kind)} and ` +
+        `status=${renderUnknown(status)} are not a legal pair`,
+    );
+    this.name = "InvalidDocumentLifecycleError";
+    this.kind = kind;
+    this.status = status;
+  }
+}
+
+/** Render foreign Yjs values without letting error construction throw. */
+function renderUnknown(value: unknown): string {
+  if (typeof value === "bigint") return `${value}n`;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return `<${typeof value}>`;
+  }
+}
+
 export type InlineLinkRangeErrorReason = "empty" | "not-prose";
 
 /**

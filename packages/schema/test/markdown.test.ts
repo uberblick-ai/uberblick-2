@@ -7,6 +7,8 @@ import {
   getBlocks,
   importMarkdown,
   initDoc,
+  setKind,
+  setStatus,
   listNumbers,
   parseGfmTable,
   setTags,
@@ -269,6 +271,31 @@ describe("markdown round-trip", () => {
         ),
       ).description,
     ).toBeUndefined();
+  });
+
+  it("exports lifecycle metadata without teaching the importer to store it", () => {
+    const requirement = new Y.Doc();
+    initDoc(requirement, { uuid: UUID, title: "Requirement", tags: [] });
+    setKind(requirement, "requirement");
+    setStatus(requirement, "planned");
+    const requirementExport = exportMarkdown(requirement);
+    expect(requirementExport).toContain("\nkind: requirement\nstatus: planned\n");
+    expect(importMarkdown(requirementExport)).not.toHaveProperty("kind");
+    expect(importMarkdown(requirementExport)).not.toHaveProperty("status");
+
+    const decision = new Y.Doc();
+    initDoc(decision, { uuid: UUID, title: "Decision", tags: [] });
+    setKind(decision, "decision");
+    setStatus(decision, "decided");
+    expect(exportMarkdown(decision)).toContain(
+      "\nkind: decision\nstatus: decided\n",
+    );
+
+    const ordinary = new Y.Doc();
+    initDoc(ordinary, { uuid: UUID, title: "Ordinary", tags: [] });
+    const ordinaryExport = exportMarkdown(ordinary);
+    expect(ordinaryExport).not.toContain("\nkind:");
+    expect(ordinaryExport).not.toContain("\nstatus:");
   });
 
   it("lengthens the fence when the code itself contains backticks", () => {
