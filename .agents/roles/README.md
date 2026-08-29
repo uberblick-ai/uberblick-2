@@ -22,9 +22,9 @@ run identity; missing either is a refusal, stated before any side effect. The
 assignment is a *queue assignment* — claim and complete one eligible item for
 this role under your contract's `Pickup` section. No preselected target exists.
 The order is prepared → challenged → `ready` (owner) → implemented, and a
-`Pickup` ordering by `Priority` means the organization issue field — Urgent →
-High → Medium → Low, unset sorting last — read from the issue's
-`issueFieldValues` with `gh api graphql`; a body `Priority:` line is ignored.
+`Pickup` ordering by `Priority` means the organization issue field, read as
+`.github/ISSUE_SPEC.md`'s scheduling section defines: Urgent → High → Medium →
+Low, and unset means untriaged and ineligible.
 
 Bounded means one outcome and one stopping condition, not one attempt:
 investigating and retrying inside it is the work, and an invocation may inspect,

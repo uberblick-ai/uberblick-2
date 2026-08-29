@@ -5,7 +5,6 @@ about: Work item the implementation loop can pick up. Contract: .github/ISSUE_SP
 
 Depends-on:
 Touches:
-Priority: normal
 
 ## What
 
