@@ -1,7 +1,7 @@
 # Dev stack — restart after every merge to `main`
 
-`SKILL.md` step 2 dispatches here once a merge lands, so http://localhost:5173/
-always serves the just-merged `main`.
+`integration.md`'s post-merge pass dispatches here once a merge lands, so
+http://localhost:5173/ always serves the just-merged `main`.
 
 Killing a running dev server is sanctioned (owner directive) but bounded:
 terminate only the hub/web processes the loop itself recorded starting (the

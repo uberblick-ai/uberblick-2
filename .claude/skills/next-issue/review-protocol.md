@@ -1,9 +1,9 @@
 # Review protocol — external rounds, and what happens once a review returns
 
 Read this whenever a PR has an external round to request or a finding to
-disposition. `SKILL.md` step 2 owns the gates' order and their mechanics;
-"Requesting the round" applies before a review exists, and every section after
-it is conditional on one producing something.
+disposition. `integration.md` beside this file owns the gates' order and their
+mechanics; "Requesting the round" applies before a review exists, and every
+section after it is conditional on one producing something.
 
 ## Requesting the round
 

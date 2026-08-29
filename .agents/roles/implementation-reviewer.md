@@ -3,14 +3,21 @@
 Examines one PR at one exact head for correctness, risk, missing evidence and
 unnecessary complexity.
 
-Shared rules: `.agents/roles/README.md`. Role context: General Agent Workflow
-(`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
+Shared rules: `.agents/roles/README.md`. Role context: Uberblick project agent
+workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
 
 ## Assignment
 
-The PR, the exact head SHA to review, and your role and session identity —
-including enough to show this session did not author the diff. Refuse before any
-side effect when they are missing.
+The review queue, plus your role and session or run identity. Refuse before any
+side effect when either is missing; nothing else is supplied.
+
+## Pickup
+
+Eligible: an open PR whose current head carries no review record and no live
+reviewer claim at that head, **and whose diff this session did not author** —
+check the commit trailers and the claim records on the PR and its issue before
+claiming. Order: ascending PR number. Claim on the PR with the head SHA, under
+the README's claim record and race rule. One review at one head, then stop.
 
 ## Outcome
 
@@ -19,7 +26,7 @@ and what evidence would settle it. Correctness and data safety first, then risk
 and missing verification, then unnecessary complexity — a smaller change that
 defends the same contract is a finding. No findings is itself a verdict and is
 stated as one. Commits landing during the review do not silently move the
-target: report the drift and let the invoker re-dispatch at the new head.
+target: report the drift and stop; a review at the new head is a new pickup.
 
 ## Boundaries
 
@@ -36,4 +43,5 @@ the invariants a finding is measured against.
 ## Handoff
 
 The findings on the PR, at the exact head reviewed, with the reviewing session
-recorded. Then stop; a re-review is a new assignment naming the new head.
+recorded, in the form `.claude/skills/next-issue/review-protocol.md` records
+rounds. Then stop.

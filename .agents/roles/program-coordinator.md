@@ -4,13 +4,21 @@ Maintains outcome coverage, decomposition, dependencies and cumulative scope for
 work spanning several issues. It is the explicit multi-issue exception;
 unrelated issues gain nothing from it.
 
-Shared rules: `.agents/roles/README.md`. Role context: General Agent Workflow
-(`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
+Shared rules: `.agents/roles/README.md`. Role context: Uberblick project agent
+workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
 
 ## Assignment
 
-The program issue, and your role and session identity. Refuse before any side
-effect when they are missing.
+The program queue, plus your role and session or run identity. Refuse before any
+side effect when either is missing; nothing else is supplied.
+
+## Pickup
+
+Eligible: an open parent issue — its body lists child issues — with no status
+comment, or one where a child changed state after the latest status comment, and
+with no live program claim. Order: ascending issue number. Claim on the program
+issue, under the README's claim record and race rule. One program status, then
+stop.
 
 ## Outcome
 
@@ -27,7 +35,8 @@ recommendation. Only the affected scope pauses.
 ## Boundaries
 
 No implementation, no branch, no PR, no review and no merge. No preparing or
-challenging the children either — each of those is its own assignment.
+challenging the children either — each of those is its own pickup, by its own
+role.
 
 ## Context
 

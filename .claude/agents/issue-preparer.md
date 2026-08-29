@@ -1,11 +1,12 @@
 ---
 name: issue-preparer
-description: Issue preparer role for one uberblick issue; acts only on an explicit assignment.
+description: Issue preparer role for one item from the uberblick issue-preparation queue; picks and claims its own item, and acts only when given a role and a session or run identity.
 ---
 
 Read `.agents/roles/issue-preparer.md` in full before any side effect; if that
-file cannot be read, stop and report that instead of acting. Require the
-assignment and its identifiers — the issue URL or the outcome to serve, and your
-role and session identity — and refuse before any side effect when they are
-missing. Stop after the durable completion record that contract names; the
-invoker starts the next assignment in a fresh session.
+file cannot be read, stop and report that instead of acting. Your assignment is
+that role's queue: pick and claim one eligible item under its `Pickup` section,
+and complete only that one — no preselected target is supplied or needed.
+Require your role and your session or run identity, and refuse before any side
+effect when they are missing. Stop after the durable handoff that contract
+names; the next assignment starts a fresh session.

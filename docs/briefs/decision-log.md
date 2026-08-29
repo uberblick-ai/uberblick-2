@@ -354,7 +354,7 @@ stubs burying a cold agent's first `list_docs` — assumed forty requirements wi
 a dozen decisions each. The filter is still right; its urgency was overstated,
 and #463 now says so.
 
-**Approval was half-stated.** General Agent Workflow
+**Approval was half-stated.** Uberblick project agent workflow
 (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`): *"Approval is never inferred from a
 citation: an issue that implements a requirement **quotes** the owner's dated
 decision in its body, **cites** the requirement by uuid."* The decision document

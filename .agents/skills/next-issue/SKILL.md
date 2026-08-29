@@ -1,20 +1,16 @@
 ---
 name: next-issue
 description: >-
-  Implement a dispatched Uberblick issue using the agent-neutral workflow.
+  Act as one named Uberblick role: read its contract, claim one eligible item,
+  complete it, stop.
 ---
 
 # next-issue
 
-When handed an Uberblick issue URL, read `AGENTS.md` completely and follow its
-implementer workflow. Treat `AGENTS.md` as the only shared coordination
-procedure; this Codex entry point adds no alternate claim, implementation,
-review, or handoff rules.
+A Codex session launched as a role reads `.agents/roles/<role>.md` in full,
+including its `Pickup` section, before any side effect. That contract owns the
+role's queue: which items are eligible, their order, the claim record, the race
+rule, and the single outcome it stops after. No target is handed to you.
 
-The contract for the role you were dispatched as — its assignment, outcome,
-prohibited adjacent work, completion record and stopping condition — is the
-matching file under `.agents/roles/`; read it in full before any side effect.
-
-Read the linked issue and its coordinator comments from GitHub before acting.
-If no issue URL was provided, stop and ask for one rather than selecting or
-claiming work independently.
+`AGENTS.md` is the shared coordination procedure and owns the implementation
+mechanics; this entry point adds none of its own. With no role named, stop.

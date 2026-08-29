@@ -1,11 +1,12 @@
 ---
 name: integrator
-description: Integrator role for gates, finding dispositions and merge execution on one uberblick pull request; acts only on an explicit assignment.
+description: Integrator role for one pull request from the uberblick integration queue; picks and claims its own item, and acts only when given a role and a session or run identity.
 ---
 
 Read `.agents/roles/integrator.md` in full before any side effect; if that file
-cannot be read, stop and report that instead of acting. Require the assignment
-and its identifiers — the pull request URL, its head SHA, and your role and
-session identity — and refuse before any side effect when they are missing. Stop
-after the durable completion record that contract names; the invoker starts the
-next assignment in a fresh session.
+cannot be read, stop and report that instead of acting. Your assignment is that
+role's queue: pick and claim one eligible item under its `Pickup` section, and
+complete only that one — no preselected target is supplied or needed. Require
+your role and your session or run identity, and refuse before any side effect
+when they are missing. Stop after the durable handoff that contract names; the
+next assignment starts a fresh session.

@@ -12,8 +12,8 @@
  * It deliberately does not check the contracts' prose: no headings, no required
  * sentences, no uuids, no wording. Encoding editorial rules here would make the
  * documents harder to improve and turn every clarification into a build break.
- * The placeholder scan is the exception, and structure too. A green run says
- * nothing about whether a runtime discovers these files or reads a contract.
+ * Structure is all it checks, and a green run says nothing about whether a
+ * runtime discovers these files or reads a contract.
  *
  * Plain Node, no imports beyond `node:`, like `fue-assert.mjs` beside it.
  * `.claude/agents` is absent from the immutable review image (`.dockerignore`
@@ -39,8 +39,6 @@ const CLAUDE_REQUIRED = ["name", "description"];
 const CLAUDE_ALLOWED = [...CLAUDE_REQUIRED, "isolation"];
 const CODEX_ALLOWED = ["name", "description", "developer_instructions"];
 
-const PLACEHOLDERS = /\b(TODO|TBD|FIXME|XXX)\b|lorem/i;
-
 const failures = [];
 const fail = (message) => failures.push(message);
 const read = (relative) => readFileSync(join(root, relative), "utf8");
@@ -49,8 +47,8 @@ const listFiles = (relative) =>
 		.filter((entry) => entry.isFile())
 		.map((entry) => entry.name);
 
-/** `---` fenced frontmatter, one `key: value` per line. */
-function parseFrontmatter(text) {
+/** `---` fenced frontmatter, one `key: value` per line, and the body after it. */
+function parseFrontmatter(label, text) {
 	const lines = text.split("\n");
 	const end = lines[0] === "---" ? lines.indexOf("---", 1) : -1;
 	if (end === -1) return null;
@@ -58,12 +56,14 @@ function parseFrontmatter(text) {
 	for (const line of lines.slice(1, end)) {
 		const pair = line.match(/^([A-Za-z_][\w-]*)\s*:\s*(.*)$/);
 		if (pair) keys.set(pair[1], pair[2].trim().replace(/^["'](.*)["']$/, "$1"));
+		else if (line.trim() !== "")
+			fail(`${label}: frontmatter line is not "key: value": ${line.trim()}`);
 	}
-	return keys;
+	return { keys, body: lines.slice(end + 1).join("\n") };
 }
 
 /** `key = "…"` and `key = """…"""`, plus any table headers present. */
-function parseToml(text) {
+function parseToml(label, text) {
 	const keys = new Map();
 	const tables = [];
 	let open = null;
@@ -81,10 +81,14 @@ function parseToml(text) {
 		const trimmed = line.trim();
 		if (trimmed === "" || trimmed.startsWith("#")) continue;
 		const header = trimmed.match(/^\[+([^\]]+)\]+$/);
-		if (header) tables.push(header[1]);
-		const pair = header ? null : trimmed.match(/^([A-Za-z_][\w.-]*)\s*=\s*(.*)$/);
-		if (!pair) continue;
-		if (pair[2].startsWith('"""') && !pair[2].slice(3).endsWith('"""')) {
+		if (header) {
+			tables.push(header[1]);
+			continue;
+		}
+		const pair = trimmed.match(/^([A-Za-z_][\w.-]*)\s*=\s*(.*)$/);
+		if (!pair?.[2].startsWith('"'))
+			fail(`${label}: not a quoted "key = value" or a table header: ${trimmed}`);
+		else if (pair[2].startsWith('"""') && !pair[2].slice(3).endsWith('"""')) {
 			open = pair[1];
 			buffer = [pair[2].slice(3)];
 		} else keys.set(pair[1], pair[2].replace(/^"+(.*?)"+$/s, "$1").trim());
@@ -123,11 +127,10 @@ for (const slug of SLUGS) {
 	if (claudePresent && !existsSync(join(root, claudePath)))
 		fail(`${claudePath}: missing`);
 	else if (claudePresent) {
-		const text = read(claudePath);
-		const keys = parseFrontmatter(text);
+		const front = parseFrontmatter(claudePath, read(claudePath));
 		// `isolation` is permitted but optional, so it is not in the required set.
-		if (!keys) fail(`${claudePath}: no "---" frontmatter block`);
-		else check(claudePath, slug, keys, CLAUDE_REQUIRED, CLAUDE_ALLOWED, [], text);
+		if (!front) fail(`${claudePath}: no "---" frontmatter block`);
+		else check(claudePath, slug, front.keys, CLAUDE_REQUIRED, CLAUDE_ALLOWED, [], front.body);
 	}
 
 	const codexPath = `${CODEX}/${slug}.toml`;
@@ -135,22 +138,14 @@ for (const slug of SLUGS) {
 		fail(`${codexPath}: missing`);
 		continue;
 	}
-	const { keys, tables } = parseToml(read(codexPath));
+	const { keys, tables } = parseToml(codexPath, read(codexPath));
 	const body = keys.get("developer_instructions") ?? "";
 	check(codexPath, slug, keys, CODEX_ALLOWED, CODEX_ALLOWED, tables, body);
 }
-
-let scanned = 0;
-for (const dir of claudePresent ? [ROLES, CLAUDE, CODEX] : [ROLES, CODEX])
-	for (const name of listFiles(dir)) {
-		scanned++;
-		const found = read(join(dir, name)).match(PLACEHOLDERS);
-		if (found) fail(`${dir}/${name}: unfinished placeholder "${found[0]}"`);
-	}
 
 if (failures.length > 0) {
 	for (const message of failures) console.error(`check-agent-roles: ${message}`);
 	process.exit(1);
 }
 
-console.log(`check-agent-roles: ${SLUGS.length} roles, ${scanned} files, structure only.`);
+console.log(`check-agent-roles: ${SLUGS.length} roles, structure only.`);

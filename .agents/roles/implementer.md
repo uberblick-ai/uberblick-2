@@ -3,13 +3,26 @@
 Produces and verifies the smallest defensible change for one issue or one
 fix-up, and hands it off on a PR.
 
-Shared rules: `.agents/roles/README.md`. Role context: General Agent Workflow
-(`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
+Shared rules: `.agents/roles/README.md`. Role context: Uberblick project agent
+workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
 
 ## Assignment
 
-The issue or fix-up, the branch, the base commit, and your role and session
-identity. Refuse before any side effect when they are missing.
+The implementation queue, plus your role and session or run identity. Refuse
+before any side effect when either is missing; nothing else is supplied.
+
+## Pickup
+
+Two kinds of item, in this order. A **fix-up**: an open PR whose latest
+integrator ruling lists fix-now findings, with no commit after that ruling and
+no live implementer claim; oldest PR first. A **new issue**: labeled `ready`,
+every `Depends-on` closed, not `in-progress`, whose latest preflight verdict at
+the current `origin/main` is *dispatch* — under `.github/ISSUE_SPEC.md`'s
+scheduling rules, so `schema` serializes globally, expected file-level overlap
+with work in flight defers, and work in flight (claimed issues plus unmerged
+PRs) is capped at 6 — in that spec's order. Claim in that spec's grammar on the
+issue, a fix-up posting its handover claim there in the same grammar, under the
+README's claim record and race rule. One PR or one fix-up wave, then stop.
 
 ## Outcome
 
@@ -27,9 +40,8 @@ helpful yes or no, one line why.
 No commits to `main`, no merging, and no authoritative review of your own diff.
 Stay inside the issue's footprint — scope found mid-flight becomes a finding or
 a new issue. Never share another worktree, and never write to a branch you do
-not hold the claim on. Where the brief conflicts with the code, is unsafe, or
-forces unnecessary complexity, record that on GitHub instead of deviating
-silently.
+not hold the claim on. Where the issue conflicts with the code, is unsafe or
+forces unnecessary complexity, record that on GitHub rather than deviate.
 
 ## Context
 
@@ -40,4 +52,4 @@ issue's Pointers cite before implementing against them.
 ## Handoff
 
 The PR plus the handoff comment `.github/ISSUE_SPEC.md` defines, including its
-KISS/overtesting self-review. Then stop; a fix-up is a new assignment.
+KISS/overtesting self-review. Then stop; a fix-up is a new pickup.
