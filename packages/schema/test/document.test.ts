@@ -142,6 +142,23 @@ describe("document round-trip", () => {
     expect(getMetaMap(outside).toJSON()).toEqual(outsideBefore);
   });
 
+  it.each([
+    ["status", (doc: Y.Doc) => setKind(doc, "requirement")],
+    ["kind", (doc: Y.Doc) => setStatus(doc, "draft")],
+  ] as const)(
+    "refuses a foreign BigInt %s with the named error and no write",
+    (key, write) => {
+      const source = seeded();
+      getMetaMap(source).set(key, 1n);
+      const replica = new Y.Doc();
+      Y.applyUpdate(replica, Y.encodeStateAsUpdate(source));
+      const before = Y.encodeStateAsUpdate(replica);
+
+      expect(() => write(replica)).toThrow(InvalidDocumentLifecycleError);
+      expect(Y.encodeStateAsUpdate(replica)).toEqual(before);
+    },
+  );
+
   it("re-kinds only when the stored status is legal for the new kind", () => {
     const doc = seeded();
     setKind(doc, "requirement");

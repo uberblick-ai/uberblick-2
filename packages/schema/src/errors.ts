@@ -214,12 +214,22 @@ export class InvalidDocumentLifecycleError extends Error {
 
   constructor(kind: unknown, status: unknown) {
     super(
-      `Invalid document lifecycle: kind=${JSON.stringify(kind)} and ` +
-        `status=${JSON.stringify(status)} are not a legal pair`,
+      `Invalid document lifecycle: kind=${renderUnknown(kind)} and ` +
+        `status=${renderUnknown(status)} are not a legal pair`,
     );
     this.name = "InvalidDocumentLifecycleError";
     this.kind = kind;
     this.status = status;
+  }
+}
+
+/** Render foreign Yjs values without letting error construction throw. */
+function renderUnknown(value: unknown): string {
+  if (typeof value === "bigint") return `${value}n`;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return `<${typeof value}>`;
   }
 }
 
