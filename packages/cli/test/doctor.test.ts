@@ -366,11 +366,16 @@ describe("ub doctor", () => {
     const box = sandbox({ credentials: { signingSecret: "a-secret-this-hub-was-not-deployed-with" } });
     const hub = await startHub(box);
     pointAt(box, `ws://127.0.0.1:${hub.port}`);
-    const { checks } = await doctor(box, { WORKSPACE_ID: WORKSPACE });
+    const { checks, run } = await doctor(box, { WORKSPACE_ID: WORKSPACE });
 
     expect(check(checks, "hub").status).toBe("fail");
     expect(check(checks, "hub").remedy).toContain(AUTH_REJECTED);
     expect(check(checks, "hub").remedy).toMatch(/same secret/);
+    // And the probe stays loud here. `ub remote join` silences its own
+    // pre-prompt probe (#447); `probeHub` — this check, and `ub open`, which
+    // reduces it to a boolean and so never names a refusal itself — must not
+    // be silenced with it. This is the cheapest command on that path.
+    expect(run.stderr).toContain("hub rejected the token");
   });
 
   // The two thresholds, and the asymmetry between them: running fast trips the

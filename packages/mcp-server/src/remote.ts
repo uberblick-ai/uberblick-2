@@ -330,12 +330,18 @@ function tombstone(entry: {
  * fingerprint it. Off where the caller needs nothing but the set of uuids — a
  * refusal is decided on those alone. On for read-back, where the question is
  * whether what this machine holds actually arrived.
+ *
+ * @param options.silent Keep this probe's hub reading off stderr, for a caller
+ * that renders `hub` itself. Off by default, because most callers here are the
+ * only place a refusal is ever named: `ub open` reduces its probe to a boolean,
+ * so silencing every probe would trade one stray line for a lost diagnostic
+ * (#447). {@link HubSync}'s `silent` option names the three lines it covers.
  */
 export async function inspectRemote(
   config: McpConfig,
-  options: { documents?: boolean } = {},
+  options: { documents?: boolean; silent?: boolean } = {},
 ): Promise<Corpus> {
-  const sync = new HubSync(config, () => {});
+  const sync = new HubSync(config, () => {}, { silent: options.silent === true });
   const opened = new Map<string, { doc: Y.Doc; awareness: Awareness }>();
 
   const open = (room: string): Y.Doc => {
