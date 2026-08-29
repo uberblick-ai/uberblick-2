@@ -12,6 +12,8 @@
  *                   prose blocks
  *   - `annotations` Y.Map of thread JSON, anchored by `comment` formatting
  *                   marks on the block's text
+ *   - `decisions`   Y.Array of decision-document uuids: the ordered log of
+ *                   which decisions govern this document
  *
  * …plus workspace ids (a uuid, optionally slug-decorated for display), room
  * names (`<workspaceId>/<uuid>`), the directory doc that makes discovery a
@@ -29,12 +31,18 @@
 export {
   ANNOTATIONS_KEY,
   BLOCKS_KEY,
+  DECISIONS_KEY,
   META_KEY,
+  addDecision,
   getAnnotationsMap,
   getBlocksFragment,
+  getDecisionsArray,
   getMeta,
   getMetaMap,
   initDoc,
+  readDecisions,
+  removeDecision,
+  reorderDecisions,
   setDescription,
   setKind,
   setLinks,
@@ -169,6 +177,7 @@ export {
   AnnotationRangeError,
   BlockNotFoundError,
   ConflictingLinkMarksError,
+  InvalidDecisionReferenceError,
   InvalidDocumentLifecycleError,
   InlineLinkRangeError,
   InvalidDocLinkTargetError,
@@ -180,6 +189,7 @@ export {
 } from "./errors.js";
 export type {
   AnnotationRangeErrorReason,
+  DecisionReferenceErrorReason,
   InlineLinkRangeErrorReason,
   StaleBlockDetails,
 } from "./errors.js";
@@ -209,6 +219,7 @@ export type {
   BlockInput,
   BlockType,
   CommentMark,
+  DecisionReference,
   DirectoryEntry,
   DecisionStatus,
   DocFeedback,
