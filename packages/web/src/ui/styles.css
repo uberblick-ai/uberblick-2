@@ -1997,6 +1997,38 @@ h3.ub-heading {
   font-size: 0.85rem;
 }
 
+/* The way out of a link conflict (#451). Under the banner that names the
+   problem and above the block list that shows it, because it is the answer to
+   the first and not a property of the second. One row per conflicting range:
+   the text that carries both links, then the two choices. */
+.ub-link-repair {
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+}
+
+.ub-link-repair ul {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ub-link-repair li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* The two targets can be long — a URL especially — so a choice wraps inside its
+   own button rather than pushing the row sideways. */
+.ub-link-repair .ub-tool {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
 /* ---- the archive banner (#146) ---- */
 
 /* A state, not an error, so the warning ground rather than the destructive one

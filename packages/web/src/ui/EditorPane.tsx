@@ -12,6 +12,9 @@ import { bindGuardedEditor } from "../editor/guarded-binding.js";
 import { docLinkFromTarget } from "../editor/doc-links.js";
 import type { DocLinkContext } from "../editor/doc-links.js";
 import { describeForeignBlocks } from "../editor/palette.js";
+import type { LinkConflict } from "../editor/palette.js";
+import { repairLinkConflict } from "../editor/link-repair.js";
+import type { LinkSurvivor } from "../editor/link-repair.js";
 import { writeToClipboard } from "../editor/source-chrome.js";
 import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
 import type { RoomConnection } from "../collab/rooms.js";
@@ -20,6 +23,7 @@ import { BlockMenu } from "./BlockMenu.js";
 import {
   useDocMeta,
   useForeignBlocks,
+  useLinkConflicts,
   usePeers,
   useRawBlocks,
   useRoomStatus,
@@ -286,6 +290,78 @@ export function StatusLine({
 }
 
 /**
+ * The way back out of a link conflict, and the only one a browser reader has.
+ *
+ * A merge of two replicas that formatted one range as different kinds of link
+ * leaves both marks on it, the gate refuses to bind (see `editor/palette.ts`),
+ * and until this existed the fallback could only point at the MCP tools — which
+ * is no answer at all for the person who does not have them. So the choice is
+ * offered here, and it is offered **per conflicting range**: two ranges in one
+ * block can legitimately want different answers, and a sweep would decide for
+ * the reader.
+ *
+ * Each choice names its own target, because that is what the reader is picking
+ * between — the URL as written, and the document by the title the directory
+ * advertises for it, falling back to the uuid when it cannot name it. Nothing
+ * is repaired by opening the document or by rendering this list; only a click
+ * writes, and only the mark it did not choose.
+ */
+function LinkConflictRepair({
+  connection,
+  archived,
+  docLinks,
+}: {
+  connection: RoomConnection;
+  archived: boolean;
+  docLinks: DocLinkContext | null;
+}): ReactElement | null {
+  const { conflicts, refresh } = useLinkConflicts(connection);
+  const repair = (conflict: LinkConflict, keep: LinkSurvivor): void => {
+    // Guarded here as well as by the absent control below: an archived document
+    // takes no write from this pane, and the rule belongs where the write is.
+    if (archived) return;
+    repairLinkConflict(conflict, keep);
+    // Unconditional: a repair changes the list, and a refusal means live state
+    // has already moved on without this render hearing about it yet.
+    refresh();
+  };
+  // An archived document's one action is Restore — the banner above says so.
+  if (archived || conflicts.length === 0) return null;
+  const name = (docId: string): string => docLinks?.lookup(docId).title ?? docId;
+  return (
+    <div className="ub-link-repair">
+      <p>
+        One range, two links. Keep one of each pair — the other mark is cleared
+        from that range, and nothing else in the block changes.
+      </p>
+      <ul>
+        {conflicts.map((conflict) => (
+          <li
+            key={`${conflict.index}:${conflict.textIndex}:${conflict.start}:${conflict.end}`}
+          >
+            <q>{conflict.label}</q>
+            <button
+              type="button"
+              className="ub-tool"
+              onClick={() => repair(conflict, "docLink")}
+            >
+              Keep the document: {name(conflict.docId)}
+            </button>
+            <button
+              type="button"
+              className="ub-tool"
+              onClick={() => repair(conflict, "link")}
+            >
+              Keep the link: {conflict.href}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
  * The loud fallback. Rendered instead of the editor whenever the document holds
  * a block the palette cannot bind.
  *
@@ -302,9 +378,13 @@ export function StatusLine({
 function ForeignFallback({
   connection,
   summary,
+  archived,
+  docLinks,
 }: {
   connection: RoomConnection;
   summary: string;
+  archived: boolean;
+  docLinks: DocLinkContext | null;
 }): ReactElement {
   const blocks = useRawBlocks(connection);
   return (
@@ -312,6 +392,11 @@ function ForeignFallback({
       <p className="ub-foreign-banner">
         <strong>Editor disabled.</strong> {summary}
       </p>
+      <LinkConflictRepair
+        connection={connection}
+        archived={archived}
+        docLinks={docLinks}
+      />
       <ol className="ub-foreign-list">
         {blocks.map((block, index) => (
           <li key={block.id ?? `index-${index}`}>
@@ -614,7 +699,9 @@ export function EditorPane({
         {foreign.length > 0 ? (
           <ForeignFallback
             connection={connection}
-            summary={describeForeignBlocks(foreign)}
+            summary={describeForeignBlocks(foreign, { repairable: !archived })}
+            archived={archived}
+            docLinks={docLinks}
           />
         ) : (
           <BoundEditor
