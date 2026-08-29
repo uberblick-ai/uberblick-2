@@ -28,8 +28,8 @@ import { getSetting, subscribeSettings } from "../settings.js";
 import type { Settings } from "../settings.js";
 import { AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
 import type { AwarenessUser } from "../collab/identity.js";
-import { findForeignBlocks } from "../editor/palette.js";
-import type { ForeignBlock } from "../editor/palette.js";
+import { findForeignBlocks, findLinkConflicts } from "../editor/palette.js";
+import type { ForeignBlock, LinkConflict } from "../editor/palette.js";
 import { blockText, plainText } from "../editor/ytext.js";
 import { observeDocRev, readPresence, samePresence } from "./doc-chrome.js";
 import type { RemotePresence } from "./doc-chrome.js";
@@ -283,6 +283,44 @@ export function useForeignBlocks(
     return () => fragment.unobserveDeep(read);
   }, [connection]);
   return foreign;
+}
+
+/**
+ * The conflicting link ranges the fallback offers a repair for, live.
+ *
+ * A second scan beside {@link useForeignBlocks}, not a slice of it: the gate
+ * reports one reason per block and stops, so a conflict standing behind another
+ * foreign reason in the same block never reaches that list (`palette.ts` says
+ * why). Observed deep for the same reason the gate is — a remote replica can
+ * repair or create one of these under an open pane.
+ *
+ * `refresh` is what an activation that wrote nothing calls: the write is a
+ * no-op precisely when live state has moved, and the offered list has to say so
+ * even when the move arrived in the same tick as the click.
+ */
+export function useLinkConflicts(connection: RoomConnection | null): {
+  conflicts: LinkConflict[];
+  refresh: () => void;
+} {
+  const [conflicts, setConflicts] = useState<LinkConflict[]>([]);
+  const refresh = useCallback((): void => {
+    setConflicts(
+      connection === null
+        ? []
+        : findLinkConflicts(getBlocksFragment(connection.ydoc)),
+    );
+  }, [connection]);
+  useEffect(() => {
+    if (connection === null) {
+      setConflicts([]);
+      return;
+    }
+    const fragment = getBlocksFragment(connection.ydoc);
+    refresh();
+    fragment.observeDeep(refresh);
+    return () => fragment.unobserveDeep(refresh);
+  }, [connection, refresh]);
+  return { conflicts, refresh };
 }
 
 /** A peer in the presence strip. `clientId` is its stable key: names collide. */

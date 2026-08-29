@@ -32,6 +32,7 @@ import {
   LINK_CONFLICT,
   describeForeignBlocks,
   findForeignBlocks,
+  findLinkConflicts,
 } from "../src/editor/palette.js";
 import { plainText } from "../src/editor/ytext.js";
 import { mountEditor } from "./helpers.js";
@@ -415,10 +416,17 @@ describe("foreign blocks already in the document", () => {
     // The reason is its own, and so is what the reader is told: `link` is a
     // supported mark, so calling this an unsupported type would name the wrong
     // thing and leave nobody anything to do about it.
+    // …and what it leaves the reader to do is now in the browser (#451), not in
+    // a tool suite they may not have. An archived document, which takes no
+    // write at all, is pointed at Restore instead.
     const said = describeForeignBlocks(foreign);
     expect(said).not.toMatch(/unsupported type/i);
     expect(said).toContain("conflicting external and document links");
-    expect(said).toContain("MCP tools");
+    expect(said).not.toContain("MCP tools");
+    expect(said).toContain("choose below which link each range keeps");
+    expect(describeForeignBlocks(foreign, { repairable: false })).toContain(
+      "restore this document",
+    );
 
     const element = document.createElement("div");
     document.body.appendChild(element);
@@ -444,6 +452,52 @@ describe("foreign blocks already in the document", () => {
       getBlockInline(a, getBlocks(a)[0]?.id ?? ""),
     );
     binding.destroy();
+  });
+
+  /**
+   * The repair's own scan, and why it is not the gate's (#451).
+   *
+   * `findForeignBlocks` reports one reason per top-level block and stops at the
+   * first, because the banner counts blocks. A repair list built on that would
+   * hide every conflict standing behind another foreign reason in the same
+   * block — the reader would be told the editor is off and offered nothing for
+   * the range that is fixable. So the scan is its own, it looks past the first
+   * offender, and it reports the range and both targets rather than a count.
+   */
+  it("finds every conflicting range, including behind another foreign reason", () => {
+    const target = "0189abcd-2222-4333-8444-555566667777";
+    const href = "https://example.com/hub";
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "doc-hidden-conflict", title: "Behind a mark" });
+    const blockId = appendBlock(ydoc, {
+      type: "paragraph",
+      text: "note see the hub",
+    });
+    const text = (getBlocksFragment(ydoc).get(0) as Y.XmlElement)
+      .firstChild as Y.XmlText;
+    // The block's *first* offender: a mark the palette does not declare.
+    text.format(0, 4, { underline: {} });
+    // And, after it, the pair a merge leaves behind.
+    text.format(5, 7, { link: { href }, docLink: { docId: target } });
+    // Bold over half of it splits the raw delta without splitting the conflict:
+    // one pair of targets is one choice, whatever else decorates the range.
+    text.format(5, 3, { bold: true });
+
+    const foreign = findForeignBlocks(getBlocksFragment(ydoc));
+    expect(foreign.map((block) => block.nodeName)).toEqual(["#mark:underline"]);
+
+    expect(findLinkConflicts(getBlocksFragment(ydoc))).toEqual([
+      {
+        index: 0,
+        blockId,
+        text,
+        start: 5,
+        end: 12,
+        label: "see the",
+        href,
+        docId: target,
+      },
+    ]);
   });
 });
 

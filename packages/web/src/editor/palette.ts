@@ -201,6 +201,130 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
 }
 
 /**
+ * One maximal range a merge left carrying both link marks, and the two targets
+ * it means at once — what an explicit repair needs in order to offer a choice.
+ *
+ * The anchor is the live `Y.XmlText` itself, never the block's `id`. A
+ * concurrent re-type can leave two raw elements carrying one id, and a block
+ * can hold more than one text child, so an id lookup is not a collision-proof
+ * way back to the range this entry describes. `blockId` and `index` are for
+ * display and for a stable list key; the write goes through `text`.
+ */
+export interface LinkConflictRange {
+  /** Start of the range, in Yjs format indices — an embed counts as one. */
+  start: number;
+  /** End of the range, exclusive. */
+  end: number;
+  /** The range's own characters: which words on screen carry both marks. */
+  label: string;
+  /** The external target. */
+  href: string;
+  /** The referenced document's uuid. */
+  docId: string;
+}
+
+export interface LinkConflict extends LinkConflictRange {
+  /** Position of the *top-level* element in the fragment, in document order. */
+  index: number;
+  /** The element's `id` attribute, when it has one. Display, never lookup. */
+  blockId: string | null;
+  /** The text holding the range, and the handle the repair writes through. */
+  text: Y.XmlText;
+}
+
+/** The two targets of one delta op, when it carries both link marks. */
+function linkPair(op: {
+  insert?: unknown;
+  attributes?: Record<string, unknown>;
+}): { href: string; docId: string } | null {
+  if (typeof op.insert !== "string") return null;
+  const attributes = op.attributes ?? {};
+  // The reader's own question, twice: a value it calls "not marked" is not one
+  // of the two targets, so it is not half of a conflict either.
+  if (!readsAsMark("link", attributes.link)) return null;
+  if (!readsAsMark("docLink", attributes.docLink)) return null;
+  return {
+    href: (attributes.link as { href: string }).href,
+    docId: (attributes.docLink as { docId: string }).docId,
+  };
+}
+
+/**
+ * The conflicting ranges in one text, as maximal runs of the *same* pair.
+ *
+ * Maximal by the pair alone: bold, a comment anchor or any other mark splits
+ * the raw delta without splitting the conflict, so adjacent ops carrying the
+ * same `href` and `docId` are one range and one choice. A different pair
+ * beside it is a different choice, and a range carrying only one of the two
+ * marks is not a conflict at all.
+ *
+ * Shared by the scan below and by the repair's re-read (`link-repair.ts`), so
+ * the range a control offers and the range a click writes to are found by one
+ * definition rather than two that can drift.
+ */
+export function linkConflictsIn(text: Y.XmlText): LinkConflictRange[] {
+  const ranges: LinkConflictRange[] = [];
+  let offset = 0;
+  let open: { start: number; label: string; href: string; docId: string } | null =
+    null;
+  const close = (end: number): void => {
+    if (open !== null) ranges.push({ ...open, end });
+    open = null;
+  };
+  for (const op of text.toDelta() as Array<{
+    insert?: unknown;
+    attributes?: Record<string, unknown>;
+  }>) {
+    const pair = linkPair(op);
+    if (open !== null && (pair === null || pair.href !== open.href || pair.docId !== open.docId)) {
+      close(offset);
+    }
+    if (pair !== null) {
+      if (open === null) open = { start: offset, label: "", ...pair };
+      open.label += op.insert as string;
+    }
+    // An embed is one index to Yjs' formatter, so it is one index here too:
+    // these offsets are what `Y.XmlText.format` is called with.
+    offset += typeof op.insert === "string" ? op.insert.length : 1;
+  }
+  close(offset);
+  return ranges;
+}
+
+/**
+ * Every conflicting range in the fragment, in document order.
+ *
+ * Deliberately not {@link findForeignBlocks}: that reports the *first* offender
+ * per top-level block and stops, so a conflict sitting behind any other foreign
+ * reason in the same block — an undeclared mark earlier in the text, a nested
+ * element before it — is invisible there. A repair list that inherited that
+ * limit would silently refuse to offer half the choices in the document.
+ *
+ * Only where the block itself may hold both marks. On a `code` or `mermaid`
+ * block the same pair is `#mark:link`: an undeclared mark, a different problem
+ * with a different recovery, and not something a link choice can fix.
+ */
+export function findLinkConflicts(fragment: Y.XmlFragment): LinkConflict[] {
+  const conflicts: LinkConflict[] = [];
+  const children = fragment.toArray();
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    if (!(child instanceof Y.XmlElement)) continue;
+    if (!isBlockType(child.nodeName)) continue;
+    if (!blockAllowsMark(child.nodeName, "link")) continue;
+    if (!blockAllowsMark(child.nodeName, "docLink")) continue;
+    const blockId = child.getAttribute("id") ?? null;
+    for (const inner of child.toArray()) {
+      if (!(inner instanceof Y.XmlText)) continue;
+      for (const range of linkConflictsIn(inner)) {
+        conflicts.push({ ...range, index, blockId, text: inner });
+      }
+    }
+  }
+  return conflicts;
+}
+
+/**
  * A single-line, human-readable summary for the loud placeholder.
  *
  * The two reasons are said separately, because they are not the same problem
@@ -209,8 +333,16 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
  * perfectly well, on one range, where the model reads only one of them. Rolling
  * the second into "unsupported type (#mark:link)" would name a mark that *is*
  * supported and leave the reader with nothing to do about it.
+ *
+ * `repairable` is what the conflict sentence points at. An archived document
+ * takes no write at all, so it is offered no repair control — telling its
+ * reader to choose below, where nothing is, would be the one thing worse than
+ * the old advice to go and use the MCP tools.
  */
-export function describeForeignBlocks(foreign: ForeignBlock[]): string {
+export function describeForeignBlocks(
+  foreign: ForeignBlock[],
+  options: { repairable?: boolean } = {},
+): string {
   if (foreign.length === 0) return "";
   const blocks = (count: number): string =>
     `${count} block${count === 1 ? "" : "s"}`;
@@ -227,7 +359,9 @@ export function describeForeignBlocks(foreign: ForeignBlock[]): string {
   }
   if (conflicting.length > 0) {
     sentences.push(
-      `${blocks(conflicting.length)} with conflicting external and document links on one range — both are retained, and editing is disabled in the browser; the document is still editable through the MCP tools (delete and re-insert the block to clear the marks).`,
+      options.repairable === false
+        ? `${blocks(conflicting.length)} with conflicting external and document links on one range — both are retained; restore this document to choose which link each range keeps.`
+        : `${blocks(conflicting.length)} with conflicting external and document links on one range — both are retained; choose below which link each range keeps, and editing resumes.`,
     );
   }
   return sentences.join(" ");
