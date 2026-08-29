@@ -162,10 +162,11 @@ description = "Run all test suites"
 run = "pnpm test"
 
 [tasks.check-agents]
-description = "Check the six role contracts and their Claude and Codex adapters are structurally complete"
-# Static structure only — see the script's header for what a green run does not
-# claim. It is chained into `mise run test` as well, so the gates enforce it
-# without anyone remembering this task; run it directly while editing a role.
+description = "Check the six role triplets: identities, native formats, contract pointers, no runtime-policy pins"
+# Portability invariants only, never the contracts' prose — see the script's
+# header for what a green run does not claim. It is chained into `mise run test`
+# as well, so the gates enforce it without anyone remembering this task; run it
+# directly while editing a role.
 #
 # `.claude/agents` is absent from the immutable review image (`.dockerignore`
 # re-admits only `.claude/skills/**`), so the script skips that third loudly

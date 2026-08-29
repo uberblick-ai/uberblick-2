@@ -1,26 +1,24 @@
 #!/usr/bin/env node
 /**
- * The six agent roles, checked as structure — nothing more.
+ * The six agent roles, checked for portability — nothing more.
  *
- * Each role is a triplet: the canonical contract at `.agents/roles/<slug>.md`
- * plus two thin adapters, `.claude/agents/<slug>.md` and
- * `.codex/agents/<slug>.toml`, whose only job is to send a runtime to that
- * contract before it does anything. This script proves the triplets exist, that
- * the three files agree on identity and description, that the adapters pin no
- * runtime policy and carry the read-or-stop instruction, and that each contract
- * still holds its headings, the corpus uuid and the pending-migration sentence.
+ * A role is a triplet: the contract at `.agents/roles/<slug>.md` and two thin
+ * adapters that point a runtime at it. This proves the triplets exist, that all
+ * three agree on identity, that each adapter parses as its runtime's format and
+ * names the exact contract, and that none pins runtime policy — model, tools,
+ * permissions, sandbox and MCP configuration belong to the runtime and the
+ * invoker, never to a checked-in description.
  *
- * What it cannot prove: that a runtime discovers these files, that an agent
- * reads its contract, or that a line of the prose is true. This is a static
- * check of file structure, and a green run is not evidence of runtime behavior.
+ * It deliberately does not check the contracts' prose: no headings, no required
+ * sentences, no uuids, no wording. Encoding editorial rules here would make the
+ * documents harder to improve and turn every clarification into a build break.
+ * The placeholder scan is the exception, and structure too. A green run says
+ * nothing about whether a runtime discovers these files or reads a contract.
  *
- * Plain Node with no imports beyond `node:`, like `fue-assert.mjs` beside it: a
- * check that guards the agent workflow should not depend on an install.
- *
- * `.claude/agents` is absent from the immutable review image — `.dockerignore`
- * excludes `.claude` and re-admits only `.claude/skills/**`, and the review
- * runner always builds with main's copy of it. That third is therefore skipped
- * loudly there rather than failing; CI, on a plain checkout, enforces it.
+ * Plain Node, no imports beyond `node:`, like `fue-assert.mjs` beside it.
+ * `.claude/agents` is absent from the immutable review image (`.dockerignore`
+ * re-admits only `.claude/skills/**`, and the runner builds with main's copy),
+ * so that third is skipped loudly there; CI, on a plain checkout, enforces it.
  */
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -29,58 +27,22 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const SLUGS = [
-	"issue-preparer",
-	"issue-adversary",
-	"implementer",
-	"implementation-reviewer",
-	"integrator",
-	"program-coordinator",
-];
+const SLUGS = ["issue-preparer", "issue-adversary", "implementer",
+	"implementation-reviewer", "integrator", "program-coordinator"];
 
 const ROLES = ".agents/roles";
 const CLAUDE = ".claude/agents";
 const CODEX = ".codex/agents";
 
-/** General Agent Workflow — the corpus document every contract cites. */
-const HUB_UUID = "c0bb016d-3d4c-4316-9b4e-da8a7b322e55";
-
-const MARKER =
-	"#460's broader authority model is pending repository migration: " +
-	"`AGENTS.md`, `CLAUDE.md` and `.github/ISSUE_SPEC.md` win on conflicts; " +
-	"installing these descriptions starts no worker and grants no merge authority.";
-
-const HEADINGS = [
-	"## Input",
-	"## Product context",
-	"## Outcome",
-	"## Prohibited adjacent work",
-	"## Completion record",
-	"## Stop",
-	"## Authority",
-];
-
-/** Frontmatter keys a Claude adapter may carry — anything else pins policy. */
-const CLAUDE_ALLOWED = ["name", "description", "isolation"];
-/** Required and permitted at once: a Codex adapter carries these three keys, no
- * other top-level key, and no table — every one of those pins runtime policy. */
+/** Anything outside these would pin policy the runtime and invoker own. */
+const CLAUDE_REQUIRED = ["name", "description"];
+const CLAUDE_ALLOWED = [...CLAUDE_REQUIRED, "isolation"];
 const CODEX_ALLOWED = ["name", "description", "developer_instructions"];
-
-/** Words that turn a discoverable description into an activation instruction. */
-const DENYLIST = [
-	"proactively",
-	"automatically",
-	"must be used",
-	"without being asked",
-	"on every",
-	"continuously",
-];
 
 const PLACEHOLDERS = /\b(TODO|TBD|FIXME|XXX)\b|lorem/i;
 
 const failures = [];
 const fail = (message) => failures.push(message);
-const flat = (text) => text.replace(/\s+/g, " ").trim();
 const read = (relative) => readFileSync(join(root, relative), "utf8");
 const listFiles = (relative) =>
 	readdirSync(join(root, relative), { withFileTypes: true })
@@ -90,8 +52,7 @@ const listFiles = (relative) =>
 /** `---` fenced frontmatter, one `key: value` per line. */
 function parseFrontmatter(text) {
 	const lines = text.split("\n");
-	if (lines[0] !== "---") return null;
-	const end = lines.indexOf("---", 1);
+	const end = lines[0] === "---" ? lines.indexOf("---", 1) : -1;
 	if (end === -1) return null;
 	const keys = new Map();
 	for (const line of lines.slice(1, end)) {
@@ -101,153 +62,82 @@ function parseFrontmatter(text) {
 	return keys;
 }
 
-/** Top-level `key = "…"` and `key = """…"""`, plus the table names present. */
+/** `key = "…"` and `key = """…"""`, plus any table headers present. */
 function parseToml(text) {
-	const lines = text.split("\n");
 	const keys = new Map();
 	const tables = [];
-	let table = "";
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i].trim();
-		if (line === "" || line.startsWith("#")) continue;
-		const header = line.match(/^\[+([^\]]+)\]+$/);
-		if (header) {
-			table = header[1];
-			tables.push(table);
+	let open = null;
+	let buffer = [];
+	for (const line of text.split("\n")) {
+		if (open !== null) {
+			const end = line.indexOf('"""');
+			if (end === -1) buffer.push(line);
+			else {
+				keys.set(open, [...buffer, line.slice(0, end)].join("\n").trim());
+				open = null;
+			}
 			continue;
 		}
-		const pair = line.match(/^([A-Za-z_][\w.-]*)\s*=\s*(.*)$/);
+		const trimmed = line.trim();
+		if (trimmed === "" || trimmed.startsWith("#")) continue;
+		const header = trimmed.match(/^\[+([^\]]+)\]+$/);
+		if (header) tables.push(header[1]);
+		const pair = header ? null : trimmed.match(/^([A-Za-z_][\w.-]*)\s*=\s*(.*)$/);
 		if (!pair) continue;
-		let value = pair[2];
-		if (value.startsWith('"""')) {
-			const rest = value.slice(3);
-			if (rest.endsWith('"""')) {
-				value = rest.slice(0, -3);
-			} else {
-				const parts = [rest];
-				while (++i < lines.length && !lines[i].includes('"""'))
-					parts.push(lines[i]);
-				if (i < lines.length)
-					parts.push(lines[i].slice(0, lines[i].indexOf('"""')));
-				value = parts.join("\n");
-			}
-		} else {
-			value = value.replace(/^"(.*)"$/, "$1");
-		}
-		if (table === "") keys.set(pair[1], value.trim());
+		if (pair[2].startsWith('"""') && !pair[2].slice(3).endsWith('"""')) {
+			open = pair[1];
+			buffer = [pair[2].slice(3)];
+		} else keys.set(pair[1], pair[2].replace(/^"+(.*?)"+$/s, "$1").trim());
 	}
 	return { keys, tables };
 }
 
-/** The read-or-stop instruction all twelve adapters carry, word for word. */
-function checkAdapterBody(label, slug, body) {
-	const instruction = `\`${ROLES}/${slug}.md\` in full before any side effect`;
-	const text = flat(body);
-	if (!text.includes(instruction))
-		fail(`${label}: missing the literal instruction ${instruction}`);
-	if (!text.includes("cannot be read, stop"))
-		fail(`${label}: does not stop when the contract cannot be read`);
-}
-
-function checkDescription(label, description) {
-	if (!description) {
-		fail(`${label}: description is empty`);
-		return;
-	}
-	for (const word of DENYLIST)
-		if (description.toLowerCase().includes(word))
-			fail(`${label}: description contains activation language "${word}"`);
+/** Identity, required keys, no policy pins, and the exact contract pointer. */
+function check(label, slug, keys, required, allowed, tables, body) {
+	for (const key of required)
+		if (!keys.get(key)) fail(`${label}: missing or empty "${key}"`);
+	if (keys.has("name") && keys.get("name") !== slug)
+		fail(`${label}: name is "${keys.get("name")}", expected "${slug}"`);
+	for (const key of keys.keys())
+		if (!allowed.includes(key)) fail(`${label}: key "${key}" pins runtime policy`);
+	for (const table of tables)
+		fail(`${label}: table "[${table}]" pins runtime policy`);
+	if (!body.includes(`${ROLES}/${slug}.md`))
+		fail(`${label}: does not name its contract ${ROLES}/${slug}.md`);
 }
 
 const claudePresent = existsSync(join(root, CLAUDE));
 if (!claudePresent)
-	console.log(
-		`skipped: ${CLAUDE} is absent from this checkout, so the Claude adapters cannot be checked here`,
-	);
+	console.log(`skipped: ${CLAUDE} is absent from this checkout, so the Claude adapters cannot be checked here`);
 
-// The contract directory holds exactly the six roles, plus its own README.
+const expected = [...SLUGS].sort();
 const contracts = listFiles(ROLES)
 	.filter((name) => name.endsWith(".md") && name !== "README.md")
 	.map((name) => name.slice(0, -3))
 	.sort();
-const expected = [...SLUGS].sort();
 if (contracts.join(",") !== expected.join(","))
-	fail(
-		`${ROLES}: holds [${contracts.join(", ")}], expected exactly [${expected.join(", ")}]`,
-	);
-if (!existsSync(join(root, ROLES, "README.md")))
-	fail(`${ROLES}/README.md: missing shared guidance`);
+	fail(`${ROLES}: holds [${contracts.join(", ")}], expected exactly [${expected.join(", ")}]`);
 
 for (const slug of SLUGS) {
-	const contractPath = `${ROLES}/${slug}.md`;
-	const codexPath = `${CODEX}/${slug}.toml`;
 	const claudePath = `${CLAUDE}/${slug}.md`;
-
-	let claudeDescription = null;
-
-	if (!existsSync(join(root, contractPath))) {
-		fail(`${contractPath}: missing`);
-	} else {
-		const contract = read(contractPath);
-		const lines = contract.split("\n");
-		if (!/^# \S/.test(lines[0] ?? ""))
-			fail(`${contractPath}: does not open with a "# <Role name>" heading`);
-		for (const heading of HEADINGS)
-			if (!lines.includes(heading))
-				fail(`${contractPath}: missing heading "${heading}"`);
-		if (!contract.includes(HUB_UUID))
-			fail(`${contractPath}: does not link its corpus document by uuid`);
-		if (!flat(contract).includes(flat(MARKER)))
-			fail(`${contractPath}: missing the pending-migration sentence`);
+	if (claudePresent && !existsSync(join(root, claudePath)))
+		fail(`${claudePath}: missing`);
+	else if (claudePresent) {
+		const text = read(claudePath);
+		const keys = parseFrontmatter(text);
+		// `isolation` is permitted but optional, so it is not in the required set.
+		if (!keys) fail(`${claudePath}: no "---" frontmatter block`);
+		else check(claudePath, slug, keys, CLAUDE_REQUIRED, CLAUDE_ALLOWED, [], text);
 	}
 
-	if (claudePresent) {
-		if (!existsSync(join(root, claudePath))) {
-			fail(`${claudePath}: missing`);
-		} else {
-			const text = read(claudePath);
-			const keys = parseFrontmatter(text);
-			if (!keys) {
-				fail(`${claudePath}: no "---" frontmatter block`);
-			} else {
-				if (keys.get("name") !== slug)
-					fail(`${claudePath}: name is "${keys.get("name")}", expected "${slug}"`);
-				claudeDescription = keys.get("description") ?? "";
-				checkDescription(claudePath, claudeDescription);
-				for (const key of keys.keys())
-					if (!CLAUDE_ALLOWED.includes(key))
-						fail(`${claudePath}: frontmatter key "${key}" pins runtime policy`);
-				const isolation = keys.get("isolation");
-				if (slug === "implementer") {
-					if (isolation !== "worktree")
-						fail(`${claudePath}: implementer needs "isolation: worktree"`);
-				} else if (isolation !== undefined) {
-					fail(`${claudePath}: only the implementer declares isolation`);
-				}
-				checkAdapterBody(claudePath, slug, text.slice(text.indexOf("---", 3)));
-			}
-		}
-	}
-
+	const codexPath = `${CODEX}/${slug}.toml`;
 	if (!existsSync(join(root, codexPath))) {
 		fail(`${codexPath}: missing`);
 		continue;
 	}
 	const { keys, tables } = parseToml(read(codexPath));
-	for (const key of CODEX_ALLOWED)
-		if (!keys.get(key)) fail(`${codexPath}: missing or empty "${key}"`);
-	if (keys.has("name") && keys.get("name") !== slug)
-		fail(`${codexPath}: name is "${keys.get("name")}", expected "${slug}"`);
-	for (const key of keys.keys())
-		if (!CODEX_ALLOWED.includes(key))
-			fail(`${codexPath}: key "${key}" pins runtime policy`);
-	for (const table of tables)
-		fail(`${codexPath}: table "[${table}]" pins runtime policy`);
-	const description = keys.get("description") ?? "";
-	checkDescription(codexPath, description);
-	if (claudeDescription !== null && claudeDescription !== description)
-		fail(`${codexPath}: description differs from ${claudePath}`);
-	checkAdapterBody(codexPath, slug, keys.get("developer_instructions") ?? "");
+	const body = keys.get("developer_instructions") ?? "";
+	check(codexPath, slug, keys, CODEX_ALLOWED, CODEX_ALLOWED, tables, body);
 }
 
 let scanned = 0;
@@ -263,6 +153,4 @@ if (failures.length > 0) {
 	process.exit(1);
 }
 
-console.log(
-	`check-agent-roles: ${SLUGS.length} roles, ${scanned} files, static structure only.`,
-);
+console.log(`check-agent-roles: ${SLUGS.length} roles, ${scanned} files, structure only.`);

@@ -1,69 +1,43 @@
 # Implementer
 
 Produces and verifies the smallest defensible change for one issue or one
-fix-up, in an isolated worktree, and hands it off on a PR. The implementer never
-reviews or merges its own work.
+fix-up, and hands it off on a PR.
 
-Read `.agents/roles/README.md` for the rules every role obeys, and `AGENTS.md`
-completely before any repository change — it owns the claim, implementation,
-handoff and recovery workflow, and this contract does not restate it.
+Shared rules: `.agents/roles/README.md`. Role context: General Agent Workflow
+(`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
 
-## Input
+## Assignment
 
-One assignment naming the issue or fix-up (URL), the branch and the base commit,
-and the identifiers of the session acting. Without them, refuse before any
-repository change.
-
-## Product context
-
-General Agent Workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`) explains why
-implementation is bounded to one assignment. Read it and the product documents
-the issue's Pointers cite through the Uberblick MCP tools — `get_doc` on each
-cited uuid, `search` for what the issue did not anticipate — before touching the
-repository, and stop with an unreachable-corpus report rather than implementing
-against inferred product truth.
-
-Name in the PR body any live document that contradicts the code. That is the
-read side of the dogfooding contract; the write side belongs to the change that
-merges, not to this role.
+The issue or fix-up, the branch, the base commit, and your role and session
+identity. Refuse before any side effect when they are missing.
 
 ## Outcome
 
 The least code that defends the issue's contract, inside its declared `Touches`
-footprint, with contract and invariant tests rather than tests of implementation
-trivia. Validation runs through the documented `mise` tasks. Where the brief
-conflicts with the code, is unsafe, or would force unnecessary complexity, record
-the discrepancy on GitHub instead of deviating silently.
+footprint, with contract and invariant tests rather than tests of trivia,
+validated through the documented `mise` tasks.
 
-A PR against `main` whose body contains `Closes #N`, states what changed and how
-it was verified with the commands and their outcomes, lists contradicting live
-documents, and carries an uberblick-usage summary: MCP used or not, the documents
-read by title and uuid, helpful yes or no, and one line why.
+A PR against `main` whose body contains `Closes #N`, says what changed and how
+it was verified, names any live document that contradicts the code, and carries
+an uberblick-usage summary: MCP used or not, documents read by title and uuid,
+helpful yes or no, one line why.
 
-## Prohibited adjacent work
+## Boundaries
 
-No commits to `main`, no merging, no reviewing this diff authoritatively, and no
-work outside the issue's footprint — scope discovered mid-flight becomes a
-finding or a new issue. Never share another worktree, and never write to a
-branch this session does not hold the claim on.
+No commits to `main`, no merging, and no authoritative review of your own diff.
+Stay inside the issue's footprint — scope found mid-flight becomes a finding or
+a new issue. Never share another worktree, and never write to a branch you do
+not hold the claim on. Where the brief conflicts with the code, is unsafe, or
+forces unnecessary complexity, record that on GitHub instead of deviating
+silently.
 
-## Completion record
+## Context
 
-The PR, plus the handoff comment `.github/ISSUE_SPEC.md` defines: what changed,
-how it was verified, unresolved blockers, risks or findings, and the
-KISS/overtesting self-review. Report any decision record raised. Only after that
-durable comment exists may the invoker be notified.
+`AGENTS.md` owns the claim, implementation and handoff workflow; `CLAUDE.md`
+owns the invariants and the validation commands. Read the product documents the
+issue's Pointers cite before implementing against them.
 
-## Stop
+## Handoff
 
-Stop after the handoff comment. Fix-ups arrive as a new assignment on the
-claimed branch; a resumed implementer is not what the review gates assume.
-
-## Authority
-
-None over merging. Gate outcomes, tiers and merge permission come from
-`CLAUDE.md`.
-
-#460's broader authority model is pending repository migration: `AGENTS.md`,
-`CLAUDE.md` and `.github/ISSUE_SPEC.md` win on conflicts; installing these
-descriptions starts no worker and grants no merge authority.
+The PR plus the handoff comment `.github/ISSUE_SPEC.md` defines, including its
+KISS/overtesting self-review. Then stop; a fix-up is a new assignment.
