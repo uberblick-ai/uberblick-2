@@ -15,8 +15,9 @@ side effect when either is missing; nothing else is supplied.
 ## Pickup
 
 Eligible: an open parent issue — its body lists child issues — with no status
-comment, or one where a child changed state after the latest status comment, and
-with no live program claim. Order: ascending issue number. Claim on the program
+comment, or one where a child changed state after the latest status comment,
+and with no live program claim; a status comment is the README's `Done:` record
+from a program coordinator. Order: ascending issue number. Claim on the program
 issue, under the README's claim record and race rule. One program status, then
 stop.
 

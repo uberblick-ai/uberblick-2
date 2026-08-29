@@ -14,10 +14,10 @@ before any side effect when either is missing; nothing else is supplied.
 ## Pickup
 
 Two kinds of item, in this order. A **fix-up**: an open PR whose latest
-integrator ruling lists fix-now findings, with no commit after that ruling and
-no live implementer claim; oldest PR first. A **new issue**: labeled `ready`,
-every `Depends-on` closed, not `in-progress`, whose latest preflight verdict at
-the current `origin/main` is *dispatch* — under `.github/ISSUE_SPEC.md`'s
+integrator ruling *at the current head* names fix-now findings, with no live
+implementer claim; oldest PR first. A **new issue**: labeled `ready`, every
+`Depends-on` closed, not `in-progress`, whose latest preflight verdict at the
+current `origin/main` is *dispatch* — under `.github/ISSUE_SPEC.md`'s
 scheduling rules, so `schema` serializes globally, expected file-level overlap
 with work in flight defers, and work in flight (claimed issues plus unmerged
 PRs) is capped at 6 — in that spec's order. Claim in that spec's grammar on the
@@ -51,5 +51,6 @@ issue's Pointers cite before implementing against them.
 
 ## Handoff
 
-The PR plus the handoff comment `.github/ISSUE_SPEC.md` defines, including its
-KISS/overtesting self-review. Then stop; a fix-up is a new pickup.
+The PR plus the handoff comment `.github/ISSUE_SPEC.md` defines, opened by the
+README's `Done:` line and including its KISS/overtesting self-review. Then stop;
+a fix-up is a new pickup.

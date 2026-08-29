@@ -13,10 +13,12 @@ any side effect when either is missing; nothing else is supplied.
 
 ## Pickup
 
-Eligible: an open PR that has a review record at its current head or carries
-`human-approved`, with no live integrator claim at that head, and not authored
-by this session. Order: `human-approved` first, then ascending PR number. Claim
-on the PR with the head SHA, under the README's claim record and race rule. One
+Eligible: an open PR with a review record at its current head, no integrator
+ruling at that head naming fix-now findings — such a head belongs to the
+implementer's queue until it changes — no live integrator claim at that head,
+and not authored by this session. `human-approved` changes order and tier, never
+eligibility. Order: `human-approved` first, then ascending PR number. Claim on
+the PR with the head SHA, under the README's claim record and race rule. One
 PR — merged with its post-merge pass, or parked with the ruling — then stop.
 
 ## Outcome

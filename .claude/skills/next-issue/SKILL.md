@@ -20,10 +20,11 @@ invocation names none of them, say so and return.
 1. **Self-update the checkout** when it is on `main`: `git fetch origin main`
    and `git merge --ff-only origin/main`, so the next read of these files tracks
    current `main`. A refused fast-forward is reported and skipped, never forced.
-2. **Start one session of the named role.** Claude: the `Agent` tool with
-   `subagent_type` set to the role slug — its adapter under `.claude/agents/` —
-   and `model: opus`. Codex: the matching `.codex/agents/` adapter through the
-   Herdr skill.
+2. **Start one session of the named role** — the Claude `Agent` tool with
+   `subagent_type` set to the role slug (its adapter under `.claude/agents/`)
+   and `model: opus`. That is this launcher's only path; launching a Codex
+   session arrives with `ub launch <role>`, and the `.codex/agents/` adapters
+   stay the definitions a Codex session discovers for itself.
 3. **Hand it the queue assignment**, and nothing more:
 
    > Claim and complete one eligible item for the `<role>` role per
@@ -48,9 +49,6 @@ fresh invocation belongs to its caller.
 - The coordinator's own repo edits (skill or docs changes, commits) happen in
   its own worktree (EnterWorktree), never in the shared checkout — multiple
   sessions share it and it may sit on any branch.
-- Edit issue/PR bodies only via `--body-file` with a file written by the Write
-  tool. Never build the file with shell redirection (`>` — noclobber has
-  silently emptied issue bodies before), and verify body length after editing.
 
 The roles' mechanics live beside this file and are read by the role that owns
 them, never here: `preflight.md` (issue adversary), `review-protocol.md`,

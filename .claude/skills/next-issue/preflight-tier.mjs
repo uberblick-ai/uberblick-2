@@ -1,12 +1,11 @@
 /**
  * The `next-issue` preflight decision table, in executable form.
  *
- * `preflight.md` next to this file renders the same table for the coordinator
- * that reads it; this file is the table a test can run. The two are checked
- * against each other in `preflight-tier.test.mjs` beside them, so the
- * procedure a coordinator follows and the routing this repository claims
- * cannot drift apart — which is the only reason an executable copy earns its
- * place.
+ * `preflight.md` next to this file renders the same table for the issue
+ * adversary that owns it; this file is the table a test can run. The two are
+ * checked against each other in `preflight-tier.test.mjs` beside them, so the
+ * procedure that role follows and the routing this repository claims cannot
+ * drift apart — which is the only reason an executable copy earns its place.
  *
  * Nothing imports this at runtime. It is not loop machinery; it is the
  * machinery's specification. No dependencies, no scheduling: order,
@@ -53,7 +52,7 @@ const LIFECYCLE = {
   blocker: BLOCKERS,
   /** Did the self-check or a challenger surface anything material? */
   findings: BOOLEANS,
-  /** The recheck immediately before the claim: still `ready`, still unclaimed. */
+  /** The recheck immediately before the outcome: still `ready`, still unclaimed. */
   stillEligible: BOOLEANS,
   /** Are challengers of differing model family, harness or approach available? */
   diverseChallengers: BOOLEANS,
@@ -65,7 +64,7 @@ export const TIERS = ["trivial", "bounded", "substantial"];
 /** How many independent challengers each tier runs before implementation. */
 export const CHALLENGERS = { trivial: 0, bounded: 1, substantial: 2 };
 
-/** Every way a preflight can end. Only `dispatch` claims the issue. */
+/** Every way a preflight can end. Only `dispatch` leads to a claim. */
 export const OUTCOMES = [
   "dispatch",
   "return-to-coordination",
@@ -132,9 +131,10 @@ export function classify(axes) {
 /**
  * The whole preflight decision: how hard to challenge, and what happens next.
  *
- * The claim is the last thing, never the first: every non-`dispatch` outcome
- * leaves the issue unclaimed, which is why a preflight can stop at any point
- * without stranding an `in-progress` label on an issue nobody is working.
+ * The claim is never this role's: the preflight leaves the issue unclaimed
+ * whatever it decides, which is why it can stop at any point without stranding
+ * an `in-progress` label on an issue nobody is working. After a *dispatch*
+ * verdict the implementer claims at its own pickup.
  *
  * @param {{
  *   materiality: string, uncertainty: string, blastRadius: string, reversibility: string,
@@ -197,9 +197,9 @@ export function preflight(signals) {
     return plan("return-to-coordination", { remove: ["ready"], comment: true });
   }
 
-  // `in-progress` is written by the claim in step 7, not here. It is named as
-  // this outcome's label because dispatch is the only outcome that ends with
-  // the issue claimed — which is the invariant worth being able to check.
+  // `in-progress` is written by the implementer's own claim at its pickup, not
+  // here. It is named as this outcome's label because dispatch is the only
+  // outcome an implementer claim can follow — the invariant worth checking.
   return plan("dispatch", {
     add: ["in-progress"],
     comment: challengers > 0 || findings,

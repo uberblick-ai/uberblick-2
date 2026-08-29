@@ -7,9 +7,13 @@ thin adapters in `.claude/agents/` and `.codex/agents/` pointing back at it.
 
 This file states what every role obeys, so no contract repeats it. Repository
 policy — `AGENTS.md`, `CLAUDE.md`, `.github/ISSUE_SPEC.md` — wins on conflicts,
-installing these descriptions starts nothing, and merge authority comes only
-from it. The role split's reasoning is Uberblick project agent workflow
-(`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`): contracts link it, none restates it.
+with one owner-authorized exception: a role posts its own claim, in the grammar
+`.github/ISSUE_SPEC.md` defines, where `AGENTS.md` still assigns that claim to a
+coordinator (owner correction on #467, 2026-08-29; `AGENTS.md` follows in its
+own change). Installing these descriptions starts nothing, and merge authority
+comes only from that policy. The role split's reasoning is Uberblick project
+agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`): contracts link it, none
+restates it.
 
 ## One queue assignment, picked by the role
 
@@ -27,8 +31,10 @@ A resumed role has voided this contract; the next assignment starts fresh.
 `.github/ISSUE_SPEC.md` defines (`Claimed: <branch>` / `Implementer:
 <opus|codex> <id>`); every other role posts a comment whose first line is
 `Claim: <role> <session-or-run id>`, plus the head or grounding SHA wherever the
-outcome is tied to one. A role's handoff is its completion record. Both live on
-GitHub, which holds all execution state; recovery must be possible from it alone.
+outcome is tied to one. A role's handoff comment opens with `Done: <role>
+<session-or-run id>` and that same SHA where the claim carried one: that line is
+what makes a claim consumed and a completion findable. Both live on GitHub,
+which holds all execution state; recovery must be possible from it alone.
 
 **The race rule.** Re-read the candidate's thread immediately before writing the
 claim and immediately after; the earliest valid claim wins, and a loser posts a

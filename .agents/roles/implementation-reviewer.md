@@ -16,8 +16,9 @@ side effect when either is missing; nothing else is supplied.
 Eligible: an open PR whose current head carries no review record and no live
 reviewer claim at that head, **and whose diff this session did not author** —
 check the commit trailers and the claim records on the PR and its issue before
-claiming. Order: ascending PR number. Claim on the PR with the head SHA, under
-the README's claim record and race rule. One review at one head, then stop.
+claiming. Order: a `human-approved` PR still without a review record first,
+then ascending PR number. Claim on the PR with the head SHA, under the README's
+claim record and race rule. One review at one head, then stop.
 
 ## Outcome
 

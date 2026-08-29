@@ -62,6 +62,11 @@ function parseFrontmatter(label, text) {
 	return { keys, body: lines.slice(end + 1).join("\n") };
 }
 
+/** One complete quoted value, then nothing but an optional comment. */
+const QUOTED = /^"((?:[^"\\]|\\.)*)"\s*(?:#.*)?$/;
+/** What may follow a closing `"""`: whitespace or a comment, nothing else. */
+const AFTER_CLOSE = /^\s*(?:#.*)?$/;
+
 /** `key = "…"` and `key = """…"""`, plus any table headers present. */
 function parseToml(label, text) {
 	const keys = new Map();
@@ -73,6 +78,8 @@ function parseToml(label, text) {
 			const end = line.indexOf('"""');
 			if (end === -1) buffer.push(line);
 			else {
+				if (!AFTER_CLOSE.test(line.slice(end + 3)))
+					fail(`${label}: text after the closing """: ${line.trim()}`);
 				keys.set(open, [...buffer, line.slice(0, end)].join("\n").trim());
 				open = null;
 			}
@@ -86,12 +93,22 @@ function parseToml(label, text) {
 			continue;
 		}
 		const pair = trimmed.match(/^([A-Za-z_][\w.-]*)\s*=\s*(.*)$/);
-		if (!pair?.[2].startsWith('"'))
+		const value = pair?.[2] ?? "";
+		if (!value.startsWith('"'))
 			fail(`${label}: not a quoted "key = value" or a table header: ${trimmed}`);
-		else if (pair[2].startsWith('"""') && !pair[2].slice(3).endsWith('"""')) {
-			open = pair[1];
-			buffer = [pair[2].slice(3)];
-		} else keys.set(pair[1], pair[2].replace(/^"+(.*?)"+$/s, "$1").trim());
+		else if (value.startsWith('"""')) {
+			const close = value.indexOf('"""', 3);
+			if (close === -1) {
+				open = pair[1];
+				buffer = [value.slice(3)];
+			} else if (!AFTER_CLOSE.test(value.slice(close + 3)))
+				fail(`${label}: text after the closing """: ${trimmed}`);
+			else keys.set(pair[1], value.slice(3, close).trim());
+		} else {
+			const quoted = value.match(QUOTED);
+			if (!quoted) fail(`${label}: value is not one quoted string: ${trimmed}`);
+			else keys.set(pair[1], quoted[1].trim());
+		}
 	}
 	return { keys, tables };
 }

@@ -22,10 +22,16 @@ test("an incomplete role tree fails, and the absent Claude third says so", () =>
 	copyFileSync(join(here, "check-agent-roles.mjs"), script);
 	writeFileSync(join(fixture, ".agents/roles/README.md"), "# Role contracts\n");
 	writeFileSync(join(fixture, ".agents/roles/implementer.md"), "# Implementer\n");
+	// A value the parser must not accept as `"ok"` with the rest ignored.
+	writeFileSync(
+		join(fixture, ".codex/agents/implementer.toml"),
+		'name = "implementer"\ndescription = "ok" trailing\n',
+	);
 
 	const run = spawnSync(process.execPath, [script], { encoding: "utf8" });
 
 	assert.equal(run.status, 1);
 	assert.match(run.stdout, /^skipped: \.claude\/agents is absent/m);
 	assert.match(run.stderr, /expected exactly \[/);
+	assert.match(run.stderr, /value is not one quoted string: description = "ok" trailing/);
 });
