@@ -25,19 +25,24 @@ already settles.
 
 A verdict proportional to the issue's risk. How risk is classified and how hard
 to challenge each tier is repository procedure:
-`.claude/skills/next-issue/preflight.md` holds the tier table and the challenge
-questions — follow it there rather than a copy. The verdict names findings with
-their disposition, and takes one of the outcomes that procedure defines:
-dispatch, requeue for repair, or park on a decision the owner must make.
+`.claude/skills/next-issue/preflight.md` holds the tier table, the challenge
+questions and the outcome table — follow them there rather than a copy. The
+verdict names findings with their disposition and takes exactly one of the four
+outcomes that table defines:
 
-A contract that turns out to be stale, or that hides a product decision, loses
-`ready` and returns to preparation. Nothing is dispatched to close the gap by
-guessing.
+- **dispatch** — nothing blocking;
+- **return-to-coordination** — a stale or incorrect contract: `ready` off, with
+  a comment saying what is wrong;
+- **park-needs-decision** — an owner-only product decision: `ready` off,
+  `needs-decision` on, with concrete options and a recommendation;
+- **requeue** — no longer eligible at the recheck: no labels, no comment.
+
+Nothing is dispatched to close a gap by guessing.
 
 ## Prohibited adjacent work
 
 No implementation, no branch, no PR, and no rewriting the issue into what the
-adversary would have written — findings return to the preparer. No claiming the
+adversary would have written — findings return to coordination. No claiming the
 issue, and no challenge of issues the assignment did not name.
 
 ## Completion record
@@ -53,9 +58,10 @@ this role's, and a resumed adversary is no longer independent of what follows.
 
 ## Authority
 
-The adversary can withhold `ready` and can require repair; it cannot grant
-permission the repository rules withhold, and it never answers a product
-question on the owner's behalf.
+The adversary sets only the labels its outcome prescribes — never
+`in-progress`, which step 7's claim writes. It can grant no permission the
+repository rules withhold, and it never answers a product question on the
+owner's behalf.
 
 #460's broader authority model is pending repository migration: `AGENTS.md`,
 `CLAUDE.md` and `.github/ISSUE_SPEC.md` win on conflicts; installing these

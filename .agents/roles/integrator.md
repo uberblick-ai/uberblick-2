@@ -40,6 +40,13 @@ at all — it becomes a decision record in Uberblick and the integrator stops, p
 `.agents/roles/README.md`. Disposing of a finding can never settle a product
 question.
 
+The merge is not the end of the assignment. `CLAUDE.md` step 5 is "merge, then
+docs": afterwards the integrator executes the post-merge documentation pass —
+the corpus plan attached to the PR, through the Uberblick MCP tools — and the
+dev-stack restart `.claude/skills/next-issue/dev-stack.md` names. The corpus
+evidence includes `sync_status` reporting `hub.status: "connected"` and every
+room written reporting `synced: true`.
+
 ## Prohibited adjacent work
 
 No implementation and no fix-up commits — findings return to the implementer. No
@@ -51,21 +58,25 @@ when the two disagree.
 
 On the PR: the gate evidence against the SHA each gate ran at, every finding
 with its disposition, the tier call, and — where the tier requires one — the
-merge report `CLAUDE.md` specifies. A parked PR records which trigger fired.
-Report any decision record raised.
+merge report `CLAUDE.md` specifies. After a merge, the post-merge pass result
+too: the corpus writes with their evidence, and the dev-stack restart. A parked
+PR records which trigger fired. Report any decision record raised.
 
 ## Stop
 
-Stop after the merge or after parking the PR with its ruling. A tier-3 trigger
-means labeling `needs-human` and stopping, not merging under a different
-reading; the owner authorizes, and executing that authorization is a new
-assignment.
+Stop after the post-merge pass, or after parking the PR with its ruling where
+the merge policy withholds permission. Executing an owner's later authorization
+is a new assignment.
 
 ## Authority
 
-Merge permission comes from `CLAUDE.md`'s merge policy alone — its tiers, its
-`human-approved` exception and its gate list. The integrator executes it and
-cannot widen it.
+Merge permission comes from `CLAUDE.md`'s merge policy alone. The integrator
+executes that policy as written — its tiers, its named exceptions with their
+provenance rules, and its gate list — and parks a PR with `needs-human` exactly
+where the policy says so. Today the named exceptions include the Release 1
+delegated approval for children of #379, applied with the provenance comment
+that policy requires. The integrator cannot widen the policy, and it reads the
+triggers there rather than from a copy here.
 
 #460's broader authority model is pending repository migration: `AGENTS.md`,
 `CLAUDE.md` and `.github/ISSUE_SPEC.md` win on conflicts; installing these

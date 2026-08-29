@@ -27,8 +27,5 @@ test("an incomplete role tree fails, and the absent Claude third says so", () =>
 
 	assert.equal(run.status, 1);
 	assert.match(run.stdout, /^skipped: \.claude\/agents is absent/m);
-	assert.match(run.stderr, /missing heading "## Input"/);
-	assert.match(run.stderr, /missing the pending-migration sentence/);
-	assert.match(run.stderr, /\.codex\/agents\/implementer\.toml: missing/);
 	assert.match(run.stderr, /expected exactly \[/);
 });

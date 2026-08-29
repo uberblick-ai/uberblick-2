@@ -36,8 +36,15 @@ An issue conforming to `.github/ISSUE_SPEC.md`: its machine-readable header,
 five sections, acceptance criteria every one of which is verifiable by running
 something, an explicit out-of-scope boundary, and Pointers citing product
 documents as `title (uuid)`. The issue cites the corpus; it never copies the
-product narrative into its body. Grant `ready` only when an implementing agent
-would face no product decision the issue leaves open.
+product narrative into its body. An implementing agent must face no product
+decision the issue leaves open.
+
+`ready` is not the preparer's to apply on its own judgment. Per
+`.github/ISSUE_SPEC.md`'s label table it is set by a human, or by an agent only
+with recorded human sign-off; without that sign-off the issue stays unready
+however complete it looks, and the completion record names what it is waiting
+on. #460's program-approval variant — one recorded approval covering several
+conforming children — is pending the repository migration and is not active.
 
 ## Prohibited adjacent work
 
@@ -55,14 +62,14 @@ raised.
 
 ## Stop
 
-Stop when the issue is prepared and either labeled `ready` or explicitly
-returned with what it is waiting on. The invoker starts the next assignment
-fresh; nothing else in the queue is this role's.
+Stop when the issue is prepared and either carries `ready` under a recorded
+human sign-off or is explicitly returned with what it is waiting on. The invoker
+starts the next assignment fresh; nothing else in the queue is this role's.
 
 ## Authority
 
-`ready` asserts specification-completeness; it grants no permission beyond
-`.github/ISSUE_SPEC.md`.
+`ready` asserts specification-completeness and comes from a human or a recorded
+human sign-off; it grants no permission beyond `.github/ISSUE_SPEC.md`.
 
 #460's broader authority model is pending repository migration: `AGENTS.md`,
 `CLAUDE.md` and `.github/ISSUE_SPEC.md` win on conflicts; installing these

@@ -18,13 +18,14 @@ does not restate either.
 This skill is the invoker: it selects eligible work and dispatches roles whose
 contracts live in `.agents/roles/` — `README.md` there holds what every role
 obeys, and `.claude/agents/` and `.codex/agents/` expose them to the two
-runtimes. Step 6's preflight challenger is `issue-adversary`, whose brief cites
-`preflight.md` rather than restating it; step 7's dispatch is `implementer`; the
-external review round is `implementation-reviewer`; step 2's gates, finding
-dispositions and merge are `integrator`. Role behaviour — input, outcome,
-prohibited adjacent work, completion record, stop — lives in those contracts and
-is not repeated here. Roles are invoked explicitly, never as a side effect of
-being installed, and this file stays executable on its own.
+runtimes. Three are dispatched as sub-agents: `issue-adversary` for step 6's
+challenge, whose brief cites `preflight.md` rather than restating it,
+`implementer` for step 7, and `implementation-reviewer` for the external review
+round. The fourth is not dispatched: this session performs the `integrator`
+role itself in step 2 — gates, dispositions, merge, post-merge pass — bound by
+that contract, until the #460 migration lands. Role behaviour lives in the
+contracts and is not repeated here; roles are invoked explicitly, never as a
+side effect of being installed, and this file stays executable on its own.
 
 ## Hard rules
 

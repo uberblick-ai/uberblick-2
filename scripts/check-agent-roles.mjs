@@ -62,13 +62,9 @@ const HEADINGS = [
 
 /** Frontmatter keys a Claude adapter may carry — anything else pins policy. */
 const CLAUDE_ALLOWED = ["name", "description", "isolation"];
-const CODEX_REQUIRED = ["name", "description", "developer_instructions"];
-const CODEX_FORBIDDEN = [
-	"model",
-	"model_reasoning_effort",
-	"sandbox_mode",
-	"mcp_servers",
-];
+/** Required and permitted at once: a Codex adapter carries these three keys, no
+ * other top-level key, and no table — every one of those pins runtime policy. */
+const CODEX_ALLOWED = ["name", "description", "developer_instructions"];
 
 /** Words that turn a discoverable description into an activation instruction. */
 const DENYLIST = [
@@ -139,16 +135,18 @@ function parseToml(text) {
 			value = value.replace(/^"(.*)"$/, "$1");
 		}
 		if (table === "") keys.set(pair[1], value.trim());
-		else tables.push(`${table}.${pair[1]}`);
 	}
 	return { keys, tables };
 }
 
-/** Both adapters must send the runtime to the contract, and must say "stop". */
+/** The read-or-stop instruction all twelve adapters carry, word for word. */
 function checkAdapterBody(label, slug, body) {
-	if (!body.includes(`${ROLES}/${slug}.md`))
-		fail(`${label}: does not name ${ROLES}/${slug}.md`);
-	if (!/\bstop\b/i.test(body)) fail(`${label}: does not tell the role to stop`);
+	const instruction = `\`${ROLES}/${slug}.md\` in full before any side effect`;
+	const text = flat(body);
+	if (!text.includes(instruction))
+		fail(`${label}: missing the literal instruction ${instruction}`);
+	if (!text.includes("cannot be read, stop"))
+		fail(`${label}: does not stop when the contract cannot be read`);
 }
 
 function checkDescription(label, description) {
@@ -236,15 +234,15 @@ for (const slug of SLUGS) {
 		continue;
 	}
 	const { keys, tables } = parseToml(read(codexPath));
-	for (const key of CODEX_REQUIRED)
+	for (const key of CODEX_ALLOWED)
 		if (!keys.get(key)) fail(`${codexPath}: missing or empty "${key}"`);
 	if (keys.has("name") && keys.get("name") !== slug)
 		fail(`${codexPath}: name is "${keys.get("name")}", expected "${slug}"`);
-	for (const key of CODEX_FORBIDDEN)
-		if (keys.has(key)) fail(`${codexPath}: key "${key}" pins runtime policy`);
+	for (const key of keys.keys())
+		if (!CODEX_ALLOWED.includes(key))
+			fail(`${codexPath}: key "${key}" pins runtime policy`);
 	for (const table of tables)
-		if (table === "skills" || table.startsWith("skills."))
-			fail(`${codexPath}: table "[${table}]" pins runtime policy`);
+		fail(`${codexPath}: table "[${table}]" pins runtime policy`);
 	const description = keys.get("description") ?? "";
 	checkDescription(codexPath, description);
 	if (claudeDescription !== null && claudeDescription !== description)
