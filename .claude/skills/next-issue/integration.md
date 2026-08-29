@@ -53,24 +53,25 @@ merges into its parent feature branch and silently orphans the reviewed work
 **Tier check.** Classify the PR against CLAUDE.md's "Merge policy" tiers by
 reading its full diff (`gh pr diff <n>`) and how its review findings were
 dispositioned — never from the issue's `Touches`. `--name-only` is just the
-pathname inventory, and it only catches the mechanical triggers (`schema`,
-`.github/`, `.claude/skills/`); the semantic ones live in the hunks — a
-`package.json` entry landing under `dependencies` rather than `devDependencies`,
-auth or token semantics changing inside otherwise ordinary code, a CLAUDE.md
-hunk in the decided-architecture or invariants sections, or this PR overruling a
-major Copilot/Codex finding. A tier-3 trigger means you do not merge: label the
-PR `needs-human`, comment which trigger fired, fire a PushNotification naming
-the PR and the trigger so the owner learns a merge decision awaits them, then
-park it and report.
+pathname inventory: it identifies hunks to classify but never fires tier 3 by
+itself. The triggers live in the change — for example breaking persisted-data
+compatibility rather than an additive optional schema field; authority or merge
+rules rather than routine process clarification; a runtime dependency rather
+than a dev dependency; auth/token semantics; a decided-architecture or
+invariants edit; or overruling a major Copilot/Codex finding. A tier-3 trigger
+means you do not merge: label the PR `needs-human`, comment which trigger fired,
+fire a PushNotification naming the PR and the trigger so the owner learns a
+merge decision awaits them, then park it and report.
 
 **Exception — `human-approved`.** A PR carrying the owner-set `human-approved`
 label is merge-authorized: execute the merge as tier 2 (merge report first),
 every other gate unchanged — evidence fresh at the exact merge head, zero
-unaddressed remarks. The label is the owner's act alone; never set it yourself,
-and never treat an owner comment as the label. Approval covers the PR's reviewed
-shape plus fix-ups and rebases; if later commits change the design beyond that,
-re-add `needs-human` with a comment naming the delta instead of merging. Tier 1
-and Tier 2 self-merge as specified there (Tier 2 requires the merge-report
+unaddressed remarks. The owner sets the label directly or explicitly directs a
+session to set it for named PRs; that session posts the direction as provenance.
+Never infer approval from `ready` or an unrelated owner comment. Approval covers
+the intended PR shape plus fix-ups and rebases; if later commits materially
+expand the design or scope, replace it with `needs-human` and name the delta.
+Tier 1 and Tier 2 self-merge as specified there (Tier 2 requires the merge-report
 comment on the PR first). Every merge report ends with two machine-readable
 lines — `findings_p1_p2_p3: <n>/<n>/<n>` and `deferred_findings: <issue refs or
 none>` — and only these two: timestamps, round counts and run counts stay
