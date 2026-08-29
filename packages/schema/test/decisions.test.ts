@@ -206,6 +206,44 @@ describe("the decision log", () => {
     expect(uuids(b)).toEqual([TOKENS, SLUGS]);
   });
 
+  it("lets a deliberate re-add append after an unseen stale reorder", () => {
+    const a = requirement();
+    addDecision(a, SLUGS);
+    addDecision(a, TOKENS);
+    const b = new Y.Doc();
+    syncDocs(a, b);
+
+    removeDecision(a, SLUGS);
+    addDecision(a, SLUGS);
+    reorderDecisions(b, SLUGS, 0);
+    syncDocs(a, b);
+
+    expect(uuids(a)).toEqual([TOKENS, SLUGS]);
+    expect(uuids(b)).toEqual([TOKENS, SLUGS]);
+  });
+
+  it("keeps decision graph edges through curated-link replacement", () => {
+    const doc = requirement();
+    addDecision(doc, SLUGS);
+
+    setLinks(doc, [ROOMS]);
+
+    expect(getMeta(doc).links).toEqual([ROOMS, SLUGS]);
+  });
+
+  it("converges decision and curated edges from concurrent writers", () => {
+    const a = requirement();
+    const b = new Y.Doc();
+    syncDocs(a, b);
+
+    addDecision(a, SLUGS);
+    setLinks(b, [ROOMS]);
+    syncDocs(a, b);
+
+    expect(getMeta(a).links).toEqual([ROOMS, SLUGS]);
+    expect(getMeta(b).links).toEqual([ROOMS, SLUGS]);
+  });
+
   it("keeps a reference whose document is missing or archived, flagged unavailable", () => {
     const doc = requirement();
     addDecision(doc, SLUGS);

@@ -183,7 +183,7 @@ export function getMeta(ydoc: Y.Doc): DocMeta {
     description:
       typeof description === "string" && description !== "" ? description : null,
     ...lifecycle,
-    links: readStringArray(meta.get("links")),
+    links: effectiveLinks(ydoc, readStringArray(meta.get("links"))),
   };
 }
 
@@ -269,16 +269,67 @@ export function setStatus(ydoc: Y.Doc, status: DocumentStatus | ""): void {
  * appearing more than once keeps its first occurrence, because two replicas
  * reordering concurrently each delete-and-insert and storage ends up holding it
  * twice. The write side refuses duplicates, which a merge can still produce.
+ * Ordinarily the first occurrence wins, matching sidebar order. After an
+ * explicit remove and re-add, the last occurrence wins instead: `addDecision`
+ * appends, so an unseen reorder of the removed occurrence cannot pull that
+ * deliberate restoration back to its stale position when the replicas merge.
  */
 function storedDecisions(ydoc: Y.Doc): string[] {
+  const meta = getMetaMap(ydoc);
+  const values = getDecisionsArray(ydoc)
+    .toArray()
+    .map((value) => canonicalDocumentUuid(value));
+  const restoredLastIndex = new Map<string, number>();
+  for (const [index, uuid] of values.entries()) {
+    if (
+      uuid !== null &&
+      decisionLevel(meta, DECISION_ADDED_PREFIX, uuid) > 0
+    ) {
+      restoredLastIndex.set(uuid, index);
+    }
+  }
+
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const value of getDecisionsArray(ydoc).toArray()) {
-    const uuid = canonicalDocumentUuid(value);
+  for (const [index, uuid] of values.entries()) {
     if (uuid === null || seen.has(uuid)) continue;
     if (!decisionIsVisible(ydoc, uuid)) continue;
+    const restoredAt = restoredLastIndex.get(uuid);
+    if (restoredAt !== undefined && restoredAt !== index) continue;
     seen.add(uuid);
     out.push(uuid);
+  }
+  return out;
+}
+
+/**
+ * The public graph edges: curated replacements plus every active decision.
+ *
+ * `setLinks` remains the sole writer of the curated array, so it keeps its
+ * replacement and CRDT last-writer semantics. Decision edges derive from the
+ * authoritative ordered slot instead of racing that whole-array write. Where a
+ * curated spelling already names an active decision, keep its first position
+ * but canonicalize and deduplicate it.
+ */
+function effectiveLinks(ydoc: Y.Doc, curated: string[]): string[] {
+  const decisions = storedDecisions(ydoc);
+  if (decisions.length === 0) return curated;
+
+  const decisionSet = new Set(decisions);
+  const seenDecisions = new Set<string>();
+  const out: string[] = [];
+  for (const link of curated) {
+    const canonical = canonicalDocumentUuid(link);
+    if (canonical === null || !decisionSet.has(canonical)) {
+      out.push(link);
+      continue;
+    }
+    if (seenDecisions.has(canonical)) continue;
+    seenDecisions.add(canonical);
+    out.push(canonical);
+  }
+  for (const decision of decisions) {
+    if (!seenDecisions.has(decision)) out.push(decision);
   }
   return out;
 }
@@ -308,10 +359,9 @@ export function readDecisions(ydoc: Y.Doc, dirDoc?: Y.Doc): DecisionReference[] 
 }
 
 /**
- * Append a decision document to the log and its canonical graph edge to
- * `meta.links`, in one transaction. Existing links stay in their order; any
- * alternate spelling or duplicate of this target is replaced by one canonical
- * uuid.
+ * Append a decision document to the log. Its graph edge is derived from this
+ * authoritative slot by `getMeta`, so a concurrent curated-link replacement
+ * cannot drop it and `setLinks` remains the sole writer of its plain array.
  *
  * Validated through the same door a `docLink` target goes through, so the slot
  * can never hold a room name, a title or a malformed id, and an upper-cased
@@ -333,15 +383,6 @@ export function addDecision(ydoc: Y.Doc, uuid: string): void {
   const meta = getMetaMap(ydoc);
   const removedAt = decisionLevel(meta, DECISION_REMOVED_PREFIX, canonical);
   const addedAt = decisionLevel(meta, DECISION_ADDED_PREFIX, canonical);
-  const links = readStringArray(meta.get("links"));
-  let targetSeen = false;
-  const nextLinks = links.flatMap((link) => {
-    if (canonicalDocumentUuid(link) !== canonical) return [link];
-    if (targetSeen) return [];
-    targetSeen = true;
-    return [canonical];
-  });
-  if (!targetSeen) nextLinks.push(canonical);
 
   ydoc.transact(() => {
     // A deliberate add after a removal is the only operation that clears the
@@ -355,7 +396,6 @@ export function addDecision(ydoc: Y.Doc, uuid: string): void {
       );
     }
     decisions.push([canonical]);
-    meta.set("links", nextLinks);
   });
 }
 
