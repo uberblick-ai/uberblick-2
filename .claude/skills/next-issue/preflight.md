@@ -141,7 +141,7 @@ the current claims, and take the outcome off this table.
 | Still eligible at the recheck | What preflight found | Outcome | Labels | Claim | Comment | Findings narrative |
 |---|---|---|---|---|---|---|
 | yes | nothing blocking (`none`) | dispatch | none — the owner's `ready` follows the verdict; `in-progress` is the implementer's claim | yes | yes | only when a challenger ran or the self-check found something |
-| yes | a stale or incorrect contract (`stale-spec`) | return-to-coordination | remove `ready` | no | yes | yes |
+| yes | an adversary finds a stale or incorrect contract (`stale-spec`) | return-to-coordination | remove `ready` | no | yes | yes |
 | yes | an owner-only product decision (`product-decision`) | park-needs-decision | remove `ready`, add `needs-decision` | no | yes | yes |
 | no | anything (`any`) | requeue | none | no | no | no |
 
@@ -158,13 +158,17 @@ the claim holder or wait for a fresh pickup; acting on live work from the
 outside is worse than losing the finding.
 
 Among the stops, which applies is the difference between evidence and authority.
-A stale contract, a missing outcome or invariant, or a scope or splitting
-decision the grounding read can settle goes back to coordination with the
-evidence: `ready` comes off, the comment says what is wrong, and a corrected
-body has to pass `.github/ISSUE_SPEC.md` and be granted `ready` before any later
-pickup. Only an unresolved *product* question — one the repository cannot
-answer — takes `needs-decision`, with concrete options and your recommendation
-per the spec's exit path.
+An adversary returns a stale contract, missing outcome or invariant, or a scope
+or splitting decision that repository evidence can settle to coordination:
+`ready` comes off, the comment says what is wrong, and a corrected body must pass
+`.github/ISSUE_SPEC.md` before another pickup. A preparer does not take that
+terminal route. When its self-check or bounded challenger finds stale wording it
+can correct without changing meaning, it fixes the body inside the same claimed
+pass, then repeats the affected grounding, challenge and recheck before one final
+handoff. Missing, contradictory or interpretive product meaning instead returns
+to product interaction. Only an unresolved *product* question — one the
+repository cannot answer — takes `needs-decision`, with concrete options and the
+recommendation the spec's exit path requires.
 
 ## Record it once, and only after the recheck
 
@@ -179,13 +183,13 @@ timings or round narration. A clean trivial self-check omits only a separate
 findings narrative: its `Done:` / `Tier: trivial — cleared for ready` handoff is
 still required. A requeue writes none.
 
-**The comment is keyed by `<issue, base SHA>`.** Before posting, look for a
-preflight comment on the issue already recording that same base SHA. If one is
-there, this preflight ran before and died after posting it: edit that comment
-instead of posting beside it. Exactly one preflight comment per issue per base
-SHA, however often a preflight is re-run. A later pickup that grounds at a newer
-commit is a different key and gets its own comment — not a duplicate, a second
-preflight.
+**The comment is keyed by `<issue, role, session-or-run identity, base SHA>`** —
+the distinct claimed pass plus its grounding. Before posting, look for a comment
+with that whole key. If one exists, this same pass died after posting and may edit
+it in place. A different role or later claim at the same base SHA posts its own
+`Done:` handoff; it never edits a completed pass. A newer grounding is likewise
+a different key. The separate records are how every claim stays consumed and a
+fresh role reconstructs the latest transition from GitHub alone.
 
 **Findings are not requirements.** Material implementation risks and options
 travel to the implementer in the brief, as options. They are never edited into
@@ -199,6 +203,5 @@ the same case and not a stop: name the freedom in the brief and dispatch. Only a
 repeated by the next pickup, and the repeat costs tokens and nothing else,
 because both of its durable effects are guarded: the owner's `ready` comes after
 this gate, so a second run either re-reaches dispatch or finds the issue no
-longer eligible at its recheck and requeues; and the comment is keyed by base
-SHA, so a second run at the same commit edits the first run's comment rather
-than posting a second.
+longer eligible at its recheck and requeues; and a retry of the same claimed pass
+edits only the comment carrying its full pass key rather than posting a second.

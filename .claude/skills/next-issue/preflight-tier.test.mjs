@@ -32,6 +32,7 @@ import {
   AXES,
   BLOCKERS,
   classify,
+  handoffKey,
   preflight,
   routeTransition,
 } from "./preflight-tier.mjs";
@@ -109,7 +110,7 @@ describe("the skill's tables and the module's tables are the same tables", () =>
     assert.deepEqual(new Set(rows.map((row) => Number(row[5]))), new Set([0, 1, 2]));
   });
 
-  it("routes every documented row of the lifecycle table, whatever the tier", () => {
+  it("routes every documented lifecycle row for each tier that can own it", () => {
     const rows = markdownTable("| Still eligible at the recheck |", "| Outcome |", "| Claim |");
     for (const [
       eligible = "",
@@ -128,6 +129,9 @@ describe("the skill's tables and the module's tables are the same tables", () =>
 
       for (const blocker of cases) {
         for (const axes of everyCombination()) {
+          // The prose names stale-spec as an adversary-only terminal outcome;
+          // smaller tiers correct meaning-preserving drift inside the pass.
+          if (blocker === "stale-spec" && classify(axes) !== "substantial") continue;
           const signals = { ...axes, blocker, stillEligible: eligible === "yes" };
           const where = JSON.stringify(signals);
           const plan = preflight(signals);
@@ -227,6 +231,84 @@ describe("the skill's tables and the module's tables are the same tables", () =>
     });
     assert.equal(challenged.challengers, 1);
     assert.equal(challenged.comment, true);
+    assert.equal(routeTransition({ transition: "small-clearance" }).role, null);
+    assert.equal(
+      routeTransition({ transition: "small-clearance", readyAfter: true }).role,
+      "implementer",
+    );
+  });
+
+  it("keeps every same-base claimed pass as a distinct completed handoff", () => {
+    const baseSha = "aaaaaaaa";
+    const issue = "#123";
+    const preparer = { issue, role: "issue-preparer", runId: "prep-1", baseSha };
+    const adversary = { issue, role: "issue-adversary", runId: "adv-1", baseSha };
+    const comments = new Map();
+
+    comments.set(handoffKey(preparer), { pass: preparer, transition: "substantial-handoff" });
+    // A retry of this claimed pass edits only its own record.
+    comments.set(handoffKey(preparer), { pass: preparer, transition: "substantial-handoff" });
+    comments.set(handoffKey(adversary), { pass: adversary, transition: "adversary-dispatch" });
+
+    assert.equal(comments.size, 2);
+    assert.notEqual(handoffKey(preparer), handoffKey(adversary));
+    for (const claim of [preparer, adversary]) assert.ok(comments.has(handoffKey(claim)));
+    assert.equal(
+      routeTransition({ transition: [...comments.values()].at(-1).transition, readyAfter: true })
+        .role,
+      "implementer",
+    );
+  });
+
+  it("preserves a parked handoff when owner ready admits a new preparer pass", () => {
+    const baseSha = "aaaaaaaa";
+    const issue = "#123";
+    const parked = { issue, role: "issue-adversary", runId: "adv-2", baseSha };
+    const recovered = { issue, role: "issue-preparer", runId: "prep-2", baseSha };
+    const comments = new Map([
+      [handoffKey(parked), { pass: parked, transition: "decision-recovery" }],
+    ]);
+
+    assert.deepEqual(routeTransition({ transition: "decision-recovery", readyAfter: true }), {
+      role: "issue-preparer",
+      labels: { remove: ["ready"] },
+    });
+    comments.set(handoffKey(recovered), { pass: recovered, transition: "small-clearance" });
+
+    assert.equal(comments.size, 2);
+    for (const claim of [parked, recovered]) assert.ok(comments.has(handoffKey(claim)));
+    assert.equal(routeTransition({ transition: "small-clearance" }).role, null);
+    assert.equal(
+      routeTransition({ transition: "small-clearance", readyAfter: true }).role,
+      "implementer",
+    );
+  });
+
+  it("keeps meaning-preserving preparer correction inside one pass and one Done", () => {
+    const bounded = {
+      materiality: "behavioral",
+      uncertainty: "low",
+      blastRadius: "local",
+      reversibility: "easy",
+    };
+    assert.throws(
+      () => preflight({ ...bounded, blocker: "stale-spec" }),
+      /same claimed pass.*repeats the affected grounding, challenge and recheck/,
+    );
+
+    // After the in-pass correction and repeated checks, there is one terminal
+    // handoff, and only a later owner ready admits the one next role.
+    const final = preflight({ ...bounded, findings: true });
+    const pass = {
+      issue: "#124",
+      role: "issue-preparer",
+      runId: "prep-3",
+      baseSha: "aaaaaaaa",
+    };
+    const comments = new Map([[handoffKey(pass), final]]);
+    assert.equal(comments.size, 1);
+    assert.equal(final.outcome, "dispatch");
+    assert.equal(final.comment, true);
     assert.equal(routeTransition({ transition: "small-clearance" }).role, null);
     assert.equal(
       routeTransition({ transition: "small-clearance", readyAfter: true }).role,

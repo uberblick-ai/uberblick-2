@@ -27,9 +27,9 @@ An issue conforming to `.github/ISSUE_SPEC.md` that cites the corpus rather than
 copying it, and that leaves an implementing agent no product decision to make.
 
 The intent-setting human–LLM interaction writes product behavior and reasoning
-into Uberblick. Check alignment against it, make only meaning-preserving
-editorial fixes, and return semantic gaps — missing, contradictory or
-interpretive content — to product interaction instead of reconstructing them.
+into Uberblick. Fix meaning-preserving editorial drift inside this pass, then
+repeat its grounding, challenge and recheck; return semantic gaps — missing,
+contradictory or interpretive content — to product interaction, never inventing it.
 
 Ground and classify the issue by `.claude/skills/next-issue/preflight.md`: the
 trivial self-check and the bounded tier's one challenger are yours, run inside

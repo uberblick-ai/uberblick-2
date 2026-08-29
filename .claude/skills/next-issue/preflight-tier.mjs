@@ -64,6 +64,16 @@ export const TIERS = ["trivial", "bounded", "substantial"];
 /** How many independent challengers each tier runs before implementation. */
 export const CHALLENGERS = { trivial: 0, bounded: 1, substantial: 2 };
 
+/**
+ * The durable comment identity: retries of one claimed pass may edit it, while
+ * later roles or claims at the same grounding must post a separate handoff.
+ *
+ * @param {{issue: string, role: string, runId: string, baseSha: string}} pass
+ */
+export function handoffKey({ issue, role, runId, baseSha }) {
+  return JSON.stringify([issue, role, runId, baseSha]);
+}
+
 /** Every way a preflight can end. Only `dispatch` leads to a claim. */
 export const OUTCOMES = [
   "dispatch",
@@ -254,6 +264,11 @@ export function preflight(signals) {
     });
   }
   if (blocker === "stale-spec") {
+    if (tier !== "substantial") {
+      throw new Error(
+        "preflight: an issue-preparer corrects a meaning-preserving stale spec in the same claimed pass, then repeats the affected grounding, challenge and recheck before choosing one final outcome",
+      );
+    }
     return plan("return-to-coordination", { remove: ["ready"], comment: true });
   }
 
