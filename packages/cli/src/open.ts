@@ -31,7 +31,12 @@
  *    `Cache-Control: no-store` on it, matched *ahead* of the SPA fallback. That
  *    document is what lets one prebuilt bundle target any hub; the fallback
  *    answering it with the app's own HTML is precisely the production failure
- *    #91 exists to remove.
+ *    #91 exists to remove. It is resolved **per request**, not once at startup
+ *    (#449): after `ub remote join` or `ub workspace use` changes this machine's
+ *    binding, a reload sees the change instead of the values this process
+ *    happened to start with. An already-open page is not retargeted — nothing
+ *    here reaches into a running client — so the freshness this buys is a
+ *    reload's, which is the step that used to require restarting `ub open`.
  *
  * 4. **It never serves a blank page.** With no bundle and no toolchain it exits
  *    non-zero naming what is missing, rather than opening a browser onto 404s.
@@ -58,7 +63,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { createReadStream, readFileSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import { isIPv4 } from "node:net";
@@ -71,6 +76,7 @@ import { SYNC_PROTOCOL_VERSION, isProtocolVersion } from "@uberblick/hub/protoco
 import { DEFAULT_HUB_URL, resolveMcpConfig } from "@uberblick/mcp-server";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
+import { initLockPath } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import {
@@ -336,10 +342,9 @@ function fileFor(root: string, pathname: string): string {
  * decoration and all — the client parses the uuid out of it, and the slug is
  * what makes the switcher readable.
  *
- * Rendered once, at startup, and served unchanged: the secret is this machine's
- * resolved configuration, and a `ub open` that outlived a rotation is stopped
- * and started like anything else. Empty when there is none — the client then
- * says it cannot authenticate rather than pretending it can.
+ * Serialization only. What goes *into* it is resolved per request by
+ * {@link configSource}. Empty secret when there is none — the client then says
+ * it cannot authenticate rather than pretending it can.
  */
 export function configDocument(
   hubUrl: string,
@@ -353,6 +358,68 @@ export function configDocument(
   });
 }
 
+/**
+ * This machine's configuration, as the document, right now.
+ *
+ * **Resolved against the environment this process started in**, never against
+ * an earlier resolution's output. {@link resolveConfig} returns an *environment*
+ * with what it resolved written over the process's own, so a `WORKSPACE_ID` or
+ * `HUB_AUTH_TOKEN` that came from a file arrives back looking exactly like an
+ * environment pin. Feeding that back in would freeze the first resolution's
+ * file values into apparent permanent overrides, and no later `ub remote join`
+ * would ever be seen again — the refresh would resolve, and resolve the same
+ * answer forever. Passing the original environment keeps the precedence honest:
+ * a genuine pin still wins every time, and a file value stays a file value.
+ */
+function currentConfigDocument(env: NodeJS.ProcessEnv): string {
+  const resolved = resolveConfig({ env });
+  return configDocument(
+    trimmed(resolved.env.HUB_URL) ?? DEFAULT_HUB_URL,
+    trimmed(resolved.env.WORKSPACE_ID),
+    trimmed(resolved.env.HUB_AUTH_TOKEN) ?? "",
+  );
+}
+
+/**
+ * The per-request source of the configuration document, with the one guarantee
+ * a reader of two files needs: it never serves a torn pair.
+ *
+ * `ub init`, `ub remote join` and `ub workspace use` publish `credentials.json`
+ * and `config.json` as separate atomic writes, holding `.init.lock` across both.
+ * Each file is therefore whole whenever it is read, but the *pair* is only
+ * consistent outside that window — a read interleaved with the write can pick up
+ * the new secret beside the old endpoint, which is a document that authenticates
+ * against a hub nobody configured.
+ *
+ * So the lock is consulted, and never taken or waited for: a request is answered
+ * now, and `ub open` is not a party to that write. While it is held, the last
+ * document that resolved outside a write is served again — stale by at most one
+ * completing command, and coherent, which is the property that matters. It is
+ * checked **again after resolving**, because the read can start before the lock
+ * appears and finish after both publications; that second check is what catches
+ * the interleaving the first cannot see.
+ *
+ * Only an *active* write falls back like that. A completed removal, or a
+ * `credentials.json` refused for its mode, resolves normally and is served
+ * normally — {@link resolveConfig}'s own semantics, not a cache pretending a
+ * deleted secret is still there.
+ */
+function configSource(env: NodeJS.ProcessEnv): () => string {
+  const lock = initLockPath(env);
+  let accepted = currentConfigDocument(env);
+  return () => {
+    if (existsSync(lock)) {
+      return accepted;
+    }
+    const fresh = currentConfigDocument(env);
+    if (existsSync(lock)) {
+      return accepted;
+    }
+    accepted = fresh;
+    return accepted;
+  };
+}
+
 function respond(
   request: IncomingMessage,
   response: ServerResponse,
@@ -364,7 +431,7 @@ function respond(
   response.end(request.method === "HEAD" ? undefined : body);
 }
 
-function serveBundle(root: string, document: string): Server {
+function serveBundle(root: string, document: () => string): Server {
   return createServer((request, response) => {
     if (request.method !== "GET" && request.method !== "HEAD") {
       respond(request, response, 405, { allow: "GET, HEAD" }, "");
@@ -384,7 +451,7 @@ function serveBundle(root: string, document: string): Server {
           // exists to remove.
           "cache-control": "no-store",
         },
-        document,
+        document(),
       );
       return;
     }
@@ -795,7 +862,12 @@ export async function openCommand(
     return 2;
   }
 
-  const resolved = resolveConfig();
+  // Kept, not just used: the configuration document is re-resolved from this
+  // same environment on every request, and resolving from anything downstream of
+  // a resolution would turn file values into permanent pins — see
+  // {@link currentConfigDocument}.
+  const startupEnv: NodeJS.ProcessEnv = { ...process.env };
+  const resolved = resolveConfig({ env: startupEnv });
   for (const warning of resolved.warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }
@@ -853,10 +925,9 @@ export async function openCommand(
   }
 
   const workspace = trimmed(env.WORKSPACE_ID);
-  const server = serveBundle(
-    plan.dir,
-    configDocument(hubUrl, workspace, trimmed(env.HUB_AUTH_TOKEN) ?? ""),
-  );
+  // `workspace` is for the banner, which reports what this command started
+  // with; the document is resolved afresh for whoever asks for it.
+  const server = serveBundle(plan.dir, configSource(startupEnv));
   try {
     await listen(server, WEB_HOST, options.port);
     owned.server = server;
