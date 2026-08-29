@@ -7,11 +7,13 @@ import {
   appendBlock,
   exportMarkdown,
   getDecisionsArray,
+  getMeta,
   importMarkdown,
   initDoc,
   readDecisions,
   removeDecision,
   reorderDecisions,
+  setLinks,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "../src/index.js";
@@ -73,6 +75,21 @@ describe("the decision log", () => {
     expect(() => addDecision(doc, SLUGS)).toThrow(
       InvalidDecisionReferenceError,
     );
+  });
+
+  it("adds the canonical graph edge atomically without disturbing other links", () => {
+    const doc = requirement();
+    setLinks(doc, [ROOMS, SLUGS.toUpperCase(), SLUGS]);
+    let updates = 0;
+    doc.on("update", () => {
+      updates += 1;
+    });
+
+    addDecision(doc, SLUGS);
+
+    expect(uuids(doc)).toEqual([SLUGS]);
+    expect(getMeta(doc).links).toEqual([ROOMS, SLUGS]);
+    expect(updates).toBe(1);
   });
 
   it("refuses a non-uuid, a reserved room name and a duplicate, storing nothing", () => {
@@ -169,6 +186,26 @@ describe("the decision log", () => {
     expect(uuids(a)).toHaveLength(3);
   });
 
+  it("keeps a removal hidden when it races a reorder, then permits a deliberate re-add", () => {
+    const a = requirement();
+    addDecision(a, SLUGS);
+    addDecision(a, TOKENS);
+    const b = new Y.Doc();
+    syncDocs(a, b);
+
+    removeDecision(a, SLUGS);
+    reorderDecisions(b, SLUGS, 1);
+    syncDocs(a, b);
+
+    expect(uuids(a)).toEqual([TOKENS]);
+    expect(uuids(b)).toEqual([TOKENS]);
+
+    addDecision(a, SLUGS);
+    syncDocs(a, b);
+    expect(uuids(a)).toEqual([TOKENS, SLUGS]);
+    expect(uuids(b)).toEqual([TOKENS, SLUGS]);
+  });
+
   it("keeps a reference whose document is missing or archived, flagged unavailable", () => {
     const doc = requirement();
     addDecision(doc, SLUGS);
@@ -240,6 +277,31 @@ describe("the decision log in markdown", () => {
 
     expect(markdown).toContain(`- ${SLUGS}\n`);
     expect(markdown).not.toContain("(unavailable)");
+  });
+
+  it("folds line breaks and renders a title as literal inline markdown", () => {
+    const doc = requirement();
+    addDecision(doc, SLUGS);
+    const dir = directory([
+      {
+        uuid: SLUGS,
+        title:
+          "Decision\n## Injected *bold* [link](https://example.com) `code` _em_ ~~strike~~",
+        status: "decided",
+      },
+    ]);
+
+    const markdown = exportMarkdown(doc, { directory: dir });
+    const rows = markdown
+      .split("\n")
+      .filter((line) => line.startsWith(`- ${SLUGS}`));
+
+    expect(rows).toEqual([
+      `- ${SLUGS} — ` +
+        "Decision ## Injected \\*bold\\* \\[link](https://example.com) " +
+        "\\`code\\` \\_em\\_ \\~\\~strike\\~\\~ — decided",
+    ]);
+    expect(markdown).not.toMatch(/^## Injected/m);
   });
 
   it("does not reconstruct the slot on import, and says so in the export", () => {

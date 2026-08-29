@@ -3,7 +3,7 @@
  *
  * Owns the Y.Doc layout for an uberblick document:
  *   - `meta`        Y.Map: uuid, title, description, tags, links-by-UUID,
- *                        kind and status
+ *                        kind, status and internal decision remove/add levels
  *   - `blocks`      Y.XmlFragment: one Y.XmlElement per block, each holding a
  *                   single Y.XmlText of plain-text source
  *                   (types: paragraph, heading, code, mermaid, list-item,

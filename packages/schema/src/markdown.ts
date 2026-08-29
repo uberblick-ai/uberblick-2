@@ -724,7 +724,10 @@ function renderDecision(
   resolved: boolean,
 ): string {
   if (!resolved) return `- ${reference.uuid}`;
-  const title = reference.title ?? "(unknown)";
+  const title = escapeInline(
+    (reference.title ?? "(unknown)").replace(/[\r\n]+/g, " "),
+    { insideLabel: false, hugged: false },
+  );
   const state = reference.available
     ? (reference.status ?? "(no status)")
     : "(unavailable)";

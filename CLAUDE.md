@@ -171,9 +171,16 @@ the fallback, which is exactly why CI is high priority.
   the parse) before the id reaches rooms, token claims, or the database
   filename — nothing two machines compare ever carries a slug. Tenancy lives in
   the room key from day one so a hosted hub never needs a room migration.
-- Doc layout: `meta` (Y.Map: uuid, title, tags, links-by-UUID), `blocks`
+- Doc layout is a closed set of four root types: `meta` (Y.Map: uuid, title,
+  description, tags, links-by-UUID, kind, status, and internal decision
+  remove/add levels), `blocks`
   (Y.XmlFragment, one element per block with stable `id` attrs; types:
-  paragraph, heading, code, mermaid, list-item, quote, table), `annotations` (Y.Map of thread JSON;
+  paragraph, heading, code, mermaid, list-item, quote, table), `annotations`
+  (Y.Map of thread JSON), and `decisions` (Y.Array of decision-document UUID
+  strings in stored order: the fixed decision-log slot). An older client that
+  never opens an unknown root type preserves it across Yjs edit and sync; the
+  loss boundary is Markdown export/import. Adding another fixed root type is a
+  decided-architecture change, not an open-ended slot mechanism. Annotation
   ranges are anchored by a `comment` formatting mark carrying the threadId on
   the block's Y.XmlText — marks survive splits, re-types, and concurrent
   edits, unlike relative positions). Inline formatting rides the same
