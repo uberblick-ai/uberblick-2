@@ -113,31 +113,28 @@ implementation (or Workflow pipelines for fan-out), then validate their output
 
 - **Tier 1 — self-merge.** `Touches ⊆ {repo}` and no new
   dependencies: the implementation loop merges as soon as all gates are green.
-- **Tier 2 — self-merge with evidence.** Feature packages (`hub`,
-  `mcp-server`, `web`): all gates green **plus** a merge-report comment on the
-  PR — acceptance criteria checked off one by one, gate outcomes, any rejected
+- **Tier 2 — self-merge with evidence.** All changes that meet neither tier 1
+  nor tier 3, including feature packages and backward-compatible additive
+  schema work: all gates green **plus** a merge-report comment on the PR —
+  acceptance criteria checked off one by one, gate outcomes, any rejected
   review findings with reasons. The coordination session audits post-merge
-  (while updating the product docs); audit findings become issues, not
-  reverts, unless critical.
+  (while updating the product docs); audit findings become issues, not reverts,
+  unless critical.
 - **Tier 3 — `needs-human`, pre-merge.** Label the PR `needs-human`, park it,
   continue with other eligible issues. The owner authorizes by swapping
-  `needs-human` for `human-approved` (owner-set only); the loop then executes
-  that merge as tier 2 — merge report, fresh gate evidence at the merge head,
-  zero unaddressed remarks all still required. Triggers: any diff touching `schema`;
-  changes to this file's decided-architecture or invariants sections; new
-  *runtime* dependencies; auth/token semantics; overruling a major
-  Copilot/Codex finding; and any change to the process itself — `.github/`
-  spec/workflow files or `.claude/skills/` (a bug in the loop's own rules
-  multiplies into everything it merges).
-- **Release 1 (#379) — delegated approval, one program.** A PR that closes a
-  child of #379 does not park `needs-human`: the coordinator applies
-  `human-approved` with a provenance comment citing the owner's directive of
-  2026-08-27 ("all work on the release 1 can be approved without a human - the
-  rule does not apply for 379 and its children") and executes the merge as tier
-  2. Every other gate is unchanged — immutable review at the merge head, CI,
-  Copilot, the Codex round where the gate list calls for one, acceptance
-  validation, zero unaddressed remarks, merge report. The exception names #379
-  and lapses when #379 closes; no other tier trigger changes.
+  `needs-human` for `human-approved`, or explicitly directs a session to do so
+  for named PRs with a provenance comment; the loop then executes that merge as
+  tier 2. Every other gate remains. Triggers: a breaking or destructive schema
+  change, data migration, or break in persisted-data compatibility; a change to
+  CRDT or concurrency semantics; changes to this file's decided-architecture or
+  invariants sections; new *runtime* dependencies; auth/token semantics;
+  overruling a major Copilot/Codex finding; and process changes that alter
+  authority, eligibility, merge/approval rules, or destructive automation.
+  Paths identify what to inspect; they never trigger tier 3 by themselves.
+- **Owner approval — one decision, not a late ceremony.** `human-approved` may
+  be recorded as soon as a PR's intended shape and known findings are visible.
+  It covers conforming fix-ups and rebases. If later work materially expands
+  the design or scope, replace it with `needs-human` and name the delta.
 - **`packages/cli` — tiered from the diff, not the package name** (owner
   decision, 2026-08-24). A diff that adds or changes the user-facing command
   surface — new subcommands, a changed user↔uberblick interaction, anything

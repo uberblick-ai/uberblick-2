@@ -42,10 +42,8 @@ Touches: mcp-server, schema
   proves wrong costs a rebase, not a lost gate: the later PR rebases and its
   gates re-run at the new head, which the commit-keyed gate rule already
   requires.
-- `schema` in `Touches` **serializes globally** — it is the keystone package;
-  nothing else is dispatched while a schema-touching issue is in flight. The
-  cost is stated rather than hidden: every other eligible issue waits for that
-  one, so a schema issue is scheduled knowing it stalls the queue.
+- This includes `schema`: its keystone risk is paid by exact-head review and
+  gates after any rebase, not by locking unrelated files or packages.
 - Order among eligible issues: dependency topology, then **`Priority`** — the
   organization issue field, Urgent → High → Medium → Low — then ascending issue
   number. An issue whose `Priority` field is unset is *untriaged* and ineligible
