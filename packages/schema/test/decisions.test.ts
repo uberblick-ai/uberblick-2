@@ -204,6 +204,11 @@ describe("the decision log", () => {
     syncDocs(a, b);
     expect(uuids(a)).toEqual([TOKENS, SLUGS]);
     expect(uuids(b)).toEqual([TOKENS, SLUGS]);
+
+    reorderDecisions(a, SLUGS, 0);
+    syncDocs(a, b);
+    expect(uuids(a)).toEqual([SLUGS, TOKENS]);
+    expect(uuids(b)).toEqual([SLUGS, TOKENS]);
   });
 
   it("lets a deliberate re-add append after an unseen stale reorder", () => {
