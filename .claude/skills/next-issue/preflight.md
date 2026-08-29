@@ -97,6 +97,21 @@ on its own: the next preparer pass hands the issue to the owner, writing the
 findings still open into Pointers as brief options, and `ready` becomes the
 owner's read of the thread rather than a verdict's conclusion.
 
+**Durable role transitions.** The latest completed transition, plus a later
+owner-set `ready` where named, admits exactly one next role. “Later” means the
+label event follows that `Done:` record; no separate lifecycle marker is stored.
+
+| Latest completed transition | Next eligible role |
+|---|---|
+| no issue-preparer `Done:` | issue-preparer |
+| preparer `Tier: trivial — cleared for ready` or `Tier: bounded — cleared for ready` | none until later `ready`, then implementer |
+| preparer `Tier: substantial — to the adversary` | issue-adversary |
+| adversary `Done:` carrying `dispatch` | none until later `ready`, then implementer; never preparer |
+| first adversary `Done:` carrying `return-to-coordination` | issue-preparer |
+| second adversary `Done:` carrying `return-to-coordination` | issue-preparer, whose pass records the round-cap handoff |
+| preparer `Tier: substantial — round cap — to the owner` | none until later `ready`, then implementer |
+| preparer `Tier: <tier> — returned to product interaction`, or adversary `Done:` carrying `park-needs-decision` | none until later `ready`, then implementer |
+
 **Briefing a Codex challenger.** Its sandbox has no network, so stage what it
 needs into a file first — the issue body, the thread, and the file excerpts the
 challenge turns on — and brief it completely in that one prompt: the
@@ -117,7 +132,7 @@ the current claims, and take the outcome off this table.
 
 | Still eligible at the recheck | What preflight found | Outcome | Labels | Claim | Comment |
 |---|---|---|---|---|---|
-| yes | nothing blocking (`none`) | dispatch | none — the owner's `ready` follows the verdict; `in-progress` is the implementer's claim | yes | only when a challenger ran or the self-check found something |
+| yes | nothing blocking (`none`) | dispatch | none — the owner's `ready` follows the verdict; `in-progress` is the implementer's claim | yes | clean trivial omits only a findings narrative |
 | yes | a stale or incorrect contract (`stale-spec`) | return-to-coordination | remove `ready` | no | yes |
 | yes | an owner-only product decision (`product-decision`) | park-needs-decision | remove `ready`, add `needs-decision` | no | yes |
 | no | anything (`any`) | requeue | none | no | no |
@@ -148,13 +163,13 @@ per the spec's exit path.
 The comment is the preflight's one durable side effect, so it is written when
 the outcome is known, never before: posted ahead of the recheck it can land on
 an issue another agent claimed a minute ago, which is exactly what the requeue
-row forbids. One concise issue comment for every one- and two-challenger case
-and for either stop, carrying the base SHA, the tier and one line of rationale,
-how many challengers ran and how they were independent, the material findings
-with their dispositions (or "none"), and proceed or stop. Never transcripts,
-never timings, never round-by-round narration — one comment, or the preflight
-becomes the thing it was meant to prevent. A trivial self-check that found
-nothing writes none, and a requeue writes none either.
+row forbids. Every completed pass writes one concise handoff opening with the
+role's `Done:` record and, for a preparer, its `Tier:` line. It carries the base
+SHA, one line of tier rationale, the challenger count and independence, material
+findings with dispositions (or "none"), and proceed or stop. Never transcripts,
+timings or round narration. A clean trivial self-check omits only a separate
+findings narrative: its `Done:` / `Tier: trivial — cleared for ready` handoff is
+still required. A requeue writes none.
 
 **The comment is keyed by `<issue, base SHA>`.** Before posting, look for a
 preflight comment on the issue already recording that same base SHA. If one is

@@ -32,16 +32,15 @@ investigating and retrying inside it is the work, and an invocation may inspect,
 or lose the race on, several candidates while performing the role on exactly one.
 A resumed role has voided this contract; the next assignment starts fresh.
 
-**The claim record.** The implementer claims in `.github/ISSUE_SPEC.md`'s grammar
-(`Claimed: <branch>` / `Implementer: <opus|codex> <id>`); every other role posts a
-comment whose first line is `Claim: <role> <session-or-run id>`, plus the head or
-grounding SHA wherever the outcome is tied to one. A role's handoff comment opens
-with `Done: <role> <session-or-run id>` and that same SHA where the claim carried
-one: that line is what makes a claim consumed and a completion findable. An
-issue-preparer's record adds a second line, `Tier: trivial|bounded|substantial —
-<outcome>`, the outcome `cleared for ready`, `to the adversary`, `returned to
-product interaction` or `round cap — to the owner`. Both live on GitHub, which
-holds all execution state; recovery must be possible from it alone.
+**The claim record.** The implementer claims in `.github/ISSUE_SPEC.md`'s grammar:
+`Claimed: <branch>` / `Implementer: <opus|codex> <id>`. Every other role posts
+`Claim: <role> <session-or-run id>`, plus the head or grounding SHA when its
+outcome is tied to one. A handoff opens `Done: <role> <session-or-run id>` with
+that SHA when claimed: this consumes the claim and makes completion findable.
+Handoffs stay proportional: link evidence rather than narrating it. A preparer's
+record adds `Tier: trivial|bounded|substantial — <outcome>`; outcomes are `cleared
+for ready`, `to the adversary`, `returned to product interaction` and `round cap
+— to the owner`. Both live on GitHub; recovery needs no transient state.
 
 **The race rule.** A live claim by any role makes the item ineligible for every
 other role. Re-read the candidate's thread immediately before writing the claim

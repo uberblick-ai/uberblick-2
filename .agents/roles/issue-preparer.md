@@ -16,10 +16,10 @@ any side effect when either is missing; nothing else is supplied.
 
 Eligible: an open issue carrying none of `ready`, `in-progress` and
 `needs-decision`, with no live claim by any role, not a parent (a body listing
-child issues belongs to the program coordinator), and not already awaiting a
-verdict — a preparer `Done:` with no adversary `Done:` after it. Order:
-`Priority` as the README defines it, then ascending issue number. Claim on the
-issue under the README's claim record and race rule. Prepare one, then stop.
+child issues belongs to the program coordinator), whose latest durable transition
+in `.claude/skills/next-issue/preflight.md` admits the preparer. Order: `Priority`
+as the README defines it, then ascending issue number. Claim on the issue under
+the README's claim record and race rule. Prepare one, then stop.
 
 ## Outcome
 

@@ -14,13 +14,12 @@ any side effect when either is missing; nothing else is supplied.
 
 Eligible: an open issue that is not a parent — its body lists no child issues —
 carrying `.github/ISSUE_SPEC.md`'s machine-readable header, none of `ready`,
-`in-progress` or `needs-decision`, no live claim by any role, still under
-`preflight.md`'s two-verdict cap, and an issue-preparer `Done:` recording the
-substantial tier that is newer than every adversary `Done:` — the smaller tiers
-are challenged inside the preparer's own pass and never arrive here. Order: that
-spec's scheduling order — dependency topology, then `Priority` as the README
-defines it, then ascending number. Claim on the issue with the grounding SHA,
-under the README's claim record and race rule. Challenge one issue, then stop.
+`in-progress` or `needs-decision`, no live claim by any role, whose latest durable
+transition in `preflight.md` admits the adversary. The smaller tiers are challenged
+inside the preparer's own pass and never arrive here. Order: that spec's scheduling
+order — dependency topology, then `Priority` as the README defines it, then
+ascending number. Claim on the issue with the grounding SHA, under the README's
+claim record and race rule. Challenge one issue, then stop.
 
 ## Outcome
 
