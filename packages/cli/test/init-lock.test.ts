@@ -14,12 +14,24 @@ import {
   writeFileSync,
 } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
-import { acquireInitLock } from "../src/init-lock.js";
+import { acquireInitLock, tryAcquireInitLock } from "../src/init-lock.js";
 import { removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
 describe("the init lock", () => {
+  it("offers an immediate try for readers with a coherent fallback", async () => {
+    const box = sandbox();
+    const writer = await acquireInitLock(box.env);
+
+    expect(tryAcquireInitLock(box.env)).toBeNull();
+
+    writer.release();
+    const reader = tryAcquireInitLock(box.env);
+    expect(reader).not.toBeNull();
+    reader?.release();
+  });
+
   it("releases the file it created, not whatever holds the name later", async () => {
     // Somebody deletes the lock while this run is still going, and a second
     // `ub init` takes it. The name is theirs now, so releasing must not touch

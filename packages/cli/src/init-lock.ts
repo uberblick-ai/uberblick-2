@@ -174,6 +174,85 @@ export interface LockOptions {
   onWait?: (path: string) => void;
 }
 
+export interface TryLockOptions {
+  /** Which lock file. Defaults to {@link initLockPath}. */
+  path?: string;
+}
+
+/**
+ * Try to take `path` exactly once.
+ *
+ * The synchronous shape is deliberate: readers that already have a coherent
+ * value can fall back to it immediately when a writer holds the lock. `null`
+ * means contention; every other create/write failure still throws.
+ */
+function tryAcquirePath(path: string): InitLock | null {
+  let fd: number;
+  try {
+    // Held open for the lock's whole lifetime, which is what makes releasing
+    // it safe — see {@link namesHeldFile}. Nothing else needs the descriptor.
+    fd = openSync(path, "wx", 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      return null;
+    }
+    throw error;
+  }
+
+  try {
+    // Whoever finds this file wants to know which process to look for.
+    writeSync(fd, `${process.pid}\n`);
+  } catch (error) {
+    // The lock exists from the create onward, so a failure here has to take
+    // it away again: one left behind by a process that never went on to hold
+    // it is one nobody will ever release, and there is no takeover to rescue
+    // it. Unlink first, close second — the same order as `release`, and for
+    // the same reason.
+    if (namesHeldFile(fd, path)) {
+      removeQuietly(path);
+    }
+    closeQuietly(fd);
+    throw error;
+  }
+
+  let released = false;
+  return {
+    path,
+    // The only `unlink` of a lock anywhere in this CLI, and it releases the
+    // file this process created rather than whatever holds the name by then:
+    // if somebody deletes the lock mid-run and another `ub init` takes it,
+    // the name is theirs and this must not touch it.
+    //
+    // Unlink first, close second. While the descriptor is open the file it
+    // refers to cannot be recycled, so the comparison and the removal are
+    // about the same file with certainty; closing first would reopen the
+    // window this exists to shut.
+    release() {
+      if (released) {
+        return;
+      }
+      released = true;
+      if (namesHeldFile(fd, path)) {
+        removeQuietly(path);
+      }
+      // A deferred write error can surface here. The lock is already gone,
+      // which is all a caller in a `finally` cares about, and throwing out of
+      // a release would mask whatever sent us into that `finally`.
+      closeQuietly(fd);
+    },
+  };
+}
+
+/** Take the init lock immediately, or return `null` when another process has it. */
+export function tryAcquireInitLock(
+  env: NodeJS.ProcessEnv = process.env,
+  options: TryLockOptions = {},
+): InitLock | null {
+  const path = options.path ?? initLockPath(env);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  return tryAcquirePath(path);
+}
+
 /**
  * Take the lock, or throw with something a person can act on.
  *
@@ -191,55 +270,9 @@ export async function acquireInitLock(
   let announced = false;
 
   for (;;) {
-    try {
-      // Held open for the lock's whole lifetime, which is what makes releasing
-      // it safe — see {@link namesHeldFile}. Nothing else needs the descriptor.
-      const fd = openSync(path, "wx", 0o600);
-      try {
-        // Whoever finds this file wants to know which process to look for.
-        writeSync(fd, `${process.pid}\n`);
-      } catch (error) {
-        // The lock exists from the create onward, so a failure here has to take
-        // it away again: one left behind by a process that never went on to hold
-        // it is one nobody will ever release, and there is no takeover to rescue
-        // it. Unlink first, close second — the same order as `release`, and for
-        // the same reason.
-        if (namesHeldFile(fd, path)) {
-          removeQuietly(path);
-        }
-        closeQuietly(fd);
-        throw error;
-      }
-      let released = false;
-      return {
-        path,
-        // The only `unlink` of a lock anywhere in this CLI, and it releases the
-        // file this process created rather than whatever holds the name by then:
-        // if somebody deletes the lock mid-run and another `ub init` takes it,
-        // the name is theirs and this must not touch it.
-        //
-        // Unlink first, close second. While the descriptor is open the file it
-        // refers to cannot be recycled, so the comparison and the removal are
-        // about the same file with certainty; closing first would reopen the
-        // window this exists to shut.
-        release() {
-          if (released) {
-            return;
-          }
-          released = true;
-          if (namesHeldFile(fd, path)) {
-            removeQuietly(path);
-          }
-          // A deferred write error can surface here. The lock is already gone,
-          // which is all a caller in a `finally` cares about, and throwing out
-          // of a release would mask whatever sent us into that `finally`.
-          closeQuietly(fd);
-        },
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-        throw error;
-      }
+    const lock = tryAcquirePath(path);
+    if (lock !== null) {
+      return lock;
     }
 
     if (Date.now() >= deadline) {

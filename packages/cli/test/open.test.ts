@@ -25,6 +25,7 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it } from "vitest";
+import { acquireInitLock } from "../src/init-lock.js";
 import { bundlePlan } from "../src/open.js";
 import { probeHub, probePort } from "../src/probes.js";
 import type { Sandbox } from "./helpers.js";
@@ -41,6 +42,12 @@ import {
 
 const WORKSPACE = "b4d1f0a7-3c62-4e91-8f05-7ad2c9e61b38";
 const SECRET = "open-test-signing-secret-9d31fa";
+
+/** What a `ub remote join` mid-run leaves behind, for the #449 tests. */
+const REBOUND_WORKSPACE = "c7e2b105-9a48-4d6f-b3e1-5f0c8a71d264";
+const REBOUND_SECRET = "open-test-rotated-secret-4b7c21";
+const FIRST_REMOTE = "wss://first.example.ts.net/ws";
+const SECOND_REMOTE = "wss://second.example.ts.net/ws";
 
 const hubs: Hub[] = [];
 const listeners: { server: Server; sockets: Socket[] }[] = [];
@@ -315,6 +322,50 @@ async function get(url: string): Promise<Response> {
   return await fetch(url, { cache: "no-store" });
 }
 
+/** This machine's config directory — the one the sandbox points XDG at. */
+function configDir(box: Sandbox): string {
+  return join(box.configHome, "uberblick");
+}
+
+/**
+ * Rebind this machine, the way `ub remote join` or `ub workspace use` leaves it:
+ * a different endpoint, workspace and signing secret, across both files.
+ */
+function rebind(
+  box: Sandbox,
+  binding: { hubUrl: string; workspace: string; signingSecret: string },
+): void {
+  const dir = configDir(box);
+  mkdirSync(dir, { recursive: true });
+  writeCredentials(box, binding.signingSecret);
+  writeBinding(box, binding.hubUrl, binding.workspace);
+}
+
+function writeCredentials(box: Sandbox, signingSecret: string): void {
+  const dir = configDir(box);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "credentials.json"),
+    `${JSON.stringify({ signingSecret }, null, 2)}\n`,
+    "utf8",
+  );
+  chmodSync(join(dir, "credentials.json"), 0o600);
+}
+
+function writeBinding(box: Sandbox, hubUrl: string, workspace: string): void {
+  const dir = configDir(box);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "config.json"),
+    `${JSON.stringify({ workspace, hubUrl }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+function documentOf(hubUrl: string, workspace: string, secret: string): string {
+  return `{"hubUrl":"${hubUrl}","workspaces":["${workspace}"],"hubAuthToken":"${secret}"}`;
+}
+
 // --- the criteria ------------------------------------------------------------
 
 describe("ub open", () => {
@@ -387,6 +438,134 @@ describe("ub open", () => {
       `{"hubUrl":"${remote}","workspaces":["${WORKSPACE}"],"hubAuthToken":"${SECRET}"}`,
     );
     expect(app.stdout()).toContain("remote — nothing started here");
+
+    expect((await app.interrupt()).status).toBe(0);
+  });
+
+  // --- #449: the served document tracks the machine, not the startup ---------
+
+  it("serves the machine's current binding, not the one it started with", async () => {
+    const { box, env } = configured();
+    pointAt(box, FIRST_REMOTE);
+    const webPort = await freePort();
+    const app = await open(box, ["--port", String(webPort)], env);
+    const url = `${app.url}uberblick-config.json`;
+
+    const before = await get(url);
+    expect(before.headers.get("cache-control")).toBe("no-store");
+    expect(await before.text()).toBe(documentOf(FIRST_REMOTE, WORKSPACE, SECRET));
+
+    // `ub remote join` completes while this `ub open` keeps running.
+    rebind(box, {
+      hubUrl: SECOND_REMOTE,
+      workspace: REBOUND_WORKSPACE,
+      signingSecret: REBOUND_SECRET,
+    });
+
+    // The next request — a reload, in a browser — sees all three new values
+    // together. Restarting `ub open` used to be the only way to get here.
+    expect(await (await get(url)).text()).toBe(
+      documentOf(SECOND_REMOTE, REBOUND_WORKSPACE, REBOUND_SECRET),
+    );
+
+    expect((await app.interrupt()).status).toBe(0);
+  });
+
+  it("serves the last coherent document while `.init.lock` is held", async () => {
+    const { box, env } = configured();
+    pointAt(box, FIRST_REMOTE);
+    const webPort = await freePort();
+    const app = await open(box, ["--port", String(webPort)], env);
+    const url = `${app.url}uberblick-config.json`;
+
+    expect(await (await get(url)).text()).toBe(
+      documentOf(FIRST_REMOTE, WORKSPACE, SECRET),
+    );
+
+    // A write is in flight after its first publication. Pairing this new secret
+    // with the old endpoint would authenticate against a hub nobody configured.
+    const lock = await acquireInitLock(box.env);
+    writeCredentials(box, REBOUND_SECRET);
+
+    // Answered from the last document that resolved outside a write, and
+    // answered *now*: the lock is consulted, never waited on. Its own holder
+    // timeout is 2s, so anything near that would be this server waiting.
+    const started = Date.now();
+    const held = await get(url);
+    const text = await held.text();
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(text).toBe(documentOf(FIRST_REMOTE, WORKSPACE, SECRET));
+
+    writeBinding(box, SECOND_REMOTE, REBOUND_WORKSPACE);
+    lock.release();
+    expect(await (await get(url)).text()).toBe(
+      documentOf(SECOND_REMOTE, REBOUND_WORKSPACE, REBOUND_SECRET),
+    );
+
+    // Only an *active* write falls back like that. A completed removal is the
+    // configuration: the client is told there is no secret rather than handed
+    // one that is no longer on disk.
+    rmSync(join(configDir(box), "credentials.json"), { force: true });
+    expect(await (await get(url)).json()).toMatchObject({ hubAuthToken: "" });
+
+    expect((await app.interrupt()).status).toBe(0);
+  });
+
+  it("establishes its first document only after a two-file writer completes", async () => {
+    const { box, env } = configured();
+    pointAt(box, FIRST_REMOTE);
+    const webPort = await freePort();
+
+    // A real writer lock spans the two publications. Start `ub open` after the
+    // new credential is visible but before its endpoint/workspace is: accepting
+    // a startup document here would seed old/new for the server's lifetime.
+    const writer = await acquireInitLock(box.env);
+    writeCredentials(box, REBOUND_SECRET);
+    const opening = open(box, ["--port", String(webPort)], env);
+
+    const openedWhileTorn = await Promise.race([
+      opening.then(() => true),
+      sleep(500).then(() => false),
+    ]);
+    expect(openedWhileTorn).toBe(false);
+
+    writeBinding(box, SECOND_REMOTE, REBOUND_WORKSPACE);
+    writer.release();
+
+    const app = await opening;
+    expect(await (await get(`${app.url}uberblick-config.json`)).text()).toBe(
+      documentOf(SECOND_REMOTE, REBOUND_WORKSPACE, REBOUND_SECRET),
+    );
+    expect((await app.interrupt()).status).toBe(0);
+  });
+
+  it("keeps a genuine environment pin winning over the files it re-reads", async () => {
+    const { box, env } = configured();
+    pointAt(box, FIRST_REMOTE);
+    const webPort = await freePort();
+    // The pin a repository puts in its project MCP entry. It outranks this
+    // machine's default, and re-resolving must not quietly demote it — nor
+    // promote the file-sourced secret beside it into a pin of its own.
+    const app = await open(box, ["--port", String(webPort)], {
+      ...env,
+      WORKSPACE_ID: REBOUND_WORKSPACE,
+    });
+    const url = `${app.url}uberblick-config.json`;
+
+    expect(await (await get(url)).text()).toBe(
+      documentOf(FIRST_REMOTE, REBOUND_WORKSPACE, SECRET),
+    );
+
+    // The files change underneath, naming a different workspace. The pin still
+    // wins; the endpoint and the secret, which no pin covers, follow the files.
+    rebind(box, {
+      hubUrl: SECOND_REMOTE,
+      workspace: WORKSPACE,
+      signingSecret: REBOUND_SECRET,
+    });
+    expect(await (await get(url)).text()).toBe(
+      documentOf(SECOND_REMOTE, REBOUND_WORKSPACE, REBOUND_SECRET),
+    );
 
     expect((await app.interrupt()).status).toBe(0);
   });
