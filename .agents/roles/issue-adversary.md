@@ -14,9 +14,12 @@ There is no global adversary queue assignment.
 ## Pickup
 
 Verify that the named issue has the parent preparer's live claim, no completed
-adversary handoff for that parent pass, and no competing nested adversary claim.
-The body must carry `.github/ISSUE_SPEC.md`'s header and required sections. Post
-the nested claim with the parent and grounding SHA under the README's race rule.
+adversary handoff for that parent pass, and no competing live nested adversary
+claim. A nested claim without a matching `Done:` becomes replaceable after 30
+minutes even while the parent remains live; only that same parent may launch the
+replacement. The body must carry `.github/ISSUE_SPEC.md`'s header and required
+sections. Post the nested claim with the parent and grounding SHA under the
+README's race rule.
 
 ## Outcome
 

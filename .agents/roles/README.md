@@ -46,7 +46,10 @@ claim or admit any other role. Re-read immediately before and after claiming;
 the earliest valid claim wins, and a loser posts a one-line withdrawal and tries
 the next candidate. A claim is stale under `AGENTS.md`'s three facts for an
 implementation claim, and for other top-level roles when no completion exists
-after 30 minutes. A live parent keeps its nested adversary assignment live.
+after 30 minutes. A nested adversary claim with no matching `Done:` also expires
+after 30 minutes, even while its parent remains live; that same parent may then
+launch one replacement. The unfinished attempt produced no verdict, so the
+replacement is not a second adversary round.
 
 ## Product context, proportional to the action
 

@@ -102,6 +102,10 @@ correctable missing outcome or invariant is fixed in this pass; only an
 unresolved owner boundary stops it.
 
 **A preflight is re-entrant.** Reuse a completed adversary handoff for the same
-parent pass. A crash before one exists restarts the one-pass preparation; a
-crash after it does not buy another verdict. The preparer remains responsible
-for applying its findings and writing the sole final preparation outcome.
+parent pass. When a nested claim has no matching `Done:` after 30 minutes, the
+same live parent may launch one replacement; the crashed attempt produced no
+verdict and therefore does not buy a second adversary round. The durable trace is
+`nested claim → no Done for 30 minutes → replacement claim → one adversary Done
+→ parent final outcome`. A crash after the adversary handoff does not buy another
+verdict. The preparer remains responsible for applying its findings and writing
+the sole final preparation outcome.
