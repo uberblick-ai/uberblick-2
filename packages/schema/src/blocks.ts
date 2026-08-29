@@ -715,8 +715,12 @@ function linkInRange(text: Y.XmlText, lo: number, hi: number): string | null {
  * `createAnnotation` treats them.
  *
  * A range that already carries a `docLink` is **retargeted** — a deliberate
- * write of the same kind, under the same `rev` guard. A range carrying an
- * external `link` is refused instead: one range cannot honestly be both.
+ * write of the same kind, under the same `rev` guard. A range carrying a
+ * visible external `link` is refused instead: one range cannot honestly be
+ * both. A range that a concurrent merge left carrying *both* raw marks already
+ * reads as the docLink alone, so this write retargets it and clears the stale
+ * `link`: afterwards the range carries the docLink and nothing else, and the
+ * raw state finally says what every reader was already reporting.
  *
  * @throws BlockNotFoundError when the block does not exist.
  * @throws InlineLinkRangeError when the block holds source text rather than
@@ -769,6 +773,9 @@ export function setInlineLink(
   if (href !== null) throw new ConflictingLinkMarksError(href, target);
 
   ydoc.transact(() => {
-    ytext.format(lo, hi - lo, { docLink: { docId: target } });
+    // `link: null` is a no-op on a range that carries none — Yjs skips an
+    // attribute already equal — and clears the invisible half of a pair a merge
+    // left behind, which no reader shows and nothing else can remove.
+    ytext.format(lo, hi - lo, { docLink: { docId: target }, link: null });
   });
 }

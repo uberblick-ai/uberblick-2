@@ -999,6 +999,44 @@ describe("inline marks in the document", () => {
   });
 
   /**
+   * The write side keeps the promise the read side already makes. A merged pair
+   * reads as the docLink, so retargeting it is a docLink retarget — refusing
+   * would block a write over a mark no reader shows and no tool can clear.
+   * The clearing write leaves the raw state saying what readers already said.
+   */
+  it("retargets a merged link pair and clears the invisible external link", () => {
+    let id = "";
+    const [a, b] = replicaPair((replica) => {
+      initDoc(replica, { uuid: UUID, title: "Marks" });
+      id = appendBlock(replica, { type: "paragraph", text: "see the hub docs" });
+    });
+    text(a).format(0, 7, {
+      link: { href: "https://example.com/hub" },
+      docLink: null,
+    });
+    text(b).format(0, 7, { docLink: { docId: TARGET }, link: null });
+    syncDocs(a, b);
+    const revBefore = getBlockRev(a, id);
+
+    setInlineLink(a, id, { start: 0, end: 7 }, OTHER_TARGET);
+
+    // The raw delta — not just the resolved read — now carries the docLink
+    // alone: the stale `link` key is gone.
+    expect(delta(a)).toEqual([
+      ["see the", { docLink: { docId: OTHER_TARGET } }],
+      [" hub docs", null],
+    ]);
+    expect(getBlockInline(a, id)).toEqual([
+      { text: "see the", marks: { docLink: OTHER_TARGET } },
+      { text: " hub docs", marks: {} },
+    ]);
+
+    // A mark write is not a text write: `text` and `rev` are untouched.
+    expect(getBlockText(a, id)).toBe("see the hub docs");
+    expect(getBlockRev(a, id)).toBe(revBefore);
+  });
+
+  /**
    * The markdown round trip dispatches on the target's shape, in both
    * directions: a uuid is a docLink, an `http(s)` URL is a link, and everything
    * else stays literal text. Same nesting, same escaping — a docLink is the

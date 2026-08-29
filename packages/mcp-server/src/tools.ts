@@ -53,6 +53,7 @@ import {
   getMeta,
   initDoc,
   insertBlock,
+  isProseBlockType,
   listAnnotations,
   listDirectory,
   resolveAnnotationRange,
@@ -628,6 +629,23 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     });
 
   /**
+   * One block input, with `inline` resolved only where it is going to be used.
+   *
+   * A source block — code, mermaid, table — carries no inline marks, so the
+   * schema writes its `text` and drops `inline` entirely. Resolving anyway
+   * would make an unknown reference target refuse a call whose inline runs were
+   * never going to be written, so the type check lives here, once, in front of
+   * both call sites.
+   */
+  const blockInputFor = (
+    block: z.infer<typeof blockInputSchema>,
+  ): BlockInput =>
+    toBlockInput(
+      block,
+      isProseBlockType(block.type) ? resolveInline(block.inline) : undefined,
+    );
+
+  /**
    * A document's blocks as a read answers with them: every block exactly as it
    * has always been, plus the inline references it carries.
    *
@@ -773,9 +791,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
 
       // Same reason, same place: an inline reference to a target this replica
       // does not know refuses the whole call before there is a document.
-      const inputs = (blocks ?? []).map((block) =>
-        toBlockInput(block, resolveInline(block.inline)),
-      );
+      const inputs = (blocks ?? []).map(blockInputFor);
 
       const uuid = randomUUID();
       const replica = replicas.replica(uuid);
@@ -1160,10 +1176,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const replica = requireWritableDoc(uuid);
       // Before the insert: an unknown reference target refuses the call with
       // nothing written.
-      const input = toBlockInput(
-        { type, text, level, language, inline },
-        resolveInline(inline),
-      );
+      const input = blockInputFor({ type, text, level, language, inline });
       const blockId = insertBlock(replica.doc, after_block_id ?? null, input);
       const block = getBlock(replica.doc, blockId);
       // The caret goes after what was actually written, which is not `text`

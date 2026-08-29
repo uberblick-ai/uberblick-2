@@ -298,4 +298,30 @@ describe("inline document references", () => {
     });
     expect(linked.title).toBe("Retired");
   });
+
+  it("ignores inline on a source block rather than refusing its target", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Citing",
+      description: DESCRIPTION,
+    });
+
+    // A code block carries no marks — the tool description says so and the
+    // schema writes its `text` — so resolving a reference that is never going
+    // to be written would refuse the call over an argument it discards.
+    // `create_doc` takes the same path, so one handler proves both.
+    const inserted = await rig.ok("insert_block", {
+      uuid: doc.uuid,
+      type: "code",
+      text: "const x = 1;",
+      language: "ts",
+      inline: [{ text: "x", marks: { docLink: randomUUID() } }],
+    });
+    expect(inserted.applied).toBe(true);
+
+    const read = await rig.ok("get_doc", { uuid: doc.uuid });
+    expect(read.blocks).toHaveLength(1);
+    expect(read.blocks[0].text).toBe("const x = 1;");
+    expect(read.blocks[0].doc_links).toBeUndefined();
+  });
 });
