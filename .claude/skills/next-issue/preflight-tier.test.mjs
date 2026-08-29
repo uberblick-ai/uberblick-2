@@ -28,7 +28,13 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { AXES, BLOCKERS, classify, preflight } from "./preflight-tier.mjs";
+import {
+  AXES,
+  BLOCKERS,
+  classify,
+  preflight,
+  routeTransition,
+} from "./preflight-tier.mjs";
 
 // The prose half is read from disk, so its path comes from this file's own
 // location rather than from the process's working directory: the suite is run
@@ -105,7 +111,15 @@ describe("the skill's tables and the module's tables are the same tables", () =>
 
   it("routes every documented row of the lifecycle table, whatever the tier", () => {
     const rows = markdownTable("| Still eligible at the recheck |", "| Outcome |", "| Claim |");
-    for (const [eligible = "", found = "", outcome, labels = "", claim, comment = ""] of rows) {
+    for (const [
+      eligible = "",
+      found = "",
+      outcome,
+      labels = "",
+      claim,
+      comment = "",
+      findingsNarrative = "",
+    ] of rows) {
       const token = found.match(/`([a-z-]+)`/)?.[1];
       if (token === undefined) throw new Error(`lifecycle row names no blocker: ${found}`);
       // `any` is the row that says the recheck outranks every finding, so it
@@ -120,14 +134,19 @@ describe("the skill's tables and the module's tables are the same tables", () =>
           assert.equal(plan.outcome, outcome, where);
           assert.equal(plan.claim, claim === "yes", where);
           assert.deepEqual(plan.labels, labelsFrom(labels), where);
-          // "only when a challenger ran or the self-check found something" is
-          // the one conditional cell, and it is asserted both ways.
-          if (comment === "yes" || comment === "no") {
-            assert.equal(plan.comment, comment === "yes", where);
+          assert.equal(plan.comment, comment === "yes", where);
+          // The findings narrative is the one conditional cell. The durable
+          // handoff above remains required even when this part is absent.
+          if (findingsNarrative === "yes" || findingsNarrative === "no") {
+            assert.equal(plan.findingsNarrative, findingsNarrative === "yes", where);
           } else {
-            assert.equal(preflight({ ...signals, findings: true }).comment, true, where);
             assert.equal(
-              preflight({ ...signals, findings: false }).comment,
+              preflight({ ...signals, findings: true }).findingsNarrative,
+              true,
+              where,
+            );
+            assert.equal(
+              preflight({ ...signals, findings: false }).findingsNarrative,
               plan.challengers > 0,
               where,
             );
@@ -135,6 +154,84 @@ describe("the skill's tables and the module's tables are the same tables", () =>
         }
       }
     }
+  });
+
+  it("routes every documented durable transition without a stored lifecycle marker", () => {
+    const rows = markdownTable(
+      "| Transition |",
+      "| Before later ready |",
+      "| After later ready |",
+      "| Claim removes ready |",
+    );
+    for (const [transitionCell, , beforeReady, afterReady, removeReady] of rows) {
+      const transition = transitionCell.match(/`([a-z-]+)`/)?.[1];
+      if (transition === undefined) throw new Error(`transition row has no key: ${transitionCell}`);
+      for (const readyAfter of [false, true]) {
+        const expectedRole = (readyAfter ? afterReady : beforeReady) === "none"
+          ? null
+          : readyAfter
+            ? afterReady
+            : beforeReady;
+        assert.deepEqual(
+          routeTransition({ transition, readyAfter }),
+          {
+            role: expectedRole,
+            labels: {
+              remove:
+                readyAfter && expectedRole === "issue-preparer" && removeReady === "yes"
+                  ? ["ready"]
+                  : [],
+            },
+          },
+          JSON.stringify({ transition, readyAfter }),
+        );
+      }
+    }
+  });
+
+  it("records a clean trivial handoff before owner ready admits implementation", () => {
+    const cleanTrivial = preflight({
+      materiality: "mechanical",
+      uncertainty: "low",
+      blastRadius: "local",
+      reversibility: "easy",
+    });
+    assert.equal(cleanTrivial.comment, true);
+    assert.equal(cleanTrivial.findingsNarrative, false);
+    assert.equal(routeTransition({ transition: "small-clearance" }).role, null);
+    assert.equal(
+      routeTransition({ transition: "small-clearance", readyAfter: true }).role,
+      "implementer",
+    );
+  });
+
+  it("routes a resolved decision through a fresh proportional challenge", () => {
+    const parked = preflight({
+      materiality: "behavioral",
+      uncertainty: "low",
+      blastRadius: "local",
+      reversibility: "easy",
+      blocker: "product-decision",
+    });
+    assert.equal(parked.outcome, "park-needs-decision");
+
+    assert.deepEqual(
+      routeTransition({ transition: "decision-recovery", readyAfter: true }),
+      { role: "issue-preparer", labels: { remove: ["ready"] } },
+    );
+    const challenged = preflight({
+      materiality: "behavioral",
+      uncertainty: "low",
+      blastRadius: "local",
+      reversibility: "easy",
+    });
+    assert.equal(challenged.challengers, 1);
+    assert.equal(challenged.comment, true);
+    assert.equal(routeTransition({ transition: "small-clearance" }).role, null);
+    assert.equal(
+      routeTransition({ transition: "small-clearance", readyAfter: true }).role,
+      "implementer",
+    );
   });
 
   it("cannot be escalated by a package name, a label or a keyword", () => {

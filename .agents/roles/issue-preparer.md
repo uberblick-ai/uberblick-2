@@ -14,12 +14,12 @@ any side effect when either is missing; nothing else is supplied.
 
 ## Pickup
 
-Eligible: an open issue carrying none of `ready`, `in-progress` and
-`needs-decision`, with no live claim by any role, not a parent (a body listing
-child issues belongs to the program coordinator), whose latest durable transition
-in `.claude/skills/next-issue/preflight.md` admits the preparer. Order: `Priority`
-as the README defines it, then ascending issue number. Claim on the issue under
-the README's claim record and race rule. Prepare one, then stop.
+Eligible: an open non-parent issue carrying neither `in-progress` nor
+`needs-decision`, with no live claim by any role, whose latest durable transition
+in `.claude/skills/next-issue/preflight.md` admits the preparer. It has no `ready`
+except on decision recovery: there the later owner-set label admits this pass,
+and its winning claim removes it before grounding. Order: `Priority` as the
+README defines it, then number. Claim under its record and race rule; prepare one.
 
 ## Outcome
 

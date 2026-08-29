@@ -73,6 +73,38 @@ export const OUTCOMES = [
 ];
 
 /**
+ * Which role a durable handoff admits before and after a later owner-set
+ * `ready`. These keys classify records for this executable specification only;
+ * GitHub stores the records and label events themselves, never these names.
+ */
+export const DURABLE_TRANSITIONS = {
+  unprepared: { beforeReady: "issue-preparer", afterReady: null, removeReady: false },
+  "small-clearance": { beforeReady: null, afterReady: "implementer", removeReady: false },
+  "substantial-handoff": {
+    beforeReady: "issue-adversary",
+    afterReady: null,
+    removeReady: false,
+  },
+  "adversary-dispatch": { beforeReady: null, afterReady: "implementer", removeReady: false },
+  "first-adversary-return": {
+    beforeReady: "issue-preparer",
+    afterReady: null,
+    removeReady: false,
+  },
+  "second-adversary-return": {
+    beforeReady: "issue-preparer",
+    afterReady: null,
+    removeReady: false,
+  },
+  "round-cap": { beforeReady: null, afterReady: "implementer", removeReady: false },
+  "decision-recovery": {
+    beforeReady: null,
+    afterReady: "issue-preparer",
+    removeReady: true,
+  },
+};
+
+/**
  * @param {unknown} signals
  * @param {Record<string, readonly unknown[]>} schema
  * @param {readonly string[]} required
@@ -99,6 +131,32 @@ function validate(signals, schema, required) {
       );
     }
   }
+}
+
+/**
+ * Resolve one GitHub-reconstructable role transition.
+ *
+ * A decision-recovery `ready` is consumed by the preparer's winning claim. That
+ * makes the corrected issue pass through proportional challenge before a later
+ * owner-set `ready` can admit implementation.
+ *
+ * @param {{transition: string, readyAfter?: boolean}} signals
+ */
+export function routeTransition(signals) {
+  validate(
+    signals,
+    { transition: Object.keys(DURABLE_TRANSITIONS), readyAfter: BOOLEANS },
+    ["transition"],
+  );
+  const { transition, readyAfter = false } = signals;
+  const route = DURABLE_TRANSITIONS[transition];
+  const role = readyAfter ? route.afterReady : route.beforeReady;
+  return {
+    role,
+    labels: {
+      remove: role === "issue-preparer" && readyAfter && route.removeReady ? ["ready"] : [],
+    },
+  };
 }
 
 /**
@@ -169,9 +227,9 @@ export function preflight(signals) {
 
   /**
    * @param {string} outcome
-   * @param {{add?: string[], remove?: string[], comment: boolean}} lifecycle
+   * @param {{add?: string[], remove?: string[], comment: boolean, findingsNarrative?: boolean}} lifecycle
    */
-  const plan = (outcome, { add = [], remove = [], comment }) => ({
+  const plan = (outcome, { add = [], remove = [], comment, findingsNarrative = comment }) => ({
     tier,
     challengers,
     independence,
@@ -179,6 +237,7 @@ export function preflight(signals) {
     claim: outcome === "dispatch",
     labels: { add, remove },
     comment,
+    findingsNarrative,
   });
 
   // The recheck outranks every finding. Someone else claimed the issue, or it
@@ -202,5 +261,8 @@ export function preflight(signals) {
   // `in-progress` is written by the implementer's own claim at its pickup.
   // Dispatch is still the only outcome a claim can follow, and `claim` is where
   // that invariant is checked — never a label this role does not write.
-  return plan("dispatch", { comment: challengers > 0 || findings });
+  return plan("dispatch", {
+    comment: true,
+    findingsNarrative: challengers > 0 || findings,
+  });
 }

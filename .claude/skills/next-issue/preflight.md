@@ -100,17 +100,25 @@ owner's read of the thread rather than a verdict's conclusion.
 **Durable role transitions.** The latest completed transition, plus a later
 owner-set `ready` where named, admits exactly one next role. “Later” means the
 label event follows that `Done:` record; no separate lifecycle marker is stored.
+The transition key below exists only in the executable specification beside
+this file; GitHub stores the named records and label events themselves.
 
-| Latest completed transition | Next eligible role |
-|---|---|
-| no issue-preparer `Done:` | issue-preparer |
-| preparer `Tier: trivial — cleared for ready` or `Tier: bounded — cleared for ready` | none until later `ready`, then implementer |
-| preparer `Tier: substantial — to the adversary` | issue-adversary |
-| adversary `Done:` carrying `dispatch` | none until later `ready`, then implementer; never preparer |
-| first adversary `Done:` carrying `return-to-coordination` | issue-preparer |
-| second adversary `Done:` carrying `return-to-coordination` | issue-preparer, whose pass records the round-cap handoff |
-| preparer `Tier: substantial — round cap — to the owner` | none until later `ready`, then implementer |
-| preparer `Tier: <tier> — returned to product interaction`, or adversary `Done:` carrying `park-needs-decision` | none until later `ready`, then implementer |
+| Transition | Latest completed transition | Before later ready | After later ready | Claim removes ready |
+|---|---|---|---|---|
+| `unprepared` | no issue-preparer `Done:` | issue-preparer | none | no |
+| `small-clearance` | preparer `Tier: trivial — cleared for ready` or `Tier: bounded — cleared for ready` | none | implementer | no |
+| `substantial-handoff` | preparer `Tier: substantial — to the adversary` | issue-adversary | none | no |
+| `adversary-dispatch` | adversary `Done:` carrying `dispatch` | none | implementer | no |
+| `first-adversary-return` | first adversary `Done:` carrying `return-to-coordination` | issue-preparer | none | no |
+| `second-adversary-return` | second adversary `Done:` carrying `return-to-coordination`; the preparer's pass records the round-cap handoff | issue-preparer | none | no |
+| `round-cap` | preparer `Tier: substantial — round cap — to the owner` | none | implementer | no |
+| `decision-recovery` | preparer `Tier: <tier> — returned to product interaction`, or adversary `Done:` carrying `park-needs-decision` | none | issue-preparer | yes |
+
+The `ready` that resolves a product decision is therefore a recovery signal,
+not an implementation verdict. The preparer's winning claim removes it before
+fresh grounding and tier-required challenge; only an owner-set `ready` after
+that completed handoff can admit the implementer. Direct owner-`ready` admission
+remains exclusive to the two-verdict round-cap route.
 
 **Briefing a Codex challenger.** Its sandbox has no network, so stage what it
 needs into a file first — the issue body, the thread, and the file excerpts the
@@ -130,12 +138,12 @@ touches what you grounded sends you back to refresh the affected grounding and
 challenge; an advance elsewhere in the tree does not. Then re-read the issue and
 the current claims, and take the outcome off this table.
 
-| Still eligible at the recheck | What preflight found | Outcome | Labels | Claim | Comment |
-|---|---|---|---|---|---|
-| yes | nothing blocking (`none`) | dispatch | none — the owner's `ready` follows the verdict; `in-progress` is the implementer's claim | yes | clean trivial omits only a findings narrative |
-| yes | a stale or incorrect contract (`stale-spec`) | return-to-coordination | remove `ready` | no | yes |
-| yes | an owner-only product decision (`product-decision`) | park-needs-decision | remove `ready`, add `needs-decision` | no | yes |
-| no | anything (`any`) | requeue | none | no | no |
+| Still eligible at the recheck | What preflight found | Outcome | Labels | Claim | Comment | Findings narrative |
+|---|---|---|---|---|---|---|
+| yes | nothing blocking (`none`) | dispatch | none — the owner's `ready` follows the verdict; `in-progress` is the implementer's claim | yes | yes | only when a challenger ran or the self-check found something |
+| yes | a stale or incorrect contract (`stale-spec`) | return-to-coordination | remove `ready` | no | yes | yes |
+| yes | an owner-only product decision (`product-decision`) | park-needs-decision | remove `ready`, add `needs-decision` | no | yes | yes |
+| no | anything (`any`) | requeue | none | no | no | no |
 
 The preflight never writes `in-progress` — the implementer's own claim does,
 after the owner's `ready` — so no preflight path can leave that label on an
