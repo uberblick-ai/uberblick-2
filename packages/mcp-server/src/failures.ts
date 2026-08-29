@@ -55,6 +55,8 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   AnnotationRangeError,
   BlockNotFoundError,
+  ConflictingLinkMarksError,
+  InlineLinkRangeError,
   StaleBlockError,
 } from "@uberblick/schema";
 import { log } from "./log.js";
@@ -117,6 +119,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "archive_doc",
   "restore_doc",
   "annotate",
+  "link_range",
   "pin_doc",
   "unpin_doc",
   "sidebar_group",
@@ -164,8 +167,9 @@ const RECOVERIES: Record<string, Recovery> = {
   stale_block: {
     recoveryClass: "reread",
     guidance:
-      "The block changed under you. This answer already carries `currentText` and `currentRev`, so re-diff " +
-      "against them and call edit_block again with `currentRev` — no extra read is needed.",
+      "The block changed under you. This answer already carries `currentText` and `currentRev`, so call the same " +
+      "tool again with `currentRev` — re-diffing against `currentText` first for edit_block, and re-measuring the " +
+      "offsets against it for link_range. No extra read is needed.",
   },
   block_not_found: {
     recoveryClass: "reread",
@@ -182,6 +186,24 @@ const RECOVERIES: Record<string, Recovery> = {
     recoveryClass: "reread",
     guidance:
       "Call get_doc for the threads this document holds, or omit `thread_id` to open a new one over a range.",
+  },
+  inline_link_range: {
+    recoveryClass: "reread",
+    guidance:
+      "Call get_doc for the block's current text, its type and its `doc_links`, then link a range that fits — " +
+      "`reason` says which of the three is in the way: `empty` (the range covers no characters), `not-prose` " +
+      "(a code, mermaid or table block holds source text and carries no inline links) or `overlap` (the range " +
+      "is already an external link, and one range cannot be both).",
+  },
+  // Never `retry`: the directory is a synced document, so a target this
+  // replica has not heard of does not arrive by calling again — it arrives, if
+  // it ever does, over the hub.
+  doclink_target_not_known_locally: {
+    recoveryClass: "reread",
+    guidance:
+      "This replica's directory holds no such document, so the link would point at a uuid nothing here can " +
+      "resolve. Call list_docs or search for the target's real uuid — and if you believe it exists elsewhere, " +
+      "`hub` says whether this replica could have received it yet; sync_status says the same in full.",
   },
   doc_not_found: {
     recoveryClass: "reread",
@@ -295,8 +317,8 @@ export const FAILURE_CODES: readonly string[] = [
  * The whole contract, in the words an agent reads — carried ONCE, in the
  * server's `instructions` (see ./server.ts).
  *
- * Repeating a hundred and fifty words on all twenty-three tools cost every
- * session tens of kilobytes of `tools/list` to say the same thing twenty-three
+ * Repeating a hundred and fifty words on all twenty-four tools cost every
+ * session tens of kilobytes of `tools/list` to say the same thing twenty-four
  * times. The prose belongs where a client reads it once; the per-tool
  * descriptions carry {@link failureContract}, which is the machine shape and
  * nothing else.
@@ -395,11 +417,11 @@ export function toFailure(tool: string, error: unknown): CallToolResult {
       error: "stale_block",
       message: error.message,
       blockId: error.blockId,
-      expectedText: error.expectedText,
+      expectedText: error.expectedText ?? null,
       expectedRev: error.expectedRev ?? null,
       currentText: error.currentText,
       currentRev: error.currentRev,
-      retry: "re-diff against currentText and call edit_block again with currentRev",
+      retry: "re-read nothing: call again with currentRev, against currentText",
     });
   }
   if (error instanceof BlockNotFoundError) {
@@ -407,6 +429,27 @@ export function toFailure(tool: string, error: unknown): CallToolResult {
       error: "block_not_found",
       message: error.message,
       blockId: error.blockId,
+    });
+  }
+  // The two ways a range refuses an inline link, under one code with a
+  // `reason` — the shape `annotation_range` already has. The conflicting-marks
+  // error is #443's own boundary and names both targets, so it keeps them.
+  if (error instanceof InlineLinkRangeError) {
+    return stamped(tool, {
+      error: "inline_link_range",
+      message: error.message,
+      reason: error.reason,
+      blockId: error.blockId,
+      blockType: error.blockType ?? null,
+    });
+  }
+  if (error instanceof ConflictingLinkMarksError) {
+    return stamped(tool, {
+      error: "inline_link_range",
+      message: error.message,
+      reason: "overlap",
+      href: error.href,
+      docId: error.docId,
     });
   }
   if (error instanceof AnnotationRangeError) {
