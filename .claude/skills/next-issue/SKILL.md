@@ -8,20 +8,29 @@ description: >-
 
 # next-issue — one iteration of the implementation loop
 
-You are the coordinator (CLAUDE.md orchestration policy): you observe, decide,
-validate, and merge — you never write feature code. All implementation happens
-in an isolated implementer agent. Read `AGENTS.md` for the shared agent-neutral
-claim, implementation, review, and handoff workflow. Read
-`.github/ISSUE_SPEC.md` for issue grammar, labels, scheduling, and lint. This
-file contains only Claude coordinator machinery and does not restate either.
+Read `AGENTS.md` for the shared agent-neutral claim, implementation, review, and
+handoff workflow. Read `.github/ISSUE_SPEC.md` for issue grammar, labels,
+scheduling, and lint. This file contains only Claude coordinator machinery and
+does not restate either.
+
+## Roles
+
+This skill is the invoker: it selects eligible work and dispatches roles whose
+contracts live in `.agents/roles/` — `README.md` there holds what every role
+obeys, and `.claude/agents/` and `.codex/agents/` expose them to the two
+runtimes. Step 6's preflight challenger is `issue-adversary`, whose brief cites
+`preflight.md` rather than restating it; step 7's dispatch is `implementer`; the
+external review round is `implementation-reviewer`; step 2's gates, finding
+dispositions and merge are `integrator`. Role behaviour — input, outcome,
+prohibited adjacent work, completion record, stop — lives in those contracts and
+is not repeated here. Roles are invoked explicitly, never as a side effect of
+being installed, and this file stays executable on its own.
 
 ## Hard rules
 
 - **This file stays under 200 lines.** An addition pays with a deletion, or
   moves its detail to a companion file beside this one. The core is reloaded on
   every iteration, so length is a cost every rule in it pays.
-- Apply `AGENTS.md` to every implementer lane and external review. The
-  coordinator owns validation and rulings, not feature code.
 - The coordinator's own repo edits (skill or docs changes, commits) happen in
   the coordinator's own worktree too (EnterWorktree), never in the shared
   checkout — multiple sessions share it and it may sit on any branch. Even
@@ -157,24 +166,15 @@ file contains only Claude coordinator machinery and does not restate either.
    output: one or two plain sentences on what the issue is and why it is next,
    plus the direct GitHub URL (from `gh issue view <n> --json url`).
 
-   The brief instructs the implementer to read `AGENTS.md` first, before any
-   repository change. Prompt the implementer named by the claim: spawn an Opus
-   sub-agent (`model: opus`, `isolation: worktree`) by default, or use the
-   Herdr skill to dispatch a Codex session with the issue URL. The brief is
-   decision-complete but pulled, not pushed: pass the full issue body and
-   applicable CLAUDE.md invariants, and instruct the agent to start by reading
-   the product docs its Pointers cite through the uberblick MCP tools —
-   `get_doc` on each cited uuid, `search` for what the issue did not
-   anticipate — before repository changes. Inline only what those tools cannot
-   serve: PR diffs, review threads, and decisions taken in this session. Where
-   the MCP server is not registered, use the throwaway stdio-client pattern
-   from #77 and #134 in a scratch directory outside the committed worktree.
-   The brief states which route applies.
-
-   Any live doc that contradicts the code is named in the PR body — the read
-   side of the dogfooding contract, mirroring the post-merge doc update. Until
-   #130 lands, ask for an uberblick-usage summary: MCP used or not, docs read
-   by title and uuid, helpful yes/no, and one line why.
+   Prompt the implementer named by the claim: spawn an Opus sub-agent
+   (`model: opus`, `isolation: worktree`) by default, or use the Herdr skill to
+   dispatch a Codex session with the issue URL. The brief is decision-complete
+   but pulled, not pushed: pass the full issue body and applicable CLAUDE.md
+   invariants, and inline only what the uberblick MCP tools cannot serve — PR
+   diffs, review threads, and decisions taken in this session. Where the MCP
+   server is not registered, use the throwaway stdio-client pattern from #77
+   and #134 in a scratch directory outside the committed worktree. The brief
+   states which route applies.
 
    Several individually-trivial issues with the same `Touches` set may go to
    one agent only under the sizing exception in `.github/ISSUE_SPEC.md`; claim
