@@ -4,7 +4,8 @@
  * A document is one Y.Doc (room name = document UUID) with exactly three
  * top-level shared types:
  *
- *   - `meta`        Y.Map     — uuid, title, tags, links (all by UUID)
+ *   - `meta`        Y.Map     — uuid, title, description, tags, links,
+ *                              kind and status
  *   - `blocks`      Y.XmlFragment — one Y.XmlElement per block
  *   - `annotations` Y.Map     — threadId → annotation JSON
  *
@@ -15,7 +16,13 @@
  */
 
 import type * as Y from "yjs";
-import type { DocMeta } from "./types.js";
+import { InvalidDocumentLifecycleError } from "./errors.js";
+import {
+  isDocumentKind,
+  isDocumentStatusForKind,
+  readDocumentLifecycle,
+} from "./types.js";
+import type { DocMeta, DocumentKind, DocumentStatus } from "./types.js";
 
 export const META_KEY = "meta";
 export const BLOCKS_KEY = "blocks";
@@ -94,12 +101,14 @@ export function getMeta(ydoc: Y.Doc): DocMeta {
   const uuid = meta.get("uuid");
   const title = meta.get("title");
   const description = meta.get("description");
+  const lifecycle = readDocumentLifecycle(meta.get("kind"), meta.get("status"));
   return {
     uuid: typeof uuid === "string" ? uuid : "",
     title: typeof title === "string" ? title : "",
     tags: readStringArray(meta.get("tags")),
     description:
       typeof description === "string" && description !== "" ? description : null,
+    ...lifecycle,
     links: readStringArray(meta.get("links")),
   };
 }
@@ -127,6 +136,52 @@ export function setDescription(ydoc: Y.Doc, description: string): void {
   const meta = getMetaMap(ydoc);
   ydoc.transact(() => {
     meta.set("description", description);
+  });
+}
+
+/**
+ * Set the document's record shape, validating it against the stored status.
+ *
+ * The empty string clears both keys: a status cannot outlive its kind. A
+ * non-empty write never clears or masks an incompatible status on the caller's
+ * behalf; it refuses before the transaction instead.
+ */
+export function setKind(ydoc: Y.Doc, kind: DocumentKind | ""): void {
+  const meta = getMetaMap(ydoc);
+  const storedStatus = meta.get("status");
+  if (
+    kind !== "" &&
+    (!isDocumentKind(kind) ||
+      (meta.has("status") &&
+        storedStatus !== "" &&
+        !isDocumentStatusForKind(kind, storedStatus)))
+  ) {
+    throw new InvalidDocumentLifecycleError(kind, storedStatus);
+  }
+
+  ydoc.transact(() => {
+    meta.set("kind", kind);
+    if (kind === "") meta.set("status", "");
+  });
+}
+
+/**
+ * Set the lifecycle state, validating it against the kind stored right now.
+ * The empty string clears only the status and leaves the kind intact.
+ */
+export function setStatus(ydoc: Y.Doc, status: DocumentStatus | ""): void {
+  const meta = getMetaMap(ydoc);
+  const storedKind = meta.get("kind");
+  if (
+    status !== "" &&
+    (!isDocumentKind(storedKind) ||
+      !isDocumentStatusForKind(storedKind, status))
+  ) {
+    throw new InvalidDocumentLifecycleError(storedKind, status);
+  }
+
+  ydoc.transact(() => {
+    meta.set("status", status);
   });
 }
 

@@ -177,6 +177,57 @@ export interface BlockInput {
  */
 export const MAX_DESCRIPTION_LENGTH = 300;
 
+/** The document shapes whose lifecycle the schema records. */
+export const DOCUMENT_KINDS = ["requirement", "decision"] as const;
+export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+
+/** The states of a requirement record, in lifecycle order. */
+export const REQUIREMENT_STATUSES = [
+  "draft",
+  "planned",
+  "implementing",
+  "done",
+] as const;
+export type RequirementStatus = (typeof REQUIREMENT_STATUSES)[number];
+
+/** The states of a decision record, in lifecycle order. */
+export const DECISION_STATUSES = ["open", "decided"] as const;
+export type DecisionStatus = (typeof DECISION_STATUSES)[number];
+
+export type DocumentStatus = RequirementStatus | DecisionStatus;
+
+export function isDocumentKind(value: unknown): value is DocumentKind {
+  return value === "requirement" || value === "decision";
+}
+
+/** Whether `status` belongs to `kind`'s closed lifecycle. */
+export function isDocumentStatusForKind(
+  kind: DocumentKind,
+  status: unknown,
+): status is DocumentStatus {
+  const statuses =
+    kind === "requirement" ? REQUIREMENT_STATUSES : DECISION_STATUSES;
+  return statuses.some((candidate) => candidate === status);
+}
+
+/**
+ * The tolerant lifecycle read shared by a document and its directory stub.
+ *
+ * `kind` is valid on its own, while `status` is meaningful only for that kind.
+ * A malformed or merged-mismatched status therefore disappears without hiding
+ * a valid kind.
+ */
+export function readDocumentLifecycle(
+  kind: unknown,
+  status: unknown,
+): { kind?: DocumentKind; status?: DocumentStatus } {
+  if (!isDocumentKind(kind)) return {};
+  return {
+    kind,
+    ...(isDocumentStatusForKind(kind, status) ? { status } : {}),
+  };
+}
+
 /** Document metadata. Identity is the uuid; title and tags are display data. */
 export interface DocMeta {
   uuid: string;
@@ -189,6 +240,10 @@ export interface DocMeta {
    * `create_doc` refuses to.
    */
   description: string | null;
+  /** The record shape. Absent means an ordinary document. */
+  kind?: DocumentKind;
+  /** The lifecycle state, present only when it is legal for {@link kind}. */
+  status?: DocumentStatus;
   /** Outbound links, by target document UUID. Never paths or titles. */
   links: string[];
 }
@@ -273,6 +328,10 @@ export interface DirectoryEntry {
    * connect. Absent when the document has none.
    */
   description?: string;
+  /** Cached record shape; absent means an ordinary document. */
+  kind?: DocumentKind;
+  /** Cached lifecycle state, present only when it is legal for {@link kind}. */
+  status?: DocumentStatus;
 }
 
 /** One group in the sidebar doc: a stable id, a name, and what it pins. */

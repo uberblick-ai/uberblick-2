@@ -70,7 +70,7 @@ import type {
 export interface ExportMarkdownOptions {
   /**
    * Emit a `---` YAML frontmatter block with uuid, title, tags and — when the
-   * document has one — description. Default true.
+   * document has them — description, kind and status. Default true.
    */
   frontmatter?: boolean;
   /**
@@ -725,6 +725,10 @@ export function exportMarkdown(
       ...(meta.description === null
         ? []
         : [`description: ${emitScalar(meta.description)}`]),
+      ...(meta.kind === undefined ? [] : [`kind: ${emitScalar(meta.kind)}`]),
+      ...(meta.status === undefined
+        ? []
+        : [`status: ${emitScalar(meta.status)}`]),
       `tags: [${meta.tags.map(emitScalar).join(", ")}]`,
       "---",
     ];

@@ -4,6 +4,7 @@ import type { Block } from "../src/index.js";
 import {
   BLOCKS_KEY,
   BlockNotFoundError,
+  InvalidDocumentLifecycleError,
   appendBlock,
   blockRev,
   deleteBlock,
@@ -11,12 +12,15 @@ import {
   getBlockText,
   getBlocks,
   getMeta,
+  getMetaMap,
   initDoc,
   insertBlock,
   setBlockLanguage,
   setBlockLevel,
   setDescription,
+  setKind,
   setLinks,
+  setStatus,
   setTags,
   setTitle,
 } from "../src/index.js";
@@ -88,6 +92,129 @@ describe("document round-trip", () => {
 
     setDescription(doc, "");
     expect(getMeta(doc).description).toBeNull();
+  });
+
+  it("writes every legal kind/status pair and refuses every illegal one", () => {
+    const legal = [
+      ["requirement", "draft"],
+      ["requirement", "planned"],
+      ["requirement", "implementing"],
+      ["requirement", "done"],
+      ["decision", "open"],
+      ["decision", "decided"],
+    ] as const;
+    for (const [kind, status] of legal) {
+      const doc = seeded();
+      setKind(doc, kind);
+      setStatus(doc, status);
+      expect(getMeta(doc), `${kind}:${status}`).toMatchObject({ kind, status });
+    }
+
+    const noKind = seeded();
+    const noKindBefore = getMetaMap(noKind).toJSON();
+    expect(() => setStatus(noKind, "draft")).toThrow(
+      InvalidDocumentLifecycleError,
+    );
+    expect(getMetaMap(noKind).toJSON()).toEqual(noKindBefore);
+
+    for (const [kind, status] of [
+      ["requirement", "open"],
+      ["decision", "implementing"],
+    ] as const) {
+      const doc = seeded();
+      setKind(doc, kind);
+      const before = getMetaMap(doc).toJSON();
+      expect(() => setStatus(doc, status)).toThrow(
+        InvalidDocumentLifecycleError,
+      );
+      expect(getMetaMap(doc).toJSON()).toEqual(before);
+    }
+
+    const outside = seeded();
+    expect(() => setKind(outside, "note" as never)).toThrow(
+      InvalidDocumentLifecycleError,
+    );
+    setKind(outside, "requirement");
+    const outsideBefore = getMetaMap(outside).toJSON();
+    expect(() => setStatus(outside, "reviewing" as never)).toThrow(
+      InvalidDocumentLifecycleError,
+    );
+    expect(getMetaMap(outside).toJSON()).toEqual(outsideBefore);
+  });
+
+  it("re-kinds only when the stored status is legal for the new kind", () => {
+    const doc = seeded();
+    setKind(doc, "requirement");
+    setStatus(doc, "implementing");
+    const before = getMetaMap(doc).toJSON();
+
+    expect(() => setKind(doc, "decision")).toThrow(
+      InvalidDocumentLifecycleError,
+    );
+    expect(getMetaMap(doc).toJSON()).toEqual(before);
+
+    setStatus(doc, "");
+    setKind(doc, "decision");
+    expect(getMeta(doc)).toMatchObject({ kind: "decision" });
+    expect(getMeta(doc)).not.toHaveProperty("status");
+
+    // A valid kind write repairs a mismatched pair left by a merge: the raw
+    // status was always legal for a requirement and becomes readable again.
+    getMetaMap(doc).set("status", "implementing");
+    setKind(doc, "requirement");
+    expect(getMeta(doc)).toMatchObject({
+      kind: "requirement",
+      status: "implementing",
+    });
+  });
+
+  it("clears status alone, or kind and status together", () => {
+    const doc = seeded();
+    setKind(doc, "requirement");
+    setStatus(doc, "planned");
+
+    setStatus(doc, "");
+    expect(getMeta(doc)).toMatchObject({ kind: "requirement" });
+    expect(getMeta(doc)).not.toHaveProperty("status");
+
+    setStatus(doc, "planned");
+    setKind(doc, "");
+    expect(getMeta(doc)).not.toHaveProperty("kind");
+    expect(getMeta(doc)).not.toHaveProperty("status");
+  });
+
+  it("reads malformed and merged-mismatched lifecycle metadata tolerantly", () => {
+    const malformedKind = seeded();
+    getMetaMap(malformedKind).set("kind", "note");
+    getMetaMap(malformedKind).set("status", "draft");
+    expect(getMeta(malformedKind)).not.toHaveProperty("kind");
+    expect(getMeta(malformedKind)).not.toHaveProperty("status");
+
+    const malformedStatus = seeded();
+    getMetaMap(malformedStatus).set("kind", "requirement");
+    getMetaMap(malformedStatus).set("status", 42);
+    expect(getMeta(malformedStatus)).toMatchObject({ kind: "requirement" });
+    expect(getMeta(malformedStatus)).not.toHaveProperty("status");
+
+    const a = seeded();
+    setKind(a, "requirement");
+    const b = new Y.Doc();
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+    setKind(a, "decision");
+    setStatus(b, "implementing");
+    const updateA = Y.encodeStateAsUpdate(a);
+    const updateB = Y.encodeStateAsUpdate(b);
+    Y.applyUpdate(a, updateB);
+    Y.applyUpdate(b, updateA);
+
+    for (const replica of [a, b]) {
+      expect(getMetaMap(replica).toJSON()).toMatchObject({
+        kind: "decision",
+        status: "implementing",
+      });
+      expect(getMeta(replica)).toMatchObject({ kind: "decision" });
+      expect(getMeta(replica)).not.toHaveProperty("status");
+    }
   });
 
   it("defaults tags and links to empty arrays and keeps links across re-init", () => {

@@ -200,6 +200,29 @@ export class ConflictingLinkMarksError extends Error {
   }
 }
 
+/**
+ * Thrown when a sanctioned metadata write would store an illegal kind/status
+ * pair.
+ *
+ * Both values are retained as `unknown` because the error also reports foreign
+ * or stale values already present in the Y.Map. The refusal always happens
+ * before either key is written.
+ */
+export class InvalidDocumentLifecycleError extends Error {
+  readonly kind: unknown;
+  readonly status: unknown;
+
+  constructor(kind: unknown, status: unknown) {
+    super(
+      `Invalid document lifecycle: kind=${JSON.stringify(kind)} and ` +
+        `status=${JSON.stringify(status)} are not a legal pair`,
+    );
+    this.name = "InvalidDocumentLifecycleError";
+    this.kind = kind;
+    this.status = status;
+  }
+}
+
 /** Thrown when a room name is not `<workspaceId>/<uuid>`-shaped. */
 export class InvalidRoomError extends Error {
   readonly room: string;
