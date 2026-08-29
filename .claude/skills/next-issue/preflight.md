@@ -1,9 +1,9 @@
 # Preflight — ground, classify, challenge, recheck
 
-`SKILL.md` step 6 dispatches here on every issue step 5 selected, after
-conflict analysis and *before* the claim. This is the loop's one cheap chance
-to be wrong: an objection raised here costs a prompt, and the same objection
-after implementation costs a review wave, a fix-up dispatch and a re-gate.
+The `issue-adversary` role runs this procedure on the issue its `Pickup`
+selected, and owns it end to end. This is the project's one cheap chance to be
+wrong: an objection raised here costs a prompt, and the same objection after
+implementation costs a review wave, a fix-up dispatch and a re-gate.
 
 ## Ground it at a commit
 
@@ -84,24 +84,24 @@ same commit.
 
 ## Recheck, then decide
 
-Last thing before handing the issue to `SKILL.md` step 7, `git fetch origin
-main` **again** — the fetch you grounded against is minutes old, and only a
-fresh one can tell you upstream moved while you were reading. An advance that
+Last thing before posting the outcome, `git fetch origin main` **again** — the
+fetch you grounded against is minutes old, and only a fresh one can tell you
+upstream moved while you were reading. An advance that
 touches what you grounded sends you back to refresh the affected grounding and
 challenge; an advance elsewhere in the tree does not. Then re-read the issue and
 the current claims, and take the outcome off this table.
 
 | Still eligible at the recheck | What preflight found | Outcome | Labels | Claim | Comment |
 |---|---|---|---|---|---|
-| yes | nothing blocking (`none`) | dispatch | add `in-progress` — written by step 7's claim, not here | yes | only when a challenger ran or the self-check found something |
+| yes | nothing blocking (`none`) | dispatch | add `in-progress` — written by the implementer's own claim, not here | yes | only when a challenger ran or the self-check found something |
 | yes | a stale or incorrect contract (`stale-spec`) | return-to-coordination | remove `ready` | no | yes |
 | yes | an owner-only product decision (`product-decision`) | park-needs-decision | remove `ready`, add `needs-decision` | no | yes |
 | no | anything (`any`) | requeue | none | no | no |
 
-The preflight never writes `in-progress` — step 7's claim does, after this gate
-— so no preflight path can leave that label on an issue nobody is implementing.
-The other two labels are the preflight's: a stop takes `ready` off, and an owner
-question adds `needs-decision`.
+The preflight never writes `in-progress` — the implementer's own claim does,
+after this gate — so no preflight path can leave that label on an issue nobody
+is implementing. The other two labels are the preflight's: a stop takes `ready`
+off, and an owner question adds `needs-decision`.
 
 The recheck outranks every finding, which is the first row to read: if someone
 else claimed the issue while you were grounding it, it is their work now.
@@ -135,7 +135,7 @@ nothing writes none, and a requeue writes none either.
 preflight comment on the issue already recording that same base SHA. If one is
 there, this preflight ran before and died between the comment and the claim:
 edit that comment instead of posting beside it. Exactly one preflight comment
-per issue per base SHA, however many times the loop restarts. A later pickup
+per issue per base SHA, however often a preflight is re-run. A later pickup
 that grounds at a newer commit is a different key and gets its own comment — not
 a duplicate, a second preflight.
 
@@ -147,10 +147,10 @@ what the challenge exists to remove. An issue that over-prescribes mechanics is
 the same case and not a stop: name the freedom in the brief and dispatch. Only a
 *missing* outcome, invariant or product decision stops one.
 
-**Under `/loop`, a preflight is re-entrant.** An iteration that dies partway
-through one repeats it on the next pass, and the repeat costs tokens and nothing
-else, because both of its durable effects are guarded: the claim is last, so a
-second run either re-reaches dispatch and claims once or finds the first run's
-claim at its recheck and requeues; and the comment is keyed by base SHA, so a
+**A preflight is re-entrant.** An invocation that dies partway through one is
+repeated by the next pickup, and the repeat costs tokens and nothing else,
+because both of its durable effects are guarded: the implementation claim comes
+after this gate, so a second run either re-reaches dispatch or finds the issue
+claimed at its recheck and requeues; and the comment is keyed by base SHA, so a
 second run at the same commit edits the first run's comment rather than posting
 a second.

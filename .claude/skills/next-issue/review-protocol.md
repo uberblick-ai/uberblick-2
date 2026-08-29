@@ -1,21 +1,22 @@
 # Review protocol — external rounds, and what happens once a review returns
 
 Read this whenever a PR has an external round to request or a finding to
-disposition. `SKILL.md` step 2 owns the gates' order and their mechanics;
-"Requesting the round" applies before a review exists, and every section after
-it is conditional on one producing something.
+disposition. `integration.md` beside this file owns the gates' order and their
+mechanics; "Requesting the round" applies before a review exists, and every
+section after it is conditional on one producing something.
 
 ## Requesting the round
 
 CLAUDE.md's gate list is the authority on *when* a local Codex review is
-required. The mechanism depends on the environment: when running under herdr
+required. The mechanism depends on the environment: under herdr
 (`test "${HERDR_ENV:-}" = 1`; use the herdr skill and `herdr agent` to find the
-Codex pane), talk to that Codex session directly — answer its findings, push
-fixes, and re-request within the re-review scoping below, never open-endedly;
-otherwise use the codex plugin. Either way the review brief is the same: be
-critical, and hunt specifically for overtesting and overengineering per this
-repo's principles (KISS/YAGNI, least code wins, tests defend contracts and
-invariants — not implementation trivia).
+Codex pane) dispatch the round to a Codex session; otherwise use the codex
+plugin. A further round is never a resumed session — it is a fresh
+`implementation-reviewer` pickup at the new head, within the re-review scoping
+below. Either way the review brief is the same: be critical, and hunt
+specifically for overtesting and overengineering per this repo's principles
+(KISS/YAGNI, least code wins, tests defend contracts and invariants — not
+implementation trivia).
 
 ## Finding triage — before any fix-up brief
 
@@ -39,21 +40,21 @@ finding — severity does not decide the other two:
   on the thread. Never silent dismissal, and no category shortcuts ("human-run
   commands can't race" is false here — parallel agents, retries and multiple
   terminals make nominally human-run commands concurrent).
-- **Verification.** Who confirms the fix: the coordinator (focused diff read,
+- **Verification.** Who confirms the fix: the integrator (focused diff read,
   the finding's test failing-then-passing, failure-path probe where stateful) or
   an external re-review round per the scoping below. A subtle P2 fix may need
   outside eyes; a tiny P1 correction with a focused proof may not.
 
 ## One batched fix-up wave per review head
 
-Collect Codex, Copilot and coordinator findings against the same head and triage
-them all first; then one decision-complete brief, one Opus dispatch, one re-gate
-at the new head — never a dispatch per finding or per reviewer. Standing brief
-constraints: smallest diff that closes the accepted findings; tests only for the
-contract or invariant a finding names, never for the mechanics of the fix. Fix-up
-diffs face the same Touches, scope-escape and overtesting checks as feature
-diffs. Late findings still get an explicit disposition, but reviewer timing must
-not manufacture extra waves.
+Collect Codex, Copilot and integrator findings against the same head and triage
+them all first; then one decision-complete brief, one implementer pickup, one
+re-gate at the new head — never a pickup per finding or per reviewer. Standing
+brief constraints: smallest diff that closes the accepted findings; tests only
+for the contract or invariant a finding names, never for the mechanics of the
+fix. Fix-up diffs face the same Touches, scope-escape and overtesting checks as
+feature diffs. Late findings still get an explicit disposition, but reviewer
+timing must not manufacture extra waves.
 
 ## Risk-scoped external re-review
 
@@ -62,8 +63,8 @@ when it sits at a data-critical boundary (security/auth, persistence,
 concurrency, schema/CRDT semantics, cross-process lifecycle) **and** is
 non-local, introduces new state or synchronization, changes the design that
 answered the original finding, or lacks a focused test proving it — a one-line
-mechanical fix at such a boundary, proven by its test, is coordinator territory;
-and whenever reviewer or coordinator names a concrete risk rationale. Re-review
+mechanical fix at such a boundary, proven by its test, is integrator territory;
+and whenever reviewer or integrator names a concrete risk rationale. Re-review
 briefs are delta-first: the fixes and the invariants they touch, expanding to
 the whole PR only when a fix invalidates earlier reasoning. After four external
 rounds, a further full round needs a PR comment naming the concrete unresolved

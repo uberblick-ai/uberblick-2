@@ -105,6 +105,7 @@ mise run dev          # hub + web in parallel
 mise run lint         # Biome lint across the workspace (no formatter)
 mise run typecheck    # tsc --noEmit across all packages
 mise run test         # all test suites
+mise run check-agents # the six role triplets under .agents/.claude/.codex
 mise run e2e          # browser proof points (Playwright, Chromium, on demand)
 mise run fue          # the documented install path, executed on a clean machine
 REVIEW_SHA=<commit> mise run review  # immutable Docker review of one commit

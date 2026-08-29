@@ -161,6 +161,18 @@ description = "Run all test suites"
 # `packages/*` only.
 run = "pnpm test"
 
+[tasks.check-agents]
+description = "Check the six role triplets: identities, native formats, contract pointers, no runtime-policy pins"
+# Portability invariants only, never the contracts' prose — see the script's
+# header for what a green run does not claim. It is chained into `mise run test`
+# as well, so the gates enforce it without anyone remembering this task; run it
+# directly while editing a role.
+#
+# `.claude/agents` is absent from the immutable review image (`.dockerignore`
+# re-admits only `.claude/skills/**`), so the script skips that third loudly
+# there and CI is what enforces it.
+run = "node scripts/check-agent-roles.mjs"
+
 [tasks.e2e]
 description = "Run the browser end-to-end proof points (Playwright, Chromium only)"
 # The harness starts its own hub on an ephemeral port with its own throwaway
