@@ -16,12 +16,12 @@ before any side effect when either is missing; nothing else is supplied.
 Two kinds of item, in this order. A **fix-up**: an open PR whose latest
 integrator ruling *at the current head* names fix-now findings, with no live
 implementer claim; oldest PR first. A **new issue**: labeled `ready`, every
-`Depends-on` closed, not `in-progress`, whose latest durable transition in
-`.claude/skills/next-issue/preflight.md` admits the implementer — under
-`.github/ISSUE_SPEC.md`'s scheduling rules and order, including its cap of 6
-items in flight — `Priority` per the README. Claim in that spec's grammar on
-the issue, a fix-up posting its handover claim there too, under the
-README's claim record and race rule. One PR or one fix-up wave, then stop.
+`Depends-on` closed, and not `in-progress` — under `.github/ISSUE_SPEC.md`'s
+scheduling rules and order, including its cap of 6 items in flight — `Priority`
+per the README. The `ready` label is the preparation verdict; do not reconstruct
+or require a separate adversary dispatch. Claim in that spec's grammar on the
+issue, or post the handover claim on a fix-up PR, under the README's race rule.
+One PR or one fix-up wave, then stop.
 
 ## Outcome
 

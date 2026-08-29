@@ -1,7 +1,7 @@
 ---
 name: next-issue
 description: >-
-  Start one fresh session of a named Uberblick role with its queue assignment,
+  Start one fresh session of an Uberblick entry role with its queue assignment,
   then return. It selects nothing and claims nothing.
 ---
 
@@ -11,9 +11,9 @@ description: >-
 This is the interim launcher for the contracts in `.agents/roles/`; the future
 `ub launch <role>` replaces this file without changing them.
 
-The roles are `issue-preparer`, `issue-adversary`, `implementer`,
-`implementation-reviewer`, `integrator` and `program-coordinator`. If the
-invocation names none of them, say so and return.
+The entry roles are `issue-preparer`, `implementer` and `program-coordinator`.
+Other roles are internal handoffs launched by those entry runs, never independent
+queue entry points. If the invocation names no entry role, say so and return.
 
 ## What this does
 
@@ -51,5 +51,5 @@ fresh invocation belongs to its caller.
   sessions share it and it may sit on any branch.
 
 The roles' mechanics live beside this file and are read by the role that owns
-them, never here: `preflight.md` (issue adversary), `review-protocol.md`,
+them, never here: `preflight.md` (issue preparer and its adversary), `review-protocol.md`,
 `integration.md` and `dev-stack.md` (implementation reviewer and integrator).

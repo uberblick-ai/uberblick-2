@@ -1,11 +1,10 @@
 # Preflight — ground, classify, challenge, recheck
 
-The `issue-adversary` role runs this procedure on the issue its `Pickup`
-selected, and owns it end to end; for the trivial and bounded tiers the
-`issue-preparer` runs it inside the pass that prepared the issue, and nothing at
-those tiers reaches the adversary. This is the project's one cheap chance to be
-wrong: an objection raised here costs a prompt, and the same objection after
-implementation costs a review wave, a fix-up dispatch and a re-gate.
+The `issue-preparer` owns this procedure end to end. A narrowly trivial issue
+gets its code-grounded self-check; every other issue gets exactly one fresh
+`issue-adversary` subagent inside the same preparer run. An objection here costs
+a prompt; the same objection after implementation costs a review wave, fix-up
+and re-gate.
 
 ## Ground it at a commit
 
@@ -19,64 +18,30 @@ more. If `main` advances while you are here, refresh only the grounding and the
 challenge the new commits actually affect; a merge elsewhere in the tree does
 not invalidate a challenge about this one.
 
-## Classify
+## Classify the route
 
-**Classify from what the grounding found**, never from a package name, a label
-or a keyword. Four axes, and only these four:
+Classify from the grounding, never a package name, label or keyword. A route is
+`trivial` only when all four facts hold: the change is mechanical (no behavior
+or contract choice), understood, local, and easy to undo. Every other
+combination is `challenged` and gets one adversary.
 
-- **Materiality** — what the change decides. `mechanical`: no behavior or
-  contract choice is being made (a localized typo, routine documentation or
-  maintenance, an obvious isolated correction). `behavioral`: real observable
-  behavior with established patterns in this repo. `architectural`: a public
-  contract, schema, data shape or migration, security/privacy, or concurrency
-  semantics.
-- **Uncertainty** — `high` when the grounding read left you unable to state the
-  outcome and the invariants it must hold.
-- **Blast radius** — `wide` for cross-package or cross-repository contracts, or
-  for broad or ambiguous scope.
-- **Reversibility** — `hard` when the choice is expensive to undo once merged:
-  persisted data, a published contract, a shape other work builds on.
+| Route | Grounded condition | Adversaries |
+|---|---|---|
+| `trivial` | mechanical, low uncertainty, local blast radius, easy reversal | 0 |
+| `challenged` | any other combination | 1 |
 
-| Materiality | Uncertainty | Blast radius | Reversibility | Tier | Challengers |
-|---|---|---|---|---|---|
-| mechanical | low | local | easy | trivial | 0 |
-| mechanical | high | local | easy | bounded | 1 |
-| behavioral | low | local | easy | bounded | 1 |
-| behavioral | high | local | easy | substantial | 2 |
-| behavioral | low | wide | easy | substantial | 2 |
-| behavioral | low | local | hard | substantial | 2 |
-| architectural | low | local | easy | substantial | 2 |
-
-Read it as three rules. Substantial when the change is architectural, wide, or
-hard to undo — *any* of the three, so a mechanical change with a wide blast
-radius is substantial too, and deliberately so: a rename with two hundred call
-sites decides nothing but breaks everything. Trivial only when it is
-mechanical, local, easy to undo **and** understood. Everything else is bounded
-— and `uncertainty: high` then moves the tier one step up, which is what routes
-a genuinely ambiguous change to two challengers instead of one.
-`preflight-tier.mjs` beside this file is this table in executable form and
-`preflight-tier.test.mjs` beside them holds the two together; if you change one,
-change both.
-
-Two things the table deliberately cannot see: `Touches`, and any keyword. A
-change proven mechanical by the grounding read is trivial even in `schema` — a
-proven fact outranks a package name — and an innocuous-looking change nobody
-can state the outcome of is not trivial anywhere.
+`preflight-tier.mjs` beside this file is the executable form and its focused
+test holds the two together. `Touches` remains outside the signal set: a proven
+mechanical correction can be trivial in a sensitive package, while an
+innocuous-looking issue whose outcome is unclear is challenged anywhere.
 
 ## Challenge
 
-Who runs the challengers follows the tier, and only the tier: the trivial
-self-check and the bounded tier's single challenger belong to the
-`issue-preparer`, run inside the pass that prepared the issue and dispositioned
-in its body; a substantial issue's two are the adversary's. Nothing else about
-the challenge changes with who runs it.
-
-A challenger pokes holes; it does not implement, and it does not write code.
-Each runs in a fresh context that neither authored the issue nor will implement
-it. For two-challenger cases prefer diverse perspectives — a different model
-family, harness or approach — and where none is available, two separate fresh
-contexts satisfy independence; say which you got. The brief asks for risks,
-questions and alternatives:
+For `trivial`, the preparer performs a brief code-grounded self-check and spawns
+no adversary. For `challenged`, it spawns exactly one fresh issue-adversary on
+the issue, scoped to this parent run. Prefer a different runtime/model where
+available. The adversary reconstructs from GitHub, pokes holes, writes its
+durable handoff, and does not edit the issue or implement. Ask for:
 
 - Is this the real problem, and is the issue's outcome the smallest viable one?
   What would KISS/YAGNI cut?
@@ -87,121 +52,56 @@ questions and alternatives:
   already in flight?
 - Which edge cases and simpler alternatives does the issue not mention?
 
-For the trivial tier this is a brief code-grounded self-check instead, at the
-same commit.
-
-**Two verdicts, then the owner.** An issue carries at most two adversary
-verdicts — the adversary `Done:` records posted on it since it was last labelled
-`ready`, or ever where it never was. At two, preparation has stopped converging
-on its own: the next preparer pass hands the issue to the owner, writing the
-findings still open into Pointers as brief options, and `ready` becomes the
-owner's read of the thread rather than a verdict's conclusion.
-
-**Durable role transitions.** The latest completed transition, plus a later
-owner-set `ready` where named, admits exactly one next role. “Later” means the
-label event follows that `Done:` record; no separate lifecycle marker is stored.
-The transition key below exists only in the executable specification beside
-this file; GitHub stores the named records and label events themselves.
-
-| Transition | Latest completed transition | Before later ready | After later ready | Claim removes ready |
-|---|---|---|---|---|
-| `unprepared` | no issue-preparer `Done:` | issue-preparer | none | no |
-| `small-clearance` | preparer `Tier: trivial — cleared for ready` or `Tier: bounded — cleared for ready` | none | implementer | no |
-| `substantial-handoff` | preparer `Tier: substantial — to the adversary` | issue-adversary | none | no |
-| `adversary-dispatch` | adversary `Done:` carrying `dispatch` | none | implementer | no |
-| `first-adversary-return` | first adversary `Done:` carrying `return-to-coordination` | issue-preparer | none | no |
-| `second-adversary-return` | second adversary `Done:` carrying `return-to-coordination`; the preparer's pass records the round-cap handoff | issue-preparer | none | no |
-| `round-cap` | preparer `Tier: substantial — round cap — to the owner` | none | implementer | no |
-| `decision-recovery` | preparer `Tier: <tier> — returned to product interaction`, or adversary `Done:` carrying `park-needs-decision` | none | issue-preparer | yes |
-
-The `ready` that resolves a product decision is therefore a recovery signal,
-not an implementation verdict. The preparer's winning claim removes it before
-fresh grounding and tier-required challenge; only an owner-set `ready` after
-that completed handoff can admit the implementer. Direct owner-`ready` admission
-remains exclusive to the two-verdict round-cap route.
-
-**Briefing a Codex challenger.** Its sandbox has no network, so stage what it
-needs into a file first — the issue body, the thread, and the file excerpts the
-challenge turns on — and brief it completely in that one prompt: the
-`codex:codex-rescue` wrapper takes no follow-ups, so a question it asks back is a
-round nobody can answer. Read the job from the directory it was started in with
-`node <codex plugin>/scripts/codex-companion.mjs status|result <job-id>`. Bound
-the wait at 15 minutes and record a challenger that did not return as one, rather
-than waiting it out or writing the verdict it would have given.
+The adversary classifies each material finding as `correctable-findings` when
+settled intent or repository evidence is enough, or `owner-boundary` for product
+or agent authority, safety, or a fundamentally unsafe work shape. The preparer
+applies correctable findings in this same run and repeats the affected grounding
+and final recheck. It does not call a second adversary to review those edits.
+Another adversary is exceptional and requires an explicit owner request.
 
 ## Recheck, then decide
 
-Last thing before posting the outcome, `git fetch origin main` **again** — the
-fetch you grounded against is minutes old, and only a fresh one can tell you
-upstream moved while you were reading. An advance that
-touches what you grounded sends you back to refresh the affected grounding and
-challenge; an advance elsewhere in the tree does not. Then re-read the issue and
-the current claims, and take the outcome off this table.
+Last thing before posting the outcome, `git fetch origin main` again. Refresh
+only grounding affected by an upstream change, then re-read the issue, parent
+claim, nested adversary handoff and labels.
 
-| Still eligible at the recheck | What preflight found | Outcome | Labels | Claim | Comment | Findings narrative |
-|---|---|---|---|---|---|---|
-| yes | nothing blocking (`none`) | dispatch | none — the owner's `ready` follows the verdict; `in-progress` is the implementer's claim | yes | yes | only when a challenger ran or the self-check found something |
-| yes | an adversary finds a stale or incorrect contract (`stale-spec`) | return-to-coordination | remove `ready` | no | yes | yes |
-| yes | an owner-only product decision (`product-decision`) | park-needs-decision | remove `ready`, add `needs-decision` | no | yes | yes |
-| no | anything (`any`) | requeue | none | no | no | no |
+| Parent still owns the issue | Final finding state | Outcome | Labels | Comment |
+|---|---|---|---|---|
+| yes | none (`none`) | ready | add `ready` | yes |
+| yes | all correctable findings applied (`correctable-applied`) | ready | add `ready` | yes |
+| yes | unresolved product, authority, safety or unsafe-shape boundary (`owner-boundary`) | park-needs-decision | remove `ready`, add `needs-decision` | yes |
+| no | anything (`any`) | requeue | none | no |
 
-The preflight never writes `in-progress` — the implementer's own claim does,
-after the owner's `ready` — so no preflight path can leave that label on an
-issue nobody is implementing. The other two labels are the preflight's: a stop
-takes `ready` off — a no-op on an issue not yet granted it — and an owner
-question adds `needs-decision`.
-
-The recheck outranks every finding, which is the first row to read: if someone
-else claimed the issue while you were grounding it, it is their work now.
-Requeue silently — do not strip `ready`, do not comment. Findings you hold go to
-the claim holder or wait for a fresh pickup; acting on live work from the
-outside is worse than losing the finding.
-
-Among the stops, which applies is the difference between evidence and authority.
-An adversary returns a stale contract, missing outcome or invariant, or a scope
-or splitting decision that repository evidence can settle to coordination:
-`ready` comes off, the comment says what is wrong, and a corrected body must pass
-`.github/ISSUE_SPEC.md` before another pickup. A preparer does not take that
-terminal route. When its self-check or bounded challenger finds stale wording it
-can correct without changing meaning, it fixes the body inside the same claimed
-pass, then repeats the affected grounding, challenge and recheck before one final
-handoff. Missing, contradictory or interpretive product meaning instead returns
-to product interaction. Only an unresolved *product* question — one the
-repository cannot answer — takes `needs-decision`, with concrete options and the
-recommendation the spec's exit path requires.
+The recheck outranks findings: if the parent no longer owns the issue, do not
+change labels or comment. Otherwise `ready` is the preparer's final verdict,
+within recorded owner-approved authority; there is no later approval ceremony.
+An owner boundary is the only normal preparation stop. It carries concrete
+options and a recommendation, not another automatic adversary round.
 
 ## Record it once, and only after the recheck
 
-The comment is the preflight's one durable side effect, so it is written when
-the outcome is known, never before: posted ahead of the recheck it can land on
-an issue another agent claimed a minute ago, which is exactly what the requeue
-row forbids. Every completed pass writes one concise handoff opening with the
-role's `Done:` record and, for a preparer, its `Tier:` line. It carries the base
-SHA, one line of tier rationale, the challenger count and independence, material
-findings with dispositions (or "none"), and proceed or stop. Never transcripts,
-timings or round narration. A clean trivial self-check omits only a separate
-findings narrative: its `Done:` / `Tier: trivial — cleared for ready` handoff is
-still required. A requeue writes none.
+The nested adversary writes its `Done:` handoff before the preparer acts. After
+the recheck, the preparer writes one concise `Done:` handoff with grounding,
+route, adversary link where applicable, material findings and dispositions, and
+`Outcome: ready|needs-decision`. Never include transcripts, timings or round
+narration. A requeue writes none.
 
-**The comment is keyed by `<issue, role, session-or-run identity, base SHA>`** —
-the distinct claimed pass plus its grounding. Before posting, look for a comment
-with that whole key. If one exists, this same pass died after posting and may edit
-it in place. A different role or later claim at the same base SHA posts its own
-`Done:` handoff; it never edits a completed pass. A newer grounding is likewise
-a different key. The separate records are how every claim stays consumed and a
-fresh role reconstructs the latest transition from GitHub alone.
+The preparer posts `Done:` before applying the named label transition. A retry
+of the same run edits only its own record. If the durable handoff exists but the
+label write did not complete, a later preparer finishes that transition without
+rerunning the challenge. GitHub therefore recovers the pass without a lifecycle
+comment graph or a second adversary.
 
 **Findings are not requirements.** Material implementation risks and options
 travel to the implementer in the brief, as options. They are never edited into
 the issue body's acceptance criteria: an alternative written into the contract
 becomes a requirement nobody chose, and out-of-scope prescription is exactly
 what the challenge exists to remove. An issue that over-prescribes mechanics is
-the same case and not a stop: name the freedom in the brief and dispatch. Only a
-*missing* outcome, invariant or product decision stops one.
+the same case and not a stop: name the freedom in the body and proceed. A
+correctable missing outcome or invariant is fixed in this pass; only an
+unresolved owner boundary stops it.
 
-**A preflight is re-entrant.** An invocation that dies partway through one is
-repeated by the next pickup, and the repeat costs tokens and nothing else,
-because both of its durable effects are guarded: the owner's `ready` comes after
-this gate, so a second run either re-reaches dispatch or finds the issue no
-longer eligible at its recheck and requeues; and a retry of the same claimed pass
-edits only the comment carrying its full pass key rather than posting a second.
+**A preflight is re-entrant.** Reuse a completed adversary handoff for the same
+parent pass. A crash before one exists restarts the one-pass preparation; a
+crash after it does not buy another verdict. The preparer remains responsible
+for applying its findings and writing the sole final preparation outcome.

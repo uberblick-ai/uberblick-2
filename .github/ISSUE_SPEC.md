@@ -73,13 +73,22 @@ the issue was mis-scoped or the agent scope-crept. The resolution is explicit
 | Label | Meaning | Set by |
 |---|---|---|
 | *(none)* | Draft — invisible to the loop | — |
-| `ready` | Spec-complete; the loop may claim it | Human (or agent with human sign-off) |
+| `ready` | Spec-complete; the loop may claim it | Human, or issue-preparer after one-pass clearance |
 | `in-progress` | Claimed; branch named in a comment | Loop |
 | `needs-decision` | Parked on a question only a human can answer | Loop |
 
 There is deliberately **no `blocked` label**: blocked is derived from
 `Depends-on` plus issue closed-state, and stored copies of derivable state
 rot.
+
+Preparation is one foreground issue-preparer run. A narrowly mechanical, local,
+understood and easily reversible issue gets a code-grounded self-check and no
+adversary. Every other issue gets exactly one fresh issue-adversary subagent,
+preferably from the other runtime/model; the same preparer applies correctable
+findings and sets `ready` when recorded owner-approved authority covers the
+result. Unresolved product, agent-authority, safety or fundamentally unsafe-shape
+findings take `needs-decision`. Another adversary is exceptional and requires an
+explicit owner request, never an automatic preparation loop.
 
 `needs-decision` exit path: the loop asks the question as an issue comment
 (concrete options, its recommendation). A human answers in a comment; whoever
@@ -104,14 +113,10 @@ KISS/overtesting self-review. Head SHA, check state, and timing remain derived
 from the PR rather than copied into the durable record. Recovery and
 independent-review rules live only in `AGENTS.md`.
 
-What comes *before* a claim — the preflight tier table that decides how hard to
-challenge an issue, and its executable twin under
-`.claude/skills/next-issue/` — is deliberately not here and not in `AGENTS.md`.
-The ladder is Claude-loop machinery by design: `AGENTS.md` states that each
-coordinator's own procedure owns it, and `.agents/skills/next-issue/SKILL.md`
-is a Codex entry stub pointing back at `AGENTS.md`, not a second copy of that
-procedure. A future pass should not "fix" the asymmetry by hoisting the table
-into this spec.
+The executable routing detail lives under `.claude/skills/next-issue/`: it owns
+the grounded trivial-vs-challenged classification, challenge questions, recheck
+and focused parity test. This spec owns only the authority and lifecycle above;
+do not grow a second copy of that procedure here or in `AGENTS.md`.
 
 ## Body sections
 
