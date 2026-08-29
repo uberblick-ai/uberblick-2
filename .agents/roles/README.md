@@ -29,6 +29,22 @@ searches a queue and never acts on another item, and writes its durable result
 there before the parent acts on it. It does not consume or release the parent's
 claim, and a private transcript is never a handoff.
 
+Before starting that child, the parent writes this assignment on the item it
+holds:
+
+```text
+Delegated: <child role> <child run id>
+Target: <issue|PR> #N
+Parent: <parent role> <parent run id>
+```
+
+For a PR target the record also names `Head: <sha>`. The parent must hold the
+live claim named by `Parent`; the child validates that claim, this delegation
+record and every supplied value before its first side effect. A missing or
+mismatched record is a refusal, not permission to fall back to the queue. The
+child's own claim and `Done:` repeat the parent and exact target so recovery can
+join the assignment to its outcome from GitHub alone.
+
 The normal order is draft → one issue-preparer run (trivial self-check, otherwise
 one fresh adversary) → `ready` or an owner boundary → implementation. Bounded
 means one outcome and stopping condition, not one attempt: the preparer owns
@@ -67,13 +83,16 @@ claim-or-renewal comment rather than its first. A top-level claim other than an
 implementation claim is stale when no completion exists and that newest comment
 is more than 30 minutes old; the window is twice the renewal interval so that a
 healthy foreground run is never reclaimed in the gap between two renewals.
-Implementation claims are the exception and are unchanged: `AGENTS.md`'s three
-facts decide those, because branch ownership is not a timer.
+Every implementation claim, top-level or delegated, uses `AGENTS.md`'s same
+three facts, because branch ownership is not a timer. A parent may replace a
+delegated implementer only after those facts make the claim stale and an
+explicit handover records the new implementer; a newer remote branch commit
+therefore prevents replacement even when no `Done:` exists after 30 minutes.
 
-A nested subagent claim with no matching `Done:` still expires after 30 minutes,
-even while its parent remains live; that same parent may then launch one
-replacement. The unfinished attempt produced no verdict, so the replacement is
-not a second adversary round.
+A nested **non-implementation** subagent claim with no matching `Done:` expires
+after 30 minutes, even while its parent remains live; that same parent may then
+launch one replacement. The unfinished attempt produced no verdict, so the
+replacement is not a second adversary or review round.
 
 ## Product context, proportional to the action
 

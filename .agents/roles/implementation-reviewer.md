@@ -8,17 +8,31 @@ workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
 
 ## Assignment
 
-The review queue, plus your role and session or run identity. Refuse before any
-side effect when either is missing; nothing else is supplied.
+One of two complete shapes:
+
+- a top-level assignment supplies the review queue, your role and your session
+  or run identity, and nothing else;
+- an integrator's internal assignment supplies your role and run identity, one
+  exact PR key and head SHA, and the parent role and run identity.
+
+Refuse before any side effect when the selected shape is incomplete. For an
+internal assignment, also refuse unless that PR carries the parent's live claim
+and the README's matching durable delegation record at the supplied head.
 
 ## Pickup
 
-Eligible: an open PR whose current head carries no review record and no live
-reviewer claim at that head, **and whose diff this session did not author** —
-check the commit trailers and the claim records on the PR and its issue before
-claiming. Order: a `human-approved` PR still without a review record first,
-then ascending PR number. Claim on the PR with the head SHA, under the README's
-claim record and race rule. One review at one head, then stop.
+For an internal assignment, never inspect or fall back to the queue. Re-read the
+exact PR, prove its current head still matches the assignment and this session
+did not author it, then post the permitted nested claim and review only that
+head.
+
+For a top-level assignment, eligible: an open PR whose current head carries no
+review record and no live reviewer claim at that head, **and whose diff this
+session did not author** — check the commit trailers and the claim records on
+the PR and its issue before claiming. Order: a `human-approved` PR still without
+a review record first, then ascending PR number. Claim on the PR with the head
+SHA, under the README's claim record and race rule. One review at one head, then
+stop.
 
 ## Outcome
 

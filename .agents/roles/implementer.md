@@ -8,23 +8,37 @@ workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
 
 ## Assignment
 
-The implementation queue, plus your role and session or run identity. Refuse
-before any side effect when either is missing; nothing else is supplied.
+One of two complete shapes:
+
+- a top-level assignment supplies the implementation queue, your role and your
+  session or run identity, and nothing else;
+- a program-coordinator's internal assignment supplies your role and run
+  identity, one exact issue key, and the parent role and run identity.
+
+Refuse before any side effect when the selected shape is incomplete. For an
+internal assignment, also refuse unless the program issue carries the parent's
+live claim and matching durable delegation record from the README.
 
 ## Pickup
 
-Two kinds of item, in this order. A **fix-up**: an open PR whose latest
-integrator ruling *at the current head* names fix-now findings, with no live
-implementer claim; oldest PR first. A **new issue**: labeled `ready`, every
-`Depends-on` closed, not `in-progress`, and not reserved by an open `Parent: #N`
-— under `.github/ISSUE_SPEC.md`'s scheduling rules and order, including its cap
-of 6 distinct work units and the recount that admission requires — `Priority`
-per the README. A reserved child reaches you only as a program coordinator's
-internal assignment, never through this queue. The `ready` label is the
-preparation verdict; do not reconstruct or require a separate adversary
-dispatch. Claim in that spec's grammar on the issue, or post the handover claim
-on a fix-up PR, under the README's race rule. One PR or one fix-up wave, then
-stop.
+For an internal assignment, never inspect or fall back to the queue. Validate
+that the exact issue is open, `ready`, dependency-complete, reserved to the
+claiming program by its `Parent: #N` header, and admissible under the file-overlap
+and work-in-flight rules. Claim that issue in `.github/ISSUE_SPEC.md`'s grammar,
+recount, and complete only it.
+
+For a top-level assignment, two kinds of item, in this order. A **fix-up**: an
+open PR whose latest integrator ruling *at the current head* names fix-now
+findings, with no live implementer claim; oldest PR first. A **new issue**:
+labeled `ready`, every `Depends-on` closed, not `in-progress`, and not reserved
+by an open `Parent: #N` — under `.github/ISSUE_SPEC.md`'s scheduling rules and
+order, including its cap of 6 distinct work units and the recount that admission
+requires — `Priority` per the README. A reserved child reaches you only as a
+program coordinator's internal assignment, never through this queue. The
+`ready` label is the preparation verdict; do not reconstruct or require a
+separate adversary dispatch. Claim in that spec's grammar on the issue, or post
+the handover claim on a fix-up PR, under the README's race rule. One PR or one
+fix-up wave, then stop.
 
 ## Outcome
 

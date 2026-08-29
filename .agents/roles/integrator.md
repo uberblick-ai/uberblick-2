@@ -13,13 +13,16 @@ any side effect when either is missing; nothing else is supplied.
 
 ## Pickup
 
-Eligible: an open PR with a review record at its current head, no integrator
-ruling at that head naming fix-now findings — such a head belongs to the
-implementer's queue until it changes — no live integrator claim at that head,
-and not authored by this session. `human-approved` changes order and tier, never
-eligibility. Order: `human-approved` first, then ascending PR number. Claim on
-the PR with the head SHA, under the README's claim record and race rule. One
-PR — merged with its post-merge pass, or parked with the ruling — then stop.
+Eligible: an open PR with no integrator ruling at its current head naming fix-now
+findings — such a head belongs to the implementer's queue until it changes — no
+live integrator claim at that head, and not authored by this session. A review
+record is not a pickup prerequisite: an otherwise-eligible unreviewed PR may be
+claimed so this role can decide whether `CLAUDE.md` requires the independent
+round and delegate it when it does. Do not race a live top-level reviewer claim
+at that head. `human-approved` changes order and tier, never eligibility. Order:
+`human-approved` first, then ascending PR number. Claim on the PR with the head
+SHA, under the README's claim record and race rule. One PR — merged with its
+post-merge pass, or parked with the ruling — then stop.
 
 ## Outcome
 
@@ -29,6 +32,14 @@ never left undispositioned, silence is never one, and each disposition is
 recorded on the PR. The merge executes `CLAUDE.md`'s merge policy as written,
 including its named exceptions. `CLAUDE.md` step 5 makes the post-merge
 documentation pass and the dev-stack restart part of this pickup too.
+
+If the claimed head needs an implementation-reviewer and has no current-head
+record, post the README's exact-PR delegation record before starting a fresh
+reviewer. The reviewer's claim is the one permitted nested claim: the
+integrator's live claim remains in force, blocks a second integrator or
+top-level reviewer, and resumes this same bounded assignment only after the
+child's durable `Done:`. Re-read the head before using that result; a review of
+another SHA is no gate.
 
 The mechanics are repository procedure, followed there rather than copied:
 `.claude/skills/next-issue/integration.md` for the gate sequence and merge

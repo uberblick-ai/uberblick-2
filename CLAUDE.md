@@ -52,9 +52,11 @@ and `.agents/roles/` holds the six role contracts it defers to: who claims what,
 in what order, where one role's authority ends, and which internal subagent a
 role may delegate to. Work in this repo is always done by isolated implementer
 agents — Opus sub-agents by default, or a Codex session dispatched through Herdr
-under the same claim/handoff/review rules. Each role self-picks and claims its
-own item under its contract rather than being briefed by a standing session, and
-no session ever reviews or merges a diff it authored.
+under the same claim/handoff/review rules. A role started at a top-level entry
+point self-picks and claims its item under its contract rather than being briefed
+by a standing session. An internal child instead validates and follows its
+parent's durable exact-key assignment; it never searches the queue. No session
+ever reviews or merges a diff it authored.
 
 ## Development workflow (every functionality)
 
