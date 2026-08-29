@@ -28,10 +28,6 @@ Touches: mcp-server, schema
   `mcp-server`, `schema`, `web` — the live directory listing is authoritative,
   this sentence is not), plus `repo` (root config, CI, top-level docs).
   Grammar: `^Touches: [a-z0-9-]+(, [a-z0-9-]+)*$`, every name from that list.
-- **`Priority`** — optional third line. `high`, `normal`, or `low`; absent
-  means `normal`. Grammar when present: `^Priority: (high|normal|low)$`.
-  A reprioritizing pass edits this line; everything else about order is
-  derived.
 
 ### Scheduling semantics
 
@@ -50,8 +46,18 @@ Touches: mcp-server, schema
   nothing else is dispatched while a schema-touching issue is in flight. The
   cost is stated rather than hidden: every other eligible issue waits for that
   one, so a schema issue is scheduled knowing it stalls the queue.
-- Order among eligible issues: dependency topology, then `Priority`
-  (high → normal → low), then ascending issue number.
+- Order among eligible issues: dependency topology, then **`Priority`** — the
+  organization issue field, Urgent → High → Medium → Low — then ascending issue
+  number. An issue whose `Priority` field is unset is *untriaged* and ineligible
+  for every role's pickup; `Urgent` is set only by the owner.
+
+`Priority` is that field, read through the API — never a line in the issue body:
+
+```sh
+gh api graphql -f query='query{repository(owner:"uberblick-ai",name:"uberblick-2"){issue(number:N){issueFieldValues(first:10){nodes{... on IssueFieldSingleSelectValue{name field{... on IssueFieldSingleSelect{name}}}}}}}}'
+```
+
+Take the node whose `field.name` is `Priority`; its `name` is the value.
 
 ### Gate check
 
@@ -180,11 +186,10 @@ An issue labeled `ready` must pass all of:
 
 1. `Depends-on` line present, first-section, matching the grammar above.
 2. `Touches` line present, matching the grammar, every name valid.
-3. `Priority` line, when present, matches its grammar.
-4. All five `##` sections present: What, Why, Acceptance criteria,
+3. All five `##` sections present: What, Why, Acceptance criteria,
    Out of scope, Pointers.
-5. At least one `- [ ]` checkbox under Acceptance criteria.
-6. Out of scope and Pointers are non-empty (explicit `None.` is acceptable).
+4. At least one `- [ ]` checkbox under Acceptance criteria.
+5. Out of scope and Pointers are non-empty (explicit `None.` is acceptable).
 
 Sizing and decision-completeness are judgment calls, not lintable — the
 coordinator applies them when granting or revoking `ready`.
