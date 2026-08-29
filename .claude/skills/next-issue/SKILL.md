@@ -12,11 +12,13 @@ This is the interim launcher for the contracts in `.agents/roles/`; the future
 `ub launch <role>` replaces this file without changing them.
 
 The intended entry roles are `issue-preparer`, `implementer` and
-`program-coordinator`. Until their delivery handoffs are orchestrated, all six
-roles remain directly callable through this interim skill: those three plus
-`issue-adversary`, `implementation-reviewer` and `integrator`. A directly
-launched role still self-picks under its own contract; this launcher selects no
-target. If the invocation names none of the six roles, say so and return.
+`program-coordinator`. Until their delivery handoffs are orchestrated,
+`implementation-reviewer` and `integrator` also remain directly callable,
+self-picking queue roles through this interim skill. `issue-adversary` is not a
+top-level queue role: the issue-preparer launches it with the exact claimed
+issue and parent run identity its contract requires. This launcher selects no
+target. If the invocation names none of the five directly callable roles, say
+so and return.
 
 ## What this does
 
