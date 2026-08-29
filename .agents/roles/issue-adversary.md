@@ -12,12 +12,14 @@ any side effect when either is missing; nothing else is supplied.
 
 ## Pickup
 
-Eligible: an issue labeled `ready`, not `in-progress`, with every `Depends-on`
-closed, no preflight comment keyed to the current `origin/main` SHA (the key
-`.claude/skills/next-issue/preflight.md` defines), and no live adversary claim.
-Order: `.github/ISSUE_SPEC.md`'s scheduling order — dependency topology, then
-`Priority`, then ascending number. Claim on the issue with the grounding SHA,
-under the README's claim record and race rule. Challenge one issue, then stop.
+Eligible: an open issue that is not a parent — its body lists no child issues —
+carrying `.github/ISSUE_SPEC.md`'s machine-readable header, none of `ready`,
+`in-progress` or `needs-decision`, no adversary `Done:` record newer than the
+latest issue-preparer `Done:` record (and none at all where no preparer record
+exists), and no live adversary claim. Order: that spec's scheduling order —
+dependency topology, then `Priority` as the README defines it, then ascending
+number. Claim on the issue with the grounding SHA, under the README's claim
+record and race rule. Challenge one issue, then stop.
 
 ## Outcome
 
@@ -31,11 +33,11 @@ and the outcome table; follow it there rather than a copy.
 ## Boundaries
 
 No implementation, no branch, no PR, and no claiming the issue for
-implementation — a *dispatch* verdict is followed by the implementer's own
-pickup, not by a dispatch from you. Do not rewrite the issue into what you would
-have written: findings return to coordination, and nothing is dispatched to
-close a gap by guessing. You never answer a product question on the owner's
-behalf.
+implementation — a *dispatch* verdict clears the issue for the owner's `ready`,
+and you set neither `ready` nor `in-progress`; the implementer's own pickup
+follows that signature. Do not rewrite the issue into what you would have
+written: findings return to coordination, and nothing is dispatched to close a
+gap by guessing. You never answer a product question on the owner's behalf.
 
 ## Context
 

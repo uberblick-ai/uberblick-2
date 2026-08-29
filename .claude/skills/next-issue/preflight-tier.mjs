@@ -133,8 +133,9 @@ export function classify(axes) {
  *
  * The claim is never this role's: the preflight leaves the issue unclaimed
  * whatever it decides, which is why it can stop at any point without stranding
- * an `in-progress` label on an issue nobody is working. After a *dispatch*
- * verdict the implementer claims at its own pickup.
+ * an `in-progress` label on an issue nobody is working. A *dispatch* verdict
+ * clears the issue for the owner's `ready`, and the implementer claims at its
+ * own pickup.
  *
  * @param {{
  *   materiality: string, uncertainty: string, blastRadius: string, reversibility: string,
@@ -197,11 +198,9 @@ export function preflight(signals) {
     return plan("return-to-coordination", { remove: ["ready"], comment: true });
   }
 
-  // `in-progress` is written by the implementer's own claim at its pickup, not
-  // here. It is named as this outcome's label because dispatch is the only
-  // outcome an implementer claim can follow — the invariant worth checking.
-  return plan("dispatch", {
-    add: ["in-progress"],
-    comment: challengers > 0 || findings,
-  });
+  // Dispatch adds no label: the owner's `ready` follows this verdict, and
+  // `in-progress` is written by the implementer's own claim at its pickup.
+  // Dispatch is still the only outcome a claim can follow, and `claim` is where
+  // that invariant is checked — never a label this role does not write.
+  return plan("dispatch", { comment: challengers > 0 || findings });
 }

@@ -93,15 +93,16 @@ the current claims, and take the outcome off this table.
 
 | Still eligible at the recheck | What preflight found | Outcome | Labels | Claim | Comment |
 |---|---|---|---|---|---|
-| yes | nothing blocking (`none`) | dispatch | add `in-progress` — written by the implementer's own claim, not here | yes | only when a challenger ran or the self-check found something |
+| yes | nothing blocking (`none`) | dispatch | none — the owner's `ready` follows the verdict; `in-progress` is the implementer's claim | yes | only when a challenger ran or the self-check found something |
 | yes | a stale or incorrect contract (`stale-spec`) | return-to-coordination | remove `ready` | no | yes |
 | yes | an owner-only product decision (`product-decision`) | park-needs-decision | remove `ready`, add `needs-decision` | no | yes |
 | no | anything (`any`) | requeue | none | no | no |
 
 The preflight never writes `in-progress` — the implementer's own claim does,
-after this gate — so no preflight path can leave that label on an issue nobody
-is implementing. The other two labels are the preflight's: a stop takes `ready`
-off, and an owner question adds `needs-decision`.
+after the owner's `ready` — so no preflight path can leave that label on an
+issue nobody is implementing. The other two labels are the preflight's: a stop
+takes `ready` off — a no-op on an issue not yet granted it — and an owner
+question adds `needs-decision`.
 
 The recheck outranks every finding, which is the first row to read: if someone
 else claimed the issue while you were grounding it, it is their work now.
@@ -113,7 +114,7 @@ Among the stops, which applies is the difference between evidence and authority.
 A stale contract, a missing outcome or invariant, or a scope or splitting
 decision the grounding read can settle goes back to coordination with the
 evidence: `ready` comes off, the comment says what is wrong, and a corrected
-body has to pass `.github/ISSUE_SPEC.md` and regain `ready` before any later
+body has to pass `.github/ISSUE_SPEC.md` and be granted `ready` before any later
 pickup. Only an unresolved *product* question — one the repository cannot
 answer — takes `needs-decision`, with concrete options and your recommendation
 per the spec's exit path.
@@ -133,11 +134,11 @@ nothing writes none, and a requeue writes none either.
 
 **The comment is keyed by `<issue, base SHA>`.** Before posting, look for a
 preflight comment on the issue already recording that same base SHA. If one is
-there, this preflight ran before and died between the comment and the claim:
-edit that comment instead of posting beside it. Exactly one preflight comment
-per issue per base SHA, however often a preflight is re-run. A later pickup
-that grounds at a newer commit is a different key and gets its own comment — not
-a duplicate, a second preflight.
+there, this preflight ran before and died after posting it: edit that comment
+instead of posting beside it. Exactly one preflight comment per issue per base
+SHA, however often a preflight is re-run. A later pickup that grounds at a newer
+commit is a different key and gets its own comment — not a duplicate, a second
+preflight.
 
 **Findings are not requirements.** Material implementation risks and options
 travel to the implementer in the brief, as options. They are never edited into
@@ -149,8 +150,8 @@ the same case and not a stop: name the freedom in the brief and dispatch. Only a
 
 **A preflight is re-entrant.** An invocation that dies partway through one is
 repeated by the next pickup, and the repeat costs tokens and nothing else,
-because both of its durable effects are guarded: the implementation claim comes
-after this gate, so a second run either re-reaches dispatch or finds the issue
-claimed at its recheck and requeues; and the comment is keyed by base SHA, so a
-second run at the same commit edits the first run's comment rather than posting
-a second.
+because both of its durable effects are guarded: the owner's `ready` comes after
+this gate, so a second run either re-reaches dispatch or finds the issue no
+longer eligible at its recheck and requeues; and the comment is keyed by base
+SHA, so a second run at the same commit edits the first run's comment rather
+than posting a second.
