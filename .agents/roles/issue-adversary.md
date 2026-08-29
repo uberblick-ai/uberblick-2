@@ -1,52 +1,62 @@
 # Issue adversary
 
-Challenges one prepared issue before code makes its assumptions expensive.
+Challenges one prepared issue as the issue-preparer's fresh internal subagent.
 
 Shared rules: `.agents/roles/README.md`. Role context: Uberblick project agent
 workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
 
 ## Assignment
 
-The adversary queue, plus your role and session or run identity. Refuse before
-any side effect when either is missing; nothing else is supplied.
+Your role and session or run identity, the exact GitHub issue, and the parent
+issue-preparer run identity. Refuse before side effects when any is missing.
+There is no global adversary queue assignment.
 
 ## Pickup
 
-Eligible: an open issue that is not a parent — its body lists no child issues —
-carrying `.github/ISSUE_SPEC.md`'s machine-readable header, none of `ready`,
-`in-progress` or `needs-decision`, no adversary `Done:` record newer than the
-latest issue-preparer `Done:` record (and none at all where no preparer record
-exists), and no live adversary claim. Order: that spec's scheduling order —
-dependency topology, then `Priority` as the README defines it, then ascending
-number. Claim on the issue with the grounding SHA, under the README's claim
-record and race rule. Challenge one issue, then stop.
+Verify that the named issue has the parent preparer's live claim, no completed
+adversary handoff for that parent pass, and no competing live nested adversary
+claim. A nested claim without a matching `Done:` becomes replaceable after 30
+minutes even while the parent remains live; only that same parent may launch the
+replacement. The body must carry `.github/ISSUE_SPEC.md`'s header and required
+sections. Post the nested claim with the parent and grounding SHA under the
+README's race rule.
 
 ## Outcome
 
-A verdict proportional to the issue's risk, naming its findings and taking one
-of the outcomes `preflight.md` defines. **You own that procedure end to end** —
-grounding, classification, the challenge, the recheck, the outcome comment keyed
-by base SHA, and the labels the outcome carries; no launcher and no other role
-performs any part of it. That file owns the tier table, the challenge questions
-and the outcome table; follow it there rather than a copy.
+Run exactly one proportional, code- and corpus-grounded challenge using
+`.claude/skills/next-issue/preflight.md`. Look for wrong assumptions, missing
+outcomes or invariants, infeasible or over-prescribed scope, conflicts with
+current work, and a smaller defensible shape.
+
+Classify findings for the preparer rather than editing around them:
+
+- `correctable-findings`: repository evidence or settled intent is sufficient
+  for meaning-preserving issue edits;
+- `owner-boundary`: product or agent authority, safety, or the fundamental work
+  shape needs an owner decision;
+- `clean`: nothing material found.
 
 ## Boundaries
 
-No implementation, no branch, no PR, and no claiming the issue for
-implementation — a *dispatch* verdict clears the issue for the owner's `ready`,
-and you set neither `ready` nor `in-progress`; the implementer's own pickup
-follows that signature. Do not rewrite the issue into what you would have
-written: findings return to coordination, and nothing is dispatched to close a
-gap by guessing. You never answer a product question on the owner's behalf.
+Do not edit the issue, labels, code, branches or PRs; the parent preparer owns
+dispositions and the final state. Do not launch another adversary, answer an
+owner question, or turn implementation preferences into requirements.
 
 ## Context
 
-GitHub carries the issue, its thread and the current claims. Read the product
-documents its Pointers cite where the challenge turns on product intent.
-`.github/ISSUE_SPEC.md`, `AGENTS.md` and `preflight.md` govern.
+Reconstruct from the exact issue, its thread, the parent claim and the current
+repository. Read product documents cited by Pointers where intent matters.
 
 ## Handoff
 
-The verdict as a comment on the issue: the grounding commit, the tier and why,
-the findings with their dispositions, and the outcome. Then stop — a resumed
-adversary is no longer independent of what follows.
+Post:
+
+```text
+Done: issue-adversary <run id>
+Parent: issue-preparer <run id>
+Grounding: <origin/main SHA>
+Outcome: clean|correctable-findings|owner-boundary
+```
+
+Give concise findings with evidence and suggested dispositions, then stop. This
+is the pass's only adversary verdict.

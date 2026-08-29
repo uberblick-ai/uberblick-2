@@ -2,7 +2,7 @@
  * The `next-issue` preflight decision table, in executable form.
  *
  * `preflight.md` next to this file renders the same table for the issue
- * adversary that owns it; this file is the table a test can run. The two are
+ * preparer that owns it; this file is the table a test can run. The two are
  * checked against each other in `preflight-tier.test.mjs` beside them, so the
  * procedure that role follows and the routing this repository claims cannot
  * drift apart — which is the only reason an executable copy earns its place.
@@ -27,17 +27,13 @@ const UNCERTAINTY = ["low", "high"];
 const BLAST_RADIUS = ["local", "wide"];
 /** `hard` when the choice is expensive to undo once merged. */
 const REVERSIBILITY = ["easy", "hard"];
-/**
- * What the preflight found that stops a dispatch, if anything — exported for
- * the same reason `AXES` is: a test should enumerate the vocabulary, not
- * retype it.
- */
-export const BLOCKERS = ["none", "stale-spec", "product-decision"];
+/** The state after the preparer has dispositioned the adversary's findings. */
+export const FINDING_STATES = ["none", "correctable-applied", "owner-boundary"];
 
 const BOOLEANS = [true, false];
 
 /**
- * The four axes the tier is a function of, and nothing else — exported so a
+ * The four axes the route is a function of, and nothing else — exported so a
  * test can enumerate the space without re-declaring the vocabulary here.
  */
 export const AXES = {
@@ -47,30 +43,20 @@ export const AXES = {
   reversibility: REVERSIBILITY,
 };
 
-/** Lifecycle signals: what the preflight found, and what the recheck saw. */
+/** Lifecycle signals: final finding state and ownership at the recheck. */
 const LIFECYCLE = {
-  blocker: BLOCKERS,
-  /** Did the self-check or a challenger surface anything material? */
-  findings: BOOLEANS,
-  /** The recheck immediately before the outcome: still `ready`, still unclaimed. */
-  stillEligible: BOOLEANS,
-  /** Are challengers of differing model family, harness or approach available? */
-  diverseChallengers: BOOLEANS,
+  findingState: FINDING_STATES,
+  /** Does the parent preparer still hold the issue? */
+  parentOwnsIssue: BOOLEANS,
 };
 
-/** Ordered weakest to strongest; `uncertainty: "high"` moves one step along it. */
-export const TIERS = ["trivial", "bounded", "substantial"];
+export const ROUTES = ["trivial", "challenged"];
 
-/** How many independent challengers each tier runs before implementation. */
-export const CHALLENGERS = { trivial: 0, bounded: 1, substantial: 2 };
+/** How many adversary subagents each route runs. */
+export const ADVERSARIES = { trivial: 0, challenged: 1 };
 
-/** Every way a preflight can end. Only `dispatch` leads to a claim. */
-export const OUTCOMES = [
-  "dispatch",
-  "return-to-coordination",
-  "park-needs-decision",
-  "requeue",
-];
+/** Every way the preparer's one pass can end. */
+export const OUTCOMES = ["ready", "park-needs-decision", "requeue"];
 
 /**
  * @param {unknown} signals
@@ -85,7 +71,7 @@ function validate(signals, schema, required) {
   for (const key of Object.keys(signals)) {
     if (!known.includes(key)) {
       throw new Error(
-        `preflight: unknown signal "${key}". The table routes on ${known.join(", ")} and nothing else — a package name, a label or a keyword never moves a tier.`,
+        `preflight: unknown signal "${key}". The table routes on ${known.join(", ")} and nothing else — a package name, label or keyword never changes the route.`,
       );
     }
   }
@@ -102,105 +88,62 @@ function validate(signals, schema, required) {
 }
 
 /**
- * The risk tier, from the four axes alone.
- *
- * Substantial when the change decides architecture or a public contract, when
- * it reaches beyond its own module, or when it is hard to undo. Bounded when
- * it is real behavior with established patterns and contained, reversible
- * impact. Trivial only when it is mechanical, local, easy to undo *and*
- * understood. Uncertainty then biases one step upward, which is what routes a
- * genuinely ambiguous change to two challengers rather than one.
+ * Trivial only when the grounded change is mechanical, understood, local and
+ * easy to undo. Every other combination receives one adversary.
  *
  * @param {{materiality: string, uncertainty: string, blastRadius: string, reversibility: string}} axes
- * @returns {"trivial" | "bounded" | "substantial"}
+ * @returns {"trivial" | "challenged"}
  */
 export function classify(axes) {
   validate(axes, AXES, Object.keys(AXES));
-  const base =
-    axes.materiality === "architectural" ||
-    axes.blastRadius === "wide" ||
-    axes.reversibility === "hard"
-      ? "substantial"
-      : axes.materiality === "behavioral"
-        ? "bounded"
-        : "trivial";
-  if (axes.uncertainty !== "high") return base;
-  return TIERS[Math.min(TIERS.indexOf(base) + 1, TIERS.length - 1)];
+  return axes.materiality === "mechanical" &&
+    axes.uncertainty === "low" &&
+    axes.blastRadius === "local" &&
+    axes.reversibility === "easy"
+    ? "trivial"
+    : "challenged";
 }
 
 /**
- * The whole preflight decision: how hard to challenge, and what happens next.
- *
- * The claim is never this role's: the preflight leaves the issue unclaimed
- * whatever it decides, which is why it can stop at any point without stranding
- * an `in-progress` label on an issue nobody is working. A *dispatch* verdict
- * clears the issue for the owner's `ready`, and the implementer claims at its
- * own pickup.
+ * The preparer's final one-pass decision after it has applied correctable
+ * findings and rechecked its ownership.
  *
  * @param {{
  *   materiality: string, uncertainty: string, blastRadius: string, reversibility: string,
- *   blocker?: string, findings?: boolean, stillEligible?: boolean, diverseChallengers?: boolean,
+ *   findingState?: string, parentOwnsIssue?: boolean,
  * }} signals
  */
 export function preflight(signals) {
   validate(signals, { ...AXES, ...LIFECYCLE }, Object.keys(AXES));
-  const {
-    blocker = "none",
-    findings = false,
-    stillEligible = true,
-    diverseChallengers = false,
-  } = signals;
-
-  const tier = classify({
+  const { findingState = "none", parentOwnsIssue = true } = signals;
+  const route = classify({
     materiality: signals.materiality,
     uncertainty: signals.uncertainty,
     blastRadius: signals.blastRadius,
     reversibility: signals.reversibility,
   });
-  const challengers = CHALLENGERS[tier];
-  const independence =
-    challengers === 0
-      ? "none"
-      : challengers === 2 && diverseChallengers
-        ? "diverse"
-        : // Two fresh contexts satisfy independence when diversity is not on
-          // offer; the fallback is stated so it is a choice, not a silent gap.
-          "fresh-context";
+  const adversaries = ADVERSARIES[route];
 
   /**
    * @param {string} outcome
    * @param {{add?: string[], remove?: string[], comment: boolean}} lifecycle
    */
   const plan = (outcome, { add = [], remove = [], comment }) => ({
-    tier,
-    challengers,
-    independence,
+    route,
+    adversaries,
+    independence: adversaries === 0 ? "self-check" : "fresh-cross-runtime-preferred",
     outcome,
-    claim: outcome === "dispatch",
     labels: { add, remove },
     comment,
   });
 
-  // The recheck outranks every finding. Someone else claimed the issue, or it
-  // stopped being eligible, while this preflight ran: it is their work now, and
-  // stripping `ready` or commenting on it would be acting on live work from the
-  // outside. Take the findings to the claim holder or to a fresh pickup instead.
-  if (!stillEligible) return plan("requeue", { comment: false });
-
-  if (blocker === "product-decision") {
+  if (!parentOwnsIssue) return plan("requeue", { comment: false });
+  if (findingState === "owner-boundary") {
     return plan("park-needs-decision", {
       add: ["needs-decision"],
       remove: ["ready"],
       comment: true,
     });
   }
-  if (blocker === "stale-spec") {
-    return plan("return-to-coordination", { remove: ["ready"], comment: true });
-  }
-
-  // Dispatch adds no label: the owner's `ready` follows this verdict, and
-  // `in-progress` is written by the implementer's own claim at its pickup.
-  // Dispatch is still the only outcome a claim can follow, and `claim` is where
-  // that invariant is checked — never a label this role does not write.
-  return plan("dispatch", { comment: challengers > 0 || findings });
+  return plan("ready", { add: ["ready"], comment: true });
 }
