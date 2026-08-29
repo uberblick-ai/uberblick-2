@@ -33,15 +33,19 @@ Touches: mcp-server, schema
 
 - **Eligible** = labeled `ready` AND every `Depends-on` issue is closed AND
   not claimed.
+- **Work in flight** is the count of claimed issues plus unmerged PRs,
+  reconstructed from GitHub. It is capped at 6: when the count is 6, no new
+  issue is dispatched until one leaves the count.
 - Parallelism is judged at **file** level, not `Touches`-set level: overlapping
   `Touches` sets do not by themselves queue. From the issues' scope and
-  Pointers the loop forms an expectation of which files each will edit, and
-  dispatches in parallel (separate worktrees) whenever those are expected to be
-  disjoint. Parallel dispatch needs that positive expectation: where the files
-  cannot be foreseen with confidence, the issues queue. An expectation that
-  proves wrong costs a rebase, not a lost gate: the later PR rebases and its
-  gates re-run at the new head, which the commit-keyed gate rule already
-  requires.
+  Pointers the loop forms an expectation of which files each will edit.
+  Dispatch in parallel when substantive implementation files are expected to
+  be disjoint. A bounded predicted overlap is also allowed in purely additive
+  aggregation surfaces, such as barrel exports or files collecting independent
+  error types, when reconciling it is mechanical; the later branch rebases after
+  the earlier merge and every exact-head gate runs again. Semantic overlap, or
+  files that cannot be foreseen with confidence, queue. An expectation that
+  proves wrong has the same rebase and fresh-gate consequence.
 - This includes `schema`: its keystone risk is paid by exact-head review and
   gates after any rebase, not by locking unrelated files or packages.
 - Order among eligible issues: dependency topology, then **`Priority`** — the
