@@ -16,9 +16,9 @@ any side effect when either is missing; nothing else is supplied.
 
 Eligible: an open issue carrying none of `ready`, `in-progress` and
 `needs-decision`, with no live preparer claim, and not a parent — a body that
-lists child issues belongs to the program coordinator. Order: `Priority` high →
-normal → low, then ascending issue number. Claim on the issue under the README's
-claim record and race rule. Prepare exactly one issue, then stop.
+lists child issues belongs to the program coordinator. Order: `Priority` as the
+README defines it, then ascending issue number. Claim on the issue under the
+README's claim record and race rule. Prepare exactly one issue, then stop.
 
 ## Outcome
 

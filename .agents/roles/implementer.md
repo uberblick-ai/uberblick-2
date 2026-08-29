@@ -16,12 +16,12 @@ before any side effect when either is missing; nothing else is supplied.
 Two kinds of item, in this order. A **fix-up**: an open PR whose latest
 integrator ruling *at the current head* names fix-now findings, with no live
 implementer claim; oldest PR first. A **new issue**: labeled `ready`, every
-`Depends-on` closed, not `in-progress`, whose latest preflight verdict at the
-current `origin/main` is *dispatch* — under `.github/ISSUE_SPEC.md`'s
-scheduling rules, so `schema` serializes globally, expected file-level overlap
-with work in flight defers, and work in flight (claimed issues plus unmerged
-PRs) is capped at 6 — in that spec's order. Claim in that spec's grammar on the
-issue, a fix-up posting its handover claim there in the same grammar, under the
+`Depends-on` closed, not `in-progress`, whose latest adversary `Done:` record
+carries the *dispatch* outcome — under `.github/ISSUE_SPEC.md`'s scheduling
+rules, so `schema` serializes globally, expected file-level overlap with work in
+flight defers, and work in flight (claimed issues plus unmerged PRs) is capped
+at 6 — in that spec's order, `Priority` per the README. Claim in that spec's
+grammar on the issue, a fix-up posting its handover claim there too, under the
 README's claim record and race rule. One PR or one fix-up wave, then stop.
 
 ## Outcome
