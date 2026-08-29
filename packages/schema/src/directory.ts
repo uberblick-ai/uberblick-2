@@ -3,17 +3,17 @@
  *
  * Discovery is itself a synced doc: one Y.Doc per workspace, in the well-known
  * room `<workspaceId>/_directory` (see `rooms.ts`), holding a Y.Map of
- * uuid → {title, tags, deleted?, createdAt?, updatedAt?, description?} stubs.
+ * uuid → {title, tags, deleted?, createdAt?, updatedAt?, description?, kind?,
+ * status?} stubs.
  * It travels over the same sync channel as every other document, so a fresh
  * client with empty local state learns the corpus by joining one more room.
  * There is no other discovery mechanism — never enumerate locally-observed
  * creations.
  *
- * The stub is a cache, not the truth: `meta.title` and `meta.description`
- * inside the document itself are authoritative, and the stub is repaired on
- * write and on connect. Caching the description is what lets a listing say what
- * a document is for without opening a single room — the whole point of having
- * one.
+ * The stub is a cache, not the truth: metadata inside the document itself is
+ * authoritative, and the stub is repaired on write and on connect. Caching the
+ * description and lifecycle is what lets a listing answer without opening a
+ * single room — the whole point of having one.
  *
  * Entries are whole-object writes, so concurrent upserts to the same uuid
  * converge last-write-wins per key while different uuids never conflict.
@@ -29,7 +29,12 @@
  */
 
 import type * as Y from "yjs";
-import type { DirectoryEntry } from "./types.js";
+import { readDocumentLifecycle } from "./types.js";
+import type {
+  DirectoryEntry,
+  DocumentKind,
+  DocumentStatus,
+} from "./types.js";
 
 /** The key of the directory Y.Map inside the directory doc. */
 export const DIRECTORY_DOCS_KEY = "docs";
@@ -41,6 +46,8 @@ interface StoredEntry {
   createdAt?: number;
   updatedAt?: number;
   description?: string;
+  kind?: DocumentKind;
+  status?: DocumentStatus;
 }
 
 /** A stored epoch-millisecond stamp, or undefined when absent or malformed. */
@@ -73,6 +80,7 @@ function readStored(value: unknown): StoredEntry | null {
   const createdAt = readStamp(candidate.createdAt);
   const updatedAt = readStamp(candidate.updatedAt);
   const description = readDescription(candidate.description);
+  const lifecycle = readDocumentLifecycle(candidate.kind, candidate.status);
   return {
     title,
     tags,
@@ -80,6 +88,7 @@ function readStored(value: unknown): StoredEntry | null {
     ...(createdAt === undefined ? {} : { createdAt }),
     ...(updatedAt === undefined ? {} : { updatedAt }),
     ...(description === undefined ? {} : { description }),
+    ...lifecycle,
   };
 }
 
@@ -98,6 +107,8 @@ function carryForward(next: StoredEntry, from: StoredEntry | null): StoredEntry 
     ...(from?.description === undefined
       ? {}
       : { description: from.description }),
+    ...(from?.kind === undefined ? {} : { kind: from.kind }),
+    ...(from?.status === undefined ? {} : { status: from.status }),
   };
 }
 
@@ -126,6 +137,16 @@ export interface DirectoryUpsert {
    * description was removed stops advertising the old one.
    */
   description?: string;
+  /**
+   * The document's record shape. Omission carries the cached value forward;
+   * the empty string clears both kind and status.
+   */
+  kind?: DocumentKind | "";
+  /**
+   * The document's lifecycle state. Omission carries it forward; the empty
+   * string clears only status. Pair validation belongs to the document setters.
+   */
+  status?: DocumentStatus | "";
 }
 
 /**
@@ -156,6 +177,12 @@ export function upsertDirectoryEntry(
     const description = readDescription(
       entry.description ?? existing?.description,
     );
+    const kind =
+      entry.kind === "" ? undefined : (entry.kind ?? existing?.kind);
+    const status =
+      entry.kind === "" || entry.status === ""
+        ? undefined
+        : (entry.status ?? existing?.status);
     const next: StoredEntry = {
       title: entry.title,
       tags: [...(entry.tags ?? [])],
@@ -163,6 +190,8 @@ export function upsertDirectoryEntry(
       ...(createdAt === undefined ? {} : { createdAt }),
       ...(updatedAt === undefined ? {} : { updatedAt }),
       ...(description === undefined ? {} : { description }),
+      ...(kind === undefined ? {} : { kind }),
+      ...(status === undefined ? {} : { status }),
     };
     docs.set(entry.uuid, next);
   });
@@ -243,6 +272,8 @@ function toEntry(uuid: string, stored: StoredEntry): DirectoryEntry {
     ...(stored.description === undefined
       ? {}
       : { description: stored.description }),
+    ...(stored.kind === undefined ? {} : { kind: stored.kind }),
+    ...(stored.status === undefined ? {} : { status: stored.status }),
   };
 }
 

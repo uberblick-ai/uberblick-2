@@ -133,6 +133,26 @@ describe("agent awareness", () => {
       blockText(afterInsert.replica.doc, inserted.block.id),
     );
     expect(head?.index).toBe("brand new".length);
+
+    // And it anchors after what was WRITTEN, which is not `text` when `inline`
+    // replaced it: the caret would otherwise sit at 0 for every formatted
+    // block an agent inserts.
+    const formatted = await rig.ok("insert_block", {
+      uuid: doc.uuid,
+      type: "paragraph",
+      inline: [
+        { text: "a formatted ", marks: {} },
+        { text: "insert", marks: { bold: true } },
+      ],
+    });
+    const afterFormatted = awarenessOf(rig, doc.uuid);
+    expect(
+      Y.createAbsolutePositionFromRelativePosition(
+        Y.createRelativePositionFromJSON(afterFormatted.state.cursor.head),
+        afterFormatted.replica.doc,
+      )?.index,
+    ).toBe("a formatted insert".length);
+    expect(formatted.block.text).toBe("a formatted insert");
   });
 
   // Who wrote is half of what a caret says, and the web editor renders whatever

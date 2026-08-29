@@ -13,16 +13,15 @@ before any side effect when either is missing; nothing else is supplied.
 
 ## Pickup
 
-Two kinds of item, in this order. A **fix-up**: an open PR whose latest integrator
-ruling *at the current head* names fix-now findings, with no live implementer
-claim; oldest PR first. A **new issue**: labeled `ready`, every `Depends-on`
-closed, not `in-progress`, whose latest durable transition in
-`.claude/skills/next-issue/preflight.md` admits the implementer, under
-`.github/ISSUE_SPEC.md`'s scheduling rules, so `schema` serializes globally and
-work in flight (claimed issues plus unmerged PRs) is capped at 6, in that spec's
-order. Claim in that spec's grammar on the issue, a fix-up posting its handover
-claim there too, under the README's claim record and race rule. One PR or one
-fix-up wave, then stop.
+Two kinds of item, in this order. A **fix-up**: an open PR whose latest
+integrator ruling *at the current head* names fix-now findings, with no live
+implementer claim; oldest PR first. A **new issue**: labeled `ready`, every
+`Depends-on` closed, not `in-progress`, whose latest durable transition in
+`.claude/skills/next-issue/preflight.md` admits the implementer — under
+`.github/ISSUE_SPEC.md`'s scheduling rules and order, including its cap of 6
+items in flight — `Priority` per the README. Claim in that spec's grammar on
+the issue, a fix-up posting its handover claim there too, under the
+README's claim record and race rule. One PR or one fix-up wave, then stop.
 
 ## Outcome
 

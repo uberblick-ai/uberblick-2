@@ -30,10 +30,19 @@ import { WEB_CLIENT } from "../collab/rooms.js";
  *
  * An MCP client that writes one block and exits is gone from awareness within
  * milliseconds of the tool response, so the caret that says *who* wrote is on
- * screen for less time than it takes to look at it (#304). Long enough to read
- * a name, short enough that nobody mistakes it for presence.
+ * screen for less time than it takes to look at it (#304). The five seconds
+ * that first bought was still gone before the owner had looked at it, so this
+ * is the thirty the MCP server already gives a *connected* agent's cursor
+ * (`cursorTtlMs`, #407): one lifetime to learn, whichever way the session ends.
+ *
+ * The two clocks compose rather than coincide — the server's runs from the last
+ * write while a session is connected, this one from the moment it leaves — so
+ * an agent that writes, lingers and then exits is drawn for up to the sum.
+ * Mistaking it for presence is ruled out elsewhere, not by the number: the
+ * retention is a decoration inside this one editor, and every count and
+ * presence list reads the real awareness states.
  */
-const AGENT_CURSOR_GRACE_MS = 5_000;
+export const AGENT_CURSOR_GRACE_MS = 30_000;
 
 /** An awareness state as it arrives on the wire — see `collab/identity.ts`. */
 type AwarenessState = Record<string, unknown> & {
@@ -76,8 +85,12 @@ function isAttributedAgentCursor(
  * Only the handful of members `yCursorPlugin` uses are implemented, hence the
  * cast at the end. Its `change` listener is the one the expiry has to reach, so
  * that subscription is ours; every other event is passed straight through.
+ *
+ * Exported so the grace can be driven on fake timers without an editor and a
+ * hub in the way; the one caller in the extension below is the production
+ * wiring, and passes {@link AGENT_CURSOR_GRACE_MS}.
  */
-function withDepartedAgentCursors(
+export function withDepartedAgentCursors(
   awareness: Awareness,
   graceMs: number,
 ): Awareness {

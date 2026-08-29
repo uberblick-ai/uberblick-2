@@ -359,6 +359,102 @@ describe("directory doc", () => {
     });
   });
 
+  it("mirrors a lifecycle pair and carries it through every rewrite", () => {
+    const dir = new Y.Doc();
+    upsertDirectoryEntry(dir, {
+      uuid: ALPHA,
+      title: "Alpha",
+      tags: ["requirement"],
+      kind: "requirement",
+      status: "planned",
+    });
+
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha, renamed" });
+    expect(getDirectoryEntry(dir, ALPHA)).toMatchObject({
+      kind: "requirement",
+      status: "planned",
+    });
+
+    upsertDirectoryEntry(dir, {
+      uuid: ALPHA,
+      title: "Alpha, renamed",
+      tags: ["requirement", "schema"],
+    });
+    expect(getDirectoryEntry(dir, ALPHA)).toMatchObject({
+      kind: "requirement",
+      status: "planned",
+    });
+
+    tombstoneDirectoryEntry(dir, ALPHA);
+    expect(getDirectoryEntry(dir, ALPHA)).toMatchObject({
+      deleted: true,
+      kind: "requirement",
+      status: "planned",
+    });
+    restoreDirectoryEntry(dir, ALPHA);
+    expect(getDirectoryEntry(dir, ALPHA)).toMatchObject({
+      kind: "requirement",
+      status: "planned",
+    });
+  });
+
+  it("distinguishes lifecycle omission from clearing at either end", () => {
+    const dir = new Y.Doc();
+    upsertDirectoryEntry(dir, {
+      uuid: ALPHA,
+      title: "Alpha",
+      kind: "requirement",
+      status: "implementing",
+    });
+
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha" });
+    expect(getDirectoryEntry(dir, ALPHA)).toMatchObject({
+      kind: "requirement",
+      status: "implementing",
+    });
+
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha", status: "" });
+    expect(getDirectoryEntry(dir, ALPHA)).toMatchObject({ kind: "requirement" });
+    expect(getDirectoryEntry(dir, ALPHA)).not.toHaveProperty("status");
+
+    upsertDirectoryEntry(dir, {
+      uuid: ALPHA,
+      title: "Alpha",
+      status: "planned",
+    });
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha", kind: "" });
+    expect(getDirectoryEntry(dir, ALPHA)).not.toHaveProperty("kind");
+    expect(getDirectoryEntry(dir, ALPHA)).not.toHaveProperty("status");
+  });
+
+  it("normalizes malformed and mismatched lifecycle metadata on read", () => {
+    const dir = new Y.Doc();
+    getDirectoryMap(dir).set(ALPHA, {
+      title: "Alpha",
+      tags: [],
+      kind: "decision",
+      status: "implementing",
+    });
+    expect(getDirectoryEntry(dir, ALPHA)).toEqual({
+      uuid: ALPHA,
+      title: "Alpha",
+      tags: [],
+      kind: "decision",
+    });
+
+    getDirectoryMap(dir).set(BETA, {
+      title: "Beta",
+      tags: [],
+      kind: "note",
+      status: "open",
+    });
+    expect(getDirectoryEntry(dir, BETA)).toEqual({
+      uuid: BETA,
+      title: "Beta",
+      tags: [],
+    });
+  });
+
   it("converges last-write-wins when two replicas describe the same document", () => {
     const [a, b] = replicaPair((dir) => {
       upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha" });

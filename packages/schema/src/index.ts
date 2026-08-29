@@ -2,7 +2,8 @@
  * @uberblick/schema — the keystone package.
  *
  * Owns the Y.Doc layout for an uberblick document:
- *   - `meta`        Y.Map: uuid, title, description, tags, links-by-UUID
+ *   - `meta`        Y.Map: uuid, title, description, tags, links-by-UUID,
+ *                        kind and status
  *   - `blocks`      Y.XmlFragment: one Y.XmlElement per block, each holding a
  *                   single Y.XmlText of plain-text source
  *                   (types: paragraph, heading, code, mermaid, list-item,
@@ -35,7 +36,9 @@ export {
   getMetaMap,
   initDoc,
   setDescription,
+  setKind,
   setLinks,
+  setStatus,
   setTags,
   setTitle,
 } from "./doc.js";
@@ -50,13 +53,20 @@ export {
   getBlockRev,
   getBlockText,
   getBlocks,
+  getBlocksWithInline,
   insertBlock,
   repairDuplicateBlocks,
   setBlockLanguage,
   setBlockLevel,
   setBlockType,
+  setInlineLink,
 } from "./blocks.js";
-export type { BlockTypeAttrs, EditBlockOptions } from "./blocks.js";
+export type {
+  BlockTypeAttrs,
+  EditBlockOptions,
+  InlineLinkRange,
+  SetInlineLinkOptions,
+} from "./blocks.js";
 
 export { isDocId, isExternalHref, readsAsMark } from "./marks.js";
 
@@ -159,6 +169,8 @@ export {
   AnnotationRangeError,
   BlockNotFoundError,
   ConflictingLinkMarksError,
+  InvalidDocumentLifecycleError,
+  InlineLinkRangeError,
   InvalidDocLinkTargetError,
   InvalidLinkHrefError,
   InvalidRoomError,
@@ -168,16 +180,22 @@ export {
 } from "./errors.js";
 export type {
   AnnotationRangeErrorReason,
+  InlineLinkRangeErrorReason,
   StaleBlockDetails,
 } from "./errors.js";
 
 export {
   BLOCK_TYPES,
+  DECISION_STATUSES,
+  DOCUMENT_KINDS,
   INLINE_MARKS,
   LIST_STYLES,
   MAX_DESCRIPTION_LENGTH,
   MAX_LIST_INDENT,
   PROSE_BLOCK_TYPES,
+  REQUIREMENT_STATUSES,
+  isDocumentKind,
+  isDocumentStatusForKind,
   isBlockType,
   isInlineMark,
   isListStyle,
@@ -192,8 +210,11 @@ export type {
   BlockType,
   CommentMark,
   DirectoryEntry,
+  DecisionStatus,
   DocFeedback,
   DocMeta,
+  DocumentKind,
+  DocumentStatus,
   FeedbackEvent,
   FeedbackKind,
   FeedbackReason,
@@ -206,5 +227,6 @@ export type {
   ListIndent,
   ListStyle,
   ProseBlockType,
+  RequirementStatus,
   SidebarGroup,
 } from "./types.js";
