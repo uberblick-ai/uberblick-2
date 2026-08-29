@@ -17,6 +17,7 @@ import {
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
+import { blockText } from "../src/replica.js";
 import { removeTempDirs, startServer, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
@@ -314,6 +315,93 @@ describe("the derived index", () => {
       (await rig.ok("backlinks", { uuid: other.uuid })).backlinks,
     ).toEqual([
       { uuid: source.uuid, title: "Source", description: "A test document." },
+    ]);
+  });
+
+  it("counts an inline reference as an edge, and never writes meta.links", async () => {
+    const rig = await localRig();
+    const target = await rig.ok("create_doc", { title: "Target", description: "A test document." });
+    const source = await rig.ok("create_doc", {
+      title: "Source",
+      description: "A test document.",
+      blocks: [
+        { type: "paragraph", text: "See the hub docs" },
+        { type: "code", text: "const x = 1;", language: "ts" },
+      ],
+    });
+    const [prose, code] = source.blocks;
+
+    await rig.ok("link_range", {
+      uuid: source.uuid,
+      block_id: prose.id,
+      start: 4,
+      end: 11,
+      doc_id: target.uuid,
+      rev: prose.rev,
+    });
+    expect(
+      (await rig.ok("backlinks", { uuid: target.uuid })).backlinks,
+    ).toEqual([
+      { uuid: source.uuid, title: "Source", description: "A test document." },
+    ]);
+    // The union is derived. `meta.links` stays the curated list set_links owns.
+    expect((await rig.ok("get_doc", { uuid: source.uuid })).links).toEqual([]);
+
+    // A document referring to itself is not an edge…
+    await rig.ok("link_range", {
+      uuid: source.uuid,
+      block_id: prose.id,
+      start: 12,
+      end: 16,
+      doc_id: source.uuid,
+      rev: prose.rev,
+    });
+    expect((await rig.ok("backlinks", { uuid: source.uuid })).backlinks).toEqual(
+      [],
+    );
+
+    // …and a source block is not scanned: it holds source text, so a docLink on
+    // one is foreign content nothing renders and nothing counts.
+    const other = await rig.ok("create_doc", { title: "Other", description: "A test document." });
+    blockText(rig.instance.replicas.replica(source.uuid).doc, code.id)?.format(
+      0,
+      5,
+      { docLink: { docId: other.uuid } },
+    );
+    expect((await rig.ok("backlinks", { uuid: other.uuid })).backlinks).toEqual(
+      [],
+    );
+  });
+
+  it("rebuilds an inline edge from a second instance's log replay", async () => {
+    const databasePath = testConfig().databasePath;
+    const first = await localRig(databasePath);
+    const target = await first.ok("create_doc", { title: "Target", description: "A test document." });
+    const source = await first.ok("create_doc", {
+      title: "Source",
+      description: "A test document.",
+      blocks: [{ type: "paragraph", text: "See the hub docs" }],
+    });
+    await first.ok("link_range", {
+      uuid: source.uuid,
+      block_id: source.blocks[0].id,
+      start: 4,
+      end: 11,
+      doc_id: target.uuid,
+      rev: source.blocks[0].rev,
+    });
+
+    // A second server over the same log: it hydrates from the log alone, so
+    // the edge has to come back out of the updates rather than out of any row.
+    const second = await localRig(databasePath);
+    await second.ok("list_docs", {});
+    const store = second.instance.store;
+    store.clearDerived();
+    expect(store.backlinks(target.uuid)).toEqual([]);
+
+    second.instance.replicas.rebuildIndex();
+    expect(store.backlinks(target.uuid).map((row) => row.uuid)).toEqual([
+      source.uuid,
     ]);
   });
 

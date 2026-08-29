@@ -1,9 +1,9 @@
 /**
  * The v0 MCP tool set.
  *
- * Twenty-three tools and no more: create_doc, get_doc, list_docs, search,
+ * Twenty-four tools and no more: create_doc, get_doc, list_docs, search,
  * backlinks, edit_block, insert_block, delete_block, set_tags, set_links,
- * set_title, set_description, archive_doc, restore_doc, annotate,
+ * set_title, set_description, archive_doc, restore_doc, annotate, link_range,
  * export_markdown, sync_status, the four sidebar tools registered from
  * ./sidebar-tools.ts — get_sidebar, pin_doc, unpin_doc, sidebar_group — and
  * the two feedback tools registered from ./feedback-tools.ts, rate_doc and
@@ -41,21 +41,25 @@ import {
   MAX_DESCRIPTION_LENGTH,
   addComment,
   appendBlock,
+  canonicalDocumentUuid,
   createAnnotation,
   deleteBlock,
   editBlock,
   exportMarkdown,
   getBlock,
-  getBlocks,
+  getBlockRev,
+  getBlocksWithInline,
   getDirectoryEntry,
   getMeta,
   initDoc,
   insertBlock,
+  isProseBlockType,
   listAnnotations,
   listDirectory,
   resolveAnnotationRange,
   restoreDirectoryEntry,
   setDescription,
+  setInlineLink,
   setLinks,
   setTags,
   setTitle,
@@ -67,6 +71,8 @@ import type {
   BlockInput,
   DirectoryEntry,
   HeadingLevel,
+  InlineMarkSet,
+  InlineRun,
 } from "@uberblick/schema";
 import { z } from "zod";
 import { registerFeedbackTools, recordDocUsage } from "./feedback-tools.js";
@@ -78,6 +84,7 @@ import {
 } from "./failures.js";
 import { strictInput } from "./inputs.js";
 import type { ToolMode } from "./inputs.js";
+import { docLinkRanges } from "./replica.js";
 import type { Replica, Replicas } from "./replica.js";
 import {
   pinnedUuids,
@@ -228,6 +235,101 @@ const titleArg = z
   .min(1, "a title cannot be empty or whitespace")
   .describe("Display title. Identity is the document's UUID, never this.");
 
+/** What `inline` is for, in the words an agent reads. */
+const INLINE_RUNS =
+  "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: " +
+  "`[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) " +
+  "and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the " +
+  "run texts joined together are the block's text. Source blocks — code, mermaid, table — hold source text and " +
+  "ignore it.\n\n" +
+  "A `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", " +
+  "marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this " +
+  "replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes " +
+  "nothing; an archived target is fine.";
+
+/**
+ * `link`'s boundary check, kept identical to the schema's `isExternalHref`.
+ *
+ * At the input boundary rather than in the handler on purpose: a target the
+ * model refuses is a wrong argument, and the MCP layer rejects those before a
+ * handler runs and therefore before anything durable could change.
+ */
+const EXTERNAL_HREF = /^https?:\/\/\S+$/i;
+
+/**
+ * A document reference's target, canonicalised at the boundary.
+ *
+ * One document has one spelling. An upper-cased uuid names the same document —
+ * room names are case-sensitive keys, so `A…` and `a…` would be two rooms
+ * holding one document — and the schema canonicalises it down at the write. Do
+ * it here instead, once, so the directory lookup, the label, the write and the
+ * answer all speak the id the model stores rather than the one the caller
+ * happened to type. The refusal branch is `z.uuid`'s leftovers: this is the
+ * model's own rule, not a second one.
+ */
+const docLinkTargetArg = z
+  .uuid("a document reference is a target document UUID, never a path or a title")
+  .transform((value, ctx) => {
+    const docId = canonicalDocumentUuid(value);
+    if (docId === null) {
+      ctx.addIssue({ code: "custom", message: "not a document UUID" });
+      return z.NEVER;
+    }
+    return docId;
+  });
+
+const inlineArg = z
+  .array(
+    z
+      .object({
+        text: z.string(),
+        marks: z
+          .object({
+            bold: z.boolean().optional(),
+            italic: z.boolean().optional(),
+            strike: z.boolean().optional(),
+            inlineCode: z.boolean().optional(),
+            link: z
+              .string()
+              .regex(EXTERNAL_HREF, "a link is an external http(s) URL")
+              .optional(),
+            docLink: docLinkTargetArg.optional(),
+          })
+          .strict()
+          // Refused as the wrong argument it is, not as a range conflict: one
+          // run carrying both link marks has no honest rendering, and there is
+          // nothing to re-read that would make the call valid.
+          .refine(
+            (marks) => marks.link === undefined || marks.docLink === undefined,
+            "a run is an external link or a document reference, never both",
+          ),
+      })
+      .strict(),
+  )
+  .optional()
+  .describe(INLINE_RUNS);
+
+/**
+ * One input run's marks as the model's mark set.
+ *
+ * Zod spells an optional property `T | undefined`; the model spells it absent —
+ * and absent is what the model means, since a flag it reads as anything but
+ * `true` is not that mark. So a key nobody set, and a flag explicitly set to
+ * `false`, both simply do not appear.
+ */
+function inlineMarks(
+  marks: NonNullable<z.infer<typeof inlineArg>>[number]["marks"],
+): InlineMarkSet {
+  return {
+    ...(marks.bold === true ? { bold: true } : {}),
+    ...(marks.italic === true ? { italic: true } : {}),
+    ...(marks.strike === true ? { strike: true } : {}),
+    ...(marks.inlineCode === true ? { inlineCode: true } : {}),
+    ...(marks.link === undefined ? {} : { link: marks.link }),
+    ...(marks.docLink === undefined ? {} : { docLink: marks.docLink }),
+  };
+}
+
 const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
   text: z.string().optional(),
@@ -242,6 +344,7 @@ const blockShape = {
     .string()
     .optional()
     .describe("Code language, e.g. \"ts\". Code blocks only."),
+  inline: inlineArg,
 };
 
 // Strict, like the sibling placement object: `create_doc`'s guarantee has to
@@ -250,7 +353,18 @@ const blockShape = {
 // its top level, where strictInput already applies the rule.
 const blockInputSchema = z.object(blockShape).strict();
 
-function toBlockInput(input: z.infer<typeof blockInputSchema>): BlockInput {
+/**
+ * One block input, ready for the schema.
+ *
+ * `inline` arrives already resolved — see `resolveInline`, which fills an empty
+ * docLink label with the target's title and refuses a target this replica has
+ * never heard of. Resolution happens before this because it can fail, and a
+ * refusal must leave nothing written.
+ */
+function toBlockInput(
+  input: z.infer<typeof blockInputSchema>,
+  inline?: InlineRun[],
+): BlockInput {
   return {
     type: input.type,
     ...(input.text === undefined ? {} : { text: input.text }),
@@ -258,6 +372,7 @@ function toBlockInput(input: z.infer<typeof blockInputSchema>): BlockInput {
       ? {}
       : { level: input.level as HeadingLevel }),
     ...(input.language === undefined ? {} : { language: input.language }),
+    ...(inline === undefined ? {} : { inline }),
   };
 }
 
@@ -468,6 +583,83 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       : stub.title;
 
   /**
+   * The title an inline reference to `docId` is written with, or a refusal.
+   *
+   * Refusing is the honest half: offline the directory hydrates from the log
+   * like any other document, so "this replica has never heard of it" is not
+   * "it does not exist" — hence the named code and the hub state, rather than
+   * `doc_not_found`. An ARCHIVED target resolves: a tombstoned stub is still a
+   * document, and reading one is allowed.
+   */
+  const linkTitle = (docId: string): string => {
+    const stub = getDirectoryEntry(replicas.directory().doc, docId);
+    if (stub === null) {
+      throw new ToolError(
+        "doclink_target_not_known_locally",
+        `No document ${docId} in the directory of workspace ${replicas.config.workspaceId}, so an inline ` +
+          "reference to it would point at nothing this replica can resolve",
+        { docId, inDirectory: false, hub: replicas.sync.state() },
+      );
+    }
+    return titleFor(docId, stub);
+  };
+
+  /**
+   * Resolve an input's inline runs before a single byte is written.
+   *
+   * The one write that resolves a title: an empty-labelled docLink run gets the
+   * target's current title, because a label is display text fixed at the moment
+   * the link is made. A resolved title that is itself empty — a document the
+   * web UI created and nobody has named — falls back to the uuid, since
+   * `applyInlineRuns` drops an empty run and a dropped run is a link silently
+   * lost.
+   */
+  const resolveInline = (
+    runs: z.infer<typeof inlineArg>,
+  ): InlineRun[] | undefined =>
+    runs?.map((run) => {
+      const marks = inlineMarks(run.marks);
+      const docId = marks.docLink;
+      if (docId === undefined) return { text: run.text, marks };
+      // Resolved even when a label is already written: an unknown target is
+      // refused either way, so a citation never points at nothing.
+      const title = linkTitle(docId);
+      if (run.text !== "") return { text: run.text, marks };
+      return { text: title === "" ? docId : title, marks };
+    });
+
+  /**
+   * One block input, with `inline` resolved only where it is going to be used.
+   *
+   * A source block — code, mermaid, table — carries no inline marks, so the
+   * schema writes its `text` and drops `inline` entirely. Resolving anyway
+   * would make an unknown reference target refuse a call whose inline runs were
+   * never going to be written, so the type check lives here, once, in front of
+   * both call sites.
+   */
+  const blockInputFor = (
+    block: z.infer<typeof blockInputSchema>,
+  ): BlockInput =>
+    toBlockInput(
+      block,
+      isProseBlockType(block.type) ? resolveInline(block.inline) : undefined,
+    );
+
+  /**
+   * A document's blocks as a read answers with them: every block exactly as it
+   * has always been, plus the inline references it carries.
+   *
+   * `doc_links` is additive and absent where a block has none. `text` and `rev`
+   * are untouched — they come off the same `Block` as before, and neither has
+   * ever seen a mark.
+   */
+  const blocksJson = (replica: Replica): Record<string, unknown>[] =>
+    getBlocksWithInline(replica.doc).map(({ block, inline }) => {
+      const links = docLinkRanges(block, inline);
+      return { ...block, ...(links.length === 0 ? {} : { doc_links: links }) };
+    });
+
+  /**
    * The backfill nudge, on every mutating answer for a document that has no
    * description.
    *
@@ -597,6 +789,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           ? null
           : requireGroup(replicas, sidebar.group.id);
 
+      // Same reason, same place: an inline reference to a target this replica
+      // does not know refuses the whole call before there is a document.
+      const inputs = (blocks ?? []).map(blockInputFor);
+
       const uuid = randomUUID();
       const replica = replicas.replica(uuid);
       const directory = replicas.directory();
@@ -704,8 +900,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
             description,
             ...(tags === undefined ? {} : { tags }),
           });
-          for (const block of blocks ?? []) {
-            appendBlock(replica.doc, toBlockInput(block));
+          for (const input of inputs) {
+            appendBlock(replica.doc, input);
           }
         });
       });
@@ -771,7 +967,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         title,
         description,
         tags: tags ?? [],
-        blocks: getBlocks(replica.doc),
+        blocks: blocksJson(replica),
         ...(placement === null ? {} : { sidebar: placement }),
         ...durabilityAcross(replica, completed),
       });
@@ -786,6 +982,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Read a document's metadata — including its `description`, null when nobody has written one — its blocks " +
         "and its annotation threads. " +
         "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
+        "`text` is plain and mark-free, as it has always been. A block that carries inline references to other " +
+        "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
+        "link_range speak in, and absent where there are none. Only prose blocks can hold them.\n\n" +
         "Reading a document records it as used by this session in the workspace's `_feedback` document — once per " +
         "document per session, however often you read it, so re-reading costs nothing. The first read of a " +
         "document you have not rated also answers with a one-line `feedback` reminder that rate_doc exists; it is " +
@@ -804,7 +1003,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       return json({
         ...meta,
         room: replica.room,
-        blocks: getBlocks(replica.doc),
+        blocks: blocksJson(replica),
         annotations: listAnnotations(replica.doc).map((annotation) =>
           annotationJson(replica, annotation),
         ),
@@ -886,7 +1085,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     {
       title: "Documents linking here",
       description:
-        "Documents whose `links` name this document. Links are by UUID, never by path or title. " +
+        "Documents that reference this one, by UUID and never by path or title. The answer is the union of two " +
+        "kinds of edge, which it does not distinguish: the curated doc-level `links` set_links owns, and every " +
+        "inline reference in a prose block — the `doc_links` get_doc reports, written by link_range or by an " +
+        "`inline` run. A document citing this one in a sentence needs no `links` entry to appear here.\n\n" +
         "Each one carries its `description` — null where it has none — so a citing document can be judged without " +
         "opening it." +
         failureContract("backlinks"),
@@ -969,18 +1171,20 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         ...blockShape,
       }),
     },
-    guarded("insert_block", async ({ uuid, after_block_id, type, text, level, language }) => {
+    guarded("insert_block", async ({ uuid, after_block_id, type, text, level, language, inline }) => {
       await replicas.settle();
       const replica = requireWritableDoc(uuid);
-      const blockId = insertBlock(
-        replica.doc,
-        after_block_id ?? null,
-        toBlockInput({ type, text, level, language }),
-      );
-      replicas.publishCursor(replica, blockId, (text ?? "").length);
+      // Before the insert: an unknown reference target refuses the call with
+      // nothing written.
+      const input = blockInputFor({ type, text, level, language, inline });
+      const blockId = insertBlock(replica.doc, after_block_id ?? null, input);
+      const block = getBlock(replica.doc, blockId);
+      // The caret goes after what was actually written, which is not `text`
+      // when `inline` replaced it — and joined runs are usually longer.
+      replicas.publishCursor(replica, blockId, block?.text.length ?? 0);
       return json({
         uuid,
-        block: getBlock(replica.doc, blockId),
+        block,
         ...durability(replica),
       });
     }),
@@ -1267,6 +1471,62 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       return json({
         uuid,
         annotation: annotationJson(replica, created),
+        ...durability(replica),
+      });
+    }),
+  );
+
+  server.registerTool(
+    "link_range",
+    {
+      title: "Link a range of a block to another document",
+      description:
+        "Turn a range of a block's text into an inline reference to another document. The range's own characters " +
+        "are the label — this tool writes a mark and never a character, so the block's `text` and `rev` come back " +
+        "exactly as get_doc gave them. `annotate` anchors a comment to a range the same way; this is that " +
+        "operation with a document uuid instead of a thread.\n\n" +
+        "`start` and `end` are character offsets into the block's text, and `rev` is REQUIRED: offsets mean " +
+        "nothing without the text they were measured against. A stale `rev` refuses with `stale_block`, carrying " +
+        "`currentText` and `currentRev` to re-measure against. Indices are clamped to the text and swapped if " +
+        "reversed; a range that clamps to nothing is refused.\n\n" +
+        "A range that is already a reference is RETARGETED. A range that is already an external link is refused — " +
+        "one range cannot be both — and so is a code, mermaid or table block, which holds source text. The answer " +
+        "carries the target's current `title` for information; the label in the document is the text you linked, " +
+        "and it does not follow a later rename.\n\n" +
+        "The target must be a document this replica's directory knows, or the call refuses with " +
+        "`doclink_target_not_known_locally` and writes nothing. An archived target is accepted.\n\n" +
+        "The edge shows up in backlinks without touching `meta.links`, which stays the curated doc-level list " +
+        "set_links owns.\n\n" +
+        ARCHIVED_IS_READ_ONLY +
+        "\n\n" +
+        SYNCED_IS_ACKNOWLEDGED +
+        failureContract("link_range"),
+      inputSchema: strictInput({
+        uuid: uuidArg,
+        block_id: z.string().min(1),
+        start: z.number().int().min(0).describe("Range start, in characters."),
+        end: z.number().int().min(0).describe("Range end, exclusive."),
+        doc_id: docLinkTargetArg.describe("Target document UUID."),
+        rev: z
+          .string()
+          .min(1)
+          .describe("The block's `rev` from get_doc. Required, and asserted."),
+      }),
+    },
+    guarded("link_range", async ({ uuid, block_id, start, end, doc_id, rev }) => {
+      await replicas.settle();
+      const replica = requireWritableDoc(uuid);
+      // Before the mark: an unknown target refuses with nothing written.
+      const title = linkTitle(doc_id);
+      setInlineLink(replica.doc, block_id, { start, end }, doc_id, { rev });
+      return json({
+        uuid,
+        blockId: block_id,
+        docId: doc_id,
+        title,
+        // Unchanged by construction — marks are not part of a rev — and
+        // answered with so the next call needs no re-read.
+        rev: getBlockRev(replica.doc, block_id),
         ...durability(replica),
       });
     }),

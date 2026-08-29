@@ -99,6 +99,12 @@ const EXPECTED: Record<
     detail: ["reason", "blockId", "conflictingThreadId"],
   },
   thread_not_found: { recoveryClass: "reread", detail: ["uuid", "threadId"] },
+  inline_link_range: { recoveryClass: "reread", detail: ["reason"] },
+  // Never `retry`: the directory arrives over the hub, not by calling again.
+  doclink_target_not_known_locally: {
+    recoveryClass: "reread",
+    detail: ["docId", "inDirectory", "hub"],
+  },
   doc_not_found: {
     recoveryClass: "reread",
     detail: ["uuid", "inDirectory", "hub"],
@@ -213,6 +219,33 @@ describe("the failure contract", () => {
           uuid: doc.uuid,
           thread_id: "no-such-thread",
           text: "a comment",
+        })
+      ).payload,
+    );
+    // A range that clamps to nothing, and a reference to a uuid this replica's
+    // directory has never carried — the two ways an inline link is refused.
+    const linkable = (await rig.ok("get_doc", { uuid: doc.uuid })).blocks[0];
+    record(
+      (
+        await rig.call("link_range", {
+          uuid: doc.uuid,
+          block_id: doc.blockId,
+          start: 0,
+          end: 0,
+          doc_id: doc.uuid,
+          rev: linkable.rev,
+        })
+      ).payload,
+    );
+    record(
+      (
+        await rig.call("link_range", {
+          uuid: doc.uuid,
+          block_id: doc.blockId,
+          start: 0,
+          end: 3,
+          doc_id: randomUUID(),
+          rev: linkable.rev,
         })
       ).payload,
     );

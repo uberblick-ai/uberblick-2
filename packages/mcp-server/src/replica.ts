@@ -32,18 +32,19 @@ import {
   compactFeedback,
   directoryRoom,
   feedbackRoom,
-  getBlocks,
   getBlocksFragment,
+  getBlocksWithInline,
   getDirectoryEntry,
   getDirectoryMap,
   getMeta,
+  isProseBlockType,
   listDirectory,
   repairDuplicateBlocks,
   roomForDoc,
   sidebarRoom,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
-import type { DocMeta } from "@uberblick/schema";
+import type { Block, DocMeta, InlineRun } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
@@ -100,6 +101,49 @@ export function blockText(doc: Y.Doc, blockId: string): Y.XmlText | null {
     return child.firstChild instanceof Y.XmlText ? child.firstChild : null;
   }
   return null;
+}
+
+/** One inline reference to another document, in the block that carries it. */
+export interface DocLinkRange {
+  /** Start offset in the block's text, in UTF-16 code units. */
+  start: number;
+  /** Exclusive end offset, in the same units. */
+  end: number;
+  /** The target document's uuid. */
+  docId: string;
+}
+
+/**
+ * The `docLink` ranges in one block, in document order, with adjacent runs of
+ * the same target merged — the same shape `commentRuns` gives an annotation
+ * anchor, and the offsets `annotate` and `link_range` speak in.
+ *
+ * The one place the ranges are derived, so `get_doc` reports exactly the edges
+ * the index unions in.
+ */
+export function docLinkRanges(
+  block: Block,
+  inline: readonly InlineRun[],
+): DocLinkRange[] {
+  // Source blocks hold source text and carry no inline links, so a docLink on
+  // one is foreign content: nothing renders it, and nothing here counts it.
+  if (!isProseBlockType(block.type)) return [];
+  const ranges: DocLinkRange[] = [];
+  let index = 0;
+  for (const run of inline) {
+    const end = index + run.text.length;
+    const docId = run.marks.docLink;
+    if (docId !== undefined) {
+      const last = ranges[ranges.length - 1];
+      if (last !== undefined && last.docId === docId && last.end === index) {
+        last.end = end;
+      } else {
+        ranges.push({ start: index, end, docId });
+      }
+    }
+    index = end;
+  }
+  return ranges;
 }
 
 function sameSet(a: readonly string[], b: readonly string[]): boolean {
@@ -480,17 +524,32 @@ export class Replicas {
     }
   }
 
-  /** One document's derived rows, read off the document itself. */
+  /**
+   * One document's derived rows, read off the document itself.
+   *
+   * Link rows are the union of the curated `meta.links` and every inline
+   * `docLink` in the document's prose: an inline mention is a link edge, so
+   * backlinks answer for it without anyone duplicating the edge by hand.
+   * `meta.links` itself is never touched — it stays the curated list a human or
+   * an agent wrote. The store de-dupes the union and drops a self-link.
+   *
+   * One traversal for both the body text and the marks: looking each block's
+   * inline runs up by id would rescan the fragment per block.
+   */
   private indexRows(replica: Replica, meta: DocMeta): void {
+    const blocks = getBlocksWithInline(replica.doc);
     this.store.indexDoc({
       uuid: meta.uuid,
       title: meta.title,
       tags: meta.tags,
       description: meta.description ?? "",
-      links: meta.links,
-      body: getBlocks(replica.doc)
-        .map((block) => block.text)
-        .join("\n"),
+      links: [
+        ...meta.links,
+        ...blocks.flatMap(({ block, inline }) =>
+          docLinkRanges(block, inline).map((range) => range.docId),
+        ),
+      ],
+      body: blocks.map(({ block }) => block.text).join("\n"),
     });
   }
 
