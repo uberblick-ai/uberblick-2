@@ -1,7 +1,9 @@
 # Preflight — ground, classify, challenge, recheck
 
 The `issue-adversary` role runs this procedure on the issue its `Pickup`
-selected, and owns it end to end. This is the project's one cheap chance to be
+selected, and owns it end to end; for the trivial and bounded tiers the
+`issue-preparer` runs it inside the pass that prepared the issue, and nothing at
+those tiers reaches the adversary. This is the project's one cheap chance to be
 wrong: an objection raised here costs a prompt, and the same objection after
 implementation costs a review wave, a fix-up dispatch and a re-gate.
 
@@ -63,6 +65,12 @@ can state the outcome of is not trivial anywhere.
 
 ## Challenge
 
+Who runs the challengers follows the tier, and only the tier: the trivial
+self-check and the bounded tier's single challenger belong to the
+`issue-preparer`, run inside the pass that prepared the issue and dispositioned
+in its body; a substantial issue's two are the adversary's. Nothing else about
+the challenge changes with who runs it.
+
 A challenger pokes holes; it does not implement, and it does not write code.
 Each runs in a fresh context that neither authored the issue nor will implement
 it. For two-challenger cases prefer diverse perspectives — a different model
@@ -81,6 +89,22 @@ questions and alternatives:
 
 For the trivial tier this is a brief code-grounded self-check instead, at the
 same commit.
+
+**Two verdicts, then the owner.** An issue carries at most two adversary
+verdicts — the adversary `Done:` records posted on it since it was last labelled
+`ready`, or ever where it never was. At two, preparation has stopped converging
+on its own: the next preparer pass hands the issue to the owner, writing the
+findings still open into Pointers as brief options, and `ready` becomes the
+owner's read of the thread rather than a verdict's conclusion.
+
+**Briefing a Codex challenger.** Its sandbox has no network, so stage what it
+needs into a file first — the issue body, the thread, and the file excerpts the
+challenge turns on — and brief it completely in that one prompt: the
+`codex:codex-rescue` wrapper takes no follow-ups, so a question it asks back is a
+round nobody can answer. Read the job from the directory it was started in with
+`node <codex plugin>/scripts/codex-companion.mjs status|result <job-id>`. Bound
+the wait at 15 minutes and record a challenger that did not return as one, rather
+than waiting it out or writing the verdict it would have given.
 
 ## Recheck, then decide
 

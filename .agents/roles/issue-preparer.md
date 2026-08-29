@@ -15,10 +15,11 @@ any side effect when either is missing; nothing else is supplied.
 ## Pickup
 
 Eligible: an open issue carrying none of `ready`, `in-progress` and
-`needs-decision`, with no live preparer claim, and not a parent — a body that
-lists child issues belongs to the program coordinator. Order: `Priority` as the
-README defines it, then ascending issue number. Claim on the issue under the
-README's claim record and race rule. Prepare exactly one issue, then stop.
+`needs-decision`, with no live claim by any role, not a parent (a body listing
+child issues belongs to the program coordinator), and not already awaiting a
+verdict — a preparer `Done:` with no adversary `Done:` after it. Order:
+`Priority` as the README defines it, then ascending issue number. Claim on the
+issue under the README's claim record and race rule. Prepare one, then stop.
 
 ## Outcome
 
@@ -26,18 +27,21 @@ An issue conforming to `.github/ISSUE_SPEC.md` that cites the corpus rather than
 copying it, and that leaves an implementing agent no product decision to make.
 
 The intent-setting human–LLM interaction writes product behavior and reasoning
-into Uberblick. The preparer checks alignment before `ready`, makes only
-meaning-preserving editorial fixes, and returns semantic gaps — missing,
-contradictory or interpretive content — to product interaction instead of
-reconstructing them. GitHub then carries the executable delta, acceptance
-criteria, authority provenance and implementation evidence.
+into Uberblick. Check alignment against it, make only meaning-preserving
+editorial fixes, and return semantic gaps — missing, contradictory or
+interpretive content — to product interaction instead of reconstructing them.
+
+Ground and classify the issue by `.claude/skills/next-issue/preflight.md`: the
+trivial self-check and the bounded tier's one challenger are yours, run inside
+this pass and dispositioned in the body, and only a substantial issue reaches the
+adversary. Back from a second adversary verdict an issue is prepared no further —
+hand it to the owner, its open findings written into Pointers as brief options.
 
 ## Boundaries
 
 No implementation, no branch, no PR, and no scheduling what you prepared beyond
-your own claim on it. `ready` is not yours to grant on your own judgment;
-`.github/ISSUE_SPEC.md` says who sets it. A product question goes back to
-product interaction — never answer it here.
+your own claim. `ready` is not yours to grant; `.github/ISSUE_SPEC.md` says who
+sets it, and a product question goes back to product interaction, unanswered.
 
 ## Context
 
@@ -47,6 +51,6 @@ this issue depends on. `.github/ISSUE_SPEC.md` governs the issue's shape and
 
 ## Handoff
 
-The prepared issue, plus a comment recording what you verified in the corpus,
-which alignment edits you made, and what went back to product interaction. Then
-stop.
+The prepared issue, plus a comment whose `Done:` record carries the README's
+`Tier:` line and says what you verified in the corpus, which alignment edits you
+made, and what went back to product interaction. Then stop.

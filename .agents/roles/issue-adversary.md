@@ -14,21 +14,22 @@ any side effect when either is missing; nothing else is supplied.
 
 Eligible: an open issue that is not a parent — its body lists no child issues —
 carrying `.github/ISSUE_SPEC.md`'s machine-readable header, none of `ready`,
-`in-progress` or `needs-decision`, no adversary `Done:` record newer than the
-latest issue-preparer `Done:` record (and none at all where no preparer record
-exists), and no live adversary claim. Order: that spec's scheduling order —
-dependency topology, then `Priority` as the README defines it, then ascending
-number. Claim on the issue with the grounding SHA, under the README's claim
-record and race rule. Challenge one issue, then stop.
+`in-progress` or `needs-decision`, no live claim by any role, still under
+`preflight.md`'s two-verdict cap, and an issue-preparer `Done:` recording the
+substantial tier that is newer than every adversary `Done:` — the smaller tiers
+are challenged inside the preparer's own pass and never arrive here. Order: that
+spec's scheduling order — dependency topology, then `Priority` as the README
+defines it, then ascending number. Claim on the issue with the grounding SHA,
+under the README's claim record and race rule. Challenge one issue, then stop.
 
 ## Outcome
 
 A verdict proportional to the issue's risk, naming its findings and taking one
 of the outcomes `preflight.md` defines. **You own that procedure end to end** —
 grounding, classification, the challenge, the recheck, the outcome comment keyed
-by base SHA, and the labels the outcome carries; no launcher and no other role
-performs any part of it. That file owns the tier table, the challenge questions
-and the outcome table; follow it there rather than a copy.
+by base SHA, and the labels the outcome carries; no launcher performs any part
+of it. That file owns the tier table, the challenge questions, the two-verdict
+cap and the outcome table; follow it there rather than a copy.
 
 ## Boundaries
 

@@ -21,7 +21,8 @@ A launcher supplies two things and nothing else: your role, and your session or
 run identity; missing either is a refusal, stated before any side effect. The
 assignment is a *queue assignment* — claim and complete one eligible item for
 this role under your contract's `Pickup` section. No preselected target exists.
-The order is prepared → challenged → `ready` (owner) → implemented, and a
+The order is prepared (small tiers self-checked or singly challenged in that same
+pass) → the adversary for a substantial one → `ready` (owner) → implemented, and a
 `Pickup` ordering by `Priority` means the organization issue field, read as
 `.github/ISSUE_SPEC.md`'s scheduling section defines: Urgent → High → Medium →
 Low, and unset means untriaged and ineligible.
@@ -31,21 +32,24 @@ investigating and retrying inside it is the work, and an invocation may inspect,
 or lose the race on, several candidates while performing the role on exactly one.
 A resumed role has voided this contract; the next assignment starts fresh.
 
-**The claim record.** The implementer claims in the grammar
-`.github/ISSUE_SPEC.md` defines (`Claimed: <branch>` / `Implementer:
-<opus|codex> <id>`); every other role posts a comment whose first line is
-`Claim: <role> <session-or-run id>`, plus the head or grounding SHA wherever the
-outcome is tied to one. A role's handoff comment opens with `Done: <role>
-<session-or-run id>` and that same SHA where the claim carried one: that line is
-what makes a claim consumed and a completion findable. Both live on GitHub,
-which holds all execution state; recovery must be possible from it alone.
+**The claim record.** The implementer claims in `.github/ISSUE_SPEC.md`'s grammar
+(`Claimed: <branch>` / `Implementer: <opus|codex> <id>`); every other role posts a
+comment whose first line is `Claim: <role> <session-or-run id>`, plus the head or
+grounding SHA wherever the outcome is tied to one. A role's handoff comment opens
+with `Done: <role> <session-or-run id>` and that same SHA where the claim carried
+one: that line is what makes a claim consumed and a completion findable. An
+issue-preparer's record adds a second line, `Tier: trivial|bounded|substantial —
+<outcome>`, the outcome `cleared for ready`, `to the adversary`, `returned to
+product interaction` or `round cap — to the owner`. Both live on GitHub, which
+holds all execution state; recovery must be possible from it alone.
 
-**The race rule.** Re-read the candidate's thread immediately before writing the
-claim and immediately after; the earliest valid claim wins, and a loser posts a
-one-line withdrawal under its own claim and tries the next candidate in order. A
-claim is stale — its item eligible again — under `AGENTS.md`'s three
-facts for an implementation claim, and for every other role when that session
-left no completion record and the claim is older than 30 minutes.
+**The race rule.** A live claim by any role makes the item ineligible for every
+other role. Re-read the candidate's thread immediately before writing the claim
+and immediately after; the earliest valid claim wins, and a loser posts a one-line
+withdrawal under its own claim and tries the next candidate in order. A claim is
+stale — its item eligible again — under `AGENTS.md`'s three facts for an
+implementation claim, and for every other role when that session left no
+completion record and the claim is older than 30 minutes.
 
 ## Product context, proportional to the action
 
