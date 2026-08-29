@@ -25,6 +25,7 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it } from "vitest";
+import { acquireInitLock } from "../src/init-lock.js";
 import { bundlePlan } from "../src/open.js";
 import { probeHub, probePort } from "../src/probes.js";
 import type { Sandbox } from "./helpers.js";
@@ -336,28 +337,29 @@ function rebind(
 ): void {
   const dir = configDir(box);
   mkdirSync(dir, { recursive: true });
+  writeCredentials(box, binding.signingSecret);
+  writeBinding(box, binding.hubUrl, binding.workspace);
+}
+
+function writeCredentials(box: Sandbox, signingSecret: string): void {
+  const dir = configDir(box);
+  mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, "credentials.json"),
-    `${JSON.stringify({ signingSecret: binding.signingSecret }, null, 2)}\n`,
+    `${JSON.stringify({ signingSecret }, null, 2)}\n`,
     "utf8",
   );
   chmodSync(join(dir, "credentials.json"), 0o600);
-  writeFileSync(
-    join(dir, "config.json"),
-    `${JSON.stringify({ workspace: binding.workspace, hubUrl: binding.hubUrl }, null, 2)}\n`,
-    "utf8",
-  );
 }
 
-/**
- * Hold `.init.lock`, which is what every command writing those two files does
- * for the whole of its write phase.
- */
-function holdInitLock(box: Sandbox): { release: () => void } {
-  const path = join(configDir(box), ".init.lock");
-  mkdirSync(configDir(box), { recursive: true });
-  writeFileSync(path, `${process.pid}\n`, "utf8");
-  return { release: () => rmSync(path, { force: true }) };
+function writeBinding(box: Sandbox, hubUrl: string, workspace: string): void {
+  const dir = configDir(box);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "config.json"),
+    `${JSON.stringify({ workspace, hubUrl }, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 function documentOf(hubUrl: string, workspace: string, secret: string): string {
@@ -480,15 +482,10 @@ describe("ub open", () => {
       documentOf(FIRST_REMOTE, WORKSPACE, SECRET),
     );
 
-    // A write is in flight. Both files have changed, but a writer is entitled to
-    // be between them, and pairing a new secret with an old endpoint would
-    // authenticate against a hub nobody configured.
-    const lock = holdInitLock(box);
-    rebind(box, {
-      hubUrl: SECOND_REMOTE,
-      workspace: REBOUND_WORKSPACE,
-      signingSecret: REBOUND_SECRET,
-    });
+    // A write is in flight after its first publication. Pairing this new secret
+    // with the old endpoint would authenticate against a hub nobody configured.
+    const lock = await acquireInitLock(box.env);
+    writeCredentials(box, REBOUND_SECRET);
 
     // Answered from the last document that resolved outside a write, and
     // answered *now*: the lock is consulted, never waited on. Its own holder
@@ -499,6 +496,7 @@ describe("ub open", () => {
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(text).toBe(documentOf(FIRST_REMOTE, WORKSPACE, SECRET));
 
+    writeBinding(box, SECOND_REMOTE, REBOUND_WORKSPACE);
     lock.release();
     expect(await (await get(url)).text()).toBe(
       documentOf(SECOND_REMOTE, REBOUND_WORKSPACE, REBOUND_SECRET),
@@ -510,6 +508,34 @@ describe("ub open", () => {
     rmSync(join(configDir(box), "credentials.json"), { force: true });
     expect(await (await get(url)).json()).toMatchObject({ hubAuthToken: "" });
 
+    expect((await app.interrupt()).status).toBe(0);
+  });
+
+  it("establishes its first document only after a two-file writer completes", async () => {
+    const { box, env } = configured();
+    pointAt(box, FIRST_REMOTE);
+    const webPort = await freePort();
+
+    // A real writer lock spans the two publications. Start `ub open` after the
+    // new credential is visible but before its endpoint/workspace is: accepting
+    // a startup document here would seed old/new for the server's lifetime.
+    const writer = await acquireInitLock(box.env);
+    writeCredentials(box, REBOUND_SECRET);
+    const opening = open(box, ["--port", String(webPort)], env);
+
+    const openedWhileTorn = await Promise.race([
+      opening.then(() => true),
+      sleep(500).then(() => false),
+    ]);
+    expect(openedWhileTorn).toBe(false);
+
+    writeBinding(box, SECOND_REMOTE, REBOUND_WORKSPACE);
+    writer.release();
+
+    const app = await opening;
+    expect(await (await get(`${app.url}uberblick-config.json`)).text()).toBe(
+      documentOf(SECOND_REMOTE, REBOUND_WORKSPACE, REBOUND_SECRET),
+    );
     expect((await app.interrupt()).status).toBe(0);
   });
 

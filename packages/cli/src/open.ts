@@ -63,7 +63,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
+import { createReadStream, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import { isIPv4 } from "node:net";
@@ -76,7 +76,7 @@ import { SYNC_PROTOCOL_VERSION, isProtocolVersion } from "@uberblick/hub/protoco
 import { DEFAULT_HUB_URL, resolveMcpConfig } from "@uberblick/mcp-server";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
-import { initLockPath } from "./init-lock.js";
+import { acquireInitLock, tryAcquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import {
@@ -373,6 +373,10 @@ export function configDocument(
  */
 function currentConfigDocument(env: NodeJS.ProcessEnv): string {
   const resolved = resolveConfig({ env });
+  return resolvedConfigDocument(resolved);
+}
+
+function resolvedConfigDocument(resolved: ReturnType<typeof resolveConfig>): string {
   return configDocument(
     trimmed(resolved.env.HUB_URL) ?? DEFAULT_HUB_URL,
     trimmed(resolved.env.WORKSPACE_ID),
@@ -391,33 +395,44 @@ function currentConfigDocument(env: NodeJS.ProcessEnv): string {
  * the new secret beside the old endpoint, which is a document that authenticates
  * against a hub nobody configured.
  *
- * So the lock is consulted, and never taken or waited for: a request is answered
- * now, and `ub open` is not a party to that write. While it is held, the last
- * document that resolved outside a write is served again — stale by at most one
- * completing command, and coherent, which is the property that matters. It is
- * checked **again after resolving**, because the read can start before the lock
- * appears and finish after both publications; that second check is what catches
- * the interleaving the first cannot see.
+ * So each refresh tries to take the same lock without waiting. While a writer
+ * holds it, the last accepted document is served immediately. When the reader
+ * gets it, no writer can complete a lock acquire/write/release cycle between
+ * observations: the lock stays held across both file reads.
  *
  * Only an *active* write falls back like that. A completed removal, or a
  * `credentials.json` refused for its mode, resolves normally and is served
  * normally — {@link resolveConfig}'s own semantics, not a cache pretending a
  * deleted secret is still there.
  */
-function configSource(env: NodeJS.ProcessEnv): () => string {
-  const lock = initLockPath(env);
-  let accepted = currentConfigDocument(env);
+function configSource(env: NodeJS.ProcessEnv, initial: string): () => string {
+  let accepted = initial;
   return () => {
-    if (existsSync(lock)) {
+    const lock = tryAcquireInitLock(env);
+    if (lock === null) {
       return accepted;
     }
-    const fresh = currentConfigDocument(env);
-    if (existsSync(lock)) {
+    try {
+      accepted = currentConfigDocument(env);
       return accepted;
+    } finally {
+      lock.release();
     }
-    accepted = fresh;
-    return accepted;
   };
+}
+
+/** Resolve the startup binding and its first served document as one snapshot. */
+async function initialConfig(env: NodeJS.ProcessEnv): Promise<{
+  resolved: ReturnType<typeof resolveConfig>;
+  document: string;
+}> {
+  const lock = await acquireInitLock(env);
+  try {
+    const resolved = resolveConfig({ env });
+    return { resolved, document: resolvedConfigDocument(resolved) };
+  } finally {
+    lock.release();
+  }
 }
 
 function respond(
@@ -867,7 +882,8 @@ export async function openCommand(
   // a resolution would turn file values into permanent pins — see
   // {@link currentConfigDocument}.
   const startupEnv: NodeJS.ProcessEnv = { ...process.env };
-  const resolved = resolveConfig({ env: startupEnv });
+  const initial = await initialConfig(startupEnv);
+  const resolved = initial.resolved;
   for (const warning of resolved.warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }
@@ -927,7 +943,7 @@ export async function openCommand(
   const workspace = trimmed(env.WORKSPACE_ID);
   // `workspace` is for the banner, which reports what this command started
   // with; the document is resolved afresh for whoever asks for it.
-  const server = serveBundle(plan.dir, configSource(startupEnv));
+  const server = serveBundle(plan.dir, configSource(startupEnv, initial.document));
   try {
     await listen(server, WEB_HOST, options.port);
     owned.server = server;
