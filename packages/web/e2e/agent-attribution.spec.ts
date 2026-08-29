@@ -33,8 +33,27 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", ".
 /** The command an MCP client is configured with — the stable line, verbatim. */
 const UB = join(repoRoot, "packages", "cli", "bin", "ub.mjs");
 
-/** How long the caret has to stay after the edit for a person to read it. */
-const READABLE_MS = 3_000;
+/**
+ * How long the caret has to stay after the edit for a person to read it.
+ *
+ * The grace is 30 s (#407) and it starts when the session *leaves*, which is
+ * later than the write this is measured from — by however long the child takes
+ * to exit and the hub takes to broadcast the departure. Asserting at a full 30 s
+ * would therefore be asserting at the instant of expiry, with only that unknown
+ * as margin; 25 s is comfortably inside the grace and nowhere near the five
+ * seconds this used to be, which had expired twenty seconds earlier.
+ */
+const READABLE_MS = 25_000;
+
+/**
+ * How long an expiry is allowed to take before the test calls it a failure.
+ *
+ * Longer than the grace itself, for the same reason the wait above is shorter:
+ * the clock starts at a departure this test does not get to observe. A timeout
+ * equal to the grace would race it and report a caret that outlived its session
+ * by half a second as one that never expires.
+ */
+const EXPIRY_MS = 45_000;
 
 /**
  * How long a closed session is given to exit on its own before it is signalled.
@@ -374,14 +393,16 @@ test("a short-lived MCP client's caret stays long enough to be read, labelled an
   await page.locator(".ub-sync-toggle").click();
   await expect(label).toBeVisible();
 
-  // ...and it is still on screen three seconds after the write returned, which
-  // is the whole point: a person gets to see who wrote.
+  // ...and it is still on screen — labelled — twenty-five seconds after the
+  // write returned, which is the whole point: a person gets to see who wrote,
+  // for as long as a connected agent's cursor would have stayed.
   const remaining = READABLE_MS - (Date.now() - wroteAt);
   if (remaining > 0) await page.waitForTimeout(remaining);
   await expect(label).toHaveText("Uberblick Coordinator Agent");
+  await expect(label).toBeVisible();
 
   // It expires on its own. Nothing has to be clicked, and nothing survives.
-  await expect(cursor).toHaveCount(0, { timeout: 30_000 });
+  await expect(cursor).toHaveCount(0, { timeout: EXPIRY_MS });
 
   // 2. No usable title: the client's own name is what a reader gets.
   await writeAndLeave(
@@ -391,5 +412,5 @@ test("a short-lived MCP client's caret stays long enough to be read, labelled an
   );
   await expect(label).toHaveText("Codex");
   await expect(label).toBeVisible();
-  await expect(cursor).toHaveCount(0, { timeout: 30_000 });
+  await expect(cursor).toHaveCount(0, { timeout: EXPIRY_MS });
 });
