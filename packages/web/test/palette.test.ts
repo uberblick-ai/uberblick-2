@@ -489,6 +489,7 @@ describe("foreign blocks already in the document", () => {
     expect(findLinkConflicts(getBlocksFragment(ydoc))).toEqual([
       {
         index: 0,
+        textIndex: 0,
         blockId,
         text,
         start: 5,

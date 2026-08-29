@@ -207,8 +207,9 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
  * The anchor is the live `Y.XmlText` itself, never the block's `id`. A
  * concurrent re-type can leave two raw elements carrying one id, and a block
  * can hold more than one text child, so an id lookup is not a collision-proof
- * way back to the range this entry describes. `blockId` and `index` are for
- * display and for a stable list key; the write goes through `text`.
+ * way back to the range this entry describes. `blockId` is display-only;
+ * `index`, `textIndex` and the range make a collision-proof render key. The
+ * write goes through `text`.
  */
 export interface LinkConflictRange {
   /** Start of the range, in Yjs format indices — an embed counts as one. */
@@ -226,6 +227,8 @@ export interface LinkConflictRange {
 export interface LinkConflict extends LinkConflictRange {
   /** Position of the *top-level* element in the fragment, in document order. */
   index: number;
+  /** Position of the direct text child inside that top-level element. */
+  textIndex: number;
   /** The element's `id` attribute, when it has one. Display, never lookup. */
   blockId: string | null;
   /** The text holding the range, and the handle the repair writes through. */
@@ -314,10 +317,12 @@ export function findLinkConflicts(fragment: Y.XmlFragment): LinkConflict[] {
     if (!blockAllowsMark(child.nodeName, "link")) continue;
     if (!blockAllowsMark(child.nodeName, "docLink")) continue;
     const blockId = child.getAttribute("id") ?? null;
-    for (const inner of child.toArray()) {
+    const innerNodes = child.toArray();
+    for (let textIndex = 0; textIndex < innerNodes.length; textIndex += 1) {
+      const inner = innerNodes[textIndex];
       if (!(inner instanceof Y.XmlText)) continue;
       for (const range of linkConflictsIn(inner)) {
-        conflicts.push({ ...range, index, blockId, text: inner });
+        conflicts.push({ ...range, index, textIndex, blockId, text: inner });
       }
     }
   }

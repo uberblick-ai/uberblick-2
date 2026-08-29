@@ -336,7 +336,9 @@ function LinkConflictRepair({
       </p>
       <ul>
         {conflicts.map((conflict) => (
-          <li key={`${conflict.blockId ?? conflict.index}:${conflict.start}`}>
+          <li
+            key={`${conflict.index}:${conflict.textIndex}:${conflict.start}:${conflict.end}`}
+          >
             <q>{conflict.label}</q>
             <button
               type="button"

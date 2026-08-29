@@ -48,6 +48,7 @@ const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const UUID = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
 /** The document half of every conflicting pair below. */
 const TARGET = "0189abcd-2222-4333-8444-555566667777";
+const SECOND_TARGET = "0189abcd-3333-4444-8555-666677778888";
 const HREF = "https://example.com/hub";
 /** A second, unrelated external link in the same block — it must survive. */
 const OTHER_HREF = "https://example.com/more";
@@ -98,6 +99,16 @@ function textAt(ydoc: Y.Doc, index = 0): Y.XmlText {
     .firstChild as Y.XmlText;
 }
 
+function textChildAt(
+  ydoc: Y.Doc,
+  blockIndex: number,
+  textIndex: number,
+): Y.XmlText {
+  return (getBlocksFragment(ydoc).get(blockIndex) as Y.XmlElement).get(
+    textIndex,
+  ) as Y.XmlText;
+}
+
 function deltaOf(text: Y.XmlText): unknown {
   return text.toDelta();
 }
@@ -109,13 +120,23 @@ function deltaOf(text: Y.XmlText): unknown {
  */
 function mergeConflictingPair(
   ydoc: Y.Doc,
-  options: { index?: number; start: number; length: number; docId?: string },
+  options: {
+    index?: number;
+    textIndex?: number;
+    start: number;
+    length: number;
+    docId?: string;
+  },
 ): void {
-  const { index = 0, start, length, docId = TARGET } = options;
+  const { index = 0, textIndex = 0, start, length, docId = TARGET } = options;
   const peer = new Y.Doc();
   Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
-  textAt(ydoc, index).format(start, length, { link: { href: HREF } });
-  textAt(peer, index).format(start, length, { docLink: { docId } });
+  textChildAt(ydoc, index, textIndex).format(start, length, {
+    link: { href: HREF },
+  });
+  textChildAt(peer, index, textIndex).format(start, length, {
+    docLink: { docId },
+  });
   Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer));
 }
 
@@ -255,6 +276,30 @@ function stage(): { ydoc: Y.Doc; blockId: string } {
   return { ydoc, blockId };
 }
 
+/** Two direct text children sharing one block and one conflict offset. */
+function stageCollidingRows(): { ydoc: Y.Doc; first: Y.XmlText; second: Y.XmlText } {
+  const directory = room(directoryRoom(WORKSPACE)).ydoc;
+  const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
+  initDoc(ydoc, { uuid: UUID, title: "Two colliding choices" });
+  appendBlock(ydoc, { type: "paragraph", text: "first" });
+  const block = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
+  const second = new Y.XmlText();
+  second.insert(0, "second");
+  block.insert(1, [second]);
+  mergeConflictingPair(ydoc, { index: 0, start: 0, length: 5 });
+  mergeConflictingPair(ydoc, {
+    index: 0,
+    textIndex: 1,
+    start: 0,
+    length: 6,
+    docId: SECOND_TARGET,
+  });
+  upsertDirectoryEntry(directory, { uuid: UUID, title: "Two colliding choices" });
+  upsertDirectoryEntry(directory, { uuid: TARGET, title: "The hub" });
+  upsertDirectoryEntry(directory, { uuid: SECOND_TARGET, title: "The other hub" });
+  return { ydoc, first: textAt(ydoc), second };
+}
+
 function repairButtons(host: HTMLElement): HTMLButtonElement[] {
   return [...host.querySelectorAll<HTMLButtonElement>(".ub-link-repair button")];
 }
@@ -276,6 +321,32 @@ function banner(host: HTMLElement): string {
 }
 
 describe("the fallback offers the person the choice, and takes only that write", () => {
+  it("keeps colliding repair rows distinct from scan through activation", async () => {
+    const { ydoc, first, second } = stageCollidingRows();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    let rows = [...host.querySelectorAll<HTMLLIElement>(".ub-link-repair li")];
+    expect(rows).toHaveLength(2);
+    expect(errors.mock.calls.flat().join(" ")).not.toContain("same key");
+
+    act(() => rows[0]?.querySelector<HTMLButtonElement>("button")?.click());
+    expect(findLinkConflicts(getBlocksFragment(ydoc))).toHaveLength(1);
+    expect(findLinkConflicts(getBlocksFragment(ydoc))[0]?.text).toBe(second);
+    expect(deltaOf(first)).toEqual([
+      { insert: "first", attributes: { docLink: { docId: TARGET } } },
+    ]);
+
+    rows = [...host.querySelectorAll<HTMLLIElement>(".ub-link-repair li")];
+    expect(rows).toHaveLength(1);
+    act(() => rows[0]?.querySelectorAll<HTMLButtonElement>("button")[1]?.click());
+    expect(findLinkConflicts(getBlocksFragment(ydoc))).toEqual([]);
+    expect(deltaOf(first)).toEqual([
+      { insert: "first", attributes: { docLink: { docId: TARGET } } },
+      { insert: "second", attributes: { link: { href: HREF } } },
+    ]);
+  });
+
   it("keeps the document reference, and binds the editor afterwards", async () => {
     const { ydoc, blockId } = stage();
     let updates = 0;
