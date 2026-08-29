@@ -19,14 +19,16 @@ import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it } from "vitest";
 import { acquireInitLock } from "../src/init-lock.js";
-import { bundlePlan } from "../src/open.js";
+import type { Io } from "../src/io.js";
+import { bundlePlan, ensureBundle } from "../src/open.js";
 import { probeHub, probePort } from "../src/probes.js";
 import type { Sandbox } from "./helpers.js";
 import {
@@ -133,6 +135,58 @@ function fixtureBundle(box: Sandbox): string {
   writeFileSync(join(dir, "assets", "app.js"), "export const marker = 42;\n", "utf8");
   stamp(dir, SYNC_PROTOCOL_VERSION);
   return dir;
+}
+
+/** This checkout, which is where `ub open` runs `mise run build-web` (#475). */
+const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..", "..", "..");
+
+/**
+ * A `mise` on PATH that records how it was called and behaves as it is told:
+ * `FAKE_STAMP_VERSION` is stamped into `FAKE_STAMP_DIR`, `FAKE_EXIT_CODE` is
+ * what it exits with. A real `mise run build-web` here would be a Vite build of
+ * the repository's own bundle — minutes, and a checkout mutated by a test.
+ */
+function fakeMise(box: Sandbox): { path: string; calls: () => string[] } {
+  const bin = join(box.cwd, "fake-bin");
+  mkdirSync(bin, { recursive: true });
+  const record = join(box.cwd, "mise-calls.txt");
+  writeFileSync(
+    join(bin, "mise"),
+    "#!/bin/sh\n" +
+      `printf '%s %s\\n' "$PWD" "$*" >> ${record}\n` +
+      'if [ -n "$FAKE_STAMP_VERSION" ]; then\n' +
+      '  printf \'{"syncProtocolVersion":%s}\' "$FAKE_STAMP_VERSION" \\\n' +
+      '    > "$FAKE_STAMP_DIR/uberblick-build.json"\n' +
+      "fi\n" +
+      'if [ -z "$FAKE_EXIT_CODE" ]; then FAKE_EXIT_CODE=0; fi\n' +
+      'exit "$FAKE_EXIT_CODE"\n',
+    "utf8",
+  );
+  chmodSync(join(bin, "mise"), 0o755);
+  return {
+    path: bin,
+    calls: () =>
+      existsSync(record)
+        ? readFileSync(record, "utf8").split("\n").filter(Boolean)
+        : [],
+  };
+}
+
+/**
+ * An {@link Io} that collects stderr and refuses stdout: which stream a bundle
+ * message lands on is the CLI contract's, not a detail.
+ */
+function stderrIo(): Io & { text: () => string } {
+  let text = "";
+  return {
+    out: () => {
+      throw new Error("a bundle message went to stdout, which carries the URL");
+    },
+    err: (chunk) => {
+      text += chunk;
+    },
+    text: () => text,
+  };
 }
 
 /** A `BROWSER` command that records the URL it was handed instead of opening it. */
@@ -670,6 +724,106 @@ describe("ub open", () => {
     const unparseable = await openFails(box, [], env);
     expect(unparseable.status).toBe(1);
     expect(unparseable.output).toContain("no sync protocol stamp");
+  });
+
+  it("rebuilds its own stale bundle with the documented task, in the checkout", async () => {
+    const box = sandbox();
+    const bundle = fixtureBundle(box);
+    stamp(bundle, SYNC_PROTOCOL_VERSION + 1);
+    const mise = fakeMise(box);
+    const io = stderrIo();
+
+    const served = await ensureBundle(
+      { action: "serve", dir: bundle, ours: true },
+      {
+        ...box.env,
+        PATH: mise.path,
+        FAKE_STAMP_DIR: bundle,
+        FAKE_STAMP_VERSION: String(SYNC_PROTOCOL_VERSION),
+      },
+      io,
+    );
+
+    expect(served).toBe(true);
+    // Said before it happens, with both versions: a command that goes quiet for
+    // a Vite build looks hung.
+    expect(io.text()).toContain(`speaks sync protocol ${SYNC_PROTOCOL_VERSION + 1}`);
+    expect(io.text()).toContain(`this uberblick speaks ${SYNC_PROTOCOL_VERSION}`);
+    // Once, the documented task, from the checkout root — not a bare pnpm.
+    expect(mise.calls()).toEqual([`${REPO_ROOT} run build-web`]);
+  });
+
+  it("rebuilds the bundle it chose, never one UBERBLICK_WEB_DIST named", async () => {
+    const box = sandbox();
+    const bundle = fixtureBundle(box);
+    stamp(bundle, null);
+    const mise = fakeMise(box);
+
+    // Ownership is the variable, not the path: the default directory named
+    // explicitly is still an artifact its caller maintains.
+    const chosen = bundlePlan({});
+    expect(chosen.ours).toBe(true);
+    expect(bundlePlan({ UBERBLICK_WEB_DIST: chosen.dir }).ours).toBe(false);
+
+    const io = stderrIo();
+    const served = await ensureBundle(
+      { action: "serve", dir: bundle, ours: false },
+      {
+        ...box.env,
+        PATH: mise.path,
+        FAKE_STAMP_DIR: bundle,
+        FAKE_STAMP_VERSION: String(SYNC_PROTOCOL_VERSION),
+      },
+      io,
+    );
+
+    expect(served).toBe(false);
+    expect(mise.calls()).toEqual([]);
+    expect(io.text()).toContain("no sync protocol stamp");
+  });
+
+  it("refuses when the rebuild cannot run, fails, or leaves the bundle stale", async () => {
+    const box = sandbox();
+    const bundle = fixtureBundle(box);
+    stamp(bundle, null);
+    const mise = fakeMise(box);
+    const plan = { action: "serve", dir: bundle, ours: true } as const;
+    const noTools = join(box.cwd, "no-tools");
+    mkdirSync(noTools, { recursive: true });
+
+    const unavailable = stderrIo();
+    expect(await ensureBundle(plan, { ...box.env, PATH: noTools }, unavailable)).toBe(false);
+    expect(unavailable.text()).toContain("could not be run");
+
+    const failed = stderrIo();
+    expect(
+      await ensureBundle(plan, { ...box.env, PATH: mise.path, FAKE_EXIT_CODE: "3" }, failed),
+    ).toBe(false);
+    expect(failed.text()).toContain("exited 3");
+
+    const stale = stderrIo();
+    expect(
+      await ensureBundle(
+        plan,
+        {
+          ...box.env,
+          PATH: mise.path,
+          FAKE_STAMP_DIR: bundle,
+          FAKE_STAMP_VERSION: String(SYNC_PROTOCOL_VERSION + 2),
+        },
+        stale,
+      ),
+    ).toBe(false);
+    expect(stale.text()).toContain(
+      `the rebuilt web app speaks sync protocol ${SYNC_PROTOCOL_VERSION + 2}`,
+    );
+
+    // Every refusal names both ways out, and none of them is "read the code".
+    for (const said of [unavailable.text(), failed.text(), stale.text()]) {
+      expect(said).toContain("mise run build-web");
+      expect(said).toContain(REPO_ROOT);
+      expect(said).toContain("UBERBLICK_WEB_DIST");
+    }
   });
 
   it("--no-browser prints the URL and opens nothing; --port chooses the port", async () => {
