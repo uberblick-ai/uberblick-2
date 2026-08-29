@@ -23,6 +23,7 @@ import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
+import { statusReading } from "./status-reading.js";
 import { GROUP_TAGS, groupKeyForTags, groupLabel } from "./groups.js";
 import { activeSession } from "./doc-chrome.js";
 import type { RemotePresence } from "./doc-chrome.js";
@@ -126,8 +127,10 @@ export function DocChrome({
   // has lost the archive. So the handle follows the rail's content and the
   // number follows the rail's head — including when that number is zero.
   const openThreads = threads.filter((thread) => !thread.resolved).length;
-  const state = useCalmSyncState(rawSyncState(useRoomStatus(connection)));
-  const label = state === "syncing" ? "syncing…" : state;
+  const status = useRoomStatus(connection);
+  // The word only. A refusal's sentence never enters the header — it lives in
+  // the sync panel this pill opens, where there is room to read it (#448).
+  const reading = statusReading(status, useCalmSyncState(rawSyncState(status)));
   /**
    * Which hub this state is about (#362) — the endpoint and how it was
    * resolved, or null while the read is still in flight.
@@ -204,7 +207,7 @@ export function DocChrome({
             moves when it becomes operable. */}
         <button
           type="button"
-          className={`ub-pill ub-pill-${state} ub-sync-toggle`}
+          className={`ub-pill ub-pill-${reading.tone} ub-sync-toggle`}
           aria-expanded={syncOpen}
           aria-controls="ub-sync-panel"
           // The visible label is one word about the state, not about the
@@ -213,24 +216,26 @@ export function DocChrome({
           // rides along in both, so the endpoint is one hover away for a
           // pointer and part of the name for everyone else.
           aria-label={
-            hub === null ? `Sync details — ${label}` : `Sync details — ${label}, hub ${hub}`
+            hub === null
+              ? `Sync details — ${reading.word}`
+              : `Sync details — ${reading.word}, hub ${hub}`
           }
           title={hub === null ? "Sync details" : `Sync details — hub ${hub}`}
           onClick={onToggleSync}
         >
           <span className="ub-status-mark" aria-hidden="true">
-            {state === "syncing" ? (
+            {reading.tone === "syncing" ? (
               <span className="ub-spinner" />
             ) : (
               <span
-                className={`ub-dot ${state === "synced" ? "ub-dot-live" : "ub-dot-off"}`}
+                className={`ub-dot ${reading.tone === "synced" ? "ub-dot-live" : "ub-dot-off"}`}
               />
             )}
           </span>
-          {/* The same fixed-width slot the status line uses: "syncing…" is the
-              longest of the three words, so the pill never changes size and
-              nothing beside it moves. */}
-          <span className="ub-status-word">{label}</span>
+          {/* The same fixed-width slot the status line uses, sized for the
+              longest reading either can show, so the pill never changes size
+              and nothing beside it moves. */}
+          <span className="ub-status-word">{reading.word}</span>
         </button>
       </span>
     </>

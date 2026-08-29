@@ -48,6 +48,8 @@ import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import type { AwarenessUser } from "../collab/identity.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useDirectory, useRoomStatus, useStoredFlag } from "./hooks.js";
+import { rawSyncState } from "./calm.js";
+import { statusReading } from "./status-reading.js";
 import { UserMenu } from "./UserMenu.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import type { Workspace } from "./route.js";
@@ -168,6 +170,7 @@ export function Sidebar({
   allOpen: boolean;
 }): ReactElement {
   const status = useRoomStatus(connection);
+  const reading = statusReading(status, rawSyncState(status));
   const ydoc = sidebar?.ydoc ?? null;
   const [drag, setDrag] = useState<Drag | null>(null);
   const [over, setOver] = useState<string | null>(null);
@@ -266,8 +269,21 @@ export function Sidebar({
         <button type="button" onClick={onCreate} disabled={connection === null}>
           + new doc
         </button>
+        {/* A refusal takes this line's word, because the three readings below
+            all describe a connection that is working or coming back and none of
+            them is true of a page the hub will not admit (#448). The ordinary
+            readings stay exactly as they were — uncalmed, and saying
+            "directory", since this line is about the directory room — so the
+            settled state is passed only because the shared derivation takes
+            one, and the word it makes from it is unused here. */}
         <span className="ub-muted">
-          {status.connected ? (status.synced ? "directory synced" : "syncing…") : "offline"}
+          {reading.detail !== null
+            ? reading.word
+            : status.connected
+              ? status.synced
+                ? "directory synced"
+                : "syncing…"
+              : "offline"}
         </span>
       </div>
       {groups.length === 0 && (

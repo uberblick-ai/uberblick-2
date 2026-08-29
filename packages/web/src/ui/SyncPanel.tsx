@@ -19,6 +19,7 @@ import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
+import { statusReading } from "./status-reading.js";
 import type { RemotePresence } from "./doc-chrome.js";
 import { useRoomStatus } from "./hooks.js";
 
@@ -71,7 +72,7 @@ export function SyncPanel({
   // The same settled word the pill this panel opens from shows. Calm is a
   // cadence, never a quieter version of the truth (see calm.ts) — and two
   // different words in one corner of the screen would be worse than either.
-  const state = useCalmSyncState(rawSyncState(status));
+  const reading = statusReading(status, useCalmSyncState(rawSyncState(status)));
 
   /**
    * Escape closes the panel, and the panel alone.
@@ -124,7 +125,14 @@ export function SyncPanel({
           value={endpoint === null ? UNKNOWN : endpointSourceLabel(endpoint.source)}
         />
         <Fact label="Room" value={connection?.room ?? UNKNOWN} />
-        <Fact label="State" value={state === "syncing" ? "syncing…" : state} />
+        <Fact label="State" value={reading.word} />
+        {/* Drawn only under a refusal (#448). This is the panel the pill opens,
+            and the pill has room for the word alone — so the sentence saying
+            what to do about it belongs here, and nowhere else. There is no such
+            sentence for the ordinary states, so the row is absent rather than
+            empty: a Reason row that read "—" three states out of four would be
+            noise in the place a reader looks during an outage. */}
+        {reading.detail !== null && <Fact label="Reason" value={reading.detail} />}
         {/* Always drawn, zero included: this is the panel someone opens to ask
             what the backlog is, and a row that vanished at zero would leave
             them unable to tell "nothing waiting" from "not reported". */}

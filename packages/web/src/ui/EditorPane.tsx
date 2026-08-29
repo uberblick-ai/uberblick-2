@@ -5,7 +5,6 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import { getBlocksFragment, parseRoom, setTitle } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { bindGuardedEditor } from "../editor/guarded-binding.js";
@@ -19,6 +18,7 @@ import { writeToClipboard } from "../editor/source-chrome.js";
 import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
+import { statusReading } from "./status-reading.js";
 import { BlockMenu } from "./BlockMenu.js";
 import {
   useDocMeta,
@@ -155,18 +155,6 @@ function CopyLink({
 }
 
 /**
- * What a reader is told when no token could be minted at all (#426).
- *
- * Composed here rather than shared with `AUTH_REJECTED`: nothing was sent, so
- * the hub has said nothing, and this names the one thing that can be acted on —
- * the app was served without the secret it needs. Local text by construction:
- * the missing value is the whole subject, so there is nothing remote to echo.
- */
-export const TOKEN_MISSING =
-  "this app was served without a hub token, so it cannot authenticate — the " +
-  "deployment serving it is incomplete";
-
-/**
  * Exported for the label test only.
  *
  * The backlog count names its unit (`backlogLabel`, shared with the sync
@@ -199,56 +187,18 @@ export function StatusLine({
   const status = useRoomStatus(connection);
   const peers = usePeers(connection);
   const state = useCalmSyncState(rawSyncState(status));
-  const label = state === "syncing" ? "syncing…" : state;
-  const mismatch = status.protocolMismatch;
-  if (mismatch !== null) {
-    // A fourth reading, not a fourth sync state: the three above describe a
-    // connection that is working or coming back, and this one describes a page
-    // that will not sync again until somebody updates something. Nothing here
-    // is the hub's text — both numbers were validated before they arrived.
+  const reading = statusReading(status, state);
+  if (reading.detail !== null) {
+    // A refusal replaces the line rather than decorating it: the backlog, the
+    // cache claim and the peer strip are all about a connection that is working
+    // or coming back, and none of them is what this reader has to act on.
     return (
       <div className="ub-status">
         <span className="ub-status-mark" aria-hidden="true">
           <span className="ub-dot ub-dot-off" />
         </span>
-        <span className="ub-status-word">update required</span>
-        <span className="ub-muted">
-          {mismatch.hub > mismatch.client
-            ? "this app is older than the hub — update it and reload"
-            : "the hub is older than this app — update the hub"}
-          {` (app ${mismatch.client}, hub ${mismatch.hub})`}
-        </span>
-        <CopyLink room={connection.room} segment={segment} />
-      </div>
-    );
-  }
-  if (status.tokenMissing) {
-    // Ahead of `authFailed`, which can still be carrying a refusal from before
-    // the secret went missing: no token was sent this time, so "the hub refused
-    // us" would name the wrong half. Not terminal either — the next connect
-    // attempt re-reads the served document (see `hubToken`).
-    return (
-      <div className="ub-status">
-        <span className="ub-status-mark" aria-hidden="true">
-          <span className="ub-dot ub-dot-off" />
-        </span>
-        <span className="ub-status-word">no hub token</span>
-        <span className="ub-muted">{TOKEN_MISSING}</span>
-        <CopyLink room={connection.room} segment={segment} />
-      </div>
-    );
-  }
-  if (status.authFailed) {
-    // Composed locally, never the hub's words — see AUTH_REJECTED. Unlike the
-    // reading above this one is not terminal: the socket keeps retrying and an
-    // accepted token clears it, so the line goes back to the ordinary three.
-    return (
-      <div className="ub-status">
-        <span className="ub-status-mark" aria-hidden="true">
-          <span className="ub-dot ub-dot-off" />
-        </span>
-        <span className="ub-status-word">not authorized</span>
-        <span className="ub-muted">{AUTH_REJECTED}</span>
+        <span className="ub-status-word">{reading.word}</span>
+        <span className="ub-muted">{reading.detail}</span>
         <CopyLink room={connection.room} segment={segment} />
       </div>
     );
@@ -265,7 +215,7 @@ export function StatusLine({
           />
         )}
       </span>
-      <span className="ub-status-word">{label}</span>
+      <span className="ub-status-word">{reading.word}</span>
       {/* `hasLocalCache`, not `localReplicaLoaded`: the second only says the
           local read is over, and it is over immediately where there is no
           IndexedDB to read. */}
