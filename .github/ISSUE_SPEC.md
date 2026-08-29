@@ -17,6 +17,7 @@ The first lines of the issue body, before any heading:
 ```
 Depends-on: #2, #3
 Touches: mcp-server, schema
+Parent: #486
 ```
 
 - **`Depends-on`** — mandatory, even when empty. `none` or a comma-separated
@@ -28,14 +29,42 @@ Touches: mcp-server, schema
   `mcp-server`, `schema`, `web` — the live directory listing is authoritative,
   this sentence is not), plus `repo` (root config, CI, top-level docs).
   Grammar: `^Touches: [a-z0-9-]+(, [a-z0-9-]+)*$`, every name from that list.
+- **`Parent`** — optional, at most one line, directly after `Touches`. Grammar:
+  `^Parent: #[0-9]+$`. It is the reservation relation, and the only one: while
+  the named issue is open, this child belongs to that program — only that
+  program dispatches it, and global implementer pickup excludes it. Closing the
+  parent releases the child; reopening it reserves the child again. A parent
+  body's list of children is reading order for a human, never the authority; the
+  headers on the children are. No line at all means unreserved, which is the
+  ordinary case.
+
+  Anything else **fails closed**: more than one `Parent` line, one naming an
+  issue that does not exist or cannot be read, a self-reference, or a cycle
+  through parents makes the child dispatchable by *no* role until a human fixes
+  the header. That is a header defect — say so in a comment and move to the next
+  candidate; never guess which parent was meant. (A delegated subagent's
+  `Parent: <role> <run id>` claim comment is a different record in a different
+  place, and is not this header.)
 
 ### Scheduling semantics
 
 - **Eligible** = labeled `ready` AND every `Depends-on` issue is closed AND
-  not claimed.
-- **Work in flight** is the count of claimed issues plus unmerged PRs,
-  reconstructed from GitHub. It is capped at 6: when the count is 6, no new
-  issue is dispatched until one leaves the count.
+  not claimed AND not reserved by an open `Parent`.
+- **Work in flight** is counted in **distinct work units**, reconstructed from
+  GitHub: one unit per item, whether that item is a live claim, an unmerged PR,
+  or both at once — an unmerged PR and the claim that produced it are one piece
+  of work in flight, not two. The cap is 6: when the count is 6, no new issue is
+  dispatched until one leaves it. Unmerged PRs occupy their slots first, because
+  a PR cannot withdraw and a claim can.
+- **A claim is tentative until it is recounted.** Observing the count before
+  claiming does not admit you, because a concurrent claimer observed the same
+  number. After posting the claim, re-read GitHub and count the units again with
+  your own now among them. Over the cap, the earliest units by the claim order
+  `.agents/roles/README.md` defines keep their slots, and every later claimer
+  posts a one-line withdrawal and stops — before creating a branch or worktree,
+  and before editing anything in the repository. Two claimers that admitted
+  themselves on the same reading therefore resolve deterministically instead of
+  both proceeding.
 - Parallelism is judged at **file** level, not `Touches`-set level: overlapping
   `Touches` sets do not by themselves queue. From the issues' scope and
   Pointers the loop forms an expectation of which files each will edit.
@@ -193,10 +222,13 @@ An issue labeled `ready` must pass all of:
 
 1. `Depends-on` line present, first-section, matching the grammar above.
 2. `Touches` line present, matching the grammar, every name valid.
-3. All five `##` sections present: What, Why, Acceptance criteria,
+3. `Parent`, where present, occurs once, matches the grammar, and names a
+   readable issue that is neither this one nor a cycle through parents.
+4. All five `##` sections present: What, Why, Acceptance criteria,
    Out of scope, Pointers.
-4. At least one `- [ ]` checkbox under Acceptance criteria.
-5. Out of scope and Pointers are non-empty (explicit `None.` is acceptable).
+5. At least one `- [ ]` checkbox under Acceptance criteria.
+6. Out of scope and Pointers are non-empty (explicit `None.` is acceptable).
 
 Sizing and decision-completeness are judgment calls, not lintable — the
-coordinator applies them when granting or revoking `ready`.
+issue-preparer applies them when granting `ready`, and any role that finds a
+`ready` issue failing them says so and skips it.

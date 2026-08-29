@@ -17,23 +17,24 @@ from GitHub alone, without terminal history or a local worktree.
 ## Claim and recovery
 
 Implementation runs in one of two lanes: an isolated Opus sub-agent by
-default, or a Codex session dispatched through Herdr. Before prompting either
-implementer, the coordinator adds `in-progress` and posts the claim defined by
-`.github/ISSUE_SPEC.md`. It records the branch,
-implementer type, and implementer session or agent id so reviewers can prove
-that they did not author the diff.
+default, or a Codex session dispatched through Herdr. Either way the implementer
+claims its own item: it adds `in-progress` and posts the claim defined by
+`.github/ISSUE_SPEC.md`, recording the branch, implementer type, and implementer
+session or agent id so reviewers can prove that they did not author the diff.
+Who may claim what, in what order, and how competing claims resolve belong to
+the role contracts in `.agents/roles/`; this file does not restate them.
 
-A claim is the *end* of the coordinator's pickup, not the start of it: before
-it writes one, the coordinator grounds the issue against a recorded
-`origin/main` commit, challenges it in proportion to its risk, and rechecks
-eligibility. How risk is classified and how that challenge is run belongs to
-each coordinator's own procedure — for the Claude loop,
-`.claude/skills/next-issue/SKILL.md` — and is not restated here. Two
-consequences are agent-neutral, because reclaimers and reviewers depend on
-them: a pickup that stops before dispatch never leaves an `in-progress` label
-behind, and an issue whose contract turns out to be stale, or to need a
-decision only the owner can make, loses `ready` and returns to coordination
-instead of being dispatched.
+A claim is the *end* of a pickup, not the start of it: before writing one, the
+implementer grounds the issue against a recorded `origin/main` commit and
+rechecks eligibility — including `.github/ISSUE_SPEC.md`'s reservation and
+work-in-flight rules, whose recount can still turn a posted claim into a
+withdrawal. Challenging the issue is not part of this lane; it happened in the
+issue-preparer's own run, and `ready` is that verdict. Two consequences are
+agent-neutral, because reclaimers and reviewers depend on them: a pickup that
+stops before any repository edit never leaves an `in-progress` label behind, and
+an issue whose contract turns out to be stale, or to need a decision only the
+owner can make, loses `ready` and returns for preparation instead of being
+implemented.
 
 An `in-progress` claim is stale and may be reclaimed only when all three facts
 are true:
@@ -43,12 +44,12 @@ are true:
 - the claim comment is older than 30 minutes.
 
 Local worktrees and panes are deliberately excluded because other sessions
-cannot observe them. The grace period protects the interval between the
-claim-before-prompt write and the implementer's first push.
+cannot observe them. The grace period protects the interval between the claim
+and the implementer's first push.
 
 ## Implementation
 
-Treat the issue body and coordinator comments as the authoritative requirements,
+Treat the issue body and its comments as the authoritative requirements,
 constraints, and acceptance criteria. Use your own engineering judgment for
 implementation details, test names, and small design choices explicitly left
 open. If the brief conflicts with the code, is unsafe, or requires unnecessary
@@ -85,7 +86,6 @@ round applies to a Codex-authored PR, use a different Codex session where one
 is available; only otherwise use an independent Opus reviewer, and record the
 reviewing session on the PR.
 
-Coordinators advance open PRs before dispatching new issues, reconstruct
-claims and progress from GitHub, and re-read the issue and PR threads before
-every ruling. They record validation and finding dispositions on the PR; merge
-authority comes from CLAUDE.md.
+Every role reconstructs claims and progress from GitHub and re-reads the issue
+and PR threads before acting. The integrator records validation and finding
+dispositions on the PR; merge authority comes from CLAUDE.md.
