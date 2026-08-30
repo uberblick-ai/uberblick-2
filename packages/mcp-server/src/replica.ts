@@ -167,6 +167,16 @@ export class Replicas {
   private readonly cursorTimers = new Map<string, NodeJS.Timeout>();
 
   /**
+   * Document rooms currently publishing this session's presence, and the timer
+   * that withdraws each.
+   *
+   * Its own clock, deliberately not the caret's: a read publishes presence
+   * without drawing a caret, and the two expire independently. See
+   * {@link touch}.
+   */
+  private readonly presenceTimers = new Map<string, NodeJS.Timeout>();
+
+  /**
    * Directory uuids whose stub changed and whose index rows have not caught up.
    *
    * Filled by the directory map's own observer, which Yjs runs before the
@@ -284,11 +294,61 @@ export class Replicas {
   setAgentName(name: string): void {
     this.agentName = name;
     for (const replica of this.replicas.values()) {
-      replica.awareness.setLocalStateField("user", {
-        name,
-        color: this.config.color,
-      });
+      // Only where this session is already published. Renaming must not turn a
+      // passively attached document room — or one whose presence has expired —
+      // into a session the document shows.
+      if (replica.awareness.getLocalState()?.user === undefined) continue;
+      replica.awareness.setLocalStateField("user", this.userState());
     }
+  }
+
+  /** This session's awareness identity, as published in a room. */
+  private userState(): { name: string; color: string } {
+    return { name: this.agentName, color: this.config.color };
+  }
+
+  /**
+   * Publish this session's presence in a document room, because a tool call is
+   * reading or writing it, and withdraw it once the room goes untouched.
+   *
+   * Presence in a document means "this session is working here", not "this
+   * process exists": the server attaches a replica for every live document in
+   * the directory, so publishing on attach made one agent show up as a peer in
+   * every document at once. Attachment is therefore silent, and this is the one
+   * thing that speaks — called from the document-room access boundary in
+   * `tools.ts`, so a tool answering from the derived index or the directory
+   * stub never announces anything.
+   *
+   * Withdrawal removes the `user` key rather than the whole state: dropping the
+   * state emits an awareness `removed`, which is what the web's departed-agent
+   * grace waits for, and a presence timeout would then draw the caret for
+   * another 30 seconds. The workspace-level rooms are exempt — the directory
+   * publishes from attach because the "MCP connections" count reads it, and
+   * nobody renders the sidebar or feedback rooms.
+   */
+  touch(replica: Replica): void {
+    if (replica.isDirectory || replica.isSidebar || replica.isFeedback) {
+      return;
+    }
+    replica.awareness.setLocalState({
+      ...replica.awareness.getLocalState(),
+      user: this.userState(),
+    });
+
+    const existing = this.presenceTimers.get(replica.room);
+    if (existing !== undefined) {
+      clearTimeout(existing);
+    }
+    const timer = setTimeout(() => {
+      this.presenceTimers.delete(replica.room);
+      const state = replica.awareness.getLocalState();
+      if (state === null) return;
+      const { user: _user, ...rest } = state;
+      replica.awareness.setLocalState(rest);
+    }, this.config.cursorTtlMs);
+    // Never a reason to hold the process open.
+    timer.unref?.();
+    this.presenceTimers.set(replica.room, timer);
   }
 
   directory(): Replica {
@@ -343,10 +403,16 @@ export class Replicas {
 
     const doc = new Y.Doc();
     const awareness = new Awareness(doc);
-    awareness.setLocalStateField("user", {
-      name: this.agentName,
-      color: this.config.color,
-    });
+    // Attaching is not working here. Hydration, sync, search indexing and the
+    // directory-driven attach loop all open rooms passively, so a document room
+    // publishes nothing until a tool call touches it ({@link touch}); the
+    // directory is workspace-level presence and publishes from the moment it
+    // attaches.
+    if (id === DIRECTORY_SUFFIX) {
+      awareness.setLocalStateField("user", this.userState());
+    } else {
+      awareness.setLocalState(null);
+    }
 
     const replica: Replica = {
       room,
@@ -1064,9 +1130,11 @@ export class Replicas {
     const position = Y.relativePositionToJSON(
       Y.createRelativePositionFromTypeIndex(text, clamped),
     );
-    replica.awareness.setLocalStateField("cursor", {
-      anchor: position,
-      head: position,
+    // Not `setLocalStateField`: y-protocols drops a field write on a room whose
+    // local state is unset, which is how a document room starts.
+    replica.awareness.setLocalState({
+      ...replica.awareness.getLocalState(),
+      cursor: { anchor: position, head: position },
     });
 
     const existing = this.cursorTimers.get(replica.room);
@@ -1080,6 +1148,11 @@ export class Replicas {
     // Never a reason to hold the process open.
     timer.unref?.();
     this.cursorTimers.set(replica.room, timer);
+    // Drawing a caret is working in the document, and a caret must never be
+    // drawn without the name beside it (#304). Re-arming presence *after* the
+    // cursor's own timer is what keeps the identity alive at least as long as
+    // the caret it labels, however long the write that drew it took.
+    this.touch(replica);
   }
 
   /** Whether a room's local changes are known to have reached the hub. */
@@ -1100,6 +1173,10 @@ export class Replicas {
       clearTimeout(timer);
     }
     this.cursorTimers.clear();
+    for (const timer of this.presenceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.presenceTimers.clear();
     this.sync.destroy();
     for (const replica of this.replicas.values()) {
       replica.awareness.destroy();

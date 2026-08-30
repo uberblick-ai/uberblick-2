@@ -217,6 +217,25 @@ export interface HubSyncOptions {
    * every room forever on a socket that is up and answering.
    */
   maxConcurrentAttaches?: number;
+
+  /**
+   * Keep this client's own hub readings off stderr. Off by default.
+   *
+   * For a client whose caller holds the return value and renders a verdict from
+   * it — {@link inspectRemote} with `silent`, and only there. A probe's answer
+   * is an answer, not an incident: `ub remote join` reads a hub before it can
+   * even ask for the secret, and that reading logging itself put an ERROR about
+   * a rejected token, or a WARN about running local-only, in front of the
+   * prompt on a command that then succeeded (#447).
+   *
+   * It silences exactly the three lines such a probe can reach, each of which
+   * is also on {@link HubState} for its caller to render: no credential, a
+   * refused token, and a protocol skew. The quarantine error is not one of them
+   * — a probe holds no update log and cannot reach it — and nothing on the
+   * replica's own sync path is affected, because there nobody is holding a
+   * reading to report instead.
+   */
+  silent?: boolean;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -370,6 +389,9 @@ export class HubSync {
 
   private destroyed = false;
 
+  /** See {@link HubSyncOptions.silent}. */
+  private readonly silent: boolean;
+
   /**
    * The signing key, imported once. `mintToken` takes a key rather than a
    * secret — the type is what keeps a credential string from being handed to it
@@ -386,6 +408,7 @@ export class HubSync {
     this.config = config;
     this.onConnected = onConnected;
     this.enabled = config.authSecret !== null;
+    this.silent = options.silent === true;
     this.maxConcurrentAttaches =
       options.maxConcurrentAttaches ?? MAX_CONCURRENT_ROOM_ATTACHES;
     if (
@@ -401,9 +424,11 @@ export class HubSync {
     this.reconnectDelayMs = backoff.delay;
 
     if (!this.enabled) {
-      log.warn(
-        "HUB_AUTH_TOKEN is not set: running local-only, no hub sync (every tool still works)",
-      );
+      if (!this.silent) {
+        log.warn(
+          "HUB_AUTH_TOKEN is not set: running local-only, no hub sync (every tool still works)",
+        );
+      }
       return;
     }
 
@@ -727,7 +752,9 @@ export class HubSync {
         // state renders it. See AUTH_REJECTED.
         this.authRejected = true;
         this.roomAnswered(room);
-        log.error("hub rejected the token", { room });
+        if (!this.silent) {
+          log.error("hub rejected the token", { room });
+        }
         // A hub on its way out refuses the room it is unloading, and one that
         // cannot load a document refuses that document's room after accepting
         // the token — so a refusal is not proof the secret is wrong. The
@@ -824,10 +851,12 @@ export class HubSync {
       return;
     }
     this.hubProtocolVersion = hubProtocol;
-    log.error("the hub speaks a different sync protocol: update required", {
-      protocolVersion: SYNC_PROTOCOL_VERSION,
-      hubProtocolVersion: hubProtocol,
-    });
+    if (!this.silent) {
+      log.error("the hub speaks a different sync protocol: update required", {
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        hubProtocolVersion: hubProtocol,
+      });
+    }
     if (this.rebuildTimer !== null) {
       clearTimeout(this.rebuildTimer);
       this.rebuildTimer = null;

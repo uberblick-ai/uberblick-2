@@ -21,13 +21,13 @@ eligible queue item under its `Pickup` section. Missing either is a refusal
 before side effects.
 
 **An internal subagent is the one exception, and it is the same exception for
-every delegating role** — issue-preparer to issue-adversary, integrator to
-implementation-reviewer, program coordinator to implementer. The parent supplies
-the child's role and run identity, the exact GitHub issue or PR key, and its own
-run identity as parent; nothing else. The child reconstructs from GitHub, never
-searches a queue and never acts on another item, and writes its durable result
-there before the parent acts on it. It does not consume or release the parent's
-claim, and a private transcript is never a handoff.
+every delegating role** — issue-preparer to issue-adversary, implementer or
+integrator to implementation-reviewer, program coordinator to implementer. The
+parent supplies the child's role and run identity, the exact GitHub issue or PR
+key, and its own run identity as parent; nothing else. The child reconstructs
+from GitHub, never searches a queue and never acts on another item, and writes
+its durable result there before the parent acts on it. It does not consume or
+release the parent's claim, and a private transcript is never a handoff.
 
 Before starting that child, the parent writes this assignment on the item it
 holds:
@@ -39,21 +39,31 @@ Parent: <parent role> <parent run id>
 ```
 
 For a PR target the record also names `Head: <sha>`. The parent must hold the
-live claim named by `Parent`; the child validates that claim, this delegation
-record and every supplied value before its first side effect. A missing or
-mismatched record is a refusal, not permission to fall back to the queue. The
-child's own claim and `Done:` repeat the parent and exact target so recovery can
-join the assignment to its outcome from GitHub alone.
+live claim named by `Parent`; for an implementer's pre-handoff PR review, that
+is its issue claim naming the PR branch. The child validates that claim, this
+delegation record and every supplied value before its first side effect. A
+missing or mismatched record is a refusal, not permission to fall back to the
+queue. The child's own claim and `Done:` repeat the parent and exact target so
+recovery can join the assignment to its outcome from GitHub alone.
+
+Scratch space is private, disposable runtime state. Before its first temporary
+file, every run creates a fresh directory outside the committed worktree,
+namespaced by its exact run id. A parent and each nested child use different
+directories; never reuse or read another run's scratch filenames. Durable state
+still goes to GitHub, never to the scratch directory.
 
 The normal order is draft → one issue-preparer run (trivial self-check, otherwise
 one fresh adversary) → `ready` or an owner boundary → implementation. Bounded
 means one outcome and stopping condition, not one attempt: the preparer owns
 correctable findings through its final handoff rather than opening another role
 loop. A stopped process is never resumed: recovery starts a fresh assignment
-from GitHub's durable state. The one preparation-specific reuse is an issue
-returning from `needs-decision`: the fresh assignment reuses the previous
-handoff, adversary verdict, question and owner answer, and rechecks only what
-the answer or intervening upstream changes affected.
+from GitHub's durable state. The preparation-specific reuse is an issue
+returning once from implementation or returning from `needs-decision`: the fresh
+assignment reuses the previous handoff, adversary verdict, return evidence,
+question and owner answer as applicable, and rechecks only what those records or
+intervening upstream changes affected. A second consecutive implementer return
+without an owner answer goes to `needs-decision`, not a new automatic
+preparation pass.
 
 `Priority` means the organization issue field: Urgent → High → Medium → Low.
 The product owner owns every explicit value; agents never write it. Unset is
@@ -76,19 +86,31 @@ or admit any other role. Re-read immediately before and after claiming; the
 earliest valid claim wins, and a loser posts a one-line withdrawal and tries the
 next candidate.
 
-**Claims are ordered, and a live one is renewed.** Every claim, renewal,
-withdrawal and takeover is ordered by its comment `createdAt`, and by the
-immutable comment id where two share a timestamp. Ownership follows that order,
+**Claims are ordered, and a live one is renewed.** Every claim, withdrawal and
+takeover is ordered by its comment `createdAt`, and by the immutable comment id
+where two share a timestamp. Ownership follows that order,
 so a holder superseded by a valid takeover does not recover the item by writing
 again: its own claim keeps the older position, and the later write is
 recognisably stale rather than authoritative.
 
-A live run renews by posting `Renewed: <role> <session-or-run id>` on the item
-at least every 15 minutes, and staleness is measured from the holder's newest
-claim-or-renewal comment rather than its first. A top-level claim other than an
-implementation claim is stale when no completion exists and that newest comment
-is more than 30 minutes old; the window is twice the renewal interval so that a
-healthy foreground run is never reclaimed in the gap between two renewals.
+A live run renews by **editing its own claim comment**, never by posting another
+one: touch the body so the comment's `updated_at` moves, appending or replacing a
+single `Renewed: <UTC timestamp>` line. Do not renew before that `updated_at` is
+25 minutes old; renew before it reaches 30 minutes.
+
+Editing rather than appending is what lets the two timestamps do two different
+jobs. `created_at` never moves, so it keeps the holder's position in the claim
+order above and a superseded holder still cannot write its way back to the
+front. `updated_at` moves on every renewal and is the liveness signal. Both are
+on the REST comment object, so a reclaimer reads them with no new machinery, and
+GitHub's comment edit history keeps the renewals auditable. A renewal says only
+"still here", so posting it as a comment buries the claim, the delegation
+record, the gate evidence and the triage under records that carry nothing.
+
+A top-level claim other than an implementation claim is stale when no completion
+exists and its claim comment's `updated_at` is more than 60 minutes old; the
+window is twice the renewal interval so that a healthy foreground run is never
+reclaimed in the gap between two renewals.
 Every implementation claim, top-level or delegated, uses `AGENTS.md`'s same
 three facts, because branch ownership is not a timer. A parent may replace a
 delegated implementer only after those facts make the claim stale and an

@@ -703,5 +703,34 @@ describe("ub remote join", () => {
     expect(persistedHubUrl(box)).toBe(DEAD_HUB_URL);
     expect(run.output).not.toContain(SECRET);
     expect(run.output).not.toMatch(TOKEN_SHAPE);
+    // This run is exactly the probe `join` makes before it can ask for a
+    // secret — no TTY here, so the prompt is skipped — and the refusal above is
+    // the whole of what it is allowed to say. The probe's own reading reaching
+    // stderr is what put an ERROR in front of the prompt on an interactive join
+    // that then succeeded (#447).
+    expect(run.stderr).not.toContain("hub rejected the token");
+  });
+
+  it("says nothing about running local-only before it would ask for a secret", async () => {
+    // The other reading that reaches the prompt, and the machine `join` exists
+    // for: nothing configured at all, so the pre-prompt probe has no credential
+    // to send and is a disabled client. `running local-only` is that client
+    // announcing itself — on a run that is about to be neither local nor only.
+    const remote = await startHub(OTHER_SECRET);
+    const box = sandbox();
+
+    const run = await runUbAsync(["remote", "join", joinUrl(remote)], box);
+
+    expect(run.stderr).not.toContain("running local-only");
+    // Everything the refusal owes a person is unchanged.
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("no signing secret is configured");
+    expect(run.stderr).toContain("--secret-file");
+    expect(run.stderr).toContain("run this from a terminal");
+    expect(run.stderr).toContain("Nothing was written");
+    expect(existsSync(join(box.configHome, "uberblick", "config.json"))).toBe(false);
+    expect(existsSync(join(box.configHome, "uberblick", "credentials.json"))).toBe(
+      false,
+    );
   });
 });

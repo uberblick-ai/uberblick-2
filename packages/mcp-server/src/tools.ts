@@ -500,6 +500,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
 
     const replica = replicas.replica(uuid);
     if (getMeta(replica.doc).uuid !== "") {
+      // This boundary is what "working in a document" means: every tool that
+      // reads or writes the room comes through here, and the ones that answer
+      // from the derived index or the directory stub — `list_docs`, `search`,
+      // `backlinks`, `archive_doc`, `restore_doc` — deliberately do not.
+      replicas.touch(replica);
       return replica;
     }
     // Whether waiting can work is a fact about the hub, not about the document:
@@ -795,6 +800,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
 
       const uuid = randomUUID();
       const replica = replicas.replica(uuid);
+      // The one write that opens its room directly instead of through
+      // `requireWritableDoc`, and it is working in the document like any other.
+      replicas.touch(replica);
       const directory = replicas.directory();
       const sidebarReplica = replicas.sidebar();
       const completed: { purpose: string; room: string }[] = [];

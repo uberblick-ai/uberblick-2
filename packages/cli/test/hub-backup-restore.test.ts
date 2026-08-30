@@ -246,13 +246,19 @@ describe("hub-backup.sh", () => {
     hubDatabase(join(fix.volume, "hub.sqlite"), 3);
     const target = join(fix.checkout, "a-directory");
     mkdirSync(target);
+    // Whatever `0o777 & ~umask` made it on this runner. The behaviour worth
+    // defending is that the refusal leaves the directory exactly as it found
+    // it — the script's own comment names the failure mode: a chmod here
+    // would strip the execute bits and leave a directory nobody can enter.
+    // An absolute mode would assert the runner's umask instead.
+    const before = mode(target);
 
     const ran = run(fix, "hub-backup.sh", [target]);
 
     expect(ran.status).not.toBe(0);
     expect(ran.stderr).toContain("Nothing was stopped");
     expect(calls(fix)).toEqual([]);
-    expect(mode(target)).toBe("755");
+    expect(mode(target)).toBe(before);
   });
 
   /** A backup taken at the price of a hub nobody noticed is not a success. */

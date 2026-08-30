@@ -374,6 +374,28 @@ function Chevron(): ReactElement {
 }
 
 /**
+ * The leading mark on a pinned row: a page with a folded corner.
+ *
+ * Drawn, not typed, for the reason `Chevron` is (#110) — and drawn here rather
+ * than pulled from an icon set, because one 16px glyph is not worth a
+ * dependency. `currentColor` is what lets the row's own tint reach it.
+ */
+function DocumentIcon(): ReactElement {
+  return (
+    <svg className="ub-doc-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M9 2H4.5v12h7V4.5z M9 2v2.5h2.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/**
  * One insertion point.
  *
  * `active` is what the drop needs, not the pointer: a slot between two
@@ -512,6 +534,10 @@ function GroupSection({
           >
             <Chevron />
             <span className="ub-group-label">{group.name}</span>
+            {/* The hairline across to the count — decoration, and announced as
+                nothing. It is what carries the label to the end of the row
+                instead of the count being pushed there. */}
+            <span className="ub-group-rule" aria-hidden="true" />
             <span className="ub-group-count">{group.docs.length}</span>
           </button>
         )}
@@ -562,14 +588,22 @@ function GroupSection({
               <li>
                 <button
                   type="button"
-                  className={uuid === selected ? "ub-selected" : ""}
+                  // The open document, said once, to the styling and to a
+                  // screen reader alike — the `ub-selected` class this replaces
+                  // told only the first of them (#481). The All-docs entry in
+                  // the footer already marked itself this way, so the two rows
+                  // are now one state with one rule.
+                  aria-current={uuid === selected ? "page" : undefined}
                   draggable={ydoc !== null}
                   onClick={() => onSelect(uuid)}
                   onDragStart={(event) => dnd.start({ kind: "doc", uuid }, event)}
                   onDragEnd={dnd.end}
                   title={uuid}
                 >
-                  <PinLabel uuid={uuid} labels={labels} />
+                  <DocumentIcon />
+                  <span className="ub-pin-label">
+                    <PinLabel uuid={uuid} labels={labels} />
+                  </span>
                 </button>
               </li>
             </Fragment>

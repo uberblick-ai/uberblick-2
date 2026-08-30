@@ -24,6 +24,10 @@ Parent: #486
   list of issue refs. Grammar: `^Depends-on: (none|#[0-9]+(, #[0-9]+)*)$`.
   A missing line means *untriaged*, which is different from `none`
   (*consciously independent*); untriaged issues are never eligible.
+  When ordering depends on an open PR, name the issue that PR closes; PR refs do
+  not belong in this header. If the PR closes no issue, record the overlap in
+  Pointers and let the file-overlap rule queue it instead of inventing a
+  dependency.
 - **`Touches`** — mandatory. Comma-separated footprint names, lowercase: the
   short names of directories under `packages/` (currently `cli`, `hub`,
   `mcp-server`, `schema`, `web` — the live directory listing is authoritative,
@@ -59,12 +63,15 @@ Parent: #486
 - **A claim is tentative until it is recounted.** Observing the count before
   claiming does not admit you, because a concurrent claimer observed the same
   number. After posting the claim, re-read GitHub and count the units again with
-  your own now among them. Over the cap, the earliest units by the claim order
+  your own now among them. A successful claimant posts exactly
+  `Admitted: N/6 work units.` and no constituent-unit narration. Over the cap,
+  the earliest units by the claim order
   `.agents/roles/README.md` defines keep their slots, and every later claimer
   posts a one-line withdrawal and stops — before creating a branch or worktree,
   and before editing anything in the repository. Two claimers that admitted
   themselves on the same reading therefore resolve deterministically instead of
-  both proceeding.
+  both proceeding. A fix-up PR already occupies its unit and needs no admission
+  recount.
 - Parallelism is judged at **file** level, not `Touches`-set level: overlapping
   `Touches` sets do not by themselves queue. From the issues' scope and
   Pointers the loop forms an expectation of which files each will edit.
@@ -141,6 +148,27 @@ the previous handoff, adversary verdict, question and answer, and rechecks only
 the affected grounding and intervening upstream changes. It does not repeat
 classification or run another adversary by default.
 
+A top-level implementer returns a stale, unsafe, unnecessarily complex, or
+owner-bound contract with this issue comment:
+
+```text
+Returned: implementer <opus|codex> <session-or-agent id>
+Grounding: <origin/main SHA>
+Reason: <stale-contract|unsafe|unnecessary-complexity|owner-decision> — <one sentence>
+Evidence: <URL or concise pointer>
+```
+
+The first consecutive return since the latest product-owner answer to a return
+question removes `ready` and `in-progress` and adds `needs-preparation`. Its
+preparer reuses the prior pass and refreshes only the affected contract and
+grounding; another adversary is not the default. A second consecutive return
+removes `ready`, `in-progress` and `needs-preparation`, adds `needs-decision`,
+and appends one focused question with concrete options and a recommendation. A
+return already at an owner boundary may take that path immediately. The answer
+to that question resets the return count. Thus an issue gets at most one
+automatic `ready` → `needs-preparation` → `ready` repair cycle before human
+escalation.
+
 ### Claim protocol
 
 The cross-agent workflow lives in [`AGENTS.md`](../AGENTS.md). Its minimum
@@ -151,11 +179,25 @@ Claimed: feat/mcp-server
 Implementer: opus a12a538d
 ```
 
-`Implementer` is `<opus|codex> <session-or-agent id>`. Completion is a PR
-comment recording what changed,
-how it was verified, unresolved blockers, risks, or findings, and the
-KISS/overtesting self-review. Head SHA, check state, and timing remain derived
-from the PR rather than copied into the durable record. Recovery and
+`Implementer` is `<opus|codex> <session-or-agent id>`. Completion is a PR body
+recording the outcome, verification, material findings, and KISS/overtesting
+self-review. A fix-up claim is posted on the PR:
+
+```text
+Claimed: <existing branch>
+Implementer: <opus|codex> <session-or-agent id>
+Ruling: <integrator comment URL>
+```
+
+After opening or updating the PR, post only:
+
+```text
+Done: implementer <opus|codex> <session-or-agent id>
+Grounding: <origin/main SHA>
+```
+
+The PR supplies the branch, head SHA, diff and check state; do not copy them
+into the handoff or add a second completion comment to the issue. Recovery and
 independent-review rules live only in `AGENTS.md`.
 
 The executable routing detail lives under `.claude/skills/next-issue/`: it owns
@@ -173,12 +215,14 @@ doesn't answer? Then the issue is not `ready`.**
 - **Why** — a sentence or two, tied to the spike acceptance criteria or a
   doc. Keeps the agent from "improving" beyond intent.
 - **Acceptance criteria** — a short checkbox list (`- [ ]`) of **distinct,
-  observable and non-obvious outcomes or invariants**. Usually one to five is
-  enough. State what must be true, not every test case or implementation step.
-  Repository hygiene and delivery gates — lint, typecheck, the general test
-  suite, review and CI — already live in `AGENTS.md`, `CLAUDE.md` and CI; they
-  are never issue acceptance criteria. Name a focused command only when its
-  result is itself the clearest observation of this issue's outcome.
+  observable and non-obvious outcomes or invariants**. Use one to five; regroup
+  or split when the contract needs more. State what must be true, not how to
+  prove it: unit/e2e scenarios, test files and implementation steps belong in
+  Pointers, not in checkboxes. Repository hygiene and delivery gates — lint,
+  typecheck, the general test suite, review and CI — already live in
+  `AGENTS.md`, `CLAUDE.md` and CI; they are never issue acceptance criteria.
+  A post-merge corpus update sequenced by `CLAUDE.md` is not a diff acceptance
+  criterion either; point the coordinator to the document under Pointers.
 - **Out of scope** — explicit non-goals, or `None.` if genuinely none. This
   is the "least code wins" principle made enforceable: it is what scope
   creep gets rejected against.
@@ -213,9 +257,12 @@ carries that report even where it would otherwise be tier 1.
 ### Body length, and what a body is for
 
 An issue body records the **final contract**, not the history of arriving at
-it. Review corrections, superseded designs and decision chronology belong in
-**comments** — searchable, and out of the way of the person implementing.
-Targets, not lint rules, because judgement beats a character count:
+it. Material review corrections, superseded decisions and decision chronology
+belong in **comments** — searchable, and out of the way of the person
+implementing. Do not copy the original intake verbatim into a new comment after
+preparation; preserve its material intent in the final contract and rely on the
+issue's edit history for the raw draft. Targets, not lint rules, because
+judgement beats a character count:
 
 | Kind | Target |
 |---|---|

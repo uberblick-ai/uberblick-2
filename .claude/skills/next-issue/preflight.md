@@ -1,10 +1,11 @@
 # Preflight — ground, classify, challenge, recheck
 
 The `issue-preparer` owns this procedure end to end. A narrowly trivial issue
-gets its code-grounded self-check; every other issue gets exactly one fresh
-`issue-adversary` subagent inside the same preparer run. An objection here costs
-a prompt; the same objection after implementation costs a review wave, fix-up
-and re-gate.
+gets its code-grounded self-check; every other new preparation gets exactly one
+fresh `issue-adversary` subagent inside the same preparer run. A resumed owner
+decision or implementer return reuses that completed pass. An objection here
+costs a prompt; the same objection after implementation costs a review wave,
+fix-up and re-gate.
 
 ## Ground it at a commit
 
@@ -12,18 +13,43 @@ and re-gate.
 against — every later statement in the preflight is a claim about that commit,
 not about your memory of the repo. Against it, read what the issue targets: the
 current behavior, the modules, interfaces, invariants and tests it lives in,
-related open issues and PRs, and the files the change is likely to touch. Before
-drafting, list the files changed by every open PR and compare them with the
-likely footprint; record direct file overlap, dependency overlap, and semantic
-overlap while it is still cheap to reshape or defer the issue. Grounding is
-proportional, not exhaustive — enough to fill the table below honestly, and no
-more. A proven mechanical, local correction may skip broad repository and issue
-corpus searches when the handoff says why. Repeating MCP calls to prove an
-absence is not grounding. If `main` advances while you are here, refresh only
-the grounding and challenge the new commits actually affect; a merge elsewhere
-in the tree does not invalidate a challenge about this one.
+related open issues and PRs, and the files the change is likely to touch. Verify
+each load-bearing noun and promised outcome has a current substrate: shipped
+concepts exist in current code, and settled targets exist in the current corpus.
+Closed issue history is evidence only when a pointer or a missing substrate
+makes it relevant; do not sweep `NOT_PLANNED` work as a separate gate.
+
+Before drafting on **every** route, trivial included, list the files changed by
+every open PR and compare them with the likely footprint. A file-list hit is the
+start of the check: inspect the relevant PR diff before deciding whether the
+overlap is a dependency, semantic conflict or mechanical rebase. Record real
+overlap while it is still cheap to reshape or defer the issue. Prefer tracked
+file searches (`git ls-files`, `rg`) and exclude `.claude/worktrees/` and
+`.worktrees/`; copied agent worktrees are not additional grounding evidence.
+
+Grounding is proportional, not exhaustive — enough to fill the table below
+honestly, and no more. A proven mechanical, local correction may skip broad
+repository and issue corpus searches when the handoff says why. Repeating MCP
+calls to prove an absence is not grounding. If `main` advances while you are
+here, refresh only the grounding and challenge the new commits actually affect;
+a merge elsewhere in the tree does not invalidate a challenge about this one.
+
+When that fetch advances `main`, inspect the changed paths. If the new commits
+touch this role contract or the procedure files this run is executing, re-read
+those files before continuing; refreshing the issue's code while following
+stale workflow rules is not a valid recheck.
 
 ## Classify the route
+
+First check for a valid top-level implementer `Returned:` record after the latest
+preparer handoff. On the first consecutive return since an owner answer, use
+route `resumed`: read the prior preparation and adversary evidence, refresh the
+reported conflict and affected upstream grounding, and correct only that part
+of the issue. Do not reclassify, repeat broad grounding, or launch another
+adversary by default. A second consecutive return is already parked on
+`needs-decision`; after the owner answers, resume the same way and treat that
+answer as resetting the count. A return that exposes a new owner boundary goes
+to `needs-decision` rather than back to `ready`.
 
 Classify from the grounding, never a package name, label or keyword. A route is
 `trivial` only when all four facts hold: the change is mechanical (no behavior
@@ -64,11 +90,49 @@ applies correctable findings in this same run and repeats the affected grounding
 and final recheck. It does not call a second adversary to review those edits.
 Another adversary is exceptional and requires an explicit owner request.
 
+**Dispatching the other runtime.** From Claude, that is one command, validated
+2026-08-30 against codex-cli 0.150.1 and 0.151.0 — it returns exit 0 with network
+and `gh` available inside the sandbox:
+
+```sh
+codex exec -s workspace-write -c 'sandbox_workspace_write.network_access=true' - < <prompt-file> > <scratch-log> 2>&1
+```
+
+`codex exec` consumes that prompt; it does not select a
+`.codex/agents/*.toml` adapter. The prompt therefore tells the child to read the
+`issue-adversary` role contract and supplies the exact issue, child run id and
+parent run id. Do not route this through the companion `codex-rescue`/task
+helper: its read-only Git metadata cannot satisfy the role's grounding fetch.
+Read the verdict from the issue, not the terminal or log. The private scratch
+log prevents the child's reasoning transcript from consuming the parent's
+context and is inspected only when the command fails or no durable verdict
+appears.
+`--full-auto` is absent in codex-cli 0.151.0 *and* is refused by Claude Code's
+permission classifier, so a dispatch carrying it dies before Codex starts. Do
+not re-derive this per run.
+
+**Hold the pass open until the verdict exists.** Dispatch in the foreground and
+wait; a round takes minutes, not seconds. A preparer that ends its turn after
+the `Delegated:` record leaves a live claim and a promised verdict nobody is
+waiting on, which reads to every other role exactly like work in progress.
+
+**A dispatch that produces no verdict is recorded, never papered over.** If the
+other runtime does not run, say so on the issue; if a same-runtime adversary
+stands in, its record names the runtime that actually challenged. A degradation
+nobody can see is worse than the round being skipped: the cross-runtime
+preference exists because a different model reads the same body differently, and
+a record claiming a round that never happened spends that credibility for
+nothing.
+
 ## Recheck, then decide
 
 Last thing before posting the outcome, `git fetch origin main` again. Refresh
 only grounding affected by an upstream change, then re-read the issue, parent
 claim, nested adversary handoff and labels.
+
+The final body has one to five acceptance criteria. Every checkbox states an
+observable outcome or invariant, never a test/e2e recipe, test filename,
+implementation step, generic delivery gate or post-merge corpus task.
 
 | Parent still owns the issue | Final finding state | Outcome | Labels | Comment |
 |---|---|---|---|---|
@@ -89,23 +153,29 @@ options and a recommendation, not another automatic adversary round.
 The nested adversary writes its `Done:` handoff before the preparer acts. After
 the recheck, the preparer writes one concise `Done:` handoff with the grounded
 commit, route, adversary link where applicable, only material findings and
-dispositions, and `Outcome: ready|needs-decision|split`. Link the final body or
-children instead of restating them. Do not include transcripts, run narration,
+dispositions, and `Outcome: ready|needs-decision|split`. Use `Preparation:
+resumed` for an implementer-return or owner-answer continuation. Link the final
+body or children instead of restating them. After the four required lines, use
+at most five short bullets and no secondary headings, targeting at most 1,500
+characters for the whole handoff. Do not include transcripts, run narration,
 generic delivery gates, or the self-assessment. A requeue writes none.
-
-After the durable issue handoff, post a separate top-level reply to the Agent
-Feedback discussion named by the role contract. Report the runtime, model and
-reasoning effort when observable; wall time, token use and tool-call counts when
-available; whether Uberblick MCP context and the adversary helped; whether a
-higher or lower effort would likely have been more efficient; and the single
-largest avoidable cost. `Unknown` is valid. These observations inform later
-tuning and never change Priority automatically.
 
 The preparer posts `Done:` before applying the named label transition. A retry
 of the same run edits only its own record. If the durable handoff exists but the
 label write did not complete, a later preparer finishes that transition without
 rerunning the challenge. GitHub therefore recovers the pass without a lifecycle
 comment graph or a second adversary.
+
+After that durable transition, post a separate top-level reply to the Agent
+Feedback discussion named by the role contract. Report the runtime, model and
+reasoning effort when observable; wall time, token use and tool-call counts when
+available; whether Uberblick MCP context and the adversary helped; whether a
+higher or lower effort would likely have been more efficient; and workflow or
+context improvements, if any. Lead with the improvement that would have saved
+the most time or ambiguity; include additional smaller observations only when
+they add distinct evidence. Target at most 2,000 characters and link evidence
+instead of narrating the run. `Unknown` is valid. Feedback is non-blocking
+telemetry and never changes the outcome or Priority automatically.
 
 **Findings are not requirements.** Material implementation risks and options
 travel to the implementer in the brief, as options. They are never edited into
@@ -126,8 +196,9 @@ verdict. The preparer remains responsible for applying its findings and writing
 the sole final preparation outcome.
 
 **A decision resumes from durable work.** An owner answer moves the issue from
-`needs-decision` back to `needs-preparation`. A fresh preparer assignment reads
-the prior preparer handoff, adversary verdict, focused question and owner answer,
+`needs-decision` back to `needs-preparation` and resets the consecutive-return
+count. A fresh preparer assignment reads the prior preparer handoff, adversary
+verdict, implementer return where present, focused question and owner answer,
 then refreshes only affected grounding before completing the same pass. It does
 not redo classification, broad grounding, or the adversary by default. A GitHub
 comment from the owner is authoritative; another human's comment is evidence
