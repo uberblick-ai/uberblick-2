@@ -2247,8 +2247,8 @@ h3.ub-heading {
 /* ---- sync indicator (#76) ---- */
 
 /* Two fixed-width slots. Whatever the state, the mark is one square and the
-   word is one column of eight monospace characters ("syncing…" is the longest
-   of the three), so "local cache" and the room key after them never move. */
+   word is one fixed column — sized on `.ub-status-word` below — so "local
+   cache" and the room key after them never move. */
 .ub-status-mark {
   display: inline-flex;
   align-items: center;

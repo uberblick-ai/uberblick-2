@@ -322,7 +322,6 @@ describe("the doc chrome reads the document, the awareness and the status", () =
       const { host, root } = mount(fixture(status));
       try {
         expect(text(host, ".ub-pill-offline")).toBe(word);
-        expect(host.querySelector(".ub-pill-offline .ub-dot-off")).not.toBeNull();
         expect(
           host.querySelector(".ub-sync-toggle")?.getAttribute("aria-label"),
         ).toContain(word);

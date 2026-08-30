@@ -105,10 +105,11 @@ describe("nothing refused reads as the settled state, and says so", () => {
     });
   });
 
-  it("comes back on its own once an accepted token clears the flag", () => {
-    // `authFailed` is not terminal — a hub unloading a room refuses it, and the
-    // next `authenticated` lowers the flag. Nothing has to be reset for the
-    // ordinary reading to return, which is what this pins.
+  it("reads a lowered authFailed as the ordinary word again", () => {
+    // `authFailed` is not terminal, so the derivation has to answer for a
+    // lowered flag as well as a raised one. What lowers it — a hub unloading a
+    // room refuses, the next `authenticated` clears — is `collab/rooms.ts`'s
+    // behavior and is pinned there, not here.
     expect(read({ authFailed: true }, "synced").word).toBe("not authorized");
     expect(read({ authFailed: false }, "synced").word).toBe("synced");
   });

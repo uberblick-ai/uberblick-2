@@ -81,13 +81,15 @@ export function statusReading(status: RoomStatus, settled: SyncState): StatusRea
     };
   }
   if (status.tokenMissing) {
+    // Unlike the reading above, not terminal: `collab/rooms.ts` re-reads the
+    // served configuration before every connect attempt, and the flag clears
+    // the moment a secret arrives.
     return { word: "no hub token", detail: TOKEN_MISSING, tone: "offline" };
   }
   if (status.authFailed) {
-    // Composed locally, never the hub's words — see AUTH_REJECTED. Unlike the
-    // two above this one is not terminal: the socket keeps retrying and an
-    // accepted token clears the flag, so the reading goes back to the ordinary
-    // three on its own.
+    // Composed locally, never the hub's words — see AUTH_REJECTED. Not
+    // terminal either: the socket keeps retrying and an accepted token clears
+    // the flag, so the reading goes back to the ordinary three on its own.
     return { word: "not authorized", detail: AUTH_REJECTED, tone: "offline" };
   }
   return {
