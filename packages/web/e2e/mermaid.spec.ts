@@ -10,9 +10,11 @@
  *   only a browser applies CSS: the diagram visible with the source hidden, and
  *   the two swapping the moment the caret lands in the block.
  * - **the OS scheme moving under the "system" appearance.** The colours are
- *   written into the SVG string rather than inherited from the page, so nothing
- *   repaints unless the NodeView hears `prefers-color-scheme` change and draws
- *   again — and `page.emulateMedia` is what makes that a real event.
+ *   ablauf's two palettes written into the SVG as `light-dark()`, which are CSS
+ *   values in presentation attributes — so the picture follows the scheme with
+ *   nothing subscribed and nothing drawn again. Only a CSS engine can say
+ *   whether that resolution actually happens, and `page.emulateMedia` is what
+ *   makes the scheme change a real event.
  */
 
 import { expect, test } from "@playwright/test";
@@ -42,9 +44,16 @@ function source(page: Page): Locator {
   return page.locator(".ub-mermaid > pre");
 }
 
-/** The ground ablauf painted, which is the palette it chose. */
-async function ground(page: Page): Promise<string | null> {
-  return diagram(page).locator("rect").first().getAttribute("fill");
+/**
+ * The ground ablauf painted, as the browser resolved it. The *attribute* is one
+ * `light-dark()` string in both appearances — the computed value is where the
+ * scheme shows up, which is the whole point of drawing the picture once.
+ */
+async function ground(page: Page): Promise<string> {
+  return diagram(page)
+    .locator("rect")
+    .first()
+    .evaluate((element) => getComputedStyle(element).fill);
 }
 
 test("a flowchart draws, opens its source under the caret, and follows the scheme", async ({
@@ -77,14 +86,19 @@ test("a flowchart draws, opens its source under the caret, and follows the schem
   await expect(source(page)).toBeHidden();
   await expect(diagram(page)).toContainText("Start");
   const light = await ground(page);
-  expect(light).not.toBeNull();
+  expect(light).not.toBe("");
+  // One picture, not one per appearance: the attribute names both halves.
+  await expect(diagram(page).locator("rect").first()).toHaveAttribute(
+    "fill",
+    /^light-dark\(/,
+  );
 
   // Clicking the picture is how they get back to the source.
   await diagram(page).click();
   await expect(source(page)).toBeVisible();
   await expect(diagram(page)).toBeHidden();
 
-  // …and the OS scheme changing under "system" repaints it, still legible.
+  // …and the OS scheme changing under "system" recolours it, still legible.
   await first.click();
   await expect(diagram(page)).toBeVisible();
   await page.emulateMedia({ colorScheme: "dark" });

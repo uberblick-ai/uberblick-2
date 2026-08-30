@@ -289,7 +289,9 @@ export const CodeBlock = Node.create({
  * representation of the diagram's meaning, because the SVG is derived on every
  * paint and never stored. Everything that makes it a picture lives in the
  * NodeView (mermaid.ts), and anything outside ablauf's mermaid subset stays the
- * source block it has always been.
+ * source block it has always been — as does anything too large to lay out, and
+ * anything carrying a `comment` mark, since constraint 3 above lets an
+ * annotation anchor in this block's text and a picture would hide it.
  */
 export const Mermaid = Node.create({
   name: "mermaid",

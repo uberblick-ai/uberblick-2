@@ -210,8 +210,15 @@ export const mermaidChrome: SourceBlockChrome = {
 
 /* ------------------------------------------------- the block under the caret */
 
-/** The top-level block of type `typeName` the selection is in, or null. */
-function selectedBlock(
+/**
+ * The top-level block of type `typeName` the selection is in, or null.
+ *
+ * Exported because {@link sourceEditingPlugin} is not the only thing that has
+ * to answer this question: a block that decides whether to *do* the expensive
+ * drawing has to agree with the stylesheet about which block is open, and two
+ * spellings of that rule would eventually disagree (mermaid.ts).
+ */
+export function selectedBlock(
   state: EditorState,
   typeName: string,
 ): { pos: number; node: PMNode } | null {

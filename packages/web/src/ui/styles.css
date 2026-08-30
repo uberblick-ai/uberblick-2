@@ -1885,15 +1885,40 @@ h3.ub-heading {
   content: none;
 }
 
+/* Why this block is not a picture, when there is a reason worth a reader's
+   time. Absent for source ablauf simply does not read — a `sequenceDiagram` is
+   not a failure and the label above already says "not rendered" — and present
+   for the three that are: past the size budget, carrying a comment, or a
+   renderer that failed. No `display` here on purpose, so the element's own
+   `hidden` is what decides whether it shows. */
+.ub-mermaid-note {
+  margin: 0 0 0.3rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+  border-left: 3px solid var(--border);
+  padding-left: 0.6rem;
+}
+
 .ub-mermaid-render {
   display: none;
   overflow-x: auto;
   cursor: text;
 }
 
-/* ablauf paints its own opaque ground and its own text colours, chosen from the
-   appearance in force (editor/mermaid.ts) — so the picture needs a box and a
-   size, and no colour of ours. */
+/* The picture is the control that opens the source, so it looks like one when
+   the keyboard is on it — the same ring the annotation highlights use. */
+.ub-mermaid-render:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* ablauf paints its own opaque ground and its own text colours — so the picture
+   needs a box and a size, and no colour of ours. Those colours are its two
+   palettes written as `light-dark()` into the SVG's presentation attributes
+   (editor/mermaid.ts), which are CSS like any other declaration: `color-scheme`
+   at the top of this file picks the half, so the picture follows the reader's
+   appearance without being drawn again. */
 .ub-mermaid-render svg {
   display: block;
   max-width: 100%;
