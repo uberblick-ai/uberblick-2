@@ -57,6 +57,7 @@ import {
   initDoc,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
+import { parse } from "@uberblick/ablauf";
 import { mermaidChrome } from "../src/editor/source-chrome.js";
 import { mountEditor } from "./helpers.js";
 
@@ -65,12 +66,18 @@ import { mountEditor } from "./helpers.js";
  * throws a bare `Error`, which no `instanceof` in the binding can name). The
  * flag is off for every test but the one that turns it on.
  */
-const ablauf = vi.hoisted(() => ({ snapThrows: false }));
+const ablauf = vi.hoisted(() => ({ snapThrows: false, parsed: 0 }));
 
 vi.mock("@uberblick/ablauf", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@uberblick/ablauf")>();
   return {
     ...actual,
+    // Counted, not replaced: whether a graph was built at all is the contract
+    // the pre-parse arrow bound exists to keep (#514 review, G-3).
+    parse: (...args: Parameters<typeof actual.parse>) => {
+      ablauf.parsed += 1;
+      return actual.parse(...args);
+    },
     snap: (...args: Parameters<typeof actual.snap>) => {
       if (ablauf.snapThrows) {
         throw new Error('ablauf: no free position for "a" within 512 grid steps of (0, 0)');
@@ -112,6 +119,18 @@ function grid(left: number, right: number): string {
   return `flowchart TD\n  ${l} --> ${r}`;
 }
 
+/**
+ * `terms²` arrows over two boxes: the same one-character id repeated on both
+ * sides of one arrow, so the source stays small while the graph does not. 2,046
+ * a side is 16,382 characters — inside the source cap, and 4.2M edges and
+ * ~290 MB the moment anything parses it (#514 review, G-3).
+ */
+function expansion(terms: number): string {
+  const left = Array.from({ length: terms }, () => "a").join(" & ");
+  const right = Array.from({ length: terms }, () => "b").join(" & ");
+  return `flowchart TD\n  ${left} --> ${right}`;
+}
+
 function docWithMermaid(text: string): { ydoc: Y.Doc; id: string } {
   const ydoc = new Y.Doc();
   initDoc(ydoc, { uuid: "mermaid-doc", title: "Diagrams" });
@@ -126,6 +145,19 @@ function block(editor: Editor): Element | null {
 
 function diagram(editor: Editor): SVGElement | null {
   return editor.view.dom.querySelector(".ub-mermaid-render svg");
+}
+
+/**
+ * The text actually drawn into the picture, and the only honest evidence that
+ * anything was: `toSvg` is called with `title: source`, so the SVG's own
+ * `textContent` carries the whole block source even when nothing was laid out
+ * — an empty canvas satisfies every label assertion made against it (#514
+ * review, G-2).
+ */
+function glyphs(editor: Editor): string {
+  const svg = diagram(editor);
+  if (svg === null) return "";
+  return [...svg.querySelectorAll("text")].map((text) => text.textContent).join("\n");
 }
 
 /** The visible explanation for a block that is not a picture, if there is one. */
@@ -143,6 +175,7 @@ function caret(editor: Editor, index: number): void {
 
 afterEach(() => {
   ablauf.snapThrows = false;
+  ablauf.parsed = 0;
   document.documentElement.removeAttribute("data-theme");
   vi.restoreAllMocks();
 });
@@ -157,12 +190,14 @@ describe("the mermaid block", () => {
       expect(block(editor)?.getAttribute("data-rendered")).toBe("true");
       const svg = diagram(editor);
       expect(svg).not.toBeNull();
-      // The labels the source names, drawn — not an empty canvas.
-      expect(svg?.textContent).toContain("Request");
-      expect(svg?.textContent).toContain("401");
-      // The picture's alternative text is the source it was drawn from: with
-      // the `<pre>` hidden, it is the only statement of the relationships left
-      // in the accessibility tree.
+      // The labels the source names, drawn as glyphs — not an empty canvas
+      // with the source in its `<title>`.
+      expect(glyphs(editor)).toContain("Request");
+      expect(glyphs(editor)).toContain("401");
+      // The picture carries the source it was drawn from. It is not what a
+      // screen reader announces — that is the wrapper's `aria-label`, and the
+      // wrapper is the control that opens the source (mermaid.ts) — but it is
+      // what a reader of the raw SVG, saved or copied out, gets with it.
       expect(svg?.querySelector("title")?.textContent).toBe(FLOWCHART);
 
       // The document is untouched: same text, same stored rev, same blocks.
@@ -186,6 +221,11 @@ describe("the mermaid block", () => {
     ["a sequence diagram", SEQUENCE],
     ["a flowchart using subgraph", SUBGRAPH],
     ["source that is not a diagram yet", "flow"],
+    // A clean parse with nothing in it: ablauf draws an empty 40x40 SVG for a
+    // header alone, and calling that drawn hides the text of the block the
+    // reader is halfway through typing (#514 review, G-1).
+    ["a header with nothing under it yet", "flowchart TD"],
+    ["a header and a comment", "flowchart TD\n  %% coming back to this"],
   ])("leaves %s as the source block it was", (_name, text) => {
     const { ydoc } = docWithMermaid(text);
     const { editor } = mountEditor(ydoc);
@@ -239,12 +279,12 @@ describe("the mermaid block", () => {
     const { editor } = mountEditor(ydoc);
     try {
       caret(editor, 1);
-      expect(diagram(editor)?.textContent).toContain("401");
+      expect(glyphs(editor)).toContain("401");
 
       editBlock(ydoc, id, FLOWCHART, FLOWCHART.replace("401", "Unauthorized"));
 
-      expect(diagram(editor)?.textContent).toContain("Unauthorized");
-      expect(diagram(editor)?.textContent).not.toContain("401");
+      expect(glyphs(editor)).toContain("Unauthorized");
+      expect(glyphs(editor)).not.toContain("401");
     } finally {
       editor.destroy();
     }
@@ -325,6 +365,55 @@ describe("the mermaid block", () => {
         expect(block(editor)?.querySelector("pre")?.textContent).toBe(text);
         expect(getBlocks(ydoc)[0]?.text).toBe(text);
       }
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  /**
+   * The arrow cap, applied to the text instead of to the graph. `&` groups
+   * expand multiplicatively, so the graph the count cap would refuse costs its
+   * memory while it is being built — which on a small heap is the renderer
+   * dying, not an exception anything here can catch (#514 review, G-3).
+   */
+  it("refuses an `&` expansion from the source, without ever building it", () => {
+    const text = expansion(2_046);
+    expect(text.length).toBeLessThanOrEqual(16_384);
+    const { ydoc } = docWithMermaid(text);
+    const { editor } = mountEditor(ydoc);
+    try {
+      // 2,046 terms a side, and the count cap never gets to see one of them.
+      expect(note(editor)).toContain("Too large to draw: 4186116 arrows past this block's 512.");
+      expect(ablauf.parsed).toBe(0);
+      expect(block(editor)?.querySelector("pre")?.textContent).toBe(text);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  /**
+   * Reading the arrows off the text rather than the graph carries exactly one
+   * risk: disagreeing with ablauf about what the text says. Under-counting
+   * would let the expansion above through; over-counting would refuse a diagram
+   * the caps admit. Both are checked against ablauf itself, on the constructs
+   * that can hide an `&` or an arrow inside a label.
+   */
+  it.each([
+    ["an `&` inside a node label", "flowchart TD\n  a[Fish & Chips] --> b"],
+    ["an arrow inside a node label", "flowchart TD\n  a[from x --> y] --> b"],
+    ["an `&` inside a pipe label", "flowchart TD\n  a -->|there & back| b"],
+    ["an `&` inside a mid-arrow label", "flowchart TD\n  a -- there & back --> b"],
+    ["a quoted label holding both", 'flowchart TD\n  a["x & y --> z"] --> b'],
+    ["a comment that reads like a statement", "flowchart TD\n  %% a & b --> c\n  a --> b"],
+    ["a chain of groups", "flowchart TD\n  a & b --> c & d --> e"],
+    ["the largest grid both caps admit", grid(16, 32)],
+  ])("draws %s exactly when ablauf's own counts allow it", (_name, text) => {
+    const graph = parse(text);
+    const drawable = graph.nodes.length > 0 && graph.nodes.length <= 48 && graph.edges.length <= 512;
+    const { ydoc } = docWithMermaid(text);
+    const { editor } = mountEditor(ydoc);
+    try {
+      expect(block(editor)?.getAttribute("data-rendered")).toBe(String(drawable));
     } finally {
       editor.destroy();
     }

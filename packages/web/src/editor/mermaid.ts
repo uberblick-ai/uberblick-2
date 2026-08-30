@@ -24,10 +24,14 @@
  *
  * 1. ablauf reads a strict subset of mermaid's flowchart grammar and refuses
  *    everything else with a `ParseError` — a `sequenceDiagram`, a `subgraph`, a
- *    `;` separator. That is not a failure and says nothing extra: the block
- *    renders exactly as it did before this module existed.
- * 2. The source is past {@link MAX_SOURCE}, or the diagram past
- *    {@link MAX_NODES} / {@link MAX_EDGES}, and the reader is told which.
+ *    `;` separator — or reads it and finds no boxes at all, which is what a
+ *    header someone has just typed is. Neither is a failure and neither says
+ *    anything extra: the block renders exactly as it did before this module
+ *    existed.
+ * 2. The source is past {@link MAX_SOURCE} or {@link edgesAtMost} bounds its
+ *    arrows past {@link MAX_EDGES} — both read off the text — or the drawn
+ *    graph is past {@link MAX_NODES} / {@link MAX_EDGES}. The reader is told
+ *    which.
  * 3. The block carries a `comment` mark. The schema lets annotations anchor in
  *    this block's text (CLAUDE.md), and a drawn diagram hides the text they are
  *    anchored in — so an annotated block stays source rather than swallowing
@@ -122,22 +126,25 @@ const THEME: Partial<Theme> = (() => {
  * Arrows are a separate axis rather than a consequence of boxes, because
  * ablauf expands `&` groups multiplicatively: 3.3 kB of perfectly valid mermaid
  * reached 62,500 arrows and a 9 MB picture. 625 arrows measured ~22ms on the
- * faster host, ~3.5x that on the slower one, so 512 is the same mark in arrows;
- * the worst shape at both caps at once — 24 & 24 maximum-width diamonds — is
- * 68ms here, so the two caps compose.
+ * faster host, ~3.5x that on the slower one, so 512 is the same mark in arrows.
+ * The two caps compose at the largest shape that passes both at once — a
+ * 16 & 32 grid, 48 boxes and exactly 512 arrows, 32ms here. (24 & 24 is *not*
+ * that shape: 576 arrows, which the arrow cap refuses.)
  *
- * **Source length is the third axis, and it is the only one checked before
- * `parse`.** The counts can only refuse a graph that already exists, and
- * building it is itself the attack: with repeated one-character ids in one `&`
- * line, edges grow as `(chars/8)²`, so 16 kB parses to 4.2M edges in 113ms and
- * 378 MB, 32 kB takes 434ms and 1.35 GB, and **48 kB aborts the process with a
- * fatal V8 out-of-memory** — which in a browser is the renderer dying, and
- * which no `catch` below can see, because it is not a JS exception. 16,384
- * refuses nothing the counts admit: the largest source that can pass 48 boxes
- * and 512 arrows is 512 explicitly written labelled arrows, which is 14.8 kB.
- * It bounds the picture too — `title: source` makes the SVG at least the
- * source's size, and every label in it comes from the source — which is what
- * keeps a block the counts accept from putting a 100 MB SVG in the DOM.
+ * **Source length is the third axis, and it is checked before `parse`ing
+ * anything at all.** The counts can only refuse a graph that already exists,
+ * and building it is itself the attack: with repeated one-character ids in one
+ * `&` line, edges grow as `(chars/8)²`, so 16 kB parses to 4.2M edges in 113ms
+ * and 378 MB, 32 kB takes 434ms and 1.35 GB, and **48 kB aborts the process
+ * with a fatal V8 out-of-memory** — which in a browser is the renderer dying,
+ * and which no `catch` below can see, because it is not a JS exception.
+ * {@link edgesAtMost} closes that class in the currency the arrow cap already
+ * counts in; this cap stays because bytes are a third thing worth bounding, and
+ * it deliberately refuses some sources the counts would admit — a single
+ * 16,385-character label is one box and no arrows. It bounds the picture too —
+ * `title: source` makes the SVG at least the source's size, and every label in
+ * it comes from the source — which is what keeps a block the counts accept from
+ * putting a 100 MB SVG in the DOM.
  *
  * Deliberately not configurable: a budget a document can raise is a budget an
  * agent can raise, and the freeze it prevents is everyone's, not the author's.
@@ -145,6 +152,138 @@ const THEME: Partial<Theme> = (() => {
 const MAX_SOURCE = 16_384;
 const MAX_NODES = 48;
 const MAX_EDGES = 512;
+
+/** ablauf's shape delimiters, longest opener first (`parse.js`'s `SHAPES`). */
+const SHAPE_LABELS: ReadonlyArray<readonly [string, string]> = [
+  ["([", "])"],
+  ["((", "))"],
+  ["[", "]"],
+  ["(", ")"],
+  ["{", "}"],
+];
+/** Connectors written whole; longest first, so `-.->` wins over `-.`. */
+const CONNECTORS: readonly string[] = ["-.->", "-->", "---", "==>"];
+/** The `A -- text --> B` spellings: an opener, and the arrows that close it. */
+const LABELLED_CONNECTORS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ["-.", [".->"]],
+  ["--", ["-->", "---"]],
+  ["==", ["==>"]],
+];
+
+/**
+ * The arrows one statement line will contribute: the sum of (left terms x right
+ * terms) over its connectors, which is exactly what `parseChain` pushes.
+ */
+function lineEdges(line: string): number {
+  /** Past a label: its quoted form first, because that may contain the closer. */
+  const skipLabel = (from: number, close: string): number => {
+    let i = from;
+    if (line[i] === '"') {
+      const quote = line.indexOf('"', i + 1);
+      if (quote < 0) return line.length;
+      i = quote + 1;
+    }
+    const end = line.indexOf(close, i);
+    return end < 0 ? line.length : end + close.length;
+  };
+  /** Past `-- text -->`, choosing the nearest closer as ablauf does. */
+  const skipLabelled = (from: number, closers: readonly string[]): number => {
+    let i = from;
+    while (line[i] === " " || line[i] === "\t") i += 1;
+    if (line[i] === '"') {
+      const quote = line.indexOf('"', i + 1);
+      if (quote < 0) return line.length;
+      i = quote + 1;
+    }
+    let cut = -1;
+    let length = 0;
+    for (const closer of closers) {
+      const found = line.indexOf(closer, i);
+      if (found >= 0 && (cut < 0 || found < cut)) {
+        cut = found;
+        length = closer.length;
+      }
+    }
+    return cut < 0 ? line.length : cut + length;
+  };
+  /** Past a `-->|text|` label, or unmoved where the connector carries none. */
+  const skipPipe = (from: number): number => {
+    let i = from;
+    while (line[i] === " " || line[i] === "\t") i += 1;
+    if (line[i] !== "|") return from;
+    return skipLabel(i + 1, "|");
+  };
+
+  const groups: number[] = [];
+  let terms = 1;
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === "&") {
+      terms += 1;
+      i += 1;
+      continue;
+    }
+    const shape = SHAPE_LABELS.find(([open]) => line.startsWith(open, i));
+    if (shape !== undefined) {
+      i = skipLabel(i + shape[0].length, shape[1]);
+      continue;
+    }
+    const plain = CONNECTORS.find((connector) => line.startsWith(connector, i));
+    const labelled =
+      plain === undefined
+        ? LABELLED_CONNECTORS.find(([open]) => line.startsWith(open, i))
+        : undefined;
+    if (plain !== undefined) i += plain.length;
+    else if (labelled !== undefined) i = skipLabelled(i + labelled[0].length, labelled[1]);
+    else {
+      i += 1;
+      continue;
+    }
+    i = skipPipe(i);
+    groups.push(terms);
+    terms = 1;
+  }
+  groups.push(terms);
+
+  let edges = 0;
+  for (let g = 1; g < groups.length; g += 1) edges += (groups[g - 1] ?? 0) * (groups[g] ?? 0);
+  return edges;
+}
+
+/**
+ * An upper bound on the arrows `parse` will build, read off the text alone —
+ * {@link MAX_EDGES} applied one step earlier, in the currency it already counts.
+ *
+ * The count cap can only refuse a graph that has been built, and for `&` groups
+ * building it *is* the damage: `a & a & … --> b & b & …` written to exactly
+ * {@link MAX_SOURCE} characters materializes 4.2M edges and ~290 MB before any
+ * count is looked at, and kills a small heap outright (#514 review, G-3). The
+ * quantity that matters is knowable first, and costs one pass with no
+ * allocation, because ablauf's expansion rule is local to a line: every
+ * connector on it makes one edge per (term on its left x term on its right).
+ *
+ * It bounds rather than predicts, and only ever upwards. It refuses nothing,
+ * so it need not agree with ablauf about what parses: a construct ablauf
+ * rejects can read as an extra term or an extra connector here, and both only
+ * make the number larger. For source ablauf does parse the two agree exactly,
+ * which is why this refuses nothing {@link MAX_EDGES} admits.
+ */
+function edgesAtMost(source: string): number {
+  let total = 0;
+  let headerSeen = false;
+  for (const line of source.split(/\r?\n/)) {
+    const statement = line.trim();
+    // Blank lines and `%%` comments carry no statement; the first line that
+    // does is the `flowchart` header, which declares nothing.
+    if (statement === "" || statement.startsWith("%%")) continue;
+    if (!headerSeen) {
+      headerSeen = true;
+      continue;
+    }
+    total += lineEdges(statement);
+  }
+  return total;
+}
 
 /* ------------------------------------------------------------------ drawing */
 
@@ -205,8 +344,9 @@ const FAILED =
  */
 function drawDiagram(target: HTMLElement, source: string): Drawing {
   try {
-    // Before `parse`, because the counts can only refuse a graph that has
-    // already been built, and building it is itself the cost — see MAX_SOURCE.
+    // Both of these run before `parse`, because the counts below can only
+    // refuse a graph that has already been built, and building it is itself
+    // the cost — see MAX_SOURCE and edgesAtMost.
     if (source.length > MAX_SOURCE) {
       target.replaceChildren();
       return {
@@ -214,7 +354,21 @@ function drawDiagram(target: HTMLElement, source: string): Drawing {
         note: tooLarge(`${source.length} characters of source past this block's ${MAX_SOURCE}`),
       };
     }
+    const bound = edgesAtMost(source);
+    if (bound > MAX_EDGES) {
+      target.replaceChildren();
+      return { drawn: false, note: tooLarge(`${bound} arrows past this block's ${MAX_EDGES}`) };
+    }
     const graph = parse(source);
+    // A header and nothing else parses cleanly to an empty graph, and ablauf
+    // draws it as a valid 40x40 SVG with no glyphs in it. Reporting that as
+    // drawn hides the reader's own text behind an empty box the moment the
+    // caret leaves the block they are typing in (#514 review, G-1) — so a
+    // graph with no boxes takes the same silent-source path as `flow`.
+    if (graph.nodes.length === 0) {
+      target.replaceChildren();
+      return UNREADABLE;
+    }
     const nodes = graph.nodes.length;
     const edges = graph.edges.length;
     if (nodes > MAX_NODES || edges > MAX_EDGES) {
@@ -289,8 +443,10 @@ export const mermaidBlockView: NodeViewRenderer = ({
   // test can see.
   rendered.setAttribute("contenteditable", "false");
   // Opening the source is a control, so it is reachable by the keyboard and it
-  // has a name. The SVG's own `<title>` is the block's source, which is what a
-  // screen reader gets for the picture itself.
+  // has a name — and that name is what assistive technology announces here,
+  // because the `<svg>` inside carries no role of its own. Its `<title>` is the
+  // block's source, reachable by opening the control, not read out in its
+  // place.
   rendered.setAttribute("role", "button");
   rendered.setAttribute("tabindex", "0");
   rendered.setAttribute("aria-label", "Diagram — open its mermaid source");
@@ -314,6 +470,10 @@ export const mermaidBlockView: NodeViewRenderer = ({
   let drawnFrom: { text: string; annotated: boolean } | null = null;
 
   const redraw = (): void => {
+    // Outside the memo: the chrome mirrors the block's own attributes, which
+    // follow the node rather than the picture, so a node whose drawing is
+    // unchanged must still take its `id` from the update it arrived in.
+    mermaidChrome.sync(current, dom);
     const text = current.textContent;
     const annotated = carriesComment(current);
     if (drawnFrom?.text === text && drawnFrom.annotated === annotated) return;
@@ -334,7 +494,6 @@ export const mermaidBlockView: NodeViewRenderer = ({
     dom.setAttribute("data-rendered", String(drawing.drawn));
     note.textContent = drawing.note ?? "";
     note.hidden = drawing.note === null;
-    mermaidChrome.sync(current, dom);
   };
 
   /**
