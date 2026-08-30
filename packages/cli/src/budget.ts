@@ -11,7 +11,9 @@
  * `UB_TEST_MAX_WAIT_MS` caps them. It is a **ceiling, never a floor**: an unset
  * or unusable value changes nothing, and a value longer than a product default
  * cannot lengthen it. So no default in this package moves, and a run without the
- * variable is byte-for-byte the run it always was.
+ * variable is byte-for-byte the run it always was. The variable is documented
+ * surface, not an internal-only seam: README's "The `ub` command line" section
+ * names it and this contract.
  *
  * **Which deadlines it may cap, and which it must not.** What it caps are four
  * probes of something remote: the two hub budgets below, `open.ts`'s 1 s
