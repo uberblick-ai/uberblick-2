@@ -377,7 +377,11 @@ export function BlockMenu({
   }, [editor, host]);
 
   // Hover, for the gutter button. Tracked on the ProseMirror root so the button
-  // itself — which is outside it — never counts as leaving the block.
+  // itself — which is outside it — never counts as leaving the block, and
+  // cleared when the pointer leaves the frame. The gutter strip the button
+  // overhangs into is the frame's too (`.ub-editor-frame::before`), so the
+  // route from the prose to the button is one unbroken piece of it: the button
+  // cannot hide in the gap on the way.
   useEffect(() => {
     const dom = editor.view.dom;
     const frame = host.current;
