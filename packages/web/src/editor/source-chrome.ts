@@ -18,10 +18,18 @@
  *
  * The text copied is `node.textContent`: the block's own text, joined with
  * nothing, newlines intact. Not markdown, not a fence — the source.
+ *
+ * {@link sourceEditingPlugin} at the foot is the other half a source block that
+ * draws itself needs, and it is here for the same reason: `table` and `mermaid`
+ * decide which representation to show by exactly the same rule, and one copy of
+ * that rule is one place for it to be wrong.
  */
 
 import type { NodeViewRenderer, NodeViewRendererProps } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
+import { NodeSelection, Plugin } from "@tiptap/pm/state";
+import type { EditorState } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { NodeView } from "@tiptap/pm/view";
 
 /** How long the confirmation stands before the label goes back to "copy". */
@@ -78,7 +86,7 @@ function copyViaSelection(text: string): boolean {
   return copied;
 }
 
-function copyButton(source: () => string): {
+export function copyButton(source: () => string): {
   element: HTMLButtonElement;
   destroy: () => void;
 } {
@@ -199,3 +207,47 @@ export const mermaidChrome: SourceBlockChrome = {
   content: () => document.createElement("pre"),
   sync: (node, root) => mirrorAttribute(root, "id", node.attrs.id),
 };
+
+/* ------------------------------------------------- the block under the caret */
+
+/** The top-level block of type `typeName` the selection is in, or null. */
+function selectedBlock(
+  state: EditorState,
+  typeName: string,
+): { pos: number; node: PMNode } | null {
+  const { selection } = state;
+  if (selection instanceof NodeSelection) {
+    return selection.node.type.name === typeName
+      ? { pos: selection.from, node: selection.node }
+      : null;
+  }
+  const { $head } = selection;
+  if ($head.depth !== 1) return null;
+  const node = $head.parent;
+  return node.type.name === typeName ? { pos: $head.before(1), node } : null;
+}
+
+/**
+ * Put `className` on the `typeName` block the selection sits in, so the
+ * stylesheet can show that block's source and hide its rendering.
+ *
+ * The two blocks that draw themselves — `table` and `mermaid` — share this, and
+ * they share the reason: which representation a reader sees is derived from the
+ * selection on every draw rather than remembered, because a mode nobody stores
+ * cannot get out of step with the document.
+ */
+export function sourceEditingPlugin(typeName: string, className: string): Plugin {
+  return new Plugin({
+    props: {
+      decorations(state: EditorState): DecorationSet | null {
+        const block = selectedBlock(state, typeName);
+        if (block === null) return null;
+        return DecorationSet.create(state.doc, [
+          Decoration.node(block.pos, block.pos + block.node.nodeSize, {
+            class: className,
+          }),
+        ]);
+      },
+    },
+  });
+}

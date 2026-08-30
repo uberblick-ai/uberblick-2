@@ -1848,6 +1848,14 @@ h3.ub-heading {
   pointer-events: none;
 }
 
+/* ---- the mermaid block (#495) ----
+
+   The table block's rule, applied to a diagram: the drawing is what a reader
+   sees and the source is what they get with their caret in the block. The
+   difference is what decides whether there is a drawing at all — ablauf reads a
+   subset of mermaid, so `data-rendered="false"` (a sequence diagram, a
+   subgraph, half-typed text) keeps the block exactly as it was before diagrams
+   existed, label and all. */
 .ub-mermaid {
   position: relative;
   margin: 0.7em 0;
@@ -1864,6 +1872,42 @@ h3.ub-heading {
   font-size: 0.7rem;
   color: var(--muted-foreground);
   margin-bottom: 0.2rem;
+}
+
+/* The label is a statement of fact, so it follows the fact. A block that draws
+   says nothing at all while it is drawing; opened for editing it says what the
+   reader is now looking at, without the parenthesis that is no longer true. */
+.ub-mermaid[data-rendered="true"]::before {
+  content: "mermaid source";
+}
+
+.ub-mermaid[data-rendered="true"]:not(.ub-mermaid-editing)::before {
+  content: none;
+}
+
+.ub-mermaid-render {
+  display: none;
+  overflow-x: auto;
+  cursor: text;
+}
+
+/* ablauf paints its own opaque ground and its own text colours, chosen from the
+   appearance in force (editor/mermaid.ts) — so the picture needs a box and a
+   size, and no colour of ours. */
+.ub-mermaid-render svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.ub-mermaid[data-rendered="true"]:not(.ub-mermaid-editing) .ub-mermaid-render {
+  display: block;
+}
+
+.ub-mermaid[data-rendered="true"]:not(.ub-mermaid-editing) > pre {
+  display: none;
 }
 
 /* An annotated range. Amber ground plus an amber underline — the underline is
