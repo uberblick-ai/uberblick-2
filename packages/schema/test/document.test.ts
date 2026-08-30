@@ -4,7 +4,6 @@ import type { Block } from "../src/index.js";
 import {
   ANNOTATIONS_KEY,
   BLOCKS_KEY,
-  COMMENTS_KEY,
   DECISIONS_KEY,
   META_KEY,
   BlockNotFoundError,
@@ -47,7 +46,7 @@ function seeded(): Y.Doc {
 }
 
 describe("document round-trip", () => {
-  it("initialises metadata and materialises the five roots", () => {
+  it("initialises metadata and materialises the four roots", () => {
     const doc = seeded();
     expect(getMeta(doc)).toEqual({
       uuid: UUID,
@@ -59,7 +58,6 @@ describe("document round-trip", () => {
     expect([...doc.share.keys()].sort()).toEqual([
       ANNOTATIONS_KEY,
       BLOCKS_KEY,
-      COMMENTS_KEY,
       DECISIONS_KEY,
       META_KEY,
     ]);

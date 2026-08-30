@@ -2,11 +2,10 @@
  * The Threads rail: comment threads as the reader sees them, derived from the
  * open document.
  *
- * Nothing is stored for the rail. A thread is metadata in the `annotations`
- * Y.Map, its comments are rows in the `comments` Y.Array, and its range is a
- * `comment` mark on some block's Y.XmlText, so the rail is those three reads
- * joined — which is why a thread another client creates needs no extra plumbing
- * to appear.
+ * Nothing is stored for the rail. A thread is a Y.Map in the `annotations`
+ * Y.Map, holding its conversation, and its range is a `comment` mark on some
+ * block's Y.XmlText, so the rail is those two reads joined — which is why a
+ * thread another client creates needs no extra plumbing to appear.
  *
  * The join is what makes the orphaned state detectable. A thread is orphaned
  * when its id appears in no block's marks: every annotated character was
@@ -15,7 +14,7 @@
  * orphaned thread is rendered dimmed, with its text intact, and is the one card
  * that has nothing to scroll to.
  *
- * Marks are looked for in *every* block, not just the one the thread's JSON
+ * Marks are looked for in *every* block, not just the one the thread itself
  * names, because a block split moves half a marked range into a new block. The
  * first anchor in document order is the one the card quotes.
  */
@@ -26,7 +25,6 @@ import {
   getAnnotationsMap,
   getBlocks,
   getBlocksFragment,
-  getCommentsArray,
   listAnnotations,
   readsAsMark,
 } from "@uberblick/schema";
@@ -79,9 +77,9 @@ export function blockRefLabel(type: BlockType, index: number): string {
 
 /**
  * A comment plus the key the rail renders it under. A stored comment carries no
- * id — a row in the `comments` array is a thread id, an author, text and a
- * timestamp — so a comment's identity is its position in the thread's converged
- * order, and the key is derived here rather than in the view.
+ * id — a row is an author, text and a timestamp — so a comment's identity is
+ * its position in the thread's converged order, and the key is derived here
+ * rather than in the view.
  */
 export interface ThreadComment extends AnnotationComment {
   key: string;
@@ -90,7 +88,7 @@ export interface ThreadComment extends AnnotationComment {
 /** One thread's card. */
 export interface ThreadView {
   id: string;
-  /** The block the thread's JSON names — where the range was made. */
+  /** The block the thread names — where the range was made. */
   blockId: string;
   /** The block whose text carries the mark now; null when orphaned. */
   anchorBlockId: string | null;
@@ -309,22 +307,20 @@ export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
  * Call `onChange` with a fresh rail whenever it could have changed. Returns the
  * unsubscribe.
  *
- * Three subscriptions, because the rail joins three places: the annotations map
- * (threads arriving and resolving), the comments array (replies arriving), and
- * the blocks fragment, observed deeply so a *format* change one level down — a
- * mark being deleted with its text — is seen too. A shallow fragment observer
- * would never notice a thread orphaning.
- *
- * The comments array is observed shallowly and that is enough: a row is plain
- * JSON pushed whole, so every reply is a change to the array itself and nothing
- * inside a row ever mutates. Without this subscription a reply arriving from
+ * Two subscriptions, because the rail joins two places: the annotations map and
+ * the blocks fragment. Both are observed deeply, and for the same reason — the
+ * change that matters is one level down. On the fragment it is a *format*
+ * change, a mark being deleted with its text, which a shallow observer would
+ * never report as a thread orphaning; on the annotations map it is a reply,
+ * which is an insert into the thread's own nested comments array and so never
+ * touches the map's own keys. Without the deep observer a reply arriving from
  * another replica would sit in the document unrendered until something else
- * touched the map or the text.
+ * moved.
  *
- * The three are coalesced onto a microtask, so a single transaction that touches
- * several — creating a thread writes the map, the array *and* the mark —
- * recomputes the rail once instead of three times. The first read is
- * synchronous: a mounting rail should not paint empty for a tick.
+ * The two are coalesced onto a microtask, so a single transaction that touches
+ * both — creating a thread writes the map *and* the mark — recomputes the rail
+ * once instead of twice. The first read is synchronous: a mounting rail should
+ * not paint empty for a tick.
  */
 export function observeThreads(
   ydoc: Y.Doc,
@@ -332,7 +328,6 @@ export function observeThreads(
 ): () => void {
   const fragment = getBlocksFragment(ydoc);
   const annotations = getAnnotationsMap(ydoc);
-  const comments = getCommentsArray(ydoc);
   let queued = false;
   let live = true;
   const schedule = (): void => {
@@ -346,13 +341,11 @@ export function observeThreads(
   };
   onChange(threadsFromDoc(ydoc));
   fragment.observeDeep(schedule);
-  annotations.observe(schedule);
-  comments.observe(schedule);
+  annotations.observeDeep(schedule);
   return () => {
     live = false;
     fragment.unobserveDeep(schedule);
-    annotations.unobserve(schedule);
-    comments.unobserve(schedule);
+    annotations.unobserveDeep(schedule);
   };
 }
 

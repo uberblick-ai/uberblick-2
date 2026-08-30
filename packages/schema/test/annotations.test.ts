@@ -14,7 +14,6 @@ import {
   getAnnotation,
   getBlockText,
   getBlocksFragment,
-  getCommentsArray,
   initDoc,
   listAnnotationRanges,
   listAnnotations,
@@ -289,8 +288,7 @@ describe("annotations", () => {
     expect(getBlockText(doc, blockId)).toBe(SENTENCE);
 
     // The freed range can be annotated again, and inherits nothing: the deleted
-    // thread's comment rows went with it rather than being left in the array.
-    expect(getCommentsArray(doc).length).toBe(0);
+    // thread's comments went with it.
     const again = createAnnotation(doc, blockId, 6, 11, "reviewer", "again");
     expect(annotatedText(doc, blockId, again.id)).toBe("brave");
     expect(getAnnotation(doc, again.id)?.comments).toEqual([
@@ -403,7 +401,7 @@ describe("annotations", () => {
     addComment(b, threadId, "agent", "One more thing.");
     syncDocs(a, b);
 
-    // The two writes land in different roots, so neither can clobber the other.
+    // The two writes touch different keys, so neither can clobber the other.
     for (const replica of [a, b]) {
       const thread = getAnnotation(replica, threadId);
       expect(thread?.resolved).toBe(true);
@@ -411,6 +409,32 @@ describe("annotations", () => {
         "Too much?",
         "One more thing.",
       ]);
+    }
+  });
+
+  /**
+   * A thread and its conversation are deleted as one subtree, so a delete can
+   * never leave a thread standing with its comments destroyed. That outcome is
+   * what a conversation stored beside the thread produces: the delete empties
+   * the conversation, the concurrent write resurrects the thread, and the
+   * replies are gone with no error — #461's own failure by another route.
+   */
+  it("removes a thread whole when a delete races a resolve or a reply", () => {
+    const resolving = threadedPair();
+    deleteAnnotation(resolving.a, resolving.threadId);
+    setAnnotationResolved(resolving.b, resolving.threadId, true);
+    syncDocs(resolving.a, resolving.b);
+
+    const replying = threadedPair();
+    deleteAnnotation(replying.a, replying.threadId);
+    addComment(replying.b, replying.threadId, "agent", "One more thing.");
+    syncDocs(replying.a, replying.b);
+
+    for (const { a, b, threadId } of [resolving, replying]) {
+      for (const replica of [a, b]) {
+        expect(getAnnotation(replica, threadId)).toBeNull();
+        expect(listAnnotations(replica)).toEqual([]);
+      }
     }
   });
 

@@ -196,10 +196,9 @@ describe("a thread whose range is deleted is orphaned, not dropped", () => {
 
 describe("the rail follows the document", () => {
   /**
-   * The observer coalesces its three subscriptions onto a microtask, so a
-   * transaction that touches the annotations map, the comments array and the
-   * text recomputes the rail once. Reading it back therefore means letting that
-   * microtask run.
+   * The observer coalesces its two subscriptions onto a microtask, so a
+   * transaction that touches both the annotations map and the text recomputes
+   * the rail once. Reading it back therefore means letting that microtask run.
    */
   const flush = (): Promise<void> => Promise.resolve();
 
@@ -220,11 +219,11 @@ describe("the rail follows the document", () => {
 
   /**
    * Every remote change the rail has to notice, on one watcher, in sequence.
-   * The three are deliberately different shapes: a thread arriving touches the
-   * annotations map, the comments array and the text; a reply touches the
-   * comments array alone; and an orphaning touches a *format* one level below
-   * the blocks fragment — which is why one subscription could never cover all
-   * three.
+   * The three are deliberately different shapes: a thread arriving touches both
+   * the annotations map and the text; a reply touches a Y.Array nested one level
+   * below that map, and none of its keys; and an orphaning touches a *format*
+   * one level below the blocks fragment — which is why one shallow subscription
+   * could never cover all three.
    */
   it("sees a remote thread, a remote reply and a remote orphaning", async () => {
     const { local, remote, blocks } = replicas();
@@ -346,10 +345,11 @@ describe("the rail renders its cards", () => {
   });
 
   /**
-   * The reply arrives in the `comments` root, which the rail did not observe
-   * before #461 — so a card open on screen would keep showing the conversation
-   * it was mounted with until something else touched the annotations map or the
-   * text. Nothing is reopened here: the same mounted rail is read again.
+   * The reply arrives inside the thread's own nested array, which a shallow
+   * observer on the annotations map does not see — so a card open on screen
+   * would keep showing the conversation it was mounted with until something
+   * else touched the map's keys or the text. Nothing is reopened here: the same
+   * mounted rail is read again.
    */
   it("shows a reply that arrives from a remote replica, live", async () => {
     const { local, remote, blocks } = replicas();

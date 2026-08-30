@@ -276,42 +276,17 @@ export interface AnnotationComment {
 }
 
 /**
- * One comment as it is stored: a row in the `comments` Y.Array, naming the
- * thread it belongs to. Readers join rows to threads by {@link threadId}.
- *
- * A row and not a member of the thread's JSON, because a Y.Map key is
- * last-write-wins: two replicas appending to one thread's array would converge
- * to one of the two appends and drop the other. Two inserts into a Y.Array are
- * two inserts, and Yjs merges them.
- */
-export interface CommentRow extends AnnotationComment {
-  threadId: string;
-}
-
-/**
- * An annotation thread's stored metadata: the `annotations` Y.Map value.
- *
- * Replaced wholesale on write, which is the right granularity for exactly this
- * much — an anchor's block and a resolved flag are last-write-wins data, and
- * whichever replica wrote last is the answer either way. The conversation is
- * deliberately not in here; see {@link CommentRow}.
- */
-export interface AnnotationThread {
-  id: string;
-  blockId: string;
-  resolved?: boolean;
-}
-
-/**
- * An annotation thread as a reader sees it: its stored metadata joined with its
- * comment rows, in converged array order.
+ * An annotation thread, stored as plain JSON in the `annotations` Y.Map.
  *
  * The thread carries no positions. Its range lives in the document text as a
  * `comment` formatting mark holding this thread's id, so the range survives
  * concurrent edits, block splits and re-types — see `annotations.ts`.
  */
-export interface Annotation extends AnnotationThread {
+export interface Annotation {
+  id: string;
+  blockId: string;
   comments: AnnotationComment[];
+  resolved?: boolean;
 }
 
 /**

@@ -1,7 +1,7 @@
 /**
  * Annotation threads, anchored by formatting marks.
  *
- * A thread is plain JSON in the `annotations` Y.Map, keyed by thread id, and it
+ * A thread is one Y.Map in the `annotations` Y.Map, keyed by thread id, and it
  * carries no positions at all. The range lives in the text itself: the block's
  * Y.XmlText carries a `comment` formatting mark whose value is
  * `{ threadId }` over exactly the annotated characters.
@@ -31,22 +31,27 @@
  *     and the thread then resolves to `null` — it is never cascade-deleted, so
  *     the conversation survives even when its anchor does not.
  *
- * ## Where a thread's parts live
+ * ## Why a thread is a Y.Map and its conversation a nested Y.Array
  *
- * A thread is two things in two roots, joined on read:
+ * A thread's anchor block and its resolved flag are genuinely last-write-wins
+ * data — whichever replica wrote last is the answer — so they are ordinary keys
+ * on the thread's map. Its comments are not: while the conversation was an
+ * array *inside* one replaced JSON value, two replicas each appending to one
+ * thread converged to whichever write landed last and the other reply vanished
+ * with no conflict and no error (#461).
  *
- *   - its **metadata** — anchor block and resolved flag — is one JSON value in
- *     the `annotations` Y.Map, replaced wholesale on write;
- *   - its **comments** are rows in the `comments` Y.Array, each naming its
- *     thread id.
+ * So the comments are a Y.Array nested under the thread's own `comments` key. A
+ * Y.Map value may itself be a Y type, and content inside a nested type is not
+ * last-write-wins — only a second `set` of the same key is. Two replies are
+ * then two inserts, which Yjs merges, and a reply and a `resolved` write touch
+ * different keys, so resolving cannot drop a reply either.
  *
- * The split is not tidiness, it is the fix for a lost reply. A Y.Map key is
- * last-write-wins, so while the comment list was a field of that JSON value,
- * two replicas each appending to one thread converged to whichever write came
- * last and the other reply vanished — no conflict, no error. Two inserts into a
- * Y.Array are two inserts, and Yjs merges them. It also means resolving a
- * thread cannot clobber a concurrent reply by construction: the two writes are
- * in different roots.
+ * Nesting rather than a second document root is also what makes deletion safe:
+ * `deleteAnnotation` removes the thread's key, and its conversation goes with
+ * it as one subtree. A conversation kept beside the thread instead — in a root
+ * of its own — can be emptied by a delete while a concurrent resolve
+ * resurrects the thread it belonged to, which loses the conversation exactly
+ * the way #461 did.
  *
  * Comment order is the converged Yjs array order, and that IS the deterministic
  * order — every replica reads the same sequence without agreeing on anything
@@ -56,7 +61,7 @@
  */
 
 import * as Y from "yjs";
-import { getAnnotationsMap, getCommentsArray } from "./doc.js";
+import { getAnnotationsMap } from "./doc.js";
 import { AnnotationRangeError, BlockNotFoundError } from "./errors.js";
 import { findBlockElement, requireBlockText } from "./blocks.js";
 import { COMMENT_MARK, isCommentMark } from "./types.js";
@@ -64,9 +69,7 @@ import type {
   Annotation,
   AnnotationComment,
   AnnotationRange,
-  AnnotationThread,
   CommentMark,
-  CommentRow,
 } from "./types.js";
 
 export { COMMENT_MARK };
@@ -111,55 +114,60 @@ function commentRuns(text: Y.XmlText): CommentRun[] {
   return runs;
 }
 
-function isAnnotationThread(value: unknown): value is AnnotationThread {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as Partial<AnnotationThread>;
+/** The `comments` key on a thread's map: its conversation, in stored order. */
+const COMMENTS_FIELD = "comments";
+
+/** One thread as stored: its own Y.Map under its id in the annotations map. */
+type ThreadMap = Y.Map<unknown>;
+
+/**
+ * A usable thread value. Any client can write into the annotations map, so a
+ * value that is not this shape is skipped on read rather than trusted.
+ */
+function isThreadMap(value: unknown): value is ThreadMap {
   return (
-    typeof candidate.id === "string" && typeof candidate.blockId === "string"
+    value instanceof Y.Map &&
+    typeof value.get("id") === "string" &&
+    typeof value.get("blockId") === "string" &&
+    value.get(COMMENTS_FIELD) instanceof Y.Array
   );
 }
 
-/**
- * A usable row of the `comments` array. Any client can write into a root type,
- * so a row that is not this shape is skipped on read rather than trusted — the
- * same rule `storedDecisions` applies to the decision log.
- */
-function isCommentRow(value: unknown): value is CommentRow {
+/** A thread's comment rows. `isThreadMap` has already proved this is there. */
+function commentRows(thread: ThreadMap): Y.Array<unknown> {
+  return thread.get(COMMENTS_FIELD) as Y.Array<unknown>;
+}
+
+function isComment(value: unknown): value is AnnotationComment {
   if (typeof value !== "object" || value === null) return false;
-  const candidate = value as Partial<CommentRow>;
+  const candidate = value as Partial<AnnotationComment>;
   return (
-    typeof candidate.threadId === "string" &&
     typeof candidate.author === "string" &&
     typeof candidate.text === "string" &&
     typeof candidate.createdAt === "string"
   );
 }
 
-/** Every thread's comments, in converged array order, from one scan. */
-function commentsByThread(ydoc: Y.Doc): Map<string, AnnotationComment[]> {
-  const out = new Map<string, AnnotationComment[]>();
-  for (const value of getCommentsArray(ydoc).toArray()) {
-    if (!isCommentRow(value)) continue;
-    const { threadId, author, text, createdAt } = value;
-    const comments = out.get(threadId);
-    if (comments === undefined) {
-      out.set(threadId, [{ author, text, createdAt }]);
-    } else {
-      comments.push({ author, text, createdAt });
-    }
+/** A stored thread as a reader sees it: metadata joined with its comments. */
+function readThread(thread: ThreadMap): Annotation {
+  const comments: AnnotationComment[] = [];
+  for (const value of commentRows(thread).toArray()) {
+    if (!isComment(value)) continue;
+    const { author, text, createdAt } = value;
+    comments.push({ author, text, createdAt });
   }
-  return out;
+  const resolved = thread.get("resolved");
+  return {
+    id: thread.get("id") as string,
+    blockId: thread.get("blockId") as string,
+    ...(typeof resolved === "boolean" ? { resolved } : {}),
+    comments,
+  };
 }
 
-/** One thread's comments, in converged array order. */
-function commentsOf(ydoc: Y.Doc, threadId: string): AnnotationComment[] {
-  return commentsByThread(ydoc).get(threadId) ?? [];
-}
-
-/** A thread's stored metadata, without reading its comments. */
-function threadMeta(ydoc: Y.Doc, threadId: string): AnnotationThread | null {
+function threadMap(ydoc: Y.Doc, threadId: string): ThreadMap | null {
   const value = getAnnotationsMap(ydoc).get(threadId);
-  return isAnnotationThread(value) ? value : null;
+  return isThreadMap(value) ? value : null;
 }
 
 /**
@@ -194,43 +202,43 @@ export function createAnnotation(
     throw new AnnotationRangeError("overlap", blockId, clash.threadId);
   }
 
-  const thread: AnnotationThread = { id: crypto.randomUUID(), blockId };
+  const id = crypto.randomUUID();
   const opening: AnnotationComment = {
     author,
     text,
     createdAt: new Date().toISOString(),
   };
-  const mark: CommentMark = { threadId: thread.id };
+  const mark: CommentMark = { threadId: id };
   const annotations = getAnnotationsMap(ydoc);
-  const comments = getCommentsArray(ydoc);
+  const thread: ThreadMap = new Y.Map<unknown>();
+  const comments = new Y.Array<unknown>();
   ydoc.transact(() => {
     ytext.format(lo, hi - lo, { [COMMENT_MARK]: mark });
-    annotations.set(thread.id, thread);
-    comments.push([{ threadId: thread.id, ...opening }]);
+    annotations.set(id, thread);
+    thread.set("id", id);
+    thread.set("blockId", blockId);
+    thread.set(COMMENTS_FIELD, comments);
+    comments.push([opening]);
   });
-  return { ...thread, comments: [opening] };
+  return { id, blockId, comments: [opening] };
 }
 
 export function getAnnotation(ydoc: Y.Doc, threadId: string): Annotation | null {
-  const thread = threadMeta(ydoc, threadId);
-  if (thread === null) return null;
-  return { ...thread, comments: commentsOf(ydoc, threadId) };
+  const thread = threadMap(ydoc, threadId);
+  return thread === null ? null : readThread(thread);
 }
 
 /** All annotation threads. Order is by thread id, for deterministic output. */
 export function listAnnotations(ydoc: Y.Doc): Annotation[] {
-  const comments = commentsByThread(ydoc);
   const out: Annotation[] = [];
   for (const value of getAnnotationsMap(ydoc).values()) {
-    if (isAnnotationThread(value)) {
-      out.push({ ...value, comments: comments.get(value.id) ?? [] });
-    }
+    if (isThreadMap(value)) out.push(readThread(value));
   }
   out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return out;
 }
 
-/** Threads whose JSON names one block. */
+/** Threads anchored to one block. */
 export function listAnnotationsForBlock(
   ydoc: Y.Doc,
   blockId: string,
@@ -245,7 +253,7 @@ export function listAnnotationsForBlock(
  * scan. This is what an editor wants: resolving threads one at a time rescans
  * the text for each.
  *
- * Returns marks as they exist in the text — including any whose thread JSON is
+ * Returns marks as they exist in the text — including any whose thread is
  * gone, which is how an orphaned mark becomes visible.
  */
 export function listAnnotationRanges(
@@ -264,18 +272,18 @@ export function listAnnotationRanges(
  *
  * Returns null when the thread is unknown, when its block has been deleted, or
  * when its mark is no longer in the text because every annotated character was
- * deleted. The thread JSON itself is never removed by any of those cases.
+ * deleted. The thread itself is never removed by any of those cases.
  */
 export function resolveAnnotationRange(
   ydoc: Y.Doc,
   threadId: string,
 ): AnnotationRange | null {
-  // The metadata alone, not `getAnnotation`: a range needs the anchor block and
+  // The stored map, not `getAnnotation`: a range needs the anchor block and
   // nothing else, and this runs once per thread on every rail recompute.
-  const thread = threadMeta(ydoc, threadId);
+  const thread = threadMap(ydoc, threadId);
   if (thread === null) return null;
 
-  const runs = listAnnotationRanges(ydoc, thread.blockId).filter(
+  const runs = listAnnotationRanges(ydoc, thread.get("blockId") as string).filter(
     (run) => run.threadId === threadId,
   );
   const first = runs[0];
@@ -292,10 +300,10 @@ export function resolveAnnotationRange(
 /**
  * Append a comment to an existing thread. Returns the updated thread.
  *
- * One insert into the `comments` array and nothing else. The thread's metadata
- * is not rewritten, so a reply cannot clobber a concurrent `setAnnotationResolved`
- * — and, the way round this exists to fix, two concurrent replies are two
- * inserts that both survive the merge.
+ * One insert into the thread's own comments array and nothing else. Its
+ * metadata key is not rewritten, so a reply cannot clobber a concurrent
+ * `setAnnotationResolved` — and, the way round this exists to fix, two
+ * concurrent replies are two inserts that both survive the merge.
  */
 export function addComment(
   ydoc: Y.Doc,
@@ -303,73 +311,62 @@ export function addComment(
   author: string,
   text: string,
 ): Annotation | null {
-  const thread = threadMeta(ydoc, threadId);
+  const thread = threadMap(ydoc, threadId);
   if (thread === null) return null;
-  const row: CommentRow = {
-    threadId,
+  const comment: AnnotationComment = {
     author,
     text,
     createdAt: new Date().toISOString(),
   };
-  const comments = getCommentsArray(ydoc);
   ydoc.transact(() => {
-    comments.push([row]);
+    commentRows(thread).push([comment]);
   });
-  return { ...thread, comments: commentsOf(ydoc, threadId) };
+  return readThread(thread);
 }
 
 /**
  * Mark a thread resolved or unresolved. The `comment` mark stays in the text —
  * a resolved thread is still anchored, so the editor can show it in place.
  *
- * Rewrites only the metadata value, which carries no comments, so resolving
- * drops no reply a concurrent replica was writing.
+ * Writes the one `resolved` key, not the whole thread, so resolving drops no
+ * reply a concurrent replica was writing.
  */
 export function setAnnotationResolved(
   ydoc: Y.Doc,
   threadId: string,
   resolved: boolean,
 ): Annotation | null {
-  const thread = threadMeta(ydoc, threadId);
+  const thread = threadMap(ydoc, threadId);
   if (thread === null) return null;
-  const updated: AnnotationThread = { ...thread, resolved };
-  const annotations = getAnnotationsMap(ydoc);
   ydoc.transact(() => {
-    annotations.set(threadId, updated);
+    thread.set("resolved", resolved);
   });
-  return { ...updated, comments: commentsOf(ydoc, threadId) };
-}
-
-/** Drop every `comments` row naming `threadId`, back to front so indexes hold. */
-function deleteCommentRows(ydoc: Y.Doc, threadId: string): void {
-  const comments = getCommentsArray(ydoc);
-  const rows = comments.toArray();
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    const row = rows[i];
-    if (isCommentRow(row) && row.threadId === threadId) comments.delete(i, 1);
-  }
+  return readThread(thread);
 }
 
 /**
- * Remove a thread: clear its `comment` mark from the text, drop its metadata,
- * and drop its comment rows. Returns true when something was removed.
+ * Remove a thread: clear its `comment` mark from the text and drop the thread.
+ * Returns true when something was removed.
+ *
+ * Dropping the key takes the conversation with it, as one subtree — which is
+ * why a delete racing a concurrent reply or resolve cannot leave a thread
+ * standing with its comments destroyed.
  *
  * Marks are cleared run by run, never as one span, so a foreign writer's
  * interleaved mark inside the range is left untouched.
  */
 export function deleteAnnotation(ydoc: Y.Doc, threadId: string): boolean {
   const annotations = getAnnotationsMap(ydoc);
-  const thread = threadMeta(ydoc, threadId);
+  const thread = threadMap(ydoc, threadId);
   if (thread === null) {
     if (!annotations.has(threadId)) return false;
     ydoc.transact(() => {
       annotations.delete(threadId);
-      deleteCommentRows(ydoc, threadId);
     });
     return true;
   }
 
-  const element = findBlockElement(ydoc, thread.blockId);
+  const element = findBlockElement(ydoc, thread.get("blockId") as string);
   const ytext = element === null ? null : element.firstChild;
   ydoc.transact(() => {
     if (ytext instanceof Y.XmlText) {
@@ -380,7 +377,6 @@ export function deleteAnnotation(ydoc: Y.Doc, threadId: string): boolean {
       }
     }
     annotations.delete(threadId);
-    deleteCommentRows(ydoc, threadId);
   });
   return true;
 }
