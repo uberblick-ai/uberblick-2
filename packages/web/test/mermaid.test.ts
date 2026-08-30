@@ -110,6 +110,14 @@ const SEQUENCE_600 = `sequenceDiagram\n${Array.from({ length: 600 }, (_, i) => `
 const SEQUENCE_BIG = `sequenceDiagram\n${Array.from({ length: 1_200 }, (_, i) => `  alpha-->>bravo: message number ${i}`).join("\n")}`;
 
 /**
+ * A sequence diagram one arrow token past the per-line arrow cap. ablauf never
+ * reads line 2, so the cap that exists to keep an `&` expansion from being
+ * built must still refuse it — and must do it the way ablauf would, in silence
+ * (#514 review, R6-2).
+ */
+const SEQUENCE_513 = `sequenceDiagram\n  a --> ${Array.from({ length: 513 }, () => "b").join(" & ")}`;
+
+/**
  * `n` disconnected maximum-width decision boxes — the shape the box cap is
  * calibrated against, because cost at a given box count spans 550x with shape
  * and this is the expensive end (#514 review, F-C). The same 64 boxes as a
@@ -242,6 +250,8 @@ describe("the mermaid block", () => {
     ["a sequence diagram with 600 messages", SEQUENCE_600],
     // Past MAX_SOURCE as well: the byte cap must not answer either (F-1).
     ["a sequence diagram past MAX_SOURCE", SEQUENCE_BIG],
+    // And past the per-line arrow cap: still refused, still silent (R6-2).
+    ["a sequence diagram past MAX_EDGES on one line", SEQUENCE_513],
     ["a flowchart using subgraph", SUBGRAPH],
     ["source that is not a diagram yet", "flow"],
     // A clean parse with nothing in it: ablauf draws an empty 40x40 SVG for a
