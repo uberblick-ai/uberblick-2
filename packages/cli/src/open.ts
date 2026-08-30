@@ -259,45 +259,20 @@ function buildEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return child;
 }
 
-/** How a build ended: with a reason it did not work, and how it was ended. */
-interface BuildEnd {
-  /** Why the build produced no bundle, or null when it exited cleanly. */
-  failure: string | null;
-  /** True when SIGINT or SIGTERM killed it — see {@link stoppedHere}. */
-  signalled: boolean;
-}
-
 /**
- * Whether the build that just ended ended because *this command* was stopped.
- *
- * A build killed by a signal is not by itself evidence of anything here: a
- * supervisor or another tool can kill one, and `ub open` failing to produce a
- * bundle is an operational failure that exits 1, as the CLI's exit classes say.
- * What makes it an interrupt is a signal this process saw too.
- *
- * The one turn is for the case that *is* an interrupt: Ctrl-C reaches the whole
- * process group, so the build's death and this process's signal are one event,
- * and which of the two callbacks the event loop runs first is not ordered.
- * Yielding once lets an already-delivered signal be seen before a Ctrl-C gets
- * reported as a failed build.
- */
-async function stoppedHere(end: BuildEnd, stop: Stop): Promise<boolean> {
-  if (end.signalled && !stop.interrupted()) {
-    await new Promise<void>((done) => setImmediate(done));
-  }
-  return stop.interrupted();
-}
-
-/**
- * Run one build to completion.
+ * Run one build to completion, and say why it produced no bundle — or `null`
+ * when it exited cleanly.
  *
  * **Never abandoned, not even on Ctrl-C.** The signal is passed on so a build
  * that has not noticed it stops promptly, but this waits for the child either
  * way: returning while a build is still writing `dist` would release the lock
  * around it, which is the one thing that lock exists to prevent.
  *
- * How the child ended is reported, never interpreted: {@link stoppedHere} is
- * what decides whether a signal-killed build was this command stopping.
+ * How the child ended is reported, never interpreted. Whether a dead build was
+ * *this command* stopping is `stop.interrupted()`'s answer and nothing else's:
+ * a supervisor or another tool can kill a build too, and `ub open` failing to
+ * produce a bundle is an operational failure that exits 1, as the CLI's exit
+ * classes say.
  */
 function runBuild(
   command: string,
@@ -305,7 +280,7 @@ function runBuild(
   cwd: string,
   env: NodeJS.ProcessEnv,
   stop: Stop,
-): Promise<BuildEnd> {
+): Promise<string | null> {
   const named = `\`${[command, ...args].join(" ")}\``;
   return new Promise((done) => {
     const child = spawn(command, args, {
@@ -317,19 +292,15 @@ function runBuild(
       stdio: ["ignore", 2, 2],
     });
     void stop.signalled.then(() => child.kill("SIGTERM"));
-    child.on("error", (error) =>
-      done({ failure: `${named} could not be run (${message(error)})`, signalled: false }),
-    );
+    child.on("error", (error) => done(`${named} could not be run (${message(error)})`));
     child.on("close", (status, signal) =>
-      done({
-        failure:
-          status === 0
-            ? null
-            : signal !== null
-              ? `${named} was killed by ${signal}`
-              : `${named} exited ${status ?? 1}`,
-        signalled: signal === "SIGINT" || signal === "SIGTERM",
-      }),
+      done(
+        status === 0
+          ? null
+          : signal !== null
+            ? `${named} was killed by ${signal}`
+            : `${named} exited ${status ?? 1}`,
+      ),
     );
   });
 }
@@ -419,12 +390,13 @@ function sleep(ms: number): Promise<void> {
 /**
  * The lock a build of `dir` holds.
  *
- * **Keyed by the directory, because the directory is the resource.** The hazard
- * is two builds emptying and rewriting one `dist`, so what has to be mutually
- * exclusive is builds of the same output — not runs that happen to share a
- * configuration. Keying it on the config root instead would let two runs of one
- * checkout under different `XDG_CONFIG_HOME` values build at once, which is
- * exactly what this repository's own test rig and its parallel agents produce.
+ * **Named after the directory, because the directory is the resource.** The
+ * hazard is two builds emptying and rewriting one `dist`, so what has to be
+ * mutually exclusive is builds of the same output — not runs that happen to
+ * share a configuration. Keying it on the config root instead would let two runs
+ * of one checkout under different `XDG_CONFIG_HOME` values build at once, which
+ * is exactly what this repository's own test rig and its parallel agents
+ * produce.
  *
  * In the temp directory because the two other candidates are both wrong: a
  * checkout is not a place this CLI writes state into, and the config root is
@@ -432,6 +404,16 @@ function sleep(ms: number): Promise<void> {
  * itself so that any directory — spaces, separators, length — yields one
  * portable file name. `wx` on it means a name somebody else already holds is a
  * refusal rather than a hijack.
+ *
+ * So the *name* is the output's, and the directory it lives in is
+ * `os.tmpdir()` — which is the one thing two runs have to agree about. It is
+ * environment (`TMPDIR`), nothing in `ub` or in this repository varies it, and
+ * runs deliberately given different temp roots get two locks and no exclusion;
+ * the cost when that happens is the transient broken serve, never lost work.
+ * Which accounts share that root is the platform's answer: per-user on macOS,
+ * usually the shared `/tmp` on Linux — whose sticky bit is why the timeout
+ * message below can only name a stale lock rather than promise it is yours to
+ * remove.
  */
 function buildLockPath(dir: string): string {
   const key = createHash("sha256").update(resolve(dir)).digest("hex").slice(0, 16);
@@ -504,10 +486,11 @@ export type BundleOutcome =
  * directory before it writes it, so two `ub open` runs building at once leave
  * one of them serving a directory the other is clearing. Both of the builds
  * below produce that one directory, so both happen under {@link buildLockPath},
- * which is keyed by the directory itself: a second run waits, then re-reads the
- * stamp and builds only if the first left no servable bundle behind. Two runs
- * of one checkout are excluded whatever else differs between them — including
- * their configuration — and two checkouts never wait on each other.
+ * which is named after the directory itself: a second run waits, then re-reads
+ * the stamp and builds only if the first left no servable bundle behind. Two
+ * runs of one checkout are excluded however their *configuration* differs, and
+ * two checkouts never wait on each other; {@link buildLockPath} states the one
+ * thing they do have to agree about.
  *
  * Either way a bundle that cannot sync is never served, and the refusal happens
  * before any hub is started or any database file exists.
@@ -519,7 +502,15 @@ export async function ensureBundle(
   stop: Stop,
 ): Promise<BundleOutcome> {
   const stamped = stampedProtocol(plan.dir);
-  if (stamped === SYNC_PROTOCOL_VERSION) {
+  // The stamp alone would be enough if nothing else were writing this directory,
+  // and this one read is the only one taken outside the lock: Vite emits the
+  // stamp from `generateBundle` with nothing ordering it last, so another run's
+  // half-written `dist` can carry a current stamp and no `index.html` yet. The
+  // reads inside {@link buildBundle} need no such guard — whoever was building
+  // has finished by then. A *supplied* bundle missing its `index.html` never
+  // reaches this at all: {@link bundlePlan} answers `missing` for it, and
+  // {@link openCommand} stops there with the reason.
+  if (stamped === SYNC_PROTOCOL_VERSION && isFile(join(plan.dir, "index.html"))) {
     return "servable";
   }
   if (!plan.ours) {
@@ -567,18 +558,18 @@ async function buildBundle(
     io.err(
       "ub open: no built web app yet — building it now with pnpm; this takes a moment\n",
     );
-    const end = await runBuild(
+    const failure = await runBuild(
       "pnpm",
       ["--filter", "@uberblick/web", "build"],
       dirname(packageRoot),
       env,
       stop,
     );
-    if (await stoppedHere(end, stop)) {
+    if (stop.interrupted()) {
       return "interrupted";
     }
-    if (end.failure !== null) {
-      io.err(`ub open: the web build failed, so there is nothing to serve: ${end.failure}\n`);
+    if (failure !== null) {
+      io.err(`ub open: the web build failed, so there is nothing to serve: ${failure}\n`);
       return "refused";
     }
   }
@@ -593,16 +584,16 @@ async function buildBundle(
       `speaks ${SYNC_PROTOCOL_VERSION} — rebuilding it with \`mise run build-web\`; ` +
       "this takes a moment\n",
   );
-  const end = await runBuild("mise", ["run", "build-web"], CHECKOUT_ROOT, env, stop);
-  if (await stoppedHere(end, stop)) {
+  const failure = await runBuild("mise", ["run", "build-web"], CHECKOUT_ROOT, env, stop);
+  if (stop.interrupted()) {
     return "interrupted";
   }
-  const rebuilt = end.failure === null ? stampedProtocol(plan.dir) : null;
+  const rebuilt = failure === null ? stampedProtocol(plan.dir) : null;
   if (rebuilt === SYNC_PROTOCOL_VERSION) {
     return "servable";
   }
   io.err(
-    `ub open: the stale web app was not rebuilt: ${end.failure ?? `the rebuilt web app ${speaks(rebuilt)}`}. ` +
+    `ub open: the stale web app was not rebuilt: ${failure ?? `the rebuilt web app ${speaks(rebuilt)}`}. ` +
       `Run \`mise run build-web\` in ${CHECKOUT_ROOT} and read what it says, or ` +
       "point UBERBLICK_WEB_DIST at a bundle that speaks sync protocol " +
       `${SYNC_PROTOCOL_VERSION}.\n`,
