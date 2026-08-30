@@ -42,8 +42,11 @@ make repeated MCP calls merely to prove that no product document applies.
 For a narrowly trivial issue, perform the code-grounded self-check and spawn no
 adversary. Otherwise spawn exactly one fresh `issue-adversary` subagent on this
 issue, giving it its own run identity and this parent run. Prefer the other
-runtime/model when available — Claude calls Codex and Codex calls Claude — and
-wait for its durable handoff before acting.
+runtime/model when available — Claude calls Codex and Codex calls Claude —
+dispatching it as `.claude/skills/next-issue/preflight.md` states, and stay in
+your assignment until its durable handoff exists. If that dispatch produces no
+verdict, record it on the issue rather than substituting a same-runtime
+adversary silently.
 
 Apply every meaning-preserving, correctable finding yourself, then repeat the
 affected grounding and final recheck without launching a second adversary. If

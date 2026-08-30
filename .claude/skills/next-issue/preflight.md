@@ -64,6 +64,31 @@ applies correctable findings in this same run and repeats the affected grounding
 and final recheck. It does not call a second adversary to review those edits.
 Another adversary is exceptional and requires an explicit owner request.
 
+**Dispatching the other runtime.** From Claude, that is one command, validated
+2026-08-30 against codex-cli 0.151.0 — it returns exit 0 with network and `gh`
+available inside the sandbox:
+
+```sh
+codex exec -s workspace-write -c 'sandbox_workspace_write.network_access=true' - < <prompt-file>
+```
+
+`--full-auto` was removed from `codex exec` in that version *and* is refused by
+Claude Code's permission classifier, so a dispatch carrying it dies before Codex
+starts. Do not re-derive this per run.
+
+**Hold the pass open until the verdict exists.** Dispatch in the foreground and
+wait; a round takes minutes, not seconds. A preparer that ends its turn after
+the `Delegated:` record leaves a live claim and a promised verdict nobody is
+waiting on, which reads to every other role exactly like work in progress.
+
+**A dispatch that produces no verdict is recorded, never papered over.** If the
+other runtime does not run, say so on the issue; if a same-runtime adversary
+stands in, its record names the runtime that actually challenged. A degradation
+nobody can see is worse than the round being skipped: the cross-runtime
+preference exists because a different model reads the same body differently, and
+a record claiming a round that never happened spends that credibility for
+nothing.
+
 ## Recheck, then decide
 
 Last thing before posting the outcome, `git fetch origin main` again. Refresh
