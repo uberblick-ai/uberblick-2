@@ -111,11 +111,13 @@ but its handoff must say why no product context could affect the choice.
 
 ## Critical review
 
-Immediately before critical review and handoff, fetch `origin/main`. If it
-advanced since this run's grounding and changed `AGENTS.md`, `CLAUDE.md`,
+Fetch `origin/main` at two distinct checkpoints: first immediately before
+delegating critical review, and again after the reviewer and any corrections,
+immediately before the final handoff. At either checkpoint, if main advanced
+since the previous grounding and changed `AGENTS.md`, `CLAUDE.md`,
 `.github/ISSUE_SPEC.md`, this role contract or a procedure this run executes,
 re-read the affected files before continuing. Apply current instructions to the
-remaining work; this freshness check does not authorize rebasing a fix-up.
+remaining work; these freshness checks do not authorize rebasing a fix-up.
 
 After the implementation and focused checks, open a new PR as a draft or use
 the existing fix-up PR. Where `CLAUDE.md` says an outside Codex read earns its
