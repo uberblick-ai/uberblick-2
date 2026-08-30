@@ -88,25 +88,6 @@ export function seedLockPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(dirname(credentialsPath(env)), SEED_LOCK_FILE);
 }
 
-/** Beside them, held only while `ub open` is building the web app. */
-const BUILD_LOCK_FILE = ".build.lock";
-
-/**
- * The lock `ub open` holds while it builds the web app (#512).
- *
- * Here rather than beside the bundle because a checkout is not a place this CLI
- * writes state into, and because the directory it protects may not exist yet
- * when the lock has to be taken. That makes it this machine's build lock rather
- * than one checkout's; `open.ts` says why nothing rests on the difference.
- *
- * Its waiting is `open.ts`'s too, not {@link acquireInitLock}'s: a build is
- * minutes rather than a handful of file writes, and a run that waits that long
- * has to stay interruptible.
- */
-export function buildLockPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(dirname(credentialsPath(env)), BUILD_LOCK_FILE);
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -262,14 +243,26 @@ function tryAcquirePath(path: string): InitLock | null {
   };
 }
 
+/**
+ * Take the lock at `path` immediately, or return `null` when somebody has it.
+ *
+ * The primitive under every lock in this CLI, for the callers whose lock is not
+ * one of this module's config-root files — `ub open`'s build lock (#512) is
+ * keyed by the directory it protects and lives outside the config root
+ * entirely, but it wants exactly this exclusive create, held descriptor and
+ * creator-only removal.
+ */
+export function tryAcquireLock(path: string): InitLock | null {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  return tryAcquirePath(path);
+}
+
 /** Take the init lock immediately, or return `null` when another process has it. */
 export function tryAcquireInitLock(
   env: NodeJS.ProcessEnv = process.env,
   options: TryLockOptions = {},
 ): InitLock | null {
-  const path = options.path ?? initLockPath(env);
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  return tryAcquirePath(path);
+  return tryAcquireLock(options.path ?? initLockPath(env));
 }
 
 /**

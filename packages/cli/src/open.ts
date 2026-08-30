@@ -78,10 +78,12 @@
  */
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import { isIPv4 } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -92,7 +94,7 @@ import { DEFAULT_HUB_URL, resolveMcpConfig } from "@uberblick/mcp-server";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
-import { acquireInitLock, buildLockPath, tryAcquireInitLock } from "./init-lock.js";
+import { acquireInitLock, tryAcquireInitLock, tryAcquireLock } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import {
@@ -256,12 +258,33 @@ function buildEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return child;
 }
 
-/** How a build ended: with a reason it did not work, and whether it was stopped. */
+/** How a build ended: with a reason it did not work, and how it was ended. */
 interface BuildEnd {
   /** Why the build produced no bundle, or null when it exited cleanly. */
   failure: string | null;
-  /** True when a signal this command also answers to ended it. */
-  stopped: boolean;
+  /** True when SIGINT or SIGTERM killed it — see {@link stoppedHere}. */
+  signalled: boolean;
+}
+
+/**
+ * Whether the build that just ended ended because *this command* was stopped.
+ *
+ * A build killed by a signal is not by itself evidence of anything here: a
+ * supervisor or another tool can kill one, and `ub open` failing to produce a
+ * bundle is an operational failure that exits 1, as the CLI's exit classes say.
+ * What makes it an interrupt is a signal this process saw too.
+ *
+ * The one turn is for the case that *is* an interrupt: Ctrl-C reaches the whole
+ * process group, so the build's death and this process's signal are one event,
+ * and which of the two callbacks the event loop runs first is not ordered.
+ * Yielding once lets an already-delivered signal be seen before a Ctrl-C gets
+ * reported as a failed build.
+ */
+async function stoppedHere(end: BuildEnd, stop: Stop): Promise<boolean> {
+  if (end.signalled && !stop.interrupted()) {
+    await new Promise<void>((done) => setImmediate(done));
+  }
+  return stop.interrupted();
 }
 
 /**
@@ -272,10 +295,8 @@ interface BuildEnd {
  * way: returning while a build is still writing `dist` would release the lock
  * around it, which is the one thing that lock exists to prevent.
  *
- * A child ended by SIGINT or SIGTERM is this command stopping rather than a
- * build failing, whichever of the two callbacks the event loop runs first — a
- * foreground Ctrl-C reaches the whole process group, so the build and this
- * process get it at the same instant.
+ * How the child ended is reported, never interpreted: {@link stoppedHere} is
+ * what decides whether a signal-killed build was this command stopping.
  */
 function runBuild(
   command: string,
@@ -296,7 +317,7 @@ function runBuild(
     });
     void stop.signalled.then(() => child.kill("SIGTERM"));
     child.on("error", (error) =>
-      done({ failure: `${named} could not be run (${message(error)})`, stopped: false }),
+      done({ failure: `${named} could not be run (${message(error)})`, signalled: false }),
     );
     child.on("close", (status, signal) =>
       done({
@@ -306,7 +327,7 @@ function runBuild(
             : signal !== null
               ? `${named} was killed by ${signal}`
               : `${named} exited ${status ?? 1}`,
-        stopped: signal === "SIGINT" || signal === "SIGTERM",
+        signalled: signal === "SIGINT" || signal === "SIGTERM",
       }),
     );
   });
@@ -389,6 +410,28 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * The lock a build of `dir` holds.
+ *
+ * **Keyed by the directory, because the directory is the resource.** The hazard
+ * is two builds emptying and rewriting one `dist`, so what has to be mutually
+ * exclusive is builds of the same output — not runs that happen to share a
+ * configuration. Keying it on the config root instead would let two runs of one
+ * checkout under different `XDG_CONFIG_HOME` values build at once, which is
+ * exactly what this repository's own test rig and its parallel agents produce.
+ *
+ * In the temp directory because the two other candidates are both wrong: a
+ * checkout is not a place this CLI writes state into, and the config root is
+ * the key that must not decide this. The name is a digest rather than the path
+ * itself so that any directory — spaces, separators, length — yields one
+ * portable file name. `wx` on it means a name somebody else already holds is a
+ * refusal rather than a hijack.
+ */
+function buildLockPath(dir: string): string {
+  const key = createHash("sha256").update(resolve(dir)).digest("hex").slice(0, 16);
+  return join(tmpdir(), `uberblick-build-${key}.lock`);
+}
+
+/**
  * Take the build lock, or say why this run has not got it.
  *
  * Its own loop rather than {@link acquireInitLock}: the bound is different, the
@@ -398,16 +441,16 @@ function sleep(ms: number): Promise<void> {
  * cannot do.
  */
 async function takeBuildLock(
-  env: NodeJS.ProcessEnv,
+  dir: string,
   io: Io,
   stop: Stop,
 ): Promise<InitLock | "interrupted" | "gave-up"> {
-  const path = buildLockPath(env);
+  const path = buildLockPath(dir);
   const deadline = Date.now() + BUILD_WAIT_MS;
   let announced = false;
 
   for (;;) {
-    const lock = tryAcquireInitLock(env, { path });
+    const lock = tryAcquireLock(path);
     if (lock !== null) {
       return lock;
     }
@@ -453,12 +496,11 @@ export type BundleOutcome =
  * **One build at a time, machine-wide (#512).** Vite empties its output
  * directory before it writes it, so two `ub open` runs building at once leave
  * one of them serving a directory the other is clearing. Both of the builds
- * below produce that one directory, so both happen under {@link buildLockPath}:
- * a second run waits, then re-reads the stamp and builds only if the first left
- * no servable bundle behind. The lock is this machine's rather than this
- * checkout's — nothing is written into a checkout — so two checkouts building at
- * once take turns, which costs a wait nobody will notice and which no
- * correctness rests on.
+ * below produce that one directory, so both happen under {@link buildLockPath},
+ * which is keyed by the directory itself: a second run waits, then re-reads the
+ * stamp and builds only if the first left no servable bundle behind. Two runs
+ * of one checkout are excluded whatever else differs between them — including
+ * their configuration — and two checkouts never wait on each other.
  *
  * Either way a bundle that cannot sync is never served, and the refusal happens
  * before any hub is started or any database file exists.
@@ -478,7 +520,7 @@ export async function ensureBundle(
     return "refused";
   }
 
-  const lock = await takeBuildLock(env, io, stop);
+  const lock = await takeBuildLock(plan.dir, io, stop);
   if (lock === "interrupted") {
     return "interrupted";
   }
@@ -525,7 +567,7 @@ async function buildBundle(
       env,
       stop,
     );
-    if (end.stopped || stop.interrupted()) {
+    if (await stoppedHere(end, stop)) {
       return "interrupted";
     }
     if (end.failure !== null) {
@@ -545,7 +587,7 @@ async function buildBundle(
       "this takes a moment\n",
   );
   const end = await runBuild("mise", ["run", "build-web"], CHECKOUT_ROOT, env, stop);
-  if (end.stopped || stop.interrupted()) {
+  if (await stoppedHere(end, stop)) {
     return "interrupted";
   }
   const rebuilt = end.failure === null ? stampedProtocol(plan.dir) : null;

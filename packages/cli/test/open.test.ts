@@ -16,9 +16,11 @@
 
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Hub } from "@uberblick/hub";
@@ -27,7 +29,7 @@ import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it } from "vitest";
 import type { InitLock } from "../src/init-lock.js";
-import { acquireInitLock, buildLockPath, tryAcquireInitLock } from "../src/init-lock.js";
+import { acquireInitLock, tryAcquireLock } from "../src/init-lock.js";
 import type { Io } from "../src/io.js";
 import type { Stop } from "../src/open.js";
 import { bundlePlan, ensureBundle } from "../src/open.js";
@@ -154,9 +156,14 @@ interface FakeTool {
 /**
  * A build command on PATH that records how it was called and behaves as it is
  * told: `FAKE_SLEEP` seconds of work, `FAKE_STAMP_VERSION` stamped into
- * `FAKE_STAMP_DIR`, `FAKE_EXIT_CODE` to exit with. A real `mise run build-web`
- * or `pnpm … build` here would be a Vite build of the repository's own bundle —
- * minutes, and a checkout mutated by a test.
+ * `FAKE_STAMP_DIR`, `FAKE_EXIT_CODE` to exit with, `FAKE_KILL_SELF` to die of a
+ * signal nobody here sent. A real `mise run build-web` or `pnpm … build` here
+ * would be a Vite build of the repository's own bundle — minutes, and a
+ * checkout mutated by a test.
+ *
+ * `FAKE_BUSY_DIR` is the overlap sentinel: a directory only one build can hold,
+ * created before the work and removed after it, so a second build running at
+ * the same time exits 9 instead of quietly succeeding.
  */
 function fakeTool(box: Sandbox, command: string): FakeTool {
   const bin = join(box.cwd, "fake-bin");
@@ -171,7 +178,10 @@ function fakeTool(box: Sandbox, command: string): FakeTool {
       'PATH="$PATH:/bin:/usr/bin"\n' +
       `printf '%s %s\\n' "$PWD" "$*" >> ${record}\n` +
       `printf '%s\\n' "\${HUB_AUTH_TOKEN-<unset>}" >> ${tokens}\n` +
+      'if [ -n "$FAKE_KILL_SELF" ]; then kill -TERM $$; fi\n' +
+      'if [ -n "$FAKE_BUSY_DIR" ]; then mkdir "$FAKE_BUSY_DIR" || exit 9; fi\n' +
       'if [ -n "$FAKE_SLEEP" ]; then sleep "$FAKE_SLEEP"; fi\n' +
+      'if [ -n "$FAKE_BUSY_DIR" ]; then rmdir "$FAKE_BUSY_DIR"; fi\n' +
       'if [ -n "$FAKE_STAMP_VERSION" ]; then\n' +
       '  mkdir -p "$FAKE_STAMP_DIR"\n' +
       '  printf \'{"syncProtocolVersion":%s}\' "$FAKE_STAMP_VERSION" \\\n' +
@@ -211,9 +221,16 @@ function stoppable(): Stop & { stop: () => void } {
   };
 }
 
-/** The build lock both paths take, held the way another `ub open` would. */
-function holdBuildLock(env: NodeJS.ProcessEnv): InitLock {
-  const lock = tryAcquireInitLock(env, { path: buildLockPath(env) });
+/**
+ * The build lock for `dir`, held the way another `ub open` would hold it.
+ *
+ * Derived here the way the source derives it rather than imported, so a change
+ * that moved the lock away from the directory it protects — which is what let
+ * two runs of one checkout build at once — fails these tests.
+ */
+function holdBuildLock(dir: string): InitLock {
+  const key = createHash("sha256").update(resolve(dir)).digest("hex").slice(0, 16);
+  const lock = tryAcquireLock(join(tmpdir(), `uberblick-build-${key}.lock`));
   if (lock === null) {
     throw new Error("the build lock was already held");
   }
@@ -900,7 +917,7 @@ describe("ub open", () => {
       FAKE_STAMP_VERSION: String(SYNC_PROTOCOL_VERSION),
     };
     const io = stderrIo();
-    const held = holdBuildLock(env);
+    const held = holdBuildLock(bundle);
 
     const waiting = ensureBundle({ action: "serve", dir: bundle, ours: true }, env, io, calm());
     await sleep(200);
@@ -929,7 +946,7 @@ describe("ub open", () => {
       FAKE_STAMP_VERSION: String(SYNC_PROTOCOL_VERSION),
     };
     const io = stderrIo();
-    const held = holdBuildLock(env);
+    const held = holdBuildLock(bundle);
 
     const waiting = ensureBundle({ action: "build", dir: bundle, ours: true }, env, io, calm());
     await sleep(200);
@@ -950,7 +967,7 @@ describe("ub open", () => {
 
     // Waiting for somebody else's build: no build of its own, and no failure.
     const waitEnv = { ...box.env, PATH: mise.path };
-    const held = holdBuildLock(waitEnv);
+    const held = holdBuildLock(bundle);
     const waitingIo = stderrIo();
     const waitingStop = stoppable();
     const waiting = ensureBundle(plan, waitEnv, waitingIo, waitingStop);
@@ -979,6 +996,63 @@ describe("ub open", () => {
 
     expect(await building).toBe("interrupted");
     expect(buildingIo.text()).not.toContain("was not rebuilt");
+  });
+
+  it("excludes two runs of one checkout even when their configuration differs", async () => {
+    // The hazard is one output directory, so the lock has to be that
+    // directory's. Two sandboxes is two `XDG_CONFIG_HOME` values — which is what
+    // this repository's own rig and its parallel agents produce — over one
+    // bundle.
+    const one = sandbox();
+    const other = sandbox();
+    const bundle = join(one.cwd, "shared-dist");
+    mkdirSync(bundle, { recursive: true });
+    stamp(bundle, SYNC_PROTOCOL_VERSION + 1);
+    const mise = fakeMise(one);
+    const build = {
+      PATH: mise.path,
+      FAKE_STAMP_DIR: bundle,
+      // Still stale afterwards, so the second run has real work to do rather
+      // than finding the first one's bundle and stopping.
+      FAKE_STAMP_VERSION: String(SYNC_PROTOCOL_VERSION + 1),
+      FAKE_SLEEP: "0.3",
+      FAKE_BUSY_DIR: join(one.cwd, "building"),
+    };
+    const plan = { action: "serve", dir: bundle, ours: true } as const;
+    const first = stderrIo();
+    const second = stderrIo();
+
+    const outcomes = await Promise.all([
+      ensureBundle(plan, { ...one.env, ...build }, first, calm()),
+      ensureBundle(plan, { ...other.env, ...build }, second, calm()),
+    ]);
+
+    // Both really did build — and the sentinel proves they never overlapped.
+    expect(outcomes).toEqual(["refused", "refused"]);
+    expect(mise.calls()).toHaveLength(2);
+    for (const said of [first.text(), second.text()]) {
+      expect(said).not.toContain("exited 9");
+    }
+  });
+
+  it("a build somebody else killed is a failure, not this command stopping", async () => {
+    const box = sandbox();
+    const bundle = fixtureBundle(box);
+    stamp(bundle, SYNC_PROTOCOL_VERSION + 1);
+    const mise = fakeMise(box);
+    const io = stderrIo();
+
+    // No signal reached this process, so a dead build is a build that did not
+    // work — exit 1 with a reason, not the quiet exit 0 of a Ctrl-C.
+    const outcome = await ensureBundle(
+      { action: "serve", dir: bundle, ours: true },
+      { ...box.env, PATH: mise.path, FAKE_KILL_SELF: "1" },
+      io,
+      calm(),
+    );
+
+    expect(outcome).toBe("refused");
+    expect(io.text()).toContain("was killed by SIGTERM");
   });
 
   it("hands both builds the same environment, and neither the signing secret", async () => {
