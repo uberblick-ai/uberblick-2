@@ -38,7 +38,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
-import { resolveMcpConfig } from "@uberblick/mcp-server";
+import { resolveMcpConfig } from "./budget.js";
 import type { McpConfig } from "@uberblick/mcp-server";
 import { readUserConfig, resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";

@@ -13,7 +13,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { acquireInitLock, tryAcquireInitLock } from "../src/init-lock.js";
 import { removeTempDirs, sandbox } from "./helpers.js";
 
@@ -71,6 +71,34 @@ describe("the init lock", () => {
     lock.release();
     expect(lstatSync(lock.path).isSymbolicLink()).toBe(true);
     expect(existsSync(hardLink)).toBe(true);
+  });
+
+  it("waits out a live holder however short the test ceiling is", async () => {
+    // The one deadline `budget.ts`'s ceiling must never reach (#524). Routing
+    // this wait through it made `ub open` give up on a lock a test was still
+    // legitimately holding, and the spawned case that caught it only fails
+    // about half the time, because it needs the waiter to arrive early enough
+    // in the holder's 500 ms. Here the margins are the test's own: both maps a
+    // regression could read carry a ceiling far under `WAIT_TIMEOUT_MS`, and
+    // the holder outlives both by 200 ms.
+    vi.stubEnv("UB_TEST_MAX_WAIT_MS", "50");
+    try {
+      const box = sandbox(); // whose own env carries the suite's 400 ms ceiling
+      const ceiling = Number(box.env.UB_TEST_MAX_WAIT_MS);
+      const holder = await acquireInitLock(box.env);
+
+      const started = Date.now();
+      setTimeout(() => holder.release(), ceiling + 200);
+      const waiter = await acquireInitLock(box.env);
+      const waited = Date.now() - started;
+      waiter.release();
+
+      // Acquiring at all is the contract. Outlasting the ceiling is what keeps
+      // the case honest — otherwise a lock that was never really held passes.
+      expect(waited).toBeGreaterThan(ceiling);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("removes its own lock, and only once", async () => {

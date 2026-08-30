@@ -11,13 +11,19 @@
  * The other half is what help must *not* do: it is answered before validation,
  * before a missing operand is noticed, and before anything is written,
  * connected to, prompted for, or read out of somebody's MCP client config.
+ *
+ * **Which half spawns.** What the dispatcher decides — exit code, which stream
+ * the text lands on, which text — is a function of argv, so those cases call
+ * {@link dispatch} and cost nothing. What survives only across a process
+ * boundary keeps its spawn: that a run in a real directory left every byte of
+ * it untouched, and the one case that reads an MCP client config off disk.
  */
 
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { HELP, MCP_HELP } from "../src/cli.js";
+import { HELP, MCP_HELP, runCli } from "../src/cli.js";
 import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
 import { ENV_HELP } from "../src/env.js";
 import { INIT_HELP, INIT_OPTIONS } from "../src/init.js";
@@ -41,12 +47,35 @@ import {
   WORKSPACE_LIST_OPTIONS,
   WORKSPACE_USE_HELP,
 } from "../src/workspace.js";
-import type { Sandbox } from "./helpers.js";
+import type { Run, Sandbox } from "./helpers.js";
 import { DEAD_HUB_URL, PACKAGE_ROOT, removeTempDirs, runUb, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
 const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
+
+/**
+ * One `ub` invocation through the dispatcher, without a process.
+ *
+ * `runCli` takes the {@link Io} the process entry point hands it, so "which
+ * stream did this land on" is answerable here — the property these cases are
+ * about — and the exit code is its return value. What is *not* answerable here
+ * is anything the process owns, which is why the cases below that assert an
+ * untouched sandbox still spawn.
+ */
+async function dispatch(argv: string[]): Promise<Run> {
+  let stdout = "";
+  let stderr = "";
+  const status = await runCli(argv, {
+    out: (text) => {
+      stdout += text;
+    },
+    err: (text) => {
+      stderr += text;
+    },
+  });
+  return { status, stdout, stderr, output: `${stdout}${stderr}` };
+}
 
 /** As much of a `parseArgs` option map as this suite reads. */
 type Options = Readonly<
@@ -156,9 +185,9 @@ describe("every human-facing command path", () => {
   for (const path of PATHS) {
     const name = ["ub", ...path.argv].join(" ");
 
-    it(`answers --help and -h on \`${name}\``, () => {
+    it(`answers --help and -h on \`${name}\``, async () => {
       for (const flag of ["--help", "-h"]) {
-        const run = runUb([...path.argv, flag], sandbox());
+        const run = await dispatch([...path.argv, flag]);
         expect(run.status, `${name} ${flag}`).toBe(0);
         expect(run.stdout, `${name} ${flag}`).toBe(path.help);
         expect(run.stderr, `${name} ${flag}`).toBe("");
@@ -208,14 +237,16 @@ describe("every human-facing command path", () => {
     }
   });
 
-  it("keeps the hidden `mcp serve` out of the group help it is dispatched by", () => {
-    const run = runUb(["mcp", "--help"], sandbox());
+  it("keeps the hidden `mcp serve` out of the group help it is dispatched by", async () => {
+    const run = await dispatch(["mcp", "--help"]);
     expect(run.status).toBe(0);
     expect(run.stdout).toMatch(/install/);
     expect(run.stdout).not.toMatch(/serve/);
 
     // And it keeps its own rules: no help on stdout, which is the transport.
-    const serve = runUb(["mcp", "serve", "--help"], sandbox());
+    // `serveCommand` refuses the argument before it resolves anything, so this
+    // starts no server here either.
+    const serve = await dispatch(["mcp", "serve", "--help"]);
     expect(serve.status).toBe(2);
     expect(serve.stdout).toBe("");
     expect(serve.stderr).toMatch(/unexpected argument/);
@@ -277,22 +308,22 @@ describe("what is not a request for help", () => {
     expect(run.stdout).toContain('"--help"');
   });
 
-  it("still refuses an unknown subcommand, `--help` after it or not", () => {
+  it("still refuses an unknown subcommand, `--help` after it or not", async () => {
     // A group answers for itself only when its own one argument is the
     // question. `ub workspace bogus --help` is a typo, not a request, and every
     // level says so the same way — the top level always has.
     for (const group of [[], ["workspace"], ["remote"], ["mcp"]]) {
       const argv = [...group, "bogus", "--help"];
-      const run = runUb(argv, sandbox());
+      const run = await dispatch(argv);
       expect(run.status, argv.join(" ")).toBe(2);
       expect(run.stdout, argv.join(" ")).toBe("");
       expect(run.stderr, argv.join(" ")).toMatch(/bogus/);
     }
   });
 
-  it("still refuses an unknown option, on stderr, with exit 2", () => {
+  it("still refuses an unknown option, on stderr, with exit 2", async () => {
     for (const argv of [["init", "--bogus"], ["status", "--bogus"], ["mcp", "install", "--bogus"]]) {
-      const run = runUb(argv, sandbox());
+      const run = await dispatch(argv);
       expect(run.status, argv.join(" ")).toBe(2);
       expect(run.stdout, argv.join(" ")).toBe("");
       expect(run.stderr, argv.join(" ")).toMatch(/bogus/);
