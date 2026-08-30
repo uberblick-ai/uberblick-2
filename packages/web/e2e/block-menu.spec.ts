@@ -9,6 +9,9 @@
  *
  * - the gutter `+` revealing on hover *without moving the prose*, which is a
  *   claim about pixels and can only be measured where there are pixels;
+ * - the pointer's route onto that `+`, which is a claim about which element is
+ *   under every pixel on the way — `hover()` and `click()` both jump straight
+ *   onto their target, so only a stepped move asks the question;
  * - the three gestures end to end through the browser's own event plumbing —
  *   typed keys reaching ProseMirror, a click reaching the menu, and a markdown
  *   prefix reaching `handleTextInput`, which only a real keystroke does.
@@ -73,6 +76,75 @@ test("hovering a block reveals the gutter + without moving the prose", async ({
   // The gutter is reserved for good, so revealing the button is a change of
   // opacity and nothing else: the prose does not move by a pixel.
   expect(after).toEqual(before);
+});
+
+/**
+ * Drag the pointer along the ground rather than lifting it: one `mousemove` per
+ * pixel, so no gap between two elements can be stepped over. That is the whole
+ * point of this test — the button used to hide in the few pixels between the
+ * prose and itself, and any pointer that jumped, or strode, never saw them
+ * (#507).
+ */
+async function walk(
+  page: Page,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): Promise<void> {
+  const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y)));
+  await page.mouse.move(to.x, to.y, { steps });
+}
+
+/**
+ * The journey, in the order a hand makes it: click the first character, walk
+ * left onto the `+`, walk off it, come back and press it.
+ */
+test("the pointer can walk from the prose onto the gutter + and press it", async ({
+  page,
+}) => {
+  await openDoc(page, "reach me");
+
+  const button = page.locator(".ub-gutter-add");
+  const prose = await blocks(page).first().boundingBox();
+  if (prose === null) throw new Error("e2e: the first block has no box");
+  const middle = prose.y + prose.height / 2;
+
+  // Whatever the gutter claims, it claims none of the prose: the first
+  // character is still the editor's, and clicking it still puts the caret
+  // before it.
+  await page.mouse.click(prose.x + 1, middle);
+  await page.keyboard.type("X", { delay: 15 });
+  await expect(blocks(page).nth(0)).toHaveText("Xreach me");
+
+  // An edit hides the hint until the pointer moves again, so the walk starts
+  // with a move into the prose.
+  const inProse = { x: prose.x + prose.width / 2, y: middle };
+  await page.mouse.move(inProse.x, inProse.y);
+  await expect(button).toHaveCSS("opacity", "1");
+  const target = await button.boundingBox();
+  if (target === null) throw new Error("e2e: the gutter button has no box");
+  const centre = { x: target.x + target.width / 2, y: target.y + target.height / 2 };
+  const away = { x: prose.x - 2 * target.width, y: middle };
+
+  await walk(page, inProse, centre);
+  await expect(button).toHaveCSS("opacity", "1");
+
+  // And it still goes when the walk continues past the gutter, which is neither
+  // the block nor its strip.
+  await walk(page, centre, away);
+  await expect(button).toHaveCSS("opacity", "0");
+
+  // Back, and pressed where the pointer already is: `click()` would move it
+  // first, which is the gesture this test exists to avoid. The insertion comes
+  // last because a heading fills the outline rail, which re-centres the column
+  // and makes every measurement above stale.
+  await walk(page, away, inProse);
+  await walk(page, inProse, centre);
+  await page.mouse.down();
+  await page.mouse.up();
+  await page.getByRole("option", { name: "Heading 2" }).click();
+  await expect(blocks(page)).toHaveCount(2);
+  await page.keyboard.type("second", { delay: 15 });
+  await expect(blocks(page).nth(1)).toHaveText("second");
 });
 
 test("the gutter + inserts the chosen block below, with the caret in it", async ({
