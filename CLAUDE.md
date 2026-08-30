@@ -79,15 +79,20 @@ ever reviews or merges a diff it authored.
      checkout can change during review;
    - coordinator validation against the issue's acceptance criteria;
    - **GitHub Copilot review** requested on the PR;
-   - **local Codex session review** of the PR wherever an outside read earns
-     its cost (owner decision, 2026-08-24): required when the diff touches
-     `packages/schema`, `packages/mcp-server`, `packages/hub`, or
-     `pnpm-lock.yaml`, when the PR runs to several hundred lines or more, when
-     it changes something genuinely architectural, and whenever the
-     coordinator judges an external review worthwhile. Only when none of those
-     fire does the relaxation apply: a trivial or UI/design-only diff — where
-     the round would spend time and tokens on nothing — merges on the
-     remaining gates, without a Codex round;
+   - **two independent implementation challenges** wherever an outside read
+     earns its cost (owner decision, 2026-08-24, clarified 2026-08-30): first a
+     fresh Codex `implementation-reviewer` delegated by the implementer before
+     handoff, then a separate Opus `implementation-reviewer` delegated by the
+     integrator. Both actively hunt for counterexamples, missing failure paths,
+     incorrect assumptions, overengineering and overtesting; the integrator's
+     own gate work and Copilot do not substitute for either challenge. The pair
+     is required when the diff touches `packages/schema`,
+     `packages/mcp-server`, `packages/hub`, or `pnpm-lock.yaml`, when the PR
+     runs to several hundred lines or more, when it changes something genuinely
+     architectural, and whenever the coordinator judges an external review
+     worthwhile. Only when none of those fire does the relaxation apply: a
+     trivial or UI/design-only diff — where the rounds would spend time and
+     tokens on nothing — merges on the remaining gates without the pair;
    - **zero unaddressed PR remarks** — immediately before merging, re-fetch
      the PR's reviews and comment threads (human and bot alike, including
      remarks that arrived after the other gates passed); merge only when

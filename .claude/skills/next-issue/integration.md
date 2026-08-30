@@ -1,10 +1,10 @@
 # integration — advancing one PR through the gates to a merge
 
 The mechanics of the `integrator` role, for one PR at one head SHA. CLAUDE.md's
-"Development workflow" owns *which* gates exist and when each applies, the Codex
-round included; drive them in the order it lists. This file owns only their
-mechanics, and `review-protocol.md` beside it owns the findings-conditional
-protocol.
+"Development workflow" owns *which* gates exist and when each applies,
+including the Codex-plus-Opus dual challenge; drive them in the order it lists.
+This file owns only their mechanics, and `review-protocol.md` beside it owns the
+findings-conditional protocol.
 
 ## Gate mechanics
 
@@ -18,12 +18,13 @@ protocol.
   Keep the SHA-tagged image long enough for the failure-path probes CLAUDE.md
   requires at stateful boundaries, then remove it when the PR is settled.
 - Record every gate result against the commit SHA it ran at — container review,
-  CI, the acceptance validation, the Codex verdict where that gate applied, the
-  Copilot state. Any new commit on the branch (fix-ups included) invalidates
-  test/typecheck and immutable review evidence: re-run those gates at the new
-  `headRefOid`. For an earlier Codex verdict, follow `review-protocol.md`'s
-  risk-scoped re-review rule; either run a fresh round or record exactly which
-  reasoning still applies and why.
+  CI, the acceptance validation, both adversarial verdicts where the
+  dual-challenge gate applied, and the Copilot state. Any new commit on the
+  branch (fix-ups included) invalidates test/typecheck and immutable review
+  evidence: re-run those gates at the new `headRefOid`. For either earlier
+  adversarial verdict, follow `review-protocol.md`'s risk-scoped re-review rule;
+  either run a fresh round or record exactly which reasoning still applies and
+  why. The integrator's own gate work does not fill a missing challenger slot.
 - Check an acceptance box on a linked issue only with evidence (command output,
   test name), and check that the diff stays within the declared `Touches` — the
   shared set when the PR closes a batch.

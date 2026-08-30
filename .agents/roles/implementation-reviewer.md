@@ -45,6 +45,14 @@ defends the same contract is a finding. No findings is itself a verdict and is
 stated as one. Commits landing during the review do not silently move the
 target: report the drift and stop; a review at the new head is a new pickup.
 
+This is an adversarial implementation challenge, not a gate replay. Try to
+falsify the change: trace important failure paths and boundary conditions,
+challenge assumptions in the issue and PR record against the code and product
+intent, and use focused probes or mutations where inspection alone cannot
+settle the risk. Hunt explicitly for overengineering and overtesting. Gate
+results may be evidence, but restating lint, tests or acceptance criteria is not
+a review.
+
 ## Boundaries
 
 No commits, no fix-ups, no merging, and no dispositioning. An implementer parent

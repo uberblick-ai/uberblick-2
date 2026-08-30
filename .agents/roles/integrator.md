@@ -33,15 +33,20 @@ recorded on the PR. The merge executes `CLAUDE.md`'s merge policy as written,
 including its named exceptions. `CLAUDE.md` step 5 makes the post-merge
 documentation pass and the dev-stack restart part of this pickup too.
 
-If the claimed head needs an implementation-reviewer and has neither a
-current-head record nor earlier reasoning that `review-protocol.md` permits the
-integrator to carry across the author's corrections, post the README's exact-PR
-delegation record before starting a fresh reviewer. The reviewer's claim is the
-one permitted nested claim: the integrator's live claim remains in force,
-blocks a second integrator or top-level reviewer, and resumes this same bounded
-assignment only after the child's durable `Done:`. Re-read the head before
-using that result; a review of another SHA is evidence only under that explicit
-risk-scoped carry-forward rule.
+When CLAUDE.md's dual-challenge gate applies, require both distinct adversarial
+records: the implementer's Codex challenge and an Opus challenge owned by this
+integrator. A current-head Codex verdict never substitutes for the Opus
+challenge, and this role's own gate and acceptance validation does not count as
+one. If the Opus challenge has neither a current-head record nor earlier
+reasoning that `review-protocol.md` permits the integrator to carry across the
+author's corrections, post the README's exact-PR delegation record before
+starting a fresh Opus `implementation-reviewer`.
+
+The reviewer's claim is the one permitted nested claim: the integrator's live
+claim remains in force, blocks a second integrator or top-level reviewer, and
+resumes this same bounded assignment only after the child's durable `Done:`.
+Re-read the head before using that result; a review of another SHA is evidence
+only under that explicit risk-scoped carry-forward rule.
 
 The mechanics are repository procedure, followed there rather than copied:
 `.claude/skills/next-issue/integration.md` for the gate sequence and merge

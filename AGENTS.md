@@ -100,6 +100,12 @@ on a Codex-authored PR uses a different Codex session where one is available;
 only otherwise use an independent Opus reviewer. Record the reviewing session
 on the PR.
 
+When CLAUDE.md's dual-challenge gate applies, the implementer owns the fresh
+Codex challenge and the integrator owns a distinct Opus challenge. Both use the
+`implementation-reviewer` role and write exact-head verdicts on the PR. The
+integrator's own acceptance and gate validation, and a Copilot review, are
+additional evidence rather than either required challenge.
+
 Every role reconstructs claims and progress from GitHub and re-reads the issue
 and PR threads before acting. The integrator records validation and finding
 dispositions on the PR; merge authority comes from CLAUDE.md.

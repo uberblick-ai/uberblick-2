@@ -1,9 +1,11 @@
 # Review protocol — external rounds, and what happens once a review returns
 
 Read this whenever a PR has an external round to request or a finding to
-handle. The implementer owns the first required critical round before handoff;
-the integrator owns authoritative dispositions and any final-head round.
-`integration.md` beside this file owns the gates' order and mechanics.
+handle. When CLAUDE.md's outside-read trigger fires, the implementer owns the
+Codex challenge before handoff and the integrator owns a separate Opus
+challenge. These are two real adversarial reads, not two gate checks. The
+integrator owns authoritative dispositions and any risk-scoped final-head
+round. `integration.md` beside this file owns the gates' order and mechanics.
 
 ## Requesting the round
 
@@ -28,12 +30,31 @@ parent context.
 
 The implementer stays in the foreground until the reviewer writes its durable
 verdict. A dispatch failure is recorded on the PR, never presented as a review;
-the integrator later supplies any still-required round. A further round is never
-a resumed session — it is a fresh reviewer at the new head, within the
-re-review scoping below. Every brief says: be critical, and hunt specifically
-for overtesting and overengineering per this repo's principles (KISS/YAGNI,
-least code wins, tests defend contracts and invariants rather than
-implementation trivia).
+the integrator later supplies the missing Codex challenge as well as its own
+Opus challenge. A further round is never a resumed session — it is a fresh
+reviewer at the new head, within the re-review scoping below. Every brief says:
+be critical, try to falsify the implementation with focused failure-path or
+mutation probes, and hunt specifically for overtesting and overengineering per
+this repo's principles (KISS/YAGNI, least code wins, tests defend contracts and
+invariants rather than implementation trivia).
+
+## The integrator's Opus challenge
+
+Where the dual-challenge gate applies, the integrator delegates a fresh Opus
+`implementation-reviewer` after claiming the PR. It is required even when the
+implementer's Codex verdict is current at the same head: the point is an
+independent second attempt to break the implementation, not duplicated gate
+evidence. The brief contains only the README's exact internal assignment; the
+role contract supplies the critical questions. The integrator's own diff read,
+acceptance validation, immutable review and finding dispositions do not count
+as this challenge.
+
+The two challenges need not be repeated automatically after every correction.
+Their reasoning may carry across a later head only under the risk-scoped rule
+below, recorded separately for the Codex and Opus verdicts. If a fresh round is
+required, use the same runtime as the stale challenge it replaces unless the
+required runtime is unavailable; record an unavailable runtime as a failed
+dispatch, never as equivalent evidence.
 
 ## Author-owned refinement
 
