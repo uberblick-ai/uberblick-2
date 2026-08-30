@@ -11,15 +11,23 @@
  * committed where the real one lives, which is the only thing a checkout ever
  * invokes docker through.
  *
- * They need `flock`, which the deployment host has and macOS does not: on a host
- * without it every case here except the refusal one fails, with the script's own
- * `cannot lock ...` on its stderr. That is the honest answer rather than a
- * defect — see #525, and the refusal case itself.
+ * They need a util-linux `flock`, which the deployment host has and macOS does
+ * not: on a host without one every case here except the two refusal cases fails,
+ * with the script's own `cannot lock ...` on its stderr. That is the honest
+ * answer rather than a defect — see #525, and the refusal cases themselves.
  */
 
 import { spawn, spawnSync } from "node:child_process";
 import type { SpawnSyncReturns } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { REPO_ROOT, removeTempDirs, sandbox } from "./helpers.js";
@@ -148,21 +156,28 @@ function deployedRef(fix: Fixture): string {
 }
 
 /**
- * A `PATH` with no `flock` on it, standing in for a host that does not ship one.
+ * A `PATH` standing in for a host whose `flock` cannot be trusted: absent, or
+ * present and answering `status` without granting anything.
+ *
  * Directories cannot simply be dropped from the real `PATH`: on Linux `flock`
  * lives beside `git`, and a run that cannot find `git` would refuse for the
  * wrong reason and prove nothing. So the shim directory names what the script
  * reaches instead — `sh` and `dirname` before the lock, `git` after it, so a
  * guard that failed to refuse would really fetch and build.
  */
-function pathWithoutFlock(fix: Fixture): string {
-  const bin = join(fix.root, "bin-no-flock");
+function pathWithBrokenFlock(fix: Fixture, status: number | null): string {
+  const bin = join(fix.root, `bin-flock-${status ?? "absent"}`);
   mkdirSync(bin, { recursive: true });
   for (const tool of ["sh", "dirname", "git"]) {
     const found = spawnSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" });
     const resolved = found.stdout.trim();
     if (resolved === "") throw new Error(`${tool} is not on PATH`);
     symlinkSync(resolved, join(bin, tool));
+  }
+  if (status !== null) {
+    const shim = join(bin, "flock");
+    writeFileSync(shim, `#!/bin/sh\nexit ${status}\n`, "utf8");
+    chmodSync(shim, 0o755);
   }
   return bin;
 }
@@ -244,26 +259,34 @@ describe("remote-update.sh", () => {
   });
 
   /**
-   * A guard that disables itself where its tool is missing is not a guard, and
-   * this one failed in the direction that looks fine: `flock` absent made the
-   * shell answer 127, which the old `if ! flock` could not tell from the 1 that
-   * means held, so an update that never ran printed "already running" and
-   * exited 0.
+   * A guard that disables itself where its tool is missing or different is not a
+   * guard, and this one failed in the direction that looks fine: an update that
+   * never fetched, reset or built printed "already running" and exited 0.
+   *
+   * Two hosts, because the guard has to survive both shapes of the same lie: no
+   * `flock` at all answers 127, and a `flock` that reports every failure as 1 —
+   * busybox does, and so does any build that does not understand `-E` — answers
+   * the status a naive guard reads as contention.
    */
-  it("refuses, and deploys nothing, when it cannot lock at all", () => {
-    const fix = fixture();
-    const before = deployedRef(fix);
-    push(fix, { "marker.txt": "two\n" });
+  for (const host of [
+    { what: "ships no flock", flock: null },
+    { what: "has a flock that answers every failure with 1", flock: 1 },
+  ]) {
+    it(`refuses, and deploys nothing, on a host that ${host.what}`, () => {
+      const fix = fixture();
+      const before = deployedRef(fix);
+      push(fix, { "marker.txt": "two\n" });
 
-    const ran = update(fix, { PATH: pathWithoutFlock(fix) });
+      const ran = update(fix, { PATH: pathWithBrokenFlock(fix, host.flock) });
 
-    expect(ran.status).not.toBe(0);
-    expect(`${ran.stdout}${ran.stderr}`).toContain("cannot lock");
-    expect(ran.stdout).not.toContain("already running");
-    expect(builds(fix)).toEqual([]);
-    expect(deployedRef(fix)).toBe(before);
-    expect(readFileSync(join(fix.checkout, "marker.txt"), "utf8")).toBe("one\n");
-  });
+      expect(ran.status).not.toBe(0);
+      expect(`${ran.stdout}${ran.stderr}`).toContain("cannot lock");
+      expect(ran.stdout).not.toContain("already running");
+      expect(builds(fix)).toEqual([]);
+      expect(deployedRef(fix)).toBe(before);
+      expect(readFileSync(join(fix.checkout, "marker.txt"), "utf8")).toBe("one\n");
+    });
+  }
 
   /**
    * The commit being deployed replaces the running script. `git reset --hard`
