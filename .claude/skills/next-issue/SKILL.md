@@ -22,9 +22,11 @@ so and return.
 
 ## What this does
 
-1. **Self-update the checkout** when it is on `main`: `git fetch origin main`
-   and `git merge --ff-only origin/main`, so the next read of these files tracks
-   current `main`. A refused fast-forward is reported and skipped, never forced.
+1. **Prove the workflow revision before reading or launching it.** Require the
+   checkout to be on `main`, then run `git fetch origin main` and
+   `git merge --ff-only origin/main` before reading a role, procedure or queue.
+   If the checkout is not on `main`, or the fast-forward is refused, report that
+   and stop; never launch a role from workflow files that are not proven current.
 2. **Create one stable run id, then start one session of the named role.** Use
    `claude-<role>-<UTC timestamp>-<short random suffix>` or an equivalently
    collision-resistant value. Create it before launch, pass it verbatim, and
@@ -56,8 +58,9 @@ fresh invocation belongs to its caller.
 - **This file stays under 200 lines.** An addition pays with a deletion, or
   moves its detail to a companion file beside this one.
 - The coordinator's own repo edits (skill or docs changes, commits) happen in
-  its own worktree (EnterWorktree), never in the shared checkout — multiple
-  sessions share it and it may sit on any branch.
+  its own worktree (EnterWorktree), never in the shared launcher checkout. Keep
+  that launcher checkout on clean `main`; role implementation still uses the
+  isolated worktree its contract requires.
 
 The roles' mechanics live beside this file and are read by the role that owns
 them, never here: `preflight.md` (issue preparer and its adversary), `review-protocol.md`,

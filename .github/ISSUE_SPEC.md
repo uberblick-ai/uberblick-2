@@ -24,6 +24,10 @@ Parent: #486
   list of issue refs. Grammar: `^Depends-on: (none|#[0-9]+(, #[0-9]+)*)$`.
   A missing line means *untriaged*, which is different from `none`
   (*consciously independent*); untriaged issues are never eligible.
+  When ordering depends on an open PR, name the issue that PR closes; PR refs do
+  not belong in this header. If the PR closes no issue, record the overlap in
+  Pointers and let the file-overlap rule queue it instead of inventing a
+  dependency.
 - **`Touches`** — mandatory. Comma-separated footprint names, lowercase: the
   short names of directories under `packages/` (currently `cli`, `hub`,
   `mcp-server`, `schema`, `web` — the live directory listing is authoritative,

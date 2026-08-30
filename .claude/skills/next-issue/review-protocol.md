@@ -59,7 +59,11 @@ finding — severity does not decide the other two:
   supported-usage P2s. *Defer* — only for a non-blocking P2/P3 whose fix is
   disproportionate right now: create a linked issue and record the concrete
   accepted risk on the PR; never defer data loss, auth/security exposure, or a
-  violated invariant. *Document boundary* — reachable only outside the usage
+  violated invariant. Queue an implementable deferral with `needs-preparation`.
+  If the finding already identifies a product or authority choice, create it at
+  `needs-decision` with the focused question, options and recommendation instead
+  of paying a preparation/adversary pass to rediscover the same boundary.
+  *Document boundary* — reachable only outside the usage
   model: the smallest useful code/doc statement naming the boundary; no behavior
   changes, no mechanism tests for an unsupported scenario. *Reject* — not
   reachable, factually wrong, or cost clearly exceeds stake: reply with evidence

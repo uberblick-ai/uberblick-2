@@ -45,6 +45,11 @@ program coordinator's internal assignment, never through this queue. The
 `ready` label is the preparation verdict; do not reconstruct or require a
 separate adversary dispatch.
 
+For a fix-up, continue the remote branch without sharing another run's
+worktree. If a leftover local worktree still holds that branch, create this
+run's worktree detached at the remote branch head and push `HEAD:<branch>`;
+never enter, delete or repurpose the other run's worktree.
+
 Before claiming a new issue, fetch `origin/main`, record its SHA, and make a
 focused freshness check: read the final issue and thread, inspect the code and
 Pointers it depends on, and recheck eligibility, expected file overlap and work
@@ -55,8 +60,9 @@ candidates: those facts are derived and become stale.
 
 Claim under the README's race rule using `.github/ISSUE_SPEC.md`'s exact issue
 or fix-up grammar. After a new-issue claim, recount and post only its one-line
-admission record; a fix-up PR already occupies its work-in-flight unit and needs
-no recount. A claim is the end of pickup. One PR or one fix-up wave, then stop.
+admission record, exactly `Admitted: N/6 work units.` with no unit inventory; a
+fix-up PR already occupies its work-in-flight unit and needs no recount. A claim
+is the end of pickup. One PR or one fix-up wave, then stop.
 
 ## Outcome
 
@@ -95,7 +101,21 @@ boundary, goes to `needs-decision` instead of another preparation pass.
 owns the invariants and the validation commands. Read the product documents the
 issue's Pointers cite before implementing against them.
 
+A cited Uberblick document is a required live read for every new implementation
+and fix-up that may affect its product meaning. If the MCP route cannot serve
+that read, stop before editing: record the exact attempted tool and failure on
+the claimed issue (or the PR for a fix-up), and notify the coordinator through
+Herdr where available. A copied issue or PR summary is not a substitute. A
+strictly mechanical change with no applicable product document may continue,
+but its handoff must say why no product context could affect the choice.
+
 ## Critical review
+
+Immediately before critical review and handoff, fetch `origin/main`. If it
+advanced since this run's grounding and changed `AGENTS.md`, `CLAUDE.md`,
+`.github/ISSUE_SPEC.md`, this role contract or a procedure this run executes,
+re-read the affected files before continuing. Apply current instructions to the
+remaining work; this freshness check does not authorize rebasing a fix-up.
 
 After the implementation and focused checks, open a new PR as a draft or use
 the existing fix-up PR. Where `CLAUDE.md` says an outside Codex read earns its
@@ -134,9 +154,10 @@ Tests: <why coverage protects contracts without testing trivia>
 Uberblick: not used — <why no product choice needed it> | <title> (<uuid>) — <one line on usefulness>
 ```
 
-Link logs instead of pasting counts or transcripts. Then post only the PR
-handoff `.github/ISSUE_SPEC.md` defines; do not duplicate it with an issue
-completion comment. After that durable handoff, a top-level run posts one
+Link logs instead of pasting counts or transcripts. Then post the two-line
+handoff `.github/ISSUE_SPEC.md` defines **as a comment on the PR, never on the
+issue**; do not add an issue completion comment. After that durable handoff, a
+top-level run posts one
 concise self-assessment to [Implementation run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/522),
 following its prompt. The retrospective is useful telemetry but never blocks
 delivery, review or recovery if posting it fails. Finally notify the coordinator

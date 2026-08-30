@@ -13,16 +13,26 @@ fix-up and re-gate.
 against — every later statement in the preflight is a claim about that commit,
 not about your memory of the repo. Against it, read what the issue targets: the
 current behavior, the modules, interfaces, invariants and tests it lives in,
-related open issues and PRs, and the files the change is likely to touch. Before
-drafting, list the files changed by every open PR and compare them with the
-likely footprint; record direct file overlap, dependency overlap, and semantic
-overlap while it is still cheap to reshape or defer the issue. Grounding is
-proportional, not exhaustive — enough to fill the table below honestly, and no
-more. A proven mechanical, local correction may skip broad repository and issue
-corpus searches when the handoff says why. Repeating MCP calls to prove an
-absence is not grounding. If `main` advances while you are here, refresh only
-the grounding and challenge the new commits actually affect; a merge elsewhere
-in the tree does not invalidate a challenge about this one.
+related open issues and PRs, and the files the change is likely to touch. Verify
+each load-bearing noun and promised outcome has a current substrate: shipped
+concepts exist in current code, and settled targets exist in the current corpus.
+Closed issue history is evidence only when a pointer or a missing substrate
+makes it relevant; do not sweep `NOT_PLANNED` work as a separate gate.
+
+Before drafting on **every** route, trivial included, list the files changed by
+every open PR and compare them with the likely footprint. A file-list hit is the
+start of the check: inspect the relevant PR diff before deciding whether the
+overlap is a dependency, semantic conflict or mechanical rebase. Record real
+overlap while it is still cheap to reshape or defer the issue. Prefer tracked
+file searches (`git ls-files`, `rg`) and exclude `.claude/worktrees/` and
+`.worktrees/`; copied agent worktrees are not additional grounding evidence.
+
+Grounding is proportional, not exhaustive — enough to fill the table below
+honestly, and no more. A proven mechanical, local correction may skip broad
+repository and issue corpus searches when the handoff says why. Repeating MCP
+calls to prove an absence is not grounding. If `main` advances while you are
+here, refresh only the grounding and challenge the new commits actually affect;
+a merge elsewhere in the tree does not invalidate a challenge about this one.
 
 When that fetch advances `main`, inspect the changed paths. If the new commits
 touch this role contract or the procedure files this run is executing, re-read
