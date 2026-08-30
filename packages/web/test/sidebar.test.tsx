@@ -55,6 +55,13 @@ const OFFLINE: RoomStatus = {
   tokenMissing: false,
 };
 
+/**
+ * What every stubbed room reports. Offline unless a test sets it before the
+ * rooms are made, which is how the directory line's readings are exercised
+ * (#448); reset after each test with the rooms that were handed it.
+ */
+let roomStatus: RoomStatus = OFFLINE;
+
 const rooms = new Map<string, RoomConnection>();
 
 function room(name: string): RoomConnection {
@@ -64,9 +71,9 @@ function room(name: string): RoomConnection {
     room: name,
     ydoc: new Y.Doc(),
     provider: { awareness: null },
-    status: OFFLINE,
+    status: roomStatus,
     onStatusChange: (listener: (next: RoomStatus) => void) => {
-      listener(OFFLINE);
+      listener(roomStatus);
       return () => {};
     },
     whenLocalReplicaLoaded: Promise.resolve(),
@@ -123,6 +130,7 @@ afterEach(() => {
     open.host.remove();
   }
   rooms.clear();
+  roomStatus = OFFLINE;
   vi.restoreAllMocks();
 });
 
@@ -466,5 +474,53 @@ describe("the sidebar is the _sidebar document", () => {
       restoreDirectoryEntry(directoryPeer, ONE);
     });
     expect(rowTitles(host, 0)).toEqual(["Overview", "Editing"]);
+  });
+});
+
+/**
+ * The directory line — the line the owner actually read on a freshly joined
+ * machine, where a refused page said `syncing…` and left no way to tell why
+ * without opening a document (#448).
+ *
+ * It now takes a refusal's word from the shared derivation, whose precedence
+ * and wording `status-reading.test.ts` pins; what is asked here is only that
+ * this line shows it, and that its own three readings are otherwise untouched —
+ * uncalmed, and still saying "directory", because this line is about the
+ * directory room and normalizing it is a different change.
+ */
+describe("the sidebar's directory line reads a refusal", () => {
+  /** The line under the head, for a directory room in the given state. */
+  async function directoryLine(status: Partial<RoomStatus>): Promise<string> {
+    // A fresh mount per reading, the way the collapse test remounts: the rooms
+    // are cached, so a new status has to be in place before they are made.
+    const open = mounted;
+    mounted = null;
+    if (open !== null) {
+      act(() => open.root.unmount());
+      open.host.remove();
+    }
+    rooms.clear();
+    roomStatus = { ...OFFLINE, ...status };
+    const host = await openApp(`/${WORKSPACE}`);
+    return host.querySelector(".ub-list-head .ub-muted")?.textContent ?? "";
+  }
+
+  it("names which refusal it is, rather than calling a refused page busy", async () => {
+    // Connected and synced underneath throughout, so each refusal is outranking
+    // the ordinary reading rather than standing in for a missing one.
+    const live = { connected: true, synced: true };
+    expect(
+      await directoryLine({ ...live, protocolMismatch: { hub: 2, client: 1 } }),
+    ).toBe("update required");
+    expect(await directoryLine({ ...live, tokenMissing: true })).toBe("no hub token");
+    expect(await directoryLine({ ...live, authFailed: true })).toBe("not authorized");
+  });
+
+  it("keeps its own three readings when nothing is refused", async () => {
+    expect(await directoryLine({ connected: true, synced: true })).toBe(
+      "directory synced",
+    );
+    expect(await directoryLine({ connected: true, synced: false })).toBe("syncing…");
+    expect(await directoryLine({})).toBe("offline");
   });
 });

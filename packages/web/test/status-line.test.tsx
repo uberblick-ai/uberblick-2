@@ -11,7 +11,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { StatusLine, TOKEN_MISSING } from "../src/ui/EditorPane.js";
+import { StatusLine } from "../src/ui/EditorPane.js";
+import { TOKEN_MISSING } from "../src/ui/status-reading.js";
 import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 

@@ -2141,8 +2141,11 @@ h3.ub-heading {
   flex: none;
 }
 
+/* Sized for the longest word the slot can hold, so nothing beside it moves when
+   the reading changes. That word is now "update required" (#448) rather than
+   "syncing…": the refusal readings share this slot with the calm three. */
 .ub-status-word {
-  width: 8ch;
+  width: 15ch;
   flex: none;
 }
 

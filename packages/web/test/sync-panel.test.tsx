@@ -25,6 +25,8 @@ import { SyncPanel } from "../src/ui/SyncPanel.js";
 import { usePresence } from "../src/ui/hooks.js";
 import type { HubEndpoint } from "../src/config.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
+import { TOKEN_MISSING } from "../src/ui/status-reading.js";
+import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 
 /** A workspace id is a uuid. */
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
@@ -256,6 +258,36 @@ describe("the sync panel renders the state this client holds", () => {
 
     const words = [offline.State, busy.State, quiet.State];
     expect(new Set(words).size).toBe(words.length);
+  });
+
+  /**
+   * #448: the `State` row used to read the calm word for a refused page too,
+   * so the panel someone opens *because* sync is broken agreed with the pill
+   * that everything was merely busy. The word now comes from the shared
+   * derivation, and the sentence it carries gets a row of its own — drawn only
+   * under a refusal, which is why the whole-fact-map test above still holds.
+   */
+  it("names a refusal in State, and why in a Reason row", () => {
+    vi.useFakeTimers();
+    const refused: Array<[string, string, Partial<RoomStatus>]> = [
+      [
+        "update required",
+        "the hub is older than this app — update the hub (app 2, hub 1)",
+        { protocolMismatch: { hub: 1, client: 2 } },
+      ],
+      ["no hub token", TOKEN_MISSING, { tokenMissing: true }],
+      ["not authorized", AUTH_REJECTED, { authFailed: true }],
+    ];
+    for (const [word, reason, status] of refused) {
+      const { host, root } = mount(fixture(status));
+      try {
+        expect(facts(host).State).toBe(word);
+        expect(facts(host).Reason).toBe(reason);
+      } finally {
+        act(() => root.unmount());
+        host.remove();
+      }
+    }
   });
 
   it("lists both sessions, with the caret's block only where there is one", () => {

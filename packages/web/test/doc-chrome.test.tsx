@@ -300,6 +300,41 @@ describe("the doc chrome reads the document, the awareness and the status", () =
   });
 
   /**
+   * #448: the pill used to show only the calm word, so a page the hub had
+   * refused sat in the topbar reading `syncing…` and sent its reader off to
+   * restart things at random. It now carries the refusal word — the word only,
+   * because the sentence saying what to do belongs in the panel this opens.
+   *
+   * What the words *are* is pinned once, in `status-reading.test.ts`. This asks
+   * the narrower question the pill owns: that the word reaches the visible slot
+   * and the accessible name, drawn in the offline tint.
+   */
+  it("carries a refusal's word, in the offline tint and the accessible name", () => {
+    const refused: Array<[string, Partial<RoomStatus>]> = [
+      ["update required", { protocolMismatch: { hub: 2, client: 1 } }],
+      ["no hub token", { tokenMissing: true }],
+      ["not authorized", { authFailed: true }],
+    ];
+    for (const [word, status] of refused) {
+      vi.useFakeTimers();
+      // Connected and synced underneath: the refusal has to outrank the calm
+      // reading, not merely fill in for a missing one.
+      const { host, root } = mount(fixture(status));
+      try {
+        expect(text(host, ".ub-pill-offline")).toBe(word);
+        expect(host.querySelector(".ub-pill-offline .ub-dot-off")).not.toBeNull();
+        expect(
+          host.querySelector(".ub-sync-toggle")?.getAttribute("aria-label"),
+        ).toContain(word);
+      } finally {
+        act(() => root.unmount());
+        host.remove();
+        vi.useRealTimers();
+      }
+    }
+  });
+
+  /**
    * #362: "synced" is not a status without "which hub". One machine
    * legitimately runs several — a dev island and a promoted remote — and two
    * tabs of one workspace can each be perfectly synced to a different world.
