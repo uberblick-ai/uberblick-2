@@ -355,6 +355,16 @@ describe("the sidebar is the _sidebar document", () => {
     expect(rowTitles(host, 0)).toEqual(["Sync"]);
     expect(pinControl(host)?.getAttribute("aria-pressed")).toBe("true");
 
+    // The open document's row says so the way the All-docs entry always has
+    // (#481): one state, `aria-current`, reaching the styling and a screen
+    // reader together — where a class reached only the styling. The footer
+    // entry is the discriminator: "current" has to mean the thing that is
+    // open, not every row in the column.
+    expect(rows(host, 0)[0]?.getAttribute("aria-current")).toBe("page");
+    expect(
+      host.querySelector(".ub-all-open-entry")?.getAttribute("aria-current"),
+    ).toBeNull();
+
     // And the same control is the way back out.
     act(() => pinControl(host)?.click());
     expect(readSidebar(peer)[0]?.docs).toEqual([]);
