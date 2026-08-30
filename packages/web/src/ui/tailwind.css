@@ -65,17 +65,27 @@
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
-  /* The product has no separate popover surface, and inventing one would be a
-     new palette value. A popover *is* a card that floats. */
-  --color-popover: var(--card);
-  --color-popover-foreground: var(--card-foreground);
+  /* Both vendored surfaces belong to the sidebar, and to nothing else: the
+     workspace switcher and the user panel are the only consumers of
+     `shadcn/dropdown-menu` and `shadcn/popover` in the app. So a popover here is
+     the sidebar that floats, not a card that floats (#480) — it is anchored to
+     that column, opens over it, and reading `--card` would now paint it a
+     surface it is nowhere near. */
+  --color-popover: var(--sidebar);
+  --color-popover-foreground: var(--sidebar-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
+  /* Follows the popover onto the sidebar for the same reason, and here it is
+     load-bearing rather than tidy: `--accent` and `--sidebar` are the same value
+     in dark, so a menu item highlighted with `--accent` over a sidebar ground
+     would be invisible to pointer and keyboard alike. `data-[highlighted]` on
+     `dropdown-menu.tsx` is the only thing in the scanned source that resolves
+     through this entry, so nothing outside those two menus moves with it. */
+  --color-accent: var(--sidebar-accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
