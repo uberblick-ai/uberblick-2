@@ -130,19 +130,15 @@ result. Unresolved product, agent-authority, safety or fundamentally unsafe-shap
 findings take `needs-decision`. Another adversary is exceptional and requires an
 explicit owner request, never an automatic preparation loop.
 
-Preparation may instead end in `split`. Technical decomposition is preparer
-judgment; decomposition that chooses product behavior is an owner decision.
-Thousands of hand-written changed lines are a strong presumption to split, and
-an exception must be justified in the prepared issue. The source becomes a
-coordination-only parent: remove `needs-preparation`, never add `ready`, and
-close it after its required children. Create each independently reviewable
-child with `needs-preparation`, `Parent: #N`, and only real ordering
-dependencies.
-
-Decide from the expected diff, not the issue body's length. Keep work together
-when the combined diff is reviewable in one sitting and a proposed child exists
-only to enable its sibling; split when the combined diff is not, or when a
-child has an independently useful outcome.
+Preparation may instead end in `split`. Decide from the expected diff, never
+the issue body's length: split when the combined change is not reviewable in
+one sitting or a child has an independently useful outcome; keep cohesive work
+together when a proposed child only enables its sibling. Technical decomposition
+is preparer judgment; choosing product behavior is an owner decision. Thousands
+of hand-written changed lines are a strong presumption to split. The source
+becomes a coordination-only parent: remove `needs-preparation`, never add
+`ready`, and close it after its independently reviewable children. Give each
+child `needs-preparation`, `Parent: #N`, and only real ordering dependencies.
 
 `needs-decision` exit path: the preparer asks one focused question as an issue
 comment, with concrete options and its recommendation, and replaces

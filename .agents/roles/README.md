@@ -40,11 +40,12 @@ Parent: <parent role> <parent run id>
 
 For a PR target the record also names `Head: <sha>`. The parent must hold the
 live claim named by `Parent`; for an implementer's pre-handoff PR review, that
-is its issue claim naming the PR branch. The child validates that claim, this
-delegation record and every supplied value before its first side effect. A
-missing or mismatched record is a refusal, not permission to fall back to the
-queue. The child's own claim and `Done:` repeat the parent and exact target so
-recovery can join the assignment to its outcome from GitHub alone.
+is its issue claim naming the PR branch. The child validates that claim, that
+the latest `Delegated:` record for its role and target names its run id, and
+every supplied value before its first side effect. A missing or mismatched
+record is a refusal, not permission to fall back to the queue. The child's own
+claim and `Done:` repeat the parent and exact target so recovery can join the
+assignment to its outcome from GitHub alone.
 
 Scratch space is private, disposable runtime state. Before its first temporary
 file, every run creates a fresh directory outside the committed worktree,
@@ -127,17 +128,12 @@ delegated implementer only after those facts make the claim stale and an
 explicit handover records the new implementer; a newer remote branch commit
 therefore prevents replacement even when no `Done:` exists after 30 minutes.
 
-When a delegated **non-implementation** child never claims, the parent edits
-its `Delegated:` record to append `Cancelled: <UTC timestamp> — no child claim`
-before launching one replacement. It may cancel immediately when the runtime
-confirms the child never started; without that knowledge, the record expires
-after 10 minutes. A late child refuses a cancelled assignment. The failed
-dispatch produced no verdict, so its replacement is not another round.
-
-A nested **non-implementation** subagent claim with no matching `Done:` expires
-after 30 minutes, even while its parent remains live; that same parent may then
-launch one replacement. The unfinished attempt produced no verdict, so the
-replacement is not a second adversary or review round.
+A nested **non-implementation** assignment expires with no claim 10 minutes
+after `Delegated:` (or immediately when the runtime confirms it never started),
+or with no matching `Done:` 30 minutes after its claim. The same live parent may
+then delegate one replacement; the latest-record check makes a late child
+refuse. An unfinished attempt produced no verdict, so replacement is not a
+second adversary or review round.
 
 ## Product context, proportional to the action
 
