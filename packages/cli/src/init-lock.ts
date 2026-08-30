@@ -58,7 +58,6 @@ import {
   writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { budget } from "./budget.js";
 import { credentialsPath } from "./config.js";
 import { removeQuietly } from "./safe-write.js";
 
@@ -68,7 +67,15 @@ const LOCK_FILE = ".init.lock";
 /** Beside it, held only while the starter documents are being written. */
 const SEED_LOCK_FILE = ".seed.lock";
 
-/** How long to wait for another `ub init` before giving up. */
+/**
+ * How long to wait for another `ub init` before giving up.
+ *
+ * Deliberately outside `budget.ts`'s test ceiling. That ceiling shortens
+ * deadlines whose expiry *is* the answer, where the same refusal simply arrives
+ * sooner. This one waits for a live sibling doing real work, so shortening it
+ * makes a run give up on a lock somebody is still legitimately holding — which
+ * is what it did, on fast machines only, until #524.
+ */
 const WAIT_TIMEOUT_MS = 2_000;
 
 /** Long enough not to spin, short enough to be invisible. */
@@ -267,7 +274,7 @@ export async function acquireInitLock(
 ): Promise<InitLock> {
   const path = options.path ?? initLockPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const deadline = Date.now() + (options.waitMs ?? budget(WAIT_TIMEOUT_MS));
+  const deadline = Date.now() + (options.waitMs ?? WAIT_TIMEOUT_MS);
   let announced = false;
 
   for (;;) {

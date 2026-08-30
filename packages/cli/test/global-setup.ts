@@ -26,6 +26,14 @@
  * Nothing here replaces the shipped launcher: `bin/ub.mjs` owns contracts a
  * bundle does not inherit, and `test/launcher.test.ts` still spawns the real
  * one.
+ *
+ * **Boundary: `vitest --watch` re-runs against a stale bundle.** vitest runs a
+ * global setup once per process and not again on a file change, so a watch
+ * session keeps spawning the `ub` it built when it started, however much
+ * `src/` has moved since. `vitest run` — what `mise run test` and both merge
+ * gates use — starts a process per run and is unaffected. A watch session that
+ * is editing `src/` should be restarted, or the change confirmed with a plain
+ * `vitest run`.
  */
 
 import { build } from "esbuild";

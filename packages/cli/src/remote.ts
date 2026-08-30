@@ -543,13 +543,15 @@ function credentialCouldFix(hub: HubState): boolean {
 
 interface Bridge {
   base: McpConfig;
+  /** The environment `base` was resolved from — the ceiling travels with it. */
+  env: NodeJS.ProcessEnv;
   target: string;
   credential: Credential;
   io: Io;
 }
 
 function remoteConfig(bridge: Bridge): McpConfig {
-  return bridgeConfig(bridge.base, {
+  return bridgeConfig(bridge.base, bridge.env, {
     hubUrl: bridge.target,
     authSecret: bridge.credential.secret,
   });
@@ -879,13 +881,14 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   // what this command was asked about. Everything downstream follows from the
   // id: the rooms opened on the remote, and the `<uuid>.sqlite` replica this
   // hydrates into, which is a different file from any workspace already here.
+  const bridgeEnv: NodeJS.ProcessEnv = {
+    ...resolved.env,
+    WORKSPACE_ID: flags.workspace,
+    HUB_URL: flags.endpoint,
+  };
   let base: McpConfig;
   try {
-    base = resolveMcpConfig({
-      ...resolved.env,
-      WORKSPACE_ID: flags.workspace,
-      HUB_URL: flags.endpoint,
-    });
+    base = resolveMcpConfig(bridgeEnv);
   } catch (error) {
     io.err(`ub remote join: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
@@ -898,7 +901,13 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     io.err(`ub remote join: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
   }
-  const bridge: Bridge = { base, target: flags.endpoint, credential, io };
+  const bridge: Bridge = {
+    base,
+    env: bridgeEnv,
+    target: flags.endpoint,
+    credential,
+    io,
+  };
 
   // Read as a fresh client, which writes nothing on either side — so every
   // refusal below leaves both this machine and the remote exactly as they were.

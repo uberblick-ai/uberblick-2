@@ -13,6 +13,14 @@
  * cannot lengthen it. So no default in this package moves, and a run without the
  * variable is byte-for-byte the run it always was.
  *
+ * **Which deadlines it may cap, and which it must not.** A deadline whose expiry
+ * *is* the answer can be shortened without changing an outcome — the refusal
+ * arrives sooner and says the same thing. A deadline that waits for a live
+ * sibling doing real work cannot: shortening it turns a success into a failure.
+ * `init-lock.ts`'s `WAIT_TIMEOUT_MS` is the second kind and is deliberately left
+ * uncapped; capping it made `ub open` give up on a lock a test was still
+ * holding, on a fast machine only (#524).
+ *
  * **Why an environment variable rather than an option.** The suites that pay
  * this cost spawn `ub` as a real process — that is the contract they defend —
  * and a function argument does not cross a process boundary. `init-lock.ts`
@@ -26,11 +34,17 @@
  * call, so capping them is a CLI concern, and the MCP server's own defaults stay
  * exactly where they are.
  *
- * Every deadline the CLI owns passes through this module. The two `McpConfig`
- * builders are re-exported here rather than wrapped at each of their call sites,
- * so a new caller cannot import the uncapped pair by accident: within
- * `packages/cli`, `./budget.js` is where `resolveMcpConfig` and `bridgeConfig`
- * come from.
+ * **What this module does not see.** `remote-init.ts` budgets a hub's first
+ * answer at `REACH_BUDGET_MS = 90_000` and gives each of its two HTTP probes
+ * 10 s; none of the three passes through here. No suite waits any of them out,
+ * so none needs to — but this module is an account of the deadlines that were
+ * costing the suite time, not of every deadline the CLI owns.
+ *
+ * The two `McpConfig` builders are re-exported here rather than wrapped at each
+ * of their call sites, so within `packages/cli` `./budget.js` is where
+ * `resolveMcpConfig` and `bridgeConfig` come from. That is a convention the
+ * import graph currently keeps, not a guard: nothing stops a new caller reaching
+ * for the uncapped pair in `@uberblick/mcp-server` directly.
  */
 
 import {
@@ -52,11 +66,8 @@ function ceiling(env: NodeJS.ProcessEnv): number | null {
 }
 
 /** `ms`, or the ceiling if one is set and shorter. */
-export function budget(
-  ms: number,
-  env: NodeJS.ProcessEnv = process.env,
-): number {
-  const cap = ceiling(env);
+export function budget(ms: number): number {
+  const cap = ceiling(process.env);
   return cap === null ? ms : Math.min(ms, cap);
 }
 
@@ -76,10 +87,19 @@ export function resolveMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfi
   return capped(uncappedResolveMcpConfig(env), env);
 }
 
-/** {@link uncappedBridgeConfig}, with the ceiling applied. */
+/**
+ * {@link uncappedBridgeConfig}, with the ceiling applied.
+ *
+ * The bridge builder replaces both deadlines with its own longer ones, so the
+ * cap has to be applied again afterwards — and from the environment that
+ * produced `config`, which is why `env` sits second and is not optional.
+ * Defaulting it to `process.env` is what let a caller-supplied ceiling cap
+ * `resolveMcpConfig` and then be silently ignored one call later.
+ */
 export function bridgeConfig(
   config: McpConfig,
+  env: NodeJS.ProcessEnv,
   overrides: { hubUrl?: string; authSecret?: string | null } = {},
 ): McpConfig {
-  return capped(uncappedBridgeConfig(config, overrides), process.env);
+  return capped(uncappedBridgeConfig(config, overrides), env);
 }
