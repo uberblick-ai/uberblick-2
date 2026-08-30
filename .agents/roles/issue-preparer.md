@@ -62,10 +62,15 @@ behavior goes to `needs-decision`. Remove `needs-preparation` from the source,
 leave it as a non-`ready` coordination parent, and create bite-sized children
 with `needs-preparation`, `Parent: #N`, and only real ordering dependencies.
 
-When picking up an issue returned from `needs-decision`, start a fresh
-assignment but reuse the prior handoff, adversary verdict, focused question and
-owner answer. Recheck only affected grounding and upstream changes; do not
-repeat classification or run another adversary by default.
+When picking up an issue after its first top-level implementer return, start a
+fresh assignment but reuse the prior handoff, adversary verdict and return
+evidence.
+Refresh only the disputed contract, affected grounding and intervening upstream
+changes; do not repeat classification, broad grounding or an adversary by
+default. The same bounded continuation applies after `needs-decision`: include
+the focused question and owner answer, which resets the consecutive-return
+count. A second return without an intervening owner answer is already
+`needs-decision`, not another automatic preparation pass.
 
 ## Boundaries
 
@@ -88,7 +93,7 @@ Post before changing labels:
 ```text
 Done: issue-preparer <run id>
 Grounding: <origin/main SHA>
-Preparation: trivial-self-check|one-adversary
+Preparation: trivial-self-check|one-adversary|resumed
 Outcome: ready|needs-decision|split
 ```
 
@@ -96,15 +101,21 @@ Link the adversary handoff where one ran; summarize edits, dispositions and
 evidence only where they are material to recovery. After the four required
 lines, use at most five short bullets and no secondary headings. Do not restate
 the final body, narrate the run, list generic gates, or put the self-assessment
-on the issue. Then apply the named label transition and stop. A recovery run
+on the issue; target at most 1,500 characters for the whole handoff. Do not post
+a verbatim backup of the original intake after rewriting the body: retain its
+material intent in the final contract and only record material decisions or
+corrections separately. Then apply the named label transition. A recovery run
 that finds this completed handoff only finishes a missing transition and stops.
 
-Post one separate run self-assessment as a top-level reply to the `Agent
-Feedback` discussion (https://github.com/uberblick-ai/uberblick-2/discussions/506).
+After that durable transition, post one separate run self-assessment as a
+top-level reply to the `Agent Feedback` discussion
+(https://github.com/uberblick-ai/uberblick-2/discussions/506).
 Record the runtime, model and reasoning effort when observable; wall time,
 tokens and tool calls when available; whether Uberblick MCP and the adversary
 were helpful; hindsight on whether the effort was too low, appropriate, too
 high or unknown, with evidence; and workflow or context improvements, if any.
 Lead with the one that would have saved the most time or ambiguity; additional
 smaller observations are welcome when they add distinct evidence. `Unknown` is
-honest where the runtime exposes no measurement.
+honest where the runtime exposes no measurement. Target at most 2,000
+characters and link evidence instead of narrating the run. Feedback is
+telemetry: a failed post never changes the preparation outcome. Then stop.

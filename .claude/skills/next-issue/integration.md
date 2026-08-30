@@ -19,9 +19,11 @@ protocol.
   requires at stateful boundaries, then remove it when the PR is settled.
 - Record every gate result against the commit SHA it ran at — container review,
   CI, the acceptance validation, the Codex verdict where that gate applied, the
-  Copilot state. Any new commit on the branch (fix-ups included) invalidates the
-  test/typecheck and review evidence: re-run those gates at the new `headRefOid`
-  rather than carrying an older verdict forward.
+  Copilot state. Any new commit on the branch (fix-ups included) invalidates
+  test/typecheck and immutable review evidence: re-run those gates at the new
+  `headRefOid`. For an earlier Codex verdict, follow `review-protocol.md`'s
+  risk-scoped re-review rule; either run a fresh round or record exactly which
+  reasoning still applies and why.
 - Check an acceptance box on a linked issue only with evidence (command output,
   test name), and check that the diff stays within the declared `Touches` — the
   shared set when the PR closes a batch.

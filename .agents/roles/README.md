@@ -21,13 +21,13 @@ eligible queue item under its `Pickup` section. Missing either is a refusal
 before side effects.
 
 **An internal subagent is the one exception, and it is the same exception for
-every delegating role** — issue-preparer to issue-adversary, integrator to
-implementation-reviewer, program coordinator to implementer. The parent supplies
-the child's role and run identity, the exact GitHub issue or PR key, and its own
-run identity as parent; nothing else. The child reconstructs from GitHub, never
-searches a queue and never acts on another item, and writes its durable result
-there before the parent acts on it. It does not consume or release the parent's
-claim, and a private transcript is never a handoff.
+every delegating role** — issue-preparer to issue-adversary, implementer or
+integrator to implementation-reviewer, program coordinator to implementer. The
+parent supplies the child's role and run identity, the exact GitHub issue or PR
+key, and its own run identity as parent; nothing else. The child reconstructs
+from GitHub, never searches a queue and never acts on another item, and writes
+its durable result there before the parent acts on it. It does not consume or
+release the parent's claim, and a private transcript is never a handoff.
 
 Before starting that child, the parent writes this assignment on the item it
 holds:
@@ -39,11 +39,12 @@ Parent: <parent role> <parent run id>
 ```
 
 For a PR target the record also names `Head: <sha>`. The parent must hold the
-live claim named by `Parent`; the child validates that claim, this delegation
-record and every supplied value before its first side effect. A missing or
-mismatched record is a refusal, not permission to fall back to the queue. The
-child's own claim and `Done:` repeat the parent and exact target so recovery can
-join the assignment to its outcome from GitHub alone.
+live claim named by `Parent`; for an implementer's pre-handoff PR review, that
+is its issue claim naming the PR branch. The child validates that claim, this
+delegation record and every supplied value before its first side effect. A
+missing or mismatched record is a refusal, not permission to fall back to the
+queue. The child's own claim and `Done:` repeat the parent and exact target so
+recovery can join the assignment to its outcome from GitHub alone.
 
 Scratch space is private, disposable runtime state. Before its first temporary
 file, every run creates a fresh directory outside the committed worktree,
@@ -56,10 +57,13 @@ one fresh adversary) → `ready` or an owner boundary → implementation. Bounde
 means one outcome and stopping condition, not one attempt: the preparer owns
 correctable findings through its final handoff rather than opening another role
 loop. A stopped process is never resumed: recovery starts a fresh assignment
-from GitHub's durable state. The one preparation-specific reuse is an issue
-returning from `needs-decision`: the fresh assignment reuses the previous
-handoff, adversary verdict, question and owner answer, and rechecks only what
-the answer or intervening upstream changes affected.
+from GitHub's durable state. The preparation-specific reuse is an issue
+returning once from implementation or returning from `needs-decision`: the fresh
+assignment reuses the previous handoff, adversary verdict, return evidence,
+question and owner answer as applicable, and rechecks only what those records or
+intervening upstream changes affected. A second consecutive implementer return
+without an owner answer goes to `needs-decision`, not a new automatic
+preparation pass.
 
 `Priority` means the organization issue field: Urgent → High → Medium → Low.
 The product owner owns every explicit value; agents never write it. Unset is

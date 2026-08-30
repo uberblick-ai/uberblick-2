@@ -32,9 +32,13 @@ withdrawal. Challenging the issue is not part of this lane; it happened in the
 issue-preparer's own run, and `ready` is that verdict. Two consequences are
 agent-neutral, because reclaimers and reviewers depend on them: a pickup that
 stops before any repository edit never leaves an `in-progress` label behind, and
-an issue whose contract turns out to be stale, or to need a decision only the
-owner can make, loses `ready` and returns for preparation instead of being
-implemented.
+a top-level issue whose contract turns out to be stale, or to need a decision
+only the owner can make, is returned instead of being implemented. The first
+consecutive return since the latest owner answer gets one focused
+`needs-preparation` repair that reuses prior grounding and challenge work. A
+second goes to `needs-decision`; an immediate owner boundary may go there on the
+first return. The exact record and label transitions live in
+`.github/ISSUE_SPEC.md`.
 
 An `in-progress` claim is stale and may be reclaimed only when all three facts
 are true:
@@ -63,15 +67,25 @@ agent's worktree. Only the current claim holder writes to a claimed branch. A
 handover first records the new implementer in a claim. Keep the change inside
 the issue's declared footprint and prefer the least code that defends the
 contract. Add contract or invariant tests, not tests of implementation
-trivia. Use the documented `mise` tasks for
-the issue's validation, including lint, typecheck, and tests where applicable.
+trivia. Use the documented `mise` tasks proportionally while editing, then run
+lint, typecheck and tests once against the final implementation head. Browser
+or e2e coverage is required only where the issue has a browser-observable
+outcome. The integrator, not the diff author, owns immutable review,
+merge-tier classification, and final-head review routing.
 
-Commit and push a feature branch, then open a PR against `main` whose body
-contains `Closes #N`, describes the change, and records validation. Never
-commit to `main` and never merge your own PR.
+Commit and push a feature branch, then open a PR against `main`. Its body is the
+single durable outcome, verification, findings, and KISS/overtesting self-review
+record and contains `Closes #N`. Before announcing completion, post the minimal
+PR handoff `.github/ISSUE_SPEC.md` defines. Do not duplicate either record with
+an issue completion comment. Never commit to `main` and never merge your own PR.
 
-Before announcing completion, post the PR handoff defined by
-`.github/ISSUE_SPEC.md`, including its KISS/overtesting self-review.
+Where `CLAUDE.md` requires a local Codex review, the implementer opens the PR as
+a draft and delegates one fresh independent critical review before handoff so it
+can correct clear findings in the same run. The reviewer authors no diff and the
+implementer makes no authoritative disposition; after any corrections the
+integrator owns final-head review, gate evidence, and every disposition. The
+exact delegation and convergence procedure lives in the role contracts and
+`.claude/skills/next-issue/review-protocol.md`.
 
 Only after that durable comment may the implementer notify the coordinator. A
 Codex Herdr message carries the PR URL and exact head SHA; for an Opus
@@ -81,10 +95,10 @@ is the fallback when the doorbell is unavailable.
 ## Review and coordination
 
 The author of a diff never reviews it authoritatively. Use an independent
-session and follow CLAUDE.md's gates and merge tiers. When a mandatory Codex
-round applies to a Codex-authored PR, use a different Codex session where one
-is available; only otherwise use an independent Opus reviewer, and record the
-reviewing session on the PR.
+session and follow CLAUDE.md's gates and merge tiers. A mandatory Codex round
+on a Codex-authored PR uses a different Codex session where one is available;
+only otherwise use an independent Opus reviewer. Record the reviewing session
+on the PR.
 
 Every role reconstructs claims and progress from GitHub and re-reads the issue
 and PR threads before acting. The integrator records validation and finding

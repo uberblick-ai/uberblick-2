@@ -12,12 +12,14 @@ One of two complete shapes:
 
 - a top-level assignment supplies the review queue, your role and your session
   or run identity, and nothing else;
-- an integrator's internal assignment supplies your role and run identity, one
-  exact PR key and head SHA, and the parent role and run identity.
+- an implementer's or integrator's internal assignment supplies your role and
+  run identity, one exact PR key and head SHA, and the parent role and run
+  identity.
 
 Refuse before any side effect when the selected shape is incomplete. For an
 internal assignment, also refuse unless that PR carries the parent's live claim
-and the README's matching durable delegation record at the supplied head.
+or links the implementer's live issue claim for its branch, and carries the
+README's matching durable delegation record at the supplied head.
 
 ## Pickup
 
@@ -45,9 +47,11 @@ target: report the drift and stop; a review at the new head is a new pickup.
 
 ## Boundaries
 
-No commits, no fix-ups, no merging, and no dispositioning — what happens to a
-finding is the integrator's. **Never review a diff this session authored.** A
-context reset does not create independence and no delegation manufactures it.
+No commits, no fix-ups, no merging, and no dispositioning. An implementer parent
+may correct a finding or answer it with evidence before handoff; the integrator
+still owns its authoritative disposition. **Never review a diff this session
+authored.** A context reset does not create independence and no delegation
+manufactures it.
 
 ## Context
 

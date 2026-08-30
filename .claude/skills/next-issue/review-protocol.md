@@ -1,22 +1,48 @@
 # Review protocol — external rounds, and what happens once a review returns
 
 Read this whenever a PR has an external round to request or a finding to
-disposition. `integration.md` beside this file owns the gates' order and their
-mechanics; "Requesting the round" applies before a review exists, and every
-section after it is conditional on one producing something.
+handle. The implementer owns the first required critical round before handoff;
+the integrator owns authoritative dispositions and any final-head round.
+`integration.md` beside this file owns the gates' order and mechanics.
 
 ## Requesting the round
 
 CLAUDE.md's gate list is the authority on *when* a local Codex review is
-required. The mechanism depends on the environment: under herdr
-(`test "${HERDR_ENV:-}" = 1`; use the herdr skill and `herdr agent` to find the
-Codex pane) dispatch the round to a Codex session; otherwise use the codex
-plugin. A further round is never a resumed session — it is a fresh
-`implementation-reviewer` pickup at the new head, within the re-review scoping
-below. Either way the review brief is the same: be critical, and hunt
-specifically for overtesting and overengineering per this repo's principles
-(KISS/YAGNI, least code wins, tests defend contracts and invariants — not
+required. The implementer opens a draft PR and posts the README's exact-PR
+delegation at its current head before starting a fresh
+`implementation-reviewer`. An Opus implementer calls Codex with the same
+validated transport as issue preparation:
+
+```sh
+codex exec -s workspace-write -c 'sandbox_workspace_write.network_access=true' - < <prompt-file> > <scratch-log> 2>&1
+```
+
+This command selects no `.codex/agents/*.toml` adapter, so the prompt tells the
+child to read the `implementation-reviewer` role contract. A Codex implementer
+uses a different Codex session where one is available. The assignment names the
+exact PR, head, child run id, and implementer parent run id, and nothing else
+— the reviewer contract supplies the critical brief. Read the verdict from the
+PR; inspect the private scratch log only when dispatch fails or no durable
+verdict appears, so the child's reasoning transcript does not consume the
+parent context.
+
+The implementer stays in the foreground until the reviewer writes its durable
+verdict. A dispatch failure is recorded on the PR, never presented as a review;
+the integrator later supplies any still-required round. A further round is never
+a resumed session — it is a fresh reviewer at the new head, within the
+re-review scoping below. Every brief says: be critical, and hunt specifically
+for overtesting and overengineering per this repo's principles (KISS/YAGNI,
+least code wins, tests defend contracts and invariants rather than
 implementation trivia).
+
+## Author-owned refinement
+
+For a review delegated by an implementer, the author applies clearly correct,
+in-scope findings in one batch and answers the others with evidence. Those
+answers are inputs, not dispositions. It requests no second pre-handoff round.
+A correction makes the earlier exact-head verdict stale as gate evidence, but
+not useless: the findings and author's responses remain durable input to the
+integrator, which decides whether the final head needs another external read.
 
 ## Finding triage — before any fix-up brief
 
