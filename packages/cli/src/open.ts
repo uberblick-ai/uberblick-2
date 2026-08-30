@@ -400,6 +400,12 @@ const CHECKOUT_ROOT = dirname(dirname(packageRoot));
  * one. Bounded all the same — there is no takeover of a lock a crashed build
  * left behind, and a foreground command that waits forever on one is worse than
  * one that says which file to remove.
+ *
+ * Deliberately outside {@link budget}'s test ceiling, for the reason
+ * `WAIT_TIMEOUT_MS` is: that ceiling shortens terminal probes, where expiry is a
+ * permitted answer. This waits for a live sibling doing real work, and a
+ * multi-minute build is not a deadline a test may shrink to milliseconds and
+ * still be testing anything.
  */
 const BUILD_WAIT_MS = 10 * 60_000;
 
