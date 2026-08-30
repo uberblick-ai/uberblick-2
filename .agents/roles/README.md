@@ -82,20 +82,31 @@ or admit any other role. Re-read immediately before and after claiming; the
 earliest valid claim wins, and a loser posts a one-line withdrawal and tries the
 next candidate.
 
-**Claims are ordered, and a live one is renewed.** Every claim, renewal,
-withdrawal and takeover is ordered by its comment `createdAt`, and by the
-immutable comment id where two share a timestamp. Ownership follows that order,
+**Claims are ordered, and a live one is renewed.** Every claim, withdrawal and
+takeover is ordered by its comment `createdAt`, and by the immutable comment id
+where two share a timestamp. Ownership follows that order,
 so a holder superseded by a valid takeover does not recover the item by writing
 again: its own claim keeps the older position, and the later write is
 recognisably stale rather than authoritative.
 
-A live run renews by posting `Renewed: <role> <session-or-run id>` on the item.
-Do not renew before the newest claim or renewal is 12 minutes old; renew before
-it reaches 15 minutes. Staleness is measured from that newest comment rather
-than the first. A top-level claim other than an implementation claim is stale
-when no completion exists and that newest comment is more than 30 minutes old;
-the window is twice the renewal interval so that a healthy foreground run is
-never reclaimed in the gap between two renewals.
+A live run renews by **editing its own claim comment**, never by posting another
+one: touch the body so the comment's `updated_at` moves, appending or replacing a
+single `Renewed: <UTC timestamp>` line. Do not renew before that `updated_at` is
+25 minutes old; renew before it reaches 30 minutes.
+
+Editing rather than appending is what lets the two timestamps do two different
+jobs. `created_at` never moves, so it keeps the holder's position in the claim
+order above and a superseded holder still cannot write its way back to the
+front. `updated_at` moves on every renewal and is the liveness signal. Both are
+on the REST comment object, so a reclaimer reads them with no new machinery, and
+GitHub's comment edit history keeps the renewals auditable. A renewal says only
+"still here", so posting it as a comment buries the claim, the delegation
+record, the gate evidence and the triage under records that carry nothing.
+
+A top-level claim other than an implementation claim is stale when no completion
+exists and its claim comment's `updated_at` is more than 60 minutes old; the
+window is twice the renewal interval so that a healthy foreground run is never
+reclaimed in the gap between two renewals.
 Every implementation claim, top-level or delegated, uses `AGENTS.md`'s same
 three facts, because branch ownership is not a timer. A parent may replace a
 delegated implementer only after those facts make the claim stale and an
