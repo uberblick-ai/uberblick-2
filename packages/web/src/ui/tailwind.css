@@ -78,7 +78,12 @@
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
+  /* Follows the popover onto the sidebar, like the highlight below and for the
+     same reason: the only thing in the scanned source that resolves through
+     this entry is the menu label, and that label sits on `--sidebar`, where
+     `--muted-foreground` is 3.96:1 in light — under WCAG AA for text that size
+     (#515). */
+  --color-muted-foreground: var(--sidebar-muted-foreground);
   /* Follows the popover onto the sidebar for the same reason, and here it is
      load-bearing rather than tidy: `--accent` and `--sidebar` are the same value
      in dark, so a menu item highlighted with `--accent` over a sidebar ground
@@ -89,7 +94,12 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
+  /* And the strokes, for the same reason again: the menu's own edge and its
+     separator are drawn *on* `--sidebar`, where `--border` is OKLab ΔE 0.021
+     against the ground — half the 0.040 `--sidebar-border` gives the column's
+     outer edge (#515). `border-border` and `bg-border` in the two vendored
+     components are all that resolves through this entry. */
+  --color-border: var(--sidebar-border);
   --color-input: var(--input);
   --color-ring: var(--ring);
   /* Not a shadcn name. The amber is the product's accent, and chrome that

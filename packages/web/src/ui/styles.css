@@ -106,19 +106,37 @@
   --sidebar-border: light-dark(oklch(0.9 0.006 65), oklch(1 0 0 / 12%));
   --sidebar-accent: light-dark(oklch(0.89 0.015 65), oklch(0.28 0.015 65));
 
-  /* The sidebar's five derived tints (#481). uberblick.ai steps its column back
-     from full ink in four places — the row, its leading icon, the group label,
-     the count — and edges the open row in brand. Each is a *named* token rather
-     than a percentage written at a use site, because a tint spelled out at four
-     rules is four places to drift; the alpha is on the ink, so the tint reads
-     against `--sidebar` and against `--sidebar-accent` alike.
+  /* The sidebar's six derived tints (#481, #515). uberblick.ai steps its column
+     back from full ink in four places — the row, its leading icon, the group
+     label, the count — and edges the open row in brand. Each is a *named* token
+     rather than a percentage written at a use site, because a tint spelled out
+     at four rules is four places to drift; the alpha is on the ink, so the tint
+     reads against `--sidebar` and against `--sidebar-accent` alike.
 
      They carry both halves the way every token above does, so light and dark
-     step back by the same amount rather than by two hand-picked colours. */
+     step back by the same amount rather than by two hand-picked colours.
+
+     The sixth is the AA half of #515, and it is why the label reads 60% rather
+     than the 55% #481 derived. In light this surface was under WCAG AA's 4.5:1
+     for small text twice over: `--muted-foreground` measures 3.96:1 on
+     `--sidebar` and 3.40:1 on `--sidebar-accent`, and the 55% label 4.20:1 and
+     4.01:1. (`--muted-foreground` failed on `--card` too, at 4.34:1, so #480
+     moved a surface out from under an existing failure rather than creating
+     one.) Owner decision, 2026-08-30: AA wins, one rung. The label steps to the
+     ladder's next rung, 60% — 4.96:1 and 4.70:1 — and every reading that was
+     `--muted-foreground` on this ground takes `--sidebar-muted-foreground` at
+     that same step, so the column carries one small-text ink rather than two
+     five points apart. Two names for one value on purpose: the label is a rung
+     of the ladder above and moves if that ladder is ever re-derived, while the
+     muted ink is the AA floor small text on this surface reads. Dark was never
+     the problem — 5.81:1 at 55% — and rises with them. `--muted-foreground`
+     itself does not move: it is what every other surface reads. The count pill
+     was already passing at 7.03:1 and is untouched. */
   --sidebar-row-foreground: light-dark(oklch(0.145 0 0 / 82%), oklch(0.985 0 0 / 82%));
   --sidebar-row-icon: light-dark(oklch(0.145 0 0 / 68%), oklch(0.985 0 0 / 68%));
-  --sidebar-group-label: light-dark(oklch(0.145 0 0 / 55%), oklch(0.985 0 0 / 55%));
+  --sidebar-group-label: light-dark(oklch(0.145 0 0 / 60%), oklch(0.985 0 0 / 60%));
   --sidebar-group-count: light-dark(oklch(0.145 0 0 / 70%), oklch(0.985 0 0 / 70%));
+  --sidebar-muted-foreground: light-dark(oklch(0.145 0 0 / 60%), oklch(0.985 0 0 / 60%));
   --sidebar-selected-border: light-dark(oklch(0.75 0.15 65 / 28%), oklch(0.8 0.18 65 / 28%));
 
   /* `--sidebar-accent`'s job, on the other surface (#516). #480 moved dark's
@@ -494,6 +512,15 @@ body {
   margin-bottom: 0.5rem;
 }
 
+/* The column's own small text: the "nothing pinned yet" line, and the `·
+   archived` suffix or uuid stub inside a pinned row. `.ub-muted` is a
+   whole-app class and keeps `--muted-foreground` everywhere else; on this
+   ground that reading is 3.96:1 (#515). Ahead of the head rule below, which
+   ties on specificity and has its own step. */
+.ub-list .ub-muted {
+  color: var(--sidebar-muted-foreground);
+}
+
 /* The status line under the head. Still mono — it is sync detail, not a name —
    but at the group label's size and step-back, so the head reads as one system
    with the labels below it (#481). */
@@ -551,7 +578,7 @@ body {
 }
 
 .ub-list-head button:disabled {
-  color: var(--muted-foreground);
+  color: var(--sidebar-muted-foreground);
   cursor: default;
 }
 
@@ -601,7 +628,7 @@ body {
 .ub-list-foot {
   margin-top: auto;
   padding-top: 0.5rem;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--sidebar-border);
 }
 
 /* ---- the sidebar's two anchored menus (#74, design 1c) ----
@@ -627,7 +654,7 @@ body {
   margin: -0.5rem -0.5rem 0.5rem;
   padding: 0.5rem;
   border: 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--sidebar-border);
   background: none;
   color: inherit;
   font: inherit;
@@ -652,12 +679,12 @@ body {
 }
 
 .ub-workspace-count {
-  color: var(--muted-foreground);
+  color: var(--sidebar-muted-foreground);
   font-size: 0.75rem;
 }
 
 .ub-menu-caret {
-  color: var(--muted-foreground);
+  color: var(--sidebar-muted-foreground);
   font-size: 0.7rem;
 }
 
@@ -720,7 +747,7 @@ body {
 }
 
 .ub-menu-value {
-  color: var(--muted-foreground);
+  color: var(--sidebar-muted-foreground);
   font-size: 0.75rem;
 }
 
@@ -751,7 +778,7 @@ body {
 .ub-panel-label {
   padding: 0;
   margin-bottom: 0.3rem;
-  color: var(--muted-foreground);
+  color: var(--sidebar-muted-foreground);
   font-size: 0.75rem;
 }
 
@@ -786,7 +813,7 @@ body {
 
 .ub-appearance-option {
   padding: 0.25rem 0.4rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--sidebar-border);
   border-radius: var(--radius-sm);
   background: none;
   color: inherit;
@@ -812,7 +839,7 @@ body {
   gap: 0.2rem;
   margin: 0;
   padding-top: 0.5rem;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--sidebar-border);
 }
 
 .ub-panel-fact {
@@ -823,7 +850,7 @@ body {
 }
 
 .ub-panel-fact dt {
-  color: var(--muted-foreground);
+  color: var(--sidebar-muted-foreground);
   font-size: 0.75rem;
 }
 
@@ -937,7 +964,7 @@ body {
   background: none;
   border-radius: var(--radius-sm);
   padding: 0.15rem 0.3rem;
-  color: var(--muted-foreground);
+  color: var(--sidebar-muted-foreground);
   font: inherit;
   font-size: 0.75rem;
   cursor: pointer;
@@ -965,7 +992,7 @@ body {
   margin: 0.25rem 0.4rem;
   padding: 0 0.2rem;
   background: transparent;
-  border: 1px solid var(--input);
+  border: 1px solid var(--sidebar-border);
   border-radius: var(--radius-sm);
   color: var(--foreground);
   font: inherit;
