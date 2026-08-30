@@ -28,6 +28,13 @@ exact PR, prove its current head still matches the assignment and this session
 did not author it, then post the permitted nested claim and review only that
 head.
 
+Prove session independence from durable evidence before claiming: compare the
+head's `Claude-Session` trailers and its linked implementer claim/delegation
+lineage with this run's launching session. Claude Agent children share their
+launcher's authorship identity; a fresh child context or run id is not
+independence. Refuse an internal assignment, or skip a top-level candidate, if
+that session launched an implementer whose commit remains in the head.
+
 For a top-level assignment, eligible: an open PR whose current head carries no
 review record and no live reviewer claim at that head, **and whose diff this
 session did not author** — check the commit trailers and the claim records on

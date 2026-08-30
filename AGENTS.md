@@ -100,6 +100,14 @@ on a Codex-authored PR uses a different Codex session where one is available;
 only otherwise use an independent Opus reviewer. Record the reviewing session
 on the PR.
 
+Independence follows the durable authoring session, not the fresh role run. A
+Claude Agent child shares its launching Claude session's authorship identity.
+Before an implementation reviewer or integrator claims a PR, it checks commit
+`Claude-Session` trailers and the linked claim/delegation records; if this
+session launched an implementer whose commit remains in the head, the PR is
+ineligible for that session. A new run id, context reset, or nested agent does
+not change that result.
+
 When CLAUDE.md's dual-challenge gate applies, the implementer owns the fresh
 Codex challenge and the integrator owns a distinct Opus challenge. Both use the
 `implementation-reviewer` role and write exact-head verdicts on the PR. The

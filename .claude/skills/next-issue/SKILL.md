@@ -44,7 +44,11 @@ so and return.
 
    Add the MCP route: the registered uberblick server, or — where none is
    registered — the throwaway `ub mcp serve` stdio client from #77 and #134, run
-   in a scratch directory outside the committed worktree.
+   in a scratch directory outside the committed worktree. For an integrator or
+   implementation-reviewer launch, explicitly state that the child shares this
+   launching session's authorship identity and must apply the role's durable
+   trailer/claim independence check before claiming; its fresh run id does not
+   create independence.
 4. **Announce and return.** Name the role launched and repeat that exact stable
    run id in your visible output, then stop.
 

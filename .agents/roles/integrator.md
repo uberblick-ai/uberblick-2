@@ -24,6 +24,14 @@ at that head. `human-approved` changes order and tier, never eligibility. Order:
 SHA, under the README's claim record and race rule. One PR — merged with its
 post-merge pass, or parked with the ruling — then stop.
 
+Prove the authorship condition before claiming: compare every commit's
+`Claude-Session` trailer and the linked implementer claim/delegation lineage
+with this run's launching session. A Claude Agent child shares the launcher's
+authorship identity. If that session launched an implementer whose commit is in
+the current head, skip the PR; a fresh integrator run id or child context is not
+independence. Record the proof briefly in the claim so a delegated reviewer can
+validate it without rediscovering the lineage.
+
 ## Outcome
 
 Every gate `CLAUDE.md` requires, run at the SHA the merge will use, and every
