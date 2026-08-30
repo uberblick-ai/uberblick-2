@@ -14,20 +14,8 @@
  */
 import { register } from "tsx/esm/api";
 
-// lib0, reached through yjs, reads `localStorage` at import time, and Node then
-// warns that `--localstorage-file` was not passed. Nobody running `ub` can act
-// on that, and stderr is where *our* diagnostics go — including into an MCP
-// client's log — so this one warning is dropped and every other still printed.
-// Node prints warnings from its own listener, hence removing it first.
-process.removeAllListeners("warning");
-process.on("warning", (warning) => {
-  const noise =
-    warning.name === "ExperimentalWarning" &&
-    warning.message.includes("localStorage");
-  if (!noise) {
-    process.stderr.write(`${warning.name}: ${warning.message}\n`);
-  }
-});
-
+// The stderr warning policy is not here but in `src/warnings.ts`, called by
+// `src/main.ts` — so this shim and the bundle the test suite builds cannot
+// drift apart on it. This file's own contract is the line below.
 register();
 await import(new URL("../src/main.ts", import.meta.url).href);

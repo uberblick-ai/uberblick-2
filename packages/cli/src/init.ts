@@ -66,7 +66,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { userInfo } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
-import { bridgeConfig, resolveMcpConfig } from "@uberblick/mcp-server";
+import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { findCheckoutRoot } from "./checkout.js";
 import {

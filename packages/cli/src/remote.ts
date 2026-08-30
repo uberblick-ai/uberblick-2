@@ -49,12 +49,10 @@ import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
 import { parseArgs } from "node:util";
 import {
-  bridgeConfig,
   compareCorpus,
   inspectRemote,
   isIdentical,
   liveDocs,
-  resolveMcpConfig,
   syncWorkspace,
 } from "@uberblick/mcp-server";
 import type {
@@ -64,6 +62,7 @@ import type {
   McpConfig,
 } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
+import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import {
   credentialsPath,
   readCredentials,

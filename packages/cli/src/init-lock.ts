@@ -58,6 +58,7 @@ import {
   writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { budget } from "./budget.js";
 import { credentialsPath } from "./config.js";
 import { removeQuietly } from "./safe-write.js";
 
@@ -266,7 +267,7 @@ export async function acquireInitLock(
 ): Promise<InitLock> {
   const path = options.path ?? initLockPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const deadline = Date.now() + (options.waitMs ?? WAIT_TIMEOUT_MS);
+  const deadline = Date.now() + (options.waitMs ?? budget(WAIT_TIMEOUT_MS));
   let announced = false;
 
   for (;;) {

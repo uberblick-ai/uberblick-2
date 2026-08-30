@@ -28,7 +28,27 @@ import { fileURLToPath } from "node:url";
 /** The package root, so a test can spawn `bin/ub.mjs` the way a user would. */
 export const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-export const UB_BIN = join(PACKAGE_ROOT, "bin", "ub.mjs");
+/**
+ * The launcher a checkout ships, resolving tsx relative to itself.
+ *
+ * `test/launcher.test.ts` is what still spawns it. The bulk of the suite goes
+ * through {@link UB_BIN} below, because paying for a tsx registration and a
+ * fresh transpile of three packages in every child is a tenth of a second times
+ * several hundred spawns.
+ */
+export const SHIPPED_UB = join(PACKAGE_ROOT, "bin", "ub.mjs");
+
+/**
+ * The built `ub`, written once per `vitest run` by `test/global-setup.ts`.
+ *
+ * One directory below the package root on purpose — the same depth as
+ * `src/*.ts` — so the three `import.meta.url`-relative resolutions in
+ * `version.ts`, `starter.ts` and `open.ts` land where they land from source.
+ */
+export const BUILT_UB = join(PACKAGE_ROOT, ".test-build", "ub.mjs");
+
+/** What {@link runUb} and {@link runUbAsync} spawn. */
+export const UB_BIN = BUILT_UB;
 
 /** The repository root, so a test can read the real `.gitignore`. */
 export const REPO_ROOT = dirname(dirname(PACKAGE_ROOT));
@@ -131,6 +151,26 @@ export function sandbox(files: SandboxFiles = {}): Sandbox {
   for (const key of RESOLVED_VARIABLES) {
     delete env[key];
   }
+  // Every deadline `ub` waits out, capped at a duration this suite chose rather
+  // than the ones a person on a tethered laptop needs (`src/budget.ts`). The
+  // refusals these suites assert are only *reachable* by sitting out a budget —
+  // a hub that accepts a socket and never serves the room, a lock nobody
+  // releases — and at their product values that is 5 s or 15 s per assertion.
+  //
+  // A ceiling, never a floor: it shortens waits and lengthens nothing.
+  //
+  // 400 ms, and not assumed to be safe — checked under the worst contention
+  // available. The same suites do real work against a real hub on loopback,
+  // seeding a corpus and syncing it, and that completes in tens of
+  // milliseconds; the whole suite is green with every spawned run, every
+  // in-process hub and vitest's own workers sharing a single core
+  // (`taskset -c 0`). A test that needs longer passes its own value through
+  // `extraEnv`.
+  //
+  // The suites' *own* clients — the hubs they start, the replicas they verify
+  // with — import `resolveMcpConfig` straight from `@uberblick/mcp-server` and
+  // keep the full budgets. This ceiling is for the `ub` under test.
+  env.UB_TEST_MAX_WAIT_MS = "400";
   // HOME too: it is where the XDG defaults point, so a test that forgets to set
   // XDG_CONFIG_HOME must still not read the developer's real configuration.
   env.HOME = root;

@@ -26,6 +26,7 @@ import { createServer } from "node:net";
 import { DEFAULT_HOST, DEFAULT_PORT } from "@uberblick/hub/config";
 import type { HubState, McpConfig } from "@uberblick/mcp-server";
 import { inspectRemote } from "@uberblick/mcp-server";
+import { budget } from "./budget.js";
 
 /**
  * What a dial found, which is one answer more than a connection has.
@@ -116,7 +117,7 @@ export function probePort(host: string, port: number): Promise<PortProbe> {
  */
 export async function probeHubClock(
   hubUrl: string,
-  timeoutMs = 2_000,
+  timeoutMs = budget(2_000),
 ): Promise<number | null> {
   let url: URL;
   try {

@@ -65,13 +65,12 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  bridgeConfig,
   importSeedDir,
   readSeedDocs,
-  resolveMcpConfig,
   syncWorkspace,
 } from "@uberblick/mcp-server";
 import type { SeedDoc } from "@uberblick/mcp-server";
+import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 
 /** `templates/` in this package — the only place the starter documents live. */
 export const TEMPLATE_DIR = join(
