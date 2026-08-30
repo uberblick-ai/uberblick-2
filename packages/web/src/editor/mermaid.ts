@@ -26,16 +26,18 @@
  *    everything else with a `ParseError` — a `sequenceDiagram`, a `subgraph`, a
  *    `;` separator. That is not a failure and says nothing extra: the block
  *    renders exactly as it did before this module existed.
- * 2. The diagram is past {@link MAX_NODES} / {@link MAX_EDGES}, and the reader
- *    is told so.
+ * 2. The source is past {@link MAX_SOURCE}, or the diagram past
+ *    {@link MAX_NODES} / {@link MAX_EDGES}, and the reader is told which.
  * 3. The block carries a `comment` mark. The schema lets annotations anchor in
  *    this block's text (CLAUDE.md), and a drawn diagram hides the text they are
  *    anchored in — so an annotated block stays source rather than swallowing
  *    the annotation.
- * 4. Anything else at all. The catch is total on purpose: `snap` throws a bare
- *    `Error` at two internal-invariant sites, and a throw escaping this
- *    NodeView takes the whole editor down for every client of the document —
- *    see {@link drawDiagram}.
+ * 4. Anything else at all. The catch is total — it wraps the parse, the layout,
+ *    the SVG *and* the DOM adoption that follows, and `draw` guards the rest of
+ *    the update path around it. `snap` throws a bare `Error` at two
+ *    internal-invariant sites, and a throw escaping this NodeView takes the
+ *    whole editor down for every client of the document — see
+ *    {@link drawDiagram}.
  *
  * Rendering is deterministic: same text, byte-identical SVG on every replica —
  * and now on every appearance too, because the palette is `light-dark()` rather
@@ -49,15 +51,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import type { Plugin } from "@tiptap/pm/state";
 import type { NodeView } from "@tiptap/pm/view";
-import {
-  DARK_THEME,
-  DEFAULT_THEME,
-  ParseError,
-  RenderError,
-  parse,
-  snap,
-  toSvg,
-} from "@uberblick/ablauf";
+import { DARK_THEME, DEFAULT_THEME, ParseError, parse, snap, toSvg } from "@uberblick/ablauf";
 import type { Theme } from "@uberblick/ablauf";
 import { COMMENT_MARK } from "@uberblick/schema";
 import {
@@ -88,6 +82,12 @@ const EDITING_CLASS = "ub-mermaid-editing";
  * both halves are strings that differ, which is true of all twelve colours and
  * of none of the sizes (`fontFamily` is one string in both). A token ablauf
  * adds is therefore handled without an edit here.
+ *
+ * **An ablauf bump must re-check two things here**, both of them assumptions
+ * about the library rather than about this code: that every *differing* string
+ * token is still a colour — a differing non-colour string would be wrapped into
+ * an invalid attribute value — and that the escaping in `toSvg` still covers
+ * the same vocabulary the XSS review of #514 checked it against.
  */
 const THEME: Partial<Theme> = (() => {
   const merged: Record<string, string | number> = { ...DEFAULT_THEME };
@@ -103,25 +103,47 @@ const THEME: Partial<Theme> = (() => {
 /* -------------------------------------------------------------- the budget */
 
 /**
- * The size past which this block stays source and says so.
+ * The size past which this block stays source and says so — three axes, all of
+ * them the same 100ms line drawn in a different currency.
  *
  * `snap` is superlinear in both boxes and arrows and runs on the main thread,
  * so one durable block can freeze every reader who opens the document — and
- * because the text lives in the CRDT, nobody can reload out of it. The line is
- * where a single draw stops being instant on the slowest host measured for
- * #514: 51 boxes cost 60ms of `snap` there and 102 cost 298ms, which puts the
- * 100ms mark at ~64 boxes.
+ * because the text lives in the CRDT, nobody can reload out of it.
+ *
+ * **Boxes are counted against the worst shape, not the common one.** Cost at a
+ * given box count spans 550x with shape, so a cap derived from a chain is not a
+ * cap at all: on this host (Node 26.7.0, macOS) 64 boxes as a chain draw in
+ * 0.9ms, while 64 *disconnected maximum-width decision boxes* — 2.2 kB of
+ * source, no arrows at all — take 166ms. That shape is the calibration: 48 of
+ * them cost 61ms here, 54 cost exactly 100ms, and 48 measured 59.5ms and 39.1ms
+ * on the two other hosts #514 was reviewed on. Hence 48, not 64. Label width
+ * does not move it; disconnectedness and box shape do.
  *
  * Arrows are a separate axis rather than a consequence of boxes, because
  * ablauf expands `&` groups multiplicatively: 3.3 kB of perfectly valid mermaid
  * reached 62,500 arrows and a 9 MB picture. 625 arrows measured ~22ms on the
- * faster host, ~3.5x that on the slower one, so 512 is the same 100ms mark
- * expressed in arrows.
+ * faster host, ~3.5x that on the slower one, so 512 is the same mark in arrows;
+ * the worst shape at both caps at once — 24 & 24 maximum-width diamonds — is
+ * 68ms here, so the two caps compose.
+ *
+ * **Source length is the third axis, and it is the only one checked before
+ * `parse`.** The counts can only refuse a graph that already exists, and
+ * building it is itself the attack: with repeated one-character ids in one `&`
+ * line, edges grow as `(chars/8)²`, so 16 kB parses to 4.2M edges in 113ms and
+ * 378 MB, 32 kB takes 434ms and 1.35 GB, and **48 kB aborts the process with a
+ * fatal V8 out-of-memory** — which in a browser is the renderer dying, and
+ * which no `catch` below can see, because it is not a JS exception. 16,384
+ * refuses nothing the counts admit: the largest source that can pass 48 boxes
+ * and 512 arrows is 512 explicitly written labelled arrows, which is 14.8 kB.
+ * It bounds the picture too — `title: source` makes the SVG at least the
+ * source's size, and every label in it comes from the source — which is what
+ * keeps a block the counts accept from putting a 100 MB SVG in the DOM.
  *
  * Deliberately not configurable: a budget a document can raise is a budget an
  * agent can raise, and the freeze it prevents is everyone's, not the author's.
  */
-const MAX_NODES = 64;
+const MAX_SOURCE = 16_384;
+const MAX_NODES = 48;
 const MAX_EDGES = 512;
 
 /* ------------------------------------------------------------------ drawing */
@@ -137,8 +159,19 @@ interface Drawing {
 /** Source, with nothing to explain: ablauf simply does not read this text. */
 const UNREADABLE: Drawing = { drawn: false, note: null };
 
-const tooLarge = (nodes: number, edges: number): string =>
-  `Too large to draw: ${nodes} boxes and ${edges} arrows, past this block's ${MAX_NODES} and ${MAX_EDGES}. Laying that out would freeze the page for everyone reading the document, so here is the source instead. Splitting it into smaller diagrams draws each of them.`;
+/**
+ * The refusal, naming only the limit that was actually passed — a reader told
+ * their 64 arrows are "past 512" learns nothing and distrusts the rest.
+ */
+const tooLarge = (past: string): string =>
+  `Too large to draw: ${past}. Laying that out would freeze the page for everyone reading the document, so here is the source instead. Splitting it into smaller diagrams draws each of them.`;
+
+const overCounts = (nodes: number, edges: number): string => {
+  const past: string[] = [];
+  if (nodes > MAX_NODES) past.push(`${nodes} boxes past this block's ${MAX_NODES}`);
+  if (edges > MAX_EDGES) past.push(`${edges} arrows past this block's ${MAX_EDGES}`);
+  return tooLarge(past.join(" and "));
+};
 
 const ANNOTATED =
   "Shown as source because this block carries a comment: comments are anchored in the text, and a drawn diagram would hide the text they point at.";
@@ -153,60 +186,70 @@ const FAILED =
  * fallback rule — the same text gives the same coordinates on every replica,
  * which is what makes the SVG comparable at all.
  *
- * **The catch is total, and that is the point.** ablauf declares two refusals,
- * `ParseError` for source outside its subset and `RenderError` for a picture it
- * will not draw, and those two are still recognised by type — they are what
- * keeps an unsupported diagram distinguishable from a broken one. But they are
- * not everything ablauf throws: `snap` throws a bare `Error` at
- * `dist/layout/snap.js:238` and `:320` on its own internal invariants. A throw
- * that escapes here escapes through y-prosemirror out of `NodeView.update`,
- * *after* the Y.Doc has already taken the text — so the reader cannot type, and
- * every client that later opens the document fails to mount the editor at all,
- * permanently, recoverable only by an agent rewriting the block over MCP. One
- * block's picture is never worth that, so anything unexpected degrades this
- * block and shouts on the console.
+ * **The catch is total, and that is the point.** It wraps every statement in
+ * this function, `DOMParser` and `importNode` included — a `try` that stops
+ * before the DOM work is not a total catch, it is a docstring (#514 review,
+ * F-A). A throw that escapes here escapes through y-prosemirror out of
+ * `NodeView.update`, *after* the Y.Doc has already taken the text — so the
+ * reader cannot type, and every client that later opens the document fails to
+ * mount the editor at all, permanently, recoverable only by an agent rewriting
+ * the block over MCP. One block's picture is never worth that.
+ *
+ * Exactly one throw is classified rather than reported: `ParseError`, which is
+ * ablauf saying "not my subset" and is the ordinary fate of a `sequenceDiagram`.
+ * Its sibling `RenderError` deliberately is *not*, because ablauf raises it only
+ * for arguments this binding supplied — a non-finite number, a missing position,
+ * a bad `margin`, a bad numeric theme token. Every reachable `RenderError` is
+ * therefore a bug here, and a bug that renders as silence is a bug nobody finds,
+ * so it takes the same path as any other unexpected throw.
  */
 function drawDiagram(target: HTMLElement, source: string): Drawing {
-  let svg: string;
   try {
+    // Before `parse`, because the counts can only refuse a graph that has
+    // already been built, and building it is itself the cost — see MAX_SOURCE.
+    if (source.length > MAX_SOURCE) {
+      target.replaceChildren();
+      return {
+        drawn: false,
+        note: tooLarge(`${source.length} characters of source past this block's ${MAX_SOURCE}`),
+      };
+    }
     const graph = parse(source);
     const nodes = graph.nodes.length;
     const edges = graph.edges.length;
     if (nodes > MAX_NODES || edges > MAX_EDGES) {
       target.replaceChildren();
-      return { drawn: false, note: tooLarge(nodes, edges) };
+      return { drawn: false, note: overCounts(nodes, edges) };
     }
     // The source is the only honest alternative text a diagram has, and it is
     // the one thing a reader of the drawn block cannot otherwise reach: the
     // stylesheet hides the `<pre>` while the picture shows.
-    svg = toSvg(graph, snap(graph).positions, { theme: THEME, title: source });
+    const svg = toSvg(graph, snap(graph).positions, { theme: THEME, title: source });
+    // Parsed as SVG rather than assigned as markup: the picture is a foreign
+    // document, and this is the one path that puts it in the right namespace
+    // without an HTML parser's opinions in between.
+    const drawn = new DOMParser().parseFromString(svg, "image/svg+xml");
+    // A malformed SVG does not throw — `DOMParser` hands back a `parsererror`
+    // document instead, and adopting that would replace the reader's text with
+    // a browser error box. ablauf's escaping covers `& < > " '` and passes
+    // XML-illegal characters through, so a control character pasted into a
+    // label reaches here today.
+    if (drawn.getElementsByTagName("parsererror").length > 0) {
+      target.replaceChildren();
+      console.error(
+        "uberblick: ablauf drew an SVG this browser could not parse",
+        drawn.documentElement.textContent,
+      );
+      return { drawn: false, note: FAILED };
+    }
+    target.replaceChildren(document.importNode(drawn.documentElement, true));
+    return { drawn: true, note: null };
   } catch (error) {
     target.replaceChildren();
-    if (error instanceof ParseError || error instanceof RenderError) {
-      return UNREADABLE;
-    }
+    if (error instanceof ParseError) return UNREADABLE;
     console.error("uberblick: drawing a mermaid block failed", error);
     return { drawn: false, note: FAILED };
   }
-  // Parsed as SVG rather than assigned as markup: the picture is a foreign
-  // document, and this is the one path that puts it in the right namespace
-  // without an HTML parser's opinions in between.
-  const drawn = new DOMParser().parseFromString(svg, "image/svg+xml");
-  // A malformed SVG does not throw — `DOMParser` hands back a `parsererror`
-  // document instead, and adopting that would replace the reader's text with a
-  // browser error box. ablauf's escaping covers `& < > " '` and passes
-  // XML-illegal characters through, so a control character pasted into a label
-  // reaches here today.
-  if (drawn.getElementsByTagName("parsererror").length > 0) {
-    target.replaceChildren();
-    console.error(
-      "uberblick: ablauf drew an SVG this browser could not parse",
-      drawn.documentElement.textContent,
-    );
-    return { drawn: false, note: FAILED };
-  }
-  target.replaceChildren(document.importNode(drawn.documentElement, true));
-  return { drawn: true, note: null };
 }
 
 /** Whether any of the block's text carries an annotation's anchor. */
@@ -270,7 +313,7 @@ export const mermaidBlockView: NodeViewRenderer = ({
   /** What the picture on screen was drawn from, or null before the first draw. */
   let drawnFrom: { text: string; annotated: boolean } | null = null;
 
-  const draw = (): void => {
+  const redraw = (): void => {
     const text = current.textContent;
     const annotated = carriesComment(current);
     if (drawnFrom?.text === text && drawnFrom.annotated === annotated) return;
@@ -292,6 +335,25 @@ export const mermaidBlockView: NodeViewRenderer = ({
     note.textContent = drawing.note ?? "";
     note.hidden = drawing.note === null;
     mermaidChrome.sync(current, dom);
+  };
+
+  /**
+   * The boundary. `drawDiagram` guards itself, but the work around it —
+   * reading the marks, mirroring the block's chrome — runs on the same update
+   * ProseMirror is in the middle of, and one throw from any of it bricks the
+   * editor for every client of the document. Nothing but DOM primitives runs
+   * in the catch, so the degraded state cannot itself fail.
+   */
+  const draw = (): void => {
+    try {
+      redraw();
+    } catch (error) {
+      console.error("uberblick: drawing a mermaid block failed", error);
+      rendered.replaceChildren();
+      dom.setAttribute("data-rendered", "false");
+      note.textContent = FAILED;
+      note.hidden = false;
+    }
   };
   draw();
 

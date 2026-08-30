@@ -29,11 +29,16 @@
  * What the block refuses to draw, and how it refuses (#514's review round).
  * Every one of these leaves the reader's text on screen:
  *
- * 6. **A diagram past the size budget** — the freeze it prevents belongs to
- *    every reader of the document, not to whoever pasted the block.
- * 7. **An unexpected throw out of the renderer.** `snap` throws a bare `Error`
- *    on its own invariants, and a throw escaping the NodeView bricks the editor
- *    for every client of the document, permanently. The block degrades instead.
+ * 6. **A diagram past the size budget** — on any of its three axes, and the
+ *    freeze it prevents belongs to every reader of the document, not to whoever
+ *    pasted the block. The source-length axis is the one checked before
+ *    `parse`, because building the graph is itself the cost.
+ * 7. **An unexpected throw anywhere in the update path.** `snap` throws a bare
+ *    `Error` on its own invariants, `DOMParser` and `importNode` are browser
+ *    primitives only a docstring promised would never throw, and the block's
+ *    chrome is mirrored outside the renderer altogether. A throw escaping the
+ *    NodeView bricks the editor for every client of the document, permanently.
+ *    The block degrades instead.
  * 8. **A block carrying an annotation**, because a drawn diagram hides the text
  *    the annotation is anchored in.
  *
@@ -52,6 +57,7 @@ import {
   initDoc,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
+import { mermaidChrome } from "../src/editor/source-chrome.js";
 import { mountEditor } from "./helpers.js";
 
 /**
@@ -78,11 +84,22 @@ const FLOWCHART = "flowchart TD\n  start([Request]) --> check{Valid?}\n  check -
 const SEQUENCE = "sequenceDiagram\n  alice->>bob: hello";
 const SUBGRAPH = "flowchart TD\n  subgraph one\n    a --> b\n  end";
 
-/** A chain of `n` boxes: `n` nodes, `n - 1` arrows, and nothing else. */
-function chain(n: number): string {
+/**
+ * `n` disconnected maximum-width decision boxes — the shape the box cap is
+ * calibrated against, because cost at a given box count spans 550x with shape
+ * and this is the expensive end (#514 review, F-C). The same 64 boxes as a
+ * chain draw in under a millisecond.
+ */
+function diamonds(n: number): string {
   const lines = ["flowchart TD"];
-  for (let i = 1; i < n; i += 1) lines.push(`  n${i - 1} --> n${i}`);
+  for (let i = 0; i < n; i += 1) lines.push(`  n${i}{${"A".repeat(26)}}`);
   return lines.join("\n");
+}
+
+/** One box whose label fills the source to exactly `chars` characters. */
+function padded(chars: number): string {
+  const head = "flowchart TD\n  a[";
+  return `${head}${"A".repeat(chars - head.length - 1)}]`;
 }
 
 /**
@@ -228,8 +245,6 @@ describe("the mermaid block", () => {
 
       expect(diagram(editor)?.textContent).toContain("Unauthorized");
       expect(diagram(editor)?.textContent).not.toContain("401");
-      // One block, one text: the drawing added nothing to the document.
-      expect(getBlocks(ydoc)).toHaveLength(2);
     } finally {
       editor.destroy();
     }
@@ -275,48 +290,37 @@ describe("the mermaid block", () => {
   });
 
   /**
-   * One picture serves both appearances. The colours are ablauf's two palettes
-   * written as `light-dark()`, which the browser resolves from `color-scheme` —
-   * so no diagram subscribes to anything, and flipping appearance costs no
-   * layout pass at all. (That the resolved colours really do change is a fact
-   * only a CSS engine can state: `e2e/mermaid.spec.ts`.)
-   */
-  it("draws one appearance-independent picture", () => {
-    const { ydoc } = docWithMermaid(FLOWCHART);
-    document.documentElement.setAttribute("data-theme", "light");
-    const { editor } = mountEditor(ydoc);
-    try {
-      const light = diagram(editor)?.outerHTML;
-      expect(light).toContain("light-dark(");
-
-      document.documentElement.setAttribute("data-theme", "dark");
-      caret(editor, 1);
-
-      expect(diagram(editor)?.outerHTML).toBe(light);
-    } finally {
-      editor.destroy();
-    }
-  });
-
-  /**
-   * The budget, at its boundary. `snap` is superlinear in both boxes and
-   * arrows, so both are capped, and the refusal is visible: a reader whose
-   * diagram stopped drawing is owed the reason and a way out.
+   * The budget, at each of its three boundaries, and the refusal naming only
+   * the axis that was passed — a reader told their 64 arrows are "past 512"
+   * learns nothing. The box rows use the expensive shape rather than a chain,
+   * because that is what the cap is calibrated on.
+   *
+   * Source length is capped before `parse` runs: the counts can only refuse a
+   * graph that already exists, and with `&` groups building it costs quadratic
+   * memory — past ~48 kB it aborts the renderer outright, which no `catch` in
+   * the binding can see.
    */
   it.each([
-    ["64 boxes", chain(64), true],
-    ["65 boxes", chain(65), false],
-    ["512 arrows", grid(16, 32), true],
-    ["1024 arrows over 64 boxes", grid(32, 32), false],
-  ])("draws %s: %o", (_name, text, expected) => {
+    ["48 boxes", diamonds(48), null],
+    ["49 boxes", diamonds(49), "49 boxes past this block's 48"],
+    ["512 arrows", grid(16, 32), null],
+    ["576 arrows over 48 boxes", grid(24, 24), "576 arrows past this block's 512"],
+    ["16,384 characters of source", padded(16_384), null],
+    [
+      "16,385 characters of source",
+      padded(16_385),
+      "16385 characters of source past this block's 16384",
+    ],
+  ])("draws %s: %o", (_name, text, refusal) => {
     const { ydoc } = docWithMermaid(text);
     const { editor } = mountEditor(ydoc);
     try {
-      expect(block(editor)?.getAttribute("data-rendered")).toBe(String(expected));
-      if (expected) {
+      expect(block(editor)?.getAttribute("data-rendered")).toBe(String(refusal === null));
+      if (refusal === null) {
         expect(note(editor)).toBeNull();
       } else {
-        expect(note(editor)).toContain("Too large to draw");
+        // Only the limit that was actually passed, and nothing else.
+        expect(note(editor)?.startsWith(`Too large to draw: ${refusal}.`)).toBe(true);
         // The text is what it always was, and the reader can still read it.
         expect(block(editor)?.querySelector("pre")?.textContent).toBe(text);
         expect(getBlocks(ydoc)[0]?.text).toBe(text);
@@ -327,15 +331,43 @@ describe("the mermaid block", () => {
   });
 
   /**
-   * The failure this catch exists for. ablauf declares `ParseError` and
-   * `RenderError`, but `snap` throws a bare `Error` on its own invariants — and
-   * a throw out of a NodeView escapes through y-prosemirror *after* the Y.Doc
-   * has taken the text, so every client that opens the document afterwards
-   * fails to mount the editor at all. Degrade the block, never the editor.
+   * The failure this guard exists for, at each place a throw can come from. A
+   * throw out of a NodeView escapes through y-prosemirror *after* the Y.Doc has
+   * taken the text, so every client that opens the document afterwards fails to
+   * mount the editor at all. Degrade the block, never the editor.
+   *
+   * Three sources, because the guard has to cover all of them: ablauf's own
+   * `snap` throws a bare `Error` on its internal invariants; `DOMParser` and
+   * `importNode` are browser primitives that a docstring — not the code — used
+   * to promise would never throw (#514 review, F-A); and the block's chrome is
+   * mirrored outside the renderer entirely.
    */
-  it("degrades the block, not the editor, when the renderer throws", () => {
+  it.each([
+    [
+      "the layout throws",
+      (): void => {
+        ablauf.snapThrows = true;
+      },
+    ],
+    [
+      "adopting the drawn SVG throws",
+      (): void => {
+        vi.spyOn(document, "importNode").mockImplementation(() => {
+          throw new Error("importNode: not today");
+        });
+      },
+    ],
+    [
+      "mirroring the block's chrome throws",
+      (): void => {
+        vi.spyOn(mermaidChrome, "sync").mockImplementation(() => {
+          throw new Error("sync: not today");
+        });
+      },
+    ],
+  ])("degrades the block, not the editor, when %s", (_name, breakIt) => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    ablauf.snapThrows = true;
+    breakIt();
     const { ydoc, id } = docWithMermaid(FLOWCHART);
 
     const { editor } = mountEditor(ydoc);

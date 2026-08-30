@@ -9,12 +9,12 @@
  * - **which representation a reader actually sees.** The switch is CSS, and
  *   only a browser applies CSS: the diagram visible with the source hidden, and
  *   the two swapping the moment the caret lands in the block.
- * - **the OS scheme moving under the "system" appearance.** The colours are
- *   ablauf's two palettes written into the SVG as `light-dark()`, which are CSS
- *   values in presentation attributes — so the picture follows the scheme with
- *   nothing subscribed and nothing drawn again. Only a CSS engine can say
- *   whether that resolution actually happens, and `page.emulateMedia` is what
- *   makes the scheme change a real event.
+ * - **the appearance moving under the picture**, both ways it can move: the OS
+ *   scheme under "system", and the reader's explicit choice stamped as
+ *   `data-theme`. The colours are ablauf's two palettes written into the SVG as
+ *   `light-dark()`, which are CSS values in presentation attributes — so the
+ *   picture follows the appearance with nothing subscribed and nothing drawn
+ *   again. Only a CSS engine can say whether that resolution actually happens.
  */
 
 import { expect, test } from "@playwright/test";
@@ -105,4 +105,9 @@ test("a flowchart draws, opens its source under the caret, and follows the schem
   await expect.poll(() => ground(page)).not.toBe(light);
   await expect(diagram(page)).toBeVisible();
   await expect(diagram(page)).toContainText("Start");
+
+  // …and the reader's own choice wins over the OS, which is the appearance
+  // control the product actually ships: `data-theme` on <html> (src/ui/theme.ts).
+  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
+  await expect.poll(() => ground(page)).toBe(light);
 });
