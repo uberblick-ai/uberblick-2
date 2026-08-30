@@ -71,10 +71,10 @@ const SEED_LOCK_FILE = ".seed.lock";
  * How long to wait for another `ub init` before giving up.
  *
  * Deliberately outside `budget.ts`'s test ceiling. That ceiling shortens
- * deadlines whose expiry *is* the answer, where the same refusal simply arrives
- * sooner. This one waits for a live sibling doing real work, so shortening it
- * makes a run give up on a lock somebody is still legitimately holding — which
- * is what it did, on fast machines only, until #524.
+ * terminal probes, where expiry is a permitted answer. This one waits for a live
+ * sibling doing real work, so shortening it makes a run give up on a lock
+ * somebody is still legitimately holding — which is what it did, on fast
+ * machines only, until #524.
  */
 const WAIT_TIMEOUT_MS = 2_000;
 

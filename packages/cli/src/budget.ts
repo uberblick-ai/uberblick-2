@@ -13,13 +13,21 @@
  * cannot lengthen it. So no default in this package moves, and a run without the
  * variable is byte-for-byte the run it always was.
  *
- * **Which deadlines it may cap, and which it must not.** A deadline whose expiry
- * *is* the answer can be shortened without changing an outcome — the refusal
- * arrives sooner and says the same thing. A deadline that waits for a live
- * sibling doing real work cannot: shortening it turns a success into a failure.
- * `init-lock.ts`'s `WAIT_TIMEOUT_MS` is the second kind and is deliberately left
- * uncapped; capping it made `ub open` give up on a lock a test was still
- * holding, on a fast machine only (#524).
+ * **Which deadlines it may cap, and which it must not.** What it caps are
+ * terminal probes: the two hub budgets below, `open.ts`'s 1 s port-owner probe
+ * and `probes.ts`'s 2 s clock observation. Expiry is a permitted answer for each
+ * of them, and none gates a success path on another process finishing its work.
+ * That is not the same as being free of meaning — `whoHoldsPort` reads a timeout
+ * as `foreign` and `probeHubClock` reads one as no observation at all, so a
+ * genuine but slow responder is described differently — but what a shorter
+ * deadline gives up there is a reading nobody was going to wait for, which is
+ * what a suite wants and a person on a tether does not.
+ *
+ * What it must not cap is a deadline that waits for a live sibling doing real
+ * work: shortening that turns a success into a failure instead of reaching an
+ * answer sooner. `init-lock.ts`'s `WAIT_TIMEOUT_MS` is that kind and is
+ * deliberately left uncapped; capping it made `ub open` give up on a lock a test
+ * was still legitimately holding, on a fast machine only (#524).
  *
  * **Why an environment variable rather than an option.** The suites that pay
  * this cost spawn `ub` as a real process — that is the contract they defend —

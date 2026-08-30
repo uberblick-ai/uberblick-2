@@ -151,11 +151,15 @@ export function sandbox(files: SandboxFiles = {}): Sandbox {
   for (const key of RESOLVED_VARIABLES) {
     delete env[key];
   }
-  // Every deadline `ub` waits out, capped at a duration this suite chose rather
-  // than the ones a person on a tethered laptop needs (`src/budget.ts`). The
-  // refusals these suites assert are only *reachable* by sitting out a budget —
-  // a hub that accepts a socket and never serves the room, a lock nobody
-  // releases — and at their product values that is 5 s or 15 s per assertion.
+  // The deadlines `ub` spends waiting on a remote, capped at a duration this
+  // suite chose rather than the ones a person on a tethered laptop needs
+  // (`src/budget.ts`). The refusals these suites assert are only *reachable* by
+  // sitting out a budget — a hub that accepts a socket and never serves the
+  // room — and at their product values that is 5 s or 15 s per assertion.
+  //
+  // Not every deadline: `init-lock.ts` waits for a live sibling `ub init` to
+  // finish writing, and shortening that makes a run give up on a lock somebody
+  // is still legitimately holding. `src/budget.ts` states the boundary.
   //
   // A ceiling, never a floor: it shortens waits and lengthens nothing.
   //
