@@ -47,13 +47,16 @@ endpoint. Rule: no hardcoded hub addresses anywhere except that in-code default.
 
 ## Orchestration policy
 
-`AGENTS.md` is the canonical agent-neutral workflow for every implementer lane.
-Work in this repo is always done by isolated implementer agents — Opus
-sub-agents by default, or a Codex session dispatched through Herdr under the
-same claim/handoff/review rules; Fable coordinates, validates and merges and
-never implements. Code lives in those agents and in workflows: delegate
-implementation (or Workflow pipelines for fan-out), then validate their output
-(run tests, check acceptance criteria) before moving on.
+`AGENTS.md` is the canonical agent-neutral workflow for every implementer lane,
+and `.agents/roles/` holds the six role contracts it defers to: who claims what,
+in what order, where one role's authority ends, and which internal subagent a
+role may delegate to. Work in this repo is always done by isolated implementer
+agents — Opus sub-agents by default, or a Codex session dispatched through Herdr
+under the same claim/handoff/review rules. A role started at a top-level entry
+point self-picks and claims its item under its contract rather than being briefed
+by a standing session. An internal child instead validates and follows its
+parent's durable exact-key assignment; it never searches the queue. No session
+ever reviews or merges a diff it authored.
 
 ## Development workflow (every functionality)
 
@@ -63,9 +66,10 @@ implementation (or Workflow pipelines for fan-out), then validate their output
    (`Depends-on`/`Touches` header, runnable acceptance criteria, explicit
    out-of-scope); the `ready` label asserts conformance and eligibility.
 2. **Branch + implementer agents.** Implementation happens on a feature branch
-   (`feat/<slug>`, `fix/<slug>`), written by isolated implementer agents
-   coordinated by Fable with decision-complete briefs. Never commit feature
-   work directly to `main`.
+   (`feat/<slug>`, `fix/<slug>`), written by isolated implementer agents that
+   claim their own issue in `.github/ISSUE_SPEC.md`'s grammar under
+   `.agents/roles/implementer.md`. Never commit feature work directly to
+   `main`.
 3. **PR.** Open a PR against `main` linked to the issue (`Closes #N`), with a
    body stating what changed and how it was verified.
 4. **Gates — all of them, before merge:**
