@@ -65,6 +65,10 @@ intervening upstream changes affected. A second consecutive implementer return
 without an owner answer goes to `needs-decision`, not a new automatic
 preparation pass.
 
+Before creating a follow-up issue discovered during a run, fetch
+`origin/main` and check the observation against that commit and existing open
+issues. Do not queue work that current main already resolved or already tracks.
+
 `Priority` means the organization issue field: Urgent → High → Medium → Low.
 The product owner owns every explicit value; agents never write it. Unset is
 ignored by preparation and sorts as Medium for implementation pickup.
