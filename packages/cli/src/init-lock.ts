@@ -88,6 +88,25 @@ export function seedLockPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(dirname(credentialsPath(env)), SEED_LOCK_FILE);
 }
 
+/** Beside them, held only while `ub open` is building the web app. */
+const BUILD_LOCK_FILE = ".build.lock";
+
+/**
+ * The lock `ub open` holds while it builds the web app (#512).
+ *
+ * Here rather than beside the bundle because a checkout is not a place this CLI
+ * writes state into, and because the directory it protects may not exist yet
+ * when the lock has to be taken. That makes it this machine's build lock rather
+ * than one checkout's; `open.ts` says why nothing rests on the difference.
+ *
+ * Its waiting is `open.ts`'s too, not {@link acquireInitLock}'s: a build is
+ * minutes rather than a handful of file writes, and a run that waits that long
+ * has to stay interruptible.
+ */
+export function buildLockPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(dirname(credentialsPath(env)), BUILD_LOCK_FILE);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

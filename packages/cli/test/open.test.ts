@@ -26,8 +26,10 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it } from "vitest";
-import { acquireInitLock } from "../src/init-lock.js";
+import type { InitLock } from "../src/init-lock.js";
+import { acquireInitLock, buildLockPath, tryAcquireInitLock } from "../src/init-lock.js";
 import type { Io } from "../src/io.js";
+import type { Stop } from "../src/open.js";
 import { bundlePlan, ensureBundle } from "../src/open.js";
 import { probeHub, probePort } from "../src/probes.js";
 import type { Sandbox } from "./helpers.js";
@@ -140,21 +142,38 @@ function fixtureBundle(box: Sandbox): string {
 /** This checkout, which is where `ub open` runs `mise run build-web` (#475). */
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..", "..", "..");
 
+interface FakeTool {
+  /** The directory to put on PATH; every fake tool of one sandbox shares it. */
+  path: string;
+  /** One `<cwd> <args>` line per invocation. */
+  calls: () => string[];
+  /** What `HUB_AUTH_TOKEN` was for each invocation — `<unset>` when it was not. */
+  tokens: () => string[];
+}
+
 /**
- * A `mise` on PATH that records how it was called and behaves as it is told:
- * `FAKE_STAMP_VERSION` is stamped into `FAKE_STAMP_DIR`, `FAKE_EXIT_CODE` is
- * what it exits with. A real `mise run build-web` here would be a Vite build of
- * the repository's own bundle — minutes, and a checkout mutated by a test.
+ * A build command on PATH that records how it was called and behaves as it is
+ * told: `FAKE_SLEEP` seconds of work, `FAKE_STAMP_VERSION` stamped into
+ * `FAKE_STAMP_DIR`, `FAKE_EXIT_CODE` to exit with. A real `mise run build-web`
+ * or `pnpm … build` here would be a Vite build of the repository's own bundle —
+ * minutes, and a checkout mutated by a test.
  */
-function fakeMise(box: Sandbox): { path: string; calls: () => string[] } {
+function fakeTool(box: Sandbox, command: string): FakeTool {
   const bin = join(box.cwd, "fake-bin");
   mkdirSync(bin, { recursive: true });
-  const record = join(box.cwd, "mise-calls.txt");
+  const record = join(box.cwd, `${command}-calls.txt`);
+  const tokens = join(box.cwd, `${command}-tokens.txt`);
   writeFileSync(
-    join(bin, "mise"),
+    join(bin, command),
     "#!/bin/sh\n" +
+      // The tests point PATH at this directory alone, to prove the build
+      // command is found there; the fixture still needs `mkdir` and `sleep`.
+      'PATH="$PATH:/bin:/usr/bin"\n' +
       `printf '%s %s\\n' "$PWD" "$*" >> ${record}\n` +
+      `printf '%s\\n' "\${HUB_AUTH_TOKEN-<unset>}" >> ${tokens}\n` +
+      'if [ -n "$FAKE_SLEEP" ]; then sleep "$FAKE_SLEEP"; fi\n' +
       'if [ -n "$FAKE_STAMP_VERSION" ]; then\n' +
+      '  mkdir -p "$FAKE_STAMP_DIR"\n' +
       '  printf \'{"syncProtocolVersion":%s}\' "$FAKE_STAMP_VERSION" \\\n' +
       '    > "$FAKE_STAMP_DIR/uberblick-build.json"\n' +
       "fi\n" +
@@ -162,14 +181,43 @@ function fakeMise(box: Sandbox): { path: string; calls: () => string[] } {
       'exit "$FAKE_EXIT_CODE"\n',
     "utf8",
   );
-  chmodSync(join(bin, "mise"), 0o755);
+  chmodSync(join(bin, command), 0o755);
+  const lines = (file: string): string[] =>
+    existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
+  return { path: bin, calls: () => lines(record), tokens: () => lines(tokens) };
+}
+
+const fakeMise = (box: Sandbox): FakeTool => fakeTool(box, "mise");
+
+/** A {@link Stop} that never fires: the paths where no signal is involved. */
+function calm(): Stop {
+  return { interrupted: () => false, signalled: new Promise<void>(() => {}) };
+}
+
+/** A {@link Stop} the test decides the moment of, standing in for Ctrl-C. */
+function stoppable(): Stop & { stop: () => void } {
+  let seen = false;
+  let wake!: () => void;
+  const signalled = new Promise<void>((done) => {
+    wake = done;
+  });
   return {
-    path: bin,
-    calls: () =>
-      existsSync(record)
-        ? readFileSync(record, "utf8").split("\n").filter(Boolean)
-        : [],
+    interrupted: () => seen,
+    signalled,
+    stop: () => {
+      seen = true;
+      wake();
+    },
   };
+}
+
+/** The build lock both paths take, held the way another `ub open` would. */
+function holdBuildLock(env: NodeJS.ProcessEnv): InitLock {
+  const lock = tryAcquireInitLock(env, { path: buildLockPath(env) });
+  if (lock === null) {
+    throw new Error("the build lock was already held");
+  }
+  return lock;
 }
 
 /**
@@ -742,9 +790,10 @@ describe("ub open", () => {
         FAKE_STAMP_VERSION: String(SYNC_PROTOCOL_VERSION),
       },
       io,
+      calm(),
     );
 
-    expect(served).toBe(true);
+    expect(served).toBe("servable");
     // Said before it happens, with both versions: a command that goes quiet for
     // a Vite build looks hung.
     expect(io.text()).toContain(`speaks sync protocol ${SYNC_PROTOCOL_VERSION + 1}`);
@@ -764,6 +813,10 @@ describe("ub open", () => {
     const chosen = bundlePlan({});
     expect(chosen.ours).toBe(true);
     expect(bundlePlan({ UBERBLICK_WEB_DIST: chosen.dir }).ours).toBe(false);
+    // And it is the checkout's own `packages/web/dist` (#512): the rebuild path
+    // reports success from the stamp in this directory, so a plan that quietly
+    // moved would serve the old bundle and keep a green suite.
+    expect(chosen.dir).toBe(join(REPO_ROOT, "packages", "web", "dist"));
 
     const io = stderrIo();
     const served = await ensureBundle(
@@ -775,9 +828,10 @@ describe("ub open", () => {
         FAKE_STAMP_VERSION: String(SYNC_PROTOCOL_VERSION),
       },
       io,
+      calm(),
     );
 
-    expect(served).toBe(false);
+    expect(served).toBe("refused");
     expect(mise.calls()).toEqual([]);
     expect(io.text()).toContain("no sync protocol stamp");
   });
@@ -792,13 +846,20 @@ describe("ub open", () => {
     mkdirSync(noTools, { recursive: true });
 
     const unavailable = stderrIo();
-    expect(await ensureBundle(plan, { ...box.env, PATH: noTools }, unavailable)).toBe(false);
+    expect(await ensureBundle(plan, { ...box.env, PATH: noTools }, unavailable, calm())).toBe(
+      "refused",
+    );
     expect(unavailable.text()).toContain("could not be run");
 
     const failed = stderrIo();
     expect(
-      await ensureBundle(plan, { ...box.env, PATH: mise.path, FAKE_EXIT_CODE: "3" }, failed),
-    ).toBe(false);
+      await ensureBundle(
+        plan,
+        { ...box.env, PATH: mise.path, FAKE_EXIT_CODE: "3" },
+        failed,
+        calm(),
+      ),
+    ).toBe("refused");
     expect(failed.text()).toContain("exited 3");
 
     const stale = stderrIo();
@@ -812,8 +873,9 @@ describe("ub open", () => {
           FAKE_STAMP_VERSION: String(SYNC_PROTOCOL_VERSION + 2),
         },
         stale,
+        calm(),
       ),
-    ).toBe(false);
+    ).toBe("refused");
     expect(stale.text()).toContain(
       `the rebuilt web app speaks sync protocol ${SYNC_PROTOCOL_VERSION + 2}`,
     );
@@ -824,6 +886,134 @@ describe("ub open", () => {
       expect(said).toContain(REPO_ROOT);
       expect(said).toContain("UBERBLICK_WEB_DIST");
     }
+  });
+
+  it("waits for another run's build, then builds only what is still missing", async () => {
+    const box = sandbox();
+    const bundle = fixtureBundle(box);
+    stamp(bundle, SYNC_PROTOCOL_VERSION + 1);
+    const mise = fakeMise(box);
+    const env = {
+      ...box.env,
+      PATH: mise.path,
+      FAKE_STAMP_DIR: bundle,
+      FAKE_STAMP_VERSION: String(SYNC_PROTOCOL_VERSION),
+    };
+    const io = stderrIo();
+    const held = holdBuildLock(env);
+
+    const waiting = ensureBundle({ action: "serve", dir: bundle, ours: true }, env, io, calm());
+    await sleep(200);
+    // Nothing was built behind the holder's back — which is the whole point:
+    // `vite build` empties this directory before it writes it.
+    expect(mise.calls()).toEqual([]);
+    expect(io.text()).toContain("waiting for it");
+
+    // What the holder's build leaves behind. The waiter re-reads it and has
+    // nothing left to do.
+    stamp(bundle, SYNC_PROTOCOL_VERSION);
+    held.release();
+
+    expect(await waiting).toBe("servable");
+    expect(mise.calls()).toEqual([]);
+  });
+
+  it("takes that same lock for a first build, not only for a rebuild", async () => {
+    const box = sandbox();
+    const bundle = join(box.cwd, "not-built-yet");
+    const pnpm = fakeTool(box, "pnpm");
+    const env = {
+      ...box.env,
+      PATH: pnpm.path,
+      FAKE_STAMP_DIR: bundle,
+      FAKE_STAMP_VERSION: String(SYNC_PROTOCOL_VERSION),
+    };
+    const io = stderrIo();
+    const held = holdBuildLock(env);
+
+    const waiting = ensureBundle({ action: "build", dir: bundle, ours: true }, env, io, calm());
+    await sleep(200);
+    expect(pnpm.calls()).toEqual([]);
+
+    held.release();
+    expect(await waiting).toBe("servable");
+    // One build, in the workspace root, once the lock was free.
+    expect(pnpm.calls()).toEqual([`${join(REPO_ROOT, "packages")} --filter @uberblick/web build`]);
+  });
+
+  it("stops quietly on an interrupt, whether it is waiting or building", async () => {
+    const box = sandbox();
+    const bundle = fixtureBundle(box);
+    stamp(bundle, SYNC_PROTOCOL_VERSION + 1);
+    const mise = fakeMise(box);
+    const plan = { action: "serve", dir: bundle, ours: true } as const;
+
+    // Waiting for somebody else's build: no build of its own, and no failure.
+    const waitEnv = { ...box.env, PATH: mise.path };
+    const held = holdBuildLock(waitEnv);
+    const waitingIo = stderrIo();
+    const waitingStop = stoppable();
+    const waiting = ensureBundle(plan, waitEnv, waitingIo, waitingStop);
+    await waitUntil("the waiter to announce itself", () =>
+      waitingIo.text().includes("waiting for it"),
+    );
+    waitingStop.stop();
+
+    expect(await waiting).toBe("interrupted");
+    expect(mise.calls()).toEqual([]);
+    expect(waitingIo.text()).not.toContain("was not rebuilt");
+    held.release();
+
+    // Running one: the signal is passed on to the build, and a build that ends
+    // on it is this command stopping rather than a build that failed.
+    const buildingIo = stderrIo();
+    const buildingStop = stoppable();
+    const building = ensureBundle(
+      plan,
+      { ...box.env, PATH: mise.path, FAKE_SLEEP: "5" },
+      buildingIo,
+      buildingStop,
+    );
+    await waitUntil("the build to start", () => mise.calls().length === 1);
+    buildingStop.stop();
+
+    expect(await building).toBe("interrupted");
+    expect(buildingIo.text()).not.toContain("was not rebuilt");
+  });
+
+  it("hands both builds the same environment, and neither the signing secret", async () => {
+    const box = sandbox();
+    const bundle = fixtureBundle(box);
+    stamp(bundle, SYNC_PROTOCOL_VERSION + 1);
+    const mise = fakeMise(box);
+    const pnpm = fakeTool(box, "pnpm");
+    const env = {
+      ...box.env,
+      HUB_AUTH_TOKEN: SECRET,
+      PATH: mise.path,
+      FAKE_STAMP_DIR: bundle,
+      FAKE_STAMP_VERSION: String(SYNC_PROTOCOL_VERSION),
+    };
+
+    const rebuilt = await ensureBundle(
+      { action: "serve", dir: bundle, ours: true },
+      env,
+      stderrIo(),
+      calm(),
+    );
+    const first = join(box.cwd, "first-build");
+    const built = await ensureBundle(
+      { action: "build", dir: first, ours: true },
+      { ...env, FAKE_STAMP_DIR: first },
+      stderrIo(),
+      calm(),
+    );
+
+    expect([rebuilt, built]).toEqual(["servable", "servable"]);
+    // What `mise run build-web` puts back into its own child is that task's
+    // business; what this command hands a build is neither path's secret.
+    expect(mise.tokens()).toEqual(["<unset>"]);
+    expect(pnpm.tokens()).toEqual(["<unset>"]);
   });
 
   it("--no-browser prints the URL and opens nothing; --port chooses the port", async () => {
