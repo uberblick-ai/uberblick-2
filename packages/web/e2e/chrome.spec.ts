@@ -25,7 +25,7 @@
 
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import type { Browser, BrowserContext, Page } from "@playwright/test";
+import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import {
   importRootSecret,
@@ -88,6 +88,14 @@ function painted(page: Page, selector: string, property: string): Promise<string
   );
 }
 
+/** The same, for an element already found rather than named by selector. */
+function paintedIn(locator: Locator, property: string): Promise<string> {
+  return locator.evaluate(
+    (element, prop) => getComputedStyle(element).getPropertyValue(prop),
+    property,
+  );
+}
+
 /** How wide something is laid out, so "full-bleed" is a number, not a look. */
 async function width(page: Page, selector: string): Promise<number> {
   const box = await page.locator(selector).boundingBox();
@@ -96,8 +104,10 @@ async function width(page: Page, selector: string): Promise<number> {
 }
 
 /**
- * A surface reads as the product's if it is painted on the product's card and
- * set in the product's face — the two things `@theme` bridges.
+ * A surface reads as the product's if it is painted on the sidebar's own ground
+ * and set in the product's face — the two things `@theme` bridges. Both of
+ * these menus belong to that column, which is why it is the sidebar they have
+ * to equal and not the card (#480).
  */
 async function matchesTheSidebar(page: Page, selector: string): Promise<void> {
   expect(await painted(page, selector, "background-color")).toBe(
@@ -124,7 +134,25 @@ for (const scheme of ["light", "dark"] as const) {
     );
 
     // The configured workspace, with the count the directory reports.
-    await expect(menu.getByRole("menuitem", { name: harness().workspace })).toBeVisible();
+    const configured = menu.getByRole("menuitem", { name: harness().workspace });
+    await expect(configured).toBeVisible();
+
+    // And an item on that surface stays visible when it is the one being
+    // chosen. Matching the container is not enough to prove that: the menu now
+    // floats the sidebar's ground, and in dark `--accent` *is* that ground, so
+    // an item highlighted out of the global palette would paint itself
+    // invisible (#480). Radix carries one `data-highlighted` state for the
+    // keyboard and the pointer, so this is asserted through each of them.
+    const ground = await painted(page, "[data-slot=dropdown-menu-content]", "background-color");
+    await page.keyboard.press("ArrowDown");
+    const highlighted = menu.locator("[data-highlighted]");
+    await expect(highlighted).toHaveCount(1);
+    expect(await paintedIn(highlighted, "background-color")).not.toBe(ground);
+
+    await configured.hover();
+    await expect(configured).toHaveAttribute("data-highlighted", /.*/);
+    expect(await paintedIn(configured, "background-color")).not.toBe(ground);
+
     // Management is on the menu and unavailable — not hidden.
     for (const name of ["New workspace", "Workspace settings"]) {
       await expect(menu.getByRole("menuitem", { name })).toHaveAttribute(
