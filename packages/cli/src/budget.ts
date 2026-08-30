@@ -13,21 +13,25 @@
  * cannot lengthen it. So no default in this package moves, and a run without the
  * variable is byte-for-byte the run it always was.
  *
- * **Which deadlines it may cap, and which it must not.** What it caps are
- * terminal probes: the two hub budgets below, `open.ts`'s 1 s port-owner probe
- * and `probes.ts`'s 2 s clock observation. Expiry is a permitted answer for each
- * of them, and none gates a success path on another process finishing its work.
- * That is not the same as being free of meaning — `whoHoldsPort` reads a timeout
- * as `foreign` and `probeHubClock` reads one as no observation at all, so a
- * genuine but slow responder is described differently — but what a shorter
- * deadline gives up there is a reading nobody was going to wait for, which is
- * what a suite wants and a person on a tether does not.
+ * **Which deadlines it may cap, and which it must not.** What it caps are four
+ * probes of something remote: the two hub budgets below, `open.ts`'s 1 s
+ * port-owner probe and `probes.ts`'s 2 s clock observation. Expiry is a
+ * permitted answer for each of them, but not a free one — `whoHoldsPort` reads a
+ * timeout as `foreign`, `probeHubClock` reads one as no observation at all, and
+ * `ub doctor` reports a hub that missed its budget as down. What makes them safe
+ * to cap is a **margin, not a category**: each waits on something that answers
+ * in milliseconds when it answers at all, against the hundreds a suite sets
+ * (`test/helpers.ts` uses 400). Take the ceiling far enough below that and a
+ * green check goes red against a hub that is up.
  *
- * What it must not cap is a deadline that waits for a live sibling doing real
- * work: shortening that turns a success into a failure instead of reaching an
- * answer sooner. `init-lock.ts`'s `WAIT_TIMEOUT_MS` is that kind and is
- * deliberately left uncapped; capping it made `ub open` give up on a lock a test
- * was still legitimately holding, on a fast machine only (#524).
+ * What it must not cap at any value is a deadline whose holder deliberately
+ * holds it for longer than a suite's ceiling: shortening that turns a success
+ * into a failure instead of reaching an answer sooner. `init-lock.ts`'s
+ * `WAIT_TIMEOUT_MS` waits for a live sibling `ub init` to finish writing, and
+ * the suite's own cases hold that lock for half a second (`test/open.test.ts`),
+ * so it is deliberately left uncapped and `test/init-lock.test.ts` holds that
+ * line. Capping it made `ub open` give up on a lock a test was still
+ * legitimately holding, on a fast machine only (#524).
  *
  * **Why an environment variable rather than an option.** The suites that pay
  * this cost spawn `ub` as a real process — that is the contract they defend —
@@ -73,9 +77,17 @@ function ceiling(env: NodeJS.ProcessEnv): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-/** `ms`, or the ceiling if one is set and shorter. */
-export function budget(ms: number): number {
-  const cap = ceiling(process.env);
+/**
+ * `ms`, or the ceiling if one is set and shorter.
+ *
+ * `env` defaults to this process's own, which is what both call sites want: they
+ * run inside a spawned `ub` and have no other map in hand. It is a parameter all
+ * the same, so an in-process caller caps against the environment it resolved
+ * from rather than silently against this one — the asymmetry that let a
+ * caller-supplied ceiling be ignored one call later in {@link bridgeConfig}.
+ */
+export function budget(ms: number, env: NodeJS.ProcessEnv = process.env): number {
+  const cap = ceiling(env);
   return cap === null ? ms : Math.min(ms, cap);
 }
 
