@@ -7,11 +7,13 @@
  *
  * Two things are worth a test and the rest is not. The *label* is a pure
  * function of a reading, so it is asserted as one. The one live case is the
- * strip following a **late marker** — a `client`/`session` pair that arrives
- * after a session's first state, which `samePresence` silently discards if the
- * comparison does not know about the fields. Block renumbering is deliberately
- * not re-proved here: `doc-chrome.test.tsx` owns that invariant over the same
- * `usePresence` snapshot this strip reads.
+ * strip following a **late marker** — a `client`, and then a `session`, that
+ * arrive after a session's first state, which `samePresence` silently discards
+ * if the comparison does not know about the field. They arrive as two updates
+ * on purpose: each one moves exactly one of the two new comparisons, so
+ * neutralising either alone turns this case red. Block renumbering is
+ * deliberately not re-proved here: `doc-chrome.test.tsx` owns that invariant
+ * over the same `usePresence` snapshot this strip reads.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -24,10 +26,12 @@ import {
   encodeAwarenessUpdate,
 } from "y-protocols/awareness";
 import { appendBlock, initDoc } from "@uberblick/schema";
+import type { ReactElement } from "react";
 import { StatusLine } from "../src/ui/EditorPane.js";
+import { usePresence } from "../src/ui/hooks.js";
 import { presenceLabel } from "../src/ui/doc-chrome.js";
 import type { RemotePresence } from "../src/ui/doc-chrome.js";
-import { AGENT_CLIENT, WEB_CLIENT } from "../src/collab/rooms.js";
+import { AGENT_CLIENT, WEB_CLIENT } from "../src/collab/identity.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
@@ -68,6 +72,21 @@ describe("what an avatar says when a circle cannot", () => {
     expect(presenceLabel(reading({ kind: "human", name: "Ben" }))).toBe("Ben");
   });
 });
+
+/**
+ * The shell's own wiring for one room: the presence reading is made once and
+ * handed to the line (`App.tsx`), so the strip is exercised over exactly the
+ * subscription the app gives it rather than over a hand-built list.
+ */
+function Shell({ connection }: { connection: RoomConnection }): ReactElement {
+  return (
+    <StatusLine
+      connection={connection}
+      segment={WORKSPACE}
+      presence={usePresence(connection)}
+    />
+  );
+}
 
 describe("the strip follows a marker that arrives late", () => {
   afterEach(() => {
@@ -128,22 +147,28 @@ describe("the strip follows a marker that arrives late", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
-    act(() => root.render(<StatusLine connection={connection} segment={WORKSPACE} />));
+    act(() => root.render(<Shell connection={connection} />));
     act(() => void vi.advanceTimersByTime(5_000));
     try {
       expect(avatar()?.textContent).toBe("C");
       expect(avatar()?.getAttribute("title")).toBe("Claude Code");
 
+      // The marker alone, with no session id yet: the circle, its ring and both
+      // accessible names follow the `kind` comparison and nothing else.
+      publish({ user: { name: "Claude Code", color: "#7b5ec7" }, client: AGENT_CLIENT });
+      expect(avatar()?.textContent).toBe("🤖");
+      expect(avatar()?.style.borderColor).toBe("rgb(123, 94, 199)");
+      expect(avatar()?.getAttribute("title")).toBe("Claude Code");
+
+      // Then the session id, with the marker unchanged. Two updates rather than
+      // one because `sameSession` compares the two new fields independently: a
+      // single publish flipping both is still caught when only one comparison
+      // survives, so it would prove neither.
       publish({
         user: { name: "Claude Code", color: "#7b5ec7" },
         client: AGENT_CLIENT,
         session: SESSION,
       });
-      // The circle, its ring and both accessible names all follow. A projection
-      // that gained these fields without gaining a comparison in `sameSession`
-      // would still be showing the "C" above.
-      expect(avatar()?.textContent).toBe("🤖");
-      expect(avatar()?.style.borderColor).toBe("rgb(123, 94, 199)");
       expect(avatar()?.getAttribute("title")).toBe(`Claude Code · ${SESSION}`);
       expect(avatar()?.getAttribute("aria-label")).toBe(`Claude Code · ${SESSION}`);
 

@@ -22,7 +22,7 @@ import {
 } from "y-prosemirror";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
-import { WEB_CLIENT } from "../collab/rooms.js";
+import { WEB_CLIENT } from "../collab/identity.js";
 
 /**
  * How long a departed agent's caret stays on screen after its session left the

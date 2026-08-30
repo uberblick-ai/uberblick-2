@@ -21,12 +21,12 @@ import {
   readSidebar,
 } from "@uberblick/schema";
 import type { DirectoryEntry, DocMeta, SidebarGroup } from "@uberblick/schema";
-import { acquireRoom, AGENT_CLIENT } from "../collab/rooms.js";
+import { acquireRoom } from "../collab/rooms.js";
 import type { RoomConnection, RoomStatus } from "../collab/rooms.js";
 import { resolveClientConfig } from "../config.js";
 import { getSetting, subscribeSettings } from "../settings.js";
 import type { Settings } from "../settings.js";
-import { AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
+import { AGENT_CLIENT, AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
 import type { AwarenessUser } from "../collab/identity.js";
 import { findForeignBlocks, findLinkConflicts } from "../editor/palette.js";
 import type { ForeignBlock, LinkConflict } from "../editor/palette.js";

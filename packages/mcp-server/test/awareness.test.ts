@@ -251,19 +251,45 @@ describe("agent awareness", () => {
     });
     expect(awarenessOf(rig, doc.uuid).state.cursor).not.toBeNull();
 
+    // Every state this room puts on the wire from here on. The two withdrawals
+    // land in the same millisecond, so what a peer sees between them is not
+    // observable by reading the state afterwards — only by watching each update
+    // as it is published.
+    const published: Array<Record<string, unknown>> = [];
+    const awareness = replicaOf(rig, doc.uuid).awareness;
+    const record = (): void => {
+      published.push(
+        JSON.parse(JSON.stringify(awareness.getLocalState() ?? {})) as Record<
+          string,
+          unknown
+        >,
+      );
+    };
+    awareness.on("update", record);
+
     await waitUntil(
       "the agent cursor to be withdrawn",
       () => awarenessOf(rig, doc.uuid).state.cursor === null,
     );
-    // The identity goes with it, never before it: presence in a document means
-    // "this session is working here", and the write that drew this caret is the
-    // touch the presence clock is counting from too (#493). Awaited rather than
-    // asserted outright because the caret is withdrawn first by construction —
-    // an anonymous caret is the one order that must not happen.
     await waitUntil(
       "the agent's presence to be withdrawn",
       () => awarenessOf(rig, doc.uuid).state.user === undefined,
     );
+    awareness.off("update", record);
+
+    // The identity goes with the caret, never before it: presence in a document
+    // means "this session is working here", and the write that drew this caret
+    // is the touch the presence clock is counting from too (#493). Both timers
+    // run for the same TTL, so the only thing keeping the presence alive at
+    // least as long as the caret is that `publishCursor` arms the cursor's timer
+    // *before* it re-arms presence — an anonymous caret is the one order that
+    // must not happen (#304), and nothing else in this suite fails if that
+    // ordering is inverted.
+    expect(published.length).toBeGreaterThan(0);
+    const anonymous = published.filter(
+      (state) => state.cursor != null && state.user === undefined,
+    );
+    expect(anonymous).toEqual([]);
   });
 
   /**

@@ -37,7 +37,7 @@ import { UserMenu } from "../src/ui/UserMenu.js";
 import { useAgentSessions } from "../src/ui/hooks.js";
 import { applyStoredAppearance } from "../src/ui/theme.js";
 import { getSetting } from "../src/settings.js";
-import { AGENT_CLIENT, WEB_CLIENT } from "../src/collab/rooms.js";
+import { AGENT_CLIENT, WEB_CLIENT } from "../src/collab/identity.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import type { Workspace } from "../src/ui/route.js";
 

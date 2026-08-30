@@ -221,8 +221,11 @@ test("MCP connections counts a connected agent session, and stops when it goes",
   await expect(connections).toContainText("0");
 
   // An agent, as far as the hub and the awareness map are concerned: a client
-  // that publishes a user and does not claim to be this app. That is exactly
-  // what the MCP server's replicas publish (`mcp-server/src/replica.ts`).
+  // that publishes a user and says positively that it is an agent (#494). That
+  // pair is exactly what the MCP server's replicas publish, in one write
+  // (`mcp-server/src/replica.ts`), and the marker is what the count reads —
+  // omitting it makes this session a person, which is the whole point of the
+  // positive test replacing the old "not this app, therefore an agent" one.
   const doc = new Y.Doc();
   const agent = new HocuspocusProvider({
     url: harness().hubUrl,
@@ -243,6 +246,7 @@ test("MCP connections counts a connected agent session, and stops when it goes",
       ),
   });
   agent.setAwarenessField("user", { name: "an agent", color: "#7b5ec7" });
+  agent.setAwarenessField("client", "agent");
 
   try {
     await expect(connections).toContainText("1");

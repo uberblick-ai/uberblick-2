@@ -28,7 +28,7 @@ const NO_INITIAL = "?";
  * starting outside the BMP contributes one glyph rather than half a surrogate
  * pair. Trimmed first: a leading space is not an initial.
  */
-export function initialOf(name: string): string {
+function initialOf(name: string): string {
   const [first] = Array.from(name.trim());
   return first === undefined ? NO_INITIAL : first.toUpperCase();
 }

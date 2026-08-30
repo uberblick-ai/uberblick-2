@@ -9,8 +9,7 @@
 import * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
 import { blockRev, getBlock, getBlocks, getBlocksFragment } from "@uberblick/schema";
-import { AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
-import { AGENT_CLIENT } from "../collab/rooms.js";
+import { AGENT_CLIENT, AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
 
 /** What kind of session a peer is, as the session itself says. */
 export type SessionKind = "agent" | "human";

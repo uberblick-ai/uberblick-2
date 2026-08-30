@@ -43,25 +43,8 @@ import {
 import { HUB_CONFIG_PATH, hubAuthToken, hubUrl, resolveClientConfig } from "../config.js";
 import { getSetting, subscribeSettings } from "../settings.js";
 import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "./token.js";
+import { WEB_CLIENT } from "./identity.js";
 import type { AwarenessUser } from "./identity.js";
-
-/**
- * The two values of the `client` awareness field: what a session says it is.
- *
- * A web tab publishes `WEB_CLIENT` (#74) and an MCP session publishes
- * `AGENT_CLIENT` (#494) — both positively, beside the `user` they belong to, so
- * a reader classifies on what a session claims rather than on what it omits.
- * The old absence test ("not a web client, therefore an agent") counted a
- * browser tab running a bundle from before the marker as an MCP connection for
- * as long as that tab stayed open.
- *
- * `AGENT_CLIENT` is the agent's own constant, held here as a literal rather
- * than imported: this package does not depend on `@uberblick/mcp-server`, and
- * an awareness field is a wire format either way. Its other end is
- * `packages/mcp-server/src/replica.ts`.
- */
-export const WEB_CLIENT = "web";
-export const AGENT_CLIENT = "agent";
 
 /**
  * The shared socket's reconnect band.

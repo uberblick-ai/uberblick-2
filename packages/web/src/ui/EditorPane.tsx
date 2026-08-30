@@ -25,10 +25,10 @@ import {
   useForeignBlocks,
   useLinkConflicts,
   usePeers,
-  usePresence,
   useRawBlocks,
   useRoomStatus,
 } from "./hooks.js";
+import type { RemotePresence } from "./doc-chrome.js";
 import { CommentComposer } from "./CommentComposer.js";
 import { PeerAvatar } from "./PeerAvatar.js";
 import { DocMetaLine } from "./DocChrome.js";
@@ -181,17 +181,23 @@ function CopyLink({
 export function StatusLine({
   connection,
   segment,
+  presence,
 }: {
   connection: RoomConnection;
   /** The workspace as the address spells it — what a copied link carries. */
   segment: string;
+  /**
+   * Who else is in this room, read once by the shell and handed down — the same
+   * snapshot the activity pill and the sync panel draw from (`App.tsx`).
+   *
+   * A prop rather than a `usePresence` of its own, because the shell already
+   * holds this room's reading: a second subscription would add an awareness
+   * `change` listener and a fragment observer that re-derive, on every
+   * keystroke anyone types, a reading the shell has already made.
+   */
+  presence: readonly RemotePresence[];
 }): ReactElement {
   const status = useRoomStatus(connection);
-  // `usePresence`, not `usePeers`: an avatar's hover names the block a caret is
-  // in, and the block number is resolved once, in `readPresence`. A strip that
-  // read the peer list and the caret separately would be two subscriptions
-  // disagreeing about where one session is.
-  const peers = usePresence(connection);
   const state = useCalmSyncState(rawSyncState(status));
   const reading = statusReading(status, state);
   if (reading.detail !== null) {
@@ -232,9 +238,12 @@ export function StatusLine({
       )}
       {/* Circles, not name pills (#494): the strip is the constrained surface,
           and a row of words pushes the status line around as sessions come and
-          go. The detail a name carried is on the avatar's hover instead. */}
+          go. The detail a name carried is on the avatar's hover instead — which
+          is why this is the presence reading and not `usePeers`: the block a
+          caret sits in is resolved once, in `readPresence`, so the hover and
+          the activity pill cannot disagree about where a session is. */}
       <span className="ub-peers">
-        {peers.map((peer) => (
+        {presence.map((peer) => (
           <PeerAvatar key={peer.clientId} session={peer} />
         ))}
       </span>
@@ -567,6 +576,7 @@ function BoundEditor({
 export function EditorPane({
   connection,
   segment,
+  presence,
   author,
   knownTags,
   archived,
@@ -577,6 +587,8 @@ export function EditorPane({
   connection: RoomConnection | null;
   /** The workspace as the address spells it — see {@link StatusLine}. */
   segment: string;
+  /** This room's presence reading, passed through to {@link StatusLine}. */
+  presence: readonly RemotePresence[];
   /** The awareness name this client publishes — the author of its comments. */
   author: string;
   /**
@@ -648,7 +660,7 @@ export function EditorPane({
             setTitle(connection.ydoc, event.target.value);
           }}
         />
-        <StatusLine connection={connection} segment={segment} />
+        <StatusLine connection={connection} segment={segment} presence={presence} />
         {foreign.length > 0 ? (
           <ForeignFallback
             connection={connection}
