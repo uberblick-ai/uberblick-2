@@ -107,7 +107,7 @@ describe("one-pass issue preparation", () => {
     assert.equal(plan.route, "challenged");
     assert.equal(plan.adversaries, 1);
     assert.equal(plan.outcome, "ready");
-    assert.deepEqual(plan.labels, { add: ["ready"], remove: [] });
+    assert.deepEqual(plan.labels, { add: ["ready"], remove: ["needs-preparation"] });
   });
 
   it("parks an owner boundary without buying another adversary", () => {
@@ -120,7 +120,26 @@ describe("one-pass issue preparation", () => {
     });
     assert.equal(plan.adversaries, 1);
     assert.equal(plan.outcome, "park-needs-decision");
-    assert.deepEqual(plan.labels, { add: ["needs-decision"], remove: ["ready"] });
+    assert.deepEqual(plan.labels, {
+      add: ["needs-decision"],
+      remove: ["needs-preparation", "ready"],
+    });
+  });
+
+  it("turns an oversized request into a coordination parent without dispatching it", () => {
+    const plan = preflight({
+      materiality: "behavioral",
+      uncertainty: "low",
+      blastRadius: "wide",
+      reversibility: "easy",
+      findingState: "split",
+    });
+    assert.equal(plan.adversaries, 1);
+    assert.equal(plan.outcome, "split");
+    assert.deepEqual(plan.labels, {
+      add: [],
+      remove: ["needs-preparation", "ready"],
+    });
   });
 
   it("does not route on package names, labels or keywords", () => {

@@ -27,8 +27,8 @@ const UNCERTAINTY = ["low", "high"];
 const BLAST_RADIUS = ["local", "wide"];
 /** `hard` when the choice is expensive to undo once merged. */
 const REVERSIBILITY = ["easy", "hard"];
-/** The state after the preparer has dispositioned the adversary's findings. */
-export const FINDING_STATES = ["none", "correctable-applied", "owner-boundary"];
+/** The final contract state after the preparer has dispositioned the pass. */
+export const FINDING_STATES = ["none", "correctable-applied", "owner-boundary", "split"];
 
 const BOOLEANS = [true, false];
 
@@ -56,7 +56,7 @@ export const ROUTES = ["trivial", "challenged"];
 export const ADVERSARIES = { trivial: 0, challenged: 1 };
 
 /** Every way the preparer's one pass can end. */
-export const OUTCOMES = ["ready", "park-needs-decision", "requeue"];
+export const OUTCOMES = ["ready", "park-needs-decision", "split", "requeue"];
 
 /**
  * @param {unknown} signals
@@ -141,9 +141,19 @@ export function preflight(signals) {
   if (findingState === "owner-boundary") {
     return plan("park-needs-decision", {
       add: ["needs-decision"],
-      remove: ["ready"],
+      remove: ["needs-preparation", "ready"],
       comment: true,
     });
   }
-  return plan("ready", { add: ["ready"], comment: true });
+  if (findingState === "split") {
+    return plan("split", {
+      remove: ["needs-preparation", "ready"],
+      comment: true,
+    });
+  }
+  return plan("ready", {
+    add: ["ready"],
+    remove: ["needs-preparation"],
+    comment: true,
+  });
 }

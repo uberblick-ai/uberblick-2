@@ -12,11 +12,16 @@ and re-gate.
 against — every later statement in the preflight is a claim about that commit,
 not about your memory of the repo. Against it, read what the issue targets: the
 current behavior, the modules, interfaces, invariants and tests it lives in,
-related open issues and PRs, and the files the change is likely to touch.
-Proportional, not exhaustive — enough to fill the table below honestly, and no
-more. If `main` advances while you are here, refresh only the grounding and the
-challenge the new commits actually affect; a merge elsewhere in the tree does
-not invalidate a challenge about this one.
+related open issues and PRs, and the files the change is likely to touch. Before
+drafting, list the files changed by every open PR and compare them with the
+likely footprint; record direct file overlap, dependency overlap, and semantic
+overlap while it is still cheap to reshape or defer the issue. Grounding is
+proportional, not exhaustive — enough to fill the table below honestly, and no
+more. A proven mechanical, local correction may skip broad repository and issue
+corpus searches when the handoff says why. Repeating MCP calls to prove an
+absence is not grounding. If `main` advances while you are here, refresh only
+the grounding and challenge the new commits actually affect; a merge elsewhere
+in the tree does not invalidate a challenge about this one.
 
 ## Classify the route
 
@@ -67,9 +72,10 @@ claim, nested adversary handoff and labels.
 
 | Parent still owns the issue | Final finding state | Outcome | Labels | Comment |
 |---|---|---|---|---|
-| yes | none (`none`) | ready | add `ready` | yes |
-| yes | all correctable findings applied (`correctable-applied`) | ready | add `ready` | yes |
-| yes | unresolved product, authority, safety or unsafe-shape boundary (`owner-boundary`) | park-needs-decision | remove `ready`, add `needs-decision` | yes |
+| yes | none (`none`) | ready | remove `needs-preparation`, add `ready` | yes |
+| yes | all correctable findings applied (`correctable-applied`) | ready | remove `needs-preparation`, add `ready` | yes |
+| yes | unresolved product, authority, safety or unsafe-shape boundary (`owner-boundary`) | park-needs-decision | remove `needs-preparation`, remove `ready`, add `needs-decision` | yes |
+| yes | request was split into a coordination parent and child intakes (`split`) | split | remove `needs-preparation`, remove `ready` | yes |
 | no | anything (`any`) | requeue | none | no |
 
 The recheck outranks findings: if the parent no longer owns the issue, do not
@@ -81,10 +87,19 @@ options and a recommendation, not another automatic adversary round.
 ## Record it once, and only after the recheck
 
 The nested adversary writes its `Done:` handoff before the preparer acts. After
-the recheck, the preparer writes one concise `Done:` handoff with grounding,
-route, adversary link where applicable, material findings and dispositions, and
-`Outcome: ready|needs-decision`. Never include transcripts, timings or round
-narration. A requeue writes none.
+the recheck, the preparer writes one concise `Done:` handoff with the grounded
+commit, route, adversary link where applicable, only material findings and
+dispositions, and `Outcome: ready|needs-decision|split`. Link the final body or
+children instead of restating them. Do not include transcripts, run narration,
+generic delivery gates, or the self-assessment. A requeue writes none.
+
+After the durable issue handoff, post a separate top-level reply to the Agent
+Feedback discussion named by the role contract. Report the runtime, model and
+reasoning effort when observable; wall time, token use and tool-call counts when
+available; whether Uberblick MCP context and the adversary helped; whether a
+higher or lower effort would likely have been more efficient; and the single
+largest avoidable cost. `Unknown` is valid. These observations inform later
+tuning and never change Priority automatically.
 
 The preparer posts `Done:` before applying the named label transition. A retry
 of the same run edits only its own record. If the durable handoff exists but the
@@ -109,3 +124,12 @@ verdict and therefore does not buy a second adversary round. The durable trace i
 → parent final outcome`. A crash after the adversary handoff does not buy another
 verdict. The preparer remains responsible for applying its findings and writing
 the sole final preparation outcome.
+
+**A decision resumes from durable work.** An owner answer moves the issue from
+`needs-decision` back to `needs-preparation`. A fresh preparer assignment reads
+the prior preparer handoff, adversary verdict, focused question and owner answer,
+then refreshes only affected grounding before completing the same pass. It does
+not redo classification, broad grounding, or the adversary by default. A GitHub
+comment from the owner is authoritative; another human's comment is evidence
+until the owner adopts it. An off-GitHub answer is usable only when its source
+and wording are recorded on the issue.

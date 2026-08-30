@@ -79,8 +79,9 @@ Parent: #486
   gates after any rebase, not by locking unrelated files or packages.
 - Order among eligible issues: dependency topology, then **`Priority`** — the
   organization issue field, Urgent → High → Medium → Low — then ascending issue
-  number. An issue whose `Priority` field is unset is *untriaged* and ineligible
-  for every role's pickup; `Urgent` is set only by the owner.
+  number. An unset value sorts as Medium; it does not make prepared work
+  ineligible. The product owner owns every explicit Priority value. Agents may
+  report evidence that the order looks wrong, but never write the field.
 
 `Priority` is that field, read through the API — never a line in the issue body:
 
@@ -102,6 +103,7 @@ the issue was mis-scoped or the agent scope-crept. The resolution is explicit
 | Label | Meaning | Set by |
 |---|---|---|
 | *(none)* | Draft — invisible to the loop | — |
+| `needs-preparation` | Queued for one issue-preparer pass | Human or intake template |
 | `ready` | Spec-complete; the loop may claim it | Human, or issue-preparer after one-pass clearance |
 | `in-progress` | Claimed; branch named in a comment | Loop |
 | `needs-decision` | Parked on a question only a human can answer | Loop |
@@ -119,11 +121,25 @@ result. Unresolved product, agent-authority, safety or fundamentally unsafe-shap
 findings take `needs-decision`. Another adversary is exceptional and requires an
 explicit owner request, never an automatic preparation loop.
 
-`needs-decision` exit path: the loop asks the question as an issue comment
-(concrete options, its recommendation). A human answers in a comment; whoever
-resolves it removes `needs-decision` and restores `ready` — restoring `ready`
-is the assertion that the decision is now written into the issue body, not
-just the thread.
+Preparation may instead end in `split`. Technical decomposition is preparer
+judgment; decomposition that chooses product behavior is an owner decision.
+Thousands of hand-written changed lines are a strong presumption to split, and
+an exception must be justified in the prepared issue. The source becomes a
+coordination-only parent: remove `needs-preparation`, never add `ready`, and
+close it after its required children. Create each independently reviewable
+child with `needs-preparation`, `Parent: #N`, and only real ordering
+dependencies.
+
+`needs-decision` exit path: the preparer asks one focused question as an issue
+comment, with concrete options and its recommendation, and replaces
+`needs-preparation` or `ready` with `needs-decision`. A direct answer from the
+product owner to that question is authority. Another person's comment is
+evidence unless the owner explicitly adopts it; an off-GitHub owner answer may
+be recorded only with clear provenance. Once the answer is durable, replace
+`needs-decision` with `needs-preparation`. A fresh preparer assignment reuses
+the previous handoff, adversary verdict, question and answer, and rechecks only
+the affected grounding and intervening upstream changes. It does not repeat
+classification or run another adversary by default.
 
 ### Claim protocol
 
@@ -156,12 +172,13 @@ doesn't answer? Then the issue is not `ready`.**
 - **What** — one paragraph, the outcome in behavioral terms.
 - **Why** — a sentence or two, tied to the spike acceptance criteria or a
   doc. Keeps the agent from "improving" beyond intent.
-- **Acceptance criteria** — a checkbox list (`- [ ]`) where **every item is
-  verifiable by running something**: a test, a command, an observable
-  behavior. "Works offline" fails this bar; "kill the hub, `create_doc`
-  still succeeds, restart the hub, the doc appears on a second client"
-  passes. This list is what the coordinator validates the PR against —
-  vague criteria make the gate unvalidatable.
+- **Acceptance criteria** — a short checkbox list (`- [ ]`) of **distinct,
+  observable and non-obvious outcomes or invariants**. Usually one to five is
+  enough. State what must be true, not every test case or implementation step.
+  Repository hygiene and delivery gates — lint, typecheck, the general test
+  suite, review and CI — already live in `AGENTS.md`, `CLAUDE.md` and CI; they
+  are never issue acceptance criteria. Name a focused command only when its
+  result is itself the clearest observation of this issue's outcome.
 - **Out of scope** — explicit non-goals, or `None.` if genuinely none. This
   is the "least code wins" principle made enforceable: it is what scope
   creep gets rejected against.
@@ -179,9 +196,11 @@ doesn't answer? Then the issue is not `ready`.**
 
 ## Sizing
 
-One issue = one PR by default, reviewable in one sitting. Work that honestly
-needs multiple PRs becomes a parent issue split into loop-ready children;
-parents are never labeled `ready`, only their children are.
+A human request may become a coordination-only parent with several bite-sized
+children. One `ready` implementation child describes at most one independently
+reviewable PR; each PR closes its child, and the parent closes after its required
+children. Parents live outside the preparation and implementation queues — only
+their children carry `needs-preparation` or `ready`.
 
 The exception runs the other way: individually-trivial issues declaring the
 same `Touches` set may be implemented by one agent as one PR closing several
@@ -200,10 +219,10 @@ Targets, not lint rules, because judgement beats a character count:
 
 | Kind | Target |
 |---|---|
-| ordinary leaf | 1,500–4,000 characters |
-| complex or security-sensitive leaf | up to 8,000; past that, justify it |
-| parent | under 5,000 characters |
-| acceptance criteria | 3–8 runnable bullets |
+| ordinary leaf | as short as complete, normally under 3,000 characters |
+| complex or security-sensitive leaf | normally under 6,000; past that, justify or split it |
+| parent | under 3,000 characters |
+| acceptance criteria | usually 1–5 distinct outcomes |
 
 Two consequences worth stating, because both have gone wrong here:
 

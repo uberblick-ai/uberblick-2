@@ -49,9 +49,15 @@ The normal order is draft → one issue-preparer run (trivial self-check, otherw
 one fresh adversary) → `ready` or an owner boundary → implementation. Bounded
 means one outcome and stopping condition, not one attempt: the preparer owns
 correctable findings through its final handoff rather than opening another role
-loop. A resumed role has voided this contract; recovery starts a fresh assignment
-from GitHub's durable state. `Priority` means the organization issue field:
-Urgent → High → Medium → Low; unset is ineligible.
+loop. A stopped process is never resumed: recovery starts a fresh assignment
+from GitHub's durable state. The one preparation-specific reuse is an issue
+returning from `needs-decision`: the fresh assignment reuses the previous
+handoff, adversary verdict, question and owner answer, and rechecks only what
+the answer or intervening upstream changes affected.
+
+`Priority` means the organization issue field: Urgent → High → Medium → Low.
+The product owner owns every explicit value; agents never write it. Unset is
+ignored by preparation and sorts as Medium for implementation pickup.
 
 **The claim record.** The implementer claims in `.github/ISSUE_SPEC.md`'s
 grammar: `Claimed: <branch>` / `Implementer: <opus|codex> <id>`. Every other
