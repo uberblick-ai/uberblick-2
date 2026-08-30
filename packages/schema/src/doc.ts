@@ -85,8 +85,8 @@ export function getBlocksFragment(ydoc: Y.Doc): Y.XmlFragment {
  * The `annotations` Y.Map: threadId → that thread's own Y.Map.
  *
  * The value is a Y type and not plain JSON, because a thread's conversation is
- * a Y.Array nested inside it — see `annotations.ts` for why that array cannot
- * be a field of a JSON value.
+ * a Y.Array nested inside it — see `annotations.ts` for why the conversation
+ * must not be a field of a replaced JSON value.
  */
 export function getAnnotationsMap(ydoc: Y.Doc): Y.Map<unknown> {
   return ydoc.getMap<unknown>(ANNOTATIONS_KEY);
