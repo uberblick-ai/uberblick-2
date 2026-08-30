@@ -46,6 +46,17 @@ function annotatedText(
   return getBlockText(doc, blockId).slice(range.start, range.end);
 }
 
+/** Two replicas already sharing one block and one open thread. */
+function threadedPair(): { a: Y.Doc; b: Y.Doc; threadId: string } {
+  let threadId = "";
+  const [a, b] = replicaPair((doc) => {
+    initDoc(doc, { uuid: UUID, title: "Annotations" });
+    const blockId = appendBlock(doc, { type: "paragraph", text: SENTENCE });
+    threadId = createAnnotation(doc, blockId, 6, 11, "reviewer", "Too much?").id;
+  });
+  return { a, b, threadId };
+}
+
 /** The raw formatting attributes Yjs holds, to prove the anchor is a mark. */
 function deltaOf(doc: Y.Doc, blockId: string): Array<[string, unknown]> {
   const element = getBlocksFragment(doc).toArray().find((child) => {
@@ -276,9 +287,13 @@ describe("annotations", () => {
     expect(deltaOf(doc, blockId)).toEqual([[SENTENCE, null]]);
     expect(getBlockText(doc, blockId)).toBe(SENTENCE);
 
-    // The freed range can be annotated again.
+    // The freed range can be annotated again, and inherits nothing: the deleted
+    // thread's comments went with it.
     const again = createAnnotation(doc, blockId, 6, 11, "reviewer", "again");
     expect(annotatedText(doc, blockId, again.id)).toBe("brave");
+    expect(getAnnotation(doc, again.id)?.comments).toEqual([
+      { author: "reviewer", text: "again", createdAt: expect.any(String) },
+    ]);
   });
 
   it("tracks the range through a concurrent edit from another replica", () => {
@@ -357,8 +372,76 @@ describe("annotations", () => {
     );
   });
 
+  it("keeps both replies when two replicas comment on one thread offline", () => {
+    const { a, b, threadId } = threadedPair();
+
+    // Neither replica can see the other's reply. While the conversation was a
+    // field of one last-write-wins Y.Map value, these two converged to whichever
+    // write came last and the other reply vanished silently (#461).
+    addComment(a, threadId, "owner", "Yes, cut it.");
+    addComment(b, threadId, "agent", "Shortened.");
+    syncDocs(a, b);
+
+    const onA = getAnnotation(a, threadId)?.comments ?? [];
+    expect(onA.map((comment) => comment.text)).toHaveLength(3);
+    expect(onA.map((comment) => comment.text)).toEqual(
+      expect.arrayContaining(["Yes, cut it.", "Shortened."]),
+    );
+    // The opening comment was already shared, so it stays first; which reply
+    // follows it is Yjs's to decide. The contract is that both replicas decide
+    // it the same way — a position, not a timestamp.
+    expect(onA[0]?.text).toBe("Too much?");
+    expect(getAnnotation(b, threadId)?.comments).toEqual(onA);
+  });
+
+  it("keeps a reply made concurrently with a resolve", () => {
+    const { a, b, threadId } = threadedPair();
+
+    setAnnotationResolved(a, threadId, true);
+    addComment(b, threadId, "agent", "One more thing.");
+    syncDocs(a, b);
+
+    // The two writes touch different keys, so neither can clobber the other.
+    for (const replica of [a, b]) {
+      const thread = getAnnotation(replica, threadId);
+      expect(thread?.resolved).toBe(true);
+      expect(thread?.comments.map((comment) => comment.text)).toEqual([
+        "Too much?",
+        "One more thing.",
+      ]);
+    }
+  });
+
+  /**
+   * A thread and its conversation are deleted as one subtree, so a delete can
+   * never leave a thread standing with its comments destroyed. That outcome is
+   * what a conversation stored beside the thread produces: the delete empties
+   * the conversation, the concurrent write resurrects the thread, and the
+   * replies are gone with no error — #461's own failure by another route.
+   */
+  it("removes a thread whole when a delete races a resolve or a reply", () => {
+    const resolving = threadedPair();
+    deleteAnnotation(resolving.a, resolving.threadId);
+    setAnnotationResolved(resolving.b, resolving.threadId, true);
+    syncDocs(resolving.a, resolving.b);
+
+    const replying = threadedPair();
+    deleteAnnotation(replying.a, replying.threadId);
+    addComment(replying.b, replying.threadId, "agent", "One more thing.");
+    syncDocs(replying.a, replying.b);
+
+    for (const { a, b, threadId } of [resolving, replying]) {
+      for (const replica of [a, b]) {
+        expect(getAnnotation(replica, threadId)).toBeNull();
+        expect(listAnnotations(replica)).toEqual([]);
+      }
+    }
+  });
+
   it("exports annotations as adjacent HTML comments, or drops them", () => {
     const { doc, blockId, threadId } = annotated();
+    // A reply, so the exported body is the joined list and not one stored field.
+    addComment(doc, threadId, "author", "Cut.");
     setAnnotationResolved(doc, threadId, true);
 
     expect(exportMarkdown(doc, { frontmatter: false })).toBe(
@@ -370,7 +453,7 @@ describe("annotations", () => {
       [
         "Hello brave world",
         "",
-        `<!-- annotation ${threadId} range=6-11 resolved reviewer: "Too much?" -->`,
+        `<!-- annotation ${threadId} range=6-11 resolved reviewer: "Too much?" | author: "Cut." -->`,
         "",
       ].join("\n"),
     );

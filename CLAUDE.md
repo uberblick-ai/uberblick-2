@@ -180,7 +180,10 @@ the fallback, which is exactly why CI is high priority.
   remove/add levels), `blocks`
   (Y.XmlFragment, one element per block with stable `id` attrs; types:
   paragraph, heading, code, mermaid, list-item, quote, table), `annotations`
-  (Y.Map of thread JSON), and `decisions` (Y.Array of decision-document UUID
+  (Y.Map of one Y.Map per thread: anchor block, resolved flag, and the
+  thread's own comments as a nested Y.Array — a comment list held inside the
+  thread's replaced JSON value silently lost concurrent replies, #461), and
+  `decisions` (Y.Array of decision-document UUID
   strings in stored order: the fixed decision-log slot). An older client that
   never opens an unknown root type preserves it across Yjs edit and sync; the
   loss boundary is Markdown export/import. Adding another fixed root type is a

@@ -202,6 +202,13 @@ function canonical(value: unknown): unknown {
  * layout (`meta`, `blocks`, `decisions`, `annotations`), so nothing a document
  * can carry is outside this.
  *
+ * The annotations map is read through `toJSON()` because a thread's value is a
+ * Y.Map with its conversation nested inside it, not plain JSON. That is what
+ * brings the comments into the hash, in their stored order: the order is the
+ * converged Yjs array order, identical on every replica, and it is content —
+ * two replicas holding the same replies in different sequence are not the same
+ * document.
+ *
  * `Block.rev` supplies the per-block part because it is already the schema's
  * answer to "has this block's content changed" — type, text and attributes. It
  * deliberately does **not** cover inline marks, so the marks are hashed here
@@ -212,13 +219,13 @@ function canonical(value: unknown): unknown {
  * **Anchors are content too, and nothing else here sees them.**
  * `getBlockInline` strips the `comment` mark, the annotations map holds no
  * positions, and a state vector says nothing about a delete set — so an undo
- * that removes an anchor leaves the text, the state vector and the thread JSON
+ * that removes an anchor leaves the text, the state vector and the thread record
  * all identical while the range a reader sees has moved or vanished. The
  * anchored runs are therefore hashed per block, which is where they live.
  */
 export function docFingerprint(doc: Y.Doc): string {
   const meta = getMeta(doc);
-  const annotations = getAnnotationsMap(doc);
+  const annotations = getAnnotationsMap(doc).toJSON();
   const state = {
     uuid: meta.uuid,
     title: meta.title,
@@ -238,9 +245,9 @@ export function docFingerprint(doc: Y.Doc): string {
         end: run.end,
       })),
     })),
-    annotations: [...annotations.keys()]
+    annotations: Object.keys(annotations)
       .sort()
-      .map((key) => [key, canonical(annotations.get(key))]),
+      .map((key) => [key, canonical(annotations[key])]),
   };
   return createHash("sha256")
     .update(JSON.stringify(state))

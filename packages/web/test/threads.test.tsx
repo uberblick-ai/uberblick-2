@@ -220,9 +220,10 @@ describe("the rail follows the document", () => {
   /**
    * Every remote change the rail has to notice, on one watcher, in sequence.
    * The three are deliberately different shapes: a thread arriving touches both
-   * the annotations map and the text, a reply touches the map alone, and an
-   * orphaning touches a *format* one level below the blocks fragment — which is
-   * why one subscription could never cover all three.
+   * the annotations map and the text; a reply touches a Y.Array nested one level
+   * below that map, and none of its keys; and an orphaning touches a *format*
+   * one level below the blocks fragment — which is why one shallow subscription
+   * could never cover all three.
    */
   it("sees a remote thread, a remote reply and a remote orphaning", async () => {
     const { local, remote, blocks } = replicas();
@@ -340,6 +341,37 @@ describe("the rail renders its cards", () => {
     ).toEqual(["why quick?", "no idea"]);
     expect(text(card!, ".ub-thread-replies")).toBe("1 reply");
     expect(card!.querySelector(".ub-chip-orphaned")).toBeNull();
+    view.unmount();
+  });
+
+  /**
+   * The reply arrives inside the thread's own nested array, which a shallow
+   * observer on the annotations map does not see — so a card open on screen
+   * would keep showing the conversation it was mounted with until something
+   * else touched the map's keys or the text. Nothing is reopened here: the same
+   * mounted rail is read again.
+   */
+  it("shows a reply that arrives from a remote replica, live", async () => {
+    const { local, remote, blocks } = replicas();
+    const thread = createAnnotation(local, blocks[1]!, 4, 15, "ben", "why quick?");
+    const view = renderRail(local);
+    expect(
+      [...cards(view.host)[0]!.querySelectorAll(".ub-thread-text")].map(
+        (el) => el.textContent,
+      ),
+    ).toEqual(["why quick?"]);
+
+    await act(async () => {
+      addComment(remote, thread.id, "agent-a", "no idea");
+      // Let the observer's coalescing microtask run before React reads back.
+      await Promise.resolve();
+    });
+
+    const card = cards(view.host)[0];
+    expect(
+      [...card!.querySelectorAll(".ub-thread-text")].map((el) => el.textContent),
+    ).toEqual(["why quick?", "no idea"]);
+    expect(text(card!, ".ub-thread-replies")).toBe("1 reply");
     view.unmount();
   });
 

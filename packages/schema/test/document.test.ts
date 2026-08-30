@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import type { Block } from "../src/index.js";
 import {
+  ANNOTATIONS_KEY,
   BLOCKS_KEY,
+  DECISIONS_KEY,
+  META_KEY,
   BlockNotFoundError,
   InvalidDocumentLifecycleError,
   appendBlock,
@@ -43,7 +46,7 @@ function seeded(): Y.Doc {
 }
 
 describe("document round-trip", () => {
-  it("initialises metadata and materialises the three roots", () => {
+  it("initialises metadata and materialises the four roots", () => {
     const doc = seeded();
     expect(getMeta(doc)).toEqual({
       uuid: UUID,
@@ -52,9 +55,12 @@ describe("document round-trip", () => {
       description: null,
       links: [],
     });
-    expect(doc.share.has("meta")).toBe(true);
-    expect(doc.share.has(BLOCKS_KEY)).toBe(true);
-    expect(doc.share.has("annotations")).toBe(true);
+    expect([...doc.share.keys()].sort()).toEqual([
+      ANNOTATIONS_KEY,
+      BLOCKS_KEY,
+      DECISIONS_KEY,
+      META_KEY,
+    ]);
   });
 
   it("updates title, tags and links independently", () => {

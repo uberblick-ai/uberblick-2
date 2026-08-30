@@ -17,6 +17,7 @@
 
 import {
   COMMENT_MARK,
+  addComment,
   addDecision,
   appendBlock,
   createAnnotation,
@@ -123,6 +124,26 @@ describe("docFingerprint", () => {
     // The things that would have had to catch it, and do not:
     expect(getBlocks(doc)[0]?.text).toBe(getBlocks(copy)[0]?.text);
     expect(listAnnotations(doc)).toEqual(listAnnotations(copy));
+
+    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+  });
+
+  // A reply is an insert into a Y.Array nested inside the thread's map value,
+  // so a fingerprint that canonicalised that value without `toJSON()` would call
+  // a replica missing every reply identical to one holding them.
+  it("changes when only a reply is added to an existing thread", () => {
+    const doc = source();
+    const thread = createAnnotation(
+      doc,
+      firstBlock(doc).id,
+      0,
+      5,
+      "someone",
+      "is this right?",
+    );
+
+    const copy = replicate(doc);
+    addComment(doc, thread.id, "someone else", "no");
 
     expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
   });

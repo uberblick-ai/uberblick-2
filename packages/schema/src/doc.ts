@@ -7,7 +7,7 @@
  *   - `meta`        Y.Map     — uuid, title, description, tags, links,
  *                              kind, status and decision remove/add levels
  *   - `blocks`      Y.XmlFragment — one Y.XmlElement per block
- *   - `annotations` Y.Map     — threadId → annotation JSON
+ *   - `annotations` Y.Map     — threadId → that thread's own Y.Map
  *   - `decisions`   Y.Array   — decision-document uuids, in stored order
  *
  * ## The decision log
@@ -81,7 +81,13 @@ export function getBlocksFragment(ydoc: Y.Doc): Y.XmlFragment {
   return ydoc.getXmlFragment(BLOCKS_KEY);
 }
 
-/** The `annotations` Y.Map. */
+/**
+ * The `annotations` Y.Map: threadId → that thread's own Y.Map.
+ *
+ * The value is a Y type and not plain JSON, because a thread's conversation is
+ * a Y.Array nested inside it — see `annotations.ts` for why the conversation
+ * must not be a field of a replaced JSON value.
+ */
 export function getAnnotationsMap(ydoc: Y.Doc): Y.Map<unknown> {
   return ydoc.getMap<unknown>(ANNOTATIONS_KEY);
 }

@@ -10,8 +10,9 @@
  *                   quote, table), formatted by the closed inline-mark set
  *                   (bold, italic, strike, inlineCode, link, docLink) on
  *                   prose blocks
- *   - `annotations` Y.Map of thread JSON, anchored by `comment` formatting
- *                   marks on the block's text
+ *   - `annotations` Y.Map of one Y.Map per thread — anchor, resolved flag and
+ *                   the conversation as a nested Y.Array — anchored by
+ *                   `comment` formatting marks on the block's text
  *   - `decisions`   Y.Array of decision-document uuids: the ordered log of
  *                   which decisions govern this document
  *
