@@ -17,12 +17,17 @@ findings-conditional protocol.
   mounts, privileged mode or Docker socket to either the build or the container.
   Keep the SHA-tagged image long enough for the failure-path probes CLAUDE.md
   requires at stateful boundaries, then remove it when the PR is settled.
+- For a browser-observable outcome, run the relevant `mise run e2e` proof early.
+  A failure may be called environmental only after the same failing spec is run
+  against the base: green at the base and red at the head is a fix-now branch
+  regression even when the stale code is a test fixture rather than production.
 - Record every gate result against the commit SHA it ran at — container review,
   CI, the acceptance validation, both adversarial verdicts where the
-  dual-challenge gate applied, and the Copilot state. Any new commit on the
-  branch (fix-ups included) invalidates test/typecheck and immutable review
-  evidence: re-run those gates at the new `headRefOid`. For either earlier
-  adversarial verdict, follow `review-protocol.md`'s risk-scoped re-review rule;
+  dual-challenge gate applied, and any Copilot result when one was requested. A
+  Copilot platform refusal is recorded once and does not block merge. Any new
+  commit on the branch (fix-ups included) invalidates test/typecheck and
+  immutable review evidence: re-run those gates at the new `headRefOid`. For
+  either earlier adversarial verdict, follow `review-protocol.md`'s risk-scoped re-review rule;
   either run a fresh round or record exactly which reasoning still applies and
   why. The integrator's own gate work does not fill a missing challenger slot.
 - Check an acceptance box on a linked issue only with evidence (command output,
@@ -72,8 +77,9 @@ every other gate unchanged — evidence fresh at the exact merge head, zero
 unaddressed remarks. The owner sets the label directly or explicitly directs a
 session to set it for named PRs; that session posts the direction as provenance.
 Never infer approval from `ready` or an unrelated owner comment. Approval covers
-the intended PR shape plus fix-ups and rebases; if later commits materially
-expand the design or scope, replace it with `needs-human` and name the delta.
+the intended PR shape plus fix-ups and non-rewriting synchronization with
+`main`; if later commits materially expand the design or scope, replace it with
+`needs-human` and name the delta.
 Tier 1 and Tier 2 self-merge as specified there (Tier 2 requires the merge-report
 comment on the PR first). Every merge report ends with two machine-readable
 lines — `findings_p1_p2_p3: <n>/<n>/<n>` and `deferred_findings: <issue refs or
@@ -92,5 +98,5 @@ them at the new head.
 
 Confirm every issue the PR closes auto-closed. Then update the product docs to
 the new status quo (uberblick MCP tools once registered; until then, comment on
-the PR that the doc update is pending), and restart the dev stack per
-`dev-stack.md`. Record the result on the PR.
+the PR that the doc update is pending). Record the result on the PR. A fresh
+integrator does not own or restart another session's development processes.

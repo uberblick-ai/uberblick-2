@@ -86,6 +86,12 @@ or admit any other role. Re-read immediately before and after claiming; the
 earliest valid claim wins, and a loser posts a one-line withdrawal and tries the
 next candidate.
 
+Before that race, do only the grounding and safety checks the selected role
+explicitly requires. Run no delivery gate and write no explanation of derived
+queue state or skipped candidates. A claim records ownership and the minimum
+proof another role needs; evidence and decisions follow only after the claim
+wins.
+
 **Claims are ordered, and a live one is renewed.** Every claim, withdrawal and
 takeover is ordered by its comment `createdAt`, and by the immutable comment id
 where two share a timestamp. Ownership follows that order,

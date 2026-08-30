@@ -76,6 +76,10 @@ finding — severity does not decide the other two:
   CLAUDE.md invariant, or become materially unusable. P2: a real correctness,
   reliability, accessibility, or maintainability defect within supported usage,
   without P1 impact. P3: minor, local, or low-impact.
+- **A branch-caused red gate is fix-now.** When a required check is green at the
+  base and red at the reviewed head, the branch must restore it even when the
+  stale code is a test fixture rather than production. Severity still follows
+  impact; it is not inferred from the word `test`.
 - **Disposition.** *Fix now* — the default for P1 and for contained
   supported-usage P2s. *Defer* — only for a non-blocking P2/P3 whose fix is
   disproportionate right now: create a linked issue and record the concrete
@@ -98,9 +102,10 @@ finding — severity does not decide the other two:
 
 ## One batched fix-up wave per review head
 
-Collect Codex, Copilot and integrator findings against the same head and triage
-them all first; then one decision-complete brief, one implementer pickup, one
-re-gate at the new head — never a pickup per finding or per reviewer. Standing
+Collect Codex, Opus, any Copilot and integrator findings against the same head
+and triage them all first; then one decision-complete brief, one implementer
+pickup, one re-gate at the new head — never a pickup per finding or per
+reviewer. Standing
 brief constraints: smallest diff that closes the accepted findings; tests only
 for the contract or invariant a finding names, never for the mechanics of the
 fix. Fix-up diffs face the same Touches, scope-escape and overtesting checks as

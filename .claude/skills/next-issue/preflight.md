@@ -22,7 +22,7 @@ makes it relevant; do not sweep `NOT_PLANNED` work as a separate gate.
 Before drafting on **every** route, trivial included, list the files changed by
 every open PR and compare them with the likely footprint. A file-list hit is the
 start of the check: inspect the relevant PR diff before deciding whether the
-overlap is a dependency, semantic conflict or mechanical rebase. Record real
+overlap is a dependency, semantic conflict or mechanical reconciliation. Record real
 overlap while it is still cheap to reshape or defer the issue. Prefer tracked
 file searches (`git ls-files`, `rg`) and exclude `.claude/worktrees/` and
 `.worktrees/`; copied agent worktrees are not additional grounding evidence.

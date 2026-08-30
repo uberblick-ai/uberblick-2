@@ -8,40 +8,25 @@ workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
 
 ## Assignment
 
-One of two complete shapes:
-
-- a top-level assignment supplies the review queue, your role and your session
-  or run identity, and nothing else;
-- an implementer's or integrator's internal assignment supplies your role and
-  run identity, one exact PR key and head SHA, and the parent role and run
-  identity.
-
-Refuse before any side effect when the selected shape is incomplete. For an
-internal assignment, also refuse unless that PR carries the parent's live claim
-or links the implementer's live issue claim for its branch, and carries the
-README's matching durable delegation record at the supplied head.
+An implementer's or integrator's internal assignment supplies your role and run
+identity, one exact PR key and head SHA, and the parent role and run identity.
+Refuse before any side effect unless every value is present, that PR carries the
+parent's live claim or links the implementer's live issue claim for its branch,
+and the README's matching durable delegation record exists at the supplied
+head. There is no top-level review queue.
 
 ## Pickup
 
-For an internal assignment, never inspect or fall back to the queue. Re-read the
-exact PR, prove its current head still matches the assignment and this session
-did not author it, then post the permitted nested claim and review only that
-head.
+Never inspect or fall back to a queue. Re-read the exact PR, prove its current
+head still matches the assignment and this session did not author it, then post
+the permitted nested claim and review only that head.
 
 Prove session independence from durable evidence before claiming: compare the
 head's `Claude-Session` trailers and its linked implementer claim/delegation
 lineage with this run's launching session. Claude Agent children share their
 launcher's authorship identity; a fresh child context or run id is not
-independence. Refuse an internal assignment, or skip a top-level candidate, if
-that session launched an implementer whose commit remains in the head.
-
-For a top-level assignment, eligible: an open PR whose current head carries no
-review record and no live reviewer claim at that head, **and whose diff this
-session did not author** — check the commit trailers and the claim records on
-the PR and its issue before claiming. Order: a `human-approved` PR still without
-a review record first, then ascending PR number. Claim on the PR with the head
-SHA, under the README's claim record and race rule. One review at one head, then
-stop.
+independence. Refuse the assignment if that session launched an implementer
+whose commit remains in the head. One review at one head, then stop.
 
 ## Outcome
 

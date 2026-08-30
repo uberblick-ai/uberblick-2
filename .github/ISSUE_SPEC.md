@@ -78,12 +78,14 @@ Parent: #486
   Dispatch in parallel when substantive implementation files are expected to
   be disjoint. A bounded predicted overlap is also allowed in purely additive
   aggregation surfaces, such as barrel exports or files collecting independent
-  error types, when reconciling it is mechanical; the later branch rebases after
-  the earlier merge and every exact-head gate runs again. Semantic overlap, or
-  files that cannot be foreseen with confidence, queue. An expectation that
-  proves wrong has the same rebase and fresh-gate consequence.
+  error types, when reconciling it is mechanical; after the earlier merge, the
+  later branch synchronizes through a non-rewriting merge only if mergeability
+  requires it, and every exact-head gate runs again. Semantic overlap, or files
+  that cannot be foreseen with confidence, queue. An expectation that proves
+  wrong has the same reconciliation and fresh-gate consequence.
 - This includes `schema`: its keystone risk is paid by exact-head review and
-  gates after any rebase, not by locking unrelated files or packages.
+  gates after upstream reconciliation, not by locking unrelated files or
+  packages.
 - Order among eligible issues: dependency topology, then **`Priority`** — the
   organization issue field, Urgent → High → Medium → Low — then ascending issue
   number. An unset value sorts as Medium; it does not make prepared work

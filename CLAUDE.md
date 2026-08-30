@@ -77,8 +77,7 @@ ever reviews or merges a diff it authored.
      run from a trusted checkout of `origin/main`; worktree tests are useful
      during implementation but are not merge evidence because a shared
      checkout can change during review;
-   - coordinator validation against the issue's acceptance criteria;
-   - **GitHub Copilot review** requested on the PR;
+   - integrator validation against the issue's acceptance criteria;
    - **two independent implementation challenges** wherever an outside read
      earns its cost (owner decision, 2026-08-24, clarified 2026-08-30): first a
      fresh Codex `implementation-reviewer` delegated by the implementer before
@@ -89,8 +88,8 @@ ever reviews or merges a diff it authored.
      is required when the diff touches `packages/schema`,
      `packages/mcp-server`, `packages/hub`, or `pnpm-lock.yaml`, when the PR
      runs to several hundred lines or more, when it changes something genuinely
-     architectural, and whenever the coordinator judges an external review
-     worthwhile. Only when none of those fire does the relaxation apply: a
+     architectural, and whenever the implementer or integrator judges an
+     external review worthwhile. Only when none of those fire does the relaxation apply: a
      trivial or UI/design-only diff — where the rounds would spend time and
      tokens on nothing — merges on the remaining gates without the pair;
    - **zero unaddressed PR remarks** — immediately before merging, re-fetch
@@ -102,6 +101,9 @@ ever reviews or merges a diff it authored.
    (never for data loss, auth/security exposure, or a violated invariant);
    documented as an out-of-usage-model boundary; or rejected with an
    explicit reply on the PR thread — never silent dismissal.
+   GitHub Copilot is optional additional evidence, not a gate. When requested,
+   record a platform refusal or outage once and continue; every review remark it
+   actually posts still falls under the zero-remark gate above.
    Reviewing a commit is one command, `mise run review <head-sha>`,
    run from a checkout at freshly fetched `origin/main` with `mise.toml`,
    `Dockerfile.review` and `.dockerignore` unmodified — the task refuses
@@ -120,15 +122,14 @@ ever reviews or merges a diff it authored.
 
 ### Merge policy — the rules are the authority, not a session
 
-- **Tier 1 — self-merge.** `Touches ⊆ {repo}` and no new
-  dependencies: the implementation loop merges as soon as all gates are green.
+- **Tier 1 — self-merge.** `Touches ⊆ {repo}` and no new dependencies: the
+  integrator merges as soon as all gates are green.
 - **Tier 2 — self-merge with evidence.** All changes that meet neither tier 1
   nor tier 3, including feature packages and backward-compatible additive
   schema work: all gates green **plus** a merge-report comment on the PR —
   acceptance criteria checked off one by one, gate outcomes, any rejected
-  review findings with reasons. The coordination session audits post-merge
-  (while updating the product docs); audit findings become issues, not reverts,
-  unless critical.
+  review findings with reasons. The integrator audits post-merge while updating
+  the product docs; audit findings become issues, not reverts, unless critical.
 - **Tier 3 — `needs-human`, pre-merge.** Label the PR `needs-human`, park it,
   continue with other eligible issues. The owner authorizes by swapping
   `needs-human` for `human-approved`, or explicitly directs a session to do so
@@ -142,8 +143,9 @@ ever reviews or merges a diff it authored.
   Paths identify what to inspect; they never trigger tier 3 by themselves.
 - **Owner approval — one decision, not a late ceremony.** `human-approved` may
   be recorded as soon as a PR's intended shape and known findings are visible.
-  It covers conforming fix-ups and rebases. If later work materially expands
-  the design or scope, replace it with `needs-human` and name the delta.
+  It covers conforming fix-ups and non-rewriting synchronization with `main`.
+  If later work materially expands the design or scope, replace it with
+  `needs-human` and name the delta.
 - **`packages/cli` — tiered from the diff, not the package name** (owner
   decision, 2026-08-24). A diff that adds or changes the user-facing command
   surface — new subcommands, a changed user↔uberblick interaction, anything

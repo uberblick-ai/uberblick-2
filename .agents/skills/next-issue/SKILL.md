@@ -8,13 +8,12 @@ description: >-
 # next-issue
 
 A Codex session reads `.agents/roles/<role>.md` in full before side effects and
-self-picks under its `Pickup` section. The intended entry roles are
-`issue-preparer`, `implementer` and `program-coordinator`, but until their
-delivery handoffs are orchestrated, `implementation-reviewer` and `integrator`
-also remain directly callable, self-picking queue roles through this interim
-skill. `issue-adversary` is not a top-level queue role: the issue-preparer
-launches it with the exact claimed issue and parent run identity its contract
-requires.
+self-picks under its `Pickup` section. The continuous entry roles are
+`issue-preparer`, `implementer` and `integrator`.
+`program-coordinator` remains directly callable for an explicitly requested
+program issue, but is not a delivery loop. `issue-adversary` and
+`implementation-reviewer` are exact-key internal roles launched by their
+parent; neither searches a top-level queue.
 
 `AGENTS.md` is the shared coordination procedure and owns the implementation
 mechanics; this entry point adds none of its own. With no role named, stop.

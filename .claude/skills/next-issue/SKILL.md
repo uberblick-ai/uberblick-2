@@ -11,14 +11,13 @@ description: >-
 This is the interim launcher for the contracts in `.agents/roles/`; the future
 `ub launch <role>` replaces this file without changing them.
 
-The intended entry roles are `issue-preparer`, `implementer` and
-`program-coordinator`. Until their delivery handoffs are orchestrated,
-`implementation-reviewer` and `integrator` also remain directly callable,
-self-picking queue roles through this interim skill. `issue-adversary` is not a
-top-level queue role: the issue-preparer launches it with the exact claimed
-issue and parent run identity its contract requires. This launcher selects no
-target. If the invocation names none of the five directly callable roles, say
-so and return.
+The continuous entry roles are `issue-preparer`, `implementer` and `integrator`.
+`program-coordinator` remains directly callable for an explicitly requested
+program issue, but is not a delivery loop. `issue-adversary` and
+`implementation-reviewer` are exact-key internal roles launched by the parent
+that owns their result; neither searches or claims a top-level queue. This
+launcher selects no target. If the invocation names none of the four directly
+callable roles, say so and return.
 
 ## What this does
 
@@ -67,5 +66,6 @@ fresh invocation belongs to its caller.
   isolated worktree its contract requires.
 
 The roles' mechanics live beside this file and are read by the role that owns
-them, never here: `preflight.md` (issue preparer and its adversary), `review-protocol.md`,
-`integration.md` and `dev-stack.md` (implementation reviewer and integrator).
+them, never here: `preflight.md` (issue preparer and its adversary),
+`review-protocol.md` and `integration.md` (implementation reviewer and
+integrator).
