@@ -92,6 +92,16 @@ const SEQUENCE = "sequenceDiagram\n  alice->>bob: hello";
 const SUBGRAPH = "flowchart TD\n  subgraph one\n    a --> b\n  end";
 
 /**
+ * A sequence diagram whose 600 `-->>` messages read as 600 arrow tokens ablauf
+ * will never parse. Big enough that a pre-`parse` refusal on the *document
+ * total* claims it is "too large" and tells the reader to split it — the false
+ * note #514's review caught (H-2) — while the per-line bound passes it through
+ * to its ordinary `ParseError` and today's silent source view. The tiny
+ * fixtures above cannot see the difference.
+ */
+const SEQUENCE_600 = `sequenceDiagram\n${Array.from({ length: 600 }, (_, i) => `  a-->>b: m${i}`).join("\n")}`;
+
+/**
  * `n` disconnected maximum-width decision boxes — the shape the box cap is
  * calibrated against, because cost at a given box count spans 550x with shape
  * and this is the expensive end (#514 review, F-C). The same 64 boxes as a
@@ -219,6 +229,9 @@ describe("the mermaid block", () => {
    */
   it.each([
     ["a sequence diagram", SEQUENCE],
+    // 600 arrow tokens in aggregate, never more than one per line: the size
+    // cap must not answer before the ParseError does (#514 review, H-2).
+    ["a sequence diagram with 600 messages", SEQUENCE_600],
     ["a flowchart using subgraph", SUBGRAPH],
     ["source that is not a diagram yet", "flow"],
     // A clean parse with nothing in it: ablauf draws an empty 40x40 SVG for a

@@ -28,10 +28,12 @@
  *    header someone has just typed is. Neither is a failure and neither says
  *    anything extra: the block renders exactly as it did before this module
  *    existed.
- * 2. The source is past {@link MAX_SOURCE} or {@link edgesAtMost} bounds its
- *    arrows past {@link MAX_EDGES} — both read off the text — or the drawn
- *    graph is past {@link MAX_NODES} / {@link MAX_EDGES}. The reader is told
- *    which.
+ * 2. The source is past {@link MAX_SOURCE} or {@link lineEdgesAtMost} bounds
+ *    one of its lines' arrows past {@link MAX_EDGES} — both read off the text
+ *    — or the drawn graph is past {@link MAX_NODES} / {@link MAX_EDGES}. The
+ *    reader is told which. Only those two text-read refusals may precede
+ *    `parse`, because everything case 1 keeps silent has to reach its
+ *    `ParseError` first.
  * 3. The block carries a `comment` mark. The schema lets annotations anchor in
  *    this block's text (CLAUDE.md), and a drawn diagram hides the text they are
  *    anchored in — so an annotated block stays source rather than swallowing
@@ -87,11 +89,15 @@ const EDITING_CLASS = "ub-mermaid-editing";
  * of none of the sizes (`fontFamily` is one string in both). A token ablauf
  * adds is therefore handled without an edit here.
  *
- * **An ablauf bump must re-check two things here**, both of them assumptions
+ * **An ablauf bump must re-check three things here**, all of them assumptions
  * about the library rather than about this code: that every *differing* string
  * token is still a colour — a differing non-colour string would be wrapped into
- * an invalid attribute value — and that the escaping in `toSvg` still covers
- * the same vocabulary the XSS review of #514 checked it against.
+ * an invalid attribute value — that the escaping in `toSvg` still covers
+ * the same vocabulary the XSS review of #514 checked it against, and that
+ * {@link SHAPE_LABELS}, {@link CONNECTORS} and {@link LABELLED_CONNECTORS}
+ * still match ablauf's grammar tables, because a connector spelling ablauf
+ * gains that this hand-copy does not know makes {@link lineEdges}
+ * *under*-count — the unsafe direction.
  */
 const THEME: Partial<Theme> = (() => {
   const merged: Record<string, string | number> = { ...DEFAULT_THEME };
@@ -138,9 +144,10 @@ const THEME: Partial<Theme> = (() => {
  * and 378 MB, 32 kB takes 434ms and 1.35 GB, and **48 kB aborts the process
  * with a fatal V8 out-of-memory** — which in a browser is the renderer dying,
  * and which no `catch` below can see, because it is not a JS exception.
- * {@link edgesAtMost} closes that class in the currency the arrow cap already
- * counts in; this cap stays because bytes are a third thing worth bounding, and
- * it deliberately refuses some sources the counts would admit — a single
+ * {@link lineEdgesAtMost} closes that class in the currency the arrow cap
+ * already counts in; this cap stays because bytes are a third thing worth
+ * bounding, and it deliberately refuses some sources the counts would admit —
+ * a single
  * 16,385-character label is one box and no arrows. It bounds the picture too —
  * `title: source` makes the SVG at least the source's size, and every label in
  * it comes from the source — which is what keeps a block the counts accept from
@@ -175,6 +182,22 @@ const LABELLED_CONNECTORS: ReadonlyArray<readonly [string, readonly string[]]> =
  * terms) over its connectors, which is exactly what `parseChain` pushes.
  */
 function lineEdges(line: string): number {
+  /**
+   * `indexOf(needle, i)` is monotone in `i`, so a closer's last result stays
+   * the answer until the scan passes it. Without this memo every `--` opener
+   * whose `-->` closer is absent rescans the rest of the line, which makes the
+   * pass quadratic — 208ms for 16 kB of `-- ---`, before anything is parsed
+   * (#514 review, H-1). With it, each closer is searched over each region of
+   * the line at most once, so the pass is linear.
+   */
+  const lastFound = new Map<string, number>();
+  const nextIndex = (needle: string, from: number): number => {
+    const cached = lastFound.get(needle);
+    if (cached !== undefined && (cached < 0 || cached >= from)) return cached;
+    const found = line.indexOf(needle, from);
+    lastFound.set(needle, found);
+    return found;
+  };
   /** Past a label: its quoted form first, because that may contain the closer. */
   const skipLabel = (from: number, close: string): number => {
     let i = from;
@@ -198,7 +221,7 @@ function lineEdges(line: string): number {
     let cut = -1;
     let length = 0;
     for (const closer of closers) {
-      const found = line.indexOf(closer, i);
+      const found = nextIndex(closer, i);
       if (found >= 0 && (cut < 0 || found < cut)) {
         cut = found;
         length = closer.length;
@@ -251,8 +274,9 @@ function lineEdges(line: string): number {
 }
 
 /**
- * An upper bound on the arrows `parse` will build, read off the text alone —
- * {@link MAX_EDGES} applied one step earlier, in the currency it already counts.
+ * An upper bound on the arrows any *single statement line* asks `parse` to
+ * build, read off the text alone — {@link MAX_EDGES} applied one step earlier,
+ * in the currency it already counts.
  *
  * The count cap can only refuse a graph that has been built, and for `&` groups
  * building it *is* the damage: `a & a & … --> b & b & …` written to exactly
@@ -262,14 +286,27 @@ function lineEdges(line: string): number {
  * allocation, because ablauf's expansion rule is local to a line: every
  * connector on it makes one edge per (term on its left x term on its right).
  *
+ * **Per line, deliberately not the document total.** The damage this guard
+ * exists to prevent is multiplicative expansion inside one statement line, and
+ * that is all it refuses. Refusing on the *sum* pre-parse put the size note in
+ * front of the `ParseError` classification, so a 600-message `sequenceDiagram`
+ * — 600 counted arrow tokens ablauf will never read — was told it was "too
+ * large" and to split itself, instead of staying the silent source view that
+ * refusal case 1 above and the job doc promise (#514 review, H-2). A
+ * multi-line total goes to `parse`, whose `ParseError` sorts the unsupported
+ * out first; what it accepts is bounded to {@link MAX_EDGES} edges per
+ * statement line — ~64k edges / ~5 MB at {@link MAX_SOURCE}, four orders below
+ * the one-line case defended here — and the post-`parse` count check still
+ * refuses it before layout.
+ *
  * It bounds rather than predicts, and only ever upwards. It refuses nothing,
  * so it need not agree with ablauf about what parses: a construct ablauf
  * rejects can read as an extra term or an extra connector here, and both only
  * make the number larger. For source ablauf does parse the two agree exactly,
  * which is why this refuses nothing {@link MAX_EDGES} admits.
  */
-function edgesAtMost(source: string): number {
-  let total = 0;
+function lineEdgesAtMost(source: string): number {
+  let worst = 0;
   let headerSeen = false;
   for (const line of source.split(/\r?\n/)) {
     const statement = line.trim();
@@ -280,9 +317,9 @@ function edgesAtMost(source: string): number {
       headerSeen = true;
       continue;
     }
-    total += lineEdges(statement);
+    worst = Math.max(worst, lineEdges(statement));
   }
-  return total;
+  return worst;
 }
 
 /* ------------------------------------------------------------------ drawing */
@@ -346,7 +383,9 @@ function drawDiagram(target: HTMLElement, source: string): Drawing {
   try {
     // Both of these run before `parse`, because the counts below can only
     // refuse a graph that has already been built, and building it is itself
-    // the cost — see MAX_SOURCE and edgesAtMost.
+    // the cost — see MAX_SOURCE and lineEdgesAtMost. Only the one-line bound
+    // may refuse here: anything it admits reaches `parse`, so an unsupported
+    // diagram type still gets its `ParseError` and stays silent source.
     if (source.length > MAX_SOURCE) {
       target.replaceChildren();
       return {
@@ -354,7 +393,7 @@ function drawDiagram(target: HTMLElement, source: string): Drawing {
         note: tooLarge(`${source.length} characters of source past this block's ${MAX_SOURCE}`),
       };
     }
-    const bound = edgesAtMost(source);
+    const bound = lineEdgesAtMost(source);
     if (bound > MAX_EDGES) {
       target.replaceChildren();
       return { drawn: false, note: tooLarge(`${bound} arrows past this block's ${MAX_EDGES}`) };
