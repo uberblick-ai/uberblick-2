@@ -9,7 +9,7 @@ protocol.
 ## Gate mechanics
 
 - Resolve and record the PR's immutable `headRefOid`, fetch that commit, and run
-  `REVIEW_SHA=<headRefOid> mise run review` — never check the PR branch out to
+  `mise run review <headRefOid>` — never check the PR branch out to
   review it, and never treat tests from a mutable shared checkout as review
   evidence. CLAUDE.md's review paragraph and README's "Review isolation" state
   what the runner refuses and why.

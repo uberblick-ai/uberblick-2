@@ -73,7 +73,7 @@ ever reviews or merges a diff it authored.
 3. **PR.** Open a PR against `main` linked to the issue (`Closes #N`), with a
    body stating what changed and how it was verified.
 4. **Gates — all of them, before merge:**
-   - immutable Docker review green (`REVIEW_SHA=<head-sha> mise run review`),
+   - immutable Docker review green (`mise run review <head-sha>`),
      run from a trusted checkout of `origin/main`; worktree tests are useful
      during implementation but are not merge evidence because a shared
      checkout can change during review;
@@ -97,7 +97,7 @@ ever reviews or merges a diff it authored.
    (never for data loss, auth/security exposure, or a violated invariant);
    documented as an out-of-usage-model boundary; or rejected with an
    explicit reply on the PR thread — never silent dismissal.
-   Reviewing a commit is one command, `REVIEW_SHA=<head-sha> mise run review`,
+   Reviewing a commit is one command, `mise run review <head-sha>`,
    run from a checkout at freshly fetched `origin/main` with `mise.toml`,
    `Dockerfile.review` and `.dockerignore` unmodified — the task refuses
    otherwise, because main is what supplies the build recipe. The reviewed

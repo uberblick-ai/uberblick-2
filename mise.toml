@@ -226,7 +226,8 @@ printf 'fue image retained for probes: %s\\n' "$tag"
 """
 
 [tasks.review]
-description = "Build and verify an immutable commit in Docker (REVIEW_SHA defaults to HEAD)"
+description = "Build and verify an immutable commit in Docker (SHA argument defaults to HEAD)"
+usage = 'arg "[sha]" help="Commit to review" default="HEAD"'
 # Trust boundary (README, "Review isolation"): the reviewed commit supplies file
 # contents, and main supplies the build recipe — this task, `Dockerfile.review`,
 # `.dockerignore`, and how the context is assembled at all. The task
@@ -258,7 +259,7 @@ GIT_NO_REPLACE_OBJECTS=1
 export GIT_NO_REPLACE_OBJECTS
 
 root="$(git rev-parse --show-toplevel)"
-review_sha="$(git -C "$root" rev-parse --verify --end-of-options "${REVIEW_SHA:-HEAD}^{commit}")"
+review_sha="$(git -C "$root" rev-parse --verify --end-of-options "${usage_sha?}^{commit}")"
 
 # One temp tree and one private ref, both released by a trap installed before
 # either exists. The fetch lands on that private ref rather than FETCH_HEAD,

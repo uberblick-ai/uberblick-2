@@ -108,7 +108,7 @@ mise run test         # all test suites
 mise run check-agents # the six role triplets under .agents/.claude/.codex
 mise run e2e          # browser proof points (Playwright, Chromium, on demand)
 mise run fue          # the documented install path, executed on a clean machine
-REVIEW_SHA=<commit> mise run review  # immutable Docker review of one commit
+mise run review <commit>  # immutable Docker review of one commit
 ```
 
 To run the hub and built web client on a remote Tailscale host, follow
@@ -523,10 +523,11 @@ nothing.
 
 ## Review isolation
 
-`mise run review` resolves `REVIEW_SHA` to a commit, extracts that commit with
-`git archive` into a temporary directory, builds it with the `Dockerfile.review`
-of freshly fetched `origin/main`, and runs the lint, typecheck, and test gates
-in a disposable container. The build context is exactly this: every committed
+`mise run review <commit>` resolves its commit argument (default `HEAD`),
+extracts that commit with `git archive` into a temporary directory, builds it
+with the `Dockerfile.review` of freshly fetched `origin/main`, and runs the lint,
+typecheck, and test gates in a disposable container. The build context is exactly
+this: every committed
 file of the reviewed SHA except its `.gitattributes` files, plus main's
 `.dockerignore`. It cannot pick up a changing checkout, untracked files, local
 `node_modules`, `.git`, or plaintext secrets, and no `export-ignore` anywhere
@@ -553,7 +554,7 @@ in any of them would quietly drop a failing test, and `export-subst` would
 rewrite file contents. `GIT_NO_REPLACE_OBJECTS` is set for the same reason: a
 `refs/replace/*` entry would let a SHA name one commit and read another.
 That is the whole reason the gate is one command with no
-preceding inspection ceremony: `REVIEW_SHA=<commit> mise run review`. It is not
+preceding inspection ceremony: `mise run review <commit>`. It is not
 a claim that the reviewed code is inert — the manifests and lockfile it ships
 are its own, and their install scripts run in the build stage below.
 
@@ -576,7 +577,7 @@ there. The verification container that runs the gates is the isolated half:
 `--network none --cap-drop ALL --security-opt no-new-privileges`. Restricting
 the build itself is not on the table: `docker build --network=none` fails at
 the package-manager install. A build only ever happens on an explicit
-`REVIEW_SHA=<commit> mise run review` — nothing builds a branch automatically
+`mise run review <commit>` — nothing builds a branch automatically
 and no CI job builds one on push. The standing rule bounds the blast radius:
 never pass build secrets, host mounts, privileged mode, or the Docker socket,
 so a hostile build has no credentials of ours to exfiltrate.
