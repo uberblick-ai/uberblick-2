@@ -29,6 +29,10 @@ and has a parseable `Cursor` block. Read the newest valid report:
 - if a valid report is less than seven days old, return `Audit not due` with its
   URL and stop without posting.
 
+A baseline with a later owner reply containing exactly `Baseline: rejected` is
+not valid for cadence or cursor purposes. The next run is a fresh baseline, not
+an incremental continuation.
+
 Use the prior report only as a cursor and hypothesis source. Reproduce open
 findings against current code rather than carrying them forward by assertion.
 Where evidence is comparable, summarize whether its material findings and
@@ -41,6 +45,12 @@ Fetch `origin/main`, record its exact SHA, and inspect from that immutable tree.
 Read `AGENTS.md`, `CLAUDE.md`, workspace manifests, TypeScript and Biome config,
 the documented `mise` tasks, and the live package layout. Derive package counts,
 line counts, dependency versions, and commands rather than hard-coding them.
+
+In `baseline` mode, read
+[`references/architecture-baseline.md`](references/architecture-baseline.md) in
+full and follow it. A baseline is a deep architectural review, not one shallow
+check per lane. Incremental mode does not load that reference unless changed
+code invalidates the previous architecture map.
 
 Use live Uberblick MCP tools to list and read product documents relevant to the
 changed code and rotating lane. Every run reads Editorial contract
@@ -86,13 +96,17 @@ For `corpus-ahead` or `code-ahead`, identify the merge or PR that introduced the
 gap when history makes it derivable. The audit measures whether the owning
 change completed `CLAUDE.md`'s merge-then-docs obligation; it does not become a
 later documentation safety net. If attribution cannot be established, say so.
+Before proposing corpus text, name which information source owns the claim.
+Product documents should not duplicate volatile repository procedure merely to
+make a technical finding easy to close.
 
 ## Technical lanes
 
-Every baseline samples all lanes. Each incremental run examines the changed
-surface in every applicable lane plus one rotating deep lane in this order,
-storing the next lane in its cursor. Rotation never postpones review of a trust,
-durability, or schema boundary changed during the current code window.
+A baseline follows the architecture reference and must leave evidence in every
+lane below. Each incremental run examines the changed surface in every
+applicable lane plus one rotating deep lane, storing the next lane in its
+cursor. Rotation never postpones review of a trust, durability, or schema
+boundary changed during the current code window.
 
 1. **Corpus and public contracts** — interfaces, promises, availability
    boundaries, stale or duplicated authority.
@@ -124,6 +138,12 @@ dependencies, enable nursery lint rules, or add coverage tooling during an
 audit. Run expensive full suites only when they materially test a suspected
 finding; record unrun checks rather than implying they passed.
 
+Material technical claims cite immutable evidence at the audited SHA: code and
+line, the focused test or probe and result, and corpus UUID plus block id and rev
+where product truth matters. A negative search states its exact scope and
+pattern. A baseline with no substantive evidence for any lane is `incomplete`,
+even when it also found defects.
+
 ## Findings and challenge
 
 For each suspected finding, establish exact evidence, reachability inside the
@@ -138,11 +158,14 @@ Before reporting, search Discussion #541 and the responsible PR or linked issue
 for a prior explicit disposition. Do not repeat a fixed, deferred, documented,
 or evidence-backed rejected finding unless new evidence overturns it; state
 that delta. For corpus drift, include the attributable merge or say why it
-could not be identified.
+could not be identified. Candidate actions name an explicit next owner and
+route; never defer stale truth to “the next change touching it.”
 
 ## Report
 
-Post one top-level reply, normally under 5,000 characters:
+Post one top-level reply. A baseline is normally under 12,000 characters and an
+incremental report under 6,000; use compact evidence tables rather than omitting
+architectural reasoning to meet a length target.
 
 ```text
 Technical audit — YYYY-MM-DD
@@ -151,7 +174,14 @@ Mode: baseline|incremental
 Code: <previous SHA or none>..<origin/main SHA>
 Corpus: <title (uuid), approximate updatedAt, exact block rev when material>
 Verdict: aligned|findings|needs-owner|incomplete
+Coverage: complete|incomplete
 Change since previous audit: first-report|improved|unchanged|regressed|incomparable — <evidence>
+
+Architecture assessment
+- <load-bearing journey, state/authority transitions, boundaries, evidence, result>
+
+Lane coverage
+- <lane 1-6: scope; immutable code/test/corpus evidence; result; limits>
 
 Corpus ↔ code
 - <status> — <claim, implementation evidence, attributable merge, consequence>
@@ -184,5 +214,6 @@ Audit self-assessment
 ```
 
 Link durable evidence instead of pasting long logs. A clean audit reports the
-sample and its limits without manufacturing findings. Post no other comment and
-stop.
+sample and its limits without manufacturing findings. `Coverage: incomplete`
+requires `Verdict: incomplete`; findings may still be listed. Post no other
+comment and stop.
