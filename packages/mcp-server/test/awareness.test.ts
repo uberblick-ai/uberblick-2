@@ -9,25 +9,37 @@
  * `Y.relativePositionToJSON` output anchored to the block's Y.XmlText.
  */
 
+import { DIRECTORY_SUFFIX } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { blockText } from "../src/replica.js";
 import { agentDisplayName } from "../src/server.js";
-import { removeTempDirs, startServer, testConfig, waitUntil } from "./helpers.js";
+import {
+  removeTempDirs,
+  sleep,
+  startServer,
+  testConfig,
+  waitUntil,
+} from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
 
 interface RigOptions {
   cursorTtlMs?: number;
+  /** An existing log to boot over, so a second server holds another's rooms. */
+  databasePath?: string;
   /** What the MCP client calls itself at `initialize`. */
   clientInfo?: { name: string; title?: string; version: string };
 }
 
 async function rigWith(options: RigOptions = {}): Promise<Rig> {
-  const { cursorTtlMs, clientInfo } = options;
+  const { cursorTtlMs, databasePath, clientInfo } = options;
   const rig = await startServer(
-    testConfig(cursorTtlMs === undefined ? {} : { cursorTtlMs }),
+    testConfig({
+      ...(cursorTtlMs === undefined ? {} : { cursorTtlMs }),
+      ...(databasePath === undefined ? {} : { databasePath }),
+    }),
     undefined,
     clientInfo,
   );
@@ -45,20 +57,42 @@ afterAll(() => {
   removeTempDirs();
 });
 
-/** The local awareness state of the replica holding `uuid`. */
-function awarenessOf(rig: Rig, uuid: string) {
+/** The attached replica for a room id — a document uuid, or `_directory`. */
+function replicaOf(rig: Rig, id: string) {
   const replica = rig.instance.replicas
     .attachedReplicas()
-    .find((candidate) => candidate.id === uuid);
+    .find((candidate) => candidate.id === id);
   if (replica === undefined) {
-    throw new Error(`no replica for ${uuid}`);
+    throw new Error(`no replica for ${id}`);
   }
-  // What the provider serialises: plain JSON, nothing else.
+  return replica;
+}
+
+/** Whether a room is attached at all — attaching and publishing are separate. */
+function isAttached(rig: Rig, id: string): boolean {
+  return rig.instance.replicas
+    .attachedReplicas()
+    .some((candidate) => candidate.id === id);
+}
+
+/**
+ * What a remote observer decodes from a room's local awareness state.
+ *
+ * The JSON round trip is the point: it is what the provider puts on the wire,
+ * so a key held locally as `undefined` is absent here exactly as it is there.
+ * `null` where the room publishes nothing at all.
+ */
+function publishedState(rig: Rig, id: string): Record<string, any> | null {
+  return JSON.parse(
+    JSON.stringify(replicaOf(rig, id).awareness.getLocalState() ?? null),
+  );
+}
+
+/** The local awareness state of the replica holding `uuid`. */
+function awarenessOf(rig: Rig, uuid: string) {
   return {
-    replica,
-    state: JSON.parse(
-      JSON.stringify(replica.awareness.getLocalState()),
-    ) as Record<string, any>,
+    replica: replicaOf(rig, uuid),
+    state: (publishedState(rig, uuid) ?? {}) as Record<string, any>,
   };
 }
 
@@ -221,7 +255,103 @@ describe("agent awareness", () => {
       "the agent cursor to be withdrawn",
       () => awarenessOf(rig, doc.uuid).state.cursor === null,
     );
-    // The identity stays: the agent is still in the room, just not pointing.
-    expect(awarenessOf(rig, doc.uuid).state.user).toBeTruthy();
+    // The identity goes with it, never before it: presence in a document means
+    // "this session is working here", and the write that drew this caret is the
+    // touch the presence clock is counting from too (#493). Awaited rather than
+    // asserted outright because the caret is withdrawn first by construction —
+    // an anonymous caret is the one order that must not happen.
+    await waitUntil(
+      "the agent's presence to be withdrawn",
+      () => awarenessOf(rig, doc.uuid).state.user === undefined,
+    );
+  });
+
+  /**
+   * Presence in a document says "this session is working here" (#493).
+   *
+   * The server attaches a replica for every live document in the directory, so
+   * publishing on attach made one agent a peer bubble in every document at
+   * once. These pin the two halves of the fix on a *second* server booted from
+   * the first one's log — the shape that produced the bug, since that is how a
+   * server comes to hold rooms nobody asked it about.
+   */
+  describe("document presence follows the work, not the connection", () => {
+    /** A server that boots holding every document another one wrote. */
+    async function secondServerOver(cursorTtlMs?: number) {
+      const first = await rigWith();
+      const doc = await first.ok("create_doc", {
+        title: "Shared",
+        description: "A test document.",
+        blocks: [{ type: "paragraph", text: "written elsewhere" }],
+      });
+      await first.close();
+      rigs.splice(rigs.indexOf(first), 1);
+
+      const second = await rigWith({
+        ...(cursorTtlMs === undefined ? {} : { cursorTtlMs }),
+        databasePath: first.config.databasePath,
+      });
+      return { rig: second, uuid: doc.uuid };
+    }
+
+    it("publishes nothing in a room it merely attached", async () => {
+      const { rig, uuid } = await secondServerOver();
+
+      // The three tools that answer from the derived index or the directory
+      // stub. Each settles first, and settling is what attaches the room — so
+      // the room is here, with its existing answers, and nobody is in it.
+      expect((await rig.ok("list_docs")).docs).toContainEqual(
+        expect.objectContaining({ uuid, title: "Shared" }),
+      );
+      expect((await rig.ok("search", { query: "elsewhere" })).hits).toContainEqual(
+        expect.objectContaining({ uuid }),
+      );
+      expect((await rig.ok("backlinks", { uuid })).backlinks).toEqual([]);
+
+      expect(isAttached(rig, uuid)).toBe(true);
+      expect(publishedState(rig, uuid)).toBeNull();
+      // Workspace-level presence is what the user menu's "MCP connections"
+      // count reads, and it is unaffected: every session joins the directory.
+      expect(publishedState(rig, DIRECTORY_SUFFIX)?.user).toEqual({
+        name: rig.clientName,
+        color: rig.config.color,
+      });
+    });
+
+    it("publishes on a read, keeps it alive, then withdraws the key", async () => {
+      // 900 ms so the arithmetic below has room on a loaded machine.
+      const ttl = 900;
+      const { rig, uuid } = await secondServerOver(ttl);
+
+      await rig.ok("get_doc", { uuid });
+      const touched = awarenessOf(rig, uuid).state;
+      expect(touched.user).toEqual({
+        name: rig.clientName,
+        color: rig.config.color,
+      });
+      // A read publishes presence and draws no caret: the clocks are separate.
+      expect(touched.cursor).toBeUndefined();
+
+      // A fresh touch supersedes the pending withdrawal rather than queueing a
+      // second one: at 1.4 × ttl the first deadline has passed and the second
+      // has not, so a session still working keeps its bubble.
+      await sleep(ttl * 0.7);
+      await rig.ok("get_doc", { uuid });
+      await sleep(ttl * 0.7);
+      expect(awarenessOf(rig, uuid).state.user).toBeTruthy();
+
+      await waitUntil(
+        "the agent's presence to be withdrawn",
+        () => awarenessOf(rig, uuid).state.user === undefined,
+      );
+      // Absent, never `user: null` — all three web readers test for absence, so
+      // a null would still count as a session. And the state itself stays:
+      // dropping it emits an awareness `removed`, which is the event the web's
+      // departed-agent grace waits for.
+      const withdrawn = publishedState(rig, uuid);
+      expect(withdrawn).not.toBeNull();
+      expect(withdrawn).not.toHaveProperty("user");
+      expect(publishedState(rig, DIRECTORY_SUFFIX)?.user).toBeTruthy();
+    });
   });
 });
