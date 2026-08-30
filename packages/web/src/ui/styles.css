@@ -121,6 +121,23 @@
   --sidebar-group-count: light-dark(oklch(0.145 0 0 / 70%), oklch(0.985 0 0 / 70%));
   --sidebar-selected-border: light-dark(oklch(0.75 0.15 65 / 28%), oklch(0.8 0.18 65 / 28%));
 
+  /* `--sidebar-accent`'s job, on the other surface (#516). #480 moved dark's
+     neutral greys onto the scheme's warm hue, which narrowed every highlight
+     that sits on `--card` — the block-menu entry, the sidebar toggle, the
+     threads handle — from OKLab ΔE 0.064 against their ground to 0.018. The
+     sidebar got its own accent then; the card did not, and the three were left
+     reading the globals. Owner decision, 2026-08-30: one card-scoped token, so
+     the answer is one thing rather than three per-surface answers, and
+     `--accent`/`--secondary` keep their warm values for every other consumer.
+
+     Both halves are `--card` stepped the way `--sidebar-accent` steps off
+     `--sidebar`: away from the ground at chroma 0.015, on `--card`'s own hue.
+     Dark lands past the literal step, and that is deliberate — +0.06 L gives
+     ΔE 0.0619, just under the 0.064 the pairs had before the retune, so it
+     goes to 0.275 (ΔE 0.0716) rather than sit fractionally under the floor it
+     exists to clear. Light steps -0.05 for ΔE 0.0510, against 0.0050 before. */
+  --card-accent: light-dark(oklch(0.92 0.015 75), oklch(0.275 0.015 75));
+
   --brand: light-dark(oklch(0.75 0.15 65), oklch(0.8 0.18 65));
   --brand-subtle: light-dark(oklch(0.95 0.03 65), oklch(0.25 0.04 65));
   --status-success: light-dark(oklch(0.65 0.18 145), oklch(0.7 0.2 145));
@@ -264,7 +281,7 @@ body {
   height: 1.6rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--secondary);
+  background: var(--card-accent);
   color: var(--secondary-foreground);
   cursor: pointer;
 }
@@ -439,7 +456,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 0.1rem 0.55rem;
-  background: var(--secondary);
+  background: var(--card-accent);
   color: var(--secondary-foreground);
   white-space: nowrap;
   cursor: pointer;
@@ -2467,7 +2484,7 @@ h3.ub-heading {
 /* The highlight follows the keyboard and the pointer alike, so it is one class
    rather than a `:hover` rule that could disagree with the arrow keys. */
 .ub-blockmenu-on {
-  background: var(--accent);
+  background: var(--card-accent);
   border-color: var(--border);
   color: var(--accent-foreground);
 }
