@@ -79,6 +79,26 @@ outcome is tied to one. A delegated subagent also posts `Parent: <parent role>
 stay proportional: link evidence instead of narrating transcripts. GitHub must
 be sufficient for recovery.
 
+**A durable comment reaches GitHub as composed.** Write every claim, renewal,
+delegation, return and `Done:` body to a file with a *quoted* heredoc delimiter,
+then post the file:
+
+```sh
+cat > "$SCRATCH/done.md" <<'EOF'
+Done: issue-adversary <run id>
+Outcome: correctable-findings — `readDecisions` already pins it; cost is $0.
+EOF
+gh issue comment <N> --body-file "$SCRATCH/done.md"
+```
+
+Any composition with the same property is equally fine; what is forbidden is a
+body a shell interpolates. Quote the delimiter as `<<'EOF'`, never bare `<<EOF`,
+and do not pass findings inline as `--body "…"`: both run the backticked terms in
+your own text as commands and flatten its newlines. A record that lands garbled
+is then recoverable only from the launching session's transcript — the private
+channel every rule here exists to keep out of the record. That has happened
+once, on #491.
+
 **The race rule.** A live top-level claim makes the item ineligible for every
 other queue pickup. The one permitted nested claim is the subagent explicitly
 delegated by the role that holds that item; it does not release the parent claim
