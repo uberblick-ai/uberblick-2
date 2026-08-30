@@ -2,10 +2,11 @@
  * The Threads rail: comment threads as the reader sees them, derived from the
  * open document.
  *
- * Nothing is stored for the rail. A thread is JSON in the `annotations` Y.Map
- * and its range is a `comment` mark on some block's Y.XmlText, so the rail is
- * those two reads joined — which is why a thread another client creates needs no
- * extra plumbing to appear.
+ * Nothing is stored for the rail. A thread is metadata in the `annotations`
+ * Y.Map, its comments are rows in the `comments` Y.Array, and its range is a
+ * `comment` mark on some block's Y.XmlText, so the rail is those three reads
+ * joined — which is why a thread another client creates needs no extra plumbing
+ * to appear.
  *
  * The join is what makes the orphaned state detectable. A thread is orphaned
  * when its id appears in no block's marks: every annotated character was
@@ -25,6 +26,7 @@ import {
   getAnnotationsMap,
   getBlocks,
   getBlocksFragment,
+  getCommentsArray,
   listAnnotations,
   readsAsMark,
 } from "@uberblick/schema";
@@ -77,9 +79,9 @@ export function blockRefLabel(type: BlockType, index: number): string {
 
 /**
  * A comment plus the key the rail renders it under. A stored comment carries no
- * id — the thread is append-only JSON, and its storage shape is not this
- * change's business — so a comment's identity is its position, and the key is
- * derived here rather than in the view.
+ * id — a row in the `comments` array is a thread id, an author, text and a
+ * timestamp — so a comment's identity is its position in the thread's converged
+ * order, and the key is derived here rather than in the view.
  */
 export interface ThreadComment extends AnnotationComment {
   key: string;
@@ -307,15 +309,22 @@ export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
  * Call `onChange` with a fresh rail whenever it could have changed. Returns the
  * unsubscribe.
  *
- * Two subscriptions, because the rail joins two places: the annotations map
- * (threads arriving, comments appended) and the blocks fragment, observed deeply
- * so a *format* change one level down — a mark being deleted with its text — is
- * seen too. A shallow fragment observer would never notice a thread orphaning.
+ * Three subscriptions, because the rail joins three places: the annotations map
+ * (threads arriving and resolving), the comments array (replies arriving), and
+ * the blocks fragment, observed deeply so a *format* change one level down — a
+ * mark being deleted with its text — is seen too. A shallow fragment observer
+ * would never notice a thread orphaning.
  *
- * The two are coalesced onto a microtask, so a single transaction that touches
- * both — creating a thread writes the map *and* the mark — recomputes the rail
- * once instead of twice. The first read is synchronous: a mounting rail should
- * not paint empty for a tick.
+ * The comments array is observed shallowly and that is enough: a row is plain
+ * JSON pushed whole, so every reply is a change to the array itself and nothing
+ * inside a row ever mutates. Without this subscription a reply arriving from
+ * another replica would sit in the document unrendered until something else
+ * touched the map or the text.
+ *
+ * The three are coalesced onto a microtask, so a single transaction that touches
+ * several — creating a thread writes the map, the array *and* the mark —
+ * recomputes the rail once instead of three times. The first read is
+ * synchronous: a mounting rail should not paint empty for a tick.
  */
 export function observeThreads(
   ydoc: Y.Doc,
@@ -323,6 +332,7 @@ export function observeThreads(
 ): () => void {
   const fragment = getBlocksFragment(ydoc);
   const annotations = getAnnotationsMap(ydoc);
+  const comments = getCommentsArray(ydoc);
   let queued = false;
   let live = true;
   const schedule = (): void => {
@@ -337,10 +347,12 @@ export function observeThreads(
   onChange(threadsFromDoc(ydoc));
   fragment.observeDeep(schedule);
   annotations.observe(schedule);
+  comments.observe(schedule);
   return () => {
     live = false;
     fragment.unobserveDeep(schedule);
     annotations.unobserve(schedule);
+    comments.unobserve(schedule);
   };
 }
 

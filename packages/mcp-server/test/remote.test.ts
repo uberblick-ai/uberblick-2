@@ -17,9 +17,11 @@
 
 import {
   COMMENT_MARK,
+  addComment,
   addDecision,
   appendBlock,
   createAnnotation,
+  getAnnotationsMap,
   getDecisionsArray,
   getBlocks,
   initDoc,
@@ -124,6 +126,30 @@ describe("docFingerprint", () => {
     expect(getBlocks(doc)[0]?.text).toBe(getBlocks(copy)[0]?.text);
     expect(listAnnotations(doc)).toEqual(listAnnotations(copy));
 
+    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+  });
+
+  // A reply lives in the `comments` root, not in the thread's map value, so a
+  // fingerprint that only canonicalised the annotations map would call a replica
+  // missing every reply identical to one holding them.
+  it("changes when only a reply is added to an existing thread", () => {
+    const doc = source();
+    const thread = createAnnotation(
+      doc,
+      firstBlock(doc).id,
+      0,
+      5,
+      "someone",
+      "is this right?",
+    );
+
+    const copy = replicate(doc);
+    addComment(doc, thread.id, "someone else", "no");
+
+    // The thread's own metadata is untouched by a reply, which is the point.
+    expect(getAnnotationsMap(doc).get(thread.id)).toEqual(
+      getAnnotationsMap(copy).get(thread.id),
+    );
     expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
   });
 

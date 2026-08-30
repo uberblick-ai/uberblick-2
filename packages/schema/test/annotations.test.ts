@@ -14,6 +14,7 @@ import {
   getAnnotation,
   getBlockText,
   getBlocksFragment,
+  getCommentsArray,
   initDoc,
   listAnnotationRanges,
   listAnnotations,
@@ -44,6 +45,17 @@ function annotatedText(
   const range = resolveAnnotationRange(doc, threadId);
   if (range === null) return null;
   return getBlockText(doc, blockId).slice(range.start, range.end);
+}
+
+/** Two replicas already sharing one block and one open thread. */
+function threadedPair(): { a: Y.Doc; b: Y.Doc; threadId: string } {
+  let threadId = "";
+  const [a, b] = replicaPair((doc) => {
+    initDoc(doc, { uuid: UUID, title: "Annotations" });
+    const blockId = appendBlock(doc, { type: "paragraph", text: SENTENCE });
+    threadId = createAnnotation(doc, blockId, 6, 11, "reviewer", "Too much?").id;
+  });
+  return { a, b, threadId };
 }
 
 /** The raw formatting attributes Yjs holds, to prove the anchor is a mark. */
@@ -276,9 +288,14 @@ describe("annotations", () => {
     expect(deltaOf(doc, blockId)).toEqual([[SENTENCE, null]]);
     expect(getBlockText(doc, blockId)).toBe(SENTENCE);
 
-    // The freed range can be annotated again.
+    // The freed range can be annotated again, and inherits nothing: the deleted
+    // thread's comment rows went with it rather than being left in the array.
+    expect(getCommentsArray(doc).length).toBe(0);
     const again = createAnnotation(doc, blockId, 6, 11, "reviewer", "again");
     expect(annotatedText(doc, blockId, again.id)).toBe("brave");
+    expect(getAnnotation(doc, again.id)?.comments).toEqual([
+      { author: "reviewer", text: "again", createdAt: expect.any(String) },
+    ]);
   });
 
   it("tracks the range through a concurrent edit from another replica", () => {
@@ -357,8 +374,50 @@ describe("annotations", () => {
     );
   });
 
+  it("keeps both replies when two replicas comment on one thread offline", () => {
+    const { a, b, threadId } = threadedPair();
+
+    // Neither replica can see the other's reply. While the conversation was a
+    // field of one last-write-wins Y.Map value, these two converged to whichever
+    // write came last and the other reply vanished silently (#461).
+    addComment(a, threadId, "owner", "Yes, cut it.");
+    addComment(b, threadId, "agent", "Shortened.");
+    syncDocs(a, b);
+
+    const onA = getAnnotation(a, threadId)?.comments ?? [];
+    expect(onA.map((comment) => comment.text)).toHaveLength(3);
+    expect(onA.map((comment) => comment.text)).toEqual(
+      expect.arrayContaining(["Yes, cut it.", "Shortened."]),
+    );
+    // The opening comment was already shared, so it stays first; which reply
+    // follows it is Yjs's to decide. The contract is that both replicas decide
+    // it the same way — a position, not a timestamp.
+    expect(onA[0]?.text).toBe("Too much?");
+    expect(getAnnotation(b, threadId)?.comments).toEqual(onA);
+  });
+
+  it("keeps a reply made concurrently with a resolve", () => {
+    const { a, b, threadId } = threadedPair();
+
+    setAnnotationResolved(a, threadId, true);
+    addComment(b, threadId, "agent", "One more thing.");
+    syncDocs(a, b);
+
+    // The two writes land in different roots, so neither can clobber the other.
+    for (const replica of [a, b]) {
+      const thread = getAnnotation(replica, threadId);
+      expect(thread?.resolved).toBe(true);
+      expect(thread?.comments.map((comment) => comment.text)).toEqual([
+        "Too much?",
+        "One more thing.",
+      ]);
+    }
+  });
+
   it("exports annotations as adjacent HTML comments, or drops them", () => {
     const { doc, blockId, threadId } = annotated();
+    // A reply, so the exported body is the joined list and not one stored field.
+    addComment(doc, threadId, "author", "Cut.");
     setAnnotationResolved(doc, threadId, true);
 
     expect(exportMarkdown(doc, { frontmatter: false })).toBe(
@@ -370,7 +429,7 @@ describe("annotations", () => {
       [
         "Hello brave world",
         "",
-        `<!-- annotation ${threadId} range=6-11 resolved reviewer: "Too much?" -->`,
+        `<!-- annotation ${threadId} range=6-11 resolved reviewer: "Too much?" | author: "Cut." -->`,
         "",
       ].join("\n"),
     );

@@ -1,13 +1,14 @@
 /**
  * Document layout and metadata.
  *
- * A document is one Y.Doc (room name = document UUID) with exactly four
+ * A document is one Y.Doc (room name = document UUID) with exactly five
  * top-level shared types:
  *
  *   - `meta`        Y.Map     — uuid, title, description, tags, links,
  *                              kind, status and decision remove/add levels
  *   - `blocks`      Y.XmlFragment — one Y.XmlElement per block
- *   - `annotations` Y.Map     — threadId → annotation JSON
+ *   - `annotations` Y.Map     — threadId → thread metadata JSON
+ *   - `comments`    Y.Array   — comment rows, each naming its thread
  *   - `decisions`   Y.Array   — decision-document uuids, in stored order
  *
  * ## The decision log
@@ -55,6 +56,7 @@ import type {
 export const META_KEY = "meta";
 export const BLOCKS_KEY = "blocks";
 export const ANNOTATIONS_KEY = "annotations";
+export const COMMENTS_KEY = "comments";
 export const DECISIONS_KEY = "decisions";
 
 /** Flat `meta` keys keep each replica's decision-removal level independent. */
@@ -81,9 +83,21 @@ export function getBlocksFragment(ydoc: Y.Doc): Y.XmlFragment {
   return ydoc.getXmlFragment(BLOCKS_KEY);
 }
 
-/** The `annotations` Y.Map. */
+/** The `annotations` Y.Map: threadId → thread metadata. */
 export function getAnnotationsMap(ydoc: Y.Doc): Y.Map<unknown> {
   return ydoc.getMap<unknown>(ANNOTATIONS_KEY);
+}
+
+/**
+ * The `comments` Y.Array: every thread's comments, each row naming its thread.
+ *
+ * One flat array rather than an array per thread, because Yjs has no nested
+ * root types: a thread's own array would have to live inside the `annotations`
+ * map value, which is exactly the last-write-wins key this root exists to get
+ * out of. Readers join rows to threads by `threadId`.
+ */
+export function getCommentsArray(ydoc: Y.Doc): Y.Array<unknown> {
+  return ydoc.getArray<unknown>(COMMENTS_KEY);
 }
 
 /** The `decisions` Y.Array: decision-document uuids, in stored order. */
@@ -104,7 +118,7 @@ export interface InitDocOptions {
 
 /**
  * Initialise a fresh document: write identity metadata and materialise the
- * four root types.
+ * five root types.
  *
  * Idempotent for uuid/title/tags (they are overwritten with what is passed);
  * `links` is only seeded when absent, so re-initialising never drops links.
@@ -124,6 +138,7 @@ export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
     // Touch the other roots so they exist in the update stream from the start.
     getBlocksFragment(ydoc);
     getAnnotationsMap(ydoc);
+    getCommentsArray(ydoc);
     getDecisionsArray(ydoc);
   });
 }

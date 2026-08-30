@@ -10,8 +10,11 @@
  *                   quote, table), formatted by the closed inline-mark set
  *                   (bold, italic, strike, inlineCode, link, docLink) on
  *                   prose blocks
- *   - `annotations` Y.Map of thread JSON, anchored by `comment` formatting
+ *   - `annotations` Y.Map of thread metadata, anchored by `comment` formatting
  *                   marks on the block's text
+ *   - `comments`    Y.Array of comment rows, each naming its thread: the
+ *                   conversation, kept out of the map so two concurrent
+ *                   replies both survive
  *   - `decisions`   Y.Array of decision-document uuids: the ordered log of
  *                   which decisions govern this document
  *
@@ -31,11 +34,13 @@
 export {
   ANNOTATIONS_KEY,
   BLOCKS_KEY,
+  COMMENTS_KEY,
   DECISIONS_KEY,
   META_KEY,
   addDecision,
   getAnnotationsMap,
   getBlocksFragment,
+  getCommentsArray,
   getDecisionsArray,
   getMeta,
   getMetaMap,
@@ -215,10 +220,12 @@ export type {
   Annotation,
   AnnotationComment,
   AnnotationRange,
+  AnnotationThread,
   Block,
   BlockInput,
   BlockType,
   CommentMark,
+  CommentRow,
   DecisionReference,
   DirectoryEntry,
   DecisionStatus,

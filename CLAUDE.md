@@ -175,13 +175,19 @@ the fallback, which is exactly why CI is high priority.
   the parse) before the id reaches rooms, token claims, or the database
   filename — nothing two machines compare ever carries a slug. Tenancy lives in
   the room key from day one so a hosted hub never needs a room migration.
-- Doc layout is a closed set of four root types: `meta` (Y.Map: uuid, title,
+- Doc layout is a closed set of five root types: `meta` (Y.Map: uuid, title,
   description, tags, links-by-UUID, kind, status, and internal decision
   remove/add levels), `blocks`
   (Y.XmlFragment, one element per block with stable `id` attrs; types:
   paragraph, heading, code, mermaid, list-item, quote, table), `annotations`
-  (Y.Map of thread JSON), and `decisions` (Y.Array of decision-document UUID
-  strings in stored order: the fixed decision-log slot). An older client that
+  (Y.Map of thread metadata JSON: anchor block and resolved flag), `comments`
+  (Y.Array of `{threadId, author, text, createdAt}` rows, joined to threads by
+  id on read), and `decisions` (Y.Array of decision-document UUID
+  strings in stored order: the fixed decision-log slot). A thread's
+  conversation is a Y.Array and not a field of its map value because a Y.Map key
+  is last-write-wins: two replicas replying concurrently converged to one and
+  the other reply was silently lost (#461). Comment order is the converged array
+  order — never a `createdAt` sort, which skew can invert. An older client that
   never opens an unknown root type preserves it across Yjs edit and sync; the
   loss boundary is Markdown export/import. Adding another fixed root type is a
   decided-architecture change, not an open-ended slot mechanism. Annotation

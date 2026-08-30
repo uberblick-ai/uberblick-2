@@ -62,6 +62,7 @@ import {
   getAnnotationsMap,
   getBlockInline,
   getBlocks,
+  getCommentsArray,
   getMeta,
   listAnnotationRanges,
   listDirectory,
@@ -198,9 +199,14 @@ function canonical(value: unknown): unknown {
  * A content hash of one document, over everything the schema puts in it.
  *
  * Meta, the ordered blocks, the inline marks on those blocks, the ordered
- * decision references, and the annotations map — which is the whole documented
- * layout (`meta`, `blocks`, `decisions`, `annotations`), so nothing a document
- * can carry is outside this.
+ * decision references, the annotations map and the comment rows — which is the
+ * whole documented layout (`meta`, `blocks`, `decisions`, `annotations`,
+ * `comments`), so nothing a document can carry is outside this.
+ *
+ * The comment rows are hashed in their stored order and not sorted: that order
+ * is the converged Yjs array order, which is identical on every replica, and it
+ * is content — two replicas holding the same replies in different sequence are
+ * not the same document.
  *
  * `Block.rev` supplies the per-block part because it is already the schema's
  * answer to "has this block's content changed" — type, text and attributes. It
@@ -241,6 +247,7 @@ export function docFingerprint(doc: Y.Doc): string {
     annotations: [...annotations.keys()]
       .sort()
       .map((key) => [key, canonical(annotations.get(key))]),
+    comments: getCommentsArray(doc).toArray().map(canonical),
   };
   return createHash("sha256")
     .update(JSON.stringify(state))
