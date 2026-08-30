@@ -47,14 +47,19 @@
  *    stamps the protocol it speaks into {@link BUILD_STAMP}, this command
  *    compares it to its own before it starts anything, and a bundle that
  *    differs — or carries no stamp, which is what one built before the stamp
- *    looks like — is refused with both versions and the rebuild named. Two
- *    local builds are what that compares: whether the *hub* speaks it too is
- *    still settled at connect, where it always was.
+ *    looks like — never gets served. What happens to it instead follows who
+ *    owns it (#475): the checkout's own default bundle is rebuilt, because the
+ *    CLI has just proved it obsolete and the fix is one documented task; a
+ *    bundle `UBERBLICK_WEB_DIST` named is the caller's artifact and is refused
+ *    with both versions and the rebuild named. Two local builds are what that
+ *    compares: whether the *hub* speaks it too is still settled at connect,
+ *    where it always was.
  *
- * The build shells out to pnpm rather than to `mise run build-web`: that task
- * wraps the build in `fnox exec`, and a user of `ub` has no age key. Tasks are
- * the documented way for *contributors* to run things; this is a program
- * running a build for somebody who was never told about either.
+ * The *missing*-bundle build shells out to pnpm rather than to
+ * `mise run build-web`: tasks are the documented way for *contributors* to run
+ * things, and this is a program running a first build for somebody who was
+ * never told about them. A rebuild is the other case — nothing is missing, a
+ * checkout's bundle went stale — so it runs the task, in the checkout.
  *
  * The bundle embeds no secret (#426): the signing secret travels in the
  * document this command serves, so the build is handed none and the bundle it
@@ -141,13 +146,20 @@ function trimmed(value: string | undefined): string | null {
 
 // --- the bundle --------------------------------------------------------------
 
+/**
+ * `ours` is the ownership question, and it is answered by whether
+ * `UBERBLICK_WEB_DIST` was supplied — never by where the directory turns out to
+ * be. A bundle a caller named is an artifact that caller maintains, even when it
+ * resolves to the default directory; only the default this command picked for
+ * itself is one it may rebuild.
+ */
 export type BundleAction =
   /** A built bundle is there; serve it. */
-  | { action: "serve"; dir: string }
+  | { action: "serve"; dir: string; ours: boolean }
   /** No bundle, but a web package to build one from — if pnpm is there. */
-  | { action: "build"; dir: string }
+  | { action: "build"; dir: string; ours: boolean }
   /** Neither, and `reason` says which half is missing. */
-  | { action: "missing"; dir: string; reason: string };
+  | { action: "missing"; dir: string; ours: boolean; reason: string };
 
 function isFile(path: string): boolean {
   try {
@@ -169,14 +181,16 @@ function isFile(path: string): boolean {
 export function bundlePlan(env: NodeJS.ProcessEnv = process.env): BundleAction {
   const override = trimmed(env.UBERBLICK_WEB_DIST);
   const dir = override === null ? resolve(DEFAULT_BUNDLE) : resolve(override);
+  const ours = override === null;
 
   if (isFile(join(dir, "index.html"))) {
-    return { action: "serve", dir };
+    return { action: "serve", dir, ours };
   }
   if (override !== null) {
     return {
       action: "missing",
       dir,
+      ours,
       reason: `UBERBLICK_WEB_DIST names ${dir}, which holds no index.html`,
     };
   }
@@ -184,10 +198,11 @@ export function bundlePlan(env: NodeJS.ProcessEnv = process.env): BundleAction {
     return {
       action: "missing",
       dir,
+      ours,
       reason: `there is no built web app at ${dir}, and no web package beside this one to build from`,
     };
   }
-  return { action: "build", dir };
+  return { action: "build", dir, ours };
 }
 
 /**
@@ -260,25 +275,104 @@ function stampedProtocol(dir: string): number | null {
   }
 }
 
+/** What a bundle's stamp says, in a sentence: a version, or nothing at all. */
+function speaks(stamped: number | null): string {
+  return stamped === null
+    ? "carries no sync protocol stamp"
+    : `speaks sync protocol ${stamped}`;
+}
+
 /**
- * Why a bundle is not being served, and what makes it servable.
+ * Why a bundle *somebody else supplied* is not being served, and what makes it
+ * servable.
  *
  * Both rebuilds are named because their audiences are different, and it is the
  * same split the build above makes: `pnpm` is the one a user of `ub` can run,
- * while `mise run build-web` is the documented task and wraps `fnox exec`,
- * which wants an age key a user has no reason to have.
+ * while `mise run build-web` is the documented task for a checkout — and since
+ * #426 that task wants no age key either (`fnox exec --if-missing warn`), so
+ * what it really needs is mise and a `ub` on PATH.
  */
 function staleBundle(dir: string, stamped: number | null): string {
-  const speaks =
-    stamped === null
-      ? "carries no sync protocol stamp"
-      : `speaks sync protocol ${stamped}`;
   return (
-    `ub open: the web app at ${dir} ${speaks}, and this uberblick speaks ` +
+    `ub open: the web app at ${dir} ${speaks(stamped)}, and this uberblick speaks ` +
     `${SYNC_PROTOCOL_VERSION} — it could not sync, so it is not being served. ` +
     "Rebuild it with `pnpm --filter @uberblick/web build`, or with " +
     "`mise run build-web` from a checkout.\n"
   );
+}
+
+/** The checkout `build-web` is a task of: two levels up from `packages/cli`. */
+const CHECKOUT_ROOT = dirname(dirname(packageRoot));
+
+/** Run the documented web build once; the reason it did not build, or null. */
+function runBuildWeb(env: NodeJS.ProcessEnv): Promise<string | null> {
+  return new Promise((done) => {
+    const child = spawn("mise", ["run", "build-web"], {
+      cwd: CHECKOUT_ROOT,
+      env,
+      // Both of the build's streams to stderr, for the same reason the build
+      // above does it: stdout is where this command prints the URL.
+      stdio: ["ignore", 2, 2],
+    });
+    child.on("error", (error) =>
+      done(`\`mise run build-web\` could not be run (${message(error)})`),
+    );
+    child.on("close", (status) =>
+      done(status === 0 ? null : `\`mise run build-web\` exited ${status ?? 1}`),
+    );
+  });
+}
+
+/**
+ * Make sure the bundle about to be served speaks this command's protocol,
+ * rebuilding it when it is stale and ours (#475).
+ *
+ * Ours means `UBERBLICK_WEB_DIST` named nothing, so the bundle is the checkout's
+ * own — the normal contributor path, where the CLI has just proved the bundle is
+ * obsolete and the recovery is one documented task away. Making the user run it
+ * by hand is a step this command can take itself. A *supplied* bundle is refused
+ * exactly as before: it is the caller's artifact, and rebuilding somebody else's
+ * deployed bundle behind their back is not this command's business.
+ *
+ * The build is the task rather than the raw `pnpm` the missing-bundle path
+ * spawns: a stale bundle is a checkout's, and in a checkout the task is the
+ * documented way to build. It needs no age key (#426), and `ub env` inside it
+ * hands the build this machine's resolved configuration.
+ *
+ * Either way a bundle that cannot sync is never served, and the refusal happens
+ * before any hub is started or any database file exists.
+ */
+export async function ensureBundle(
+  plan: BundleAction,
+  env: NodeJS.ProcessEnv,
+  io: Io,
+): Promise<boolean> {
+  const stamped = stampedProtocol(plan.dir);
+  if (stamped === SYNC_PROTOCOL_VERSION) {
+    return true;
+  }
+  if (!plan.ours) {
+    io.err(staleBundle(plan.dir, stamped));
+    return false;
+  }
+
+  io.err(
+    `ub open: the web app at ${plan.dir} ${speaks(stamped)}, and this uberblick ` +
+      `speaks ${SYNC_PROTOCOL_VERSION} — rebuilding it with \`mise run build-web\`; ` +
+      "this takes a moment\n",
+  );
+  const failure = await runBuildWeb(env);
+  const rebuilt = failure === null ? stampedProtocol(plan.dir) : null;
+  if (rebuilt === SYNC_PROTOCOL_VERSION) {
+    return true;
+  }
+  io.err(
+    `ub open: the stale web app was not rebuilt: ${failure ?? `the rebuilt web app ${speaks(rebuilt)}`}. ` +
+      `Run \`mise run build-web\` in ${CHECKOUT_ROOT} and read what it says, or ` +
+      "point UBERBLICK_WEB_DIST at a bundle that speaks sync protocol " +
+      `${SYNC_PROTOCOL_VERSION}.\n`,
+  );
+  return false;
 }
 
 // --- the served files --------------------------------------------------------
@@ -919,9 +1013,7 @@ export async function openCommand(
   // After the build, so it judges the bundle that will actually be served: one
   // that was already there, or the one just produced. Before `ensureHub`,
   // because a refusal must start no hub and create no database file.
-  const stamped = stampedProtocol(plan.dir);
-  if (stamped !== SYNC_PROTOCOL_VERSION) {
-    io.err(staleBundle(plan.dir, stamped));
+  if (!(await ensureBundle(plan, env, io))) {
     return await foreground.shutdown(1);
   }
   if (foreground.interrupted()) {
