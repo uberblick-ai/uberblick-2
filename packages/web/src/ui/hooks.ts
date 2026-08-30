@@ -21,7 +21,7 @@ import {
   readSidebar,
 } from "@uberblick/schema";
 import type { DirectoryEntry, DocMeta, SidebarGroup } from "@uberblick/schema";
-import { acquireRoom, WEB_CLIENT } from "../collab/rooms.js";
+import { acquireRoom, AGENT_CLIENT } from "../collab/rooms.js";
 import type { RoomConnection, RoomStatus } from "../collab/rooms.js";
 import { resolveClientConfig } from "../config.js";
 import { getSetting, subscribeSettings } from "../settings.js";
@@ -361,25 +361,22 @@ export function usePeers(connection: RoomConnection | null): Peer[] {
 /**
  * How many agent sessions are in this room right now (#74).
  *
- * Awareness has no "this is an agent" field — an MCP session publishes the same
- * `user` a browser tab does — so the question is answered from the other side:
- * this app marks its own sessions (`WEB_CLIENT`), and a remote session that
- * does not claim to be a web client is an agent.
+ * A **conjunction, and a positive one** (#494): a session counts only where it
+ * publishes both a `user` and the agent marker an MCP session stamps its
+ * presence with (`AGENT_CLIENT`, `mcp-server/src/replica.ts`). Neither half is
+ * redundant.
  *
- * **The boundary that classification buys, stated rather than hidden:** it is
- * an *absence* test, so anything that predates the marker looks like an agent.
- * Concretely, during a rollout a browser tab still running a bundle from before
- * #267 is counted as an MCP connection until that tab reloads — for the length
- * of one deploy, one workspace's count can read high. This is accepted as the
- * price of keeping the change inside the web client: the positive marker
- * belongs on the publishing side, and that is #73's `lastAction` awareness
- * field, which is where a session will eventually say what it *is* instead of
- * this inferring it from what it does not say. Nothing is ever counted that is
- * not connected, and the miscount clears itself on reload.
+ * The marker is what makes this a claim rather than an inference. Until #494
+ * this was an *absence* test — "not a web client, therefore an agent" — which
+ * counted a browser tab running a bundle from before #267 as an MCP connection
+ * until that tab reloaded. The remaining skew runs the other way and shrinks
+ * rather than grows: an agent on a build from before the marker is now not
+ * counted, until that server restarts.
  *
  * A state with no `user` is nobody: the MCP server's connectivity probe opens
  * rooms with its awareness deliberately unset, and it must not read as a
- * session (see `mcp-server/src/remote.ts`).
+ * session (see `mcp-server/src/remote.ts`). The marker is withdrawn with the
+ * `user` it belongs to, so a leftover cannot answer for a presence that ended.
  *
  * The room to ask is the workspace's directory — every session joins it, agents
  * included, whatever document it is working on.
@@ -397,7 +394,7 @@ export function useAgentSessions(connection: RoomConnection | null): number {
       awareness.getStates().forEach((state, clientId) => {
         if (clientId === awareness.clientID) return;
         const fields = state as { user?: unknown; client?: unknown };
-        if (fields.user === undefined || fields.client === WEB_CLIENT) return;
+        if (fields.user === undefined || fields.client !== AGENT_CLIENT) return;
         agents += 1;
       });
       setCount((previous) => (previous === agents ? previous : agents));

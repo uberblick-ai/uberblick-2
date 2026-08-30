@@ -37,7 +37,7 @@ import { UserMenu } from "../src/ui/UserMenu.js";
 import { useAgentSessions } from "../src/ui/hooks.js";
 import { applyStoredAppearance } from "../src/ui/theme.js";
 import { getSetting } from "../src/settings.js";
-import { WEB_CLIENT } from "../src/collab/rooms.js";
+import { AGENT_CLIENT, WEB_CLIENT } from "../src/collab/rooms.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import type { Workspace } from "../src/ui/route.js";
 
@@ -284,7 +284,7 @@ describe("the user menu is this client, as it publishes itself", () => {
   });
 });
 
-describe("an agent session is a session that is not this app", () => {
+describe("an agent session is one that says it is an agent", () => {
   /** A room, as far as the count is concerned: an awareness map and nothing else. */
   function room(): { connection: RoomConnection; awareness: Awareness } {
     const awareness = new Awareness(new Y.Doc());
@@ -323,9 +323,13 @@ describe("an agent session is a session that is not this app", () => {
       view.host.querySelector(".ub-count")?.textContent ?? undefined;
     expect(counted()).toBe("0");
 
-    // An MCP replica publishes a user and no client marker (mcp-server's
-    // `ensureRoom`), which is exactly what makes it countable.
-    const agent = join(awareness, { user: { name: "claude", color: "#7b5ec7" } });
+    // An MCP replica publishes a user and the agent marker beside it
+    // (mcp-server's `presenceState`), and it is the marker — not the absence of
+    // ours — that makes it countable (#494).
+    const agent = join(awareness, {
+      user: { name: "claude", color: "#7b5ec7" },
+      client: AGENT_CLIENT,
+    });
     expect(counted()).toBe("1");
 
     // Another browser tab says what it is, so it is not one.
@@ -336,12 +340,23 @@ describe("an agent session is a session that is not this app", () => {
     expect(counted()).toBe("1");
 
     // Neither is the MCP server's connectivity probe, which publishes no user
-    // at all so that it stays invisible.
+    // at all so that it stays invisible — marker or no marker.
     join(awareness, {});
+    join(awareness, { client: AGENT_CLIENT });
+    expect(counted()).toBe("1");
+
+    // The conjunction's other half, and the reason it is one: a session that
+    // claims nothing is a person until it says otherwise. Under the absence
+    // test this read as an agent, which is how a browser tab on an older bundle
+    // came to be counted as an MCP connection.
+    const silent = join(awareness, {
+      user: { name: "unbothered ibex", color: "#0c853d" },
+    });
     expect(counted()).toBe("1");
 
     agent.leave();
     expect(counted()).toBe("0");
+    silent.leave();
     tab.leave();
     view.unmount();
   });

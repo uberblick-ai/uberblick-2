@@ -40,6 +40,10 @@ const ENDPOINT: HubEndpoint = { url: "ws://hub.example:1234", source: "document"
 const AGENT_CLIENT = 424_242;
 const HUMAN_CLIENT = 515_151;
 
+/** The `client` markers each of them publishes (#494) — the wire values. */
+const AGENT_MARKER = "agent";
+const WEB_MARKER = "web";
+
 interface Fixture {
   ydoc: Y.Doc;
   awareness: Awareness;
@@ -87,15 +91,17 @@ function blockText(ydoc: Y.Doc, index: number): Y.XmlText {
 
 /**
  * Publish a foreign session, in the wire format an MCP session uses:
- * relative-position JSON under `cursor`, `user` beside it. `blockIndex` null is
- * a session publishing presence with no caret — a tab that has not been clicked
- * into, which the list still has to name.
+ * relative-position JSON under `cursor`, `user` beside it, and the session's own
+ * `client` marker (#494) beside both. `blockIndex` null is a session publishing
+ * presence with no caret — a tab that has not been clicked into, which the list
+ * still has to name.
  */
 function publish(
   fix: Fixture,
   clientId: number,
   user: { name: string; color: string },
   blockIndex: number | null,
+  client: string = AGENT_MARKER,
 ): void {
   const cursor =
     blockIndex === null
@@ -111,7 +117,7 @@ function publish(
         })();
   fix.awareness.states.set(
     clientId,
-    JSON.parse(JSON.stringify({ user, cursor })) as Record<string, unknown>,
+    JSON.parse(JSON.stringify({ user, client, cursor })) as Record<string, unknown>,
   );
 }
 
@@ -294,7 +300,13 @@ describe("the sync panel renders the state this client holds", () => {
     vi.useFakeTimers();
     const fix = fixture();
     publish(fix, AGENT_CLIENT, { name: "Claude · demo agent", color: "#7b5ec7" }, 1);
-    publish(fix, HUMAN_CLIENT, { name: "loitering otter", color: "#0c853d" }, null);
+    publish(
+      fix,
+      HUMAN_CLIENT,
+      { name: "loitering otter", color: "#0c853d" },
+      null,
+      WEB_MARKER,
+    );
     const { host, root } = mount(fix);
     try {
       // Sorted by client id, so the list does not reorder itself under a reader.
@@ -304,13 +316,23 @@ describe("the sync panel renders the state this client holds", () => {
         // where — a block number nobody could point at would be an invention.
         "loitering otter",
       ]);
-      // Each session in its own presence colour, the one its cursor carries in
-      // the prose.
-      const dots = [...host.querySelectorAll<HTMLElement>(".ub-presence-dot")];
-      expect(dots.map((dot) => dot.style.background)).toEqual([
-        "rgb(123, 94, 199)",
-        "rgb(12, 133, 61)",
+      // Avatar plus name, each in its own presence colour — the one its cursor
+      // carries in the prose (#494).
+      const avatars = [...host.querySelectorAll<HTMLElement>(".ub-avatar")];
+      expect(
+        avatars.map((avatar) => [avatar.textContent, avatar.style.borderColor]),
+      ).toEqual([
+        ["🤖", "rgb(123, 94, 199)"],
+        ["L", "rgb(12, 133, 61)"],
       ]);
+      // Announced once: the visible name is the row's accessible name, and the
+      // avatar in front of it is decoration. A labelled avatar here would make
+      // a screen reader read every session twice.
+      for (const avatar of avatars) {
+        expect(avatar.getAttribute("aria-hidden")).toBe("true");
+        expect(avatar.getAttribute("aria-label")).toBeNull();
+        expect(avatar.getAttribute("title")).toBeNull();
+      }
     } finally {
       act(() => root.unmount());
       host.remove();

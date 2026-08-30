@@ -10,6 +10,10 @@ import * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
 import { blockRev, getBlock, getBlocks, getBlocksFragment } from "@uberblick/schema";
 import { AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
+import { AGENT_CLIENT } from "../collab/rooms.js";
+
+/** What kind of session a peer is, as the session itself says. */
+export type SessionKind = "agent" | "human";
 
 /** A remote session in this room, and the block its caret sits in if any. */
 export interface RemotePresence {
@@ -18,6 +22,19 @@ export interface RemotePresence {
   name: string;
   /** The session's own presence colour — its chip is drawn in it. */
   color: string;
+  /**
+   * Agent only where the session says so (#494). Everything else is a person:
+   * a browser tab, including one running a bundle from before either marker
+   * existed. This is the positive test — the absence test it replaces called
+   * every silent session an agent.
+   */
+  kind: SessionKind;
+  /**
+   * The agent session id (`agent-<uuid>`, the one `sync_status` reports), or
+   * null for a session that publishes none. Null for every human, and for an
+   * agent whose bundle predates the field.
+   */
+  session: string | null;
   /**
    * 1-based position of the block its caret is in, or null when there is no
    * saying: no cursor published, or one anchored where no reader is looking.
@@ -93,10 +110,10 @@ function blockOf(
 /**
  * Every remote session in this room, by client id.
  *
- * Awareness carries no "this is an agent" marker today — an MCP session
- * publishes the same `user` and `cursor` fields a browser tab does (#73's
- * `lastAction` is what would tell them apart), so this reports the sessions and
- * lets each name say who it is.
+ * Each session says what kind it is in its `client` field (#494) and, where it
+ * is an agent, which session it is in `session`. Both ride beside `user` and
+ * are withdrawn with it, so a peer that is here at all is a peer this can
+ * classify and name.
  *
  * A state carrying neither a `user` nor a cursor is skipped: there is nobody to
  * name and nowhere to point, and a row for it would be a session invented out
@@ -109,6 +126,8 @@ export function readPresence(ydoc: Y.Doc, awareness: Awareness): RemotePresence[
     if (clientId === awareness.clientID) return;
     const fields = state as {
       user?: Partial<{ name: string; color: string }>;
+      client?: unknown;
+      session?: unknown;
       cursor?: { anchor?: unknown } | null;
     };
     const anchor = fields.cursor?.anchor;
@@ -125,6 +144,8 @@ export function readPresence(ydoc: Y.Doc, awareness: Awareness): RemotePresence[
         typeof fields.user?.color === "string"
           ? fields.user.color
           : AWARENESS_FALLBACK_COLOR,
+      kind: fields.client === AGENT_CLIENT ? "agent" : "human",
+      session: typeof fields.session === "string" ? fields.session : null,
       block:
         anchor === undefined || anchor === null
           ? null
@@ -140,9 +161,9 @@ export function readPresence(ydoc: Y.Doc, awareness: Awareness): RemotePresence[
  * block this document can name, or null when nobody's is.
  *
  * Lowest client id, so two carets do not swap the pill back and forth between
- * them; the sync panel's present-now list is where everyone appears. In the
- * spike that session is the agent — awareness carries no "this is an agent"
- * marker, so the name is what says who it is (see {@link readPresence}).
+ * them; the sync panel's present-now list is where everyone appears. Whichever
+ * kind of session it turns out to be, the pill names it in words — a circle is
+ * the strip's language, not this one's.
  *
  * A projection of the reading rather than a second walk of the awareness map:
  * the pill and the list are two views of one snapshot, which is what stops them
@@ -158,15 +179,42 @@ export function activeSession(
   );
 }
 
-/** Whether two readings would draw the same chip. */
+/**
+ * Whether two readings would draw the same chip.
+ *
+ * Every field the chip or its hover shows is compared, and that is a
+ * correctness rule rather than thoroughness: this is what decides whether a
+ * re-read is stored at all, so a projection that gains a field without gaining
+ * a comparison here silently drops every update to it. A marker or a session id
+ * that arrives after a session's first state is exactly that case.
+ */
 function sameSession(a: RemotePresence | null, b: RemotePresence | null): boolean {
   if (a === null || b === null) return a === b;
   return (
     a.clientId === b.clientId &&
     a.block === b.block &&
     a.name === b.name &&
-    a.color === b.color
+    a.color === b.color &&
+    a.kind === b.kind &&
+    a.session === b.session
   );
+}
+
+/**
+ * What a peer's avatar says on hover, and to a screen reader.
+ *
+ * A human is named and nothing else — the name is all a reader asked for. An
+ * agent gets what a person cannot tell from a robot glyph: which session it is,
+ * and where it is working while its caret is anchored. Both tail parts drop out
+ * when there is nothing to say, so the label never trails a separator into an
+ * absent value.
+ */
+export function presenceLabel(session: RemotePresence): string {
+  if (session.kind === "human") return session.name;
+  const parts = [session.name];
+  if (session.session !== null) parts.push(session.session);
+  if (session.block !== null) parts.push(`editing block ${session.block}`);
+  return parts.join(" · ");
 }
 
 /** Whether two readings would draw the same present-now list. */

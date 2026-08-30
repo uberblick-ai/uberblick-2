@@ -25,10 +25,12 @@ import {
   useForeignBlocks,
   useLinkConflicts,
   usePeers,
+  usePresence,
   useRawBlocks,
   useRoomStatus,
 } from "./hooks.js";
 import { CommentComposer } from "./CommentComposer.js";
+import { PeerAvatar } from "./PeerAvatar.js";
 import { DocMetaLine } from "./DocChrome.js";
 import { shareUrl } from "./route.js";
 import { threadIdFromActivation, threadIdFromTarget } from "./threads.js";
@@ -185,7 +187,11 @@ export function StatusLine({
   segment: string;
 }): ReactElement {
   const status = useRoomStatus(connection);
-  const peers = usePeers(connection);
+  // `usePresence`, not `usePeers`: an avatar's hover names the block a caret is
+  // in, and the block number is resolved once, in `readPresence`. A strip that
+  // read the peer list and the caret separately would be two subscriptions
+  // disagreeing about where one session is.
+  const peers = usePresence(connection);
   const state = useCalmSyncState(rawSyncState(status));
   const reading = statusReading(status, state);
   if (reading.detail !== null) {
@@ -224,15 +230,12 @@ export function StatusLine({
       {state !== "synced" && status.unsyncedChanges > 0 && (
         <span className="ub-pending">{backlogLabel(status.unsyncedChanges)}</span>
       )}
+      {/* Circles, not name pills (#494): the strip is the constrained surface,
+          and a row of words pushes the status line around as sessions come and
+          go. The detail a name carried is on the avatar's hover instead. */}
       <span className="ub-peers">
         {peers.map((peer) => (
-          <span
-            key={peer.clientId}
-            className="ub-peer"
-            style={{ borderColor: peer.color }}
-          >
-            {peer.name}
-          </span>
+          <PeerAvatar key={peer.clientId} session={peer} />
         ))}
       </span>
     </div>
