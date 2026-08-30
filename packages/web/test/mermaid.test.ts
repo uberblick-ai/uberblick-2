@@ -102,6 +102,14 @@ const SUBGRAPH = "flowchart TD\n  subgraph one\n    a --> b\n  end";
 const SEQUENCE_600 = `sequenceDiagram\n${Array.from({ length: 600 }, (_, i) => `  a-->>b: m${i}`).join("\n")}`;
 
 /**
+ * The same diagram past the source cap — 44,505 characters. The per-line arrow
+ * bound was not the only gate that could answer before the `ParseError`: the
+ * byte cap did it one step earlier, and told a diagram nothing would have laid
+ * out that it was too large and should split itself (#514 review, F-1).
+ */
+const SEQUENCE_BIG = `sequenceDiagram\n${Array.from({ length: 1_200 }, (_, i) => `  alpha-->>bravo: message number ${i}`).join("\n")}`;
+
+/**
  * `n` disconnected maximum-width decision boxes — the shape the box cap is
  * calibrated against, because cost at a given box count spans 550x with shape
  * and this is the expensive end (#514 review, F-C). The same 64 boxes as a
@@ -232,6 +240,8 @@ describe("the mermaid block", () => {
     // 600 arrow tokens in aggregate, never more than one per line: the size
     // cap must not answer before the ParseError does (#514 review, H-2).
     ["a sequence diagram with 600 messages", SEQUENCE_600],
+    // Past MAX_SOURCE as well: the byte cap must not answer either (F-1).
+    ["a sequence diagram past MAX_SOURCE", SEQUENCE_BIG],
     ["a flowchart using subgraph", SUBGRAPH],
     ["source that is not a diagram yet", "flow"],
     // A clean parse with nothing in it: ablauf draws an empty 40x40 SVG for a

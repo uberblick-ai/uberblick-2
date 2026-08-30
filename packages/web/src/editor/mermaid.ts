@@ -31,9 +31,11 @@
  * 2. The source is past {@link MAX_SOURCE} or {@link lineEdgesAtMost} bounds
  *    one of its lines' arrows past {@link MAX_EDGES} — both read off the text
  *    — or the drawn graph is past {@link MAX_NODES} / {@link MAX_EDGES}. The
- *    reader is told which. Only those two text-read refusals may precede
- *    `parse`, because everything case 1 keeps silent has to reach its
- *    `ParseError` first.
+ *    reader is told which. Those two text-read refusals are the only ones that
+ *    precede `parse`, and neither speaks for a source case 1 keeps silent: the
+ *    byte one asks {@link opensAsFlowchart} first, and the arrow one refuses
+ *    nothing ablauf parses. Case 1 therefore reaches its `ParseError` at any
+ *    size (#514 review, F-1).
  * 3. The block carries a `comment` mark. The schema lets annotations anchor in
  *    this block's text (CLAUDE.md), and a drawn diagram hides the text they are
  *    anchored in — so an annotated block stays source rather than swallowing
@@ -89,15 +91,18 @@ const EDITING_CLASS = "ub-mermaid-editing";
  * of none of the sizes (`fontFamily` is one string in both). A token ablauf
  * adds is therefore handled without an edit here.
  *
- * **An ablauf bump must re-check three things here**, all of them assumptions
+ * **An ablauf bump must re-check four things here**, all of them assumptions
  * about the library rather than about this code: that every *differing* string
  * token is still a colour — a differing non-colour string would be wrapped into
  * an invalid attribute value — that the escaping in `toSvg` still covers
- * the same vocabulary the XSS review of #514 checked it against, and that
+ * the same vocabulary the XSS review of #514 checked it against, that
  * {@link SHAPE_LABELS}, {@link CONNECTORS} and {@link LABELLED_CONNECTORS}
  * still match ablauf's grammar tables, because a connector spelling ablauf
  * gains that this hand-copy does not know makes {@link lineEdges}
- * *under*-count — the unsafe direction.
+ * *under*-count — the unsafe direction — and that {@link HEADERS} still names
+ * every keyword `parseHeader` opens a chart on, because a header spelling
+ * ablauf gains that this does not know lets a source past {@link MAX_SOURCE}
+ * reach `parse`, which is the same unsafe direction one gate earlier.
  */
 const THEME: Partial<Theme> = (() => {
   const merged: Record<string, string | number> = { ...DEFAULT_THEME };
@@ -137,13 +142,14 @@ const THEME: Partial<Theme> = (() => {
  * 16 & 32 grid, 48 boxes and exactly 512 arrows, 32ms here. (24 & 24 is *not*
  * that shape: 576 arrows, which the arrow cap refuses.)
  *
- * **Source length is the third axis, and it is checked before `parse`ing
- * anything at all.** The counts can only refuse a graph that already exists,
- * and building it is itself the attack: with repeated one-character ids in one
- * `&` line, edges grow as `(chars/8)²`, so 16 kB parses to 4.2M edges in 113ms
- * and 378 MB, 32 kB takes 434ms and 1.35 GB, and **48 kB aborts the process
- * with a fatal V8 out-of-memory** — which in a browser is the renderer dying,
- * and which no `catch` below can see, because it is not a JS exception.
+ * **Source length is the third axis, and it is checked before `parse` builds
+ * anything — for a source ablauf would read.** The counts can only refuse a
+ * graph that already exists, and building it is itself the attack: with
+ * repeated one-character ids in one `&` line, edges grow as `(chars/8)²`, so
+ * 16 kB parses to 4.2M edges in 113ms and 378 MB, 32 kB takes 434ms and
+ * 1.35 GB, and **48 kB aborts the process with a fatal V8 out-of-memory** —
+ * which in a browser is the renderer dying, and which no `catch` below can
+ * see, because it is not a JS exception.
  * {@link lineEdgesAtMost} closes that class in the currency the arrow cap
  * already counts in; this cap stays because bytes are a third thing worth
  * bounding, and it deliberately refuses some sources the counts would admit —
@@ -151,7 +157,10 @@ const THEME: Partial<Theme> = (() => {
  * 16,385-character label is one box and no arrows. It bounds the picture too —
  * `title: source` makes the SVG at least the source's size, and every label in
  * it comes from the source — which is what keeps a block the counts accept from
- * putting a 100 MB SVG in the DOM.
+ * putting a 100 MB SVG in the DOM. Both of those are properties of a diagram
+ * that gets drawn, which is why {@link opensAsFlowchart} gates this cap and
+ * not the arrow one: a source ablauf never reads has no picture to bound, and
+ * telling it that it is too large is the lie F-1 named.
  *
  * Deliberately not configurable: a budget a document can raise is a budget an
  * agent can raise, and the freeze it prevents is everyone's, not the author's.
@@ -295,9 +304,12 @@ function lineEdges(line: string): number {
  * refusal case 1 above and the job doc promise (#514 review, H-2). A
  * multi-line total goes to `parse`, whose `ParseError` sorts the unsupported
  * out first; what it accepts is bounded to {@link MAX_EDGES} edges per
- * statement line — ~64k edges / ~5 MB at {@link MAX_SOURCE}, four orders below
- * the one-line case defended here — and the post-`parse` count check still
- * refuses it before layout.
+ * statement line, and the post-`parse` count check still refuses it before
+ * layout. That aggregate is real but small: the densest legal shape — 22 & 23
+ * terms per line, 5.5 edges per character — reaches **89,562 edges and a few
+ * MB** at {@link MAX_SOURCE} on this host, under two orders below the
+ * 4.2M-edge one-line case defended here rather than the four an earlier
+ * estimate claimed (#514 review, F-2).
  *
  * It bounds rather than predicts, and only ever upwards. It refuses nothing,
  * so it need not agree with ablauf about what parses: a construct ablauf
@@ -320,6 +332,48 @@ function lineEdgesAtMost(source: string): number {
     worst = Math.max(worst, lineEdges(statement));
   }
   return worst;
+}
+
+/** The header keywords ablauf's `parseHeader` opens a chart on. */
+const HEADERS: readonly string[] = ["flowchart", "graph"];
+
+/**
+ * Whether ablauf could read this text at all, decided the way ablauf decides
+ * it: on the first statement line, which must open `flowchart` or `graph`.
+ *
+ * This exists so that {@link MAX_SOURCE} speaks only about diagrams that would
+ * otherwise be drawn. The byte cap used to answer for every source, so a
+ * `sequenceDiagram` past 16,384 characters was told it was too large and to
+ * split itself — false in both halves, since nothing would have been laid out
+ * and splitting draws none of it. That is the same defect as the arrow cap's
+ * (#514 review, H-2) one gate earlier, and it broke the same promise: outside
+ * ablauf's subset a block keeps today's source view, at every size ("Diagrams
+ * from mermaid blocks — the ablauf job", `e7e7787a-…`).
+ *
+ * **Deliberately more permissive than `parseHeader`, because the two ways of
+ * being wrong do not cost the same.** Saying yes to a header ablauf then
+ * refuses — `flowchart XX`, a `%%{init}%%` line skipped here as a comment —
+ * only puts the size note back in front of a `ParseError`, for that source
+ * alone. Saying no to one ablauf accepts would let a source past the byte cap
+ * reach `parse`, which is the cap's whole job. So this asks the one question
+ * with no false negatives in it: `parseHeader` reads letters and accepts
+ * exactly {@link HEADERS}, so a first statement line opening on any other word
+ * cannot parse, and {@link drawDiagram} may hand it to `parse` at any size —
+ * `parse` splits the text into lines and then fails on that first statement
+ * line, so no graph is built however long the text is. Checked against ablauf
+ * over 200k first lines: no false negative, and every false positive a
+ * malformed `flowchart` header.
+ *
+ * {@link lineEdgesAtMost} stays unconditional regardless, so the fatal `&`
+ * class is closed even if this drifts from ablauf.
+ */
+function opensAsFlowchart(source: string): boolean {
+  for (const line of source.split(/\r?\n/)) {
+    const statement = line.trim();
+    if (statement === "" || statement.startsWith("%%")) continue;
+    return HEADERS.includes(/^[A-Za-z]+/.exec(statement)?.[0] ?? "");
+  }
+  return false;
 }
 
 /* ------------------------------------------------------------------ drawing */
@@ -383,10 +437,12 @@ function drawDiagram(target: HTMLElement, source: string): Drawing {
   try {
     // Both of these run before `parse`, because the counts below can only
     // refuse a graph that has already been built, and building it is itself
-    // the cost — see MAX_SOURCE and lineEdgesAtMost. Only the one-line bound
-    // may refuse here: anything it admits reaches `parse`, so an unsupported
-    // diagram type still gets its `ParseError` and stays silent source.
-    if (source.length > MAX_SOURCE) {
+    // the cost — see MAX_SOURCE and lineEdgesAtMost. Neither may speak for a
+    // source ablauf would refuse anyway: the byte cap asks opensAsFlowchart
+    // first, and the one-line bound refuses nothing ablauf parses. So an
+    // unsupported diagram type still reaches its `ParseError` and stays silent
+    // source, whatever its size (#514 review, F-1).
+    if (source.length > MAX_SOURCE && opensAsFlowchart(source)) {
       target.replaceChildren();
       return {
         drawn: false,
