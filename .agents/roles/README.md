@@ -79,25 +79,28 @@ outcome is tied to one. A delegated subagent also posts `Parent: <parent role>
 stay proportional: link evidence instead of narrating transcripts. GitHub must
 be sufficient for recovery.
 
-**A durable comment reaches GitHub as composed.** Write every claim, renewal,
-delegation, return and `Done:` body to a file with a *quoted* heredoc delimiter,
-then post the file:
+**A durable comment reaches GitHub as composed.** Every durable comment body —
+claim, renewal, delegation, return, `Done:`, review round, dispatch failure,
+finding disposition, merge report, retrospective reply — is written to a file
+with a *quoted* heredoc delimiter and posted from that file, where `<scratch>`
+is the run's own directory from the paragraph above:
 
 ```sh
-cat > "$SCRATCH/done.md" <<'EOF'
+cat > <scratch>/done.md <<'EOF'
 Done: issue-adversary <run id>
 Outcome: correctable-findings — `readDecisions` already pins it; cost is $0.
 EOF
-gh issue comment <N> --body-file "$SCRATCH/done.md"
+gh issue comment <N> --body-file <scratch>/done.md
 ```
 
 Any composition with the same property is equally fine; what is forbidden is a
-body a shell interpolates. Quote the delimiter as `<<'EOF'`, never bare `<<EOF`,
-and do not pass findings inline as `--body "…"`: both run the backticked terms in
-your own text as commands and flatten its newlines. A record that lands garbled
-is then recoverable only from the launching session's transcript — the private
-channel every rule here exists to keep out of the record. That has happened
-once, on #491.
+body a shell expands. Quote the delimiter as `<<'EOF'`, never bare `<<EOF`, and
+do not pass a body inline as `--body "…"`: both substitute the backticked terms
+and the `$` in your own text, so a finding that names `` `ub --help` `` posts
+that command's output in its place. A record that lands garbled is then
+recoverable only from the launching session's transcript — the private channel
+every rule here exists to keep out of the record. That has happened once, on
+#491.
 
 **The race rule.** A live top-level claim makes the item ineligible for every
 other queue pickup. The one permitted nested claim is the subagent explicitly
