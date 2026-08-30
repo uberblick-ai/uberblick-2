@@ -127,6 +127,13 @@ delegated implementer only after those facts make the claim stale and an
 explicit handover records the new implementer; a newer remote branch commit
 therefore prevents replacement even when no `Done:` exists after 30 minutes.
 
+When a delegated **non-implementation** child never claims, the parent edits
+its `Delegated:` record to append `Cancelled: <UTC timestamp> — no child claim`
+before launching one replacement. It may cancel immediately when the runtime
+confirms the child never started; without that knowledge, the record expires
+after 10 minutes. A late child refuses a cancelled assignment. The failed
+dispatch produced no verdict, so its replacement is not another round.
+
 A nested **non-implementation** subagent claim with no matching `Done:` expires
 after 30 minutes, even while its parent remains live; that same parent may then
 launch one replacement. The unfinished attempt produced no verdict, so the

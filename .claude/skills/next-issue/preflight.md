@@ -76,7 +76,8 @@ durable handoff, and does not edit the issue or implement. Ask for:
 
 - Is this the real problem, and is the issue's outcome the smallest viable one?
   What would KISS/YAGNI cut?
-- Does it split usefully into smaller issues?
+- Would the expected diff be reviewable in one sitting, and would each proposed
+  child have an independently useful outcome? Body length is not a split test.
 - Is anything over-prescribed — mechanics stated where an outcome would do?
 - Does it conflict with current behavior, the decided architecture, existing
   tests, migrations, contracts, security or concurrency semantics, or work

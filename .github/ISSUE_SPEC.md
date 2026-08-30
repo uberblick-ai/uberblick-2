@@ -139,6 +139,11 @@ close it after its required children. Create each independently reviewable
 child with `needs-preparation`, `Parent: #N`, and only real ordering
 dependencies.
 
+Decide from the expected diff, not the issue body's length. Keep work together
+when the combined diff is reviewable in one sitting and a proposed child exists
+only to enable its sibling; split when the combined diff is not, or when a
+child has an independently useful outcome.
+
 `needs-decision` exit path: the preparer asks one focused question as an issue
 comment, with concrete options and its recommendation, and replaces
 `needs-preparation` or `ready` with `needs-decision`. A direct answer from the
@@ -256,22 +261,18 @@ shared set, and the PR carries the tier-2 merge report of CLAUDE.md's merge
 policy, checking each issue's acceptance criteria separately — a batch PR
 carries that report even where it would otherwise be tier 1.
 
-### Body length, and what a body is for
+### Body focus, and what a body is for
 
 An issue body records the **final contract**, not the history of arriving at
 it. Material review corrections, superseded decisions and decision chronology
 belong in **comments** — searchable, and out of the way of the person
 implementing. Do not copy the original intake verbatim into a new comment after
 preparation; preserve its material intent in the final contract and rely on the
-issue's edit history for the raw draft. Targets, not lint rules, because
-judgement beats a character count:
-
-| Kind | Target |
-|---|---|
-| ordinary leaf | as short as complete, normally under 3,000 characters |
-| complex or security-sensitive leaf | normally under 6,000; past that, justify or split it |
-| parent | under 3,000 characters |
-| acceptance criteria | usually 1–5 distinct outcomes |
+issue's edit history for the raw draft. Keep every body as short as complete. A
+complex or security-sensitive issue may carry more context when it changes a
+decision; a coordination parent carries only the shared outcome and child
+routing. Length alone never decides whether to split. Acceptance criteria stay
+at one to five distinct outcomes.
 
 Two consequences worth stating, because both have gone wrong here:
 
