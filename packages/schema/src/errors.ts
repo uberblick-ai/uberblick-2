@@ -228,6 +228,40 @@ export class InvalidDocumentLifecycleError extends Error {
   }
 }
 
+export type DecisionReferenceErrorReason = "not-a-document" | "duplicate";
+
+/**
+ * Thrown when a write to a document's decision log would store something that
+ * is not one reference to one decision document.
+ *
+ * `"not-a-document"`: the value is not a document uuid. The log holds uuids and
+ * nothing else — the same rule, through the same validator, that a `docLink`
+ * target obeys — so a room name, a title or a path is refused before it reaches
+ * the CRDT rather than becoming a reference nothing can resolve.
+ *
+ * `"duplicate"`: the document is already referenced. A decision governs a
+ * document once; a second entry would make the log's order ambiguous and give a
+ * reader two rows for one decision. Moving it is `reorderDecisions`.
+ */
+export class InvalidDecisionReferenceError extends Error {
+  readonly reason: DecisionReferenceErrorReason;
+  /** The rejected value, as passed — `unknown` because a non-uuid is legal input to reject. */
+  readonly uuid: unknown;
+
+  constructor(reason: DecisionReferenceErrorReason, uuid: unknown) {
+    super(
+      reason === "not-a-document"
+        ? `Not a document reference: ${renderUnknown(uuid)}. A decision log ` +
+            "holds document uuids; a room name, a title or a path is not one."
+        : `Document ${renderUnknown(uuid)} is already in this decision log. A ` +
+            "decision is referenced once — move it with reorderDecisions.",
+    );
+    this.name = "InvalidDecisionReferenceError";
+    this.reason = reason;
+    this.uuid = uuid;
+  }
+}
+
 /** Render foreign Yjs values without letting error construction throw. */
 function renderUnknown(value: unknown): string {
   if (typeof value === "bigint") return `${value}n`;

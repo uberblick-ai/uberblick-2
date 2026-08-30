@@ -43,7 +43,7 @@
 
 import type * as Y from "yjs";
 import { getBlocksWithInline } from "./blocks.js";
-import { getMeta } from "./doc.js";
+import { getMeta, readDecisions } from "./doc.js";
 import { listAnnotations, resolveAnnotationRange } from "./annotations.js";
 import {
   hasInlineMarks,
@@ -60,6 +60,7 @@ import { MAX_LIST_INDENT } from "./types.js";
 import type {
   Block,
   BlockType,
+  DecisionReference,
   HeadingLevel,
   InlineMarkSet,
   InlineRun,
@@ -78,6 +79,13 @@ export interface ExportMarkdownOptions {
    * per thread directly after its block; `"drop"` (default) omits them.
    */
   annotations?: "html-comments" | "drop";
+  /**
+   * The workspace's directory doc, used to name and state the documents the
+   * decision log references. Without it the log still exports — the references
+   * are the record — but as bare uuids, because only the directory knows what
+   * they are called and what state they are in.
+   */
+  directory?: Y.Doc;
 }
 
 const NEEDS_QUOTING = /[:#[\]{}",&*!|>%@`']/;
@@ -689,6 +697,43 @@ function renderAnnotationComment(
   return `<!-- annotation ${id} ${range}${resolved ? " resolved" : ""} ${safeBody} -->`;
 }
 
+/** The fixed heading the decision log exports under. */
+const DECISIONS_HEADING = "## Decisions";
+
+/**
+ * Said in the export because markdown cannot carry the slot back: the section
+ * is prose to `importMarkdown`, which reads it as a heading and a list of
+ * items and reconstructs no references. An HTML comment because it is a note
+ * about the file rather than content of it — the same shape annotations
+ * export in, and the one thing the reader skips on the way back in.
+ */
+const DECISIONS_NOTE =
+  "<!-- decisions: references to decision documents, in stored order. " +
+  "Importing this file does not restore them. -->";
+
+/**
+ * One reference as a list item.
+ *
+ * Three columns with a directory to resolve against, one without: an exporter
+ * that was given no directory does not know these documents are missing, and
+ * saying "unavailable" would claim it did. Placeholders rather than omitted
+ * columns keep every line one shape within one export.
+ */
+function renderDecision(
+  reference: DecisionReference,
+  resolved: boolean,
+): string {
+  if (!resolved) return `- ${reference.uuid}`;
+  const title = escapeInline(
+    (reference.title ?? "(unknown)").replace(/[\r\n]+/g, " "),
+    { insideLabel: false, hugged: false },
+  );
+  const state = reference.available
+    ? (reference.status ?? "(no status)")
+    : "(unavailable)";
+  return `- ${reference.uuid} — ${title} — ${state}`;
+}
+
 /**
  * Render the document as markdown.
  *
@@ -700,6 +745,10 @@ function renderAnnotationComment(
  * Blocks are separated by a blank line, except two adjacent list items: a blank
  * line between them is what makes a reader render the list *loose*, so a run of
  * items is written as the tight list it is.
+ *
+ * A non-empty decision log follows the blocks as a fixed `## Decisions`
+ * section, in stored order. An empty one emits nothing, so a document without
+ * decisions exports exactly as it did before the slot existed.
  */
 export function exportMarkdown(
   ydoc: Y.Doc,
@@ -796,6 +845,18 @@ export function exportMarkdown(
     // comment *outside* the item for any reader that counts columns.
     const inside = " ".repeat(marker.length);
     push(comments.map((line) => `${inside}${line}`).join("\n"), true);
+  }
+
+  const decisions = readDecisions(ydoc, options.directory);
+  if (decisions.length > 0) {
+    const resolved = options.directory !== undefined;
+    push(DECISIONS_HEADING);
+    push(DECISIONS_NOTE);
+    push(
+      decisions
+        .map((reference) => renderDecision(reference, resolved))
+        .join("\n"),
+    );
   }
 
   if (sections.length === 0) return "";

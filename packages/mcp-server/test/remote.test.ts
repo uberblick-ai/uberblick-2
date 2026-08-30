@@ -17,12 +17,16 @@
 
 import {
   COMMENT_MARK,
+  addDecision,
   appendBlock,
   createAnnotation,
+  getDecisionsArray,
   getBlocks,
   initDoc,
   listAnnotationRanges,
   listAnnotations,
+  readDecisions,
+  reorderDecisions,
   setTitle,
 } from "@uberblick/schema";
 import * as Y from "yjs";
@@ -31,6 +35,9 @@ import { compareCorpus, docFingerprint, isIdentical } from "../src/remote.js";
 import type { CorpusDoc } from "../src/remote.js";
 
 const UUID = "3f0a3d4c-6f6c-4e5f-9b9a-1f2e3d4c5b6a";
+const DECISION_A = "11111111-1111-4111-8111-111111111111";
+const DECISION_B = "22222222-2222-4222-8222-222222222222";
+const DECISION_C = "33333333-3333-4333-8333-333333333333";
 
 function source(): Y.Doc {
   const ydoc = new Y.Doc();
@@ -125,6 +132,29 @@ describe("docFingerprint", () => {
     const copy = replicate(doc);
     setTitle(doc, "Another note");
     expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+  });
+
+  it("changes when only the effective decision order changes", () => {
+    const doc = source();
+    addDecision(doc, DECISION_A);
+    addDecision(doc, DECISION_B);
+    addDecision(doc, DECISION_C);
+    const concurrent = replicate(doc);
+
+    reorderDecisions(doc, DECISION_C, 0);
+    reorderDecisions(concurrent, DECISION_C, 1);
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(concurrent));
+    Y.applyUpdate(concurrent, Y.encodeStateAsUpdate(doc));
+
+    const copy = replicate(doc);
+    const decisions = getDecisionsArray(doc);
+    const firstC = decisions.toArray().indexOf(DECISION_C);
+    decisions.delete(firstC, 1);
+
+    expect(readDecisions(doc)).not.toEqual(readDecisions(copy));
+    expect(Y.encodeStateVector(doc)).toEqual(Y.encodeStateVector(copy));
+    expect(docFingerprint(doc)).not.toBe(docFingerprint(copy));
+    expect(isIdentical(compareCorpus([entry(doc)], [entry(copy)]))).toBe(false);
   });
 });
 

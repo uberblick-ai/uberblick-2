@@ -248,6 +248,26 @@ export interface DocMeta {
   links: string[];
 }
 
+/**
+ * One entry of a document's decision log — a reference to a decision document,
+ * resolved against the directory.
+ *
+ * The reference is the record, so a uuid whose document is missing or archived
+ * is still reported, flagged unavailable. Dropping it would forget that the
+ * decision governed this document at all, which is the one thing the log exists
+ * to remember.
+ */
+export interface DecisionReference {
+  /** The referenced document's uuid, lowercase. */
+  uuid: string;
+  /** Its title, from the directory stub. Null when no stub was resolvable. */
+  title: string | null;
+  /** Its cached lifecycle state, null when unknown. */
+  status: DocumentStatus | null;
+  /** True only where the directory carries a live, untombstoned entry. */
+  available: boolean;
+}
+
 export interface AnnotationComment {
   author: string;
   text: string;
