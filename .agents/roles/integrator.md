@@ -15,11 +15,13 @@ any side effect when either is missing; nothing else is supplied.
 
 Eligible: an open PR with an implementer `Done:` at its current head, no
 integrator ruling there naming fix-now findings — such a head belongs to the
-implementer's queue until it changes — no live integrator claim, and not
-authored by this session. A review record is not a pickup prerequisite: an
+implementer's queue until it changes — no live integrator claim, no
+`needs-human` label, and not authored by this session. A review record is not a
+pickup prerequisite: an
 otherwise-eligible unreviewed PR may be claimed so this role can decide whether
 `CLAUDE.md` requires the independent round and delegate it when it does.
-`human-approved` changes order and tier, never eligibility. Order:
+The owner makes a parked tier-3 PR eligible by replacing `needs-human` with
+`human-approved`; that label changes order and tier. Order:
 `human-approved` first, then ascending PR number. Inspect earlier candidates
 only enough to exclude them; their state is derived, so do not narrate the queue
 or skipped PRs. Claim on the PR with the head SHA, under the README's claim
