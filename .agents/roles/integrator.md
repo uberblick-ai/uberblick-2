@@ -77,4 +77,12 @@ documents that issue's Pointers cite before validating acceptance criteria.
 
 On the PR: gate evidence against the SHA each gate ran at, every finding with
 its disposition, the tier call, the merge report the policy requires, and the
-post-merge pass result. Then stop.
+post-merge pass result. After that durable outcome, post one concise
+self-assessment to [Implementation and integration run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/522),
+following its prompt. Record the role and run identity; runtime, model,
+reasoning effort, wall time, tokens and tool calls when observable; whether the
+prepared context, Uberblick MCP and independent review were useful; effort fit;
+and one or more workflow or context improvements when applicable. Target at
+most 2,000 characters and link evidence instead of repeating the ruling or gate
+transcript. The retrospective is telemetry: a failed post never changes the PR
+outcome or blocks recovery. Then stop.
