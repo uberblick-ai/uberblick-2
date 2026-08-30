@@ -128,9 +128,10 @@ export function DocChrome({
   // number follows the rail's head — including when that number is zero.
   const openThreads = threads.filter((thread) => !thread.resolved).length;
   const status = useRoomStatus(connection);
+  const state = useCalmSyncState(rawSyncState(status));
   // The word only. A refusal's sentence never enters the header — it lives in
   // the sync panel this pill opens, where there is room to read it (#448).
-  const reading = statusReading(status, useCalmSyncState(rawSyncState(status)));
+  const reading = statusReading(status, state);
   /**
    * Which hub this state is about (#362) — the endpoint and how it was
    * resolved, or null while the read is still in flight.

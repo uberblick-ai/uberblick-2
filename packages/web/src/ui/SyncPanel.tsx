@@ -69,10 +69,11 @@ export function SyncPanel({
   onClose: () => void;
 }): ReactElement {
   const status = useRoomStatus(connection);
+  const state = useCalmSyncState(rawSyncState(status));
   // The same settled word the pill this panel opens from shows. Calm is a
   // cadence, never a quieter version of the truth (see calm.ts) — and two
   // different words in one corner of the screen would be worse than either.
-  const reading = statusReading(status, useCalmSyncState(rawSyncState(status)));
+  const reading = statusReading(status, state);
 
   /**
    * Escape closes the panel, and the panel alone.
