@@ -40,7 +40,7 @@ import {
 } from "@uberblick/hub/token";
 import { AUTH_REJECTED, SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import type { McpConfig } from "@uberblick/mcp-server";
-import { resolveMcpConfig } from "@uberblick/mcp-server";
+import { resolveMcpConfig } from "./budget.js";
 import type { ResolvedConfig } from "./config.js";
 import { readCredentials, resolveConfig, userConfigPath } from "./config.js";
 import { takeHelp } from "./help.js";

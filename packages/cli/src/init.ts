@@ -66,7 +66,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { userInfo } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
-import { bridgeConfig, resolveMcpConfig } from "@uberblick/mcp-server";
+import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { findCheckoutRoot } from "./checkout.js";
 import {
@@ -546,21 +546,18 @@ export async function initCommand(
   // in memory at this point, so a refusal here leaves the machine untouched.
   if (binding !== null) {
     io.err(`ub init: checking ${binding}…\n`);
+    const bridgeEnv: NodeJS.ProcessEnv = {
+      ...resolved.env,
+      WORKSPACE_ID: workspace,
+      HUB_URL: binding,
+      // The credential chosen above, named explicitly: `resolved.env` drops a
+      // file whose mode is wrong, and this run's own repair is what fixes
+      // that — probing without it would refuse a machine whose secret is right
+      // and then seed with the value it just repaired.
+      ...(credential.secret === null ? {} : { HUB_AUTH_TOKEN: credential.secret }),
+    };
     const problem = await remoteProblem(
-      bridgeConfig(
-        resolveMcpConfig({
-          ...resolved.env,
-          WORKSPACE_ID: workspace,
-          HUB_URL: binding,
-          // The credential chosen above, named explicitly: `resolved.env`
-          // drops a file whose mode is wrong, and this run's own repair is
-          // what fixes that — probing without it would refuse a machine whose
-          // secret is right and then seed with the value it just repaired.
-          ...(credential.secret === null
-            ? {}
-            : { HUB_AUTH_TOKEN: credential.secret }),
-        }),
-      ),
+      bridgeConfig(resolveMcpConfig(bridgeEnv), bridgeEnv),
     );
     if (problem !== null) {
       // `problem` is a sentence of its own, ending in its own newline — the

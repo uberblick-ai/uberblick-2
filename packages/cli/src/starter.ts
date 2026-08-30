@@ -65,13 +65,12 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  bridgeConfig,
   importSeedDir,
   readSeedDocs,
-  resolveMcpConfig,
   syncWorkspace,
 } from "@uberblick/mcp-server";
 import type { SeedDoc } from "@uberblick/mcp-server";
+import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 
 /** `templates/` in this package — the only place the starter documents live. */
 export const TEMPLATE_DIR = join(
@@ -176,7 +175,7 @@ export async function seedStarterDocs(
   // make every later `ub init` try, fail on the sticky tombstone, and say so
   // forever. An archived document that is not a starter is the same evidence
   // the live ones are: this workspace is somebody's already.
-  const stubs = (await syncWorkspace(bridgeConfig(config, { authSecret: null })))
+  const stubs = (await syncWorkspace(bridgeConfig(config, env, { authSecret: null })))
     .entries;
   const nothingToDo: StarterResult = { created: [], synced: true };
   if (stubs.some((stub) => !uuids.has(stub.uuid))) return nothingToDo;

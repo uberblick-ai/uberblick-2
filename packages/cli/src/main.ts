@@ -9,6 +9,12 @@
 
 import { runCli } from "./cli.js";
 import { stopWhenDrained } from "./exit.js";
+import { quietUnactionableWarnings } from "./warnings.js";
+
+// Before anything is written: whichever entry point reached this module — the
+// `bin/ub.mjs` shim, or a bundle built from it — gets the same stderr policy.
+// See ./warnings.ts for why running after yjs has loaded is still in time.
+quietUnactionableWarnings();
 
 // `process.exitCode`, never `process.exit`: exit() tears the process down at
 // once, and a write to a pipe is asynchronous, so `ub status --json | …` would

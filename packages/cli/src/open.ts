@@ -90,7 +90,8 @@ import { parseArgs } from "node:util";
 import type { Hub } from "@uberblick/hub";
 import { createHub, resolveHubConfig } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION, isProtocolVersion } from "@uberblick/hub/protocol";
-import { DEFAULT_HUB_URL, resolveMcpConfig } from "@uberblick/mcp-server";
+import { DEFAULT_HUB_URL } from "@uberblick/mcp-server";
+import { budget, resolveMcpConfig } from "./budget.js";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
@@ -837,7 +838,7 @@ async function whoHoldsPort(port: number): Promise<"ub-open" | "foreign"> {
   try {
     const response = await fetch(`http://${WEB_HOST}:${port}${CONFIG_PATH}`, {
       cache: "no-store",
-      signal: AbortSignal.timeout(1_000),
+      signal: AbortSignal.timeout(budget(1_000)),
     });
     if (!response.ok) {
       return "foreign";

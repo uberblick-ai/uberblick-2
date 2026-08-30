@@ -4,6 +4,9 @@ node_modules/
 # build output
 dist/
 *.tsbuildinfo
+# the `ub` bundle packages/cli's test globalSetup builds once per run, so the
+# spawning suites do not transpile three packages in every child
+.test-build/
 
 # local data / persistence (hub SQLite, mcp mirror)
 data/

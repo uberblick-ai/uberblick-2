@@ -18,12 +18,9 @@
 
 import { parseArgs } from "node:util";
 import { hubDatabasePath } from "@uberblick/hub/config";
-import {
-  collectSyncStatus,
-  createMcpServer,
-  resolveMcpConfig,
-} from "@uberblick/mcp-server";
+import { collectSyncStatus, createMcpServer } from "@uberblick/mcp-server";
 import type { SyncStatus } from "@uberblick/mcp-server";
+import { resolveMcpConfig } from "./budget.js";
 import type { CredentialOrigin, Origin, ShadowedLayer } from "./config.js";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";

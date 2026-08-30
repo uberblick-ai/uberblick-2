@@ -21,6 +21,9 @@
  *   jsdom does not have.
  * - **A connected agent is counted.** The count reads awareness over a real
  *   hub, and the session it counts is a client that is not a browser at all.
+ * - **A highlight steps off its ground.** `light-dark()` and `oklch()` are
+ *   resolved by the browser and by nothing else, so a contrast floor is only a
+ *   number where there is a rendering engine to measure (#516).
  */
 
 import { randomUUID } from "node:crypto";
@@ -251,3 +254,101 @@ test("MCP connections counts a connected agent session, and stops when it goes",
   }
   await expect(connections).toContainText("0");
 });
+
+/**
+ * A painted colour in OKLab. Every token measured below is written `oklch()`
+ * and Chromium's computed value keeps that space, so this is polar-to-
+ * rectangular arithmetic and nothing is quantised on the way. A serialization
+ * that is not `oklch()` throws rather than guesses: a wrong number here would
+ * look like a passing measurement.
+ */
+function oklab(painted: string): { L: number; a: number; b: number } {
+  // `none` is how an achromatic colour reports the hue it does not have.
+  const parts =
+    /^oklch\((\d*\.?\d+) (\d*\.?\d+) (\d*\.?\d+|none)\)$/.exec(painted.trim());
+  const [, rawL, rawC, rawH] = parts ?? [];
+  if (rawL === undefined || rawC === undefined || rawH === undefined) {
+    throw new Error(`not an oklch colour: ${painted}`);
+  }
+  const chroma = Number(rawC);
+  const radians = ((rawH === "none" ? 0 : Number(rawH)) * Math.PI) / 180;
+  return {
+    L: Number(rawL),
+    a: chroma * Math.cos(radians),
+    b: chroma * Math.sin(radians),
+  };
+}
+
+/** How far a fill sits from the ground it is painted on. */
+function separation(fill: string, ground: string): number {
+  const one = oklab(fill);
+  const two = oklab(ground);
+  return Math.hypot(one.L - two.L, one.a - two.a, one.b - two.b);
+}
+
+/**
+ * What a highlight on `--card` has to clear, per appearance (#516).
+ *
+ * Dark is the contract's own number: 0.064 is what all three of these pairs
+ * measured before #480 moved dark's greys onto the scheme's warm hue and
+ * narrowed them to 0.018. Light never had it — the pairs sat at 0.005, which is
+ * no step at all — so what is owed there is only that the step became real;
+ * 0.04 is a regression guard far above what it replaced and far below the 0.051
+ * `--card-accent` now gives.
+ */
+const cardHighlightFloor = { light: 0.04, dark: 0.064 } as const;
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`a card-grounded highlight steps off its ground — ${scheme}`, async ({
+    browser,
+  }) => {
+    const page = await openApp(browser, scheme);
+    // Under the rail's 1100px breakpoint, which is the only width where the
+    // threads handle is on screen to be measured at all.
+    await page.setViewportSize({ width: 1000, height: 800 });
+
+    // The header is `--card`, and the toggle that lives in it is the first of
+    // the three.
+    const header = await painted(page, ".ub-header", "background-color");
+    const toggle = await painted(page, ".ub-sidebar-toggle", "background-color");
+    expect(separation(toggle, header)).toBeGreaterThanOrEqual(
+      cardHighlightFloor[scheme],
+    );
+
+    // The second: the block menu is its own `--card` floating over the prose,
+    // and one entry carries the highlight from the moment it opens.
+    await page.getByRole("button", { name: "+ new doc" }).click();
+    await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+    await page.locator(".ub-editor .ProseMirror").click();
+    await page.keyboard.type("/", { delay: 15 });
+    await expect(page.locator(".ub-blockmenu")).toBeVisible();
+    const card = await painted(page, ".ub-blockmenu", "background-color");
+    const entry = await paintedIn(
+      page.locator(".ub-blockmenu-on"),
+      "background-color",
+    );
+    expect(separation(entry, card)).toBeGreaterThanOrEqual(
+      cardHighlightFloor[scheme],
+    );
+    await page.keyboard.press("Escape");
+
+    // The third: the drawer's handle appears once the document has a thread,
+    // so the measurement needs a real one.
+    await page.keyboard.type("annotate me", { delay: 15 });
+    await page.keyboard.press("Shift+Home");
+    await page.locator(".ub-composer-open").click();
+    await page.keyboard.type("a thread", { delay: 15 });
+    await page.keyboard.press("Enter");
+    const handle = page.locator(".ub-threads-toggle");
+    await expect(handle).toBeVisible();
+    const drawer = await paintedIn(handle, "background-color");
+    expect(separation(drawer, header)).toBeGreaterThanOrEqual(
+      cardHighlightFloor[scheme],
+    );
+
+    // And it is one answer rather than three: the same painted fill, whichever
+    // `--card` surface it lands on.
+    expect(entry).toBe(toggle);
+    expect(drawer).toBe(toggle);
+  });
+}
