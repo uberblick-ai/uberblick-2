@@ -19,9 +19,12 @@ Eligible: an open issue carrying `needs-preparation` and none of `ready`,
 `in-progress` or `needs-decision`, with no live top-level claim. A completed
 preparer `Done:` whose named label transition is missing is eligible only for
 that mechanical recovery, not another challenge. Order by issue number;
-Priority belongs to implementation scheduling and is irrelevant here. Claim
-under the README's record and race rule; prepare one. An unlabelled issue is a
-draft outside every queue, not an implicit preparation candidate.
+Priority belongs to implementation scheduling and is irrelevant here. Scan
+only the labels, state and claims needed to establish eligibility and order,
+then claim under the README's record and race rule **before** reading the full
+body, thread, dependency graph, corpus or code. A losing claimer moves to the
+next candidate before doing that deeper intake. Prepare one. An unlabelled
+issue is a draft outside every queue, not an implicit preparation candidate.
 
 ## Outcome
 
@@ -87,16 +90,18 @@ Outcome: ready|needs-decision|split
 ```
 
 Link the adversary handoff where one ran; summarize edits, dispositions and
-evidence only where they are material to recovery. Do not restate the final
-body, narrate the run, list generic gates, or put the self-assessment on the
-issue. Then apply the named label transition and stop. A recovery run that finds
-this completed handoff only finishes a missing transition and stops.
+evidence only where they are material to recovery. After the four required
+lines, use at most five short bullets and no secondary headings. Do not restate
+the final body, narrate the run, list generic gates, or put the self-assessment
+on the issue. Then apply the named label transition and stop. A recovery run
+that finds this completed handoff only finishes a missing transition and stops.
 
 Post one separate run self-assessment as a top-level reply to the `Agent
 Feedback` discussion (https://github.com/uberblick-ai/uberblick-2/discussions/506).
 Record the runtime, model and reasoning effort when observable; wall time,
 tokens and tool calls when available; whether Uberblick MCP and the adversary
 were helpful; hindsight on whether the effort was too low, appropriate, too
-high or unknown, with evidence; and the one context or workflow change that
-would have saved the most time or ambiguity. `Unknown` is honest where the
-runtime exposes no measurement.
+high or unknown, with evidence; and workflow or context improvements, if any.
+Lead with the one that would have saved the most time or ambiguity; additional
+smaller observations are welcome when they add distinct evidence. `Unknown` is
+honest where the runtime exposes no measurement.

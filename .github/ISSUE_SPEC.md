@@ -173,12 +173,14 @@ doesn't answer? Then the issue is not `ready`.**
 - **Why** — a sentence or two, tied to the spike acceptance criteria or a
   doc. Keeps the agent from "improving" beyond intent.
 - **Acceptance criteria** — a short checkbox list (`- [ ]`) of **distinct,
-  observable and non-obvious outcomes or invariants**. Usually one to five is
-  enough. State what must be true, not every test case or implementation step.
-  Repository hygiene and delivery gates — lint, typecheck, the general test
-  suite, review and CI — already live in `AGENTS.md`, `CLAUDE.md` and CI; they
-  are never issue acceptance criteria. Name a focused command only when its
-  result is itself the clearest observation of this issue's outcome.
+  observable and non-obvious outcomes or invariants**. Use one to five; regroup
+  or split when the contract needs more. State what must be true, not how to
+  prove it: unit/e2e scenarios, test files and implementation steps belong in
+  Pointers, not in checkboxes. Repository hygiene and delivery gates — lint,
+  typecheck, the general test suite, review and CI — already live in
+  `AGENTS.md`, `CLAUDE.md` and CI; they are never issue acceptance criteria.
+  A post-merge corpus update sequenced by `CLAUDE.md` is not a diff acceptance
+  criterion either; point the coordinator to the document under Pointers.
 - **Out of scope** — explicit non-goals, or `None.` if genuinely none. This
   is the "least code wins" principle made enforceable: it is what scope
   creep gets rejected against.

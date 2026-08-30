@@ -25,22 +25,26 @@ so and return.
 1. **Self-update the checkout** when it is on `main`: `git fetch origin main`
    and `git merge --ff-only origin/main`, so the next read of these files tracks
    current `main`. A refused fast-forward is reported and skipped, never forced.
-2. **Start one session of the named role** — the Claude `Agent` tool with
-   `subagent_type` set to the role slug (its adapter under `.claude/agents/`)
-   and `model: opus`. That is this launcher's only path; launching a Codex
-   session arrives with `ub launch <role>`, and the `.codex/agents/` adapters
-   stay the definitions a Codex session discovers for itself.
+2. **Create one stable run id, then start one session of the named role.** Use
+   `claude-<role>-<UTC timestamp>-<short random suffix>` or an equivalently
+   collision-resistant value. Create it before launch, pass it verbatim, and
+   never substitute the Agent tool's internal id or the launcher session id.
+   Start the Claude `Agent` tool with `subagent_type` set to the role slug (its
+   adapter under `.claude/agents/`) and `model: opus`. That is this launcher's
+   only path; launching a Codex session arrives with `ub launch <role>`, and
+   the `.codex/agents/` adapters stay the definitions a Codex session discovers
+   for itself.
 3. **Hand it the queue assignment**, and nothing more:
 
    > Claim and complete one eligible item for the `<role>` role per
-   > `.agents/roles/<role>.md`. Identifiers: role `<role>`, run id `<the
-   > launched agent's id>`, launched by session `<this session's id>`.
+   > `.agents/roles/<role>.md`. Identifiers: role `<role>`, run id `<the stable
+   > run id created above>`, launched by session `<this session's id>`.
 
    Add the MCP route: the registered uberblick server, or — where none is
    registered — the throwaway `ub mcp serve` stdio client from #77 and #134, run
    in a scratch directory outside the committed worktree.
-4. **Announce and return.** Name the role launched and its run id in your
-   visible output, then stop.
+4. **Announce and return.** Name the role launched and repeat that exact stable
+   run id in your visible output, then stop.
 
 Everything else belongs to the role: this file observes no GitHub state, selects
 nothing, claims nothing, and performs no gate, review, disposition or merge. It

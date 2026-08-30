@@ -45,6 +45,12 @@ mismatched record is a refusal, not permission to fall back to the queue. The
 child's own claim and `Done:` repeat the parent and exact target so recovery can
 join the assignment to its outcome from GitHub alone.
 
+Scratch space is private, disposable runtime state. Before its first temporary
+file, every run creates a fresh directory outside the committed worktree,
+namespaced by its exact run id. A parent and each nested child use different
+directories; never reuse or read another run's scratch filenames. Durable state
+still goes to GitHub, never to the scratch directory.
+
 The normal order is draft → one issue-preparer run (trivial self-check, otherwise
 one fresh adversary) → `ready` or an owner boundary → implementation. Bounded
 means one outcome and stopping condition, not one attempt: the preparer owns
@@ -83,12 +89,13 @@ so a holder superseded by a valid takeover does not recover the item by writing
 again: its own claim keeps the older position, and the later write is
 recognisably stale rather than authoritative.
 
-A live run renews by posting `Renewed: <role> <session-or-run id>` on the item
-at least every 15 minutes, and staleness is measured from the holder's newest
-claim-or-renewal comment rather than its first. A top-level claim other than an
-implementation claim is stale when no completion exists and that newest comment
-is more than 30 minutes old; the window is twice the renewal interval so that a
-healthy foreground run is never reclaimed in the gap between two renewals.
+A live run renews by posting `Renewed: <role> <session-or-run id>` on the item.
+Do not renew before the newest claim or renewal is 12 minutes old; renew before
+it reaches 15 minutes. Staleness is measured from that newest comment rather
+than the first. A top-level claim other than an implementation claim is stale
+when no completion exists and that newest comment is more than 30 minutes old;
+the window is twice the renewal interval so that a healthy foreground run is
+never reclaimed in the gap between two renewals.
 Every implementation claim, top-level or delegated, uses `AGENTS.md`'s same
 three facts, because branch ownership is not a timer. A parent may replace a
 delegated implementer only after those facts make the claim stale and an

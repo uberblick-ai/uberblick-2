@@ -70,6 +70,10 @@ Last thing before posting the outcome, `git fetch origin main` again. Refresh
 only grounding affected by an upstream change, then re-read the issue, parent
 claim, nested adversary handoff and labels.
 
+The final body has one to five acceptance criteria. Every checkbox states an
+observable outcome or invariant, never a test/e2e recipe, test filename,
+implementation step, generic delivery gate or post-merge corpus task.
+
 | Parent still owns the issue | Final finding state | Outcome | Labels | Comment |
 |---|---|---|---|---|
 | yes | none (`none`) | ready | remove `needs-preparation`, add `ready` | yes |
@@ -90,16 +94,20 @@ The nested adversary writes its `Done:` handoff before the preparer acts. After
 the recheck, the preparer writes one concise `Done:` handoff with the grounded
 commit, route, adversary link where applicable, only material findings and
 dispositions, and `Outcome: ready|needs-decision|split`. Link the final body or
-children instead of restating them. Do not include transcripts, run narration,
-generic delivery gates, or the self-assessment. A requeue writes none.
+children instead of restating them. After the four required lines, use at most
+five short bullets and no secondary headings. Do not include transcripts, run
+narration, generic delivery gates, or the self-assessment. A requeue writes
+none.
 
 After the durable issue handoff, post a separate top-level reply to the Agent
 Feedback discussion named by the role contract. Report the runtime, model and
 reasoning effort when observable; wall time, token use and tool-call counts when
 available; whether Uberblick MCP context and the adversary helped; whether a
-higher or lower effort would likely have been more efficient; and the single
-largest avoidable cost. `Unknown` is valid. These observations inform later
-tuning and never change Priority automatically.
+higher or lower effort would likely have been more efficient; and workflow or
+context improvements, if any. Lead with the improvement that would have saved
+the most time or ambiguity; include additional smaller observations only when
+they add distinct evidence. `Unknown` is valid. These observations inform
+later tuning and never change Priority automatically.
 
 The preparer posts `Done:` before applying the named label transition. A retry
 of the same run edits only its own record. If the durable handoff exists but the
