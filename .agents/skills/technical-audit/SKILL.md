@@ -163,9 +163,8 @@ route; never defer stale truth to “the next change touching it.”
 
 ## Report
 
-Post one top-level reply. A baseline is normally under 12,000 characters and an
-incremental report under 6,000; use compact evidence tables rather than omitting
-architectural reasoning to meet a length target.
+Post one human-scannable top-level reply. Use compact evidence tables, but never
+omit architectural reasoning merely for brevity.
 
 ```text
 Technical audit — YYYY-MM-DD

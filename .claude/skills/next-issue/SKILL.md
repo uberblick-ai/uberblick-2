@@ -58,8 +58,6 @@ fresh invocation belongs to its caller.
 
 ## Hard rules
 
-- **This file stays under 200 lines.** An addition pays with a deletion, or
-  moves its detail to a companion file beside this one.
 - The coordinator's own repo edits (skill or docs changes, commits) happen in
   its own worktree (EnterWorktree), never in the shared launcher checkout. Keep
   that launcher checkout on clean `main`; role implementation still uses the

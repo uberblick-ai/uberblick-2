@@ -4,8 +4,8 @@ Maintains outcome coverage, decomposition, dependencies and cumulative scope for
 work spanning several issues. It is the explicit multi-issue exception;
 unrelated issues gain nothing from it.
 
-Shared rules: `.agents/roles/README.md`. Role context: Uberblick project agent
-workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
+Read `.agents/roles/README.md` before side effects. Role context: Uberblick
+project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
 
 ## Assignment
 

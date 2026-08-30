@@ -91,9 +91,7 @@ applies correctable findings in this same run and repeats the affected grounding
 and final recheck. It does not call a second adversary to review those edits.
 Another adversary is exceptional and requires an explicit owner request.
 
-**Dispatching the other runtime.** From Claude, that is one command, validated
-2026-08-30 against codex-cli 0.150.1 and 0.151.0 — it returns exit 0 with network
-and `gh` available inside the sandbox:
+**Dispatching the other runtime.** From Claude, use:
 
 ```sh
 codex exec -s workspace-write -c 'sandbox_workspace_write.network_access=true' - < <prompt-file> > <scratch-log> 2>&1
@@ -108,9 +106,6 @@ Read the verdict from the issue, not the terminal or log. The private scratch
 log prevents the child's reasoning transcript from consuming the parent's
 context and is inspected only when the command fails or no durable verdict
 appears.
-`--full-auto` is absent in codex-cli 0.151.0 *and* is refused by Claude Code's
-permission classifier, so a dispatch carrying it dies before Codex starts. Do
-not re-derive this per run.
 
 **Hold the pass open until the verdict exists.** Dispatch in the foreground and
 wait; a round takes minutes, not seconds. A preparer that ends its turn after
@@ -157,26 +152,15 @@ commit, route, adversary link where applicable, only material findings and
 dispositions, and `Outcome: ready|needs-decision|split`. Use `Preparation:
 resumed` for an implementer-return or owner-answer continuation. Link the final
 body or children instead of restating them. After the four required lines, use
-at most five short bullets and no secondary headings, targeting at most 1,500
-characters for the whole handoff. Do not include transcripts, run narration,
-generic delivery gates, or the self-assessment. A requeue writes none.
+only the material detail needed for recovery. Do not include transcripts, run
+narration, generic delivery gates, or the self-assessment. A requeue writes
+none.
 
 The preparer posts `Done:` before applying the named label transition. A retry
 of the same run edits only its own record. If the durable handoff exists but the
 label write did not complete, a later preparer finishes that transition without
 rerunning the challenge. GitHub therefore recovers the pass without a lifecycle
 comment graph or a second adversary.
-
-After that durable transition, post a separate top-level reply to the Agent
-Feedback discussion named by the role contract. Report the runtime, model and
-reasoning effort when observable; wall time, token use and tool-call counts when
-available; whether Uberblick MCP context and the adversary helped; whether a
-higher or lower effort would likely have been more efficient; and workflow or
-context improvements, if any. Lead with the improvement that would have saved
-the most time or ambiguity; include additional smaller observations only when
-they add distinct evidence. Target at most 2,000 characters and link evidence
-instead of narrating the run. `Unknown` is valid. Feedback is non-blocking
-telemetry and never changes the outcome or Priority automatically.
 
 **Findings are not requirements.** Material implementation risks and options
 travel to the implementer in the brief, as options. They are never edited into
@@ -187,21 +171,10 @@ the same case and not a stop: name the freedom in the body and proceed. A
 correctable missing outcome or invariant is fixed in this pass; only an
 unresolved owner boundary stops it.
 
-**A preflight is re-entrant.** Reuse a completed adversary handoff for the same
-parent pass. When a nested claim has no matching `Done:` after 30 minutes, the
-same live parent may launch one replacement; the crashed attempt produced no
-verdict and therefore does not buy a second adversary round. The durable trace is
-`nested claim → no Done for 30 minutes → replacement claim → one adversary Done
-→ parent final outcome`. A crash after the adversary handoff does not buy another
-verdict. The preparer remains responsible for applying its findings and writing
-the sole final preparation outcome.
+**A preflight is re-entrant.** Follow the README's nested-assignment expiry and
+reuse a completed adversary handoff for the same parent pass. The preparer still
+applies its findings and writes the sole final outcome.
 
-**A decision resumes from durable work.** An owner answer moves the issue from
-`needs-decision` back to `needs-preparation` and resets the consecutive-return
-count. A fresh preparer assignment reads the prior preparer handoff, adversary
-verdict, implementer return where present, focused question and owner answer,
-then refreshes only affected grounding before completing the same pass. It does
-not redo classification, broad grounding, or the adversary by default. A GitHub
-comment from the owner is authoritative; another human's comment is evidence
-until the owner adopts it. An off-GitHub answer is usable only when its source
-and wording are recorded on the issue.
+**A decision resumes from durable work.** Follow ISSUE_SPEC's `needs-decision`
+exit path: reuse its durable records, refresh only affected grounding, and do
+not repeat classification or the adversary by default.

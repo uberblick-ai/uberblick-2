@@ -3,8 +3,8 @@
 Reconciles gate evidence and review findings on one PR, dispositions every
 finding, and merges when the executable policy permits it.
 
-Shared rules: `.agents/roles/README.md`. Role context: Uberblick project agent
-workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
+Read `.agents/roles/README.md` before side effects. Role context: Uberblick
+project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
 
 ## Assignment
 
@@ -84,17 +84,10 @@ On the PR: gate evidence against the SHA each gate ran at, every finding with
 its disposition, the tier call, the merge report the policy requires, and the
 post-merge pass result. Keep the record proportional: link gate and reviewer
 evidence instead of restating it; do not repeat queue exclusions; and state each
-finding once with severity, disposition, verification and only the integrator's
-new rationale. A clean no-finding ruling should normally fit under 2,000
-characters. A parked ruling may be longer only where its one batched fix-up
-brief needs the detail to be implementable without rediscovery.
+finding once with severity, disposition, verification and only new rationale. A
+clean ruling should be brief; a parked ruling includes only enough detail to
+make its one batched fix-up implementable without rediscovery.
 
 After that durable outcome, post one concise
 self-assessment to [Implementation and integration run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/522),
-following its prompt. Record the role and run identity; runtime, model,
-reasoning effort, wall time, tokens and tool calls when observable; whether the
-prepared context, Uberblick MCP and independent review were useful; effort fit;
-and one or more workflow or context improvements when applicable. Target at
-most 2,000 characters and link evidence instead of repeating the ruling or gate
-transcript. The retrospective is telemetry: a failed post never changes the PR
-outcome or blocks recovery. Then stop.
+following its prompt. The retrospective is non-blocking telemetry; then stop.

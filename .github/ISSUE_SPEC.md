@@ -270,14 +270,9 @@ decision; a coordination parent carries only the shared outcome and child
 routing. Length alone never decides whether to split. Acceptance criteria stay
 at one to five distinct outcomes.
 
-Two consequences worth stating, because both have gone wrong here:
-
 - **Mechanism belongs in a document, not an issue.** When the corpus is
   unreachable and a design lands in an issue body instead, that is a recorded
   debt to repay, not a precedent — see CLAUDE.md's dogfooding contract.
-- **A draft carries exactly one unresolved decision** and the
-  `needs-decision` label. An issue with several open questions is not a draft,
-  it is a conversation; close it until it becomes actionable.
 
 Close a parent when its final child closes.
 

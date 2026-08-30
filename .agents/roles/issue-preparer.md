@@ -4,9 +4,9 @@ Turns settled product intent into one ready issue an implementer can execute
 without asking a product question, or a coordination parent with bite-sized
 children.
 
-Shared rules: `.agents/roles/README.md`. Role context: Uberblick project agent
-workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`) and Editorial contract
-(`5e0e25d8-c71f-44c3-9bf3-93662712c1fc`).
+Read `.agents/roles/README.md` before side effects. Role context: Uberblick
+project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`) and Editorial
+contract (`5e0e25d8-c71f-44c3-9bf3-93662712c1fc`).
 
 ## Assignment
 
@@ -98,24 +98,14 @@ Outcome: ready|needs-decision|split
 ```
 
 Link the adversary handoff where one ran; summarize edits, dispositions and
-evidence only where they are material to recovery. After the four required
-lines, use at most five short bullets and no secondary headings. Do not restate
-the final body, narrate the run, list generic gates, or put the self-assessment
-on the issue; target at most 1,500 characters for the whole handoff. Do not post
-a verbatim backup of the original intake after rewriting the body: retain its
-material intent in the final contract and only record material decisions or
-corrections separately. Then apply the named label transition. A recovery run
-that finds this completed handoff only finishes a missing transition and stops.
+evidence only where material to recovery. Keep it short and easy for a human to
+scan: do not restate the final body, narrate the run, list generic gates, or put
+the self-assessment on the issue. Do not back up the original intake after
+rewriting it; retain its material intent in the final contract and record only
+material decisions or corrections. Then apply the named label transition. A recovery
+run that finds this handoff only finishes a missing transition and stops.
 
 After that durable transition, post one separate run self-assessment as a
 top-level reply to the `Agent Feedback` discussion
-(https://github.com/uberblick-ai/uberblick-2/discussions/506).
-Record the runtime, model and reasoning effort when observable; wall time,
-tokens and tool calls when available; whether Uberblick MCP and the adversary
-were helpful; hindsight on whether the effort was too low, appropriate, too
-high or unknown, with evidence; and workflow or context improvements, if any.
-Lead with the one that would have saved the most time or ambiguity; additional
-smaller observations are welcome when they add distinct evidence. `Unknown` is
-honest where the runtime exposes no measurement. Target at most 2,000
-characters and link evidence instead of narrating the run. Feedback is
-telemetry: a failed post never changes the preparation outcome. Then stop.
+(https://github.com/uberblick-ai/uberblick-2/discussions/506), following its
+prompt. Feedback is non-blocking telemetry; then stop.

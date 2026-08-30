@@ -54,9 +54,8 @@ review threads via `gh api graphql` — inline review comments don't show in the
 former) and confirm zero unaddressed remarks, human or bot, including any that
 arrived after the earlier gates passed; anything open is triaged first. Confirm
 the PR's base is `main` (`gh pr view <n> --json baseRefName`) — a stacked PR
-merges into its parent feature branch and silently orphans the reviewed work
-(this happened: #13 into feat/hub, re-landed as #25); retarget the PR to `main`
-(or merge the parent first) before merging.
+merges into its parent feature branch and can orphan the reviewed work; retarget
+the PR to `main` (or merge the parent first) before merging.
 
 **Tier check.** Classify the PR against CLAUDE.md's "Merge policy" tiers by
 reading its full diff (`gh pr diff <n>`) and how its review findings were

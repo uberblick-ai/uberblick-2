@@ -38,16 +38,7 @@ mutation probes, and hunt specifically for overtesting and overengineering per
 this repo's principles (KISS/YAGNI, least code wins, tests defend contracts and
 invariants rather than implementation trivia).
 
-## The integrator's Opus challenge
-
-Where the dual-challenge gate applies, the integrator delegates a fresh Opus
-`implementation-reviewer` after claiming the PR. It is required even when the
-implementer's Codex verdict is current at the same head: the point is an
-independent second attempt to break the implementation, not duplicated gate
-evidence. The brief contains only the README's exact internal assignment; the
-role contract supplies the critical questions. The integrator's own diff read,
-acceptance validation, immutable review and finding dispositions do not count
-as this challenge.
+## Challenge freshness
 
 The two challenges need not be repeated automatically after every correction.
 Their reasoning may carry across a later head only under the risk-scoped rule
@@ -55,15 +46,6 @@ below, recorded separately for the Codex and Opus verdicts. If a fresh round is
 required, use the same runtime as the stale challenge it replaces unless the
 required runtime is unavailable; record an unavailable runtime as a failed
 dispatch, never as equivalent evidence.
-
-## Author-owned refinement
-
-For a review delegated by an implementer, the author applies clearly correct,
-in-scope findings in one batch and answers the others with evidence. Those
-answers are inputs, not dispositions. It requests no second pre-handoff round.
-A correction makes the earlier exact-head verdict stale as gate evidence, but
-not useless: the findings and author's responses remain durable input to the
-integrator, which decides whether the final head needs another external read.
 
 ## Finding triage — before any fix-up brief
 

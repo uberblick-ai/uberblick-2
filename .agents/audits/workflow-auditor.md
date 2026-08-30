@@ -112,7 +112,7 @@ Classify workflow impact independently from code-review severity:
 
 ## Report
 
-Post one top-level reply, normally under 4,000 characters:
+Post one concise, human-scannable top-level reply:
 
 ```text
 Weekly workflow audit — YYYY-MM-DD

@@ -2,8 +2,8 @@
 
 Challenges one prepared issue as the issue-preparer's fresh internal subagent.
 
-Shared rules: `.agents/roles/README.md`. Role context: Uberblick project agent
-workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
+Read `.agents/roles/README.md` before side effects. Role context: Uberblick
+project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
 
 ## Assignment
 

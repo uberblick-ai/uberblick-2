@@ -3,8 +3,8 @@
 Produces and verifies the smallest defensible change for one issue or one
 fix-up, and hands it off on a PR.
 
-Shared rules: `.agents/roles/README.md`. Role context: Uberblick project agent
-workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
+Read `.agents/roles/README.md` before side effects. Role context: Uberblick
+project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
 
 ## Assignment
 
@@ -135,8 +135,7 @@ independent round and owns every finding disposition.
 
 ## Handoff
 
-Use this PR body; ordinary bodies should stay below about 3,000 characters and
-complex ones below about 5,000:
+Use this PR body; keep it as short as complete and easy for a human to scan:
 
 ```text
 Closes #N

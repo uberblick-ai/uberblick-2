@@ -1,9 +1,10 @@
 # Role contracts
 
-The Uberblick project uses six roles in its development cycle: `issue-preparer`,
-`issue-adversary`, `implementer`, `implementation-reviewer`, `integrator` and
-`program-coordinator`. Each file beside this one is one role's contract, with
-thin adapters in `.claude/agents/` and `.codex/agents/` pointing back at it.
+The delivery workflow has three continuous entry roles: `issue-preparer`,
+`implementer` and `integrator`. They delegate the exact-key internal roles
+`issue-adversary` and `implementation-reviewer`; `program-coordinator` is called
+directly only for explicit program work. Each file beside this one is one
+role's contract, with thin runtime adapters pointing back at it.
 
 This file states what every role obeys, so no contract repeats it. Repository
 policy — `AGENTS.md`, `CLAUDE.md`, `.github/ISSUE_SPEC.md` — wins on conflicts,
@@ -47,11 +48,8 @@ record is a refusal, not permission to fall back to the queue. The child's own
 claim and `Done:` repeat the parent and exact target so recovery can join the
 assignment to its outcome from GitHub alone.
 
-Scratch space is private, disposable runtime state. Before its first temporary
-file, every run creates a fresh directory outside the committed worktree,
-namespaced by its exact run id. A parent and each nested child use different
-directories; never reuse or read another run's scratch filenames. Durable state
-still goes to GitHub, never to the scratch directory.
+Each run uses fresh private scratch outside the worktree, namespaced by its run
+id; never share it or treat it as durable state.
 
 The normal order is draft → one issue-preparer run (trivial self-check, otherwise
 one fresh adversary) → `ready` or an owner boundary → implementation. Bounded
