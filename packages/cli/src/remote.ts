@@ -565,9 +565,20 @@ function remoteConfig(bridge: Bridge): McpConfig {
  * that subset *the same* subset — needs contents, and a probe that answered
  * only the first question would let a divergent overlap through as an
  * interrupted run.
+ *
+ * The first read is `silent`: it happens before the prompt, and both readings
+ * that reach the prompt log themselves otherwise — a machine that ran `ub init`
+ * probes with its own secret and gets `hub rejected the token`, a machine with
+ * no configuration at all probes with none and gets `running local-only`. Both
+ * would land in front of "remote signing secret", on a join that then succeeds
+ * (#447). Nothing is hidden by that: whatever this reading says arrives in
+ * `hub.status`, and {@link corpusProblem} is what prints it when `join` refuses.
  */
 async function openRemote(bridge: Bridge, secretFileGiven: boolean): Promise<Corpus> {
-  const first = await inspectRemote(remoteConfig(bridge), { documents: true });
+  const first = await inspectRemote(remoteConfig(bridge), {
+    documents: true,
+    silent: true,
+  });
   if (!credentialCouldFix(first.hub) || secretFileGiven) {
     return first;
   }
