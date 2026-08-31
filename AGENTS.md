@@ -117,3 +117,14 @@ additional evidence rather than either required challenge.
 Every role reconstructs claims and progress from GitHub and re-reads the issue
 and PR threads before acting. The integrator records validation and finding
 dispositions on the PR; merge authority comes from CLAUDE.md.
+
+## Loop pacing
+
+A coordinator that repeatedly launches a continuous entry role (issue-preparer,
+implementer, integrator) — including a `/loop`-style session — paces relaunch
+by actual queue depth, not a fixed idle interval. Before waiting out a fallback
+delay after a run completes, check the role's queue for another eligible,
+unclaimed item (per that role's `Pickup` section in `.agents/roles/`). If one
+exists, launch the next run immediately with a fresh run id; reserve the
+longer fallback delay for a genuinely empty queue, as a safety net rather than
+the normal cadence.
