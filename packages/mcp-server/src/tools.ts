@@ -1075,7 +1075,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Letters and digits make a term; punctuation and emoji are not terms, so a query holding only those matches nothing. " +
         "Case and accents are folded, but nothing is stemmed — `withdrawal` does not find a document that says " +
         "`withdrawing`. A trailing `*` loosens one term to a prefix match, which is how to reach an inflection: " +
-        "`withdraw*` finds both. So no hits means no single document holds every term, not that the index is empty.\n\n" +
+        "`withdraw*` finds both. No hits means no indexed document holds every term; it does not by itself mean the index is empty.\n\n" +
         "Every hit carries the document's `description` — null where nobody has written one — so relevance can be " +
         "judged from the result list rather than by opening each document in turn." +
         failureContract("search"),
