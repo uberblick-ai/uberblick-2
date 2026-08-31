@@ -78,8 +78,9 @@ of a queue, and start the long pole first.
   worktrees share one ref store, so simultaneous `git fetch origin` calls lose a
   `cannot lock ref 'refs/remotes/origin/main'` race — the one trap the fan-out
   itself creates, and it fires tens of percent of the time. The objects still
-  land and the loser's ref already holds the newer value, so re-run the fetch
-  and carry on; a non-zero exit here is not a red gate. Then, by gate:
+  land and the loser's ref already holds the newer value, so a fetch that exits
+  non-zero with *that* error is re-run rather than reported as a red gate — any
+  other fetch failure still is one. Then, by gate:
   - **The acceptance-criteria read and the `Touches` scope check** — `git fetch
     origin`, then `git checkout --detach <headRefOid>`. They read that tree and
     run no task, so no `mise trust`. Left on the launch checkout's `origin/main`
