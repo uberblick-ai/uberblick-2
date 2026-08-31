@@ -74,7 +74,12 @@ of a queue, and start the long pole first.
 - **Every gate agent grades the PR head, and its first commands say which tree
   it reads.** A fresh worktree binds a gate agent in ways that look like a red
   gate and are not branch results. `mise` trusts config by path and every
-  worktree is a new path, so `mise trust` precedes any task there. Then, by gate:
+  worktree is a new path, so `mise trust` precedes any task there. And the
+  worktrees share one ref store, so simultaneous `git fetch origin` calls lose a
+  `cannot lock ref 'refs/remotes/origin/main'` race — the one trap the fan-out
+  itself creates, and it fires tens of percent of the time. The objects still
+  land and the loser's ref already holds the newer value, so re-run the fetch
+  and carry on; a non-zero exit here is not a red gate. Then, by gate:
   - **The acceptance-criteria read and the `Touches` scope check** — `git fetch
     origin`, then `git checkout --detach <headRefOid>`. They read that tree and
     run no task, so no `mise trust`. Left on the launch checkout's `origin/main`
@@ -87,17 +92,20 @@ of a queue, and start the long pole first.
     `node_modules` cannot serve. A red run is classified *before* the agent
     returns, because the environmental-failure rule above needs a base run and
     this is the only installed worktree — it is gone once the agent returns.
-    That base is freshly fetched `origin/main`, the tree the container review
-    runs from and the one the PR merges into: `git checkout --detach
-    origin/main`, `mise run install` again — the head's `node_modules` is not
-    the base's — then the same spec, and report both outcomes with both SHAs.
+    That base is `origin/main`, the tree the container review runs from and the
+    one the PR merges into: `git checkout --detach origin/main`, `mise run
+    install` again — the head's `node_modules` is not the base's — then the same
+    spec, and report both outcomes with both SHAs.
   - **The immutable container review** — the exception, and the only gate whose
     own checkout stays at freshly fetched `origin/main`: `main` supplies the
     build recipe (README, "Review isolation"), and archiving the SHA it is
-    passed is what lets it grade the head from there. `mise run review`
-    re-fetches `main` and re-compares at run time while a worktree's `HEAD` is
-    frozen at creation, so a gate agent it refuses moves its own worktree to
-    freshly fetched `origin/main` and re-runs instead of reporting a red gate.
+    passed is what lets it grade the head from there. So `mise trust`, then
+    `mise run review <headRefOid>`. `mise run review` re-fetches `main` and
+    re-compares at run time while a worktree's `HEAD` is frozen at creation, so
+    a gate agent it refuses moves its own worktree to freshly fetched
+    `origin/main` and re-runs instead of reporting a red gate. The SHA-tagged
+    image outlives that worktree on the host daemon, so the failure-path probes
+    above stay the integrator's own work, never the gate agent's.
 - **Every gate agent reports; none writes.** Each returns its `gate`, `outcome`,
   a short `summary`, the `sha` it ran at, and its `start` and `end`, and performs
   no GitHub write at all — no claim, comment, label, review or merge. The
