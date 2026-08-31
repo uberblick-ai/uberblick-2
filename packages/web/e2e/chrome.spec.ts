@@ -487,10 +487,19 @@ function surface(page: Page, root: string): Promise<Reading[]> {
       const style = getComputedStyle(element);
       const where = name(element);
 
-      const speaks = [...element.childNodes].some(
-        (node) =>
-          node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "",
-      );
+      // A field's value is text the reader reads, and it is the one text that
+      // is not a child node — without this the rename field's ink is walked
+      // past, and only its border is measured.
+      const field =
+        (element instanceof HTMLInputElement ||
+          element instanceof HTMLTextAreaElement) &&
+        element.value.trim() !== "";
+      const speaks =
+        field ||
+        [...element.childNodes].some(
+          (node) =>
+            node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "",
+        );
       if (speaks) {
         readings.push({ where, kind: "text", colour: style.color, ground: groundOf(element) });
       }
@@ -559,14 +568,26 @@ function surface(page: Page, root: string): Promise<Reading[]> {
  *   `--muted-foreground` reached 3.96:1 on `--sidebar` and 3.40:1 on
  *   `--sidebar-accent`, and the group label 4.20:1.
  *
- * One thing is measured and let through: a colour with real chroma on this
- * surface is the brand accent. As a stroke that is a mark carrying its own
- * meaning, which #515 excludes by name. As ink it is 1.93:1 in light — but
- * against `--card` and the page ground too, so it is a property of `--brand`
- * rather than of this surface, and retuning a token other surfaces read is
- * #515's *Out of scope*. Tracked as #569.
+ * Chroma is what separates an accent from the surface: every neutral this column
+ * paints sits at or under 0.015, and both accents — `--brand` and the 28% edge
+ * derived from it — at 0.15 or above, so the threshold below is a tenfold margin
+ * from either side rather than a number picked to make something pass. What it
+ * buys differs by kind, and the difference is #515's:
+ *
+ * - **A stroke above it is excluded, and the criterion says so** — "a stroke
+ *   carrying its own meaning (`--brand`, a focus ring)". Meaning, not a named
+ *   token: a list of accent rules would be the selector list this test exists
+ *   not to be.
+ * - **Ink has no such exclusion, so chroma alone must not let a text through.**
+ *   A chromatic text has to *be* the accent, compared against what the wordmark
+ *   is painted rather than against a threshold. Today that is one text:
+ *   `.ub-menu-current`, the current workspace's row, at 1.93:1 in light. It is a
+ *   property of `--brand` rather than of this surface — 2.04 to 2.30:1 against
+ *   every other light ground in the app — so #515's *Out of scope* reserves it
+ *   and #569 owns it, parked on the owner's answer. Any other chromatic ink
+ *   fails here rather than passing on its chroma.
  */
-const brandChroma = 0.05;
+const accentChroma = 0.05;
 
 for (const scheme of ["light", "dark"] as const) {
   test(`the sidebar's interior reads the sidebar's own tokens — ${scheme}`, async ({
@@ -579,6 +600,11 @@ for (const scheme of ["light", "dark"] as const) {
     const ground = await painted(page, ".ub-list", "background-color");
     const floor =
       scheme === "light" ? separation(edge, ground) : contrast(edge, ground);
+
+    // And the accent as this page paints it, read off the wordmark — the app's
+    // other `--brand` ink, so this is the same property resolved by the same
+    // engine. It names the one text the loop below may let through.
+    const accent = await painted(page, ".ub-brand", "color");
 
     // A group, so the header's rule, its count pill and the two quiet actions
     // are on screen. "+ group" makes one and opens its rename field, so the
@@ -609,8 +635,11 @@ for (const scheme of ["light", "dark"] as const) {
 
     for (const { where, kind, colour, ground: under } of readings) {
       const ink = oklab(colour);
-      if (ink.chroma > brandChroma) continue;
       const seen = `${where} — ${colour} on ${under}`;
+      if (ink.chroma > accentChroma) {
+        if (kind === "text") expect(colour, seen).toBe(accent);
+        continue;
+      }
       if (kind === "text") {
         expect(contrast(colour, under), seen).toBeGreaterThanOrEqual(4.5);
       } else if (scheme === "dark") {

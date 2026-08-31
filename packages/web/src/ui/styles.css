@@ -139,6 +139,18 @@
   --sidebar-muted-foreground: light-dark(oklch(0.145 0 0 / 60%), oklch(0.985 0 0 / 60%));
   --sidebar-selected-border: light-dark(oklch(0.75 0.15 65 / 28%), oklch(0.8 0.18 65 / 28%));
 
+  /* The one interior stroke `--sidebar-border` could not simply absorb (#515).
+     The group-rename field edged itself in `--input`, which in light is ΔE 0.021
+     against this ground — half the floor, so it had to move — but whose dark
+     half is 15% white against the border's 12%. Taking `--sidebar-border`
+     wholesale would have traded that field's dark contrast down from 1.587 to
+     1.430 while every other interior stroke rose to it, and the criterion is
+     that no stroke *loses* contrast. So the field takes the column's light half
+     and keeps `--input`'s dark one. Not a second standard: it is the same value
+     as `--sidebar-border` where the standard was the problem, and one rung above
+     it in the appearance that was already fine. */
+  --sidebar-input: light-dark(oklch(0.9 0.006 65), oklch(1 0 0 / 15%));
+
   /* `--sidebar-accent`'s job, on the other surface (#516). #480 moved dark's
      neutral greys onto the scheme's warm hue, which narrowed every highlight
      that sits on `--card` — the block-menu entry, the sidebar toggle, the
@@ -1086,7 +1098,7 @@ body {
   margin: 0.25rem 0.4rem;
   padding: 0 0.2rem;
   background: transparent;
-  border: 1px solid var(--sidebar-border);
+  border: 1px solid var(--sidebar-input);
   border-radius: var(--radius-sm);
   color: var(--foreground);
   font: inherit;
