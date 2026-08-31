@@ -120,11 +120,10 @@ A top-level claim other than an implementation claim is stale when no completion
 exists and its claim comment's `updated_at` is more than 60 minutes old; the
 window is twice the renewal interval so that a healthy foreground run is never
 reclaimed in the gap between two renewals.
-Every implementation claim, top-level or delegated, uses `AGENTS.md`'s same
-three facts, because branch ownership is not a timer. A parent may replace a
-delegated implementer only after those facts make the claim stale and an
-explicit handover records the new implementer; a newer remote branch commit
-therefore prevents replacement even when no `Done:` exists after 30 minutes.
+Every implementation claim, top-level or delegated, uses `AGENTS.md`'s
+30-minute durable-liveness rule. A later valid claim takes over a stale one and
+continues the current remote branch head; the superseded holder stops if it
+resumes. A parent replaces a stale delegated implementer the same way.
 
 A nested **non-implementation** assignment expires with no claim 10 minutes
 after `Delegated:` (or immediately when the runtime confirms it never started),
