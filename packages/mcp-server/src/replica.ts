@@ -354,28 +354,30 @@ export class Replicas {
    * Withdrawal removes the presence keys rather than the whole state: dropping
    * the state emits an awareness `removed`, which is what the web's departed-agent
    * grace waits for, and a presence timeout would then draw the caret for
-   * another 30 seconds. Where a caret was drawn that reads as avoidable —
-   * {@link publishCursor} arms the cursor's timer before re-arming presence, so
-   * locally the caret goes first — but that ordering does not survive to the
-   * wire. Both timers carry the same TTL, so both callbacks run in one event
-   * loop turn, and the hub broadcasts a turn's awareness once per changed
-   * client, collapsed to that client's latest state (`@hocuspocus/server`'s
-   * default `flushDelay: 0`; the sending provider does *not* coalesce, so the
-   * hub is where to check this). The intermediate `{user, cursor: null}` is
-   * therefore never observable remotely: a peer would go straight from
+   * another 30 seconds. Locally the caret goes first — {@link publishCursor}
+   * arms the cursor's timer before re-arming presence — but a peer sees two
+   * updates only where something moved one deadline and not the other, and
+   * `touch` moves presence alone on every read through `requireDoc`. With no
+   * call touching the room in between, both callbacks fall in one event loop
+   * turn and the hub broadcasts that turn once per changed client, collapsed to
+   * the client's latest state (`@hocuspocus/server`'s default `flushDelay: 0`;
+   * the sending provider does *not* coalesce, so the hub is where to check
+   * this): `setLocalState(null)` would take a peer straight from
    * `{user, cursor}` to `removed`, still holding a state the grace accepts, and
-   * the caret would outlive the session after all. `setLocalState(null)` is not
-   * the simplification it looks like. Measured against a real hub on #511 and
-   * again on #519.
+   * the caret would outlive the session. A read in between separates the two
+   * updates and the peer does decode `{user, cursor: null}` — harmless there,
+   * because a last state with a null cursor is not a caret the grace retains.
+   * Conditional is enough: `setLocalState(null)` is not the simplification it
+   * looks like. Both paths measured against a real hub, on #511 and #588.
    *
    * The price is that "not present" then has two shapes. A room this session has
    * touched keeps a non-null local state for the rest of its life in this
    * process — heartbeated by y-protocols and re-sent on every reconnect — where
    * a never-touched room publishes nothing at all. No reader can see the
-   * difference today, because every one that counts or renders presence needs a
-   * usable `user`; one that counted awareness *entries* instead would count this
-   * server as present in every document it has ever opened, which is the bug
-   * #493 exists to fix.
+   * difference today, because that residual is `{cursor: null}` or `{}` — no
+   * `user`, no anchor, nothing any reader counts or draws; one that counted
+   * awareness *entries* instead would count this server as present in every
+   * document it has ever opened, which is the bug #493 exists to fix.
    *
    * The workspace-level rooms are exempt — the directory publishes from attach
    * because the "MCP connections" count reads it, and nobody renders the
