@@ -240,6 +240,16 @@ export interface DocMeta {
    * `create_doc` refuses to.
    */
   description: string | null;
+  /**
+   * Draft release-note copy for the work this document records: one short
+   * sentence of simple English about the user-visible outcome.
+   *
+   * Three states, one key. Absent means nobody has written one; `null` means
+   * this change deliberately needs no user-facing entry; a non-empty string is
+   * the suggestion. Absent and null are kept apart on purpose — collapsing them
+   * would make every internal-only change look unfinished.
+   */
+  changelogSuggestion?: string | null;
   /** The record shape. Absent means an ordinary document. */
   kind?: DocumentKind;
   /** The lifecycle state, present only when it is legal for {@link kind}. */

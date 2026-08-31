@@ -29,6 +29,7 @@ import {
   listAnnotations,
   readDecisions,
   reorderDecisions,
+  setChangelogSuggestion,
   setDescription,
   setKind,
   setStatus,
@@ -167,6 +168,25 @@ describe("docFingerprint", () => {
     const copy = replicate(doc);
     setDescription(doc, "what this note is for");
     expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+  });
+
+  // All three states of one key, because a suggestion nobody wrote and a
+  // deliberate "no user-facing entry" are different documents — and only the
+  // absent one is invisible to JSON.
+  it("changes when only the changelog suggestion changes", () => {
+    const doc = source();
+    const unwritten = replicate(doc);
+    setChangelogSuggestion(doc, "Documents now carry a changelog suggestion.");
+    expect(docFingerprint(unwritten)).not.toBe(docFingerprint(doc));
+
+    const written = replicate(doc);
+    setChangelogSuggestion(doc, null);
+    expect(docFingerprint(written)).not.toBe(docFingerprint(doc));
+
+    // Clearing returns the document to the one it was, rather than leaving a
+    // residue a bridge would keep failing closed on.
+    setChangelogSuggestion(doc, "");
+    expect(docFingerprint(doc)).toBe(docFingerprint(unwritten));
   });
 
   it("changes when only the kind changes", () => {
