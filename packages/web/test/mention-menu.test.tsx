@@ -11,8 +11,9 @@
  * 2. **A picked reference is a typed one.** Same `docLink` mark, same uuid, the
  *    directory's title as ordinary text, the `@query` gone, one undo step, and
  *    what the reader types next is unmarked prose.
- * 3. **Dismissing changes nothing.** Esc, and a query nothing matches, leave the
- *    typed characters exactly as typed — and give Enter back to the prose.
+ * 3. **Dismissing changes nothing.** Esc, a click outside, and a query nothing
+ *    matches leave the typed characters exactly as typed — and give Enter back
+ *    to the prose.
  * 4. **It never acts on a block that has moved or gone**, and never offers the
  *    open document or an archived one.
  *
@@ -37,6 +38,7 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
+import { redo, undo } from "y-prosemirror";
 import { createDocLinkContext } from "../src/editor/doc-links.js";
 import type { DocLinkContext } from "../src/editor/doc-links.js";
 import {
@@ -165,6 +167,15 @@ function caret(editor: Editor, index: number, offset: number): void {
   for (let i = 0; i < index; i += 1) pos += editor.state.doc.child(i).nodeSize;
   act(() => {
     editor.commands.setTextSelection(pos + offset);
+  });
+}
+
+/** Backspace: the one-character deletion prosemirror-commands dispatches. */
+function backspace(editor: Editor): void {
+  act(() => {
+    const { state } = editor;
+    const at = state.selection.from;
+    editor.view.dispatch(state.tr.delete(at - 1, at));
   });
 }
 
@@ -348,6 +359,47 @@ describe("the picker", () => {
   });
 
   /**
+   * A click outside means the same thing as Esc, and the card needs its own
+   * handler to hear it: an `@` sits inside a sentence, so a click further along
+   * that same sentence leaves the trigger valid and would leave the card
+   * hanging over prose the reader has moved on from.
+   */
+  it("closes on a click outside, and not on one inside the card", () => {
+    const { context } = directory();
+    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
+    const mounted = mountPicker(ydoc, context);
+    try {
+      caret(mounted.editor, 0, 0);
+      type(mounted.editor, "@");
+      type(mounted.editor, "hu");
+      expect(mounted.card()).not.toBeNull();
+
+      // Reaching for an entry is not dismissing the card that holds it.
+      act(() => {
+        mounted
+          .card()
+          ?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      });
+      expect(mounted.card()).not.toBeNull();
+
+      act(() => {
+        document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      });
+      expect(mounted.card()).toBeNull();
+      expect(delta(ydoc)).toEqual([{ insert: "@hu" }]);
+
+      // Dismissed for this session only, exactly as Esc is.
+      type(mounted.editor, "b");
+      expect(mounted.card()).toBeNull();
+      type(mounted.editor, " ");
+      type(mounted.editor, "@");
+      expect(mounted.card()).not.toBeNull();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  /**
    * The candidates are the directory this replica already holds — no target
    * room is opened to offer one, which is also why an archived document is
    * simply absent rather than offered and then refused.
@@ -442,35 +494,6 @@ describe("the picker", () => {
   });
 
   /**
-   * And the command refuses on the same grounds, not only the card: a trigger
-   * naming one occurrence must not splice into the identical one beside it,
-   * whoever is holding it.
-   */
-  it("refuses a trigger that names a different occurrence", () => {
-    const { context } = directory();
-    const { ydoc } = docWith([{ type: "paragraph", text: "one @hub two @hub" }]);
-    const mounted = mountPicker(ydoc, context);
-    try {
-      caret(mounted.editor, 0, 8);
-      const first = mentionTriggerAt(mounted.editor);
-      expect(first).toMatchObject({ query: "hub" });
-
-      caret(mounted.editor, 0, 17);
-      expect(
-        linkMentionAtTrigger(
-          mounted.editor,
-          first as MentionTrigger,
-          HUB,
-          context,
-        ),
-      ).toBe(false);
-      expect(getBlocks(ydoc)[0]?.text).toBe("one @hub two @hub");
-    } finally {
-      mounted.unmount();
-    }
-  });
-
-  /**
    * Typing the `@` over a selection is still typing it. The gate asks what this
    * transaction *wrote*, not what the block ended up holding — which is the
    * whole point, because selecting `@x` and typing `@` leaves the block's text
@@ -487,6 +510,31 @@ describe("the picker", () => {
       type(mounted.editor, "@");
       expect(getBlocks(ydoc)[0]?.text).toBe("see @");
       expect(mounted.card()).not.toBeNull();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  /**
+   * And the deletion form of the same question, which is the one gesture the
+   * written-range test is alone in refusing: a peer's edit, an undo and a redo
+   * are already a change from elsewhere, and a paste carries its `uiEvent`.
+   * Deleting `notes` back off a week-old `@notes` leaves the caret exactly
+   * where typing an `@` would have, having typed nothing.
+   */
+  it("never opens by deleting back onto an @ that was already prose", () => {
+    const { context } = directory();
+    const { ydoc } = docWith([{ type: "paragraph", text: "see @notes" }]);
+    const mounted = mountPicker(ydoc, context);
+    try {
+      caret(mounted.editor, 0, 10);
+      for (let i = 0; i < 5; i += 1) backspace(mounted.editor);
+
+      // Trigger-shaped, caret in it, and no picker: the text is prose that has
+      // been there since last week.
+      expect(getBlocks(ydoc)[0]?.text).toBe("see @");
+      expect(mentionTriggerAt(mounted.editor)).toMatchObject({ query: "" });
+      expect(mounted.card()).toBeNull();
     } finally {
       mounted.unmount();
     }
@@ -523,14 +571,16 @@ describe("the picker", () => {
       expect(mounted.card()).toBeNull();
 
       // And neither an undo that restores a trigger-looking text nor the redo
-      // that puts it back is a request for a picker: both replace the whole
-      // document, so neither wrote the `@` the caret is sitting after.
+      // that puts it back is a request for a picker. Driven through
+      // y-prosemirror's own `undo`/`redo`, which is what `Mod-z` is bound to:
+      // an undo goes to the Y.Doc and comes back as a change from elsewhere,
+      // exactly like the peer's edit above.
       act(() => {
-        mounted.editor.commands.keyboardShortcut("Mod-z");
+        undo(mounted.editor.state);
       });
       expect(mounted.card()).toBeNull();
       act(() => {
-        mounted.editor.commands.keyboardShortcut("Mod-Shift-z");
+        redo(mounted.editor.state);
       });
       expect(mounted.card()).toBeNull();
     } finally {

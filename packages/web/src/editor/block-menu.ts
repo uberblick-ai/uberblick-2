@@ -304,13 +304,19 @@ function isChangeFromElsewhere(transaction: Transaction): boolean {
 
 /**
  * Whether `transaction` came from **this reader's keyboard** rather than from
- * somewhere else: a peer's keystroke, or a paste, drop or cut.
+ * somewhere else: a peer's keystroke, an undo or a redo, or a paste, drop or
+ * cut.
  *
- * Necessary for opening a menu, and not sufficient. An **undo** passes this:
- * y-prosemirror rebuilds the document from the Y.Doc and the resulting
- * transaction carries no origin at all — measured, not assumed — so both menus
- * additionally compare the block against `transaction.before` before they open
- * (see {@link opensSlashSession}, and `opensMentionSession` in
+ * An undo counts as somewhere else, and that is not obvious. `Mod-z` is bound
+ * to y-prosemirror's `undo` (`editor/collaboration.ts`), which writes to the
+ * Y.Doc; every transaction the sync plugin then makes — a peer's edit and this
+ * reader's own undo alike — carries `isChangeOrigin`, so {@link
+ * isChangeFromElsewhere} closes both. Measured, not assumed.
+ *
+ * Necessary for opening a menu, and not sufficient: what is left is this
+ * reader's typing, and each menu still has to tell the keystroke that meant the
+ * command from one that merely landed where a command would look like it (see
+ * {@link opensSlashSession}, and `opensMentionSession` in
  * `editor/mention-menu.ts`). Shared, because "where did this change come from"
  * is one question and two answers to it would drift.
  */

@@ -47,7 +47,6 @@
  */
 
 import type { Editor } from "@tiptap/core";
-import { TextSelection } from "@tiptap/pm/state";
 import type { Transaction } from "@tiptap/pm/state";
 import { endUndoCapture, isTypedHere } from "./block-menu.js";
 import { replaceWithDocLink } from "./doc-links.js";
@@ -123,15 +122,15 @@ export function mentionTriggerAt(editor: Editor): MentionTrigger | null {
  *
  * - Typing `@`, over a selection or not, writes a range ending exactly at the
  *   caret.
- * - A deletion writes nothing, so backspacing back onto an `@` that was already
- *   there is not an insertion of it.
- * - An **undo or a redo** replaces the whole document in one step —
- *   y-prosemirror rebuilds it from the Y.Doc — so its written range ends at the
- *   document's end, never at a caret inside a paragraph. That matters because
- *   the transaction carries no origin to test instead: a peer's edit arrives
- *   with `y-sync$` meta and a paste with `uiEvent`, but an undo arrives with
- *   neither, and the undo manager's own `undoing` flag is already cleared by the
- *   time the transaction is seen. Both measured, not assumed.
+ * - A **deletion writes nothing**, which is the gesture this exists for:
+ *   backspacing back onto an `@` that has been sitting in the prose since last
+ *   week leaves the caret exactly where a freshly typed one would, and nobody
+ *   asked for a picker.
+ *
+ * A peer's edit, an undo and a redo never reach here — {@link isTypedHere}
+ * closes all three, because y-prosemirror writes an undo to the Y.Doc and the
+ * sync plugin marks what comes back as a change from elsewhere. A paste it
+ * closes by its `uiEvent`.
  */
 function wroteUpTo(transaction: Transaction, pos: number): boolean {
   let matched = false;
@@ -153,13 +152,13 @@ function wroteUpTo(transaction: Transaction, pos: number): boolean {
  * text nobody was mentioning with.
  *
  * - **This reader's keyboard** ({@link isTypedHere}): not a peer's keystroke,
- *   and not a paste, drop or cut.
+ *   not an undo or a redo, and not a paste, drop or cut.
  * - **An empty query.** A paragraph that has held `@notes` since last week is
  *   prose; clicking into it and typing a letter must not pop a picker. Only an
  *   `@` with nothing typed after it yet can be the command.
  * - **The `@` is what this transaction wrote** ({@link wroteUpTo}), which is
- *   what tells the keystroke from an undo or a redo that happens to leave the
- *   caret after one.
+ *   what tells the keystroke from deleting `notes` back off that week-old
+ *   `@notes` — the same prose, reached backwards.
  *
  * Keeping an already-open session alive as the query grows is the state's job,
  * not this one's (see {@link mentionTriggerAt}).
@@ -224,10 +223,15 @@ export function linkMentionAtTrigger(
 ): boolean {
   const live = mentionTriggerAt(editor);
   if (live === null) return false;
-  // The block, the occurrence and the query: a block can hold two `@hub`s, and
-  // one that is not the session's is not this session's to replace.
+  // The block and the query: what the picker offered was an answer to *this*
+  // question in *that* block, and a live state describing anything else is not
+  // this session's to replace. Which occurrence it is stays the caller's to
+  // watch — `ui/MentionMenu.tsx` closes the session the moment the caret's
+  // trigger stops being the one it opened on — and is deliberately not compared
+  // here, because a peer's edit above the block moves the position without
+  // changing which `@` was meant.
   if (live.blockId !== trigger.blockId) return false;
-  if (live.from !== trigger.from || live.query !== trigger.query) return false;
+  if (live.query !== trigger.query) return false;
 
   // A reader who undoes this means "give me my `@query` back", not "give me back
   // the empty block I started from" — so the reference is its own undo step.
@@ -245,10 +249,6 @@ export function linkMentionAtTrigger(
   ) {
     return false;
   }
-  // After the label, never inside it: `docLink` is not inclusive, so what the
-  // reader types next is ordinary prose.
-  tr.setSelection(TextSelection.near(tr.doc.resolve(tr.mapping.map(live.to))));
-
   editor.view.dispatch(tr);
   editor.view.focus();
   return true;
