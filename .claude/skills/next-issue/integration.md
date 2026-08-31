@@ -76,17 +76,21 @@ of a queue, and start the long pole first.
   gate and are not branch results. `mise` trusts config by path and every
   worktree is a new path, so `mise trust` precedes any task there. Then, by gate:
   - **The acceptance-criteria read and the `Touches` scope check** — `git fetch
-    origin`, `git checkout --detach <headRefOid>`, `mise trust`. Left on the
-    launch checkout's `origin/main` they grade `main`: every criterion of the
-    form "X is unchanged" reads true there for free, and every "the file now
-    says Y" reads false and costs a fix-up wave the branch never earned.
-  - **The e2e proof** — the same three commands, then `mise run install`. `mise
-    run e2e` takes no SHA and runs whatever its checkout holds, and it opens
-    with a `pnpm --filter` exec that a fresh worktree's empty `node_modules`
-    cannot serve. A red run is classified *before* the agent returns: re-run the
-    same failing spec against the base and report both outcomes with both SHAs,
-    because the environmental-failure rule above requires that comparison and
-    this worktree is the only installed one — it is gone once the agent returns.
+    origin`, then `git checkout --detach <headRefOid>`. They read that tree and
+    run no task, so no `mise trust`. Left on the launch checkout's `origin/main`
+    they grade `main`: every criterion of the form "X is unchanged" reads true
+    there for free, and every "the file now says Y" reads false and costs a
+    fix-up wave the branch never earned.
+  - **The e2e proof** — the same two commands, then `mise trust` and `mise run
+    install`. `mise run e2e` takes no SHA and runs whatever its checkout holds,
+    and it opens with a `pnpm --filter` exec that a fresh worktree's empty
+    `node_modules` cannot serve. A red run is classified *before* the agent
+    returns, because the environmental-failure rule above needs a base run and
+    this is the only installed worktree — it is gone once the agent returns.
+    That base is freshly fetched `origin/main`, the tree the container review
+    runs from and the one the PR merges into: `git checkout --detach
+    origin/main`, `mise run install` again — the head's `node_modules` is not
+    the base's — then the same spec, and report both outcomes with both SHAs.
   - **The immutable container review** — the exception, and the only gate whose
     own checkout stays at freshly fetched `origin/main`: `main` supplies the
     build recipe (README, "Review isolation"), and archiving the SHA it is
