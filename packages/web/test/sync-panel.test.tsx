@@ -209,6 +209,10 @@ describe("the sync panel renders the state this client holds", () => {
         State: "syncing…",
         // The status line's wording, from the one place both read it.
         Backlog: "4 sync messages unacked",
+        // The local read is over and found nothing — this fixture's browser has
+        // no IndexedDB. An answer, not a silence: the status line only says this
+        // during an outage, so the panel is where it is always readable (#535).
+        "Local copy": "unavailable",
       });
     } finally {
       act(() => root.unmount());
@@ -264,6 +268,37 @@ describe("the sync panel renders the state this client holds", () => {
 
     const words = [offline.State, busy.State, quiet.State];
     expect(new Set(words).size).toBe(words.length);
+  });
+
+  it("keeps the local-copy row in every state, unknown until the read settles", () => {
+    vi.useFakeTimers();
+    const localCopy = (status: Partial<RoomStatus>): string | undefined => {
+      const { host, root } = mount(fixture(status));
+      try {
+        return facts(host)["Local copy"];
+      } finally {
+        act(() => root.unmount());
+        host.remove();
+      }
+    };
+    // `hasLocalCache: false` is two different things — a read that found
+    // nothing, and a read still running — and the panel must not spell them the
+    // same way. `localReplicaLoaded` is what tells them apart.
+    expect(localCopy({ localReplicaLoaded: false, hasLocalCache: false })).toBe("—");
+    expect(localCopy({ localReplicaLoaded: true, hasLocalCache: false })).toBe(
+      "unavailable",
+    );
+    expect(localCopy({ localReplicaLoaded: true, hasLocalCache: true })).toBe(
+      "available",
+    );
+    // Including where the reader is least able to check for themselves.
+    expect(
+      localCopy({
+        protocolMismatch: { hub: 2, client: 1 },
+        localReplicaLoaded: true,
+        hasLocalCache: true,
+      }),
+    ).toBe("available");
   });
 
   /**

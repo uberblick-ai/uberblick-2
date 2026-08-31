@@ -63,7 +63,6 @@ function label(
     root.render(
       <StatusLine
         connection={stubConnection(unsyncedChanges, patch)}
-        segment={WORKSPACE}
         presence={NOBODY}
       />,
     ),
@@ -97,7 +96,6 @@ function line(patch: Partial<RoomStatus>): string {
     root.render(
       <StatusLine
         connection={stubConnection(0, patch)}
-        segment={WORKSPACE}
         presence={NOBODY}
       />,
     ),
@@ -159,36 +157,78 @@ describe("an app served without a token", () => {
   });
 });
 
-/** Whether the line claims a local cache, for a room in the given state. */
-function claimsCache(patch: Partial<RoomStatus>): boolean {
+/**
+ * What the settled line says about a local copy, or null when it says nothing.
+ *
+ * Settled on purpose: every mount starts at "offline" and debounces towards the
+ * truth, so a line read before the window is up would answer for a state the
+ * reader never sees — which is exactly how "nothing while synced" would pass
+ * against a line that says it all the time.
+ */
+function localCopyNote(patch: Partial<RoomStatus>): string | null {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
+  vi.useFakeTimers();
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
   act(() =>
     root.render(
-      <StatusLine
-        connection={stubConnection(0, patch)}
-        segment={WORKSPACE}
-        presence={NOBODY}
-      />,
+      <StatusLine connection={stubConnection(0, patch)} presence={NOBODY} />,
     ),
   );
-  const claimed = host.querySelector(".ub-status .ub-muted")?.textContent === "local cache";
+  act(() => void vi.advanceTimersByTime(5_000));
+  const note = host.querySelector(".ub-status .ub-local-copy")?.textContent ?? null;
   act(() => root.unmount());
   host.remove();
-  return claimed;
+  return note;
 }
 
-describe("the line promises a local cache only where one exists", () => {
-  it("does not read the promise off the end of the local read", () => {
+describe("the line says whether a durable local copy is here", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("says nothing about it while the reading is synced", () => {
+    // A promise nobody is waiting on. It stood permanently beside a healthy
+    // "synced" and is now one click away in the sync panel instead (#535).
+    expect(
+      localCopyNote({
+        connected: true,
+        synced: true,
+        localReplicaLoaded: true,
+        hasLocalCache: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("claims nothing either way before the local read settles", () => {
+    // `hasLocalCache` is false while the IndexedDB read is still running as
+    // well as where there is nothing to find, and those are different claims.
+    expect(localCopyNote({ hasLocalCache: false })).toBeNull();
+  });
+
+  it("states availability once it is known, refusal included", () => {
+    expect(localCopyNote({ localReplicaLoaded: true, hasLocalCache: true })).toBe(
+      "local copy",
+    );
     // `localReplicaLoaded` means the read is *over*, and it is over instantly
     // where there is no IndexedDB to read or it refused to open — environments
     // with no cache at all. Telling a reader their document survives a reload
     // there would be a promise the browser cannot keep.
-    expect(claimsCache({ localReplicaLoaded: true, hasLocalCache: false })).toBe(false);
-    expect(claimsCache({ localReplicaLoaded: true, hasLocalCache: true })).toBe(true);
+    expect(localCopyNote({ localReplicaLoaded: true, hasLocalCache: false })).toBe(
+      "no local copy",
+    );
+    // And under a refusal, which is the state it matters most in: nothing will
+    // sync again until somebody acts, so whether the work is durably here is
+    // the one thing on this line that is still worth reading.
+    expect(
+      localCopyNote({
+        protocolMismatch: { hub: 2, client: 1 },
+        localReplicaLoaded: true,
+        hasLocalCache: true,
+      }),
+    ).toBe("local copy");
   });
 });
 
@@ -224,7 +264,6 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
       root.render(
         <StatusLine
           connection={stubConnection(4, status)}
-          segment={WORKSPACE}
           presence={NOBODY}
         />,
       ),
@@ -260,7 +299,6 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
       root.render(
         <StatusLine
           connection={stubConnection(0, { connected: true, synced: true })}
-          segment={WORKSPACE}
           presence={NOBODY}
         />,
       ),

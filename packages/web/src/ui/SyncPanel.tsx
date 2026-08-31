@@ -18,7 +18,12 @@ import type { ReactElement } from "react";
 import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
-import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
+import {
+  backlogLabel,
+  localCopyState,
+  rawSyncState,
+  useCalmSyncState,
+} from "./calm.js";
 import { statusReading } from "./status-reading.js";
 import type { RemotePresence } from "./doc-chrome.js";
 import { useRoomStatus } from "./hooks.js";
@@ -75,6 +80,7 @@ export function SyncPanel({
   // cadence, never a quieter version of the truth (see calm.ts) — and two
   // different words in one corner of the screen would be worse than either.
   const reading = statusReading(status, state);
+  const localCopy = localCopyState(status);
 
   /**
    * Escape closes the panel, and the panel alone.
@@ -139,6 +145,17 @@ export function SyncPanel({
             what the backlog is, and a row that vanished at zero would leave
             them unable to tell "nothing waiting" from "not reported". */}
         <Fact label="Backlog" value={backlogLabel(status.unsyncedChanges)} />
+        {/* Same rule, and the reason the status line above no longer says this
+            while everything is healthy (#535): the promise that this browser
+            holds a durable copy belongs where somebody went looking for it.
+            Drawn in every state, `—` until the local read settles — before then
+            "unavailable" would be this panel guessing at a read still running. */}
+        <Fact
+          label="Local copy"
+          value={
+            localCopy === null ? UNKNOWN : localCopy ? "available" : "unavailable"
+          }
+        />
       </dl>
       <h2 className="ub-rail-head">Present now</h2>
       {presence.length === 0 ? (

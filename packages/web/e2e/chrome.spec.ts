@@ -356,3 +356,47 @@ for (const scheme of ["light", "dark"] as const) {
     expect(drawer).toBe(toggle);
   });
 }
+
+/**
+ * The copy-link control's touch target (#535).
+ *
+ * A browser, because both halves of the claim are layout: the identity row is a
+ * single fixed line of 0.75rem text, and the control in it has to be big enough
+ * for a thumb on an iPad without making that row 44px tall and pushing the
+ * title down. The target is therefore a pseudo-element over the button, which
+ * is exactly the kind of thing jsdom reports nothing about — it has no layout
+ * and no `::after` box to measure, and a click 8px above an element there means
+ * nothing.
+ */
+test("the copy-link control is a 44px target in a row that stays its own height", async ({
+  browser,
+}) => {
+  const page = await openApp(browser, "light");
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+
+  const target = await page.evaluate(() => {
+    const button = document.querySelector(".ub-copy-link");
+    if (button === null) throw new Error("e2e: no copy-link control on the page");
+    const painted = getComputedStyle(button, "::after");
+    return {
+      width: Number.parseFloat(painted.width),
+      height: Number.parseFloat(painted.height),
+    };
+  });
+  expect(target.width).toBeGreaterThanOrEqual(44);
+  expect(target.height).toBeGreaterThanOrEqual(44);
+
+  const row = await page.locator(".ub-doc-meta").boundingBox();
+  const button = await page.locator(".ub-copy-link").boundingBox();
+  if (row === null || button === null) throw new Error("e2e: the row has no box");
+  // The row is still the single short line it was: the target overhangs it
+  // rather than setting its height.
+  expect(row.height).toBeLessThan(44);
+
+  // And the overhang is live, not merely painted: a tap above the button's own
+  // box still reaches it. Either word in the confirmation proves the click
+  // landed — which of the two clipboard paths ran is not what this is about.
+  await page.mouse.click(button.x + button.width / 2, button.y - 8);
+  await expect(page.locator(".ub-copied")).not.toBeEmpty();
+});

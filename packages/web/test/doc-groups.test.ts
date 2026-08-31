@@ -22,6 +22,8 @@ describe("a document's group derives from its tags", () => {
   it("drops an untagged or unknown-tagged doc into the trailing group", () => {
     expect(groupKeyForTags([])).toBe("other");
     expect(groupKeyForTags(["misc", "wip"])).toBe("other");
-    expect(groupLabel(groupKeyForTags([]))).toBe("Other");
+    // And that group has no name to show (#535): the fallback says nothing
+    // about a document, so the surfaces that render a group render nothing.
+    expect(groupLabel(groupKeyForTags([]))).toBeNull();
   });
 });

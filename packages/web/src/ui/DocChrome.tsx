@@ -14,11 +14,12 @@
  * words in place rather than moving the header around them.
  */
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type * as Y from "yjs";
-import { getMeta, setTags } from "@uberblick/schema";
+import { getMeta, parseRoom, setTags } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
+import { writeToClipboard } from "../editor/source-chrome.js";
 import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
@@ -28,6 +29,7 @@ import { GROUP_TAGS, groupKeyForTags, groupLabel } from "./groups.js";
 import { activeSession } from "./doc-chrome.js";
 import type { RemotePresence } from "./doc-chrome.js";
 import { useDocRev, useRoomStatus } from "./hooks.js";
+import { shareUrl } from "./route.js";
 import { distinctTags, withTag, withoutTag } from "./tags.js";
 import type { ThreadView } from "./threads.js";
 
@@ -38,25 +40,34 @@ function titleOf(meta: DocMeta): string {
   return meta.title === "" ? UNTITLED : meta.title;
 }
 
-/** The document's group: the first canonical tag it carries (#39's rule). */
-function groupOf(meta: DocMeta): string {
+/**
+ * The document's group: the first canonical tag it carries (#39's rule), or
+ * null when it carries none of them.
+ */
+function groupOf(meta: DocMeta): string | null {
   return groupLabel(groupKeyForTags(meta.tags));
 }
 
 /**
- * `<group> / <title>` for the open document.
+ * `<group> / <title>` for the open document — and just the title for a document
+ * that is in no group.
  *
  * The group comes from the document's own `meta.tags`, which is what makes a
  * retag land here immediately — and it is the same derivation the sidebar
  * groups by, so the breadcrumb and the list agree on where a document lives.
  */
 function Breadcrumb({ meta }: { meta: DocMeta }): ReactElement {
+  const group = groupOf(meta);
   return (
     <nav className="ub-crumb" aria-label="Breadcrumb">
-      <span className="ub-crumb-group">{groupOf(meta)}</span>
-      <span className="ub-crumb-sep" aria-hidden="true">
-        /
-      </span>
+      {group !== null && (
+        <>
+          <span className="ub-crumb-group">{group}</span>
+          <span className="ub-crumb-sep" aria-hidden="true">
+            /
+          </span>
+        </>
+      )}
       <span className="ub-crumb-title">{titleOf(meta)}</span>
     </nav>
   );
@@ -393,9 +404,81 @@ function TagStrip({
   );
 }
 
+/** How long the copy confirmation stays up, in milliseconds. */
+const COPIED_MS = 1_500;
+
+type CopyResult = "idle" | "copied" | "failed";
+
+/**
+ * Copy this document's shareable link (#68), at the end of the identity line.
+ *
+ * It used to be the room key under the title, which was both the label and the
+ * affordance. The key itself is gone from the header (#535) — the sync panel is
+ * where a `<workspaceId>/<docUuid>` belongs — so what is left is a control that
+ * says what it does, beside the identity it is about.
+ *
+ * The link is built from `segment` — the workspace as the *address* spells it —
+ * rather than from the room key, which carries the bare uuid. The two are the
+ * same string for an undecorated workspace and differ for `<slug>-<uuid>`, and
+ * a copy that quietly handed back the undecorated form would rewrite somebody's
+ * link on its way out of their own address bar. What is copied is the address
+ * this document is open at, and the accessible name names it.
+ *
+ * The copy goes through `writeToClipboard`, not `navigator.clipboard`: that API
+ * exists only in a secure context, and serving this client over plain http on a
+ * tailnet host is a supported deployment (REMOTE.md). The shared helper falls
+ * back to `execCommand`, and reports whether either worked — so a failure is
+ * said out loud rather than swallowed into a button that quietly does nothing.
+ *
+ * The confirmation is positioned out of flow for the reason the rest of this
+ * row is built the way it is (#76): nothing here may move sideways, and a word
+ * appearing in the row would move everything after it.
+ */
+function CopyLink({ room, segment }: { room: string; segment: string }): ReactElement {
+  const [result, setResult] = useState<CopyResult>("idle");
+
+  useEffect(() => {
+    if (result === "idle") return;
+    const timer = setTimeout(() => setResult("idle"), COPIED_MS);
+    return () => clearTimeout(timer);
+  }, [result]);
+
+  // The one address this button is about: what it copies, and what it says it
+  // copies. Two derivations of that would be two chances for them to disagree.
+  const address = `${segment}/${parseRoom(room).uuid}`;
+
+  const copy = async (): Promise<void> => {
+    const ok = await writeToClipboard(shareUrl(address, window.location.origin));
+    setResult(ok ? "copied" : "failed");
+  };
+
+  return (
+    <span className="ub-copy-wrap">
+      <button
+        type="button"
+        className="ub-copy-link"
+        // The visible words name the action; `title` is not reliably announced,
+        // so the accessible name carries them *and* the address that lands on
+        // the clipboard — which is the part a reader cannot see.
+        aria-label={`Copy link to ${address}`}
+        title={`Copy link to ${address}`}
+        onClick={() => void copy()}
+      >
+        Copy link
+      </button>
+      {/* Rendered always, empty when idle: `role="status"` only announces
+          changes to a region the reader was already in. */}
+      <span className="ub-copied" role="status">
+        {result !== "idle" && (result === "copied" ? "link copied" : "copy failed")}
+      </span>
+    </span>
+  );
+}
+
 /**
  * The document's identity, above its prose: what kind of document this is, its
- * tags, and the two machine facts that identify the thing on screen.
+ * tags, the two machine facts that identify the thing on screen, and the link
+ * to it.
  *
  * **Above the prose and above the title** (owner, design surface 1a): the
  * eyebrow line sits over the H1, and the tags sit in it. Putting them there
@@ -414,19 +497,24 @@ function TagStrip({
  * arrive into a space that was already reserved for them.
  *
  * The uuid is shortened because identity is the uuid but *recognition* is its
- * first few characters — the full one is a click away on the room key below the
- * title. The rev is the whole document's, folded from its block revs
+ * first few characters. The full one is not in the header at all any more
+ * (#535): the room key that carried it under the title said the same thing a
+ * third time, and the sync panel is where a reader who wants it goes. The rev
+ * is the whole document's, folded from its block revs
  * (`docRev`), so it moves on every edit; it sits in a fixed-width monospace slot
  * for that reason, since a rev that changed the width of this line would drag
  * the line around while somebody types.
  */
 export function DocMetaLine({
   connection,
+  segment,
   meta,
   knownTags,
   archived,
 }: {
   connection: RoomConnection;
+  /** The workspace as the address spells it — what a copied link carries. */
+  segment: string;
   meta: DocMeta | null;
   /** Every tag the workspace uses — the add field's suggestions. */
   knownTags: readonly string[];
@@ -434,13 +522,17 @@ export function DocMetaLine({
   archived: boolean;
 }): ReactElement {
   const rev = useDocRev(connection);
+  const group = meta === null ? null : groupOf(meta);
   return (
     <p className="ub-doc-meta">
       {/* Nothing to say about a room that has not answered yet, and nothing to
           tag in it either — but the row itself stands, holding the space. */}
       {meta !== null && meta.uuid !== "" && (
         <>
-          <span className="ub-badge">{groupOf(meta)}</span>
+          {/* Only where the document is in a named group: a badge for the
+              fallback would label every untagged document with a word that
+              names no group (#535). */}
+          {group !== null && <span className="ub-badge">{group}</span>}
           <TagStrip
             ydoc={connection.ydoc}
             tags={meta.tags}
@@ -450,6 +542,9 @@ export function DocMetaLine({
           <span className="ub-doc-ids">
             uuid {meta.uuid.slice(0, 8)} · rev {rev ?? "········"}
           </span>
+          {/* Archived or not: a tombstoned document still has an address, and
+              handing somebody the link to it is not a write. */}
+          <CopyLink room={connection.room} segment={segment} />
         </>
       )}
     </p>

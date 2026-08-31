@@ -71,6 +71,23 @@ export function backlogLabel(count: number): string {
 }
 
 /**
+ * Whether a durable copy of this room is on this machine — `null` until the
+ * local read has settled.
+ *
+ * The three-valued answer is the whole point, and it is why this exists rather
+ * than each surface reading `hasLocalCache` for itself. That flag is false
+ * *before* the IndexedDB read finishes as well as where there is nothing to
+ * find, and the two are different claims: one is "not known yet", the other is
+ * "this browser is keeping nothing". `localReplicaLoaded` is what tells them
+ * apart, so both surfaces that say it out loud — the status line under the
+ * title and the sync panel's fact — read the pair through here and cannot end
+ * up promising different things about one document.
+ */
+export function localCopyState(status: RoomStatus): boolean | null {
+  return status.localReplicaLoaded ? status.hasLocalCache : null;
+}
+
+/**
  * The state the indicator should draw: `raw`, once it has survived its settle
  * window.
  *

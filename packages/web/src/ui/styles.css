@@ -1575,45 +1575,66 @@ body {
   background: var(--destructive);
 }
 
-/* ---- the room key as a shareable link (#68) ---- */
+/* ---- copying the document's link (#68), in the identity line (#535) ---- */
 
-/* The room key is the document's address, so it is the copy affordance. It has
-   to keep looking like the muted text it replaced: no border, no padding, no
-   change of width. The whole point of this line is that nothing on it moves. */
-.ub-room-wrap {
+/* Compact by construction: the row it sits at the end of is a single fixed
+   height, and a control that changed that would push the title down. */
+.ub-copy-wrap {
   position: relative;
   display: inline-flex;
+  flex: none;
 }
 
-.ub-room {
+.ub-copy-link {
+  /* The containing block for the target below, so it is measured against the
+     button rather than against whatever happens to be positioned above it. */
+  position: relative;
   font: inherit;
   color: var(--muted-foreground);
   background: none;
   border: none;
-  padding: 0;
+  padding: 0 0.15rem;
   height: auto;
   cursor: pointer;
 }
 
-.ub-room:hover {
+.ub-copy-link:hover {
   color: var(--foreground);
   text-decoration: underline;
 }
 
-.ub-room:focus-visible {
+.ub-copy-link:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
 
+/* The 44x44 target a thumb needs, without giving the identity row 44px of
+   height. The tap area is this pseudo-element rather than the button's own box,
+   so the words stay the size of the line they sit in and the row keeps its
+   height; centred on the button, the extra height falls into the pane's own
+   padding above and into the two pixels of gap plus the very top of the title
+   below — at the row's right end, where nothing else is asking for a click.
+   `max()` is what keeps a wider label from *shrinking* the target. */
+.ub-copy-link::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 44px);
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
 /* Out of flow, and only there while it has something to say: a confirmation
    that took part in the layout would push everything after it sideways for a
-   second and a half. */
+   second and a half. Above the row rather than below it, because below it is
+   the document's title. */
 .ub-copied {
   position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 0.2rem;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 0.2rem;
   padding: 0 0.3rem;
   border-radius: var(--radius-sm);
   background: var(--secondary);
@@ -2363,8 +2384,8 @@ h3.ub-heading {
 /* ---- sync indicator (#76) ---- */
 
 /* Two fixed-width slots. Whatever the state, the mark is one square and the
-   word is one fixed column — sized on `.ub-status-word` below — so "local
-   cache" and the room key after them never move. */
+   word is one fixed column — sized on `.ub-status-word` below — so whatever
+   follows them never moves. */
 .ub-status-mark {
   display: inline-flex;
   align-items: center;
