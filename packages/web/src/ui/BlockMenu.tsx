@@ -23,7 +23,8 @@
  *   an Enter that meant "insert this one". Everything else falls through and
  *   filters the list by editing the document, which is what keeps the typed
  *   `/query` visible in the prose and undoable as text. A composing keystroke is
- *   never the menu's, whatever it says — see {@link composing}.
+ *   never the menu's, whatever it says — `useCompositionGuard` in
+ *   `ui/caret-menu.ts` owns that, shared with the `@` picker.
  *
  * - **The gutter is reserved, never inserted.** `.ub-column` carries a permanent
  *   left padding and the button is absolutely positioned inside it, so
@@ -51,12 +52,8 @@ import {
   triggerHint,
 } from "../editor/block-menu.js";
 import type { BlockMenuEntry, SlashTrigger } from "../editor/block-menu.js";
-
-/** A position in the frame's own coordinates, in pixels. */
-interface Point {
-  top: number;
-  left: number;
-}
+import { CARET_MENU_OFFSET, pointAtCaret, useCompositionGuard } from "./caret-menu.js";
+import type { KeySource, Point } from "./caret-menu.js";
 
 interface SlashSession {
   trigger: SlashTrigger;
@@ -73,112 +70,8 @@ interface Hover {
   top: number;
 }
 
-/** The gap between the caret and the menu, in pixels. */
-const OFFSET = 6;
-
 /** The gutter button's height, in pixels — kept in step with `.ub-gutter-add`. */
 const BUTTON_SIZE = 22;
-
-/**
- * Whether this keystroke belongs to an input method editor rather than to the
- * menu.
- *
- * Typing Japanese, Chinese or Korean runs Enter and the arrow keys through a
- * composition first — Enter commits the candidate, the arrows walk the candidate
- * list — and the browser reports that with `isComposing` (a `keyCode` of 229 on
- * the browsers that predate it). Taking those keys for the menu would make the
- * IME unusable inside a slash session. ProseMirror's own `composing` flag is
- * checked too: it stays true for a moment after `compositionend`, which is one
- * of the windows in which a stray Enter arrives.
- *
- * The other window is Safari's, and no flag on the event describes it — see
- * {@link COMPOSITION_TAIL_MS}.
- */
-function composingKey(event: KeyboardEvent, editor: Editor): boolean {
-  return event.isComposing || event.keyCode === 229 || editor.view.composing;
-}
-
-/**
- * How long after a `compositionend` its confirming keystroke may still arrive.
- *
- * Safari fires `compositionend` *before* the Enter keydown that committed the
- * candidate, and that keydown carries `isComposing: false` with ProseMirror's
- * own flag already cleared — so nothing on the event says "this Enter was the
- * IME's". Missing it means the menu converts a block while the reader was only
- * accepting a candidate: their text is gone and a heading is there instead.
- *
- * So the composition's tail is remembered rather than read: the first keydown
- * after a `compositionend` is left to the editor, and the memory is one-shot
- * (consumed by that keydown) and time-boxed (an Enter pressed deliberately a
- * moment later is the menu's again). Both bounds matter — one-shot alone would
- * swallow a deliberate Enter that came minutes later, and the window alone
- * would swallow every key in a fast composition-then-command sequence.
- *
- * Time-boxed is not narrow enough on its own, though: see {@link armsTail}.
- */
-const COMPOSITION_TAIL_MS = 100;
-
-/** Which of the menu's two typing surfaces a key or a composition came from. */
-type KeySource = "editor" | "search";
-
-/**
- * Safari, by the test ProseMirror itself uses (`browser.safari` is
- * `/Apple Computer/.test(navigator.vendor)`).
- *
- * A browser check rather than pure behaviour-sniffing, and deliberately so:
- * ProseMirror gates its own composition workarounds on exactly this, and the
- * ordering being worked around is one browser's. Read at call time so nothing
- * is baked in at module load.
- */
-function isSafariLike(): boolean {
-  return (
-    typeof navigator !== "undefined" && /Apple Computer/.test(navigator.vendor ?? "")
-  );
-}
-
-/**
- * Whether a `compositionend` should arm the tail at all.
- *
- * The tail exists for one ordering and must not fire outside it. Chrome and
- * Firefox deliver the committing Enter *before* `compositionend` — the guard
- * already declined it as composing, so nothing is owed, and arming there would
- * hand the reader's next deliberate Enter to ProseMirror and split the very
- * paragraph they were converting. Three conditions, all necessary:
- *
- * - `confirmed`: the keydown immediately before this event was a composing
- *   Enter, i.e. the commit already came through. That is the Chrome/Firefox
- *   ordering, and it must NOT arm. (Arrows walking a candidate list are not a
- *   commit and do not count, which keeps Safari's ordering armed when the
- *   reader navigated candidates before committing.)
- * - Safari: the ordering being compensated for is Safari's.
- * - `source`: the composition ended in the control this menu is listening to.
- *   A composition finished in some other field inside the frame owes the menu
- *   nothing.
- */
-function armsTail(confirmed: boolean, source: KeySource | null): boolean {
-  return !confirmed && source !== null && isSafariLike();
-}
-
-/**
- * Where the menu goes for a slash session: just below the caret.
- *
- * ProseMirror measures through the live layout, which a headless DOM does not
- * have; every fallback here is that case, and the origin is fine there because
- * nothing is looking at it.
- */
-function pointAtCaret(editor: Editor, frame: HTMLElement | null): Point {
-  if (frame === null) return { top: 0, left: 0 };
-  try {
-    const coords = editor.view.coordsAtPos(editor.state.selection.from);
-    const rect = frame.getBoundingClientRect();
-    const top = coords.bottom - rect.top + OFFSET;
-    const left = coords.left - rect.left;
-    if (!Number.isFinite(top) || !Number.isFinite(left)) return { top: 0, left: 0 };
-    return { top, left: Math.max(0, left) };
-  } catch {
-    return { top: 0, left: 0 };
-  }
-}
 
 /**
  * The top-level block a DOM node inside the editor belongs to — its id and its
@@ -267,14 +160,12 @@ export function BlockMenu({
   const card = useRef<HTMLDivElement | null>(null);
   /** The gutter menu's search field, when one is open — a composition surface. */
   const search = useRef<HTMLInputElement | null>(null);
-  /** When the last composition ended — see {@link COMPOSITION_TAIL_MS}. */
-  const composedAt = useRef(0);
-  /** And where, so the tail only ever covers the surface it ended in. */
-  const composedIn = useRef<KeySource | null>(null);
-  /** Whether the keydown just before was a composing Enter — see {@link armsTail}. */
-  const confirmed = useRef(false);
 
-  /** Which of the menu's typing surfaces holds `target`, if either does. */
+  /**
+   * Which of the menu's two typing surfaces holds `target`, if either does. The
+   * prose and the gutter's search field are both inside the frame, and both are
+   * typed into with an input method.
+   */
   const sourceOf = useCallback(
     (target: EventTarget | null): KeySource | null => {
       if (!(target instanceof Node)) return null;
@@ -288,53 +179,8 @@ export function BlockMenu({
     [editor],
   );
 
-  // One listener for both key paths: the prose and the gutter's search field
-  // are both inside the frame, and both are typed into with an IME.
-  useEffect(() => {
-    const frame = host.current;
-    if (frame === null) return;
-    const ended = (event: Event): void => {
-      const afterConfirm = confirmed.current;
-      confirmed.current = false;
-      const source = sourceOf(event.target);
-      if (!armsTail(afterConfirm, source)) return;
-      composedAt.current = Date.now();
-      composedIn.current = source;
-    };
-    frame.addEventListener("compositionend", ended, true);
-    return () => {
-      frame.removeEventListener("compositionend", ended, true);
-    };
-  }, [host, sourceOf]);
-
-  /**
-   * Whether the menu may act on this keystroke.
-   *
-   * Always consumes the composition-tail memory, so the tail covers exactly the
-   * one keydown that followed its `compositionend` — and only when that keydown
-   * came from the surface the composition ended in.
-   */
-  const menuOwnsKey = useCallback(
-    (event: KeyboardEvent, source: KeySource): boolean => {
-      const composing = composingKey(event, editor);
-      // A composing Enter is the commit key arriving *before* `compositionend`,
-      // which is how Chrome's and Firefox's ordering is told from Safari's.
-      confirmed.current = composing && event.key === "Enter";
-
-      const tail = composedAt.current;
-      const endedIn = composedIn.current;
-      composedAt.current = 0;
-      composedIn.current = null;
-
-      if (composing) return false;
-      return !(
-        tail !== 0 &&
-        endedIn === source &&
-        Date.now() - tail <= COMPOSITION_TAIL_MS
-      );
-    },
-    [editor],
-  );
+  /** Whether the menu may act on this keystroke — see `ui/caret-menu.ts`. */
+  const menuOwnsKey = useCompositionGuard(editor, host, sourceOf);
 
   // Two questions with two different answers.
   //
@@ -565,7 +411,7 @@ export function BlockMenu({
   const visible = anchor !== null;
   const point: Point =
     gutter !== null
-      ? { top: gutter.top + BUTTON_SIZE + OFFSET, left: 0 }
+      ? { top: gutter.top + BUTTON_SIZE + CARET_MENU_OFFSET, left: 0 }
       : (slash?.point ?? { top: 0, left: 0 });
 
   return (

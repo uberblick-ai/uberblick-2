@@ -1,19 +1,24 @@
 /**
- * Inline document references, in a real browser (#444).
+ * Inline document references, in a real browser (#444, #532).
  *
- * One spec, because exactly one claim is out of jsdom's reach and it is the
- * whole feature end to end: a person types a reference into a document, clicks
- * it, and the app is on the other document — with Back returning them. That
- * chain runs through real key events reaching an input rule, a real anchor
- * inside a `contenteditable` (where a browser's own click handling is what
- * makes the interception necessary), and real session history.
+ * Two cases, because exactly two claims are out of jsdom's reach and each is a
+ * whole door end to end.
  *
- * Everything else is pinned without a browser in `test/doc-links.test.tsx`: what
- * the doors accept and refuse, the shorthand's label, the unresolved/archived
- * states, and that a reference inside a comment highlight is one action rather
- * than two. What is asserted here beyond the click is only what the browser
- * adds: that the reference resolved against a directory that really synced over
- * a real hub, from a document created in this session.
+ * 1. **Typed.** A person types a reference into a document, clicks it, and the
+ *    app is on the other document — with Back returning them. That chain runs
+ *    through real key events reaching an input rule, a real anchor inside a
+ *    `contenteditable` (where a browser's own click handling is what makes the
+ *    interception necessary), and real session history.
+ * 2. **Picked.** A person types `@`, and a card appears *at the caret* over a
+ *    directory that really synced; arrowing and Enter reach it through a real
+ *    contenteditable, where an Enter the picker failed to claim would split the
+ *    paragraph instead of writing a reference.
+ *
+ * Everything else is pinned without a browser in `test/doc-links.test.tsx` and
+ * `test/mention-menu.test.tsx`: what the doors accept and refuse, the
+ * shorthand's label, the unresolved/archived states, the trigger's exact shape,
+ * and that a reference inside a comment highlight is one action rather than two.
+ * What is asserted here beyond that is only what the browser adds.
  */
 
 import { expect, test } from "@playwright/test";
@@ -123,4 +128,57 @@ test("a typed reference is a link to the document it names, and Back comes home"
   await expect(page).toHaveURL(new RegExp(`/${ws()}/${source}$`));
   await expect(page.locator(".ub-title")).toHaveValue(sourceTitle);
   await expect(page.locator(".ub-editor a.ub-doclink")).toHaveText("the target");
+});
+
+test("the @ picker offers a synced document and writes the same reference", async ({
+  browser,
+}) => {
+  const page = await openApp(browser);
+  // Two candidates sharing a prefix, so one query leaves two rows and the arrow
+  // key has somewhere to go; the picker lists by title, so the second row is the
+  // lexicographically later of the two.
+  const first = docTitle("pick");
+  const second = docTitle("pick");
+  const made = new Map<string, string>();
+  made.set(first, await createDoc(page, first));
+  made.set(second, await createDoc(page, second));
+  const [, wanted] = [first, second].sort();
+  await createDoc(page, docTitle("writing"));
+
+  await editor(page).click();
+  await page.keyboard.type("see @pick");
+
+  const picker = page.locator(".ub-mentionmenu");
+  await expect(picker).toBeVisible();
+  const rows = picker.locator(".ub-blockmenu-entry");
+  await expect(rows).toHaveCount(2);
+  // The card is measured against a live layout, which jsdom does not have: it
+  // sits below the caret's line and to the right of the frame's edge, past the
+  // "see " already typed. The origin is what a failed measurement produces, so
+  // both bounds fail loudly rather than reading as a position.
+  const card = await picker.boundingBox();
+  const frame = await page.locator(".ub-editor-frame").boundingBox();
+  expect(card?.y ?? 0).toBeGreaterThan(frame?.y ?? 0);
+  expect(card?.x ?? 0).toBeGreaterThan(frame?.x ?? 0);
+
+  // The first row is highlighted; one arrow moves to the second, and Enter
+  // commits it rather than splitting the paragraph.
+  await expect(rows.first()).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowDown");
+  await expect(rows.nth(1)).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Enter");
+
+  await expect(picker).toHaveCount(0);
+  const link = page.locator(".ub-editor a.ub-doclink");
+  await expect(link).toHaveText(wanted ?? "");
+  await expect(link).toHaveAttribute("data-doc-link-state", "resolved");
+  await expect(link).toHaveAttribute("href", `/${ws()}/${made.get(wanted ?? "")}`);
+  // The typed `@query` is gone and the paragraph was never split.
+  await expect(editor(page)).toHaveText(`see ${wanted}`);
+  await expect(page.locator(".ub-editor .ProseMirror > *")).toHaveCount(1);
+
+  // And it is a real reference, not a look-alike: it navigates.
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`/${ws()}/${made.get(wanted ?? "")}$`));
+  await expect(page.locator(".ub-title")).toHaveValue(wanted ?? "");
 });

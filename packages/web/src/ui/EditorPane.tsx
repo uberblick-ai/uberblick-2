@@ -20,6 +20,7 @@ import type { RoomConnection } from "../collab/rooms.js";
 import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
 import { BlockMenu } from "./BlockMenu.js";
+import { MentionMenu } from "./MentionMenu.js";
 import {
   useDocMeta,
   useForeignBlocks,
@@ -558,6 +559,17 @@ function BoundEditor({
             offers neither: the insertion menu and the comment composer are
             gone, not merely inert. */}
         {editor !== null && !archived && <BlockMenu editor={editor} host={frame} />}
+        {editor !== null && !archived && (
+          <MentionMenu
+            editor={editor}
+            host={frame}
+            docLinks={docLinks}
+            // The document on screen, from the room it is open in — the one
+            // place its uuid is already known here, and the same parse a copied
+            // link goes through.
+            openDocId={parseRoom(connection.room).uuid}
+          />
+        )}
         {editor !== null && !archived && (
           <CommentComposer
             editor={editor}
