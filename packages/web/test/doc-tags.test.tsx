@@ -172,6 +172,11 @@ function crumb(host: HTMLElement): string {
   return host.querySelector(".ub-crumb-group")?.textContent ?? "";
 }
 
+/** The identity line's group badge — the same derivation, said again. */
+function badge(host: HTMLElement): string {
+  return host.querySelector(".ub-badge")?.textContent ?? "";
+}
+
 /** Type a word into the add field and commit it with Enter. */
 function addTag(host: HTMLElement, word: string): void {
   act(() => typeInto(field(host), word));
@@ -206,7 +211,11 @@ describe("tags are editable in the doc header", () => {
     // workspace used first.
     expect(suggestions(host)).toEqual(["reference", "verify"]);
     expect(chips(host)).toEqual([]);
-    expect(crumb(host)).toBe("Other");
+    // No canonical tag, so no group to name: the crumb is the title alone,
+    // rather than a document filed under a word that names no group (#535).
+    // Both surfaces, because both used to say "Other".
+    expect(crumb(host)).toBe("");
+    expect(badge(host)).toBe("");
 
     // ---- adding a tag is the write set_tags makes ----
     act(() => typeInto(field(host), "Feature"));
@@ -223,8 +232,9 @@ describe("tags are editable in the doc header", () => {
     // The stub is repaired from meta, so the second client sees it without
     // anyone telling it: this is what `list_docs` reads.
     expect(getDirectoryEntry(peer, UUID)?.tags).toEqual(["feature"]);
-    // And the document has moved groups, live, in the crumb.
+    // And the document has moved groups, live, in both.
     expect(crumb(host)).toBe("Features");
+    expect(badge(host)).toBe("Features");
     // A tag already on the document is not offered again.
     expect(suggestions(host)).toEqual(["reference", "verify"]);
 
@@ -251,7 +261,8 @@ describe("tags are editable in the doc header", () => {
     expect(chips(host)).toEqual([]);
     expect(getMeta(ydoc).tags).toEqual([]);
     expect(getDirectoryEntry(peer, UUID)?.tags).toEqual([]);
-    expect(crumb(host)).toBe("Other");
+    // Removing the last canonical tag takes the group label away with it.
+    expect(crumb(host)).toBe("");
   });
 
   /**

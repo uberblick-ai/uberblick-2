@@ -28,7 +28,7 @@ import { createDocLinkContext } from "../editor/doc-links.js";
 import type { DocLinkContext } from "../editor/doc-links.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import type { RemotePresence } from "./doc-chrome.js";
-import { DocChrome } from "./DocChrome.js";
+import { CopyLink, DocChrome } from "./DocChrome.js";
 import { Sidebar, togglePin } from "./Sidebar.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
@@ -185,12 +185,21 @@ export function RoutePane({
       return (
         <PaneNotice>
           {/* The live sync state, so a link that is waiting says what it is
-              waiting on rather than looking stuck. */}
-          <StatusLine
-            connection={connection}
-            segment={route.workspace.segment}
-            presence={presence}
-          />
+              waiting on rather than looking stuck — and the copy control, which
+              this screen carried before the identity line existed and still
+              needs: this is the address of a document that has not arrived, and
+              handing it to somebody who does have it is the way out (#535). */}
+          <div className="ub-waiting-meta">
+            <StatusLine
+              connection={connection}
+              presence={presence}
+              // This screen's whole subject: the document is not here. Saying
+              // "local copy" over that sentence was two claims about one
+              // document, one of them false (#601).
+              docPresent={false}
+            />
+            <CopyLink room={connection.room} segment={route.workspace.segment} />
+          </div>
           <p className="ub-notice">
             <strong>Waiting for sync.</strong> Document <code>{route.uuid}</code>{" "}
             has not reached this replica yet. It opens here as soon as it arrives.
@@ -693,6 +702,9 @@ export function App(): ReactElement {
             connection={chromeRoom}
             presence={presence}
             endpoint={endpoint}
+            // The panel is open over the waiting screen as readily as over a
+            // document, and there the local-copy fact is not known (#601).
+            docPresent={route.kind !== "doc" || docIsHydrated(route.uuid, meta)}
             onClose={closeSync}
           />
         )}

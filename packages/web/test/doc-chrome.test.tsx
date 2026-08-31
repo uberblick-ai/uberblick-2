@@ -149,6 +149,7 @@ function Chrome({
       />
       <DocMetaLine
         connection={fix.connection}
+        segment={WORKSPACE}
         meta={getMeta(fix.ydoc)}
         knownTags={["reference"]}
         archived={false}

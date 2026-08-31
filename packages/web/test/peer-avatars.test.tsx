@@ -102,7 +102,7 @@ function Shell({
     onFrame?.();
   });
   return doc === null ? null : (
-    <StatusLine connection={doc} segment={WORKSPACE} presence={presence} />
+    <StatusLine connection={doc} presence={presence} docPresent />
   );
 }
 

@@ -230,7 +230,9 @@ test("a reload with the hub stopped renders from the local cache, and the offlin
   await openDoc(b, title);
   await expect.poll(() => blockText(b)).toBe("before");
   await expect(a.locator(".ub-status")).toContainText("synced");
-  await expect(a.locator(".ub-status")).toContainText("local cache");
+  // Nothing about the local copy while the hub is acking: it is a promise
+  // nobody is waiting on, and it stood here permanently before #535.
+  await expect(a.locator(".ub-status .ub-local-copy")).toHaveCount(0);
 
   await harness().stopHub();
   await expect(a.locator(".ub-status")).toContainText("offline");
@@ -241,7 +243,9 @@ test("a reload with the hub stopped renders from the local cache, and the offlin
   await openDoc(a, title);
   await expect.poll(() => blockText(a)).toBe("before");
   await expect(a.locator(".ub-status")).toContainText("offline");
-  await expect(a.locator(".ub-status")).toContainText("local cache");
+  // Offline is where the fact earns its place — and this reload proves it is
+  // true, because the document on screen can only have come out of IndexedDB.
+  await expect(a.locator(".ub-status .ub-local-copy")).toHaveText("local copy");
 
   await caretTo(a, "end");
   await type(a, "-offline");
