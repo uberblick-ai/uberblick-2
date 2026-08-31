@@ -66,23 +66,34 @@ of a queue, and start the long pole first.
   is browser-observable, the acceptance-criteria read, the `Touches` scope check
   — with the `Agent` tool's `isolation: "worktree"`, so each works in a checkout
   of its own. Sharing one checkout is not an option: concurrent gates install,
-  build and check out in it at the same time. A fresh worktree then binds the
-  gate agent in ways that look like a red gate and are not branch results. It
-  inherits the launching checkout's `HEAD`, so launch only from a checkout at
-  freshly fetched `origin/main` with `mise.toml`, `Dockerfile.review` and
-  `.dockerignore` unmodified — necessary, not sufficient: `mise run review`
-  re-fetches `main` and re-compares at run time while a worktree's `HEAD` is
-  frozen at creation, so a gate agent it refuses moves its own worktree to
-  freshly fetched `origin/main` and re-runs instead of reporting a red gate.
-  `mise` also trusts config by path, and every worktree is a new path, so the
-  gate agent runs `mise trust` there before any task. A gate that runs repo code
-  rather than the container checks out the PR head first, then `mise trust`, then
-  `mise run install`: `mise run e2e` takes no SHA and runs whatever its checkout
-  holds, so an agent left on `origin/main` returns a green the branch never
-  earned — and it opens with a `pnpm --filter` exec that a fresh worktree's
-  empty `node_modules` cannot serve. `mise run review` is the asymmetry, not the
-  rule: it archives the SHA it is passed, which is exactly why its own checkout
-  stays on `main`.
+  build and check out in it at the same time. Every worktree inherits the
+  launching checkout's `HEAD`, so launch only from a checkout at freshly fetched
+  `origin/main` with `mise.toml`, `Dockerfile.review` and `.dockerignore`
+  unmodified: that is the state the container review must still be in when it
+  runs, and it is necessary rather than sufficient — see its gate below.
+- **Every gate agent grades the PR head, and its first commands say which tree
+  it reads.** A fresh worktree binds a gate agent in ways that look like a red
+  gate and are not branch results. `mise` trusts config by path and every
+  worktree is a new path, so `mise trust` precedes any task there. Then, by gate:
+  - **The acceptance-criteria read and the `Touches` scope check** — `git fetch
+    origin`, `git checkout --detach <headRefOid>`, `mise trust`. Left on the
+    launch checkout's `origin/main` they grade `main`: every criterion of the
+    form "X is unchanged" reads true there for free, and every "the file now
+    says Y" reads false and costs a fix-up wave the branch never earned.
+  - **The e2e proof** — the same three commands, then `mise run install`. `mise
+    run e2e` takes no SHA and runs whatever its checkout holds, and it opens
+    with a `pnpm --filter` exec that a fresh worktree's empty `node_modules`
+    cannot serve. A red run is classified *before* the agent returns: re-run the
+    same failing spec against the base and report both outcomes with both SHAs,
+    because the environmental-failure rule above requires that comparison and
+    this worktree is the only installed one — it is gone once the agent returns.
+  - **The immutable container review** — the exception, and the only gate whose
+    own checkout stays at freshly fetched `origin/main`: `main` supplies the
+    build recipe (README, "Review isolation"), and archiving the SHA it is
+    passed is what lets it grade the head from there. `mise run review`
+    re-fetches `main` and re-compares at run time while a worktree's `HEAD` is
+    frozen at creation, so a gate agent it refuses moves its own worktree to
+    freshly fetched `origin/main` and re-runs instead of reporting a red gate.
 - **Every gate agent reports; none writes.** Each returns its `gate`, `outcome`,
   a short `summary`, the `sha` it ran at, and its `start` and `end`, and performs
   no GitHub write at all — no claim, comment, label, review or merge. The
