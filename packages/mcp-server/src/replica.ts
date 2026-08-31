@@ -361,9 +361,10 @@ export class Replicas {
    * entry 30 seconds later, showing an agent as working in a document it has
    * left. Removing the keys is an ordinary update and lands at once; the caret
    * is safe either way, because the cursor's own timer fires no later than
-   * presence and that update is relayed too. Measured both ways against a real
-   * hub on #588 — the withdrawal decoded at 506 ms, the dropped state still
-   * standing at 33 s.
+   * presence and that update is relayed too. Only an *inbound* removal is
+   * swallowed: the hub broadcasts the one it generates itself when a connection
+   * closes (`Document.removeConnection`), which is what the web's
+   * departed-agent grace waits for.
    *
    * The price is that "not present" then has two shapes. A room this session has
    * touched keeps a non-null local state for the rest of its life in this
