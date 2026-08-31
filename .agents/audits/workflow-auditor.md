@@ -51,6 +51,10 @@ The sample is deterministic:
   those entries;
 - every implementer return or `needs-decision` transition in the window, even
   when no retrospective links it;
+- every PR active in the window, shallow-scanned for convergence from its diff
+  size and durable review/fix-up history whether or not a retrospective linked
+  it, with a full thread read when that scan indicates repeated correction,
+  diminishing finding value or review effort disproportionate to the change;
 - a shallow machine-state scan of every open issue and PR, followed by full
   thread reads only for detected lifecycle, claim, dependency, reservation, or
   handoff anomalies; and
@@ -85,7 +89,20 @@ choices and triggers. Duplicated or stale truth is itself a possible finding.
    as actionability, and inconsistent parent or child state.
 4. Look for repeated grounding, redundant adversaries or review rounds,
    repeated repairs, ceremony with no consumer, excessive issue bodies, and
-   missing context that causes downstream rediscovery.
+   missing context that causes downstream rediscovery. Use every active PR's
+   shallow convergence scan to identify cases worth a full thread read; do not
+   use a fixed line-count, wave-count or round-count threshold. For each such
+   case, count fix-up waves and external rounds, record the diff size and risk
+   surface, and classify the findings in each wave by severity, novelty and
+   defect class. Challenge whether later rounds still prevented a material
+   supported-usage failure, merely refined a prior correction, or repeated the
+   same class without convergence. Assess proportionality from the diff size,
+   semantic impact, finding severity and novelty together; no one input creates
+   an exception or decides the result. Many rounds on a small diff with no
+   later substantial findings are a strong churn signal, but the auditor must
+   establish the actual value and risk from durable evidence. Treat recurrence
+   inside the same unit as a possible representation or workflow defect rather
+   than automatically as evidence that one more round is valuable.
 5. Challenge every suspected finding. Record the exact rule, durable evidence,
    reachable consequence, and smallest correction. Put plausible but unproven
    risks under `Watch` and record important false alarms rejected.
@@ -127,6 +144,9 @@ Evidence sampled
 
 Not sampled
 - <explicit coverage limits>
+
+Review convergence
+- <PR, diff size/risk surface, fix-up waves, external rounds, later-round finding value, assessment> | None.
 
 Findings
 - <high|medium|low> — <finding, evidence, consequence, correction, owner>
