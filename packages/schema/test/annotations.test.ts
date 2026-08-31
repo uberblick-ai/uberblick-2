@@ -72,7 +72,7 @@ describe("annotations", () => {
   it("anchors the range as a comment mark on the block's text", () => {
     const { doc, blockId, threadId } = annotated();
 
-    // The thread JSON carries no positions at all — the range is in the text.
+    // The thread record carries no positions at all — the range is in the text.
     expect(getAnnotation(doc, threadId)).toEqual({
       id: threadId,
       blockId,
@@ -176,7 +176,7 @@ describe("annotations", () => {
     // A mark cannot mark nothing: deleting the whole span removes the anchor,
     // so the range is gone rather than collapsed (the round-1 relative-position
     // model collapsed to a point here). The conversation is never
-    // cascade-deleted with it — the thread JSON stays readable and listable.
+    // cascade-deleted with it — the thread record stays readable and listable.
     expect(resolveAnnotationRange(doc, threadId)).toBeNull();
     expect(annotatedText(doc, blockId, threadId)).toBeNull();
     expect(getAnnotation(doc, threadId)?.comments).toHaveLength(1);
@@ -356,8 +356,8 @@ describe("annotations", () => {
 
     // Documented outcome: the mark is one value per character, so exactly one
     // thread keeps the anchor (Yjs picks deterministically) and the other
-    // resolves to null — but both conversations survive as JSON, on both
-    // replicas, which is what stops a comment from being silently destroyed.
+    // resolves to null — but both conversations survive, on both replicas,
+    // which is what stops a comment from being silently destroyed.
     const winners = [fromA.id, fromB.id].filter(
       (id) => resolveAnnotationRange(a, id) !== null,
     );
@@ -375,9 +375,10 @@ describe("annotations", () => {
   it("keeps both replies when two replicas comment on one thread offline", () => {
     const { a, b, threadId } = threadedPair();
 
-    // Neither replica can see the other's reply. While the conversation was a
-    // field of one last-write-wins Y.Map value, these two converged to whichever
-    // write came last and the other reply vanished silently (#461).
+    // Neither replica can see the other's reply. While the conversation was one
+    // plain JSON value in the annotations Y.Map, the replicas
+    // converged to whichever write came last, and the other reply vanished
+    // silently (#461).
     addComment(a, threadId, "owner", "Yes, cut it.");
     addComment(b, threadId, "agent", "Shortened.");
     syncDocs(a, b);

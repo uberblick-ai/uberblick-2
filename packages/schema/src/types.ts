@@ -276,7 +276,11 @@ export interface AnnotationComment {
 }
 
 /**
- * An annotation thread, stored as plain JSON in the `annotations` Y.Map.
+ * One annotation thread as a reader sees it: the materialised view of the
+ * thread's own Y.Map in the `annotations` Y.Map, with the comments Yjs holds
+ * nested inside it flattened into a plain array. Reading this shape is not
+ * writing it — `annotations.ts` owns the stored layout and the rules that come
+ * with it.
  *
  * The thread carries no positions. Its range lives in the document text as a
  * `comment` formatting mark holding this thread's id, so the range survives
