@@ -354,23 +354,28 @@ export class Replicas {
    * Withdrawal removes the presence keys rather than the whole state: dropping
    * the state emits an awareness `removed`, which is what the web's departed-agent
    * grace waits for, and a presence timeout would then draw the caret for
-   * another 30 seconds. Locally that reads as avoidable — {@link publishCursor}
-   * arms the cursor's timer before re-arming presence, so the caret is already
-   * withdrawn by the time this one fires — but that ordering does not survive to
-   * the wire. The two withdrawals reach a peer as a *single coalesced* update,
-   * so the intermediate `{user, cursor: null}` is never observable remotely
-   * (measured against a real hub on #511). A peer would therefore go straight
-   * from `{user, cursor}` to `removed`, still holding a state that qualifies for
-   * the grace, and the caret would outlive the session after all.
-   * `setLocalState(null)` is not the simplification it looks like.
+   * another 30 seconds. Where a caret was drawn that reads as avoidable —
+   * {@link publishCursor} arms the cursor's timer before re-arming presence, so
+   * locally the caret goes first — but that ordering does not survive to the
+   * wire. Both timers carry the same TTL, so both callbacks run in one event
+   * loop turn, and the hub broadcasts a turn's awareness once per changed
+   * client, collapsed to that client's latest state (`@hocuspocus/server`'s
+   * default `flushDelay: 0`; the sending provider does *not* coalesce, so the
+   * hub is where to check this). The intermediate `{user, cursor: null}` is
+   * therefore never observable remotely: a peer would go straight from
+   * `{user, cursor}` to `removed`, still holding a state the grace accepts, and
+   * the caret would outlive the session after all. `setLocalState(null)` is not
+   * the simplification it looks like. Measured against a real hub on #511 and
+   * again on #519.
    *
    * The price is that "not present" then has two shapes. A room this session has
-   * touched keeps a non-null local state for good — heartbeated by y-protocols
-   * and re-sent on every reconnect — where a never-touched room publishes
-   * nothing at all. Every reader today tests for `user`, so none of them can see
-   * the difference; one that counted awareness *entries* instead would count
-   * this server as present in every document it has ever opened, which is the
-   * bug #493 exists to fix.
+   * touched keeps a non-null local state for the rest of its life in this
+   * process — heartbeated by y-protocols and re-sent on every reconnect — where
+   * a never-touched room publishes nothing at all. No reader can see the
+   * difference today, because every one that counts or renders presence needs a
+   * usable `user`; one that counted awareness *entries* instead would count this
+   * server as present in every document it has ever opened, which is the bug
+   * #493 exists to fix.
    *
    * The workspace-level rooms are exempt — the directory publishes from attach
    * because the "MCP connections" count reads it, and nobody renders the
