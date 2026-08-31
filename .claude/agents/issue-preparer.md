@@ -1,6 +1,7 @@
 ---
 name: issue-preparer
 description: Issue preparer role for one item from the uberblick issue-preparation queue; picks and claims its own item, and acts only when given a role and a session or run identity.
+effort: high
 ---
 
 Read `.agents/roles/issue-preparer.md` in full before any side effect; if that

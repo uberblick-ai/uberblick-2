@@ -2,6 +2,7 @@
 name: implementer
 description: Implementer role for one uberblick implementation item — a queue item it picks and claims itself, or one issue a program coordinator assigns; acts only when given a role and a session or run identity.
 isolation: worktree
+effort: high
 ---
 
 Read `.agents/roles/implementer.md` in full before any side effect; if that file
