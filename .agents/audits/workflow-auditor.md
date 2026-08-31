@@ -51,10 +51,14 @@ The sample is deterministic:
   those entries;
 - every implementer return or `needs-decision` transition in the window, even
   when no retrospective links it;
-- every PR active in the window, shallow-scanned for convergence from its diff
-  size and durable review/fix-up history whether or not a retrospective linked
-  it, with a full thread read when that scan indicates repeated correction,
-  diminishing finding value or review effort disproportionate to the change;
+- every PR active in the window, meaning its `createdAt`, `updatedAt`,
+  `mergedAt`, or `closedAt`, or a durable commit, review, or comment record,
+  falls after the window start and through the observed-through time. Whether
+  or not a retrospective linked it, shallow-scan its number and state, activity
+  timestamps, exact head, additions, deletions, changed-file and commit counts,
+  and durable review verdicts and fix-up or parked rulings. Fully read its
+  thread when that scan indicates repeated correction, diminishing finding
+  value, or review effort disproportionate to the change;
 - a shallow machine-state scan of every open issue and PR, followed by full
   thread reads only for detected lifecycle, claim, dependency, reservation, or
   handoff anomalies; and
@@ -117,7 +121,13 @@ Recommend a workflow change only when the same problem appears in at least two
 independent runs, or one proven occurrence could cause wrong product behavior,
 unauthorized work, data or secret loss, or permanently invisible work. Prefer a
 local correction over another role, label, required field, review round, or
-gate. Never convert retrospective completeness into a gate.
+gate. The independent runs may be lifecycle runs on different items or distinct
+role or review runs on one item, but not repeated comments from the same run;
+the evidence must identify the same underlying workflow mechanism. When that
+mechanism is repeated interpretation of procedural prose, prefer deleting or
+shrinking the prose, or moving the mechanical step into one executable local
+helper, over adding more prose or another review round. Never convert
+retrospective completeness into a gate.
 
 Classify workflow impact independently from code-review severity:
 
@@ -146,7 +156,12 @@ Not sampled
 - <explicit coverage limits>
 
 Review convergence
-- <PR, diff size/risk surface, fix-up waves, external rounds, later-round finding value, assessment> | None.
+- <PR and evidence links; observed diff/risk surface; fix-up waves and external
+  rounds; later-round finding value; proportionate|watch|corrective> | None.
+
+A `corrective` convergence assessment also appears under `Findings` with the
+smallest correction and owner, and under `Recommended actions`; this section is
+evidence, not a separate finding channel.
 
 Findings
 - <high|medium|low> — <finding, evidence, consequence, correction, owner>
