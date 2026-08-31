@@ -524,7 +524,7 @@ export class Replicas {
         this.sync.quarantine();
         return;
       }
-      this.afterChange(replica);
+      this.afterChange(replica, kind === "local");
     });
 
     this.replicas.set(room, replica);
@@ -574,7 +574,9 @@ export class Replicas {
       applied = true;
     }
     if (applied) {
-      this.afterChange(replica);
+      // A replay is this replica catching up on writes it did not make — its own
+      // from before a restart, or another instance's on the same database.
+      this.afterChange(replica, false);
     }
     return applied;
   }
@@ -587,6 +589,9 @@ export class Replicas {
 
   /**
    * Repair a changed document's directory stub, then reindex it.
+   *
+   * `authored` says whether this server made the change being reacted to; only
+   * the stub's `updatedAt` depends on it, and {@link repairStub} explains why.
    *
    * The stub write comes first because it is document state — the one thing here
    * that is not rebuildable — and this is the only place stubs are written:
@@ -601,7 +606,7 @@ export class Replicas {
    * own observer records that as a sticky persistence failure, which stops every
    * tool regardless of what this catch does.
    */
-  private afterChange(replica: Replica): void {
+  private afterChange(replica: Replica, authored: boolean): void {
     if (replica.isDirectory) {
       this.reconcileDirectory();
       return;
@@ -636,7 +641,7 @@ export class Replicas {
         this.store.unindexDoc(meta.uuid);
         return;
       }
-      this.repairStub(meta);
+      this.repairStub(meta, authored);
       this.indexRows(replica, meta);
     } catch (error) {
       log.warn("failed to mirror a document change", error);
@@ -813,7 +818,9 @@ export class Replicas {
     if (!this.hydrated(uuid)) {
       return false;
     }
-    this.repairStub(getMeta(this.replica(uuid).doc));
+    // A restore changes the directory, not the document, so it repairs the stub
+    // without claiming the document changed now.
+    this.repairStub(getMeta(this.replica(uuid).doc), false);
     return true;
   }
 
@@ -851,7 +858,8 @@ export class Replicas {
   }
 
   /**
-   * Bring the directory stub back in line with the document, and stamp it.
+   * Bring the directory stub back in line with the document, and stamp it where
+   * this server authored the change it is reacting to.
    *
    * `meta.title` and `meta.description` in the doc are authoritative; the stub
    * is a cache. A tombstone is left alone — `upsertDirectoryEntry` keeps it
@@ -869,17 +877,27 @@ export class Replicas {
    * - `createdAt` is set once. Passing it on every repair costs nothing (the
    *   schema keeps the existing one) and is what backfills a stub written
    *   before the field existed, on the first change anyone observes.
-   * - `updatedAt` is stamped when the metadata actually changed — that write is
-   *   happening anyway — and otherwise only once the stored stamp is older than
-   *   `updatedAtCoarsenessMs`. A burst of edits to one document therefore costs
-   *   one directory update per window, not one per keystroke.
+   * - `updatedAt` is stamped only for a change this server authored — `authored`
+   *   — because the field says when someone changed the document, not when a
+   *   replica noticed it. An update that merely arrived, a log replay, an index
+   *   rebuild and an archive restore all still repair a stub that disagrees, and
+   *   still backfill `createdAt`; they just never claim the document changed
+   *   now. Without that, hydrating a corpus stamped every document in it with
+   *   today's date and made "last changed" unreadable (#544).
+   * - An authored change stamps immediately when the metadata changed — that
+   *   write is happening anyway — and otherwise once the stored stamp is older
+   *   than `updatedAtCoarsenessMs`. A burst of edits to one document therefore
+   *   costs one directory update per window, not one per keystroke.
+   *
+   * This is the rule `packages/web/src/collab/directory-stub.ts` already
+   * follows, where `transaction.local` is what `authored` is here.
    *
    * The stamp read back is whatever the directory holds, so a second replica
    * that has already stamped this window suppresses this one's write too. Two
    * replicas that stamp concurrently converge last-write-wins on the entry,
    * which is the accepted outcome for a cache-quality field.
    */
-  private repairStub(meta: DocMeta): void {
+  private repairStub(meta: DocMeta, authored: boolean): void {
     const directory = this.directory();
     const stub = getDirectoryEntry(directory.doc, meta.uuid);
     if (stub?.deleted === true) {
@@ -894,7 +912,11 @@ export class Replicas {
     const staleStamp =
       stub?.updatedAt === undefined ||
       now - stub.updatedAt >= this.config.updatedAtCoarsenessMs;
-    if (!metaChanged && !staleStamp && stub.createdAt !== undefined) {
+    const stamp = authored && (metaChanged || staleStamp);
+    // Whether to write and whether to stamp are separate questions: a stub
+    // missing `createdAt` is written to backfill it even when nothing else
+    // changed and nothing is stamped.
+    if (!metaChanged && !stamp && stub.createdAt !== undefined) {
       return;
     }
     upsertDirectoryEntry(directory.doc, {
@@ -910,7 +932,7 @@ export class Replicas {
       // its next observed update. The cache heals; it is not arbitrated.
       description: meta.description ?? "",
       createdAt: now,
-      ...(metaChanged || staleStamp ? { updatedAt: now } : {}),
+      ...(stamp ? { updatedAt: now } : {}),
     });
   }
 
@@ -1164,7 +1186,8 @@ export class Replicas {
     this.store.clearDerived();
     this.adoptKnownDocs();
     for (const replica of this.replicas.values()) {
-      this.afterChange(replica);
+      // Rebuilding an index is not editing a document.
+      this.afterChange(replica, false);
     }
   }
 

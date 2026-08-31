@@ -8,6 +8,13 @@
  * "at most one bump per window, and immediately on a title or tag change,
  * which writes the stub anyway".
  *
+ * The other half of the bargain is authorship: `updatedAt` says when someone
+ * changed the document, not when a replica noticed it, so everything a server
+ * merely observes — a log replay, an index rebuild, an archive restore — repairs
+ * a stub that disagrees without ever restamping it (#544). The hub's own arm of
+ * that rule, a peer's edit arriving over the wire, is in `sync.test.ts`, where
+ * the hub and the second client already live.
+ *
  * The clock is faked (`toFake: ["Date"]`) and the timers are not: these rigs
  * run a real server over a real store, and a window is crossed by moving the
  * clock rather than by shrinking the window down to something untrue.
@@ -19,14 +26,16 @@ import type { DirectoryEntry } from "@uberblick/schema";
 import {
   removeTempDirs,
   startServer,
+  tempDatabasePath,
   testConfig,
 } from "./helpers.js";
+import type { McpConfig } from "../src/config.js";
 import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
 
-async function localRig(): Promise<Rig> {
-  const rig = await startServer(testConfig());
+async function localRig(config: McpConfig = testConfig()): Promise<Rig> {
+  const rig = await startServer(config);
   rigs.push(rig);
   return rig;
 }
@@ -160,5 +169,67 @@ describe("directory timestamps", () => {
       createdAt: T0 + 1_000,
       updatedAt: T0 + 1_000,
     });
+  });
+
+  it("does not stamp for a change it only replayed from the log", async () => {
+    // Two servers on one database, which is the ordinary case: the second one
+    // learns this document by replaying the log, long after it was written.
+    const databasePath = tempDatabasePath();
+    const author = await localRig(testConfig({ databasePath }));
+    const doc = await author.ok("create_doc", {
+      title: "Written elsewhere",
+      description: "A test document.",
+    });
+
+    vi.setSystemTime(T0 + 3 * WINDOW);
+    const observer = await localRig(testConfig({ databasePath }));
+    await observer.ok("list_docs");
+    expect(stub(observer, doc.uuid).updatedAt).toBe(T0);
+
+    // And back the other way: the first server reads whatever the second wrote
+    // on its next call, and stamps for none of it either.
+    await author.ok("list_docs");
+    expect(stub(author, doc.uuid).updatedAt).toBe(T0);
+  });
+
+  it("repairs a stub it disagrees with, and backfills createdAt, without stamping", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Right",
+      description: "A test document.",
+    });
+
+    // A stub as an older writer left it: a drifted title and no stamps at all.
+    // Written into the map directly, for the reason the backfill test above
+    // gives.
+    getDirectoryMap(rig.instance.replicas.directory().doc).set(doc.uuid, {
+      title: "Drifted",
+      tags: [],
+    });
+
+    // Rebuilding the derived index is not editing a document — but it does reach
+    // the stub, and the stub is the one thing here that is not rebuildable.
+    vi.setSystemTime(T0 + 3 * WINDOW);
+    rig.instance.replicas.rebuildIndex();
+
+    expect(stub(rig, doc.uuid)).toMatchObject({
+      title: "Right",
+      createdAt: T0 + 3 * WINDOW,
+    });
+    expect(stub(rig, doc.uuid).updatedAt).toBeUndefined();
+  });
+
+  it("does not stamp a restore: the directory changed, the document did not", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Archived",
+      description: "A test document.",
+    });
+    await rig.ok("archive_doc", { uuid: doc.uuid });
+
+    vi.setSystemTime(T0 + 3 * WINDOW);
+    await rig.ok("restore_doc", { uuid: doc.uuid });
+
+    expect(stub(rig, doc.uuid).updatedAt).toBe(T0);
   });
 });

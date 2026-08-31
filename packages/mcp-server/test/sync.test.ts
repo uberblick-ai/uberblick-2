@@ -321,6 +321,38 @@ describe("hub sync", () => {
     }
   });
 
+  it("does not stamp a document for an edit that merely arrived", async () => {
+    const running = await hub();
+    // Every stored stamp reads as stale on this server, so authorship is the
+    // only thing left that can decide whether it stamps. `updatedAt` says when
+    // someone changed the document, not when a replica watched it change: the
+    // human's own client stamps for the human's edit, and this one must not
+    // stamp for having received it (#544). The coarseness window itself is the
+    // timestamps suite's business, which is why it is out of the way here.
+    const rig = await serverOn(running.port, { updatedAtCoarsenessMs: 0 });
+    const created = await rig.ok("create_doc", {
+      title: "Shared",
+      description: "A test document.",
+      blocks: [{ type: "paragraph", text: "written by the agent" }],
+    });
+    const stamped = (await rig.ok("list_docs", {})).docs[0].updatedAt;
+    expect(stamped).toEqual(expect.any(Number));
+    await waitForQuiet(rig);
+
+    const other = await peer(running.port, `${WORKSPACE}/${created.uuid}`);
+    await other.synced;
+    await waitUntil("the second client to see the agent's block", () =>
+      getBlocks(other.doc).length === 1,
+    );
+    appendBlock(other.doc, { type: "paragraph", text: "written by a human" });
+    await waitUntil("the agent's replica to see the human's block", async () => {
+      const read = await rig.ok("get_doc", { uuid: created.uuid });
+      return read.blocks.length === 2;
+    });
+
+    expect((await rig.ok("list_docs", {})).docs[0].updatedAt).toBe(stamped);
+  });
+
   it("reports a protocol skew as update-required, and keeps serving", async () => {
     // A hub from another release. The version is compared for exact equality
     // and refused before the token, so this is not a credential problem and no
