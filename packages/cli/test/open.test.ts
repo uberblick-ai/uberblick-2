@@ -541,9 +541,20 @@ describe("ub open", () => {
     expect(await hubAnswers(box, hubUrl)).toBe(true);
     expect(app.stdout()).toContain("started here");
 
-    // The browser was handed the address that is actually being served.
-    await sleep(500);
-    expect(readFileSync(browser.opened, "utf8").trim()).toBe(app.url);
+    // The browser was handed the address that is actually being served. `ub
+    // open` spawns that command and carries on without awaiting it, so the
+    // recording lands whenever the machine gets to it: wait for the recording
+    // rather than for a duration, or load fails this case instead of delaying
+    // it (#531). The recorder appends, and `>>` creates the file before
+    // `printf` fills it — so a finished line, not an existing file, is the
+    // recording.
+    const recording = (): string =>
+      existsSync(browser.opened) ? readFileSync(browser.opened, "utf8") : "";
+    await waitUntil(
+      "the `BROWSER` command to record the URL it was handed",
+      () => recording().endsWith("\n"),
+    );
+    expect(recording().trim()).toBe(app.url);
 
     expect((await app.interrupt()).status).toBe(0);
   });
