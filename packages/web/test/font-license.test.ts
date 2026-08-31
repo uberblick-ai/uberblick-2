@@ -16,15 +16,29 @@ import { describe, expect, it } from "vitest";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+/**
+ * Every vendored face and the OFL text that has to travel with it. Geist ships
+ * as two files under one license; Fraunces is its own (#536). A face added
+ * without its license, or a license deleted from under a face, is the
+ * regression this defends.
+ */
+const bundled = [
+  { woff2: "Geist-Variable.woff2", license: "LICENSE-Geist.txt" },
+  { woff2: "GeistMono-Variable.woff2", license: "LICENSE-Geist.txt" },
+  { woff2: "Fraunces-Variable.woff2", license: "LICENSE-Fraunces.txt" },
+];
+
 describe("bundled fonts", () => {
   it("keep the OFL text in public/, where every build copies it from", () => {
-    const fonts = readdirSync(resolve(webRoot, "src/assets/fonts"));
-    expect(fonts.filter((f) => f.endsWith(".woff2")).length).toBeGreaterThan(0);
-
-    const license = readFileSync(
-      resolve(webRoot, "public/LICENSE-Geist.txt"),
-      "utf8",
+    const vendored = readdirSync(resolve(webRoot, "src/assets/fonts"));
+    expect(vendored.filter((f) => f.endsWith(".woff2")).sort()).toEqual(
+      bundled.map((face) => face.woff2).sort(),
     );
-    expect(license).toContain("SIL OPEN FONT LICENSE");
+
+    for (const { license } of bundled) {
+      expect(readFileSync(resolve(webRoot, "public", license), "utf8")).toContain(
+        "SIL OPEN FONT LICENSE",
+      );
+    }
   });
 });

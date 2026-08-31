@@ -182,7 +182,12 @@
 
   /* Geist for UI and prose, Geist Mono for machine-flavoured text — room keys,
      uuids, sync detail, group labels. Both are bundled (see the @font-face
-     block below), with a system stack behind them for the swap period. */
+     block below), with a system stack behind them for the swap period.
+
+     The document title is the one surface set in neither, and it carries no
+     token: Fraunces is written at `.ub-title` because that rule is its only
+     use site, and a token exists to stop a value drifting across several
+     (#536). */
   --font-sans: "Geist", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -193,13 +198,14 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* The two faces ship with the app: variable woff2 files vendored under
- * `src/assets/fonts` (Geist 1.7.2, SIL Open Font License 1.1). The OFL wants
- * its text to travel with the font software, so `public/LICENSE-Geist.txt` is
- * copied verbatim into every build and served at `/LICENSE-Geist.txt` — it
- * covers these two files only, not the app. (It lives in `public/` rather than
- * beside the woff2 files because Vite emits from `src/` only what something
- * references, and no honest document-level reference to a font license
+/* The three faces ship with the app: variable woff2 files vendored under
+ * `src/assets/fonts` (Geist 1.7.2 and Fraunces, both SIL Open Font License
+ * 1.1). The OFL wants its text to travel with the font software, so
+ * `public/LICENSE-Geist.txt` and `public/LICENSE-Fraunces.txt` are copied
+ * verbatim into every build and served at those paths — they cover these three
+ * files only, not the app. (They live in `public/` rather than beside the
+ * woff2 files because Vite emits from `src/` only what something references,
+ * and no honest document-level reference to a font license
  * exists.) No CDN, no `fonts.googleapis.com`: the
  * app is offline-first, and a render-blocking third-party request would make
  * it render differently with no network.
@@ -221,6 +227,21 @@
 @font-face {
   font-family: "Geist Mono";
   src: url("../assets/fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Fraunces is the latin cut Google Fonts serves (v38, U+0000–00FF and the
+   punctuation around it), not the upstream full charset: it is the size of one
+   Geist at 67 KB, and a title character outside that range falls back to
+   Georgia for that glyph alone. Its optical-size axis is left to the browser's
+   default `font-optical-sizing: auto`, which reads the axis off the title's
+   own 2.05rem — the whole reason to ship the variable file rather than an
+   instance cut for one size. */
+@font-face {
+  font-family: "Fraunces";
+  src: url("../assets/fonts/Fraunces-Variable.woff2") format("woff2");
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
@@ -266,8 +287,8 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-/* The wordmark is Geist like the rest of the UI — the serif display face is
-   gone with Fraunces. */
+/* The wordmark is Geist like the rest of the UI. Fraunces came back with #536
+   for the document title and for nothing else, this included. */
 .ub-brand {
   font-weight: 500;
   color: var(--brand);
@@ -1496,7 +1517,11 @@ body {
 }
 
 /* The doc title is the document's h1 and is set like one — same size, leading
-   and tracking as `h1.ub-heading` below. */
+   and tracking as `h1.ub-heading` below, and differing from it in family
+   alone: the title is the app's one editorial surface and is set in Fraunces,
+   while every heading inside the prose stays Geist (#41, #536). The
+   placeholder needs no rule of its own; an input paints it in the field's own
+   face. */
 .ub-title {
   font-size: 2.05rem;
   font-weight: 500;
@@ -1507,7 +1532,7 @@ body {
   background: none;
   padding: 0.2rem 0;
   color: inherit;
-  font-family: inherit;
+  font-family: "Fraunces", Georgia, "Times New Roman", serif;
 }
 
 .ub-title:focus {

@@ -24,6 +24,10 @@
  * - **A highlight steps off its ground.** `light-dark()` and `oklch()` are
  *   resolved by the browser and by nothing else, so a contrast floor is only a
  *   number where there is a rendering engine to measure (#516).
+ * - **A bundled face is really there.** A `font-family` in a stylesheet is a
+ *   wish; only an engine that fetched the woff2 and put it in `document.fonts`
+ *   says the title is set in the face the app ships rather than in the serif
+ *   behind it (#536).
  */
 
 import { randomUUID } from "node:crypto";
@@ -352,3 +356,53 @@ for (const scheme of ["light", "dark"] as const) {
     expect(drawer).toBe(toggle);
   });
 }
+
+test("the document title is set in the bundled Fraunces, and nothing else moved", async ({
+  browser,
+}) => {
+  const page = await openApp(browser, "light");
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+
+  expect(await painted(page, ".ub-title", "font-family")).toBe(
+    'Fraunces, Georgia, "Times New Roman", serif',
+  );
+
+  // The stack above is satisfied by Georgia too, so it is not evidence on its
+  // own: this is the engine reporting that it fetched the vendored woff2 and
+  // has the face to paint with. A missing or unreadable file leaves the entry
+  // in `error`, and the title would quietly be Georgia.
+  const face = await page.evaluate(async () => {
+    await document.fonts.ready;
+    return [...document.fonts]
+      .filter((loaded) => loaded.family === "Fraunces")
+      .map((loaded) => loaded.status);
+  });
+  expect(face).toEqual(["loaded"]);
+
+  // Title-only: the prose it sits above and the column beside it keep Geist,
+  // and the title is not in it.
+  const prose = await painted(page, ".ub-editor .ub-paragraph", "font-family");
+  expect(prose).toBe(await painted(page, ".ub-list", "font-family"));
+  expect(prose).toContain("Geist");
+  expect(prose).not.toContain("Fraunces");
+
+  // The face changed and the setting did not: same size and weight as the h1
+  // it is matched to, and a box still as wide as the column rather than as
+  // wide as its own text — a serif is wider than Geist per character, and an
+  // input that sized itself would take the layout with it.
+  expect(await painted(page, ".ub-title", "font-size")).toBe("32.8px");
+  expect(await painted(page, ".ub-title", "font-weight")).toBe("500");
+  expect(await width(page, ".ub-title")).toBe(await width(page, ".ub-editor"));
+
+  // "No font CDN" is not checkable by naming CDNs, so it is checked as what it
+  // is a case of: this app fetches nothing off its own origin. A websocket to
+  // the hub is not a resource and does not appear here.
+  const offOrigin = await page.evaluate(() =>
+    performance
+      .getEntriesByType("resource")
+      .map((entry) => entry.name)
+      .filter((url) => new URL(url).origin !== location.origin),
+  );
+  expect(offOrigin).toEqual([]);
+});
