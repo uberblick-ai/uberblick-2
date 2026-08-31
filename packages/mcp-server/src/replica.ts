@@ -351,24 +351,19 @@ export class Replicas {
    * `tools.ts`, so a tool answering from the derived index or the directory
    * stub never announces anything.
    *
-   * Withdrawal removes the presence keys rather than the whole state: dropping
-   * the state emits an awareness `removed`, which is what the web's departed-agent
-   * grace waits for, and a presence timeout would then draw the caret for
-   * another 30 seconds. Locally the caret goes first — {@link publishCursor}
-   * arms the cursor's timer before re-arming presence — but a peer sees two
-   * updates only where something moved one deadline and not the other, and
-   * `touch` moves presence alone on every read through `requireDoc`. With no
-   * call touching the room in between, both callbacks fall in one event loop
-   * turn and the hub broadcasts that turn once per changed client, collapsed to
-   * the client's latest state (`@hocuspocus/server`'s default `flushDelay: 0`;
-   * the sending provider does *not* coalesce, so the hub is where to check
-   * this): `setLocalState(null)` would take a peer straight from
-   * `{user, cursor}` to `removed`, still holding a state the grace accepts, and
-   * the caret would outlive the session. A read in between separates the two
-   * updates and the peer does decode `{user, cursor: null}` — harmless there,
-   * because a last state with a null cursor is not a caret the grace retains.
-   * Conditional is enough: `setLocalState(null)` is not the simplification it
-   * looks like. Both paths measured against a real hub, on #511 and #588.
+   * Withdrawal removes the presence keys rather than dropping the whole state,
+   * because a peer never sees the drop. The hub re-encodes each inbound
+   * awareness update from a scratch `Awareness`, relaying only the clients that
+   * update leaves alive (`@hocuspocus/server`'s `MessageReceiver`), so a
+   * removal's client id is absent from what it broadcasts:
+   * `setLocalState(null)` would leave every peer holding this session's last
+   * presence — name, agent marker, session id — until y-protocols expires the
+   * entry 30 seconds later, showing an agent as working in a document it has
+   * left. Removing the keys is an ordinary update and lands at once; the caret
+   * is safe either way, because the cursor's own timer fires no later than
+   * presence and that update is relayed too. Measured both ways against a real
+   * hub on #588 — the withdrawal decoded at 506 ms, the dropped state still
+   * standing at 33 s.
    *
    * The price is that "not present" then has two shapes. A room this session has
    * touched keeps a non-null local state for the rest of its life in this
