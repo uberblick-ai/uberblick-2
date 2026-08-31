@@ -113,7 +113,7 @@ describe("docFingerprint", () => {
   // The case nothing else here can see: `getBlockInline` strips the comment
   // mark, the annotations map holds no positions, and a state vector says
   // nothing about a delete set. Undo the anchor and the text, the state vector
-  // and the thread JSON are all still identical.
+  // and the thread record are all still identical.
   it("changes when only an annotation's anchor is removed", () => {
     const doc = source();
     const { id } = firstBlock(doc);

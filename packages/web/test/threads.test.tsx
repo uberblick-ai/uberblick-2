@@ -175,7 +175,7 @@ describe("a thread whose range is deleted is orphaned, not dropped", () => {
       "why quick?",
       "no idea",
     ]);
-    // The thread JSON is untouched — nothing cascade-deletes it.
+    // The thread record is untouched — nothing cascade-deletes it.
     expect(getAnnotation(ydoc, thread.id)).not.toBeNull();
   });
 

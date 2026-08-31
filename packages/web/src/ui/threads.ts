@@ -250,7 +250,7 @@ function blockRefFor(
  * in, then by where in that block. Reading order and not thread-id order — a
  * rail sorted by uuid is a rail you cannot follow down the page.
  *
- * An orphan is placed by the block its JSON names, at the head of it: the offset
+ * An orphan is placed by the block its record names, at the head of it: the offset
  * its range used to have is recorded nowhere, and the alternative — dropping
  * orphans to the bottom of the rail — would move a card away from the passage
  * the conversation is about.

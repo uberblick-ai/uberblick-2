@@ -72,7 +72,7 @@ describe("annotations", () => {
   it("anchors the range as a comment mark on the block's text", () => {
     const { doc, blockId, threadId } = annotated();
 
-    // The thread JSON carries no positions at all — the range is in the text.
+    // The thread record carries no positions at all — the range is in the text.
     expect(getAnnotation(doc, threadId)).toEqual({
       id: threadId,
       blockId,
@@ -176,7 +176,7 @@ describe("annotations", () => {
     // A mark cannot mark nothing: deleting the whole span removes the anchor,
     // so the range is gone rather than collapsed (the round-1 relative-position
     // model collapsed to a point here). The conversation is never
-    // cascade-deleted with it — the thread JSON stays readable and listable.
+    // cascade-deleted with it — the thread record stays readable and listable.
     expect(resolveAnnotationRange(doc, threadId)).toBeNull();
     expect(annotatedText(doc, blockId, threadId)).toBeNull();
     expect(getAnnotation(doc, threadId)?.comments).toHaveLength(1);
