@@ -28,6 +28,10 @@
  *   wish; only an engine that fetched the woff2 and put it in `document.fonts`
  *   says the title is set in the face the app ships rather than in the serif
  *   behind it (#536).
+ * - **A surface is measured, not a selector list.** The sidebar's interior is
+ *   held to its own strokes and to WCAG AA by walking what the column and its
+ *   two menus actually paint — which needs a cascade, a `light-dark()` and a
+ *   layout, and is what a list of rules checked one at a time missed (#515).
  */
 
 import { randomUUID } from "node:crypto";
@@ -312,11 +316,20 @@ test("MCP connections counts a connected agent session, and stops when it goes",
  * that is not `oklch()` throws rather than guesses: a wrong number here would
  * look like a passing measurement.
  */
-function oklab(painted: string): { L: number; a: number; b: number } {
-  // `none` is how an achromatic colour reports the hue it does not have.
+function oklab(painted: string): {
+  L: number;
+  a: number;
+  b: number;
+  chroma: number;
+  alpha: number;
+} {
+  // `none` is how an achromatic colour reports the hue it does not have, and
+  // the alpha half only appears on the tokens that carry one (#515).
   const parts =
-    /^oklch\((\d*\.?\d+) (\d*\.?\d+) (\d*\.?\d+|none)\)$/.exec(painted.trim());
-  const [, rawL, rawC, rawH] = parts ?? [];
+    /^oklch\((\d*\.?\d+) (\d*\.?\d+) (\d*\.?\d+|none)(?: \/ (\d*\.?\d+))?\)$/.exec(
+      painted.trim(),
+    );
+  const [, rawL, rawC, rawH, rawA] = parts ?? [];
   if (rawL === undefined || rawC === undefined || rawH === undefined) {
     throw new Error(`not an oklch colour: ${painted}`);
   }
@@ -326,7 +339,54 @@ function oklab(painted: string): { L: number; a: number; b: number } {
     L: Number(rawL),
     a: chroma * Math.cos(radians),
     b: chroma * Math.sin(radians),
+    chroma,
+    alpha: rawA === undefined ? 1 : Number(rawA),
   };
+}
+
+/**
+ * The sRGB a browser paints for one of those colours, so an ink with an alpha
+ * can be composited onto its ground and read as a contrast ratio (#515). The
+ * matrices are the OKLab specification's; the clamp is the gamut Chromium
+ * paints into. Nothing here is a second palette — every input is a value read
+ * off a rendered element.
+ */
+function srgb(painted: string): [number, number, number] {
+  const { L, a, b } = oklab(painted);
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  const linear = [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+  const encoded = linear.map((channel) => {
+    const clamped = Math.min(1, Math.max(0, channel));
+    return clamped <= 0.0031308
+      ? 12.92 * clamped
+      : 1.055 * clamped ** (1 / 2.4) - 0.055;
+  });
+  return [encoded[0] ?? 0, encoded[1] ?? 0, encoded[2] ?? 0];
+}
+
+/** WCAG's ratio between an ink — alpha composited where it has one — and its ground. */
+function contrast(ink: string, ground: string): number {
+  const under = srgb(ground);
+  const alpha = oklab(ink).alpha;
+  const over = srgb(ink).map((channel, index) => {
+    const beneath = under[index] ?? 0;
+    return channel * alpha + beneath * (1 - alpha);
+  });
+  const luminance = (colour: number[]): number => {
+    const [r, g, b] = colour.map((channel) =>
+      channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
+    );
+    return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
+  };
+  const one = luminance(over) + 0.05;
+  const two = luminance(under) + 0.05;
+  return one > two ? one / two : two / one;
 }
 
 /** How far a fill sits from the ground it is painted on. */
@@ -400,6 +460,279 @@ for (const scheme of ["light", "dark"] as const) {
     // `--card` surface it lands on.
     expect(entry).toBe(toggle);
     expect(drawer).toBe(toggle);
+  });
+}
+
+/** One colour a surface paints, and the ground it lands on. */
+type Reading = {
+  where: string;
+  kind: "text" | "stroke";
+  colour: string;
+  ground: string;
+  /**
+   * Inside the current workspace's row — the one text this surface may paint in
+   * the accent, and only until #569 answers for it. Carried on texts, which are
+   * the only readings that exemption applies to.
+   */
+  current?: boolean;
+};
+
+/**
+ * Everything one rendered surface paints, walked rather than listed.
+ *
+ * A list of selectors is exactly what went stale between #480 and #515: the
+ * column took its own surface tokens and its interior kept reading the page's,
+ * and no rule was wrong on its own. So this reads the surface the reader sees —
+ * every stroke and every text under a root, against the ground each actually
+ * sits on — and a rule added later is measured without anybody remembering to
+ * add it.
+ *
+ * A stroke is a border, an outline, or a hairline element painted with a fill
+ * of its own; the menu separator is that third shape. A text is an element with
+ * words of its own, so an ancestor's ink is not counted once per descendant.
+ * Skipped: anything unrendered, and anything inside an inactive control — WCAG
+ * 1.4.3 excepts a disabled component's text, and the vendored menu draws its two
+ * unavailable items at half opacity.
+ */
+function surface(page: Page, root: string): Promise<Reading[]> {
+  return page.evaluate((selector) => {
+    const start = document.querySelector(selector);
+    if (start === null) throw new Error(`no surface for ${selector}`);
+
+    const alphaOf = (colour: string): number => {
+      const rgba = /^rgba?\(([^)]*)\)$/.exec(colour);
+      if (rgba !== null) {
+        const parts = (rgba[1] ?? "").split(",");
+        return parts.length === 4 ? Number(parts[3]) : 1;
+      }
+      const slashed = /\/\s*(\d*\.?\d+)\s*\)$/.exec(colour);
+      return slashed === null ? 1 : Number(slashed[1]);
+    };
+
+    // The nearest ancestor that actually paints something: a transparent
+    // element's ink lands on whatever is behind it, which is the ground the
+    // reader compares it against.
+    const groundOf = (element: Element | null): string => {
+      for (let node = element; node !== null; node = node.parentElement) {
+        const colour = getComputedStyle(node).backgroundColor;
+        if (alphaOf(colour) === 1) return colour;
+      }
+      throw new Error(`nothing opaque under ${selector}`);
+    };
+
+    const name = (element: Element): string =>
+      `${selector} ${element.tagName.toLowerCase()}${element.getAttribute("class") === null ? "" : `.${element.getAttribute("class")?.trim().split(/\s+/).join(".")}`}`;
+
+    const readings: Reading[] = [];
+    for (const element of [start, ...start.querySelectorAll("*")]) {
+      const box = element.getBoundingClientRect();
+      if (box.width === 0 && box.height === 0) continue;
+      if (
+        element.closest("[data-disabled], [aria-disabled='true'], :disabled") !== null
+      ) {
+        continue;
+      }
+      const style = getComputedStyle(element);
+      const where = name(element);
+
+      // A field's value is text the reader reads, and it is the one text that
+      // is not a child node — without this the rename field's ink is walked
+      // past, and only its border is measured.
+      const field =
+        (element instanceof HTMLInputElement ||
+          element instanceof HTMLTextAreaElement) &&
+        element.value.trim() !== "";
+      const speaks =
+        field ||
+        [...element.childNodes].some(
+          (node) =>
+            node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "",
+        );
+      if (speaks) {
+        readings.push({
+          where,
+          kind: "text",
+          colour: style.color,
+          ground: groundOf(element),
+          current: element.closest(".ub-menu-current") !== null,
+        });
+      }
+
+      for (const side of ["top", "right", "bottom", "left"] as const) {
+        const width = Number.parseFloat(style.getPropertyValue(`border-${side}-width`));
+        const colour = style.getPropertyValue(`border-${side}-color`);
+        // A transparent border reserves geometry; it is not a separator (#515).
+        if (width > 0 && alphaOf(colour) > 0) {
+          readings.push({
+            where: `${where} border-${side}`,
+            kind: "stroke",
+            colour,
+            // The background paints under the border, so an element that has
+            // one is its own border's ground.
+            ground: groundOf(element),
+          });
+        }
+      }
+
+      // `auto` is the browser's own focus ring, in the browser's own colour —
+      // a stroke that carries its own meaning, which #515 excludes by name.
+      const outline = Number.parseFloat(style.outlineWidth);
+      const drawn = style.outlineStyle !== "none" && style.outlineStyle !== "auto";
+      if (outline > 0 && drawn && alphaOf(style.outlineColor) > 0) {
+        readings.push({
+          where: `${where} outline`,
+          kind: "stroke",
+          colour: style.outlineColor,
+          ground: groundOf(element.parentElement),
+        });
+      }
+
+      const hairline =
+        Math.min(box.width, box.height) <= 2 && Math.max(box.width, box.height) > 2;
+      if (hairline && alphaOf(style.backgroundColor) > 0) {
+        readings.push({
+          where: `${where} fill`,
+          kind: "stroke",
+          colour: style.backgroundColor,
+          ground: groundOf(element.parentElement),
+        });
+      }
+    }
+    return readings;
+  }, root);
+}
+
+/**
+ * The sidebar's interior is the sidebar's own surface (#515).
+ *
+ * #480 gave the column four surface tokens and applied one of them to its outer
+ * edge; everything inside kept reading the page's `--border` and
+ * `--muted-foreground`, which are tuned for the `--card` ground the column no
+ * longer has. Two floors follow, and each is read off the column itself rather
+ * than written down here, so neither can drift from what the surface is:
+ *
+ * - **Light — the strokes.** Every separator or outline reaches at least the
+ *   OKLab separation the column's own outer edge has (`--sidebar-border` on
+ *   `--sidebar`, ΔE 0.040). `--border` gives half of that, 0.021.
+ * - **Dark — the strokes.** They are white at a low alpha there, where a
+ *   separation between two opaque colours is not the measurement; the composite
+ *   is. No interior stroke is weaker against its ground than that same outer
+ *   edge.
+ * - **Both — the ink.** Every text reaches WCAG AA's 4.5:1. In light
+ *   `--muted-foreground` reached 3.96:1 on `--sidebar` and 3.40:1 on
+ *   `--sidebar-accent`, and the group label 4.20:1. `--sidebar-accent` is the
+ *   tighter of those two grounds and the resting column paints no text on it —
+ *   every row that takes it does so hovered or highlighted — so the walk reaches
+ *   it deliberately and then asserts it got there, rather than leaving the
+ *   closest call in the change unmeasured while everything else passes.
+ *
+ * Chroma is what separates an accent from the surface: every neutral this column
+ * paints sits at or under 0.015, and both accents — `--brand` and the 28% edge
+ * derived from it — at 0.15 or above. The two populations are a tenfold apart,
+ * and the threshold below sits about three times clear of each of them, so it is
+ * a gap rather than a number picked to make something pass. What it buys differs
+ * by kind, and the difference is #515's:
+ *
+ * - **A stroke above it is excluded, and the criterion says so** — "a stroke
+ *   carrying its own meaning (`--brand`, a focus ring)". Meaning, not a named
+ *   token: a list of accent rules would be the selector list this test exists
+ *   not to be.
+ * - **Ink has no such exclusion, so chroma alone must not let a text through.**
+ *   A chromatic text has to *be* the accent, compared against what the wordmark
+ *   is painted, *and* be the one text that is allowed to be: `.ub-menu-current`,
+ *   the current workspace's row, at 1.93:1 in light. Naming it is the opposite
+ *   of the selector list this test exists not to be — a coverage list fails open
+ *   and omits silently, an exception list fails closed, so a second brand-inked
+ *   text fails here instead of inheriting the carve-out, and the carve-out ends
+ *   with the decision rather than outliving it. What reserves that one text is
+ *   not #515: the reading is a property of `--brand` rather than of this surface
+ *   (2.04 to 2.30:1 against every other light ground in the app), and a
+ *   sidebar-private brand ink is what #569's own criterion forbids — open,
+ *   `needs-decision`, unanswered.
+ */
+const accentChroma = 0.05;
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`the sidebar's interior reads the sidebar's own tokens — ${scheme}`, async ({
+    browser,
+  }) => {
+    const page = await openApp(browser, scheme);
+
+    // The floor is the column's outer edge, whatever it is painted.
+    const edge = await painted(page, ".ub-list", "border-right-color");
+    const ground = await painted(page, ".ub-list", "background-color");
+    const floor =
+      scheme === "light" ? separation(edge, ground) : contrast(edge, ground);
+    // Reading the floor off the column is what keeps it from drifting away from
+    // the surface — but it would also fall with `--sidebar-border` if that token
+    // were ever weakened, and every interior stroke would still pass. AC1 names
+    // 0.040, so light holds that absolutely too. Dark's floor is relative by the
+    // criterion's own construction and has no such number.
+    if (scheme === "light") expect(floor).toBeGreaterThanOrEqual(0.04);
+
+    // And the accent as this page paints it, read off the wordmark — the app's
+    // other `--brand` ink, so this is the same property resolved by the same
+    // engine. It names the one text the loop below may let through.
+    const accent = await painted(page, ".ub-brand", "color");
+
+    // A group, so the header's rule, its count pill and the two quiet actions
+    // are on screen. "+ group" makes one and opens its rename field, so the
+    // column is read once with the field and once with the header.
+    await page.getByRole("button", { name: "+ group" }).click();
+    const readings = await surface(page, ".ub-list");
+    await page.getByLabel("Group name").press("Enter");
+    // `.first()` because the sidebar is one workspace shared by this file's
+    // tests, so the appearance before this one has already left a group here.
+    await expect(page.locator(".ub-group-toggle").first()).toBeVisible();
+    readings.push(...(await surface(page, ".ub-list")));
+
+    // Both anchored menus, each while it is open: they are portalled siblings
+    // of the app, so nothing in the column reaches them and they carry their
+    // own rules.
+    await page.locator(".ub-workspace").click();
+    await expect(page.locator("[data-slot=dropdown-menu-content]")).toBeVisible();
+    readings.push(...(await surface(page, "[data-slot=dropdown-menu-content]")));
+    // And once more with the current workspace's row highlighted, which is where
+    // `--sidebar-accent` gets under a text: the row's own count keeps the muted
+    // ink while the item takes the accent ground, and that pairing — 4.70:1, the
+    // worse of the two failures #515 published — is painted nowhere at rest.
+    await page.locator(".ub-menu-current").hover();
+    const highlight = await painted(page, ".ub-menu-current", "background-color");
+    readings.push(...(await surface(page, "[data-slot=dropdown-menu-content]")));
+    await page.keyboard.press("Escape");
+    await page.locator(".ub-user-card").click();
+    await expect(page.locator("[data-slot=popover-content]")).toBeVisible();
+    readings.push(...(await surface(page, "[data-slot=popover-content]")));
+
+    // The walk reached that ground — the coverage the change is tightest on, and
+    // the same assertion that a silently empty result cannot pass.
+    expect(
+      readings.filter((one) => one.kind === "text" && one.ground === highlight),
+      `no text measured on ${highlight}`,
+    ).not.toHaveLength(0);
+
+    for (const { where, kind, colour, ground: under, current } of readings) {
+      const ink = oklab(colour);
+      const seen = `${where} — ${colour} on ${under}`;
+      if (ink.chroma > accentChroma) {
+        if (kind === "text") {
+          expect(colour, seen).toBe(accent);
+          expect(current, seen).toBe(true);
+        }
+        continue;
+      }
+      if (kind === "text") {
+        expect(contrast(colour, under), seen).toBeGreaterThanOrEqual(4.5);
+      } else if (scheme === "dark") {
+        expect(contrast(colour, under), seen).toBeGreaterThanOrEqual(floor);
+      } else {
+        // A separation is between two opaque colours. Light has no translucent
+        // stroke today, and one added later must fail here rather than be
+        // measured uncomposited and pass on a number nothing paints.
+        expect(ink.alpha, seen).toBe(1);
+        expect(separation(colour, under), seen).toBeGreaterThanOrEqual(floor);
+      }
+    }
   });
 }
 
