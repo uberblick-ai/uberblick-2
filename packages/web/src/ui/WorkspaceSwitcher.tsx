@@ -7,6 +7,11 @@
  * sidebar's own header opening rather than as a popup that happens to be near
  * it.
  *
+ * The trigger is an identity card (#482): a tile carrying the workspace's first
+ * character, then the name over the doc count as a subtitle. Where the address
+ * names no workspace there is neither tile nor count — a letter and a number
+ * for a workspace that is not there would both be invented.
+ *
  * Switching is navigating. There is no "active workspace" state to set: the
  * control writes `/<workspace>` into the address bar and the app re-reads it
  * like any other navigation, which is what keeps a switch and a pasted link the
@@ -26,6 +31,7 @@
  */
 
 import type { ReactElement } from "react";
+import { initialOf } from "./PeerAvatar.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -64,13 +70,24 @@ export function WorkspaceSwitcher({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button type="button" className="ub-workspace" aria-label="Workspace">
-          <span className="ub-workspace-name">
-            {/* As the address spells it: the slug is what a person reads. */}
-            {current === null ? "no workspace" : current.segment}
-          </span>
+          {/* Hidden like the user card's tile: a letter announced beside the
+              name it repeats is the name read twice. */}
           {current !== null && (
-            <span className="ub-workspace-count">{docCountLabel(docs)}</span>
+            <span className="ub-identity-tile ub-workspace-tile" aria-hidden="true">
+              {initialOf(current.segment)}
+            </span>
           )}
+          <span className="ub-workspace-identity">
+            {/* The name truncates, and a segment can be a bare uuid — so the
+                whole of it is on the hover. */}
+            <span className="ub-workspace-name" title={current?.segment}>
+              {/* As the address spells it: the slug is what a person reads. */}
+              {current === null ? "no workspace" : current.segment}
+            </span>
+            {current !== null && (
+              <span className="ub-workspace-count">{docCountLabel(docs)}</span>
+            )}
+          </span>
           <span className="ub-menu-caret" aria-hidden="true">
             ▾
           </span>

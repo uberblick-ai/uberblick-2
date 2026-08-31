@@ -10,6 +10,9 @@
  * - The switcher renders *configuration*, not accounts: the workspace it is in
  *   with a count that follows the directory, and management items that are
  *   present and disabled rather than quietly absent.
+ * - Each end draws an identity tile (#482) carrying a first character, and the
+ *   header's hover carries the whole segment the name truncates. Where the
+ *   address names no workspace, neither the letter nor the count is invented.
  * - A presence colour, once chosen, is what the client publishes — and is still
  *   what it publishes after a reload. Whether peers *see* it is a claim about
  *   awareness, and lives in `presence-color.test.ts`.
@@ -128,11 +131,11 @@ describe("the workspace switcher renders configuration", () => {
     });
   }
 
-  function switcher(docs: number): ReactElement {
+  function switcher(docs: number, current: Workspace | null = WORKSPACE): ReactElement {
     return (
       <WorkspaceSwitcher
         workspaces={[WORKSPACE]}
-        current={WORKSPACE}
+        current={current}
         docs={docs}
         onSwitch={() => {}}
       />
@@ -157,6 +160,35 @@ describe("the workspace switcher renders configuration", () => {
     const current = panel("[data-slot=dropdown-menu-item][aria-current=true]")[0];
     expect(current?.textContent).toBe(`${WORKSPACE.segment}1 doc`);
     view.unmount();
+  });
+
+  it("names the workspace with a tile, a hover title, and nothing invented when there is none", () => {
+    // The tile is the segment's own first character, so a bare uuid gets its
+    // first hex digit rather than a placeholder mark (#482).
+    const bare: Workspace = { uuid: WORKSPACE.uuid, segment: WORKSPACE.uuid };
+    for (const workspace of [WORKSPACE, bare]) {
+      const view = mount(switcher(2, workspace));
+      const trigger = view.host.querySelector(".ub-workspace");
+      expect(trigger?.querySelector(".ub-workspace-tile")?.textContent).toBe(
+        workspace.segment[0]?.toUpperCase(),
+      );
+      // The name truncates, so the whole segment has to be reachable somewhere.
+      expect(trigger?.querySelector(".ub-workspace-name")?.getAttribute("title")).toBe(
+        workspace.segment,
+      );
+      view.unmount();
+    }
+
+    // No workspace, nothing invented: a letter and a count for a workspace that
+    // is not there would both be made up.
+    const none = mount(switcher(2, null));
+    const trigger = none.host.querySelector(".ub-workspace");
+    expect(trigger?.querySelector(".ub-workspace-tile")).toBe(null);
+    expect(trigger?.querySelector(".ub-workspace-count")).toBe(null);
+    expect(trigger?.querySelector(".ub-workspace-name")?.textContent).toBe("no workspace");
+    expect(trigger?.querySelector(".ub-workspace-name")?.hasAttribute("title")).toBe(false);
+    expect(trigger?.querySelector(".ub-menu-caret")).not.toBe(null);
+    none.unmount();
   });
 
   it("renders workspace management disabled rather than hiding it", () => {
@@ -196,11 +228,19 @@ describe("the user menu is this client, as it publishes itself", () => {
     ) as HTMLButtonElement | undefined;
   }
 
+  /** The trigger's tile: the letter it draws, and the colour it is filled with. */
+  function tile(view: View): HTMLElement | null {
+    return view.host.querySelector<HTMLElement>(".ub-user-tile");
+  }
+
   it("names the session and marks the colour it is currently published in", () => {
     const view = mount(menu());
     expect(view.host.querySelector(".ub-user-card")?.textContent).toContain(
       IDENTITY.name,
     );
+    // Awareness names are two lowercase words, so the tile is the first of them
+    // upper-cased (#482).
+    expect(tile(view)?.textContent).toBe("U");
     open(view);
     expect(panel(".ub-user-heading")[0]?.textContent).toBe(IDENTITY.name);
     // The tab's dealt colour is the blue one, and nothing was chosen yet.
@@ -211,10 +251,14 @@ describe("the user menu is this client, as it publishes itself", () => {
   it("stores a chosen presence colour, and starts from it after a reload", () => {
     const view = mount(menu());
     open(view);
+    // The tile is filled with what this client publishes, so it moves with the
+    // choice rather than with a reload.
+    expect(tile(view)?.style.background).toBe("rgb(6, 117, 201)");
     click(swatch("green"));
 
     expect(getSetting("presenceColor")).toBe("#0c853d");
     expect(chosenSwatch()).toBe("green");
+    expect(tile(view)?.style.background).toBe("rgb(12, 133, 61)");
     view.unmount();
 
     // The reload: a new tab, dealt a different colour, reading the same storage.
@@ -223,6 +267,8 @@ describe("the user menu is this client, as it publishes itself", () => {
     );
     open(reloaded);
     expect(chosenSwatch()).toBe("green");
+    expect(tile(reloaded)?.textContent).toBe("A");
+    expect(tile(reloaded)?.style.background).toBe("rgb(12, 133, 61)");
     reloaded.unmount();
   });
 
