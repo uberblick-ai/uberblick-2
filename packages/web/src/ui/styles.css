@@ -2848,8 +2848,7 @@ h3.ub-heading {
 }
 
 /* The pin sits beside the row rather than inside it, so the whole of the row
-   is the open target and the pin is still its own control. Aligned to the top,
-   because a row is as tall as its description and tags make it. */
+   is the open target and the pin is still its own control. */
 .ub-docs-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--docs-pin);
@@ -2859,7 +2858,6 @@ h3.ub-heading {
 
 .ub-docs-open {
   display: grid;
-  gap: 0.15rem;
   width: 100%;
   text-align: left;
   padding: 0.4rem;
@@ -2907,32 +2905,6 @@ h3.ub-heading {
   font-family: var(--font-mono);
   font-size: 0.78rem;
   color: var(--muted-foreground);
-}
-
-/* One line of it: the description is here so a match on it is visible, and a
-   paragraph would turn the listing into a page of prose. */
-.ub-docs-desc {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.85rem;
-  color: var(--muted-foreground);
-}
-
-/* The chips the document header already uses, on one line that scrolls rather
-   than wrapping — same promise the header's strip makes. */
-.ub-docs-tags {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-  font-size: 0.78rem;
-}
-
-.ub-docs-tags::-webkit-scrollbar {
-  display: none;
 }
 
 /* Quiet until the row is hovered or something in it has focus — the same
