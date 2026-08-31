@@ -75,10 +75,14 @@ of a queue, and start the long pole first.
   frozen at creation, so a gate agent it refuses moves its own worktree to
   freshly fetched `origin/main` and re-runs instead of reporting a red gate.
   `mise` also trusts config by path, and every worktree is a new path, so the
-  gate agent's first command is `mise trust`. A gate that runs repo code rather
-  than the container needs `mise run install` next: `mise run e2e` opens with a
-  `pnpm --filter` exec that a fresh worktree's empty `node_modules` cannot
-  serve.
+  gate agent runs `mise trust` there before any task. A gate that runs repo code
+  rather than the container checks out the PR head first, then `mise trust`, then
+  `mise run install`: `mise run e2e` takes no SHA and runs whatever its checkout
+  holds, so an agent left on `origin/main` returns a green the branch never
+  earned — and it opens with a `pnpm --filter` exec that a fresh worktree's
+  empty `node_modules` cannot serve. `mise run review` is the asymmetry, not the
+  rule: it archives the SHA it is passed, which is exactly why its own checkout
+  stays on `main`.
 - **Every gate agent reports; none writes.** Each returns its `gate`, `outcome`,
   a short `summary`, the `sha` it ran at, and its `start` and `end`, and performs
   no GitHub write at all — no claim, comment, label, review or merge. The
