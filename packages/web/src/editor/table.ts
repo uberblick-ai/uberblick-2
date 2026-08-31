@@ -12,11 +12,11 @@
  * - **{@link tableBlockView}**, the NodeView, holds both representations at
  *   once: a `<table>` it draws from the source, and the editable source itself.
  *   Which one is shown is CSS, keyed off a class.
- * - **{@link tableEditingPlugin}** puts that class on the table block the
- *   selection is in. So the rendering is what a reader sees, and the source is
- *   what they get the moment their caret is in the block — click to edit, the
- *   same gesture a code block has, with no mode to remember and nothing stored
- *   about which table is "open".
+ * - **`sourceEditingPlugin`** (source-chrome.ts, shared with `mermaid`) puts
+ *   that class on the table block the selection is in. So the rendering is what
+ *   a reader sees, and the source is what they get the moment their caret is in
+ *   the block — click to edit, the same gesture a code block has, with no mode
+ *   to remember and nothing stored about which table is "open".
  * - **{@link tableFromTextPlugin}** is the two doors a table comes in through:
  *   typing a header row, Enter, then a delimiter row; and pasting GFM text. Both
  *   are `prosemirror-view` props, so they fire for this reader's own gestures
@@ -32,13 +32,12 @@
 import { Extension } from "@tiptap/core";
 import type { NodeViewRenderer, NodeViewRendererProps } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import { NodeSelection, Plugin, TextSelection } from "@tiptap/pm/state";
-import type { EditorState } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { Plugin, TextSelection } from "@tiptap/pm/state";
 import type { EditorView, NodeView } from "@tiptap/pm/view";
 import { parseGfmTable } from "@uberblick/schema";
 import { endUndoCapture, findBlockById } from "./block-menu.js";
 import { retypeBlockInTransaction } from "./retype.js";
+import { sourceEditingPlugin } from "./source-chrome.js";
 
 /** On the block whose source the reader is editing. */
 export const EDITING_CLASS = "ub-table-editing";
@@ -160,46 +159,6 @@ export const tableBlockView: NodeViewRenderer = ({
     destroy: () => rendered.removeEventListener("mousedown", open),
   };
 };
-
-/* ------------------------------------------------------------------ editing */
-
-/** The top-level `table` block the selection is in, or null. */
-function tableAt(state: EditorState): { pos: number; node: ProseMirrorNode } | null {
-  const { selection } = state;
-  if (selection instanceof NodeSelection) {
-    return selection.node.type.name === "table"
-      ? { pos: selection.from, node: selection.node }
-      : null;
-  }
-  const { $head } = selection;
-  if ($head.depth !== 1) return null;
-  const node = $head.parent;
-  return node.type.name === "table" ? { pos: $head.before(1), node } : null;
-}
-
-/**
- * Mark the table block the selection sits in, so the stylesheet can show its
- * source and hide its drawing.
- *
- * Derived from the state on every draw rather than remembered, for the reason
- * the block menu gives about its slash session: a mode nobody stores cannot get
- * out of step with the document.
- */
-export function tableEditingPlugin(): Plugin {
-  return new Plugin({
-    props: {
-      decorations(state: EditorState): DecorationSet | null {
-        const table = tableAt(state);
-        if (table === null) return null;
-        return DecorationSet.create(state.doc, [
-          Decoration.node(table.pos, table.pos + table.node.nodeSize, {
-            class: EDITING_CLASS,
-          }),
-        ]);
-      },
-    },
-  });
-}
 
 /* -------------------------------------------------------------------- doors */
 
@@ -367,6 +326,6 @@ export function tableFromTextPlugin(): Plugin {
 export const TableBlocks = Extension.create({
   name: "uberblickTableBlocks",
   addProseMirrorPlugins() {
-    return [tableEditingPlugin(), tableFromTextPlugin()];
+    return [sourceEditingPlugin("table", EDITING_CLASS), tableFromTextPlugin()];
   },
 });
