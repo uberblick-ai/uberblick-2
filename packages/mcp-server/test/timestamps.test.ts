@@ -21,7 +21,12 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDirectoryEntry, getDirectoryMap, setTitle } from "@uberblick/schema";
+import {
+  getDirectoryEntry,
+  getDirectoryMap,
+  setTags,
+  setTitle,
+} from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import {
   removeTempDirs,
@@ -219,7 +224,7 @@ describe("directory timestamps", () => {
     expect(stub(rig, doc.uuid).updatedAt).toBeUndefined();
   });
 
-  it("does not stamp a restore: the directory changed, the document did not", async () => {
+  it("republishes a stub on restore without inventing a stamp for it", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
       title: "Archived",
@@ -227,9 +232,19 @@ describe("directory timestamps", () => {
     });
     await rig.ok("archive_doc", { uuid: doc.uuid });
 
+    // The case `republishStub` exists for: a retag from a replica that had not
+    // seen the archive, which this server's own tools would refuse. Stub repair
+    // stops at a tombstone, so nobody stamped that edit — here or on the replica
+    // that made it. Restoring is when the stub catches up, and the honest answer
+    // to "when did this change?" is still the last stamp anyone actually wrote:
+    // the restore's own clock would be a time at which nothing was edited.
     vi.setSystemTime(T0 + 3 * WINDOW);
+    setTags(rig.instance.replicas.replica(doc.uuid).doc, ["retired"]);
     await rig.ok("restore_doc", { uuid: doc.uuid });
 
-    expect(stub(rig, doc.uuid).updatedAt).toBe(T0);
+    expect(stub(rig, doc.uuid)).toMatchObject({
+      tags: ["retired"],
+      updatedAt: T0,
+    });
   });
 });
