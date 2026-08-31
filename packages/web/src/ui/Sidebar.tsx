@@ -575,39 +575,45 @@ function GroupSection({
       */}
       <div className="ub-group-body" data-collapsed={collapsed} inert={collapsed}>
         <ul>
-          {group.docs.map((uuid, index) => (
-            <Fragment key={uuid}>
-              <li className="ub-drop-row">
-                <DropSlot
-                  slot={`${group.id}-${index}`}
-                  active={dnd.kind === "doc"}
-                  dnd={dnd}
-                  onDrop={() => dnd.dropDoc(group.id, index)}
-                />
-              </li>
-              <li>
-                <button
-                  type="button"
-                  // The open document, said once, to the styling and to a
-                  // screen reader alike — the `ub-selected` class this replaces
-                  // told only the first of them (#481). The All-docs entry in
-                  // the footer already marked itself this way, so the two rows
-                  // are now one state with one rule.
-                  aria-current={uuid === selected ? "page" : undefined}
-                  draggable={ydoc !== null}
-                  onClick={() => onSelect(uuid)}
-                  onDragStart={(event) => dnd.start({ kind: "doc", uuid }, event)}
-                  onDragEnd={dnd.end}
-                  title={uuid}
-                >
-                  <DocumentIcon />
-                  <span className="ub-pin-label">
-                    <PinLabel uuid={uuid} labels={labels} />
-                  </span>
-                </button>
-              </li>
-            </Fragment>
-          ))}
+          {group.docs.map((uuid, index) => {
+            // Resolved once for the row: the drawn label and the tooltip are
+            // the same reading of the same stub, so a clipped row can never
+            // offer different words than it shows (#529).
+            const entry = labels.get(uuid);
+            return (
+              <Fragment key={uuid}>
+                <li className="ub-drop-row">
+                  <DropSlot
+                    slot={`${group.id}-${index}`}
+                    active={dnd.kind === "doc"}
+                    dnd={dnd}
+                    onDrop={() => dnd.dropDoc(group.id, index)}
+                  />
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    // The open document, said once, to the styling and to a
+                    // screen reader alike — the `ub-selected` class this
+                    // replaces told only the first of them (#481). The All-docs
+                    // entry in the footer already marked itself this way, so the
+                    // two rows are now one state with one rule.
+                    aria-current={uuid === selected ? "page" : undefined}
+                    draggable={ydoc !== null}
+                    onClick={() => onSelect(uuid)}
+                    onDragStart={(event) => dnd.start({ kind: "doc", uuid }, event)}
+                    onDragEnd={dnd.end}
+                    title={pinTitle(uuid, entry)}
+                  >
+                    <DocumentIcon />
+                    <span className="ub-pin-label">
+                      <PinLabel uuid={uuid} entry={entry} />
+                    </span>
+                  </button>
+                </li>
+              </Fragment>
+            );
+          })}
           {/* The last slot, and an empty group's only one — which is what lets
               an empty group be a drop target at all. */}
           <li className="ub-drop-row">
@@ -642,12 +648,11 @@ function GroupSection({
  */
 function PinLabel({
   uuid,
-  labels,
+  entry,
 }: {
   uuid: string;
-  labels: ReadonlyMap<string, DirectoryEntry>;
+  entry: DirectoryEntry | undefined;
 }): ReactNode {
-  const entry = labels.get(uuid);
   if (entry === undefined) return <span className="ub-muted">{uuid.slice(0, 8)}</span>;
   const title = entry.title === "" ? <em>Untitled</em> : entry.title;
   if (entry.deleted !== true) return title;
@@ -657,4 +662,20 @@ function PinLabel({
       <span className="ub-muted">{" \u00b7 archived"}</span>
     </>
   );
+}
+
+/**
+ * The same four things {@link PinLabel} draws, as the one string a `title`
+ * attribute can carry.
+ *
+ * The row is 34px and ellipsises anything longer than the column (#481), which
+ * is the right geometry but left the name unrecoverable: the tooltip offered
+ * the uuid, so a clipped title could be read nowhere at all. Here the stub is
+ * the whole uuid rather than the eight characters the row shows, because the
+ * tooltip is the place the rest of it is recoverable from.
+ */
+function pinTitle(uuid: string, entry: DirectoryEntry | undefined): string {
+  if (entry === undefined) return uuid;
+  const title = entry.title === "" ? "Untitled" : entry.title;
+  return entry.deleted === true ? `${title} \u00b7 archived` : title;
 }

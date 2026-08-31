@@ -192,6 +192,11 @@ function rowTitles(host: HTMLElement, index: number): string[] {
   return rows(host, index).map((row) => row.textContent ?? "");
 }
 
+/** What each row offers on hover — the `title` attribute, top to bottom. */
+function rowTooltips(host: HTMLElement, index: number): Array<string | null> {
+  return rows(host, index).map((row) => row.getAttribute("title"));
+}
+
 /** The `index`-th group's insertion points, top to bottom. */
 function docSlots(host: HTMLElement, index: number): HTMLElement[] {
   const section = sections(host)[index];
@@ -484,6 +489,36 @@ describe("the sidebar is the _sidebar document", () => {
       restoreDirectoryEntry(directoryPeer, ONE);
     });
     expect(rowTitles(host, 0)).toEqual(["Overview", "Editing"]);
+  });
+
+  it("offers the whole name a clipped row can only show part of", async () => {
+    // A 34px row ellipsises anything longer than the 16rem column (#481), so
+    // the tooltip is the only way back to the name — and it used to offer the
+    // uuid instead (#529). All four things a row can say, in one group.
+    const directory = seedDirectory();
+    upsertDirectoryEntry(directory, { uuid: THREE, title: "" });
+    tombstoneDirectoryEntry(directory, TWO);
+    const unknown = "3a9d5c17-0e64-4b28-8f31-6d2a7c40b9e5";
+
+    const sidebar = sidebarDoc();
+    const reading = createGroup(sidebar, "Reading");
+    for (const uuid of [ONE, TWO, THREE, unknown]) pinDoc(sidebar, reading, uuid);
+
+    const host = await openApp(`/${WORKSPACE}`);
+    expect(rowTitles(host, 0)).toEqual([
+      "Overview",
+      "Editing · archived",
+      "Untitled",
+      unknown.slice(0, 8),
+    ]);
+    // The same words, with the suffix — and for the stub the whole uuid, since
+    // the eight characters on the row are what there is to recover from.
+    expect(rowTooltips(host, 0)).toEqual([
+      "Overview",
+      "Editing · archived",
+      "Untitled",
+      unknown,
+    ]);
   });
 });
 
