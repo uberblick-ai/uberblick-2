@@ -31,11 +31,13 @@ whose commit remains in the head. One review at one head, then stop.
 ## Outcome
 
 Reproducible findings against that head: what is wrong, where, why it matters,
-and what evidence would settle it. Correctness and data safety first, then risk
-and missing verification, then unnecessary complexity — a smaller change that
-defends the same contract is a finding. No findings is itself a verdict and is
-stated as one. Commits landing during the review do not silently move the
-target: report the drift and stop; a review at the new head is a new pickup.
+what evidence would settle it, and a proposed P1/P2/P3 severity grounded in the
+concrete supported-usage consequence. Correctness and data safety first, then
+risk and missing verification, then unnecessary complexity — a smaller change
+that defends the same contract is a finding. State when a verdict is P3-only.
+No findings is itself a verdict and is stated as one. Commits landing during
+the review do not silently move the target: report the drift and stop; a review
+at the new head is a new pickup.
 
 This is an adversarial implementation challenge, not a gate replay. Try to
 falsify the change: trace important failure paths and boundary conditions,

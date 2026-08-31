@@ -57,7 +57,9 @@ finding — severity does not decide the other two:
 - **Severity.** P1: supported usage can lose data, expose secrets, violate a
   CLAUDE.md invariant, or become materially unusable. P2: a real correctness,
   reliability, accessibility, or maintainability defect within supported usage,
-  without P1 impact. P3: minor, local, or low-impact.
+  without P1 impact. P3: minor, local, or low-impact. Name the concrete
+  supported-usage consequence; fix size or reviewer confidence does not change
+  severity.
 - **A branch-caused red gate is fix-now.** When a required check is green at the
   base and red at the reviewed head, the branch must restore it even when the
   stale code is a test fixture rather than production. Severity still follows
@@ -93,6 +95,9 @@ for the contract or invariant a finding names, never for the mechanics of the
 fix. Fix-up diffs face the same Touches, scope-escape and overtesting checks as
 feature diffs. Late findings still get an explicit disposition, but reviewer
 timing must not manufacture extra waves.
+Once all required challenges have returned and no P1 or supported-usage P2
+remains, a later P3-only verdict does not justify another external round. The
+integrator dispositions it and verifies any accepted local correction directly.
 
 ## Risk-scoped external re-review
 
@@ -118,5 +123,9 @@ at the exact merge head; and any earlier external-review reasoning carried
 across a later local fix is recorded on the PR with scope and rationale. If a
 confirmation round surfaces a net-new triaged P1, or the open-P1 set fails to
 shrink after a directed correction wave, park the PR `needs-human` with the
-finding list instead of looping — but never park for a false positive, an
-unrelated pre-existing issue, or a finding rejected with evidence.
+finding list instead of looping. Do not debate a P2/P3 label through fresh
+rounds: after one implementer evidence response or correction wave, the
+integrator rules from supported-usage impact; if it still cannot, park
+`needs-human` with the finding and one focused owner question. Never park for a
+false positive, an unrelated pre-existing issue, or a finding rejected with
+evidence.
