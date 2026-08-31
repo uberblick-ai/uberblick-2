@@ -2681,6 +2681,84 @@ h3.ub-heading {
   color: var(--foreground);
 }
 
+/* ---- the disclosure row (#563) ----
+
+   A shared primitive, not any one surface's furniture: a quiet full-width
+   header over a body the caller fills. `Disclosure.tsx` states why the header
+   is a button rather than a `<summary>`; these rules own the two claims that
+   are made of layout rather than of markup — the whole header is the target,
+   and it reads at a narrow pane width. */
+
+.ub-disclosure-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  /* `min-height`, never `height`, for the reason the sidebar row records
+     (#481): a label that wraps at a narrow width has to grow this row instead
+     of being clipped by it. 44px is the touch target the row owes a finger,
+     and it is a floor rather than a size. */
+  min-height: 44px;
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: var(--foreground);
+}
+
+.ub-disclosure-head:hover {
+  background: var(--secondary);
+}
+
+.ub-disclosure-head:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* The label takes what is left of the row and wraps inside it. The value and
+   the mark keep their own width at the end and stay centred against however
+   many lines the label became, so a wrap moves neither of them. */
+.ub-disclosure-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.ub-disclosure-secondary {
+  flex: none;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+
+/* One shape, one transform — the chevron reasoning of #110, and the reason the
+   mark is never hover-only: it is drawn at full strength in both states, and
+   only its angle says which one. */
+.ub-disclosure-mark {
+  display: block;
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: none;
+  color: var(--muted-foreground);
+  transform: rotate(0deg);
+  transition: transform 160ms ease;
+}
+
+.ub-disclosure-head[aria-expanded="true"] .ub-disclosure-mark {
+  transform: rotate(90deg);
+}
+
+/* A closed body is hidden and still mounted (`Disclosure.tsx`). Spelled out
+   rather than left to the browser's own `[hidden]` rule, because that rule is
+   the weakest origin there is: any later author rule giving this element a
+   `display` would quietly put a collapsed body back on the screen and back
+   into the accessibility tree. */
+.ub-disclosure-body[hidden] {
+  display: none;
+}
+
 /* ---- reduced motion ---- */
 
 /* Every transition above is decoration on a state change that has already
@@ -2690,6 +2768,7 @@ h3.ub-heading {
   .ub-group-body,
   .ub-group-act,
   .ub-copy,
+  .ub-disclosure-mark,
   .ub-gutter-add {
     transition: none;
   }
