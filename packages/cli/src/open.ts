@@ -508,11 +508,13 @@ export async function ensureBundle(
   // half-written `dist` can carry a current stamp and no `index.html` yet.
   // {@link buildBundle}'s pre-build read is paired the same way, because a build
   // killed between those two writes leaves that state behind with nobody left to
-  // finish it; its reads *after* a build need no pairing, since either that build
-  // exited 0 or the plan is `serve`, which {@link bundlePlan} returns only having
-  // seen an `index.html`. A *supplied* bundle missing its `index.html` never
-  // reaches this at all: {@link bundlePlan} answers `missing` for it, and
-  // {@link openCommand} stops there with the reason.
+  // finish it; its read *after* a build needs no pairing, because that build
+  // exited 0 and so wrote both files. On a `serve` plan nothing runs between
+  // those two reads, so the later one is the earlier one over again — which is
+  // why it answers `servable` only when a build actually ran. A *supplied*
+  // bundle missing its `index.html` never reaches this at all:
+  // {@link bundlePlan} answers `missing` for it, and {@link openCommand} stops
+  // there with the reason.
   if (stamped === SYNC_PROTOCOL_VERSION && isFile(join(plan.dir, "index.html"))) {
     return "servable";
   }
@@ -578,14 +580,18 @@ async function buildBundle(
   }
 
   const built = stampedProtocol(plan.dir);
-  if (built === SYNC_PROTOCOL_VERSION) {
+  if (built === SYNC_PROTOCOL_VERSION && plan.action === "build") {
     return "servable";
   }
 
+  const why =
+    built === SYNC_PROTOCOL_VERSION
+      ? `is a sync protocol ${built} stamp with no bundle behind it, left by a ` +
+        "build that never finished"
+      : `${speaks(built)}, and this uberblick speaks ${SYNC_PROTOCOL_VERSION}`;
   io.err(
-    `ub open: the web app at ${plan.dir} ${speaks(built)}, and this uberblick ` +
-      `speaks ${SYNC_PROTOCOL_VERSION} — rebuilding it with \`mise run build-web\`; ` +
-      "this takes a moment\n",
+    `ub open: the web app at ${plan.dir} ${why} — rebuilding it with ` +
+      "`mise run build-web`; this takes a moment\n",
   );
   const failure = await runBuild("mise", ["run", "build-web"], CHECKOUT_ROOT, env, stop);
   if (stop.interrupted()) {

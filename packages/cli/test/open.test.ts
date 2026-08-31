@@ -990,6 +990,39 @@ describe("ub open", () => {
     expect(mise.calls()).toEqual([]);
   });
 
+  it("builds when the run it waited for left a stamp and no bundle", async () => {
+    const box = sandbox();
+    const dir = join(box.cwd, "abandoned");
+    mkdirSync(dir, { recursive: true });
+    const mise = fakeMise(box);
+    const io = stderrIo();
+    // The holder's build stamps this directory and then ends without ever
+    // writing `index.html` — an ordinary non-zero exit does it. The waiter is
+    // woken into precisely that state, and the stamp it re-reads under the lock
+    // is the same one it already refused to serve outside it: nothing ran in
+    // between. Take it at its word and this run announces success and answers
+    // 404 for as long as it stays in the foreground.
+    const holder = await anotherRunBuilding(dir, SYNC_PROTOCOL_VERSION);
+
+    const env = {
+      ...box.env,
+      PATH: mise.path,
+      FAKE_STAMP_DIR: dir,
+      FAKE_STAMP_VERSION: String(SYNC_PROTOCOL_VERSION),
+    };
+    const waiting = ensureBundle({ action: "serve", dir, ours: true }, env, io, calm());
+    await waitUntil("the waiter to announce itself", () => io.text().includes("waiting for it"));
+    expect(mise.calls()).toEqual([]);
+
+    await holder.finish();
+
+    expect(await waiting).toBe("servable");
+    // It built, rather than serving the abandoned stamp, and said which of the
+    // two things wrong with a bundle this one was.
+    expect(mise.calls().length).toBe(1);
+    expect(io.text()).toContain("stamp with no bundle behind it");
+  });
+
   it("builds a stamp-only directory nobody is building, rather than serving it", async () => {
     const box = sandbox();
     const dir = join(box.cwd, "stamp-only");
