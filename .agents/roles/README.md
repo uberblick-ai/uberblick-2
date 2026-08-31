@@ -81,9 +81,10 @@ be sufficient for recovery.
 
 **A durable comment reaches GitHub as composed.** Every durable comment body —
 claim, renewal, delegation, return, `Done:`, review round, dispatch failure,
-finding disposition, merge report, retrospective reply — is written to a file
-with a *quoted* heredoc delimiter and posted from that file, where `<scratch>`
-is the run's own directory from the paragraph above:
+finding disposition, merge report, retrospective reply — must land byte for
+byte: line breaks intact, backticks and `$` literal. Write it into a file under
+the run's own scratch directory, `<scratch>` here, and post that file; any
+composition with that property is fine, and a quoted heredoc is one:
 
 ```sh
 cat > <scratch>/done.md <<'EOF'
@@ -93,14 +94,11 @@ EOF
 gh issue comment <N> --body-file <scratch>/done.md
 ```
 
-Any composition with the same property is equally fine; what is forbidden is a
-body a shell expands. Quote the delimiter as `<<'EOF'`, never bare `<<EOF`, and
-do not pass a body inline as `--body "…"`: both substitute the backticked terms
-and the `$` in your own text, so a finding that names `` `ub --help` `` posts
-that command's output in its place. A record that lands garbled is then
-recoverable only from the launching session's transcript — the private channel
-every rule here exists to keep out of the record. That has happened once, on
-#491.
+#491 lost a `Done:` to both at once: a shell expanded `` `ub --help` `` into the
+verdict — as `--body "…"` and a bare `<<EOF` both do — and its line breaks
+arrived as the two literal characters `\n`, which no shell had touched. A
+garbled record survives only in the launching session's transcript, the private
+channel every rule here exists to keep out of the record.
 
 **The race rule.** A live top-level claim makes the item ineligible for every
 other queue pickup. The one permitted nested claim is the subagent explicitly
