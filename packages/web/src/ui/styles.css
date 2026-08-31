@@ -1676,32 +1676,52 @@ body {
   background: var(--destructive);
 }
 
-/* ---- the room key as a shareable link (#68) ---- */
+/* ---- copying the document's link (#68), in the identity line (#535) ---- */
 
-/* The room key is the document's address, so it is the copy affordance. It has
-   to keep looking like the muted text it replaced: no border, no padding, no
-   change of width. The whole point of this line is that nothing on it moves. */
-.ub-room-wrap {
+/* The confirmation is positioned against this, so it is placed relative to the
+   control rather than to whatever happens to be positioned above it. */
+.ub-copy-wrap {
   position: relative;
   display: inline-flex;
+  flex: none;
 }
 
-.ub-room {
+/* The control *is* the touch target: 44x44 of its own box, with the words
+   centred in it.
+
+   It was a pseudo-element overhanging a 25px row, and both directions it could
+   overhang were already taken (#535). Downward is `.ub-title`, which is
+   full-bleed and starts a few pixels below, so a target reaching there answered
+   taps meant for the title (Codex round 1). Upward is `.ub-pane`'s top padding,
+   which scrolls away: the same target measured 44px at rest and 25px once the
+   pane had scrolled 20px, while the button itself stayed fully visible and
+   unchanged (Opus round 1). A target that exists at one scroll offset is not a
+   target, so the row now carries the height a thumb needs instead of borrowing
+   it from its neighbours. */
+.ub-copy-link {
   font: inherit;
   color: var(--muted-foreground);
   background: none;
   border: none;
-  padding: 0;
-  height: auto;
+  padding: 0 0.15rem;
+  /* 44px for a thumb, and never narrower than the confirmation drawn over it.
+     `em`, because that confirmation is set in this control's own font, which is
+     the identity line's 0.75rem here and the waiting screen's inherited size
+     there — a `rem` floor would fit one and not the other. */
+  min-width: max(2.75rem, 6em);
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
 }
 
-.ub-room:hover {
+.ub-copy-link:hover {
   color: var(--foreground);
   text-decoration: underline;
 }
 
-.ub-room:focus-visible {
+.ub-copy-link:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
@@ -1709,13 +1729,22 @@ body {
 
 /* Out of flow, and only there while it has something to say: a confirmation
    that took part in the layout would push everything after it sideways for a
-   second and a half. */
+   second and a half.
+
+   Over the control itself, because every direction around it belongs to
+   something this header keeps. Above is the pane's clip edge, which cuts the
+   confirmation off as soon as anyone scrolls; below is the document's title;
+   and beside it are the `uuid … · rev …` facts on the identity line and the
+   whole sync reading on the waiting screen — the two things #535 preserves
+   while moving the control, which a confirmation to their right covered for a
+   second and a half (Codex round 2). The control's own `min-width` above is
+   what keeps this inside it. */
 .ub-copied {
   position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 0.2rem;
-  padding: 0 0.3rem;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--radius-sm);
   background: var(--secondary);
   color: var(--secondary-foreground);
@@ -1754,7 +1783,12 @@ body {
   align-items: center;
   gap: 0.5rem;
   flex-wrap: nowrap;
-  min-height: 1.55rem;
+  /* The copy control's 44px target sets this row's height, and the row states
+     it so that the *empty* row — the one drawn for the frame before `meta`
+     arrives — reserves the same space. A row that grew when its contents
+     landed would push the title down one frame after every navigation, which
+     is the jump this layout is built to avoid. */
+  min-height: 2.75rem;
   margin: 0 0 0.15rem;
   font-size: 0.75rem;
   color: var(--muted-foreground);
@@ -2395,6 +2429,28 @@ h3.ub-heading {
 
 /* ---- what an address resolved to, when it was not a document (#68) ---- */
 
+/* The waiting screen's own row: what this link is waiting on, and the address
+   to hand somebody who already has the document.
+
+   Its own class rather than the identity line's (`.ub-doc-meta`), because
+   `.ub-status` is written as a block line — a divider across the column and a
+   margin separating it from the prose — and as a flex item neither rule means
+   that any more: the divider stops under the words, and the margin pushes the
+   copy control below them (#535, Opus round 1). So the row takes both over and
+   the status line drops them here. */
+.ub-waiting-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.75rem;
+}
+
+.ub-waiting-meta .ub-status {
+  border-bottom: 0;
+  margin-bottom: 0;
+}
+
 /* Quieter than the unsupported-content banner above and built the same way: a
    <strong> lead in UI weight, then the detail. None of these three states is an
    error the reader caused — an unsynced link is the ordinary case — so none of
@@ -2464,8 +2520,8 @@ h3.ub-heading {
 /* ---- sync indicator (#76) ---- */
 
 /* Two fixed-width slots. Whatever the state, the mark is one square and the
-   word is one fixed column — sized on `.ub-status-word` below — so "local
-   cache" and the room key after them never move. */
+   word is one fixed column — sized on `.ub-status-word` below — so whatever
+   follows them never moves. */
 .ub-status-mark {
   display: inline-flex;
   align-items: center;

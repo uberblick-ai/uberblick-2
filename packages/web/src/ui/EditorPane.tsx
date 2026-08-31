@@ -14,10 +14,14 @@ import { describeForeignBlocks } from "../editor/palette.js";
 import type { LinkConflict } from "../editor/palette.js";
 import { repairLinkConflict } from "../editor/link-repair.js";
 import type { LinkSurvivor } from "../editor/link-repair.js";
-import { writeToClipboard } from "../editor/source-chrome.js";
 import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
 import type { RoomConnection } from "../collab/rooms.js";
-import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
+import {
+  backlogLabel,
+  localCopyState,
+  rawSyncState,
+  useCalmSyncState,
+} from "./calm.js";
 import { statusReading } from "./status-reading.js";
 import { BlockMenu } from "./BlockMenu.js";
 import { MentionMenu } from "./MentionMenu.js";
@@ -33,7 +37,6 @@ import type { RemotePresence } from "./doc-chrome.js";
 import { CommentComposer } from "./CommentComposer.js";
 import { PeerAvatar } from "./PeerAvatar.js";
 import { DocMetaLine } from "./DocChrome.js";
-import { shareUrl } from "./route.js";
 import { threadIdFromActivation, threadIdFromTarget } from "./threads.js";
 import type { SelectThread } from "./threads.js";
 
@@ -76,87 +79,6 @@ function ArchivedBanner({ onRestore }: { onRestore: () => void }): ReactElement 
   );
 }
 
-/** How long the copy confirmation stays up, in milliseconds. */
-const COPIED_MS = 1_500;
-
-type CopyResult = "idle" | "copied" | "failed";
-
-/**
- * The room key, doubling as the document's shareable link (#68).
- *
- * The line that already identified the document becomes the copy affordance
- * rather than growing a button beside it — there was never anything else to
- * show. The confirmation is positioned out of flow for the reason the rest of
- * this line is built the way it is (#76): nothing here may move sideways, and a
- * word appearing in the row would move everything after it.
- *
- * The link is built from `segment` — the workspace as the *address* spells it —
- * rather than from the room key, which carries the bare uuid. The two are the
- * same string for an undecorated workspace and differ for `<slug>-<uuid>`, and
- * a copy that quietly handed back the undecorated form would rewrite somebody's
- * link on its way out of their own address bar. What is copied is the address
- * this document is open at.
- *
- * The visible label stays the room key, because that is what the rest of this
- * line is about: the sync state of a room, named the way the hub and the update
- * log name it. The accessible name goes the other way and announces the
- * address, because that is the thing the click produces.
- *
- * The copy goes through `writeToClipboard`, not `navigator.clipboard`: that API
- * exists only in a secure context, and serving this client over plain http on a
- * tailnet host is a supported deployment (REMOTE.md). The shared helper falls
- * back to `execCommand`, and reports whether either worked — so a failure is
- * said out loud rather than swallowed into a button that quietly does nothing.
- */
-function CopyLink({
-  room,
-  segment,
-}: {
-  room: string;
-  segment: string;
-}): ReactElement {
-  const [result, setResult] = useState<CopyResult>("idle");
-
-  useEffect(() => {
-    if (result === "idle") return;
-    const timer = setTimeout(() => setResult("idle"), COPIED_MS);
-    return () => clearTimeout(timer);
-  }, [result]);
-
-  // The one address this button is about: what it copies, and what it says it
-  // copies. Two derivations of that would be two chances for them to disagree.
-  const address = `${segment}/${parseRoom(room).uuid}`;
-
-  const copy = async (): Promise<void> => {
-    const ok = await writeToClipboard(shareUrl(address, window.location.origin));
-    setResult(ok ? "copied" : "failed");
-  };
-
-  return (
-    <span className="ub-room-wrap">
-      <button
-        type="button"
-        className="ub-room"
-        // The visible label is the room key, which names the document but not
-        // the action. `title` is not reliably announced, so the accessible name
-        // is set explicitly and carries both — and it names the address that is
-        // actually copied, not the room key beside it, so what a screen reader
-        // announces is what lands on the clipboard.
-        aria-label={`Copy link to ${address}`}
-        title={`Copy link to ${address}`}
-        onClick={() => void copy()}
-      >
-        {room}
-      </button>
-      {/* Rendered always, empty when idle: `role="status"` only announces
-          changes to a region the reader was already in. */}
-      <span className="ub-copied" role="status">
-        {result !== "idle" && (result === "copied" ? "link copied" : "copy failed")}
-      </span>
-    </span>
-  );
-}
-
 /**
  * Exported for the label test only.
  *
@@ -169,10 +91,10 @@ function CopyLink({
  *    redraw cadence is.
  * 2. The mark and the word each sit in a fixed-width slot, so swapping the dot
  *    for the spinner and "synced" for "syncing…" moves nothing to their right.
- * 3. The backlog badge is last before the presence strip, and only shows when
- *    the settled state is not `synced`. In the two settled states the room key
- *    and "local cache" are therefore at identical positions; a badge in its old
- *    place, between them and the word, could not have been.
+ * 3. Everything after the word is drawn only while the reading is *not*
+ *    `synced` — the local-copy note and the backlog badge alike — so the
+ *    settled healthy line is the word and the peers, and nothing between them
+ *    can move.
  *
  * The suppression in (3) is safe only because a non-empty backlog is itself
  * part of what makes the state busy (`rawSyncState`). A backlog that outlives
@@ -181,12 +103,10 @@ function CopyLink({
  */
 export function StatusLine({
   connection,
-  segment,
   presence,
+  docPresent,
 }: {
   connection: RoomConnection;
-  /** The workspace as the address spells it — what a copied link carries. */
-  segment: string;
   /**
    * Who else is in this room, read once by the shell and handed down — the same
    * snapshot the activity pill and the sync panel draw from (`App.tsx`).
@@ -197,14 +117,38 @@ export function StatusLine({
    * keystroke anyone types, a reading the shell has already made.
    */
   presence: readonly RemotePresence[];
+  /**
+   * Whether the document this line is about has reached this replica. The
+   * waiting screen draws this line for one that has not, and there the local
+   * copy is not a fact this client has — see {@link localCopyState}.
+   */
+  docPresent: boolean;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const state = useCalmSyncState(rawSyncState(status));
   const reading = statusReading(status, state);
+  /**
+   * Whether this client holds a durable copy of the document — the one
+   * additional fact worth saying inline while syncing is not happening (owner,
+   * #535), and said nowhere while the reading is `synced`, where it is a
+   * promise nobody is waiting on. `null` is "not known", which is why it asks
+   * `localCopyState` rather than `hasLocalCache`: false before the local read
+   * settles is a read still running, not an absent copy.
+   */
+  const localCopy =
+    reading.tone === "synced" ? null : localCopyState(status, docPresent);
+  const copyNote =
+    localCopy === null ? null : (
+      <span className="ub-muted ub-local-copy">
+        {localCopy ? "local copy" : "no local copy"}
+      </span>
+    );
   if (reading.detail !== null) {
-    // A refusal replaces the line rather than decorating it: the backlog, the
-    // cache claim and the peer strip are all about a connection that is working
-    // or coming back, and none of them is what this reader has to act on.
+    // A refusal replaces the line rather than decorating it: the backlog and
+    // the peer strip are about a connection that is working or coming back, and
+    // neither is what this reader has to act on. The local copy is the
+    // exception, and the reason is the same one: it is the only thing here that
+    // is still true while nothing will sync again until somebody acts.
     return (
       <div className="ub-status">
         <span className="ub-status-mark" aria-hidden="true">
@@ -212,7 +156,7 @@ export function StatusLine({
         </span>
         <span className="ub-status-word">{reading.word}</span>
         <span className="ub-muted">{reading.detail}</span>
-        <CopyLink room={connection.room} segment={segment} />
+        {copyNote}
       </div>
     );
   }
@@ -229,11 +173,7 @@ export function StatusLine({
         )}
       </span>
       <span className="ub-status-word">{reading.word}</span>
-      {/* `hasLocalCache`, not `localReplicaLoaded`: the second only says the
-          local read is over, and it is over immediately where there is no
-          IndexedDB to read. */}
-      {status.hasLocalCache && <span className="ub-muted">local cache</span>}
-      <CopyLink room={connection.room} segment={segment} />
+      {copyNote}
       {state !== "synced" && status.unsyncedChanges > 0 && (
         <span className="ub-pending">{backlogLabel(status.unsyncedChanges)}</span>
       )}
@@ -597,7 +537,7 @@ export function EditorPane({
   onSelectThread,
 }: {
   connection: RoomConnection | null;
-  /** The workspace as the address spells it — see {@link StatusLine}. */
+  /** The workspace as the address spells it — see {@link DocMetaLine}. */
   segment: string;
   /** This room's presence reading, passed through to {@link StatusLine}. */
   presence: readonly RemotePresence[];
@@ -651,6 +591,7 @@ export function EditorPane({
             version of it is on screen — above the title, as design 1a has it. */}
         <DocMetaLine
           connection={connection}
+          segment={segment}
           meta={meta}
           knownTags={knownTags}
           archived={archived}
@@ -672,7 +613,9 @@ export function EditorPane({
             setTitle(connection.ydoc, event.target.value);
           }}
         />
-        <StatusLine connection={connection} segment={segment} presence={presence} />
+        {/* The editor draws only for a document that is here: `RoutePane` sends
+            everything else to the waiting screen. */}
+        <StatusLine connection={connection} presence={presence} docPresent />
         {foreign.length > 0 ? (
           <ForeignFallback
             connection={connection}

@@ -28,13 +28,17 @@ export const UNGROUPED_KEY = "other";
 
 export type GroupKey = GroupTag | typeof UNGROUPED_KEY;
 
-const LABELS: Record<GroupKey, string> = {
+const LABELS: Record<GroupKey, string | null> = {
   "start-here": "Start here",
   feature: "Features",
   verify: "Verify",
   "implementation-reference": "Implementation reference",
   reference: "Reference",
-  [UNGROUPED_KEY]: "Other",
+  // Deliberately nameless (#535). A document carrying none of the canonical
+  // tags is not in a group called "Other" — the word is only this derivation's
+  // fallback, it says nothing about the document, and beside the title it read
+  // like a kind of document rather than the absence of a group.
+  [UNGROUPED_KEY]: null,
 };
 
 /** The group a set of tags belongs to: the first known tag, in canonical order. */
@@ -43,11 +47,12 @@ export function groupKeyForTags(tags: readonly string[]): GroupKey {
 }
 
 /**
- * The label the breadcrumb and the identity-line badge show for a group. Both
- * read the document's own `meta.tags` rather than its directory stub, because
- * the stub is a cache of them: a retag lands here on the write itself instead
- * of waiting for the repair that follows it.
+ * The label the breadcrumb and the identity-line badge show for a group, or
+ * `null` where a group has no name to show. Both read the document's own
+ * `meta.tags` rather than its directory stub, because the stub is a cache of
+ * them: a retag lands here on the write itself instead of waiting for the
+ * repair that follows it.
  */
-export function groupLabel(key: GroupKey): string {
+export function groupLabel(key: GroupKey): string | null {
   return LABELS[key];
 }

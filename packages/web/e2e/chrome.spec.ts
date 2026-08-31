@@ -795,3 +795,149 @@ test("the document title is set in the bundled Fraunces, and nothing else moved"
   expect(fetched.offOrigin).toEqual([]);
   expect(fetched.fraunces).toBeGreaterThan(0);
 });
+
+/**
+ * The copy-link control's touch target (#535).
+ *
+ * A browser, because the claim is layout and nothing else. The target used to
+ * be a pseudo-element overhanging a 25px row, and both directions it could
+ * overhang were already spoken for: `.ub-title` is full-bleed a few pixels
+ * below and lost the taps a target reaching down took from it (Codex round 1),
+ * and above is `.ub-pane`'s top padding, which scrolls away — the same target
+ * measured 44px at rest and 25px once the pane had scrolled 20px, with the
+ * button itself still fully visible and unchanged (Opus round 1). The target is
+ * the control's own box now, and this asks the only question that settles it:
+ * at both offsets where a reader can see the whole control, does the whole
+ * 44x44 take a click?
+ */
+test("the copy-link control is a 44px target, at rest and once the pane has scrolled", async ({
+  browser,
+}) => {
+  const page = await openApp(browser, "light");
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+
+  // Prose enough that the pane really scrolls: the defect this replaced was
+  // invisible in a document short enough to sit still.
+  await page.locator(".ub-editor .ProseMirror").click();
+  await page.keyboard.type("a line of prose\n".repeat(24));
+
+  // A long tag strip, because that is what pushes this row around.
+  // `.ub-tag-add` carries a `list`, which makes its role combobox, not textbox.
+  const addTag = page.locator(".ub-tag-add");
+  for (const tag of ["alpha", "beta", "gamma", "delta", "epsilon"]) {
+    await addTag.fill(tag);
+    await addTag.press("Enter");
+  }
+
+  /**
+   * The live target, hit-tested rather than computed. Reading the rule's own
+   * offsets back out only re-states what the stylesheet says, and the
+   * arithmetic that turns them into a rectangle is wrong for any other way of
+   * writing the same target — a wrong number there would look like a passing
+   * measurement. `contains` answers what matters: does this control take the
+   * click?
+   */
+  const probe = (
+    toClipEdge: boolean,
+  ): Promise<{
+    liveHeight: number;
+    liveWidth: number;
+    takesTheTitle: boolean;
+    scrolled: number;
+  }> =>
+    page.evaluate((flush) => {
+      const control = document.querySelector(".ub-copy-link");
+      const title = document.querySelector(".ub-title");
+      const pane = document.querySelector(".ub-pane");
+      if (control === null || title === null || pane === null) {
+        throw new Error("e2e: no header");
+      }
+      if (flush) {
+        // The last offset at which all of the control is still on screen: its
+        // top edge resting on the pane's clip edge. A target spent in the
+        // padding above the row is entirely gone here, while the control a
+        // reader is aiming at has not moved a pixel.
+        pane.scrollTop += Math.floor(
+          control.getBoundingClientRect().top - pane.getBoundingClientRect().top,
+        );
+      }
+      const box = control.getBoundingClientRect();
+      const x = Math.round(box.x + box.width / 2);
+      const y = Math.round(box.y + box.height / 2);
+      const answers = (px: number, py: number): boolean =>
+        control.contains(document.elementFromPoint(px, py));
+      // Swept outward from the centre, the one point inside the target however
+      // the target is drawn.
+      let top = y;
+      let bottom = y;
+      let left = x;
+      let right = x;
+      while (answers(x, top - 1)) top -= 1;
+      while (answers(x, bottom + 1)) bottom += 1;
+      while (answers(left - 1, y)) left -= 1;
+      while (answers(right + 1, y)) right += 1;
+      return {
+        liveHeight: bottom - top + 1,
+        liveWidth: right - left + 1,
+        takesTheTitle: answers(x, title.getBoundingClientRect().top + 1),
+        scrolled: pane.scrollTop,
+      };
+    }, toClipEdge);
+
+  // The three widths the layout has to hold at, including the iPad width the
+  // 44px is *for*.
+  for (const width of [1280, 1100, 768]) {
+    await page.setViewportSize({ width, height: 620 });
+    // Typing left the pane scrolled to the caret; the first reading is of the
+    // header at rest.
+    await page.evaluate(() => {
+      const pane = document.querySelector(".ub-pane");
+      if (pane !== null) pane.scrollTop = 0;
+    });
+
+    const rest = await probe(false);
+    // The target a thumb needs is really there, not merely declared…
+    expect(rest.liveHeight).toBeGreaterThanOrEqual(44);
+    expect(rest.liveWidth).toBeGreaterThanOrEqual(44);
+    // …and it is not paid for with the title underneath.
+    expect(rest.takesTheTitle).toBe(false);
+
+    // Then again with the header scrolled up against the clip edge. A
+    // measurement taken where the pane could not scroll proves nothing, so the
+    // offset it reached is asserted too.
+    const scrolled = await probe(true);
+    expect(scrolled.scrolled).toBeGreaterThan(0);
+    expect(scrolled.liveHeight).toBeGreaterThanOrEqual(44);
+    expect(scrolled.liveWidth).toBeGreaterThanOrEqual(44);
+    expect(scrolled.takesTheTitle).toBe(false);
+  }
+
+  // The confirmation is drawn over the control rather than beside it, because
+  // beside it are the `uuid … · rev …` facts this line exists to show, and on
+  // the waiting screen the whole sync reading. Containment inside the control's
+  // own box is the claim, since it holds whatever the row happens to carry.
+  const confirmationIsContained = async (open: Page): Promise<boolean> => {
+    await open.locator(".ub-copy-link").click();
+    await expect(open.locator(".ub-copied")).not.toBeEmpty();
+    return open.evaluate(() => {
+      const control = document.querySelector(".ub-copy-link");
+      const note = document.querySelector(".ub-copied");
+      if (control === null || note === null) throw new Error("e2e: no control");
+      const box = control.getBoundingClientRect();
+      const shown = note.getBoundingClientRect();
+      return shown.left >= box.left - 0.5 && shown.right <= box.right + 0.5;
+    });
+  };
+  expect(await confirmationIsContained(page)).toBe(true);
+
+  // And on the waiting screen, where the control inherits a larger font and the
+  // same words are wider — the reason its width floor is in `em`.
+  const waiting = await openApp(
+    browser,
+    "light",
+    `/${harness().workspace}/${randomUUID()}`,
+  );
+  await expect(waiting.locator(".ub-notice")).toContainText("Waiting for sync");
+  expect(await confirmationIsContained(waiting)).toBe(true);
+});

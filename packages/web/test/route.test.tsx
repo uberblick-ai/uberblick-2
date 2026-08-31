@@ -36,7 +36,7 @@ import {
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
 import { RoutePane } from "../src/ui/App.js";
-import { StatusLine } from "../src/ui/EditorPane.js";
+import { DocMetaLine } from "../src/ui/DocChrome.js";
 import { useDocMeta } from "../src/ui/hooks.js";
 import {
   canonicalPath,
@@ -330,6 +330,16 @@ describe("a fresh deep link does not open a writable empty replica", () => {
     expect(host.querySelector(".ub-notice")?.textContent).toContain("Waiting for sync");
     expect(host.querySelector(".ub-editor")).toBeNull();
 
+    // AC3 is about the document page, and this screen is one — it is this
+    // document's address, showing why it is not here yet. The control moved to
+    // the identity line, which this screen does not draw, so it is rendered
+    // here too; a link is *more* worth sending from a document that has not
+    // arrived, and the address bar is not a keyboard-reachable control
+    // (Codex round 1).
+    expect(
+      host.querySelector(".ub-copy-link")?.getAttribute("aria-label"),
+    ).toBe(`Copy link to ${WS}/${UUID}`);
+
     // Now the document's own room delivers, exactly as sync would.
     const remote = new Y.Doc();
     initDoc(remote, { uuid: UUID, title: "Annotations" });
@@ -581,7 +591,7 @@ describe("an address that resolves to no document says which one, and why", () =
 });
 
 /**
- * Click the room key on a mounted status line and return what it then says.
+ * Click the copy control on a mounted identity line and return what it says.
  *
  * `segment` is the workspace as the address spells it, which is what the app
  * hands the line — the room key is always the bare uuid.
@@ -596,15 +606,17 @@ async function clickCopy(
   const root = createRoot(host);
   act(() =>
     root.render(
-      <StatusLine
+      <DocMetaLine
         connection={stubConnection(`${WS}/${UUID}`)}
         segment={segment}
-        presence={NOBODY}
+        meta={meta(UUID)}
+        knownTags={[]}
+        archived={false}
       />,
     ),
   );
 
-  const button = host.querySelector<HTMLButtonElement>(".ub-room");
+  const button = host.querySelector<HTMLButtonElement>(".ub-copy-link");
   const label = button?.textContent ?? "";
   const ariaLabel = button?.getAttribute("aria-label") ?? "";
   await act(async () => {
@@ -617,7 +629,7 @@ async function clickCopy(
   return { label, ariaLabel, said };
 }
 
-describe("the room key copies the document's canonical link", () => {
+describe("the copy control hands back the document's canonical link", () => {
   const realExecCommand = (document as unknown as { execCommand?: unknown }).execCommand;
 
   afterEach(() => {
@@ -639,10 +651,11 @@ describe("the room key copies the document's canonical link", () => {
 
     const { label, ariaLabel, said } = await clickCopy();
 
-    // The affordance is the line that already named the document — no new chrome.
-    expect(label).toBe(`${WS}/${UUID}`);
-    // …but the visible label names the document, not the action, so the
-    // accessible name has to carry both. `title` is not reliably announced.
+    // The visible words say what the button does; the room key they used to be
+    // is out of the header entirely (#535).
+    expect(label).toBe("Copy link");
+    // The accessible name adds the part a reader cannot see — the address that
+    // lands on the clipboard. `title` is not reliably announced.
     expect(ariaLabel).toBe(`Copy link to ${WS}/${UUID}`);
 
     // Exactly what `parseRoute` resolves back to this document.
@@ -674,9 +687,9 @@ describe("the room key copies the document's canonical link", () => {
     const { label, ariaLabel } = await clickCopy(DECORATED);
 
     expect(written).toEqual([`${window.location.origin}/${DECORATED}/${UUID}`]);
-    expect(label).toBe(`${WS}/${UUID}`);
+    expect(label).toBe("Copy link");
     // The accessible name announces what the click actually produces, so it
-    // follows the address rather than the room key beside it.
+    // follows the address rather than the room key the button no longer shows.
     expect(ariaLabel).toBe(`Copy link to ${DECORATED}/${UUID}`);
     // And it is a link that resolves back to this document.
     expect(route(new URL(written[0] as string).pathname)).toEqual({
