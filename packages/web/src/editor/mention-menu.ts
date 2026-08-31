@@ -49,7 +49,7 @@
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import type { Transaction } from "@tiptap/pm/state";
-import { endUndoCapture, findBlockById, isTypedHere } from "./block-menu.js";
+import { endUndoCapture, isTypedHere } from "./block-menu.js";
 import { replaceWithDocLink } from "./doc-links.js";
 import type { DocLinkCandidate, DocLinkContext } from "./doc-links.js";
 
@@ -114,29 +114,52 @@ export function mentionTriggerAt(editor: Editor): MentionTrigger | null {
   };
 }
 
-/** How many `@` characters `text` holds. */
-function atCount(text: string): number {
-  let count = 0;
-  for (const character of text) if (character === "@") count += 1;
-  return count;
+/**
+ * Whether this transaction's own writing **ends** at `pos`.
+ *
+ * That is the shape of a character typed at the caret, and nothing else has it.
+ * Each step map reports the range it wrote, in that step's own coordinates, so
+ * the range is carried through the steps after it before being compared.
+ *
+ * - Typing `@`, over a selection or not, writes a range ending exactly at the
+ *   caret.
+ * - A deletion writes nothing, so backspacing back onto an `@` that was already
+ *   there is not an insertion of it.
+ * - An **undo or a redo** replaces the whole document in one step —
+ *   y-prosemirror rebuilds it from the Y.Doc — so its written range ends at the
+ *   document's end, never at a caret inside a paragraph. That matters because
+ *   the transaction carries no origin to test instead: a peer's edit arrives
+ *   with `y-sync$` meta and a paste with `uiEvent`, but an undo arrives with
+ *   neither, and the undo manager's own `undoing` flag is already cleared by the
+ *   time the transaction is seen. Both measured, not assumed.
+ */
+function wroteUpTo(transaction: Transaction, pos: number): boolean {
+  let matched = false;
+  transaction.mapping.maps.forEach((map, index) => {
+    const after = transaction.mapping.slice(index + 1);
+    map.forEach((_oldFrom, _oldTo, newFrom, newTo) => {
+      if (newTo <= newFrom) return;
+      if (after.map(newTo, 1) === pos) matched = true;
+    });
+  });
+  return matched;
 }
 
 /**
  * Whether `transaction` is the gesture that *opens* a mention session: this
- * reader typing an `@` the block did not have.
+ * reader typing the `@` itself.
  *
- * Two conditions, and each rules out a different way a picker could appear over
+ * Three conditions, each ruling out a different way a picker could appear over
  * text nobody was mentioning with.
  *
+ * - **This reader's keyboard** ({@link isTypedHere}): not a peer's keystroke,
+ *   and not a paste, drop or cut.
  * - **An empty query.** A paragraph that has held `@notes` since last week is
  *   prose; clicking into it and typing a letter must not pop a picker. Only an
  *   `@` with nothing typed after it yet can be the command.
- * - **The block gained an `@`.** {@link isTypedHere} does not catch an undo —
- *   y-prosemirror rebuilds the document and the transaction carries no origin —
- *   and an undo can leave the caret immediately after an `@` that was already
- *   there. Comparing the count against `transaction.before` tells "the reader
- *   pressed that key" from "that character was already in this block", which is
- *   the same question the slash menu asks of its own block being empty.
+ * - **The `@` is what this transaction wrote** ({@link wroteUpTo}), which is
+ *   what tells the keystroke from an undo or a redo that happens to leave the
+ *   caret after one.
  *
  * Keeping an already-open session alive as the query grows is the state's job,
  * not this one's (see {@link mentionTriggerAt}).
@@ -147,11 +170,7 @@ export function opensMentionSession(
 ): boolean {
   if (!isTypedHere(transaction)) return false;
   if (trigger.query !== "") return false;
-  const before = findBlockById(transaction.before, trigger.blockId);
-  const now = findBlockById(transaction.doc, trigger.blockId);
-  // A block this transaction created had no `@` to keep, so its first one is new.
-  if (before === null || now === null) return true;
-  return atCount(before.node.textContent) < atCount(now.node.textContent);
+  return wroteUpTo(transaction, trigger.to);
 }
 
 /**
@@ -205,7 +224,10 @@ export function linkMentionAtTrigger(
 ): boolean {
   const live = mentionTriggerAt(editor);
   if (live === null) return false;
-  if (live.blockId !== trigger.blockId || live.query !== trigger.query) return false;
+  // The block, the occurrence and the query: a block can hold two `@hub`s, and
+  // one that is not the session's is not this session's to replace.
+  if (live.blockId !== trigger.blockId) return false;
+  if (live.from !== trigger.from || live.query !== trigger.query) return false;
 
   // A reader who undoes this means "give me my `@query` back", not "give me back
   // the empty block I started from" — so the reference is its own undo step.

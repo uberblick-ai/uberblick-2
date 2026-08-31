@@ -417,11 +417,87 @@ describe("the picker", () => {
   });
 
   /**
+   * A session belongs to one `@`. A block can hold two, and a caret moved from
+   * one to the other is a different mention: the card closes rather than
+   * silently re-aiming at the occurrence the reader walked into.
+   */
+  it("closes when the caret moves to another mention in the same block", () => {
+    const { context } = directory();
+    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
+    const mounted = mountPicker(ydoc, context);
+    try {
+      caret(mounted.editor, 0, 0);
+      type(mounted.editor, "one @hub two ");
+      type(mounted.editor, "@");
+      type(mounted.editor, "hub");
+      expect(mounted.card()).not.toBeNull();
+
+      // Onto the end of the *first* `@hub`, which is trigger-shaped too.
+      caret(mounted.editor, 0, 8);
+      expect(mentionTriggerAt(mounted.editor)).toMatchObject({ query: "hub" });
+      expect(mounted.card()).toBeNull();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  /**
+   * And the command refuses on the same grounds, not only the card: a trigger
+   * naming one occurrence must not splice into the identical one beside it,
+   * whoever is holding it.
+   */
+  it("refuses a trigger that names a different occurrence", () => {
+    const { context } = directory();
+    const { ydoc } = docWith([{ type: "paragraph", text: "one @hub two @hub" }]);
+    const mounted = mountPicker(ydoc, context);
+    try {
+      caret(mounted.editor, 0, 8);
+      const first = mentionTriggerAt(mounted.editor);
+      expect(first).toMatchObject({ query: "hub" });
+
+      caret(mounted.editor, 0, 17);
+      expect(
+        linkMentionAtTrigger(
+          mounted.editor,
+          first as MentionTrigger,
+          HUB,
+          context,
+        ),
+      ).toBe(false);
+      expect(getBlocks(ydoc)[0]?.text).toBe("one @hub two @hub");
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  /**
+   * Typing the `@` over a selection is still typing it. The gate asks what this
+   * transaction *wrote*, not what the block ended up holding — which is the
+   * whole point, because selecting `@x` and typing `@` leaves the block's text
+   * holding exactly as many `@` as before.
+   */
+  it("opens when the typed @ replaces a selection", () => {
+    const { context } = directory();
+    const { ydoc } = docWith([{ type: "paragraph", text: "see @x" }]);
+    const mounted = mountPicker(ydoc, context);
+    try {
+      act(() => {
+        mounted.editor.commands.setTextSelection({ from: 5, to: 7 });
+      });
+      type(mounted.editor, "@");
+      expect(getBlocks(ydoc)[0]?.text).toBe("see @");
+      expect(mounted.card()).not.toBeNull();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  /**
    * The picker is this reader's, and only this reader's. A peer typing an `@`
    * into the block the caret sits in must not open one — that is a menu popping
    * up on somebody else's keystroke.
    */
-  it("never opens on a peer's edit, an undo, or a paste", () => {
+  it("never opens on a peer's edit, an undo, a redo, or a paste", () => {
     const { context } = directory();
     const { ydoc, ids } = docWith([{ type: "paragraph", text: "note " }]);
     const peer = peerOf(ydoc);
@@ -446,9 +522,15 @@ describe("the picker", () => {
       });
       expect(mounted.card()).toBeNull();
 
-      // And an undo that restores a trigger-looking text is not one either.
+      // And neither an undo that restores a trigger-looking text nor the redo
+      // that puts it back is a request for a picker: both replace the whole
+      // document, so neither wrote the `@` the caret is sitting after.
       act(() => {
         mounted.editor.commands.keyboardShortcut("Mod-z");
+      });
+      expect(mounted.card()).toBeNull();
+      act(() => {
+        mounted.editor.commands.keyboardShortcut("Mod-Shift-z");
       });
       expect(mounted.card()).toBeNull();
     } finally {

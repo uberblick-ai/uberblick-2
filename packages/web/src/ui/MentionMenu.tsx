@@ -114,12 +114,23 @@ export function MentionMenu({
         setSession(null);
         return;
       }
-      setSession((current) =>
-        current === null &&
-        (transaction === null || !opensMentionSession(transaction, trigger))
-          ? null
-          : { trigger, point: pointAtCaret(editor, host.current) },
-      );
+      setSession((current) => {
+        const here = { trigger, point: pointAtCaret(editor, host.current) };
+        if (current === null) {
+          return transaction !== null && opensMentionSession(transaction, trigger)
+            ? here
+            : null;
+        }
+        // A session belongs to **one** `@`. Carrying its position through this
+        // transaction and comparing is what makes a caret moved to a second
+        // `@hub` in the same block close the card rather than silently re-aim
+        // it at the other occurrence.
+        const carried =
+          transaction === null
+            ? current.trigger.from
+            : transaction.mapping.map(current.trigger.from);
+        return carried === trigger.from ? here : null;
+      });
     };
     read(null);
     const onTransaction = ({ transaction }: { transaction: Transaction }): void =>
