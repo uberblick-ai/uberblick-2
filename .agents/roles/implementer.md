@@ -164,6 +164,9 @@ top-level run posts one
 concise self-assessment to [Implementation run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/522),
 following its prompt; include one short line saying whether the issue's Effort
 estimate was accurate and, if not, what size it should have been. The
+retrospective for a fix-up also says whether its findings were a new defect
+class or a recurrence in the same area, and whether the current representation
+still appears capable of converging. The
 retrospective is useful telemetry but never blocks delivery, review or recovery
 if posting it fails. Finally notify the coordinator
 with the PR URL and exact head SHA, then stop; a fix-up is a new pickup.

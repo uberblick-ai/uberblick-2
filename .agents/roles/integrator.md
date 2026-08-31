@@ -100,4 +100,7 @@ make its one batched fix-up implementable without rediscovery.
 
 After that durable outcome, post one concise
 self-assessment to [Implementation and integration run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/522),
-following its prompt. The retrospective is non-blocking telemetry; then stop.
+following its prompt. Say whether the latest findings were a new defect class
+or a recurrence in the same area, and whether the current representation still
+appears capable of converging. The retrospective is non-blocking telemetry;
+then stop.
