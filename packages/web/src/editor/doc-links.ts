@@ -16,7 +16,7 @@
  * `BlockInputRules` and `TableBlocks`, and it takes that workspace-shaped half
  * as a {@link DocLinkContext} the shell hands down.
  *
- * ## The three doors, and only three
+ * ## The four doors, and only four
  *
  * 1. **Typing** `[label](<uuid>)`, and the shorthand `[<uuid>]`. The external
  *    `[label](https://…)` rule in `marks.ts` is untouched: the two patterns are
@@ -32,7 +32,14 @@
  *    anything that is not external, and the address this file renders is
  *    derived, never read back.
  *
- * `canonicalDocumentUuid` is the one definition of a target in all three, the
+ * 4. **The `@` picker** (`editor/mention-menu.ts`), which is the same insertion
+ *    reached from a menu instead of a pattern: it replaces the typed `@query`
+ *    through {@link replaceWithDocLink}, so a picked reference and a typed one
+ *    are the same mark on the same kind of text. Its candidates come from
+ *    {@link DocLinkContext.candidates}, the directory this replica already
+ *    holds — no target room is opened to offer one.
+ *
+ * `canonicalDocumentUuid` is the one definition of a target in all four, the
  * same door the schema package's write boundary uses: an upper-cased uuid is
  * canonicalized down rather than becoming a second identity for one document,
  * and anything else is not a reference at all.
@@ -59,15 +66,16 @@
  */
 
 import { Extension, InputRule, PasteRule } from "@tiptap/core";
-import type { EditorState } from "@tiptap/pm/state";
+import type { EditorState, Transaction } from "@tiptap/pm/state";
 import { Plugin } from "@tiptap/pm/state";
-import type { Mark } from "@tiptap/pm/model";
+import type { Mark, Schema } from "@tiptap/pm/model";
 import type { MarkView, ViewMutationRecord } from "@tiptap/pm/view";
 import type * as Y from "yjs";
 import {
   canonicalDocumentUuid,
   getDirectoryEntry,
   getDirectoryMap,
+  listDirectory,
 } from "@uberblick/schema";
 
 /**
@@ -89,10 +97,21 @@ export interface DocLinkTarget {
   title: string | null;
 }
 
+/** A document a reference can be made to, and the text such a reference carries. */
+export interface DocLinkCandidate {
+  docId: string;
+  /**
+   * What {@link labelFor} would write for this target: its directory title, or
+   * its uuid where it has none. One rule, so a picker shows the words the
+   * document is about to receive rather than a second spelling of them.
+   */
+  label: string;
+}
+
 /**
  * The workspace-shaped half of a document reference, supplied by the shell.
  *
- * Four questions, all answerable from the directory room the app has already
+ * Five questions, all answerable from the directory room the app has already
  * joined: nothing here opens a target's room, and nothing here writes.
  */
 export interface DocLinkContext {
@@ -100,6 +119,13 @@ export interface DocLinkContext {
   href(docId: string): string;
   /** What the directory says about a target right now. */
   lookup(docId: string): DocLinkTarget;
+  /**
+   * Every document a reference could name, by title. Read at call time from the
+   * directory, so it is correct offline and costs nothing until something asks.
+   * Tombstoned documents are absent: a reference to one renders as `archived`,
+   * which is not a thing to offer a writer.
+   */
+  candidates(): DocLinkCandidate[];
   /** Directory changes, so an open document can restyle itself. */
   subscribe(onChange: () => void): () => void;
   /** Follow a reference — the shell's own navigation, so Back works. */
@@ -128,6 +154,16 @@ export function createDocLinkContext(options: {
       if (entry === null) return { state: "unresolved", title: null };
       if (entry.deleted === true) return { state: "archived", title: null };
       return { state: "resolved", title: entry.title === "" ? null : entry.title };
+    },
+    candidates(): DocLinkCandidate[] {
+      if (directory === null) return [];
+      // `listDirectory` drops tombstones and sorts by title; a stub with no
+      // title falls back to its uuid, which is what a reference to it would
+      // carry anyway.
+      return listDirectory(directory).map((entry) => ({
+        docId: entry.uuid,
+        label: entry.title === "" ? entry.uuid : entry.title,
+      }));
     },
     subscribe(onChange: () => void): () => void {
       if (directory === null) return () => {};
@@ -169,10 +205,37 @@ function labelFor(
 }
 
 /**
- * Replace `range` with one marked label, or decline the match.
+ * Replace `range` in `tr` with one marked label, or decline the target.
  *
- * Declining is `null`, which both rule runners read as "this rule did not
- * fire" — the text stays exactly as it was typed or pasted.
+ * The one place a reference enters a document, shared by all four doors: a rule
+ * runner hands its own `state.tr` in, the `@` picker hands in a transaction it
+ * dispatches itself. False means the target is not a document uuid — the caller
+ * leaves the text exactly as it was typed, pasted, or offered.
+ */
+export function replaceWithDocLink(
+  tr: Transaction,
+  schema: Schema,
+  range: { from: number; to: number },
+  target: string | undefined,
+  label: string | null,
+  context: DocLinkContext | null,
+): boolean {
+  const docId = canonicalDocumentUuid(target);
+  const type = schema.marks.docLink;
+  if (docId === null || type === undefined) return false;
+  tr.replaceWith(
+    range.from,
+    range.to,
+    // A directory title is *text*, and this is the only place one enters a
+    // document: `schema.text` cannot make it anything else.
+    schema.text(labelFor(docId, label, context), [type.create({ docId })]),
+  );
+  return true;
+}
+
+/**
+ * The rule runners' door onto {@link replaceWithDocLink}. Declining is `null`,
+ * which both runners read as "this rule did not fire".
  */
 function insertDocLink(
   state: EditorState,
@@ -181,17 +244,9 @@ function insertDocLink(
   label: string | null,
   context: DocLinkContext | null,
 ): null | undefined {
-  const docId = canonicalDocumentUuid(target);
-  const type = state.schema.marks.docLink;
-  if (docId === null || type === undefined) return null;
-  state.tr.replaceWith(
-    range.from,
-    range.to,
-    // A directory title is *text*, and this is the only place one enters a
-    // document: `schema.text` cannot make it anything else.
-    state.schema.text(labelFor(docId, label, context), [type.create({ docId })]),
-  );
-  return undefined;
+  return replaceWithDocLink(state.tr, state.schema, range, target, label, context)
+    ? undefined
+    : null;
 }
 
 /** The class every document reference carries, resolved or not. */

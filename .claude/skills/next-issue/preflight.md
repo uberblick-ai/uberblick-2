@@ -107,8 +107,13 @@ log prevents the child's reasoning transcript from consuming the parent's
 context and is inspected only when the command fails or no durable verdict
 appears.
 
-**Hold the pass open until the verdict exists.** Dispatch in the foreground and
-wait; a round takes minutes, not seconds. A preparer that ends its turn after
+**Hold the pass open until the verdict exists.** A round takes 15–20 minutes
+and a foreground shell call is killed at ten, so a foreground dispatch
+guarantees a dead child and a lost round (observed 2026-08-31: SIGTERM at
+exactly 10:00, replacement delegation required). Dispatch `codex exec`
+detached — a background command still writing the scratch log — then stay in
+the assignment, watch the issue for the child's durable `Done:` record, and
+keep renewing your own claim meanwhile. A preparer that ends its turn after
 the `Delegated:` record leaves a live claim and a promised verdict nobody is
 waiting on, which reads to every other role exactly like work in progress.
 

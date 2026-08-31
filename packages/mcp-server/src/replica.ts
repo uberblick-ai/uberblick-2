@@ -351,12 +351,33 @@ export class Replicas {
    * `tools.ts`, so a tool answering from the derived index or the directory
    * stub never announces anything.
    *
-   * Withdrawal removes the presence keys rather than the whole state: dropping
-   * the state emits an awareness `removed`, which is what the web's departed-agent
-   * grace waits for, and a presence timeout would then draw the caret for
-   * another 30 seconds. The workspace-level rooms are exempt — the directory
-   * publishes from attach because the "MCP connections" count reads it, and
-   * nobody renders the sidebar or feedback rooms.
+   * Withdrawal removes the presence keys rather than dropping the whole state,
+   * because a peer never sees the drop. The hub re-encodes each inbound
+   * awareness update from a scratch `Awareness`, relaying only the clients that
+   * update leaves alive (`@hocuspocus/server`'s `MessageReceiver`), so a
+   * removal's client id is absent from what it broadcasts:
+   * `setLocalState(null)` would leave every peer holding this session's last
+   * presence — name, agent marker, session id — until y-protocols expires the
+   * entry 30 seconds later, showing an agent as working in a document it has
+   * left. Removing the keys is an ordinary update and lands at once; the caret
+   * is safe either way, because the cursor's own timer fires no later than
+   * presence and that update is relayed too. Only an *inbound* removal is
+   * swallowed: the hub broadcasts the one it generates itself when a connection
+   * closes (`Document.removeConnection`), which is what the web's
+   * departed-agent grace waits for.
+   *
+   * The price is that "not present" then has two shapes. A room this session has
+   * touched keeps a non-null local state for the rest of its life in this
+   * process — heartbeated by y-protocols and re-sent on every reconnect — where
+   * a never-touched room publishes nothing at all. No reader can see the
+   * difference today, because that residual is `{cursor: null}` or `{}` — no
+   * `user`, no anchor, nothing any reader counts or draws; one that counted
+   * awareness *entries* instead would count this server as present in every
+   * document it has ever opened, which is the bug #493 exists to fix.
+   *
+   * The workspace-level rooms are exempt — the directory publishes from attach
+   * because the "MCP connections" count reads it, and nobody renders the
+   * sidebar or feedback rooms.
    */
   touch(replica: Replica): void {
     if (replica.isDirectory || replica.isSidebar || replica.isFeedback) {

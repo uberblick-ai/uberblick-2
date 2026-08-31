@@ -303,6 +303,31 @@ function isChangeFromElsewhere(transaction: Transaction): boolean {
 }
 
 /**
+ * Whether `transaction` came from **this reader's keyboard** rather than from
+ * somewhere else: a peer's keystroke, an undo or a redo, or a paste, drop or
+ * cut.
+ *
+ * An undo counts as somewhere else, and that is not obvious. `Mod-z` is bound
+ * to y-prosemirror's `undo` (`editor/collaboration.ts`), which writes to the
+ * Y.Doc; every transaction the sync plugin then makes — a peer's edit and this
+ * reader's own undo alike — carries `isChangeOrigin`, so {@link
+ * isChangeFromElsewhere} closes both. Measured, not assumed.
+ *
+ * Necessary for opening a menu, and not sufficient: what is left is this
+ * reader's typing, and each menu still has to tell the keystroke that meant the
+ * command from one that merely landed where a command would look like it (see
+ * {@link opensSlashSession}, and `opensMentionSession` in
+ * `editor/mention-menu.ts`). Shared, because "where did this change come from"
+ * is one question and two answers to it would drift.
+ */
+export function isTypedHere(transaction: Transaction): boolean {
+  if (!transaction.docChanged) return false;
+  if (isChangeFromElsewhere(transaction)) return false;
+  const uiEvent = transaction.getMeta("uiEvent");
+  return uiEvent !== "paste" && uiEvent !== "drop" && uiEvent !== "cut";
+}
+
+/**
  * Whether `transaction` is the gesture that *opens* a slash session: this
  * reader, typing, turning an **empty** paragraph into a slash query.
  *
@@ -325,11 +350,8 @@ export function opensSlashSession(
   transaction: Transaction,
   trigger: SlashTrigger,
 ): boolean {
-  if (!transaction.docChanged) return false;
-  if (isChangeFromElsewhere(transaction)) return false;
   // Pasting `/code` into an empty block is content, not a command.
-  const uiEvent = transaction.getMeta("uiEvent");
-  if (uiEvent === "paste" || uiEvent === "drop" || uiEvent === "cut") return false;
+  if (!isTypedHere(transaction)) return false;
 
   const before = findBlockById(transaction.before, trigger.blockId);
   if (before === null || before.node.type.name !== "paragraph") return false;

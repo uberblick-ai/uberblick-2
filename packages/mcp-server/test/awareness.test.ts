@@ -372,8 +372,8 @@ describe("agent awareness", () => {
       );
       // Absent, never `user: null` — all three web readers test for absence, so
       // a null would still count as a session. And the state itself stays:
-      // dropping it emits an awareness `removed`, which is the event the web's
-      // departed-agent grace waits for.
+      // dropping it would never reach a peer, leaving every one of them holding
+      // this session's last presence — `Replicas.touch` has the mechanism.
       const withdrawn = publishedState(rig, uuid);
       expect(withdrawn).not.toBeNull();
       expect(withdrawn).not.toHaveProperty("user");
@@ -435,7 +435,7 @@ describe("agent awareness", () => {
 
       // Touch it, then let the presence expire: the marker and the id go with
       // the `user`, in one write. The state itself survives, because dropping
-      // it is the `removed` the web's departed-agent grace waits for.
+      // it would never reach a peer — see `Replicas.touch`.
       await rig.ok("get_doc", { uuid: doc.uuid });
       expect(awarenessOf(rig, doc.uuid).state.client).toBe(AGENT_CLIENT);
       await waitUntil(

@@ -15,6 +15,14 @@ any side effect when either is missing; nothing else is supplied.
 
 ## Pickup
 
+First, triage the unlabelled open issues by skimming title and body only: one
+that asks for a concrete change — and is not a coordination parent, not
+explicitly non-dispatchable, and not self-described as awaiting an owner
+decision — clearly lacks its label; add `needs-preparation` and nothing else
+(owner decision, 2026-08-31). Leave an ambiguous draft untouched for the
+owner. The skim is not intake and posts no comment; adding the label is
+idempotent under a concurrent run.
+
 Eligible: an open issue carrying `needs-preparation` and none of `ready`,
 `in-progress` or `needs-decision`, with no live top-level claim. A completed
 preparer `Done:` whose named label transition is missing is eligible only for
@@ -24,7 +32,7 @@ only the labels, state and claims needed to establish eligibility and order,
 then claim under the README's record and race rule **before** reading the full
 body, thread, dependency graph, corpus or code. A losing claimer moves to the
 next candidate before doing that deeper intake. Prepare one. An unlabelled
-issue is a draft outside every queue, not an implicit preparation candidate.
+issue enters the queue only through that triage, never as an implicit pickup.
 
 ## Outcome
 
