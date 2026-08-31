@@ -202,6 +202,17 @@ function canonical(value: unknown): unknown {
  * layout (`meta`, `blocks`, `decisions`, `annotations`), so nothing a document
  * can carry is outside this.
  *
+ * **Meta is hashed as `getMeta` returns it, not as a list of fields named
+ * here.** The list this used to carry went stale three times without anyone
+ * noticing: `description`, `kind` and `status` each landed in `DocMeta` after
+ * this function was written and none of them reached it (#526). Deriving the
+ * coverage is what makes the claim above true rather than aspirational — a
+ * field added to `getMeta` is inside the hash the moment it exists, and there
+ * is no second place to remember. `getMeta` is also the normalising read, so
+ * two documents it reports identically hash identically: a cleared `kind` and
+ * one never set are both simply absent. Only `tags` and `links` are reshaped,
+ * by sorting, because their order is not content.
+ *
  * The annotations map is read through `toJSON()` because a thread's value is a
  * Y.Map with its conversation nested inside it, not plain JSON. That is what
  * brings the comments into the hash, in their stored order: the order is the
@@ -227,10 +238,11 @@ export function docFingerprint(doc: Y.Doc): string {
   const meta = getMeta(doc);
   const annotations = getAnnotationsMap(doc).toJSON();
   const state = {
-    uuid: meta.uuid,
-    title: meta.title,
-    tags: [...meta.tags].sort(),
-    links: [...meta.links].sort(),
+    meta: canonical({
+      ...meta,
+      tags: [...meta.tags].sort(),
+      links: [...meta.links].sort(),
+    }),
     decisions: readDecisions(doc).map((reference) => reference.uuid),
     blocks: getBlocks(doc).map((block) => ({
       id: block.id,

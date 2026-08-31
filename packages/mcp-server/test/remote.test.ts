@@ -23,11 +23,15 @@ import {
   createAnnotation,
   getDecisionsArray,
   getBlocks,
+  getMeta,
   initDoc,
   listAnnotationRanges,
   listAnnotations,
   readDecisions,
   reorderDecisions,
+  setDescription,
+  setKind,
+  setStatus,
   setTitle,
 } from "@uberblick/schema";
 import * as Y from "yjs";
@@ -153,6 +157,47 @@ describe("docFingerprint", () => {
     const copy = replicate(doc);
     setTitle(doc, "Another note");
     expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+  });
+
+  // The three `meta` fields the hand-written field list never grew to include:
+  // each landed in `DocMeta` after the fingerprint was written, and each left
+  // the schema-level half of verification blind on it.
+  it("changes when only the description changes", () => {
+    const doc = source();
+    const copy = replicate(doc);
+    setDescription(doc, "what this note is for");
+    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+  });
+
+  it("changes when only the kind changes", () => {
+    const doc = source();
+    const copy = replicate(doc);
+    setKind(doc, "requirement");
+    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+  });
+
+  it("changes when only the status changes", () => {
+    const doc = source();
+    setKind(doc, "requirement");
+    const copy = replicate(doc);
+    setStatus(doc, "planned");
+    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+  });
+
+  // The other direction, and the reason the hash reads `getMeta` rather than
+  // the meta map: clearing writes the empty string where an untouched document
+  // has no key at all. Both read back as no kind and no status, so a bridge
+  // that fails closed must not call them different documents.
+  it("is unmoved by a cleared kind and status the other side never set", () => {
+    const doc = source();
+    const copy = replicate(doc);
+    setKind(doc, "requirement");
+    setStatus(doc, "planned");
+    setStatus(doc, "");
+    setKind(doc, "");
+
+    expect(getMeta(doc)).toEqual(getMeta(copy));
+    expect(docFingerprint(doc)).toBe(docFingerprint(copy));
   });
 
   it("changes when only the effective decision order changes", () => {
