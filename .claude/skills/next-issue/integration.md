@@ -47,6 +47,43 @@ wave per review head, risk-scoped re-review with the round-count rule, and the
 exit condition. Read it whenever a PR has a round to request or a finding to
 disposition.
 
+## The fan-out — one round's gates at once
+
+The gates above do not depend on each other, so run them as one fan-out instead
+of a queue, and start the long pole first.
+
+- **The owed external round goes first.** `review-protocol.md` decides whether a
+  round is owed and who owns it; dispatching it before the fan-out is ordering
+  only and never creates one. Its wait then overlaps the mechanical gates rather
+  than following them.
+- **One agent per gate, each in its own checkout.** Launch the mechanical gates
+  concurrently — the immutable container review, the e2e proof where the outcome
+  is browser-observable, the acceptance-criteria read, the `Touches` scope check,
+  the diff read the tier call needs — with the `Agent` tool's
+  `isolation: "worktree"`, so each works in a checkout of its own. A shared
+  checkout is not an option here: concurrent gates install, build and check out
+  at the same time, and `mise run review` refuses to run anywhere but a checkout
+  that is itself at freshly fetched `origin/main` with `mise.toml`,
+  `Dockerfile.review` and `.dockerignore` unmodified.
+- **Every gate agent reports; none writes.** Each returns its `gate`, `outcome`,
+  a short `summary`, the `sha` it ran at, and its `start` and `end`, and performs
+  no GitHub write at all — no claim, comment, label, review or merge. The
+  integrator owns every durable record, so a gate result reaches the PR only
+  through it.
+- **`needs-runtime` is routing, never a pass.** A gate agent that cannot settle
+  an acceptance criterion from static evidence answers `needs-runtime` and names
+  the gate that covers it — a criterion observable only in a running browser goes
+  to the e2e gate — instead of guessing. The integrator then reconciles that
+  gate's result into a pass or fail for the criterion, at the same fresh head,
+  before ruling.
+- **Freshness survives the fan-out.** Every evidence item names the SHA it ran
+  at. A commit landing mid-fan-out is resolved by the per-gate freshness rules
+  above and in `review-protocol.md` — re-run what the new commit invalidates —
+  never by carrying an item forward to a head it did not run at.
+- **The record carries the timings.** The integrator's PR record names each
+  gate's start and end alongside its outcome, and the round's own claim→ruling
+  wall time.
+
 ## Immediately before merging
 
 Re-fetch the PR's reviews and comment threads (`gh pr view <n> --comments` plus
