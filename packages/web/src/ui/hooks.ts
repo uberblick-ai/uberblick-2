@@ -21,12 +21,12 @@ import {
   readSidebar,
 } from "@uberblick/schema";
 import type { DirectoryEntry, DocMeta, SidebarGroup } from "@uberblick/schema";
-import { acquireRoom, WEB_CLIENT } from "../collab/rooms.js";
+import { acquireRoom } from "../collab/rooms.js";
 import type { RoomConnection, RoomStatus } from "../collab/rooms.js";
 import { resolveClientConfig } from "../config.js";
 import { getSetting, subscribeSettings } from "../settings.js";
 import type { Settings } from "../settings.js";
-import { AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
+import { AGENT_CLIENT, AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
 import type { AwarenessUser } from "../collab/identity.js";
 import { findForeignBlocks, findLinkConflicts } from "../editor/palette.js";
 import type { ForeignBlock, LinkConflict } from "../editor/palette.js";
@@ -361,25 +361,22 @@ export function usePeers(connection: RoomConnection | null): Peer[] {
 /**
  * How many agent sessions are in this room right now (#74).
  *
- * Awareness has no "this is an agent" field — an MCP session publishes the same
- * `user` a browser tab does — so the question is answered from the other side:
- * this app marks its own sessions (`WEB_CLIENT`), and a remote session that
- * does not claim to be a web client is an agent.
+ * A **conjunction, and a positive one** (#494): a session counts only where it
+ * publishes both a `user` and the agent marker an MCP session stamps its
+ * presence with (`AGENT_CLIENT`, `mcp-server/src/replica.ts`). Neither half is
+ * redundant.
  *
- * **The boundary that classification buys, stated rather than hidden:** it is
- * an *absence* test, so anything that predates the marker looks like an agent.
- * Concretely, during a rollout a browser tab still running a bundle from before
- * #267 is counted as an MCP connection until that tab reloads — for the length
- * of one deploy, one workspace's count can read high. This is accepted as the
- * price of keeping the change inside the web client: the positive marker
- * belongs on the publishing side, and that is #73's `lastAction` awareness
- * field, which is where a session will eventually say what it *is* instead of
- * this inferring it from what it does not say. Nothing is ever counted that is
- * not connected, and the miscount clears itself on reload.
+ * The marker is what makes this a claim rather than an inference. Until #494
+ * this was an *absence* test — "not a web client, therefore an agent" — which
+ * counted a browser tab running a bundle from before #267 as an MCP connection
+ * until that tab reloaded. The remaining skew runs the other way and shrinks
+ * rather than grows: an agent on a build from before the marker is now not
+ * counted, until that server restarts.
  *
  * A state with no `user` is nobody: the MCP server's connectivity probe opens
  * rooms with its awareness deliberately unset, and it must not read as a
- * session (see `mcp-server/src/remote.ts`).
+ * session (see `mcp-server/src/remote.ts`). The marker is withdrawn with the
+ * `user` it belongs to, so a leftover cannot answer for a presence that ended.
  *
  * The room to ask is the workspace's directory — every session joins it, agents
  * included, whatever document it is working on.
@@ -397,7 +394,7 @@ export function useAgentSessions(connection: RoomConnection | null): number {
       awareness.getStates().forEach((state, clientId) => {
         if (clientId === awareness.clientID) return;
         const fields = state as { user?: unknown; client?: unknown };
-        if (fields.user === undefined || fields.client === WEB_CLIENT) return;
+        if (fields.user === undefined || fields.client !== AGENT_CLIENT) return;
         agents += 1;
       });
       setCount((previous) => (previous === agents ? previous : agents));
@@ -419,6 +416,13 @@ const NOBODY: readonly RemotePresence[] = [];
  * the chrome's activity pill (`activeSession`) are two views of this one
  * snapshot, so there is one subscription rather than one per reader.
  *
+ * Never returns a reading made in another room — `useRoom`'s guard, for the
+ * same reason: the stored reading is state, so it lags `connection` by one
+ * effect, and the shell reads over `doc ?? directory`. Without the check, the
+ * first painted frame after a document opens would draw the directory's roster
+ * — every session in the workspace — as this document's. Callers see `NOBODY`
+ * for that single render instead.
+ *
  * The reading is compared before it is stored, and that is the point rather
  * than an optimisation: awareness fires `change` on every caret movement, so a
  * peer typing a sentence produces dozens of readings that all say the same
@@ -434,17 +438,27 @@ const NOBODY: readonly RemotePresence[] = [];
 export function usePresence(
   connection: RoomConnection | null,
 ): readonly RemotePresence[] {
-  const [presence, setPresence] = useState<readonly RemotePresence[]>(NOBODY);
+  const [stored, setStored] = useState<{
+    room: string;
+    sessions: readonly RemotePresence[];
+  } | null>(null);
   useEffect(() => {
     const awareness = connection?.provider.awareness ?? null;
     if (connection === null || awareness === null) {
-      setPresence(NOBODY);
+      setStored(null);
       return;
     }
+    const { room } = connection;
     const fragment = getBlocksFragment(connection.ydoc);
     const read = (): void => {
       const next = readPresence(connection.ydoc, awareness);
-      setPresence((previous) => (samePresence(previous, next) ? previous : next));
+      setStored((previous) =>
+        previous !== null &&
+        previous.room === room &&
+        samePresence(previous.sessions, next)
+          ? previous
+          : { room, sessions: next },
+      );
     };
     read();
     awareness.on("change", read);
@@ -454,7 +468,9 @@ export function usePresence(
       fragment.unobserve(read);
     };
   }, [connection]);
-  return presence;
+  return stored !== null && stored.room === connection?.room
+    ? stored.sessions
+    : NOBODY;
 }
 
 /**

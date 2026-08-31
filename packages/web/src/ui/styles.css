@@ -306,15 +306,55 @@ body {
   font-family: var(--font-mono);
 }
 
-/* Presence names are words, not identifiers, so the pills stay Geist wherever
-   they sit — including inside the mono status line. */
-.ub-me,
-.ub-peer {
+/* Presence names are words, not identifiers, so the pill stays Geist wherever
+   it sits — including inside the mono status line. */
+.ub-me {
   border: 2px solid var(--border);
   border-radius: 999px;
   padding: 0.1rem 0.5rem;
   font-size: 0.75rem;
   font-family: var(--font-sans);
+}
+
+/* A session as a circle (#494): a robot for an agent, an initial for a person.
+   The ring — and, for a person, the letter — is the session's own presence
+   colour, written inline by the component because that palette is `#rrggbb`
+   literals rather than theme tokens (src/collab/identity.ts).
+
+   The disc is *not* filled with that colour, and the reason is in identity.ts:
+   those eight hues sit near luminance 0.18 because they are calibrated for
+   contrast **against** a ground, so a filled disc would put a dark glyph on a
+   dark fill in either theme. A ring plus coloured ink keeps one identity legible
+   on both. Transparent rather than a ground token, so the circle takes whatever
+   it sits on — the status line sits on the page, the sync panel's rows sit on a
+   card, and a token would be wrong on one of them. */
+.ub-avatar {
+  box-sizing: border-box;
+  width: 1.35rem;
+  height: 1.35rem;
+  flex: none;
+  align-self: center;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  line-height: 1;
+  /* A letter is an identity, not a word: centred and bold enough to read at
+     this size. The robot ignores both — an emoji brings its own glyph. */
+  font-weight: 600;
+  user-select: none;
+}
+
+/* The robot needs no weight, and it is set smaller than the letter rather than
+   larger: an emoji is drawn to its own em box edge to edge, so at the letter's
+   size it touches the ring on both sides. */
+.ub-avatar-agent {
+  font-size: 0.62rem;
+  font-weight: 400;
 }
 
 /* ---- doc chrome in the topbar (#69) ---- */
@@ -1176,16 +1216,6 @@ body {
   align-items: baseline;
   gap: 0.4rem;
   min-width: 0;
-}
-
-/* The session's awareness colour, written inline by the component: the palette
-   is `#rrggbb` literals rather than tokens (see src/collab/identity.ts). */
-.ub-presence-dot {
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 50%;
-  flex: none;
-  align-self: center;
 }
 
 /* A session may call itself anything, and a long name has to end in an ellipsis

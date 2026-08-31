@@ -12,7 +12,7 @@
 import { DIRECTORY_SUFFIX } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { blockText } from "../src/replica.js";
+import { AGENT_CLIENT, blockText } from "../src/replica.js";
 import { agentDisplayName } from "../src/server.js";
 import {
   removeTempDirs,
@@ -251,19 +251,45 @@ describe("agent awareness", () => {
     });
     expect(awarenessOf(rig, doc.uuid).state.cursor).not.toBeNull();
 
+    // Every state this room puts on the wire from here on. The two withdrawals
+    // land in the same millisecond, so what a peer sees between them is not
+    // observable by reading the state afterwards — only by watching each update
+    // as it is published.
+    const published: Array<Record<string, unknown>> = [];
+    const awareness = replicaOf(rig, doc.uuid).awareness;
+    const record = (): void => {
+      published.push(
+        JSON.parse(JSON.stringify(awareness.getLocalState() ?? {})) as Record<
+          string,
+          unknown
+        >,
+      );
+    };
+    awareness.on("update", record);
+
     await waitUntil(
       "the agent cursor to be withdrawn",
       () => awarenessOf(rig, doc.uuid).state.cursor === null,
     );
-    // The identity goes with it, never before it: presence in a document means
-    // "this session is working here", and the write that drew this caret is the
-    // touch the presence clock is counting from too (#493). Awaited rather than
-    // asserted outright because the caret is withdrawn first by construction —
-    // an anonymous caret is the one order that must not happen.
     await waitUntil(
       "the agent's presence to be withdrawn",
       () => awarenessOf(rig, doc.uuid).state.user === undefined,
     );
+    awareness.off("update", record);
+
+    // The identity goes with the caret, never before it: presence in a document
+    // means "this session is working here", and the write that drew this caret
+    // is the touch the presence clock is counting from too (#493). Both timers
+    // run for the same TTL, so the only thing keeping the presence alive at
+    // least as long as the caret is that `publishCursor` arms the cursor's timer
+    // *before* it re-arms presence — an anonymous caret is the one order that
+    // must not happen (#304), and nothing else in this suite fails if that
+    // ordering is inverted.
+    expect(published.length).toBeGreaterThan(0);
+    const anonymous = published.filter(
+      (state) => state.cursor != null && state.user === undefined,
+    );
+    expect(anonymous).toEqual([]);
   });
 
   /**
@@ -352,6 +378,74 @@ describe("agent awareness", () => {
       expect(withdrawn).not.toBeNull();
       expect(withdrawn).not.toHaveProperty("user");
       expect(publishedState(rig, DIRECTORY_SUFFIX)?.user).toBeTruthy();
+    });
+  });
+
+  /**
+   * The positive marker and the session id (#494).
+   *
+   * They are what the web classifies and labels a session by, so what matters
+   * is not that they are published but that they are published *with* the
+   * presence they describe and withdrawn with it. A marker outliving its `user`
+   * would keep counting a session that stopped working here.
+   */
+  describe("the marker and the session id are part of the presence", () => {
+    it("rides beside `user` wherever presence is published", async () => {
+      const rig = await rigWith();
+      const doc = await rig.ok("create_doc", {
+        title: "Marked",
+        description: "A test document.",
+        blocks: [{ type: "paragraph", text: "who is this" }],
+      });
+
+      // A document room: presence published because a tool touched it.
+      expect(awarenessOf(rig, doc.uuid).state).toMatchObject({
+        user: { name: rig.clientName, color: rig.config.color },
+        client: AGENT_CLIENT,
+        session: rig.config.sessionId,
+      });
+      // The id is the one `sync_status` reports, so a hover in the web client
+      // and a tool's own answer name the same session.
+      expect((await rig.ok("sync_status")).session).toBe(rig.config.sessionId);
+
+      // And the workspace room, where presence starts at attach — this is what
+      // the user menu's "MCP connections" count reads.
+      expect(publishedState(rig, DIRECTORY_SUFFIX)).toMatchObject({
+        client: AGENT_CLIENT,
+        session: rig.config.sessionId,
+      });
+    });
+
+    it("is absent wherever the presence is", async () => {
+      const ttl = 120;
+      const first = await rigWith();
+      const doc = await first.ok("create_doc", {
+        title: "Passive",
+        description: "A test document.",
+        blocks: [{ type: "paragraph", text: "written elsewhere" }],
+      });
+      await first.close();
+      rigs.splice(rigs.indexOf(first), 1);
+
+      // A second server booted over the first one's log holds the room without
+      // ever having worked in it.
+      const rig = await rigWith({ cursorTtlMs: ttl, databasePath: first.config.databasePath });
+      await rig.ok("list_docs");
+      expect(publishedState(rig, doc.uuid)).toBeNull();
+
+      // Touch it, then let the presence expire: the marker and the id go with
+      // the `user`, in one write. The state itself survives, because dropping
+      // it is the `removed` the web's departed-agent grace waits for.
+      await rig.ok("get_doc", { uuid: doc.uuid });
+      expect(awarenessOf(rig, doc.uuid).state.client).toBe(AGENT_CLIENT);
+      await waitUntil(
+        "the agent's presence to be withdrawn",
+        () => awarenessOf(rig, doc.uuid).state.user === undefined,
+      );
+      const withdrawn = publishedState(rig, doc.uuid);
+      expect(withdrawn).not.toBeNull();
+      expect(withdrawn).not.toHaveProperty("client");
+      expect(withdrawn).not.toHaveProperty("session");
     });
   });
 });

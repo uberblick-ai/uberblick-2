@@ -15,9 +15,13 @@ import { StatusLine } from "../src/ui/EditorPane.js";
 import { TOKEN_MISSING } from "../src/ui/status-reading.js";
 import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
+import type { RemotePresence } from "../src/ui/doc-chrome.js";
 
 /** The workspace these stub room keys sit in. A workspace id is a uuid. */
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
+
+/** Nobody else in the room: this suite is about the line, not the strip. */
+const NOBODY: readonly RemotePresence[] = [];
 
 /** A connection that only reports status — no socket, no awareness, no peers. */
 function stubConnection(
@@ -60,6 +64,7 @@ function label(
       <StatusLine
         connection={stubConnection(unsyncedChanges, patch)}
         segment={WORKSPACE}
+        presence={NOBODY}
       />,
     ),
   );
@@ -90,7 +95,11 @@ function line(patch: Partial<RoomStatus>): string {
   const root = createRoot(host);
   act(() =>
     root.render(
-      <StatusLine connection={stubConnection(0, patch)} segment={WORKSPACE} />,
+      <StatusLine
+        connection={stubConnection(0, patch)}
+        segment={WORKSPACE}
+        presence={NOBODY}
+      />,
     ),
   );
   const text = host.querySelector(".ub-status")?.textContent ?? "";
@@ -159,7 +168,11 @@ function claimsCache(patch: Partial<RoomStatus>): boolean {
   const root = createRoot(host);
   act(() =>
     root.render(
-      <StatusLine connection={stubConnection(0, patch)} segment={WORKSPACE} />,
+      <StatusLine
+        connection={stubConnection(0, patch)}
+        segment={WORKSPACE}
+        presence={NOBODY}
+      />,
     ),
   );
   const claimed = host.querySelector(".ub-status .ub-muted")?.textContent === "local cache";
@@ -209,7 +222,11 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
     const root = createRoot(host);
     act(() =>
       root.render(
-        <StatusLine connection={stubConnection(4, status)} segment={WORKSPACE} />,
+        <StatusLine
+          connection={stubConnection(4, status)}
+          segment={WORKSPACE}
+          presence={NOBODY}
+        />,
       ),
     );
     // Past every settle window, so what is on screen is what the reader sees.
@@ -244,6 +261,7 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
         <StatusLine
           connection={stubConnection(0, { connected: true, synced: true })}
           segment={WORKSPACE}
+          presence={NOBODY}
         />,
       ),
     );

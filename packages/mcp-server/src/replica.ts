@@ -56,6 +56,18 @@ import { HubSync } from "./sync.js";
  */
 const LOG_ORIGIN = Symbol("uberblick/log");
 
+/**
+ * What an MCP session publishes as its `client` awareness field (#73, #494).
+ *
+ * The positive counterpart of the web client's own marker: a reader classifies
+ * a session by what it *says* it is rather than by what it fails to say, so a
+ * browser tab running a bundle too old to have said anything is no longer
+ * mistaken for an agent. The value is a wire constant shared with the web
+ * client by literal — `packages/web/src/collab/identity.ts` holds the other
+ * end, and neither package imports the other.
+ */
+export const AGENT_CLIENT = "agent";
+
 export interface Replica {
   /** `<workspaceId>/<uuid>`, or one of the workspace's well-known rooms. */
   readonly room: string;
@@ -308,6 +320,26 @@ export class Replicas {
   }
 
   /**
+   * The three fields that together *are* this session's presence: who it is,
+   * that it is an agent, and which session it is.
+   *
+   * Written as one and withdrawn as one. A marker or a session id outliving the
+   * `user` beside it would name a session the room no longer holds — a reader
+   * counting agents, or drawing an avatar, would answer from a leftover.
+   */
+  private presenceState(): {
+    user: { name: string; color: string };
+    client: string;
+    session: string;
+  } {
+    return {
+      user: this.userState(),
+      client: AGENT_CLIENT,
+      session: this.config.sessionId,
+    };
+  }
+
+  /**
    * Publish this session's presence in a document room, because a tool call is
    * reading or writing it, and withdraw it once the room goes untouched.
    *
@@ -319,8 +351,8 @@ export class Replicas {
    * `tools.ts`, so a tool answering from the derived index or the directory
    * stub never announces anything.
    *
-   * Withdrawal removes the `user` key rather than the whole state: dropping the
-   * state emits an awareness `removed`, which is what the web's departed-agent
+   * Withdrawal removes the presence keys rather than the whole state: dropping
+   * the state emits an awareness `removed`, which is what the web's departed-agent
    * grace waits for, and a presence timeout would then draw the caret for
    * another 30 seconds. The workspace-level rooms are exempt — the directory
    * publishes from attach because the "MCP connections" count reads it, and
@@ -332,7 +364,7 @@ export class Replicas {
     }
     replica.awareness.setLocalState({
       ...replica.awareness.getLocalState(),
-      user: this.userState(),
+      ...this.presenceState(),
     });
 
     const existing = this.presenceTimers.get(replica.room);
@@ -343,7 +375,7 @@ export class Replicas {
       this.presenceTimers.delete(replica.room);
       const state = replica.awareness.getLocalState();
       if (state === null) return;
-      const { user: _user, ...rest } = state;
+      const { user: _user, client: _client, session: _session, ...rest } = state;
       replica.awareness.setLocalState(rest);
     }, this.config.cursorTtlMs);
     // Never a reason to hold the process open.
@@ -409,7 +441,7 @@ export class Replicas {
     // directory is workspace-level presence and publishes from the moment it
     // attaches.
     if (id === DIRECTORY_SUFFIX) {
-      awareness.setLocalStateField("user", this.userState());
+      awareness.setLocalState(this.presenceState());
     } else {
       awareness.setLocalState(null);
     }

@@ -11,6 +11,30 @@
  */
 
 /**
+ * The two values of the `client` awareness field: what a session says it is.
+ *
+ * A web tab publishes `WEB_CLIENT` (#74) and an MCP session publishes
+ * `AGENT_CLIENT` (#494) — both positively, beside the `user` they belong to, so
+ * a reader classifies on what a session claims rather than on what it omits.
+ * The old absence test ("not a web client, therefore an agent") counted a
+ * browser tab running a bundle from before the marker as an MCP connection for
+ * as long as that tab stayed open. One reader still classifies on omission:
+ * `editor/collaboration.ts`'s caret grace, until #564 lands.
+ *
+ * They live here, with the rest of the awareness identity, because the readers
+ * that classify a peer are presentation code: routing them through `rooms.ts`
+ * for one string would pull the provider, the local replica and the token mint
+ * into a chrome test that needs none of them.
+ *
+ * `AGENT_CLIENT` is the agent's own constant, held as a literal rather than
+ * imported: this package does not depend on `@uberblick/mcp-server`, and an
+ * awareness field is a wire format either way. Its other end is
+ * `packages/mcp-server/src/replica.ts`.
+ */
+export const WEB_CLIENT = "web";
+export const AGENT_CLIENT = "agent";
+
+/**
  * y-prosemirror only accepts 6-digit hex colours — `cursor-plugin.js` tests
  * against `/^#[0-9a-fA-F]{6}$/` and warns on anything else. No shorthand, no
  * `rgb()`, no alpha. This is the one place in the app where a colour is a

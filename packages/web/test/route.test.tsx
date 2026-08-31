@@ -48,6 +48,10 @@ import {
 } from "../src/ui/route.js";
 import type { Route } from "../src/ui/route.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
+import type { RemotePresence } from "../src/ui/doc-chrome.js";
+
+/** Nobody else in the room: these cases are about addresses, not the strip. */
+const NOBODY: readonly RemotePresence[] = [];
 
 const UUID = "3231bff4-2f1c-4a49-9f0a-6f8b2c1d7e55";
 const OTHER = "8c9a1b20-77de-4d31-bd2e-1f0f3a5c6b90";
@@ -289,6 +293,7 @@ function LinkedPane({
     <RoutePane
       route={{ kind: "doc", workspace, uuid }}
       connection={connection}
+      presence={NOBODY}
       meta={docMeta}
       author="tester"
       knownTags={[]}
@@ -510,6 +515,7 @@ function paneText(target: Route, docMeta: DocMeta | null): string {
       <RoutePane
         route={target}
         connection={target.kind === "doc" ? stubConnection(`${WS}/${UUID}`) : null}
+        presence={NOBODY}
         meta={docMeta}
         author="tester"
         knownTags={[]}
@@ -590,7 +596,11 @@ async function clickCopy(
   const root = createRoot(host);
   act(() =>
     root.render(
-      <StatusLine connection={stubConnection(`${WS}/${UUID}`)} segment={segment} />,
+      <StatusLine
+        connection={stubConnection(`${WS}/${UUID}`)}
+        segment={segment}
+        presence={NOBODY}
+      />,
     ),
   );
 
