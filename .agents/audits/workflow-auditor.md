@@ -51,6 +51,14 @@ The sample is deterministic:
   those entries;
 - every implementer return or `needs-decision` transition in the window, even
   when no retrospective links it;
+- every PR active in the window, meaning its `createdAt`, `updatedAt`,
+  `mergedAt`, or `closedAt`, or a durable commit, review, or comment record,
+  falls after the window start and through the observed-through time. Whether
+  or not a retrospective linked it, shallow-scan its number and state, activity
+  timestamps, exact head, additions, deletions, changed-file and commit counts,
+  and durable review verdicts and fix-up or parked rulings. Fully read its
+  thread when that scan indicates repeated correction, diminishing finding
+  value, or review effort disproportionate to the change;
 - a shallow machine-state scan of every open issue and PR, followed by full
   thread reads only for detected lifecycle, claim, dependency, reservation, or
   handoff anomalies; and
@@ -85,7 +93,20 @@ choices and triggers. Duplicated or stale truth is itself a possible finding.
    as actionability, and inconsistent parent or child state.
 4. Look for repeated grounding, redundant adversaries or review rounds,
    repeated repairs, ceremony with no consumer, excessive issue bodies, and
-   missing context that causes downstream rediscovery.
+   missing context that causes downstream rediscovery. Use every active PR's
+   shallow convergence scan to identify cases worth a full thread read; do not
+   use a fixed line-count, wave-count or round-count threshold. For each such
+   case, count fix-up waves and external rounds, record the diff size and risk
+   surface, and classify the findings in each wave by severity, novelty and
+   defect class. Challenge whether later rounds still prevented a material
+   supported-usage failure, merely refined a prior correction, or repeated the
+   same class without convergence. Assess proportionality from the diff size,
+   semantic impact, finding severity and novelty together; no one input creates
+   an exception or decides the result. Many rounds on a small diff with no
+   later substantial findings are a strong churn signal, but the auditor must
+   establish the actual value and risk from durable evidence. Treat recurrence
+   inside the same unit as a possible representation or workflow defect rather
+   than automatically as evidence that one more round is valuable.
 5. Challenge every suspected finding. Record the exact rule, durable evidence,
    reachable consequence, and smallest correction. Put plausible but unproven
    risks under `Watch` and record important false alarms rejected.
@@ -100,7 +121,13 @@ Recommend a workflow change only when the same problem appears in at least two
 independent runs, or one proven occurrence could cause wrong product behavior,
 unauthorized work, data or secret loss, or permanently invisible work. Prefer a
 local correction over another role, label, required field, review round, or
-gate. Never convert retrospective completeness into a gate.
+gate. The independent runs may be lifecycle runs on different items or distinct
+role or review runs on one item, but not repeated comments from the same run;
+the evidence must identify the same underlying workflow mechanism. When that
+mechanism is repeated interpretation of procedural prose, prefer deleting or
+shrinking the prose, or moving the mechanical step into one executable local
+helper, over adding more prose or another review round. Never convert
+retrospective completeness into a gate.
 
 Classify workflow impact independently from code-review severity:
 
@@ -127,6 +154,14 @@ Evidence sampled
 
 Not sampled
 - <explicit coverage limits>
+
+Review convergence
+- <PR and evidence links; observed diff/risk surface; fix-up waves and external
+  rounds; later-round finding value; proportionate|watch|corrective> | None.
+
+A `corrective` convergence assessment also appears under `Findings` with the
+smallest correction and owner, and under `Recommended actions`; this section is
+evidence, not a separate finding channel.
 
 Findings
 - <high|medium|low> — <finding, evidence, consequence, correction, owner>
