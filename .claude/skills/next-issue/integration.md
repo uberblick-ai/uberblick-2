@@ -66,14 +66,19 @@ of a queue, and start the long pole first.
   is browser-observable, the acceptance-criteria read, the `Touches` scope check
   — with the `Agent` tool's `isolation: "worktree"`, so each works in a checkout
   of its own. Sharing one checkout is not an option: concurrent gates install,
-  build and check out in it at the same time. Two properties of a fresh worktree
-  bind the gate agent. It inherits the launching checkout's `HEAD`, so launch
-  only from a checkout at freshly fetched `origin/main` with `mise.toml`,
-  `Dockerfile.review` and `.dockerignore` unmodified, or every `mise run review`
-  worktree refuses before building. `mise` also trusts config by path, and every
-  worktree is a new path, so the gate agent's first command is `mise trust`:
-  without it every `mise` task there fails as untrusted, which looks like a red
-  gate but is not a branch result.
+  build and check out in it at the same time. A fresh worktree then binds the
+  gate agent in ways that look like a red gate and are not branch results. It
+  inherits the launching checkout's `HEAD`, so launch only from a checkout at
+  freshly fetched `origin/main` with `mise.toml`, `Dockerfile.review` and
+  `.dockerignore` unmodified — necessary, not sufficient: `mise run review`
+  re-fetches `main` and re-compares at run time while a worktree's `HEAD` is
+  frozen at creation, so a gate agent it refuses moves its own worktree to
+  freshly fetched `origin/main` and re-runs instead of reporting a red gate.
+  `mise` also trusts config by path, and every worktree is a new path, so the
+  gate agent's first command is `mise trust`. A gate that runs repo code rather
+  than the container needs `mise run install` next: `mise run e2e` opens with a
+  `pnpm --filter` exec that a fresh worktree's empty `node_modules` cannot
+  serve.
 - **Every gate agent reports; none writes.** Each returns its `gate`, `outcome`,
   a short `summary`, the `sha` it ran at, and its `start` and `end`, and performs
   no GitHub write at all — no claim, comment, label, review or merge. The
