@@ -53,7 +53,7 @@ const MONTH = 30 * DAY;
 const YEAR = 365 * DAY;
 
 /** What the filter looks at, said on screen so nobody has to guess. */
-const SCOPE = "Filters titles — not the text inside documents.";
+const SCOPE = "Filters titles alone — not the text inside documents.";
 
 /** One list per screen, so the sentence the search field points at has one id. */
 const SCOPE_ID = "ub-docs-scope";

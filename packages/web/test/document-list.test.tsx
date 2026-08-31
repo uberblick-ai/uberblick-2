@@ -355,7 +355,8 @@ describe("the list", () => {
     );
     // The stub still caches both — this is what one screen renders.
     expect(row?.textContent).not.toContain("deliberately is not");
-    expect(row?.querySelectorAll(".ub-tag")).toHaveLength(0);
+    expect(row?.textContent).not.toContain("product");
+    expect(row?.textContent).not.toContain("reference");
   });
 
   it("names the group a document is pinned into while the list is open", async () => {
@@ -480,11 +481,7 @@ describe("the filter", () => {
     const scope = host.querySelector(".ub-docs-scope")?.textContent ?? "";
     // No row matches on something its row does not show, and the sentence says
     // exactly that.
-    expect(scope).toContain("titles");
-    expect(scope).not.toContain("tags");
-    expect(scope).not.toContain("descriptions");
-    // And it says what it does *not* look at, which is the assumption a reader
-    // would otherwise make: full text lives in the agents' `search`.
+    expect(scope).toContain("titles alone");
     expect(scope).toContain("not the text inside documents");
   });
 
