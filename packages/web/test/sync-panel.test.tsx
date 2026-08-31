@@ -130,10 +130,12 @@ function publish(
 function Panel({
   fix,
   endpoint = ENDPOINT,
+  docPresent = true,
   onClose = () => {},
 }: {
   fix: Fixture;
   endpoint?: HubEndpoint | null;
+  docPresent?: boolean;
   onClose?: () => void;
 }): ReactElement {
   const presence = usePresence(fix.connection);
@@ -142,6 +144,7 @@ function Panel({
       connection={fix.connection}
       presence={presence}
       endpoint={endpoint}
+      docPresent={docPresent}
       onClose={onClose}
     />
   );
@@ -150,13 +153,16 @@ function Panel({
 function mount(
   fix: Fixture,
   endpoint: HubEndpoint | null = ENDPOINT,
+  docPresent = true,
 ): { host: HTMLElement; root: Root } {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  act(() => root.render(<Panel fix={fix} endpoint={endpoint} />));
+  act(() =>
+    root.render(<Panel fix={fix} endpoint={endpoint} docPresent={docPresent} />),
+  );
   // Past every settle window, so the state word is what a reader sees rather
   // than the "offline" every mount starts from.
   act(() => void vi.advanceTimersByTime(5_000));
@@ -299,6 +305,25 @@ describe("the sync panel renders the state this client holds", () => {
         hasLocalCache: true,
       }),
     ).toBe("available");
+  });
+
+  it("knows nothing about a document that has not reached this replica", () => {
+    // The panel opens over the waiting screen too, and `hasLocalCache` is true
+    // there for a room whose document has never arrived — the flag reports that
+    // IndexedDB opened, not that anything was found in it (#601). Unknown, in
+    // the panel's own word for it, rather than a promise.
+    vi.useFakeTimers();
+    const { host, root } = mount(
+      fixture({ localReplicaLoaded: true, hasLocalCache: true }),
+      ENDPOINT,
+      false,
+    );
+    try {
+      expect(facts(host)["Local copy"]).toBe("—");
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
   });
 
   /**

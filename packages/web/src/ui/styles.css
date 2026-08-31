@@ -1678,24 +1678,37 @@ body {
 
 /* ---- copying the document's link (#68), in the identity line (#535) ---- */
 
-/* Compact by construction: the row it sits at the end of is a single fixed
-   height, and a control that changed that would push the title down. */
+/* The confirmation is positioned against this, so it is placed relative to the
+   control rather than to whatever happens to be positioned above it. */
 .ub-copy-wrap {
   position: relative;
   display: inline-flex;
   flex: none;
 }
 
+/* The control *is* the touch target: 44x44 of its own box, with the words
+   centred in it.
+
+   It was a pseudo-element overhanging a 25px row, and both directions it could
+   overhang were already taken (#535). Downward is `.ub-title`, which is
+   full-bleed and starts a few pixels below, so a target reaching there answered
+   taps meant for the title (Codex round 1). Upward is `.ub-pane`'s top padding,
+   which scrolls away: the same target measured 44px at rest and 25px once the
+   pane had scrolled 20px, while the button itself stayed fully visible and
+   unchanged (Opus round 1). A target that exists at one scroll offset is not a
+   target, so the row now carries the height a thumb needs instead of borrowing
+   it from its neighbours. */
 .ub-copy-link {
-  /* The containing block for the target below, so it is measured against the
-     button rather than against whatever happens to be positioned above it. */
-  position: relative;
   font: inherit;
   color: var(--muted-foreground);
   background: none;
   border: none;
   padding: 0 0.15rem;
-  height: auto;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
 }
 
@@ -1710,41 +1723,18 @@ body {
   border-radius: var(--radius-sm);
 }
 
-/* The 44x44 target a thumb needs, without giving the identity row 44px of
-   height. The tap area is this pseudo-element rather than the button's own box,
-   so the words stay the size of the line they sit in and the row keeps its
-   height. `max()` is what keeps a wider label from *shrinking* the target.
-
-   It grows *upward*, and that direction is the whole point. The button is 16px
-   in a 25px row with only ~5px of dead space beneath it before `.ub-title`
-   begins — the title input is full-bleed, so it runs the entire width of the
-   column and passes directly under this control. A target centred on the button
-   therefore reached about 7px into the top of the title and swallowed taps meant
-   for it (#535, Codex round 1). Above the button there is ~17px of the pane's
-   own padding before the topbar, and nothing interactive until the header's
-   presence strip at ~27px. Anchoring the bottom edge just short of the title
-   spends the 44px in that dead space instead: it clears the title below and
-   stops short of anything in the header above. The e2e case measures both
-   clearances rather than trusting this comment. */
-.ub-copy-link::after {
-  content: "";
-  position: absolute;
-  bottom: -5px;
-  left: 50%;
-  width: max(100%, 44px);
-  height: 44px;
-  transform: translateX(-50%);
-}
-
 /* Out of flow, and only there while it has something to say: a confirmation
    that took part in the layout would push everything after it sideways for a
-   second and a half. Above the row rather than below it, because below it is
-   the document's title. */
+   second and a half. Beside the control rather than above or below it: above is
+   the pane's clip edge, which cuts it off as soon as anyone scrolls, and below
+   is the document's title. It lands over the end of the identity line it shares
+   the row with, opaque, for the second and a half it is there. */
 .ub-copied {
   position: absolute;
-  bottom: 100%;
-  right: 0;
-  margin-bottom: 0.2rem;
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-right: 0.3rem;
   padding: 0 0.3rem;
   border-radius: var(--radius-sm);
   background: var(--secondary);
@@ -1784,15 +1774,13 @@ body {
   align-items: center;
   gap: 0.5rem;
   flex-wrap: nowrap;
-  min-height: 1.55rem;
-  /* The top margin is the copy control's tap area, not decoration. `.ub-pane`
-     scrolls, so it clips anything reaching above its padding, and `.ub-title`
-     is full-bleed directly below this row — between those two edges there was
-     about 40px, and the 44px target has to live inside them (#535, Codex round
-     1). Eight pixels here is what makes the target real rather than declared;
-     the e2e case hit-tests it, so a future change to this rhythm fails loudly
-     instead of quietly shrinking the target again. */
-  margin: 0.5rem 0 0.15rem;
+  /* The copy control's 44px target sets this row's height, and the row states
+     it so that the *empty* row — the one drawn for the frame before `meta`
+     arrives — reserves the same space. A row that grew when its contents
+     landed would push the title down one frame after every navigation, which
+     is the jump this layout is built to avoid. */
+  min-height: 2.75rem;
+  margin: 0 0 0.15rem;
   font-size: 0.75rem;
   color: var(--muted-foreground);
 }
@@ -2431,6 +2419,28 @@ h3.ub-heading {
 }
 
 /* ---- what an address resolved to, when it was not a document (#68) ---- */
+
+/* The waiting screen's own row: what this link is waiting on, and the address
+   to hand somebody who already has the document.
+
+   Its own class rather than the identity line's (`.ub-doc-meta`), because
+   `.ub-status` is written as a block line — a divider across the column and a
+   margin separating it from the prose — and as a flex item neither rule means
+   that any more: the divider stops under the words, and the margin pushes the
+   copy control below them (#535, Opus round 1). So the row takes both over and
+   the status line drops them here. */
+.ub-waiting-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.75rem;
+}
+
+.ub-waiting-meta .ub-status {
+  border-bottom: 0;
+  margin-bottom: 0;
+}
 
 /* Quieter than the unsupported-content banner above and built the same way: a
    <strong> lead in UI weight, then the detail. None of these three states is an

@@ -5,7 +5,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { getBlocksFragment, setTitle } from "@uberblick/schema";
+import { getBlocksFragment, parseRoom, setTitle } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { bindGuardedEditor } from "../editor/guarded-binding.js";
 import { docLinkFromTarget } from "../editor/doc-links.js";
@@ -104,6 +104,7 @@ function ArchivedBanner({ onRestore }: { onRestore: () => void }): ReactElement 
 export function StatusLine({
   connection,
   presence,
+  docPresent,
 }: {
   connection: RoomConnection;
   /**
@@ -116,6 +117,12 @@ export function StatusLine({
    * keystroke anyone types, a reading the shell has already made.
    */
   presence: readonly RemotePresence[];
+  /**
+   * Whether the document this line is about has reached this replica. The
+   * waiting screen draws this line for one that has not, and there the local
+   * copy is not a fact this client has — see {@link localCopyState}.
+   */
+  docPresent: boolean;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const state = useCalmSyncState(rawSyncState(status));
@@ -124,11 +131,12 @@ export function StatusLine({
    * Whether this client holds a durable copy of the document — the one
    * additional fact worth saying inline while syncing is not happening (owner,
    * #535), and said nowhere while the reading is `synced`, where it is a
-   * promise nobody is waiting on. `null` is "not known yet", which is why it
-   * asks `localCopyState` rather than `hasLocalCache`: false before the local
-   * read settles is a read still running, not an absent copy.
+   * promise nobody is waiting on. `null` is "not known", which is why it asks
+   * `localCopyState` rather than `hasLocalCache`: false before the local read
+   * settles is a read still running, not an absent copy.
    */
-  const localCopy = reading.tone === "synced" ? null : localCopyState(status);
+  const localCopy =
+    reading.tone === "synced" ? null : localCopyState(status, docPresent);
   const copyNote =
     localCopy === null ? null : (
       <span className="ub-muted ub-local-copy">
@@ -605,7 +613,9 @@ export function EditorPane({
             setTitle(connection.ydoc, event.target.value);
           }}
         />
-        <StatusLine connection={connection} presence={presence} />
+        {/* The editor draws only for a document that is here: `RoutePane` sends
+            everything else to the waiting screen. */}
+        <StatusLine connection={connection} presence={presence} docPresent />
         {foreign.length > 0 ? (
           <ForeignFallback
             connection={connection}

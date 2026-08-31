@@ -64,6 +64,7 @@ function label(
       <StatusLine
         connection={stubConnection(unsyncedChanges, patch)}
         presence={NOBODY}
+        docPresent
       />,
     ),
   );
@@ -97,6 +98,7 @@ function line(patch: Partial<RoomStatus>): string {
       <StatusLine
         connection={stubConnection(0, patch)}
         presence={NOBODY}
+        docPresent
       />,
     ),
   );
@@ -165,7 +167,10 @@ describe("an app served without a token", () => {
  * reader never sees — which is exactly how "nothing while synced" would pass
  * against a line that says it all the time.
  */
-function localCopyNote(patch: Partial<RoomStatus>): string | null {
+function localCopyNote(
+  patch: Partial<RoomStatus>,
+  docPresent = true,
+): string | null {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   vi.useFakeTimers();
@@ -174,7 +179,11 @@ function localCopyNote(patch: Partial<RoomStatus>): string | null {
   const root = createRoot(host);
   act(() =>
     root.render(
-      <StatusLine connection={stubConnection(0, patch)} presence={NOBODY} />,
+      <StatusLine
+        connection={stubConnection(0, patch)}
+        presence={NOBODY}
+        docPresent={docPresent}
+      />,
     ),
   );
   act(() => void vi.advanceTimersByTime(5_000));
@@ -206,6 +215,17 @@ describe("the line says whether a durable local copy is here", () => {
     // `hasLocalCache` is false while the IndexedDB read is still running as
     // well as where there is nothing to find, and those are different claims.
     expect(localCopyNote({ hasLocalCache: false })).toBeNull();
+  });
+
+  it("claims nothing for a document that has not reached this replica", () => {
+    // The waiting screen's line, and the state that made this a falsehood
+    // rather than a nicety: `hasLocalCache` goes true when IndexedDB opens —
+    // a database this tab may have just created empty — so the strongest
+    // possible local read still says nothing over "has not reached this
+    // replica yet" (#601).
+    expect(
+      localCopyNote({ localReplicaLoaded: true, hasLocalCache: true }, false),
+    ).toBeNull();
   });
 
   it("states availability once it is known, refusal included", () => {
@@ -276,6 +296,7 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
         <StatusLine
           connection={stubConnection(4, status)}
           presence={NOBODY}
+          docPresent
         />,
       ),
     );
@@ -311,6 +332,7 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
         <StatusLine
           connection={stubConnection(0, { connected: true, synced: true })}
           presence={NOBODY}
+          docPresent
         />,
       ),
     );

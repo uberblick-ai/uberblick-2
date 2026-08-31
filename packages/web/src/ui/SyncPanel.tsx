@@ -65,6 +65,7 @@ export function SyncPanel({
   connection,
   presence,
   endpoint,
+  docPresent,
   onClose,
 }: {
   connection: RoomConnection | null;
@@ -72,6 +73,12 @@ export function SyncPanel({
   presence: readonly RemotePresence[];
   /** The endpoint the provider was constructed with, or null until resolved. */
   endpoint: HubEndpoint | null;
+  /**
+   * Whether the document this room is about has reached this replica — false
+   * only while the address names one that has not. See {@link localCopyState}:
+   * the local-copy fact is unknown rather than `available` there.
+   */
+  docPresent: boolean;
   onClose: () => void;
 }): ReactElement {
   const status = useRoomStatus(connection);
@@ -80,7 +87,7 @@ export function SyncPanel({
   // cadence, never a quieter version of the truth (see calm.ts) — and two
   // different words in one corner of the screen would be worse than either.
   const reading = statusReading(status, state);
-  const localCopy = localCopyState(status);
+  const localCopy = localCopyState(status, docPresent);
 
   /**
    * Escape closes the panel, and the panel alone.

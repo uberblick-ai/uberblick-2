@@ -799,92 +799,117 @@ test("the document title is set in the bundled Fraunces, and nothing else moved"
 /**
  * The copy-link control's touch target (#535).
  *
- * A browser, because both halves of the claim are layout: the identity row is a
- * single fixed line of 0.75rem text, and the control in it has to be big enough
- * for a thumb on an iPad without making that row 44px tall and pushing the
- * title down. The target is therefore a pseudo-element over the button, which
- * is exactly the kind of thing jsdom reports nothing about — it has no layout
- * and no `::after` box to measure, and a click 8px above an element there means
- * nothing.
+ * A browser, because the claim is layout and nothing else. The target used to
+ * be a pseudo-element overhanging a 25px row, and both directions it could
+ * overhang were already spoken for: `.ub-title` is full-bleed a few pixels
+ * below and lost the taps a target reaching down took from it (Codex round 1),
+ * and above is `.ub-pane`'s top padding, which scrolls away — the same target
+ * measured 44px at rest and 25px once the pane had scrolled 20px, with the
+ * button itself still fully visible and unchanged (Opus round 1). The target is
+ * the control's own box now, and this asks the only question that settles it:
+ * at both offsets where a reader can see the whole control, does the whole
+ * 44x44 take a click?
  */
-test("the copy-link control is a 44px target in a row that stays its own height", async ({
+test("the copy-link control is a 44px target, at rest and once the pane has scrolled", async ({
   browser,
 }) => {
   const page = await openApp(browser, "light");
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
-  const target = await page.evaluate(() => {
-    const button = document.querySelector(".ub-copy-link");
-    if (button === null) throw new Error("e2e: no copy-link control on the page");
-    const painted = getComputedStyle(button, "::after");
-    return {
-      width: Number.parseFloat(painted.width),
-      height: Number.parseFloat(painted.height),
-    };
-  });
-  expect(target.width).toBeGreaterThanOrEqual(44);
-  expect(target.height).toBeGreaterThanOrEqual(44);
+  // Prose enough that the pane really scrolls: the defect this replaced was
+  // invisible in a document short enough to sit still.
+  await page.locator(".ub-editor .ProseMirror").click();
+  await page.keyboard.type("a line of prose\n".repeat(24));
 
-  const row = await page.locator(".ub-doc-meta").boundingBox();
-  const button = await page.locator(".ub-copy-link").boundingBox();
-  if (row === null || button === null) throw new Error("e2e: the row has no box");
-  // The row is still the single short line it was: the target overhangs it
-  // rather than setting its height.
-  expect(row.height).toBeLessThan(44);
-
-  // And the overhang is live, not merely painted: a tap above the button's own
-  // box still reaches it. Either word in the confirmation proves the click
-  // landed — which of the two clipboard paths ran is not what this is about.
-  await page.mouse.click(button.x + button.width / 2, button.y - 8);
-  await expect(page.locator(".ub-copied")).not.toBeEmpty();
-
-  // The overhang must not be paid for by a control underneath it. `.ub-title`
-  // is full-bleed and starts a few pixels below this button, so a target
-  // centred on the button ate the top of the title and answered taps meant for
-  // it (Codex round 1). Asserted at the three widths the layout has to hold at,
-  // including the iPad width the 44px is *for*, and with a long tag strip
-  // because that is what pushes this row around.
+  // A long tag strip, because that is what pushes this row around.
   // `.ub-tag-add` carries a `list`, which makes its role combobox, not textbox.
   const addTag = page.locator(".ub-tag-add");
   for (const tag of ["alpha", "beta", "gamma", "delta", "epsilon"]) {
     await addTag.fill(tag);
     await addTag.press("Enter");
   }
-  for (const width of [1280, 1100, 768]) {
-    await page.setViewportSize({ width, height: 900 });
-    // Hit-tested, not computed. Reading the rule's own offsets back out only
-    // re-states what the stylesheet says, and the arithmetic that converts them
-    // into a rectangle is wrong for any other way of writing the same target —
-    // a wrong number here would look like a passing measurement. `contains`
-    // answers the only question that matters: does this control take the click?
-    const probe = await page.evaluate(() => {
+
+  /**
+   * The live target, hit-tested rather than computed. Reading the rule's own
+   * offsets back out only re-states what the stylesheet says, and the
+   * arithmetic that turns them into a rectangle is wrong for any other way of
+   * writing the same target — a wrong number there would look like a passing
+   * measurement. `contains` answers what matters: does this control take the
+   * click?
+   */
+  const probe = (
+    toClipEdge: boolean,
+  ): Promise<{
+    liveHeight: number;
+    liveWidth: number;
+    takesTheTitle: boolean;
+    scrolled: number;
+  }> =>
+    page.evaluate((flush) => {
       const control = document.querySelector(".ub-copy-link");
       const title = document.querySelector(".ub-title");
-      if (control === null || title === null) throw new Error("e2e: no header");
+      const pane = document.querySelector(".ub-pane");
+      if (control === null || title === null || pane === null) {
+        throw new Error("e2e: no header");
+      }
+      if (flush) {
+        // The last offset at which all of the control is still on screen: its
+        // top edge resting on the pane's clip edge. A target spent in the
+        // padding above the row is entirely gone here, while the control a
+        // reader is aiming at has not moved a pixel.
+        pane.scrollTop += Math.floor(
+          control.getBoundingClientRect().top - pane.getBoundingClientRect().top,
+        );
+      }
       const box = control.getBoundingClientRect();
-      const x = box.x + box.width / 2;
-      const answers = (y: number): boolean =>
-        control.contains(document.elementFromPoint(x, y));
-      // Sweep outward from the button to find the live target's real extent.
-      let top = Math.round(box.top);
-      let bottom = Math.round(box.bottom);
-      while (answers(top - 1)) top -= 1;
-      while (answers(bottom + 1)) bottom += 1;
-      const above = document.elementFromPoint(x, top - 1);
+      const x = Math.round(box.x + box.width / 2);
+      const y = Math.round(box.y + box.height / 2);
+      const answers = (px: number, py: number): boolean =>
+        control.contains(document.elementFromPoint(px, py));
+      // Swept outward from the centre, the one point inside the target however
+      // the target is drawn.
+      let top = y;
+      let bottom = y;
+      let left = x;
+      let right = x;
+      while (answers(x, top - 1)) top -= 1;
+      while (answers(x, bottom + 1)) bottom += 1;
+      while (answers(left - 1, y)) left -= 1;
+      while (answers(right + 1, y)) right += 1;
       return {
-        liveHeight: bottom - top,
-        // The defect this replaced: the target reached into the full-bleed
-        // title input and answered taps meant for it.
-        takesTheTitle: answers(title.getBoundingClientRect().top + 1),
-        aboveTarget: above === null ? "none" : above.tagName,
+        liveHeight: bottom - top + 1,
+        liveWidth: right - left + 1,
+        takesTheTitle: answers(x, title.getBoundingClientRect().top + 1),
+        scrolled: pane.scrollTop,
       };
+    }, toClipEdge);
+
+  // The three widths the layout has to hold at, including the iPad width the
+  // 44px is *for*.
+  for (const width of [1280, 1100, 768]) {
+    await page.setViewportSize({ width, height: 620 });
+    // Typing left the pane scrolled to the caret; the first reading is of the
+    // header at rest.
+    await page.evaluate(() => {
+      const pane = document.querySelector(".ub-pane");
+      if (pane !== null) pane.scrollTop = 0;
     });
+
+    const rest = await probe(false);
     // The target a thumb needs is really there, not merely declared…
-    expect(probe.liveHeight).toBeGreaterThanOrEqual(44);
-    // …it is not paid for with the title underneath…
-    expect(probe.takesTheTitle).toBe(false);
-    // …and it stops short of anything clickable in the topbar above.
-    expect(["SECTION", "HEADER", "P", "DIV"]).toContain(probe.aboveTarget);
+    expect(rest.liveHeight).toBeGreaterThanOrEqual(44);
+    expect(rest.liveWidth).toBeGreaterThanOrEqual(44);
+    // …and it is not paid for with the title underneath.
+    expect(rest.takesTheTitle).toBe(false);
+
+    // Then again with the header scrolled up against the clip edge. A
+    // measurement taken where the pane could not scroll proves nothing, so the
+    // offset it reached is asserted too.
+    const scrolled = await probe(true);
+    expect(scrolled.scrolled).toBeGreaterThan(0);
+    expect(scrolled.liveHeight).toBeGreaterThanOrEqual(44);
+    expect(scrolled.liveWidth).toBeGreaterThanOrEqual(44);
+    expect(scrolled.takesTheTitle).toBe(false);
   }
 });
