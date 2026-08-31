@@ -90,12 +90,18 @@ the run's own scratch directory, `<scratch>` here, and post that file; any
 composition with that property is fine, and a quoted heredoc is one:
 
 ```sh
+rm -f <scratch>/done.md
 cat > <scratch>/done.md <<'EOF'
 Done: issue-adversary <run id>
 Outcome: correctable-findings — `readDecisions` already pins it; cost is $0.
 EOF
 gh issue comment <N> --body-file <scratch>/done.md
 ```
+
+The `rm -f` is load-bearing: the run shell sets `noclobber`, so `>` onto a
+file that already exists fails — and `gh` then posts the file's *previous*
+body as if it were this one (observed 2026-08-31: a claim renewal carrying
+the prior renewal's timestamp).
 
 #491 lost a `Done:` to both at once: a shell expanded `` `ub --help` `` into the
 verdict — as `--body "…"` and a bare `<<EOF` both do — and its line breaks
