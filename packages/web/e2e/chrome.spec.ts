@@ -427,6 +427,12 @@ type Reading = {
   kind: "text" | "stroke";
   colour: string;
   ground: string;
+  /**
+   * Inside the current workspace's row — the one text this surface may paint in
+   * the accent, and only until #569 answers for it. Carried on texts, which are
+   * the only readings that exemption applies to.
+   */
+  current?: boolean;
 };
 
 /**
@@ -501,7 +507,13 @@ function surface(page: Page, root: string): Promise<Reading[]> {
             node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "",
         );
       if (speaks) {
-        readings.push({ where, kind: "text", colour: style.color, ground: groundOf(element) });
+        readings.push({
+          where,
+          kind: "text",
+          colour: style.color,
+          ground: groundOf(element),
+          current: element.closest(".ub-menu-current") !== null,
+        });
       }
 
       for (const side of ["top", "right", "bottom", "left"] as const) {
@@ -566,13 +578,18 @@ function surface(page: Page, root: string): Promise<Reading[]> {
  *   edge.
  * - **Both — the ink.** Every text reaches WCAG AA's 4.5:1. In light
  *   `--muted-foreground` reached 3.96:1 on `--sidebar` and 3.40:1 on
- *   `--sidebar-accent`, and the group label 4.20:1.
+ *   `--sidebar-accent`, and the group label 4.20:1. `--sidebar-accent` is the
+ *   tighter of those two grounds and the resting column paints no text on it —
+ *   every row that takes it does so hovered or highlighted — so the walk reaches
+ *   it deliberately and then asserts it got there, rather than leaving the
+ *   closest call in the change unmeasured while everything else passes.
  *
  * Chroma is what separates an accent from the surface: every neutral this column
  * paints sits at or under 0.015, and both accents — `--brand` and the 28% edge
- * derived from it — at 0.15 or above, so the threshold below is a tenfold margin
- * from either side rather than a number picked to make something pass. What it
- * buys differs by kind, and the difference is #515's:
+ * derived from it — at 0.15 or above. The two populations are a tenfold apart,
+ * and the threshold below sits about three times clear of each of them, so it is
+ * a gap rather than a number picked to make something pass. What it buys differs
+ * by kind, and the difference is #515's:
  *
  * - **A stroke above it is excluded, and the criterion says so** — "a stroke
  *   carrying its own meaning (`--brand`, a focus ring)". Meaning, not a named
@@ -580,12 +597,16 @@ function surface(page: Page, root: string): Promise<Reading[]> {
  *   not to be.
  * - **Ink has no such exclusion, so chroma alone must not let a text through.**
  *   A chromatic text has to *be* the accent, compared against what the wordmark
- *   is painted rather than against a threshold. Today that is one text:
- *   `.ub-menu-current`, the current workspace's row, at 1.93:1 in light. It is a
- *   property of `--brand` rather than of this surface — 2.04 to 2.30:1 against
- *   every other light ground in the app — so #515's *Out of scope* reserves it
- *   and #569 owns it, parked on the owner's answer. Any other chromatic ink
- *   fails here rather than passing on its chroma.
+ *   is painted, *and* be the one text that is allowed to be: `.ub-menu-current`,
+ *   the current workspace's row, at 1.93:1 in light. Naming it is the opposite
+ *   of the selector list this test exists not to be — a coverage list fails open
+ *   and omits silently, an exception list fails closed, so a second brand-inked
+ *   text fails here instead of inheriting the carve-out, and the carve-out ends
+ *   with the decision rather than outliving it. What reserves that one text is
+ *   not #515: the reading is a property of `--brand` rather than of this surface
+ *   (2.04 to 2.30:1 against every other light ground in the app), and a
+ *   sidebar-private brand ink is what #569's own criterion forbids — open,
+ *   `needs-decision`, unanswered.
  */
 const accentChroma = 0.05;
 
@@ -600,6 +621,12 @@ for (const scheme of ["light", "dark"] as const) {
     const ground = await painted(page, ".ub-list", "background-color");
     const floor =
       scheme === "light" ? separation(edge, ground) : contrast(edge, ground);
+    // Reading the floor off the column is what keeps it from drifting away from
+    // the surface — but it would also fall with `--sidebar-border` if that token
+    // were ever weakened, and every interior stroke would still pass. AC1 names
+    // 0.040, so light holds that absolutely too. Dark's floor is relative by the
+    // criterion's own construction and has no such number.
+    if (scheme === "light") expect(floor).toBeGreaterThanOrEqual(0.04);
 
     // And the accent as this page paints it, read off the wordmark — the app's
     // other `--brand` ink, so this is the same property resolved by the same
@@ -623,21 +650,33 @@ for (const scheme of ["light", "dark"] as const) {
     await page.locator(".ub-workspace").click();
     await expect(page.locator("[data-slot=dropdown-menu-content]")).toBeVisible();
     readings.push(...(await surface(page, "[data-slot=dropdown-menu-content]")));
+    // And once more with the current workspace's row highlighted, which is where
+    // `--sidebar-accent` gets under a text: the row's own count keeps the muted
+    // ink while the item takes the accent ground, and that pairing — 4.70:1, the
+    // worse of the two failures #515 published — is painted nowhere at rest.
+    await page.locator(".ub-menu-current").hover();
+    const highlight = await painted(page, ".ub-menu-current", "background-color");
+    readings.push(...(await surface(page, "[data-slot=dropdown-menu-content]")));
     await page.keyboard.press("Escape");
     await page.locator(".ub-user-card").click();
     await expect(page.locator("[data-slot=popover-content]")).toBeVisible();
     readings.push(...(await surface(page, "[data-slot=popover-content]")));
 
-    // The walk found the column, both menus, and more than a handful of each
-    // kind — a silent empty result would pass every assertion below.
-    expect(readings.filter((one) => one.kind === "stroke").length).toBeGreaterThan(5);
-    expect(readings.filter((one) => one.kind === "text").length).toBeGreaterThan(5);
+    // The walk reached that ground — the coverage the change is tightest on, and
+    // the same assertion that a silently empty result cannot pass.
+    expect(
+      readings.filter((one) => one.kind === "text" && one.ground === highlight),
+      `no text measured on ${highlight}`,
+    ).not.toHaveLength(0);
 
-    for (const { where, kind, colour, ground: under } of readings) {
+    for (const { where, kind, colour, ground: under, current } of readings) {
       const ink = oklab(colour);
       const seen = `${where} — ${colour} on ${under}`;
       if (ink.chroma > accentChroma) {
-        if (kind === "text") expect(colour, seen).toBe(accent);
+        if (kind === "text") {
+          expect(colour, seen).toBe(accent);
+          expect(current, seen).toBe(true);
+        }
         continue;
       }
       if (kind === "text") {
