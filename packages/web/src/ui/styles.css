@@ -530,10 +530,14 @@ body {
   cursor: pointer;
 }
 
-.ub-list-head button:hover,
-.ub-list li button:hover,
-.ub-group-add:hover,
-.ub-all-open-entry:hover {
+/* Hover is an offer, so only a control that can take it lights up. The shared
+   rule used to match a disabled `+ new doc` as well, and the `:disabled` rule
+   below resets the ink and the cursor but not the ground — so the one row that
+   could do nothing was the one that looked most ready (#529). */
+.ub-list-head button:hover:not(:disabled),
+.ub-list li button:hover:not(:disabled),
+.ub-group-add:hover:not(:disabled),
+.ub-all-open-entry:hover:not(:disabled) {
   background: var(--sidebar-accent);
   color: var(--sidebar-foreground);
 }

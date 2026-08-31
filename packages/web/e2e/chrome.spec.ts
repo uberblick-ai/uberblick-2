@@ -67,14 +67,24 @@ test.afterAll(async () => {
   await running?.stop();
 });
 
+/**
+ * The app in its own context, at `path` — `/`, and the workspace the harness
+ * configured, unless a test names another address.
+ *
+ * The address is an argument rather than a second `goto`, because the dev
+ * server's module graph is hundreds of requests and loading it twice in one
+ * context exhausts the browser's sockets (`ERR_INSUFFICIENT_RESOURCES`) instead
+ * of failing on anything the test is about.
+ */
 async function openApp(
   browser: Browser,
   colorScheme: "light" | "dark",
+  path = "",
 ): Promise<Page> {
   const context = await browser.newContext({ colorScheme });
   contexts.push(context);
   const page = await context.newPage();
-  await page.goto(harness().appUrl);
+  await page.goto(new URL(path, harness().appUrl).href);
   await expect(page.locator(".ub-workspace")).toBeVisible();
   return page;
 }
@@ -174,6 +184,38 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(panel.getByRole("group", { name: "Presence colour" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
+  });
+}
+
+/**
+ * A hover ground is an offer, and a disabled control has nothing to offer
+ * (#529). Beside the loop above, because it asks the same kind of question of
+ * the same column in the same two appearances.
+ *
+ * The sidebar's four row controls share one hover rule, and `+ new doc` is the
+ * one of them that can be disabled: it creates into the directory room, and at
+ * an address naming no workspace this client can use there is none. Only a
+ * browser can be asked — `:hover` is a state nothing but a pointer sets, and
+ * the ground it would paint is a `light-dark()` token — so the enabled control
+ * beside it takes the same gesture, which is what makes "unchanged" mean the
+ * rule missed it rather than that the measurement cannot see a change.
+ */
+for (const scheme of ["light", "dark"] as const) {
+  test(`a disabled sidebar control keeps its ground under the pointer — ${scheme}`, async ({
+    browser,
+  }) => {
+    const page = await openApp(browser, scheme, "not-a-workspace");
+    const create = page.getByRole("button", { name: "+ new doc" });
+    await expect(create).toBeDisabled();
+
+    const disabled = await paintedIn(create, "background-color");
+    await create.hover();
+    expect(await paintedIn(create, "background-color")).toBe(disabled);
+
+    const allDocs = page.locator(".ub-all-open-entry");
+    const ground = await paintedIn(allDocs, "background-color");
+    await allDocs.hover();
+    expect(await paintedIn(allDocs, "background-color")).not.toBe(ground);
   });
 }
 
