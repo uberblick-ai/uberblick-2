@@ -131,8 +131,10 @@ reviewer's durable verdict exists or a failed dispatch is recorded, as
 
 Apply clearly correct, in-scope findings in one batch and answer the others with
 evidence; those answers are not authoritative dispositions. Do not request a
-second pre-handoff review. Run the final validation after any corrections and
-mark a new PR ready. The integrator decides whether the final head needs another
+second pre-handoff review or reopen one to debate P2/P3 severity; after one
+evidence response or correction wave, the integrator rules under
+`review-protocol.md`. Run the final validation after any corrections and mark a
+new PR ready. The integrator decides whether the final head needs another
 independent round and owns every finding disposition.
 
 ## Handoff

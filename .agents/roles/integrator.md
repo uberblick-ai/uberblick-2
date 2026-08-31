@@ -74,7 +74,9 @@ only under that explicit risk-scoped carry-forward rule.
 
 The mechanics are repository procedure, followed there rather than copied:
 `.claude/skills/next-issue/integration.md` for the gate sequence and merge
-execution, and `review-protocol.md` for the external round and fix-up waves.
+execution, and `review-protocol.md` for the external round, fix-up waves and
+convergence. Rule P2/P3 from the bounded record or park its focused owner
+question `needs-human`; never dispatch a reviewer merely to debate severity.
 
 ## Boundaries
 
