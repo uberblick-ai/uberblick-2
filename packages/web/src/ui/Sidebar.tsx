@@ -164,7 +164,7 @@ export function Sidebar({
   selected: string | null;
   onSelect: (uuid: string) => void;
   onCreate: () => void;
-  /** Go to the "All docs" listing (#118) — the fixed entry in the footer. */
+  /** Go to the "All docs" listing (#118) — the live row in Navigation. */
   onOpenAll: () => void;
   /** Whether that listing is what the address currently names. */
   allOpen: boolean;
@@ -286,6 +286,7 @@ export function Sidebar({
               : "offline"}
         </span>
       </div>
+      <Navigation allOpen={allOpen} onOpenAll={onOpenAll} />
       {groups.length === 0 && (
         <p className="ub-muted ub-empty">
           Nothing pinned yet. Pin the open document from its header.
@@ -327,24 +328,127 @@ export function Sidebar({
       >
         + group
       </button>
-      {/* The sidebar's footer. "All docs" (#118) is not part of the curation
-          above it — not a group, not a drop target, not draggable, and present
-          whether anything is pinned or not — so it belongs below the line the
-          groups end at, where it never moves. */}
+      {/* The sidebar's footer. Who this client is (#74), and nothing else: it
+          is the one row that is about the person rather than about the corpus,
+          so it is the one row that belongs below the line the groups end at. */}
       <div className="ub-list-foot">
-        <button
-          type="button"
-          className="ub-all-open-entry"
-          aria-current={allOpen ? "page" : undefined}
-          onClick={onOpenAll}
-        >
-          <span aria-hidden="true">▤</span> All docs
-        </button>
-        {/* Who this client is (#74). Last, because it is the one row that is
-            about the person rather than about the corpus. */}
         <UserMenu identity={identity} agentSessions={agentSessions} />
       </div>
     </nav>
+  );
+}
+
+/**
+ * The sidebar's fixed navigation (#483): the destination the app has, and the
+ * two it is going to have.
+ *
+ * Chrome rather than curation — not a group, not draggable, not a drop target,
+ * nothing of it in `_sidebar` — so it is drawn above the groups whether
+ * anything is pinned or not, and above the "nothing pinned yet" line too.
+ *
+ * The two placeholders are shown before their destinations exist (owner
+ * decision, 2026-08-29), because both are recorded product intent rather than
+ * invented labels: the dashboard in *Product Overview* and *My daily
+ * workflows*, requirement documents in #438. They are unavailable rather than
+ * hidden, in the workspace menu's own words (#480) — `aria-disabled` and no
+ * handler, so a screen reader is told what the muted ink and the missing hover
+ * ground tell a pointer. Focusable on purpose: `disabled` would drop them out
+ * of the tab order, and a reader who never meets a row never learns the
+ * destination is coming.
+ */
+function Navigation({
+  allOpen,
+  onOpenAll,
+}: {
+  allOpen: boolean;
+  onOpenAll: () => void;
+}): ReactElement {
+  return (
+    <section className="ub-nav">
+      <p className="ub-nav-label">Navigation</p>
+      <ul>
+        <li>
+          <button
+            type="button"
+            className="ub-all-open-entry"
+            aria-current={allOpen ? "page" : undefined}
+            onClick={onOpenAll}
+          >
+            <GridIcon />
+            All docs
+          </button>
+        </li>
+        <Soon icon={<DashboardIcon />}>Dashboard</Soon>
+        <Soon icon={<ChecklistIcon />}>Product requirements</Soon>
+      </ul>
+    </section>
+  );
+}
+
+/** A navigation row for a destination the product has decided on and not built. */
+function Soon({
+  icon,
+  children,
+}: {
+  icon: ReactNode;
+  children: string;
+}): ReactElement {
+  return (
+    <li>
+      <button type="button" aria-disabled="true" title="Coming soon">
+        {icon}
+        {children}
+      </button>
+    </li>
+  );
+}
+
+/**
+ * The three navigation glyphs. Drawn here rather than pulled from an icon set,
+ * for the reason `Chevron` and `DocumentIcon` are (#110): three 16px marks are
+ * not worth a dependency, and `currentColor` is what lets a muted row mute its
+ * own glyph.
+ */
+function GridIcon(): ReactElement {
+  return (
+    <svg className="ub-nav-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M3 3h4v4H3z M9 3h4v4H9z M3 9h4v4H3z M9 9h4v4H9z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function DashboardIcon(): ReactElement {
+  return (
+    <svg className="ub-nav-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M2.5 13.5h11 M5 13.5V8 M8 13.5V3.5 M11 13.5V10"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function ChecklistIcon(): ReactElement {
+  return (
+    <svg className="ub-nav-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M2.5 4.8 L4 6.3 L6.5 3.3 M8.5 5h5 M2.5 10.8 L4 12.3 L6.5 9.3 M8.5 11h5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

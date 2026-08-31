@@ -649,8 +649,8 @@ body {
 }
 
 /* ---- the sidebar row (#481) ----
-   One shape for the four things the column lists: a pinned document, "All
-   docs", "+ new doc" and "+ group". They are the same affordance at four
+   One shape for the things the column lists: a pinned document, the navigation
+   rows, "+ new doc" and "+ group". They are the same affordance at four
    places, so they are one rule; four near-copies is how two of them end up a
    pixel apart. The uberblick.ai row is 34px, and `min-height` rather than
    `height` so a wrapped label grows the row instead of spilling out of it.
@@ -659,8 +659,7 @@ body {
    and reserving it here is what stops selection from nudging every row. */
 .ub-list-head button,
 .ub-list li button,
-.ub-group-add,
-.ub-all-open-entry {
+.ub-group-add {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -679,11 +678,12 @@ body {
 /* Hover is an offer, so only a control that can take it lights up. The shared
    rule used to match a disabled `+ new doc` as well, and the `:disabled` rule
    below resets the ink and the cursor but not the ground — so the one row that
-   could do nothing was the one that looked most ready (#529). */
+   could do nothing was the one that looked most ready (#529). Navigation's
+   placeholder rows say the same thing with `aria-disabled`, because they stay
+   focusable (#483), and they are declined here for the same reason. */
 .ub-list-head button:hover:not(:disabled),
-.ub-list li button:hover:not(:disabled),
-.ub-group-add:hover:not(:disabled),
-.ub-all-open-entry:hover:not(:disabled) {
+.ub-list li button:hover:not(:disabled, [aria-disabled="true"]),
+.ub-group-add:hover:not(:disabled) {
   background: var(--sidebar-accent);
   color: var(--sidebar-foreground);
 }
@@ -692,8 +692,7 @@ body {
    class and the All-docs entry by `aria-current`, which meant two rules painting
    one state — and only one of them told a screen reader anything. Now the
    attribute is the state, and the rule is one. */
-.ub-list li button[aria-current="page"],
-.ub-all-open-entry[aria-current="page"] {
+.ub-list li button[aria-current="page"] {
   background: var(--sidebar-accent);
   border-color: var(--sidebar-selected-border);
   color: var(--sidebar-foreground);
@@ -715,13 +714,52 @@ body {
   width: 100%;
 }
 
-/* The pinned row's leading glyph — drawn, like the group caret (#110). */
-.ub-doc-icon {
+/* A row's leading glyph — drawn, like the group caret (#110). One box and one
+   step-back ink for the pinned rows and the navigation rows above them: they
+   are the same row shape, so their marks are the same mark. */
+.ub-doc-icon,
+.ub-nav-icon {
   display: block;
   width: 16px;
   height: 16px;
   flex: none;
   color: var(--sidebar-row-icon);
+}
+
+/* ---- the sidebar's fixed navigation (#483) ----
+   Chrome above the curation: the live "All docs" row, and the two destinations
+   the product has decided on and not yet built. */
+
+.ub-nav {
+  margin-bottom: 0.5rem;
+}
+
+/* The section's name, in the group label's voice (#481) — the same 11px
+   wide-tracked small caps, at `.ub-group-toggle`'s inset so both labels start
+   on one vertical line. Without that button's shape: this section discloses
+   nothing, so it is a label rather than a control. */
+.ub-nav-label {
+  margin: 0;
+  padding: 0.25rem 0.4rem;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sidebar-group-label);
+}
+
+/* Shown and unavailable, like the workspace menu's management items (#480).
+   The hover rule above already declines it; what is left is the ink and the
+   cursor, so nothing about the row offers a click it cannot take. */
+.ub-list li button[aria-disabled="true"] {
+  color: var(--sidebar-muted-foreground);
+  cursor: default;
+}
+
+/* And its glyph goes with it — the mark of an unavailable row must not read
+   more present than the row's own name. */
+.ub-list li button[aria-disabled="true"] .ub-nav-icon {
+  color: inherit;
 }
 
 /* Everything the row is called, in one flex child: the title, and the `·
@@ -2852,16 +2890,6 @@ h3.ub-heading {
    The corpus listing and the sidebar's fixed entry into it. Self-contained:
    nothing here touches the tokens or the rules above, and nothing above knows
    about it. */
-
-/* The sidebar's fixed entry. It lives in the footer, below the line the
-   curated groups end at, and shares the footer's row shape with the user card
-   under it. Its shape, hover and open state are the sidebar row's (#481) — it
-   is one of the four rows that rule exists for; only its width and the gap to
-   the card below belong to it alone. */
-.ub-all-open-entry {
-  width: 100%;
-  margin-bottom: 0.15rem;
-}
 
 .ub-docs {
   --docs-pin: 1.75rem;
