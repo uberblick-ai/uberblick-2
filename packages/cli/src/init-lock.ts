@@ -251,14 +251,26 @@ function tryAcquirePath(path: string): InitLock | null {
   };
 }
 
+/**
+ * Take the lock at `path` immediately, or return `null` when somebody has it.
+ *
+ * The primitive under every lock in this CLI, for the callers whose lock is not
+ * one of this module's config-root files — `ub open`'s build lock (#512) is
+ * keyed by the directory it protects and lives outside the config root
+ * entirely, but it wants exactly this exclusive create, held descriptor and
+ * creator-only removal.
+ */
+export function tryAcquireLock(path: string): InitLock | null {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  return tryAcquirePath(path);
+}
+
 /** Take the init lock immediately, or return `null` when another process has it. */
 export function tryAcquireInitLock(
   env: NodeJS.ProcessEnv = process.env,
   options: TryLockOptions = {},
 ): InitLock | null {
-  const path = options.path ?? initLockPath(env);
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  return tryAcquirePath(path);
+  return tryAcquireLock(options.path ?? initLockPath(env));
 }
 
 /**

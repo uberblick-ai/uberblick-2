@@ -43,18 +43,8 @@ import {
 import { HUB_CONFIG_PATH, hubAuthToken, hubUrl, resolveClientConfig } from "../config.js";
 import { getSetting, subscribeSettings } from "../settings.js";
 import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "./token.js";
+import { WEB_CLIENT } from "./identity.js";
 import type { AwarenessUser } from "./identity.js";
-
-/**
- * What this client publishes as its `client` awareness field (#74).
- *
- * Awareness has no "this is an agent" marker — an MCP session publishes the
- * same `user` a browser tab does, and #73 is where a richer one would arrive.
- * A web tab does know what a web tab looks like, though, so it says so: a
- * remote session that does not claim to be one is an MCP session, which is
- * what the user menu counts.
- */
-export const WEB_CLIENT = "web";
 
 /**
  * The shared socket's reconnect band.

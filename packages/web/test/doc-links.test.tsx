@@ -450,6 +450,7 @@ describe("following a reference", () => {
           <EditorPane
             connection={connectionFor(ydoc)}
             segment={WORKSPACE}
+            presence={[]}
             author="tester"
             knownTags={[]}
             archived={false}

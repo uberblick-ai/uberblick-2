@@ -200,7 +200,12 @@
 
   /* Geist for UI and prose, Geist Mono for machine-flavoured text — room keys,
      uuids, sync detail, group labels. Both are bundled (see the @font-face
-     block below), with a system stack behind them for the swap period. */
+     block below), with a system stack behind them for the swap period.
+
+     The document title is the one surface set in neither, and it carries no
+     token: Fraunces is written at `.ub-title` because that rule is its only
+     use site, and a token exists to stop a value drifting across several
+     (#536). */
   --font-sans: "Geist", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -211,20 +216,22 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* The two faces ship with the app: variable woff2 files vendored under
- * `src/assets/fonts` (Geist 1.7.2, SIL Open Font License 1.1). The OFL wants
- * its text to travel with the font software, so `public/LICENSE-Geist.txt` is
- * copied verbatim into every build and served at `/LICENSE-Geist.txt` — it
- * covers these two files only, not the app. (It lives in `public/` rather than
- * beside the woff2 files because Vite emits from `src/` only what something
- * references, and no honest document-level reference to a font license
+/* The three faces ship with the app: variable woff2 files vendored under
+ * `src/assets/fonts` (Geist 1.7.2 and Fraunces v38, both SIL Open Font
+ * License 1.1). The OFL wants its text to travel with the font software, so
+ * `public/LICENSE-Geist.txt` and `public/LICENSE-Fraunces.txt` are copied
+ * verbatim into every build and served at those paths — they cover the
+ * vendored files only, not the app. (They live in `public/` rather than beside the
+ * woff2 files because Vite emits from `src/` only what something references,
+ * and no honest document-level reference to a font license
  * exists.) No CDN, no `fonts.googleapis.com`: the
  * app is offline-first, and a render-blocking third-party request would make
  * it render differently with no network.
  *
  * Vite rewrites these relative urls to hashed emitted assets, so the paths
  * survive any base path. One variable file per family covers every weight
- * (`font-weight: 100 900`); italics are left to the browser's synthetic
+ * (`font-weight: 100 900`) — Fraunces is served in three subsets and says so
+ * below; italics are left to the browser's synthetic
  * oblique rather than doubling the payload. `swap` keeps first paint on the
  * system stack instead of blocking on the download.
  */
@@ -242,6 +249,53 @@
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
+}
+
+/* Fraunces is the exception to the file-per-family rule above, because Google
+   Fonts publishes it in three cuts rather than one: all three are vendored,
+   with the `unicode-range` each is served with, so the face covers everything
+   Google publishes for it and a Polish or Turkish title is not half Georgia
+   (#579). The ranges overlap on a few combining marks and the last declaration
+   wins, so the order is Google's own. Fraunces has no Cyrillic upstream at
+   all, so a Cyrillic title falls back to Georgia where Geist would have set it
+   — a property of the typeface, not of this packaging.
+
+   Its optical-size axis is left to the browser's default
+   `font-optical-sizing: auto`, which reads the axis off the title's own
+   2.05rem — the whole reason to ship the variable file rather than an instance
+   cut for one size. */
+@font-face {
+  font-family: "Fraunces";
+  src: url("../assets/fonts/Fraunces-Variable-vietnamese.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169,
+    U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323,
+    U+0329, U+1EA0-1EF9, U+20AB;
+}
+
+@font-face {
+  font-family: "Fraunces";
+  src: url("../assets/fonts/Fraunces-Variable-latin-ext.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
+    U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Fraunces";
+  src: url("../assets/fonts/Fraunces-Variable-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 /* The appearance override (#74), and all of it: the reader's choice is an
@@ -284,8 +338,8 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-/* The wordmark is Geist like the rest of the UI — the serif display face is
-   gone with Fraunces. */
+/* The wordmark is Geist like the rest of the UI. Fraunces came back with #536
+   for the document title and for nothing else, this included. */
 .ub-brand {
   font-weight: 500;
   color: var(--brand);
@@ -324,15 +378,55 @@ body {
   font-family: var(--font-mono);
 }
 
-/* Presence names are words, not identifiers, so the pills stay Geist wherever
-   they sit — including inside the mono status line. */
-.ub-me,
-.ub-peer {
+/* Presence names are words, not identifiers, so the pill stays Geist wherever
+   it sits — including inside the mono status line. */
+.ub-me {
   border: 2px solid var(--border);
   border-radius: 999px;
   padding: 0.1rem 0.5rem;
   font-size: 0.75rem;
   font-family: var(--font-sans);
+}
+
+/* A session as a circle (#494): a robot for an agent, an initial for a person.
+   The ring — and, for a person, the letter — is the session's own presence
+   colour, written inline by the component because that palette is `#rrggbb`
+   literals rather than theme tokens (src/collab/identity.ts).
+
+   The disc is *not* filled with that colour, and the reason is in identity.ts:
+   those eight hues sit near luminance 0.18 because they are calibrated for
+   contrast **against** a ground, so a filled disc would put a dark glyph on a
+   dark fill in either theme. A ring plus coloured ink keeps one identity legible
+   on both. Transparent rather than a ground token, so the circle takes whatever
+   it sits on — the status line sits on the page, the sync panel's rows sit on a
+   card, and a token would be wrong on one of them. */
+.ub-avatar {
+  box-sizing: border-box;
+  width: 1.35rem;
+  height: 1.35rem;
+  flex: none;
+  align-self: center;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  line-height: 1;
+  /* A letter is an identity, not a word: centred and bold enough to read at
+     this size. The robot ignores both — an emoji brings its own glyph. */
+  font-weight: 600;
+  user-select: none;
+}
+
+/* The robot needs no weight, and it is set smaller than the letter rather than
+   larger: an emoji is drawn to its own em box edge to edge, so at the letter's
+   size it touches the ring on both sides. */
+.ub-avatar-agent {
+  font-size: 0.62rem;
+  font-weight: 400;
 }
 
 /* ---- doc chrome in the topbar (#69) ---- */
@@ -1205,16 +1299,6 @@ body {
   min-width: 0;
 }
 
-/* The session's awareness colour, written inline by the component: the palette
-   is `#rrggbb` literals rather than tokens (see src/collab/identity.ts). */
-.ub-presence-dot {
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 50%;
-  flex: none;
-  align-self: center;
-}
-
 /* A session may call itself anything, and a long name has to end in an ellipsis
    rather than push the block number out of the panel. */
 .ub-presence-name {
@@ -1523,7 +1607,11 @@ body {
 }
 
 /* The doc title is the document's h1 and is set like one — same size, leading
-   and tracking as `h1.ub-heading` below. */
+   and tracking as `h1.ub-heading` below, and differing from it in family
+   alone: the title is the app's one editorial surface and is set in Fraunces,
+   while every heading inside the prose stays Geist (#41, #536). The
+   placeholder needs no rule of its own; an input paints it in the field's own
+   face. */
 .ub-title {
   font-size: 2.05rem;
   font-weight: 500;
@@ -1534,7 +1622,7 @@ body {
   background: none;
   padding: 0.2rem 0;
   color: inherit;
-  font-family: inherit;
+  font-family: "Fraunces", Georgia, "Times New Roman", serif;
 }
 
 .ub-title:focus {
@@ -2009,6 +2097,14 @@ h3.ub-heading {
   pointer-events: none;
 }
 
+/* ---- the mermaid block (#495) ----
+
+   The table block's rule, applied to a diagram: the drawing is what a reader
+   sees and the source is what they get with their caret in the block. The
+   difference is what decides whether there is a drawing at all — ablauf reads a
+   subset of mermaid, so `data-rendered="false"` (a sequence diagram, a
+   subgraph, half-typed text) keeps the block exactly as it was before diagrams
+   existed, label and all. */
 .ub-mermaid {
   position: relative;
   margin: 0.7em 0;
@@ -2025,6 +2121,67 @@ h3.ub-heading {
   font-size: 0.7rem;
   color: var(--muted-foreground);
   margin-bottom: 0.2rem;
+}
+
+/* The label is a statement of fact, so it follows the fact. A block that draws
+   says nothing at all while it is drawing; opened for editing it says what the
+   reader is now looking at, without the parenthesis that is no longer true. */
+.ub-mermaid[data-rendered="true"]::before {
+  content: "mermaid source";
+}
+
+.ub-mermaid[data-rendered="true"]:not(.ub-mermaid-editing)::before {
+  content: none;
+}
+
+/* Why this block is not a picture, when there is a reason worth a reader's
+   time. Absent for source ablauf simply does not read — a `sequenceDiagram` is
+   not a failure and the label above already says "not rendered" — and present
+   for the three that are: past the size budget, carrying a comment, or a
+   renderer that failed. No `display` here on purpose, so the element's own
+   `hidden` is what decides whether it shows. */
+.ub-mermaid-note {
+  margin: 0 0 0.3rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+  border-left: 3px solid var(--border);
+  padding-left: 0.6rem;
+}
+
+.ub-mermaid-render {
+  display: none;
+  overflow-x: auto;
+  cursor: text;
+}
+
+/* The picture is the control that opens the source, so it looks like one when
+   the keyboard is on it — the same ring the annotation highlights use. */
+.ub-mermaid-render:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* ablauf paints its own opaque ground and its own text colours — so the picture
+   needs a box and a size, and no colour of ours. Those colours are its two
+   palettes written as `light-dark()` into the SVG's presentation attributes
+   (editor/mermaid.ts), which are CSS like any other declaration: `color-scheme`
+   at the top of this file picks the half, so the picture follows the reader's
+   appearance without being drawn again. */
+.ub-mermaid-render svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.ub-mermaid[data-rendered="true"]:not(.ub-mermaid-editing) .ub-mermaid-render {
+  display: block;
+}
+
+.ub-mermaid[data-rendered="true"]:not(.ub-mermaid-editing) > pre {
+  display: none;
 }
 
 /* An annotated range. Amber ground plus an amber underline — the underline is

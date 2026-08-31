@@ -27,6 +27,7 @@ import { randomIdentity } from "../collab/identity.js";
 import { createDocLinkContext } from "../editor/doc-links.js";
 import type { DocLinkContext } from "../editor/doc-links.js";
 import type { RoomConnection } from "../collab/rooms.js";
+import type { RemotePresence } from "./doc-chrome.js";
 import { DocChrome } from "./DocChrome.js";
 import { Sidebar, togglePin } from "./Sidebar.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
@@ -79,6 +80,7 @@ export function RoutePane({
   route,
   configured = true,
   connection,
+  presence,
   meta,
   author,
   knownTags,
@@ -104,6 +106,11 @@ export function RoutePane({
    * is null for one render after the address changes.
    */
   connection: RoomConnection | null;
+  /**
+   * Who else is in that room, read once by the shell (`usePresence`) and passed
+   * down to every reader of it — see {@link StatusLine}.
+   */
+  presence: readonly RemotePresence[];
   /**
    * That room's metadata, or null while it has not been read yet. The
    * difference carries a decision: unread is silence, read-and-not-this-document
@@ -179,7 +186,11 @@ export function RoutePane({
         <PaneNotice>
           {/* The live sync state, so a link that is waiting says what it is
               waiting on rather than looking stuck. */}
-          <StatusLine connection={connection} segment={route.workspace.segment} />
+          <StatusLine
+            connection={connection}
+            segment={route.workspace.segment}
+            presence={presence}
+          />
           <p className="ub-notice">
             <strong>Waiting for sync.</strong> Document <code>{route.uuid}</code>{" "}
             has not reached this replica yet. It opens here as soon as it arrives.
@@ -196,6 +207,7 @@ export function RoutePane({
       // (#406) — and it carries the workspace the address spelled, which is
       // what a copied link has to keep.
       segment={route.workspace.segment}
+      presence={presence}
       author={author}
       knownTags={knownTags}
       archived={archived}
@@ -377,9 +389,11 @@ export function App(): ReactElement {
    */
   const chromeRoom = doc ?? directory;
   /**
-   * Who else is in that room, read *here* and handed to both readers. The pill
-   * names one session and the panel lists them all; one subscription over the
-   * awareness map is what keeps those two views of the same fact identical.
+   * Who else is in that room, read *here* and handed to every reader of it. The
+   * pill names one session, the status line's strip draws them all as circles,
+   * and the sync panel lists them in words; one subscription over the awareness
+   * map is what keeps those views of the same fact identical — and what stops a
+   * peer's keystroke costing three readings that all say the same thing.
    */
   const presence = usePresence(chromeRoom);
   /**
@@ -641,6 +655,7 @@ export function App(): ReactElement {
             route={route}
             configured={hubReady}
             connection={doc}
+            presence={presence}
             meta={meta}
             author={identity.name}
             knownTags={knownTags}

@@ -40,16 +40,15 @@ second goes to `needs-decision`; an immediate owner boundary may go there on the
 first return. The exact record and label transitions live in
 `.github/ISSUE_SPEC.md`.
 
-An `in-progress` claim is stale and may be reclaimed only when all three facts
-are true:
-
-- no open PR exists for the named branch;
-- no commit on that branch at `origin` is newer than the claim comment; and
-- the claim comment is older than 30 minutes.
+An implementation claim is stale when no later matching implementer `Done:`
+exists and its claim comment's `updated_at` is more than 30 minutes old. A live
+run renews that comment as `.agents/roles/README.md` defines. An open PR or a
+remote commit is recoverable branch state, not evidence that the claiming run
+is still alive; a valid takeover continues from the current remote head.
 
 Local worktrees and panes are deliberately excluded because other sessions
-cannot observe them. The grace period protects the interval between the claim
-and the implementer's first push.
+cannot observe them. The grace period protects startup, while renewal protects
+longer work.
 
 ## Implementation
 
@@ -63,15 +62,16 @@ deviating.
 For a newly claimed issue, start from fresh `origin/main` in an isolated
 worktree. For a fix-up or handover, continue the claimed branch in a new
 isolated worktree without rebasing or force-pushing. Never share another
-agent's worktree. Only the current claim holder writes to a claimed branch. A
-handover first records the new implementer in a claim. Keep the change inside
+agent's worktree. Only the current claim holder writes to a claimed branch;
+re-read ownership before pushing and stop if a valid takeover superseded you.
+A handover first records the new implementer in a claim. Keep the change inside
 the issue's declared footprint and prefer the least code that defends the
-contract. Add contract or invariant tests, not tests of implementation
-trivia. Use the documented `mise` tasks proportionally while editing, then run
-lint, typecheck and tests once against the final implementation head. Browser
-or e2e coverage is required only where the issue has a browser-observable
-outcome. The integrator, not the diff author, owns immutable review,
-merge-tier classification, and final-head review routing.
+contract. Add contract or invariant tests, not tests of implementation trivia.
+Use the documented `mise` tasks proportionally while editing, then run lint,
+typecheck and tests once against the final implementation head. Browser or e2e
+coverage is required only where the issue has a browser-observable outcome. The
+integrator, not the diff author, owns immutable review, merge-tier
+classification, and final-head review routing.
 
 Commit and push a feature branch, then open a PR against `main`. Its body is the
 single durable outcome, verification, findings, and KISS/overtesting self-review

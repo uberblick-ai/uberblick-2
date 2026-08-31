@@ -26,11 +26,28 @@ deployed_ref=refs/uberblick/deployed
 # Outside the checkout, which this script rewrites underneath itself. The lock
 # is what keeps a by-hand run and an `ub remote update` from colliding. The fd
 # is held for the life of the script, so a run that is still building keeps it.
+#
+# Contention is told apart from a broken lock by a status nothing else answers
+# with. `-E` makes flock report "somebody else holds it" as 100, so 0 is ours,
+# 100 is theirs, and every other status is the lock failing to exist rather than
+# being busy: 127 where the host has no flock, a sysexits code for an unusable
+# descriptor or a filesystem that cannot lock, and 1 from a flock that reports
+# every failure that way (busybox) or does not understand `-E` at all. Reading
+# any of those as "already running" is how a host without flock reported an
+# update it never ran as a success, so they refuse, before anything is fetched.
 lock="${XDG_RUNTIME_DIR:-/tmp}/uberblick-update.lock"
+busy=100
 exec 9>"$lock"
-if ! flock -n 9; then
+lock_status=0
+flock -n -E "$busy" 9 || lock_status=$?
+if [ "$lock_status" -eq "$busy" ]; then
   printf 'uberblick-update: already running; nothing to do.\n'
   exit 0
+fi
+if [ "$lock_status" -ne 0 ]; then
+  printf 'uberblick-update: cannot lock %s (flock exited %s); refusing to update.\n' \
+    "$lock" "$lock_status" >&2
+  exit 1
 fi
 
 cd "$checkout"

@@ -22,6 +22,7 @@ import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
 import type { RemotePresence } from "./doc-chrome.js";
 import { useRoomStatus } from "./hooks.js";
+import { PeerAvatar } from "./PeerAvatar.js";
 
 /** What a fact reads as before this client knows it. */
 const UNKNOWN = "—";
@@ -146,14 +147,11 @@ export function SyncPanel({
         <ul className="ub-presence">
           {presence.map((session) => (
             <li key={session.clientId} className="ub-presence-row">
-              {/* The session's own awareness colour, the one its cursor carries
-                  in the prose. Written inline for the reason identity.ts gives:
-                  the palette is `#rrggbb` literals, not tokens. */}
-              <span
-                className="ub-presence-dot"
-                style={{ background: session.color }}
-                aria-hidden="true"
-              />
+              {/* The same avatar the peer strip draws, decorative here: this
+                  is a list, so the name stays in words and is the row's
+                  accessible name. A labelled avatar would announce every
+                  session twice. */}
+              <PeerAvatar session={session} decorative />
               <span className="ub-presence-name">{session.name}</span>
               {/* Only where the caret resolves to a block a reader can see.
                   Silence beats a number the document disagrees with. */}

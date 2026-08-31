@@ -24,6 +24,10 @@
  * - **A highlight steps off its ground.** `light-dark()` and `oklch()` are
  *   resolved by the browser and by nothing else, so a contrast floor is only a
  *   number where there is a rendering engine to measure (#516).
+ * - **A bundled face is really there.** A `font-family` in a stylesheet is a
+ *   wish; only an engine that fetched the woff2 and put it in `document.fonts`
+ *   says the title is set in the face the app ships rather than in the serif
+ *   behind it (#536).
  * - **A surface is measured, not a selector list.** The sidebar's interior is
  *   held to its own strokes and to WCAG AA by walking what the column and its
  *   two menus actually paint — which needs a cascade, a `light-dark()` and a
@@ -228,8 +232,11 @@ test("MCP connections counts a connected agent session, and stops when it goes",
   await expect(connections).toContainText("0");
 
   // An agent, as far as the hub and the awareness map are concerned: a client
-  // that publishes a user and does not claim to be this app. That is exactly
-  // what the MCP server's replicas publish (`mcp-server/src/replica.ts`).
+  // that publishes a user and says positively that it is an agent (#494). That
+  // pair is exactly what the MCP server's replicas publish, in one write
+  // (`mcp-server/src/replica.ts`), and the marker is what the count reads —
+  // omitting it makes this session a person, which is the whole point of the
+  // positive test replacing the old "not this app, therefore an agent" one.
   const doc = new Y.Doc();
   const agent = new HocuspocusProvider({
     url: harness().hubUrl,
@@ -250,6 +257,7 @@ test("MCP connections counts a connected agent session, and stops when it goes",
       ),
   });
   agent.setAwarenessField("user", { name: "an agent", color: "#7b5ec7" });
+  agent.setAwarenessField("client", "agent");
 
   try {
     await expect(connections).toContainText("1");
@@ -618,3 +626,62 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
+test("the document title is set in the bundled Fraunces, and nothing else moved", async ({
+  browser,
+}) => {
+  const page = await openApp(browser, "light");
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+
+  expect(await painted(page, ".ub-title", "font-family")).toBe(
+    'Fraunces, Georgia, "Times New Roman", serif',
+  );
+
+  // The stack above is satisfied by Georgia too, so it is not evidence on its
+  // own. A title that reaches into all three vendored cuts is: the engine only
+  // fetches a face whose characters it has to paint, so three `loaded` faces
+  // is three files it found and used. Polish and Turkish are the latin-ext
+  // cut, Vietnamese the third, and the rest of the line the first — a title
+  // this face could not cover would be quietly half Georgia.
+  await page.locator(".ub-title").fill("Łódź, Ağrı, Việt — a title");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        [...document.fonts]
+          .filter((face) => face.family === "Fraunces")
+          .map((face) => face.status),
+      ),
+    )
+    .toEqual(["loaded", "loaded", "loaded"]);
+
+  // Title-only: the prose it sits above and the column beside it keep Geist,
+  // and the title is not in it.
+  const prose = await painted(page, ".ub-editor .ub-paragraph", "font-family");
+  expect(prose).toBe(await painted(page, ".ub-list", "font-family"));
+  expect(prose).toContain("Geist");
+  expect(prose).not.toContain("Fraunces");
+
+  // The face changed and the setting did not: same size and weight as the h1
+  // it is matched to, and a box still as wide as the column rather than as
+  // wide as its own text — a serif is wider than Geist per character, and an
+  // input that sized itself would take the layout with it.
+  expect(await painted(page, ".ub-title", "font-size")).toBe("32.8px");
+  expect(await painted(page, ".ub-title", "font-weight")).toBe("500");
+  expect(await width(page, ".ub-title")).toBe(await width(page, ".ub-editor"));
+
+  // "No font CDN" is not checkable by naming CDNs, so it is checked as what it
+  // is a case of: every font file this page fetched came from the app's own
+  // origin, and Fraunces is among them.
+  const fetched = await page.evaluate(() => {
+    const fonts = performance
+      .getEntriesByType("resource")
+      .map((entry) => entry.name)
+      .filter((url) => /\.(woff2?|otf|ttf)(\?|$)/i.test(url));
+    return {
+      offOrigin: fonts.filter((url) => new URL(url).origin !== location.origin),
+      fraunces: fonts.filter((url) => /fraunces/i.test(url)).length,
+    };
+  });
+  expect(fetched.offOrigin).toEqual([]);
+  expect(fetched.fraunces).toBeGreaterThan(0);
+});

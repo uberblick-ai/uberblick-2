@@ -14,6 +14,7 @@ import { DocLinks } from "./doc-links.js";
 import type { DocLinkContext } from "./doc-links.js";
 import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
+import { MermaidBlocks } from "./mermaid.js";
 import { paletteExtensions } from "./nodes.js";
 import { TableBlocks } from "./table.js";
 
@@ -63,6 +64,10 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // …and the table block's own two: the class that opens a table's source
     // under the caret, and the typed and pasted doors a table comes in through.
     TableBlocks,
+    // …and the mermaid block's one: the same class, opening a diagram's source
+    // under the caret. Nothing else — a diagram has no typed or pasted door,
+    // because a mermaid block is one the reader asks for by name.
+    MermaidBlocks,
     // …and the document reference's: the two typed and pasted spellings, the
     // live anchor, and the address they resolve against. Behaviour again — the
     // mark itself is schema, declared once in `marks.ts`, because

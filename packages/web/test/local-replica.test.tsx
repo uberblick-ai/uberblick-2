@@ -94,6 +94,7 @@ function LinkedPane({ connection }: { connection: RoomConnection }): ReactElemen
     <RoutePane
       route={{ kind: "doc", workspace, uuid: UUID }}
       connection={connection}
+      presence={[]}
       meta={useDocMeta(connection)}
       author="tester"
       knownTags={[]}

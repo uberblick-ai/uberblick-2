@@ -82,6 +82,27 @@ outcome is tied to one. A delegated subagent also posts `Parent: <parent role>
 stay proportional: link evidence instead of narrating transcripts. GitHub must
 be sufficient for recovery.
 
+**A durable comment reaches GitHub as composed.** Every durable comment body —
+claim, renewal, delegation, return, `Done:`, review round, dispatch failure,
+finding disposition, merge report, retrospective reply — must land byte for
+byte: line breaks intact, backticks and `$` literal. Write it into a file under
+the run's own scratch directory, `<scratch>` here, and post that file; any
+composition with that property is fine, and a quoted heredoc is one:
+
+```sh
+cat > <scratch>/done.md <<'EOF'
+Done: issue-adversary <run id>
+Outcome: correctable-findings — `readDecisions` already pins it; cost is $0.
+EOF
+gh issue comment <N> --body-file <scratch>/done.md
+```
+
+#491 lost a `Done:` to both at once: a shell expanded `` `ub --help` `` into the
+verdict — as `--body "…"` and a bare `<<EOF` both do — and its line breaks
+arrived as the two literal characters `\n`, which no shell had touched. A
+garbled record survives only in the launching session's transcript, the private
+channel every rule here exists to keep out of the record.
+
 **The race rule.** A live top-level claim makes the item ineligible for every
 other queue pickup. The one permitted nested claim is the subagent explicitly
 delegated by the role that holds that item; it does not release the parent claim
@@ -120,11 +141,10 @@ A top-level claim other than an implementation claim is stale when no completion
 exists and its claim comment's `updated_at` is more than 60 minutes old; the
 window is twice the renewal interval so that a healthy foreground run is never
 reclaimed in the gap between two renewals.
-Every implementation claim, top-level or delegated, uses `AGENTS.md`'s same
-three facts, because branch ownership is not a timer. A parent may replace a
-delegated implementer only after those facts make the claim stale and an
-explicit handover records the new implementer; a newer remote branch commit
-therefore prevents replacement even when no `Done:` exists after 30 minutes.
+Every implementation claim, top-level or delegated, uses `AGENTS.md`'s
+30-minute durable-liveness rule. A later valid claim takes over a stale one and
+continues the current remote branch head; the superseded holder stops if it
+resumes. A parent replaces a stale delegated implementer the same way.
 
 A nested **non-implementation** assignment expires with no claim 10 minutes
 after `Delegated:` (or immediately when the runtime confirms it never started),

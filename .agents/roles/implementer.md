@@ -34,35 +34,37 @@ new issue can be eligible. At the cap, or with no possible item, return only
 documents or code, create a worktree, or narrate candidates merely to prove an
 empty queue.
 
-For a top-level assignment, two kinds of item, in this order. A **fix-up**: an
+For a top-level assignment, three kinds of item, in this order. A **fix-up**: an
 open PR whose latest integrator ruling *at the current head* names fix-now
-findings, with no live implementer claim; oldest PR first. A **new issue**:
-labeled `ready`, every `Depends-on` closed, not `in-progress`, and not reserved
-by an open `Parent: #N` — under `.github/ISSUE_SPEC.md`'s scheduling rules and
-order, including its cap of 6 distinct work units and the recount that admission
-requires — `Priority` per the README. A reserved child reaches you only as a
-program coordinator's internal assignment, never through this queue. The
-`ready` label is the preparation verdict; do not reconstruct or require a
-separate adversary dispatch.
+findings, with no live implementer claim; oldest PR first. A **recovery**: a
+`ready` issue whose implementation claim is stale under `AGENTS.md`; oldest
+claim first. A **new issue**: labeled `ready`, every `Depends-on` closed, not
+`in-progress`, and not reserved by an open `Parent: #N` — under
+`.github/ISSUE_SPEC.md`'s scheduling rules and order, including its cap of 6
+distinct work units and the recount that admission requires — `Priority` per
+the README. A reserved child reaches you only as a program coordinator's
+internal assignment, never through this queue. The `ready` label is the
+preparation verdict; do not reconstruct or require a separate adversary
+dispatch.
 
-For a fix-up, continue the remote branch without sharing another run's
-worktree. If a leftover local worktree still holds that branch, create this
-run's worktree detached at the remote branch head and push `HEAD:<branch>`;
+For a fix-up or recovery, continue the remote branch without sharing another
+run's worktree. If a leftover local worktree still holds that branch, create
+this run's worktree detached at the remote branch head and push `HEAD:<branch>`;
 never enter, delete or repurpose the other run's worktree.
 
-Before claiming a new issue, fetch `origin/main`, record its SHA, and make a
-focused freshness check: read the final issue and thread, inspect the code and
-Pointers it depends on, and recheck eligibility, expected file overlap and work
-in flight. This is not another preparation pass. Read cited product documents
-when the implementation needs them; do not search the whole corpus merely to
-prove that no document applies. Do not narrate the queue or comment on skipped
-candidates: those facts are derived and become stale.
+Before claiming a recovery or new issue, fetch `origin/main`, record its SHA,
+and make a focused freshness check: read the final issue and thread, inspect the
+code and Pointers it depends on, and recheck eligibility, expected file overlap
+and work in flight. This is not another preparation pass. Read cited product
+documents when the implementation needs them; do not search the whole corpus
+merely to prove that no document applies. Do not narrate the queue or comment
+on skipped candidates: those facts are derived and become stale.
 
 Claim under the README's race rule using `.github/ISSUE_SPEC.md`'s exact issue
-or fix-up grammar. After a new-issue claim, recount and post only its one-line
-admission record, exactly `Admitted: N/6 work units.` with no unit inventory; a
-fix-up PR already occupies its work-in-flight unit and needs no recount. A claim
-is the end of pickup. One PR or one fix-up wave, then stop.
+or fix-up grammar. After a recovery or new-issue claim, recount and post only
+its one-line admission record, exactly `Admitted: N/6 work units.` with no unit
+inventory; a fix-up PR already occupies its work-in-flight unit and needs no
+recount. A claim is the end of pickup. One PR or one fix-up wave, then stop.
 
 ## Outcome
 
