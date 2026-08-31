@@ -90,8 +90,10 @@ principle).
 recorded gate SHA — `gh pr merge <n> --match-head-commit <gate-sha> …` — so a
 commit landing after the last check fails the merge instead of riding stale
 evidence; comparing `gh pr view <n> --json headRefOid` beforehand is for the
-report, not the guarantee. Either way a mismatch returns to the gates: re-run
-them at the new head.
+report, not the guarantee. Freshness covers the base too: if `origin/main`
+advanced after the gates and its changed files overlap the PR, gate the
+prospective merged tree and repeat if the base moves again. Either kind of
+mismatch returns to the gates.
 
 ## After merging
 
