@@ -912,4 +912,32 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
     expect(scrolled.liveWidth).toBeGreaterThanOrEqual(44);
     expect(scrolled.takesTheTitle).toBe(false);
   }
+
+  // The confirmation is drawn over the control rather than beside it, because
+  // beside it are the `uuid … · rev …` facts this line exists to show, and on
+  // the waiting screen the whole sync reading. Containment inside the control's
+  // own box is the claim, since it holds whatever the row happens to carry.
+  const confirmationIsContained = async (open: Page): Promise<boolean> => {
+    await open.locator(".ub-copy-link").click();
+    await expect(open.locator(".ub-copied")).not.toBeEmpty();
+    return open.evaluate(() => {
+      const control = document.querySelector(".ub-copy-link");
+      const note = document.querySelector(".ub-copied");
+      if (control === null || note === null) throw new Error("e2e: no control");
+      const box = control.getBoundingClientRect();
+      const shown = note.getBoundingClientRect();
+      return shown.left >= box.left - 0.5 && shown.right <= box.right + 0.5;
+    });
+  };
+  expect(await confirmationIsContained(page)).toBe(true);
+
+  // And on the waiting screen, where the control inherits a larger font and the
+  // same words are wider — the reason its width floor is in `em`.
+  const waiting = await openApp(
+    browser,
+    "light",
+    `/${harness().workspace}/${randomUUID()}`,
+  );
+  await expect(waiting.locator(".ub-notice")).toContainText("Waiting for sync");
+  expect(await confirmationIsContained(waiting)).toBe(true);
 });

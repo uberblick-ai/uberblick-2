@@ -1704,7 +1704,11 @@ body {
   background: none;
   border: none;
   padding: 0 0.15rem;
-  min-width: 2.75rem;
+  /* 44px for a thumb, and never narrower than the confirmation drawn over it.
+     `em`, because that confirmation is set in this control's own font, which is
+     the identity line's 0.75rem here and the waiting screen's inherited size
+     there — a `rem` floor would fit one and not the other. */
+  min-width: max(2.75rem, 6em);
   min-height: 2.75rem;
   display: inline-flex;
   align-items: center;
@@ -1725,17 +1729,22 @@ body {
 
 /* Out of flow, and only there while it has something to say: a confirmation
    that took part in the layout would push everything after it sideways for a
-   second and a half. Beside the control rather than above or below it: above is
-   the pane's clip edge, which cuts it off as soon as anyone scrolls, and below
-   is the document's title. It lands over the end of the identity line it shares
-   the row with, opaque, for the second and a half it is there. */
+   second and a half.
+
+   Over the control itself, because every direction around it belongs to
+   something this header keeps. Above is the pane's clip edge, which cuts the
+   confirmation off as soon as anyone scrolls; below is the document's title;
+   and beside it are the `uuid … · rev …` facts on the identity line and the
+   whole sync reading on the waiting screen — the two things #535 preserves
+   while moving the control, which a confirmation to their right covered for a
+   second and a half (Codex round 2). The control's own `min-width` above is
+   what keeps this inside it. */
 .ub-copied {
   position: absolute;
-  right: 100%;
-  top: 50%;
-  transform: translateY(-50%);
-  margin-right: 0.3rem;
-  padding: 0 0.3rem;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--radius-sm);
   background: var(--secondary);
   color: var(--secondary-foreground);
