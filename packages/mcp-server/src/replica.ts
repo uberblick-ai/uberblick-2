@@ -354,9 +354,27 @@ export class Replicas {
    * Withdrawal removes the presence keys rather than the whole state: dropping
    * the state emits an awareness `removed`, which is what the web's departed-agent
    * grace waits for, and a presence timeout would then draw the caret for
-   * another 30 seconds. The workspace-level rooms are exempt — the directory
-   * publishes from attach because the "MCP connections" count reads it, and
-   * nobody renders the sidebar or feedback rooms.
+   * another 30 seconds. Locally that reads as avoidable — {@link publishCursor}
+   * arms the cursor's timer before re-arming presence, so the caret is already
+   * withdrawn by the time this one fires — but that ordering does not survive to
+   * the wire. The two withdrawals reach a peer as a *single coalesced* update,
+   * so the intermediate `{user, cursor: null}` is never observable remotely
+   * (measured against a real hub on #511). A peer would therefore go straight
+   * from `{user, cursor}` to `removed`, still holding a state that qualifies for
+   * the grace, and the caret would outlive the session after all.
+   * `setLocalState(null)` is not the simplification it looks like.
+   *
+   * The price is that "not present" then has two shapes. A room this session has
+   * touched keeps a non-null local state for good — heartbeated by y-protocols
+   * and re-sent on every reconnect — where a never-touched room publishes
+   * nothing at all. Every reader today tests for `user`, so none of them can see
+   * the difference; one that counted awareness *entries* instead would count
+   * this server as present in every document it has ever opened, which is the
+   * bug #493 exists to fix.
+   *
+   * The workspace-level rooms are exempt — the directory publishes from attach
+   * because the "MCP connections" count reads it, and nobody renders the
+   * sidebar or feedback rooms.
    */
   touch(replica: Replica): void {
     if (replica.isDirectory || replica.isSidebar || replica.isFeedback) {
