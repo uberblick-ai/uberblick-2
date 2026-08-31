@@ -9,6 +9,11 @@
  * workspace. All of it was already real client-held state — only the
  * affordances were missing.
  *
+ * The trigger is an identity card (#482): a tile in this session's presence
+ * colour carrying the first character of the name it publishes, then the name.
+ * There is still no role, account or e-mail line under it — there are no
+ * accounts, so a second line would have nothing true to say.
+ *
  * A popover rather than a menu, deliberately. A menu is a list of commands you
  * pick one of and leave; this is a small panel of controls and readouts you
  * come back out of unchanged, and two of its rows are facts rather than
@@ -24,6 +29,7 @@ import type { AwarenessUser } from "../collab/identity.js";
 import { setSetting } from "../settings.js";
 import type { Appearance } from "../settings.js";
 import { useSetting } from "./hooks.js";
+import { initialOf } from "./PeerAvatar.js";
 import {
   Popover,
   PopoverContent,
@@ -109,10 +115,12 @@ export function UserMenu({
       <PopoverTrigger asChild>
         <button type="button" className="ub-user-card" aria-label="You">
           <span
-            className="ub-user-dot"
+            className="ub-identity-tile ub-user-tile"
             style={{ background: color }}
             aria-hidden="true"
-          />
+          >
+            {initialOf(identity.name)}
+          </span>
           <span className="ub-user-name">{identity.name}</span>
           <span className="ub-menu-caret" aria-hidden="true">
             ▾

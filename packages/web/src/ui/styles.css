@@ -170,6 +170,13 @@
 
   --brand: light-dark(oklch(0.75 0.15 65), oklch(0.8 0.18 65));
   --brand-subtle: light-dark(oklch(0.95 0.03 65), oklch(0.25 0.04 65));
+  /* Ink on a `--brand` fill (#482, the workspace tile). Theme-invariant for the
+     same reason as `--cursor-label-foreground` below: `--brand` is a light
+     amber in *both* appearances, so the ink on it is dark in both, and a
+     `light-dark()` pair here would flip a letter to white on a light ground.
+     `--foreground`'s light half — 8.61:1 on light's brand and 9.76:1 on
+     dark's. */
+  --brand-foreground: oklch(0.145 0 0);
   --status-success: light-dark(oklch(0.65 0.18 145), oklch(0.7 0.2 145));
   --status-success-subtle: light-dark(oklch(0.95 0.04 145), oklch(0.25 0.04 145));
   --status-warning: light-dark(oklch(0.75 0.18 75), oklch(0.8 0.2 75));
@@ -182,11 +189,17 @@
      the hierarchy is carried by contrast rather than by size alone. */
   --prose-text: light-dark(oklch(0.3 0 0), oklch(0.92 0 0));
 
-  /* Remote-cursor label text. Theme-invariant on purpose — it sits on the peer's
-     awareness colour, which y-prosemirror writes inline as a `#rrggbb` literal
-     (see src/collab/identity.ts), and that palette is picked for white text:
-     ≥4.69:1 for every colour. Not overridden in the light block. */
-  --cursor-label-foreground: #ffffff;
+  /* Text on an awareness colour. Theme-invariant on purpose — the palette
+     y-prosemirror writes inline as `#rrggbb` literals (see
+     src/collab/identity.ts) is picked for white text: ≥4.69:1 for every
+     colour. Not overridden in the light block. Two surfaces read it, the
+     remote-cursor label it is named for and the sidebar's user tile (#482),
+     and it stays one token because it is one fact about that palette.
+
+     Spelled in oklch like every other token here, rather than as the hex it
+     started as: #515's surface walk parses what the column paints, and a
+     legacy colour reaches it as `rgb(255, 255, 255)`. Same white either way. */
+  --cursor-label-foreground: oklch(1 0 0);
 
   --radius: 0.625rem;
   --radius-sm: calc(var(--radius) - 4px);
@@ -777,10 +790,22 @@ body {
   color: var(--accent-foreground);
 }
 
-/* A segment can be a bare uuid, so it truncates rather than pushing the count
-   and the caret out of the column. */
-.ub-workspace-name {
+/* The name over its count (#482): two lines, one identity. The column is what
+   takes the width the tile and the caret leave, so the name inside it can
+   truncate against something. */
+.ub-workspace-identity {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* Tight: the subtitle belongs to the name above it, not beside it. */
+  gap: 0.1rem;
+}
+
+/* A segment can be a bare uuid, so it truncates rather than pushing the tile
+   and the caret out of the column. The whole of it is on the trigger's
+   `title` — see WorkspaceSwitcher. */
+.ub-workspace-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -788,9 +813,15 @@ body {
   font-size: 0.8rem;
 }
 
+/* #481's section-label style: on the second line the count is a subtitle
+   under the name rather than a value beside it. `text-transform` is paint, so
+   the text is still the "2 docs" / "1 doc" the component wrote. */
 .ub-workspace-count {
-  color: var(--sidebar-muted-foreground);
-  font-size: 0.75rem;
+  color: var(--sidebar-group-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .ub-menu-caret {
@@ -818,12 +849,12 @@ body {
   font-size: 0.8rem;
 }
 
-/* The user card: the footer's row shape, plus the dot that carries this
+/* The user card: the footer's row shape, plus the tile that carries this
    session's presence colour — the same colour peers see it in. */
 .ub-user-card {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.5rem;
   width: 100%;
   margin-top: 0.15rem;
   padding: 0.3rem 0.4rem;
@@ -841,11 +872,43 @@ body {
   color: var(--accent-foreground);
 }
 
-.ub-user-dot {
+/* The sidebar's two identity tiles (#482): where you are, and who this client
+   is. Rounded squares, and the shape is the distinction — #494's session
+   avatars are circles because they say who is *present*, which is a different
+   question from who you are. Both letters are `aria-hidden` in the markup, so
+   this is decoration and never a reading. */
+.ub-identity-tile {
+  box-sizing: border-box;
   flex: none;
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: 999px;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  /* 500, the emphasis weight of the two this file uses: a letter alone at 400
+     reads as a stray character, and at 28px on a filled ground it needs no
+     more than that. */
+  font-weight: 500;
+  line-height: 1;
+  user-select: none;
+}
+
+.ub-workspace-tile {
+  background: var(--brand);
+  color: var(--brand-foreground);
+}
+
+/* Filled with the presence colour, which the component writes inline because
+   that palette is `#rrggbb` literals rather than tokens (identity.ts). The ink
+   is the token those eight hues were picked for: white, ≥4.69:1 on every one
+   of them, in either appearance. Filled rather than the avatar circle's ring,
+   because this tile is not competing with a ground it has to stay legible
+   against — it sits alone at the foot of the column. */
+.ub-user-tile {
+  color: var(--cursor-label-foreground);
 }
 
 .ub-user-name {

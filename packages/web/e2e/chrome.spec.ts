@@ -345,6 +345,23 @@ function oklab(painted: string): {
 }
 
 /**
+ * The channels of a legacy serialization, or null where the colour is not one.
+ *
+ * The column paints one ground that is not a token: the user tile's fill is a
+ * colour from the awareness palette, which is `#rrggbb` literals because
+ * y-prosemirror accepts nothing else (#482, src/collab/identity.ts). Chromium
+ * reports it as `rgb(r, g, b)`, already in the space `srgb` returns. Grounds
+ * only — an *ink* still has to be a token, so a legacy one reaches `oklab`
+ * below and throws rather than being classified by a chroma nobody computed.
+ */
+function legacySrgb(painted: string): [number, number, number] | null {
+  const parts = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(painted.trim());
+  if (parts === null) return null;
+  const [r, g, b] = parts.slice(1).map((channel) => Number(channel) / 255);
+  return [r ?? 0, g ?? 0, b ?? 0];
+}
+
+/**
  * The sRGB a browser paints for one of those colours, so an ink with an alpha
  * can be composited onto its ground and read as a contrast ratio (#515). The
  * matrices are the OKLab specification's; the clamp is the gamut Chromium
@@ -352,6 +369,8 @@ function oklab(painted: string): {
  * off a rendered element.
  */
 function srgb(painted: string): [number, number, number] {
+  const legacy = legacySrgb(painted);
+  if (legacy !== null) return legacy;
   const { L, a, b } = oklab(painted);
   const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
   const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;

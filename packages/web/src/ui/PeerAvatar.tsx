@@ -27,8 +27,12 @@ const NO_INITIAL = "?";
  * The first *character* of a name, upper-cased — by code point, so a name
  * starting outside the BMP contributes one glyph rather than half a surrogate
  * pair. Trimmed first: a leading space is not an initial.
+ *
+ * Exported because the sidebar's identity tiles (#482) draw a first character
+ * too. One rule, so a workspace tile and a session circle never disagree about
+ * what the first character of the same string is.
  */
-function initialOf(name: string): string {
+export function initialOf(name: string): string {
   const [first] = Array.from(name.trim());
   return first === undefined ? NO_INITIAL : first.toUpperCase();
 }
