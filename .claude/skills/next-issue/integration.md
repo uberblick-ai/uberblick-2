@@ -47,6 +47,93 @@ wave per review head, risk-scoped re-review with the round-count rule, and the
 exit condition. Read it whenever a PR has a round to request or a finding to
 disposition.
 
+## The fan-out — one round's gates at once
+
+The gates above do not depend on each other, so run them as one fan-out instead
+of a queue, and start the long pole first.
+
+- **The read that decides the round precedes the fan-out.** Deciding an external
+  round is owed, and writing the brief that makes its wall time worth spending,
+  is a `CLAUDE.md` judgment made from the change: read the diff far enough to
+  make it before launching anything. That read is the ordering's precondition,
+  not one of its members, and it is the integrator's own — "Tier check" below
+  classifies from the same full diff, never from a gate agent's summary.
+  `review-protocol.md` decides whether a round is owed and who owns it;
+  dispatching it before the fan-out is ordering only and never creates one. Its
+  wait then overlaps the mechanical gates rather than following them.
+- **One agent per gate, each in its own checkout.** Launch the mechanical gates
+  concurrently — the immutable container review, the e2e proof where the outcome
+  is browser-observable, the acceptance-criteria read, the `Touches` scope check
+  — with the `Agent` tool's `isolation: "worktree"`, so each works in a checkout
+  of its own. Sharing one checkout is not an option: concurrent gates install,
+  build and check out in it at the same time. Every worktree inherits the
+  launching checkout's `HEAD`, so launch only from a checkout at freshly fetched
+  `origin/main` with `mise.toml`, `Dockerfile.review` and `.dockerignore`
+  unmodified: that is the state the container review must still be in when it
+  runs, and it is necessary rather than sufficient — see its gate below.
+- **Every gate agent grades the PR head, and its first commands say which tree
+  it reads.** A fresh worktree binds a gate agent in ways that look like a red
+  gate and are not branch results. `mise` trusts config by path and every
+  worktree is a new path, so `mise trust` precedes any task there. And the
+  worktrees share one ref store, so simultaneous `git fetch origin` calls lose a
+  `cannot lock ref …: is at <new> but expected <old>` race — the one trap the
+  fan-out itself creates, and it fires tens of percent of the time. Whichever
+  ref lost, that signature fires because the objects landed and the loser's ref
+  already holds the winner's value, so a fetch that exits non-zero with it is
+  re-run rather than reported as a red gate — any other fetch failure still is
+  one. Then, by gate:
+  - **The acceptance-criteria read and the `Touches` scope check** — `git fetch
+    origin`, then `git checkout --detach <headRefOid>`. They read that tree and
+    run no task, so no `mise trust`. Left on the launch checkout's `origin/main`
+    they grade `main`: every criterion of the form "X is unchanged" reads true
+    there for free, and every "the file now says Y" reads false and costs a
+    fix-up wave the branch never earned.
+  - **The e2e proof** — the same two commands, then `mise trust` and `mise run
+    install`. `mise run e2e` takes no SHA and runs whatever its checkout holds,
+    and it opens with a `pnpm --filter` exec that a fresh worktree's empty
+    `node_modules` cannot serve. A red run is classified *before* the agent
+    returns, because the environmental-failure rule above needs a base run and
+    this is the only installed worktree — it is gone once the agent returns.
+    That base is `origin/main`, the tree the container review runs from and the
+    one the PR merges into: `git checkout --detach origin/main`, `mise run
+    install` again — the head's `node_modules` is not the base's — then the same
+    spec, and report both outcomes with both SHAs.
+  - **The immutable container review** — the exception, and the only gate whose
+    own checkout stays at freshly fetched `origin/main`: `main` supplies the
+    build recipe (README, "Review isolation"), and archiving the SHA it is
+    passed is what lets it grade the head from there. So `mise trust`, then
+    `mise run review <headRefOid>`, which needs that commit already in the
+    shared object store — the fetch "Gate mechanics" opens with. `mise run
+    review` re-fetches `main` and re-compares at run time while a worktree's
+    `HEAD` is frozen at creation, so a gate agent it refuses moves its worktree to
+    freshly fetched `origin/main` and re-runs instead of reporting a red gate.
+    The SHA-tagged image outlives that worktree on the host daemon, so the
+    failure-path probes above stay the integrator's own work, never the gate
+    agent's.
+- **Every gate agent reports; none writes.** Each returns its `gate`, `outcome`,
+  a short `summary`, the `sha` it ran at, and its `start` and `end`, and performs
+  no GitHub write at all — no claim, comment, label, review or merge. The
+  integrator owns every durable record, so a gate result reaches the PR only
+  through it.
+- **`needs-runtime` is routing, never a pass.** A gate agent that cannot settle
+  an acceptance criterion from static evidence answers `needs-runtime` and names
+  the gate that covers it — a criterion observable only in a running browser goes
+  to the e2e gate — instead of guessing. The integrator then reconciles that
+  gate's result into a pass or fail for the criterion, at the same fresh head,
+  before ruling; when the named gate was not launched — the browser-observability
+  call is made before the acceptance read returns — launch it in a second wave at
+  that same head and reconcile against its result.
+- **Freshness survives the fan-out.** Every evidence item names the SHA it ran
+  at. A commit landing mid-fan-out is resolved by the per-gate freshness rules
+  above and in `review-protocol.md` — re-run what the new commit invalidates —
+  never by carrying an item forward to a head it did not run at.
+- **The record carries the timings.** The integrator's PR record names each
+  gate's start and end alongside its outcome, and the round's own claim→ruling
+  wall time. Per-gate times happen inside subagents that write nothing, so they
+  are not derivable at all; the round total is the one deliberate exception to
+  the never-restate-a-timestamp rule below, because it is the telemetry this
+  fan-out exists to produce.
+
 ## Immediately before merging
 
 Re-fetch the PR's reviews and comment threads (`gh pr view <n> --comments` plus

@@ -56,9 +56,19 @@ reasoning that `review-protocol.md` permits the integrator to carry across the
 author's corrections, post the README's exact-PR delegation record before
 starting a fresh Opus `implementation-reviewer`.
 
+An owed round is dispatched *before* the mechanical gates rather than after
+them, because its wait is the round's long pole; the mechanical gates then run
+concurrently with it and with each other, wherever the runtime allows. Order and
+concurrency only make the same evidence arrive sooner: which gates are owed,
+which criteria they answer, who dispositions a finding and who rules are all
+unchanged, and a criterion this role cannot settle statically is routed to the
+gate that covers it rather than guessed.
+
 The reviewer's claim is the one permitted nested claim: the integrator's live
-claim remains in force, blocks a second integrator, and resumes this same
-bounded assignment only after the child's durable `Done:`.
+claim remains in force and blocks a second integrator. Gate work continues while
+that child runs, but no ruling does — this assignment reaches a disposition, an
+acceptance verdict, a tier call or a merge only after the child's durable
+`Done:` or a recorded failed dispatch.
 Re-read the head before using that result; a review of another SHA is evidence
 only under that explicit risk-scoped carry-forward rule.
 
