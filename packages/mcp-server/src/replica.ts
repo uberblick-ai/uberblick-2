@@ -63,8 +63,8 @@ const LOG_ORIGIN = Symbol("uberblick/log");
  * a session by what it *says* it is rather than by what it fails to say, so a
  * browser tab running a bundle too old to have said anything is no longer
  * mistaken for an agent. The value is a wire constant shared with the web
- * client by literal — `packages/web/src/collab/rooms.ts` holds the other end,
- * and neither package imports the other.
+ * client by literal — `packages/web/src/collab/identity.ts` holds the other
+ * end, and neither package imports the other.
  */
 export const AGENT_CLIENT = "agent";
 

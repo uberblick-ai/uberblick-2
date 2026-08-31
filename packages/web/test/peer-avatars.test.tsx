@@ -5,19 +5,24 @@
  * everything a name used to carry has to be in the hover and in the
  * accessibility tree instead.
  *
- * Two things are worth a test and the rest is not. The *label* is a pure
- * function of a reading, so it is asserted as one. The one live case is the
+ * Three things are worth a test and the rest is not. The *label* is a pure
+ * function of a reading, so it is asserted as one. One live case is the
  * strip following a **late marker** — a `client`, and then a `session`, that
  * arrive after a session's first state, which `samePresence` silently discards
  * if the comparison does not know about the field. They arrive as two updates
  * on purpose: each one moves exactly one of the two new comparisons, so
- * neutralising either alone turns this case red. Block renumbering is
+ * neutralising either alone turns this case red. The other live case is the
+ * strip's **first frame after a document opens**: the shell reads presence over
+ * `doc ?? directory`, the stored reading lags the connection by one effect, and
+ * without `usePresence`'s room guard the strip's first painted frame is the
+ * directory's roster — every session in the workspace — drawn as this
+ * document's. Block renumbering is
  * deliberately not re-proved here: `doc-chrome.test.tsx` owns that invariant
  * over the same `usePresence` snapshot this strip reads.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
+import { act, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import * as Y from "yjs";
 import {
@@ -74,17 +79,73 @@ describe("what an avatar says when a circle cannot", () => {
 });
 
 /**
- * The shell's own wiring for one room: the presence reading is made once and
- * handed to the line (`App.tsx`), so the strip is exercised over exactly the
- * subscription the app gives it rather than over a hand-built list.
+ * The shell's own wiring, both rooms of it (`App.tsx`): presence is read once
+ * over `chromeRoom = doc ?? directory` and handed to the line, which renders
+ * against the *document's* connection — so the strip is exercised over exactly
+ * the subscription and the room switch the app gives it, not a hand-built
+ * list. `onFrame` fires from a layout effect — after the commit, before the
+ * passive effects that correct a stale reading — so a test sees every frame
+ * exactly as it would paint.
  */
-function Shell({ connection }: { connection: RoomConnection }): ReactElement {
-  return (
-    <StatusLine
-      connection={connection}
-      segment={WORKSPACE}
-      presence={usePresence(connection)}
-    />
+function Shell({
+  doc,
+  directory,
+  onFrame,
+}: {
+  doc: RoomConnection | null;
+  directory: RoomConnection | null;
+  onFrame?: () => void;
+}): ReactElement | null {
+  const chromeRoom = doc ?? directory;
+  const presence = usePresence(chromeRoom);
+  useLayoutEffect(() => {
+    onFrame?.();
+  });
+  return doc === null ? null : (
+    <StatusLine connection={doc} segment={WORKSPACE} presence={presence} />
+  );
+}
+
+/** A connected room, as `useRoom` would hand it to the shell. */
+function roomFixture(room: string): {
+  connection: RoomConnection;
+  ydoc: Y.Doc;
+  awareness: Awareness;
+} {
+  const ydoc = new Y.Doc();
+  const awareness = new Awareness(ydoc);
+  const status: RoomStatus = {
+    connected: true,
+    synced: true,
+    unsyncedChanges: 0,
+    localReplicaLoaded: true,
+    hasLocalCache: false,
+    protocolMismatch: null,
+    authFailed: false,
+    tokenMissing: false,
+  };
+  const connection = {
+    room,
+    ydoc,
+    provider: { awareness },
+    status,
+    onStatusChange: (listener: (next: RoomStatus) => void) => {
+      listener(status);
+      return () => {};
+    },
+  } as unknown as RoomConnection;
+  return { connection, ydoc, awareness };
+}
+
+/** A remote session already in the room: one state, applied as an update. */
+function join(awareness: Awareness, state: Record<string, unknown>): void {
+  const peerDoc = new Y.Doc();
+  const peer = new Awareness(peerDoc);
+  peer.setLocalState(state);
+  applyAwarenessUpdate(
+    awareness,
+    encodeAwarenessUpdate(peer, [peerDoc.clientID]),
+    "test",
   );
 }
 
@@ -98,30 +159,11 @@ describe("the strip follows a marker that arrives late", () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
       true;
 
-    const ydoc = new Y.Doc();
+    const { connection, ydoc, awareness } = roomFixture(
+      `${WORKSPACE}/${DOC_UUID}`,
+    );
     initDoc(ydoc, { uuid: DOC_UUID, title: "Presence" });
     appendBlock(ydoc, { type: "paragraph", text: "first block" });
-    const awareness = new Awareness(ydoc);
-    const status: RoomStatus = {
-      connected: true,
-      synced: true,
-      unsyncedChanges: 0,
-      localReplicaLoaded: true,
-      hasLocalCache: false,
-      protocolMismatch: null,
-      authFailed: false,
-      tokenMissing: false,
-    };
-    const connection = {
-      room: `${WORKSPACE}/${DOC_UUID}`,
-      ydoc,
-      provider: { awareness },
-      status,
-      onStatusChange: (listener: (next: RoomStatus) => void) => {
-        listener(status);
-        return () => {};
-      },
-    } as unknown as RoomConnection;
 
     // A real remote session, so a second publish arrives as an update to a
     // state already in the map rather than as a new one.
@@ -147,7 +189,7 @@ describe("the strip follows a marker that arrives late", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
-    act(() => root.render(<Shell connection={connection} />));
+    act(() => root.render(<Shell doc={connection} directory={null} />));
     act(() => void vi.advanceTimersByTime(5_000));
     try {
       expect(avatar()?.textContent).toBe("C");
@@ -175,6 +217,60 @@ describe("the strip follows a marker that arrives late", () => {
       // And a browser tab stays a person, whatever else moves.
       publish({ user: { name: "Ben", color: "#0c853d" }, client: WEB_CLIENT });
       expect(avatar()?.textContent).toBe("B");
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+});
+
+describe("the strip's first frame after a document opens", () => {
+  it("is empty until the document's own reading lands, never the directory's roster", () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+
+    // The directory room every session in the workspace publishes into, and the
+    // document only Zoe is reading. If the reading made in the directory's room
+    // ever reaches the document's strip, three strangers appear in it.
+    const directory = roomFixture(`${WORKSPACE}/_directory`);
+    join(directory.awareness, { user: { name: "Alice", color: "#0c853d" } });
+    join(directory.awareness, { user: { name: "Bob", color: "#0675c9" } });
+    join(directory.awareness, { user: { name: "Cleo", color: "#cb26b4" } });
+
+    const doc = roomFixture(`${WORKSPACE}/${DOC_UUID}`);
+    initDoc(doc.ydoc, { uuid: DOC_UUID, title: "Presence" });
+    join(doc.awareness, { user: { name: "Zoe", color: "#e30c4e" } });
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const frames: string[][] = [];
+    const onFrame = (): void => {
+      frames.push(
+        Array.from(
+          host.querySelectorAll<HTMLElement>(".ub-peers .ub-avatar"),
+          (avatar) => avatar.getAttribute("title") ?? "",
+        ),
+      );
+    };
+    try {
+      // The first screen of a session: no document open, the shell reading over
+      // the directory. Then a document opens — the commit that first mounts the
+      // strip is the one where the stored reading still belongs to the
+      // directory, and it must paint as nobody rather than as everybody.
+      act(() =>
+        root.render(<Shell doc={null} directory={directory.connection} onFrame={onFrame} />),
+      );
+      act(() =>
+        root.render(
+          <Shell
+            doc={doc.connection}
+            directory={directory.connection}
+            onFrame={onFrame}
+          />,
+        ),
+      );
+      expect(frames).toEqual([[], [], [], ["Zoe"]]);
     } finally {
       act(() => root.unmount());
       host.remove();

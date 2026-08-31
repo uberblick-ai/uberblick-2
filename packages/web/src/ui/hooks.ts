@@ -416,6 +416,13 @@ const NOBODY: readonly RemotePresence[] = [];
  * the chrome's activity pill (`activeSession`) are two views of this one
  * snapshot, so there is one subscription rather than one per reader.
  *
+ * Never returns a reading made in another room — `useRoom`'s guard, for the
+ * same reason: the stored reading is state, so it lags `connection` by one
+ * effect, and the shell reads over `doc ?? directory`. Without the check, the
+ * first painted frame after a document opens would draw the directory's roster
+ * — every session in the workspace — as this document's. Callers see `NOBODY`
+ * for that single render instead.
+ *
  * The reading is compared before it is stored, and that is the point rather
  * than an optimisation: awareness fires `change` on every caret movement, so a
  * peer typing a sentence produces dozens of readings that all say the same
@@ -431,17 +438,27 @@ const NOBODY: readonly RemotePresence[] = [];
 export function usePresence(
   connection: RoomConnection | null,
 ): readonly RemotePresence[] {
-  const [presence, setPresence] = useState<readonly RemotePresence[]>(NOBODY);
+  const [stored, setStored] = useState<{
+    room: string;
+    sessions: readonly RemotePresence[];
+  } | null>(null);
   useEffect(() => {
     const awareness = connection?.provider.awareness ?? null;
     if (connection === null || awareness === null) {
-      setPresence(NOBODY);
+      setStored(null);
       return;
     }
+    const { room } = connection;
     const fragment = getBlocksFragment(connection.ydoc);
     const read = (): void => {
       const next = readPresence(connection.ydoc, awareness);
-      setPresence((previous) => (samePresence(previous, next) ? previous : next));
+      setStored((previous) =>
+        previous !== null &&
+        previous.room === room &&
+        samePresence(previous.sessions, next)
+          ? previous
+          : { room, sessions: next },
+      );
     };
     read();
     awareness.on("change", read);
@@ -451,7 +468,9 @@ export function usePresence(
       fragment.unobserve(read);
     };
   }, [connection]);
-  return presence;
+  return stored !== null && stored.room === connection?.room
+    ? stored.sessions
+    : NOBODY;
 }
 
 /**
