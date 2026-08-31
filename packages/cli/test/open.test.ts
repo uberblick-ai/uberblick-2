@@ -990,6 +990,31 @@ describe("ub open", () => {
     expect(mise.calls()).toEqual([]);
   });
 
+  it("builds a stamp-only directory nobody is building, rather than serving it", async () => {
+    const box = sandbox();
+    const dir = join(box.cwd, "stamp-only");
+    mkdirSync(dir, { recursive: true });
+    // The same half-written directory as above, except that the build which left
+    // it was killed: nothing holds the lock, so nothing will ever finish it. Take
+    // the stamp at its word here and every `ub open` from now on announces
+    // success and answers 404.
+    stamp(dir, SYNC_PROTOCOL_VERSION);
+    const pnpm = fakeTool(box, "pnpm");
+    const io = stderrIo();
+
+    const outcome = await ensureBundle(
+      { action: "build", dir, ours: true },
+      { ...box.env, PATH: pnpm.path, FAKE_EXIT_CODE: "1" },
+      io,
+      calm(),
+    );
+
+    // It built — and said so when the build failed, instead of serving nothing.
+    expect(pnpm.calls().length).toBe(1);
+    expect(outcome).toBe("refused");
+    expect(io.text()).toContain("the web build failed");
+  });
+
   it("takes that same lock for a first build, not only for a rebuild", async () => {
     const box = sandbox();
     const bundle = join(box.cwd, "not-built-yet");

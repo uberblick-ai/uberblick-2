@@ -505,9 +505,12 @@ export async function ensureBundle(
   // The stamp alone would be enough if nothing else were writing this directory,
   // and this one read is the only one taken outside the lock: Vite emits the
   // stamp from `generateBundle` with nothing ordering it last, so another run's
-  // half-written `dist` can carry a current stamp and no `index.html` yet. The
-  // reads inside {@link buildBundle} need no such guard — whoever was building
-  // has finished by then. A *supplied* bundle missing its `index.html` never
+  // half-written `dist` can carry a current stamp and no `index.html` yet.
+  // {@link buildBundle}'s pre-build read is paired the same way, because a build
+  // killed between those two writes leaves that state behind with nobody left to
+  // finish it; its reads *after* a build need no pairing, since either that build
+  // exited 0 or the plan is `serve`, which {@link bundlePlan} returns only having
+  // seen an `index.html`. A *supplied* bundle missing its `index.html` never
   // reaches this at all: {@link bundlePlan} answers `missing` for it, and
   // {@link openCommand} stops there with the reason.
   if (stamped === SYNC_PROTOCOL_VERSION && isFile(join(plan.dir, "index.html"))) {
@@ -550,7 +553,7 @@ async function buildBundle(
   io: Io,
   stop: Stop,
 ): Promise<BundleOutcome> {
-  if (stampedProtocol(plan.dir) === SYNC_PROTOCOL_VERSION) {
+  if (stampedProtocol(plan.dir) === SYNC_PROTOCOL_VERSION && isFile(join(plan.dir, "index.html"))) {
     return "servable";
   }
 
