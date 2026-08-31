@@ -375,9 +375,10 @@ describe("annotations", () => {
   it("keeps both replies when two replicas comment on one thread offline", () => {
     const { a, b, threadId } = threadedPair();
 
-    // Neither replica can see the other's reply. While the conversation was a
-    // field of one last-write-wins Y.Map value, these two converged to whichever
-    // write came last and the other reply vanished silently (#461).
+    // Neither replica can see the other's reply. While the conversation was one
+    // plain JSON value in the annotations Y.Map, the replicas
+    // converged to whichever write came last, and the other reply vanished
+    // silently (#461).
     addComment(a, threadId, "owner", "Yes, cut it.");
     addComment(b, threadId, "agent", "Shortened.");
     syncDocs(a, b);

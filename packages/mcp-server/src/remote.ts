@@ -174,10 +174,11 @@ export function liveDocs(corpus: Corpus): CorpusDoc[] {
 /**
  * A value with every object key sorted, recursively.
  *
- * The annotations map reaches this function as the plain JSON `toJSON()`
- * produces from it, and one thread's updates reach two replicas in different
- * orders; nothing guarantees the two decodings enumerate their keys
- * identically. A fingerprint that depends on key order would report
+ * The document fingerprint passes each thread's plain JSON `toJSON()` value
+ * here, alongside its metadata and each inline run's marks. One thread's
+ * updates can reach two replicas in different orders; nothing guarantees the
+ * two decodings enumerate their keys identically. A fingerprint that depends
+ * on key order would report
  * divergence between documents that are in fact the same, and this bridge fails
  * closed — so a false difference is a promotion that refuses to finish.
  */
