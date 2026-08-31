@@ -330,6 +330,16 @@ describe("a fresh deep link does not open a writable empty replica", () => {
     expect(host.querySelector(".ub-notice")?.textContent).toContain("Waiting for sync");
     expect(host.querySelector(".ub-editor")).toBeNull();
 
+    // AC3 is about the document page, and this screen is one — it is this
+    // document's address, showing why it is not here yet. The control moved to
+    // the identity line, which this screen does not draw, so it is rendered
+    // here too; a link is *more* worth sending from a document that has not
+    // arrived, and the address bar is not a keyboard-reachable control
+    // (Codex round 1).
+    expect(
+      host.querySelector(".ub-copy-link")?.getAttribute("aria-label"),
+    ).toBe(`Copy link to ${WS}/${UUID}`);
+
     // Now the document's own room delivers, exactly as sync would.
     const remote = new Y.Doc();
     initDoc(remote, { uuid: UUID, title: "Annotations" });

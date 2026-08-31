@@ -222,8 +222,19 @@ describe("the line says whether a durable local copy is here", () => {
     // And under a refusal, which is the state it matters most in: nothing will
     // sync again until somebody acts, so whether the work is durably here is
     // the one thing on this line that is still worth reading.
+    //
+    // `connected`/`synced` are true on purpose, and they are what make this
+    // case worth its lines. The gate is `reading.tone`, not the calm `state`,
+    // and only a refusal that arrives while the socket still looks healthy
+    // tells the two apart: `statusReading` forces `tone` to "offline" for a
+    // refusal, while the calm state settles to "synced". Reading the calm
+    // state here would suppress the note in exactly the situation the owner
+    // asked for it, and with an ordinary offline fixture both gates agree and
+    // the mistake passes (Codex round 1 proved it by mutation).
     expect(
       localCopyNote({
+        connected: true,
+        synced: true,
         protocolMismatch: { hub: 2, client: 1 },
         localReplicaLoaded: true,
         hasLocalCache: true,

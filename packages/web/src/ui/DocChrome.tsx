@@ -417,6 +417,12 @@ type CopyResult = "idle" | "copied" | "failed";
  * where a `<workspaceId>/<docUuid>` belongs — so what is left is a control that
  * says what it does, beside the identity it is about.
  *
+ * Exported because the identity line is not the only place a reader is looking
+ * at a document's address. A document that has not reached this replica yet
+ * draws the waiting notice instead of this line, and that is a state a link is
+ * *more* worth sending from, not less — it can last as long as the hub is away.
+ * `RoutePane` renders the same control there.
+ *
  * The link is built from `segment` — the workspace as the *address* spells it —
  * rather than from the room key, which carries the bare uuid. The two are the
  * same string for an undecorated workspace and differ for `<slug>-<uuid>`, and
@@ -434,7 +440,13 @@ type CopyResult = "idle" | "copied" | "failed";
  * row is built the way it is (#76): nothing here may move sideways, and a word
  * appearing in the row would move everything after it.
  */
-function CopyLink({ room, segment }: { room: string; segment: string }): ReactElement {
+export function CopyLink({
+  room,
+  segment,
+}: {
+  room: string;
+  segment: string;
+}): ReactElement {
   const [result, setResult] = useState<CopyResult>("idle");
 
   useEffect(() => {

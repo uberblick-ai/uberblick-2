@@ -463,4 +463,53 @@ test("the copy-link control is a 44px target in a row that stays its own height"
   // landed — which of the two clipboard paths ran is not what this is about.
   await page.mouse.click(button.x + button.width / 2, button.y - 8);
   await expect(page.locator(".ub-copied")).not.toBeEmpty();
+
+  // The overhang must not be paid for by a control underneath it. `.ub-title`
+  // is full-bleed and starts a few pixels below this button, so a target
+  // centred on the button ate the top of the title and answered taps meant for
+  // it (Codex round 1). Asserted at the three widths the layout has to hold at,
+  // including the iPad width the 44px is *for*, and with a long tag strip
+  // because that is what pushes this row around.
+  // `.ub-tag-add` carries a `list`, which makes its role combobox, not textbox.
+  const addTag = page.locator(".ub-tag-add");
+  for (const tag of ["alpha", "beta", "gamma", "delta", "epsilon"]) {
+    await addTag.fill(tag);
+    await addTag.press("Enter");
+  }
+  for (const width of [1280, 1100, 768]) {
+    await page.setViewportSize({ width, height: 900 });
+    // Hit-tested, not computed. Reading the rule's own offsets back out only
+    // re-states what the stylesheet says, and the arithmetic that converts them
+    // into a rectangle is wrong for any other way of writing the same target —
+    // a wrong number here would look like a passing measurement. `contains`
+    // answers the only question that matters: does this control take the click?
+    const probe = await page.evaluate(() => {
+      const control = document.querySelector(".ub-copy-link");
+      const title = document.querySelector(".ub-title");
+      if (control === null || title === null) throw new Error("e2e: no header");
+      const box = control.getBoundingClientRect();
+      const x = box.x + box.width / 2;
+      const answers = (y: number): boolean =>
+        control.contains(document.elementFromPoint(x, y));
+      // Sweep outward from the button to find the live target's real extent.
+      let top = Math.round(box.top);
+      let bottom = Math.round(box.bottom);
+      while (answers(top - 1)) top -= 1;
+      while (answers(bottom + 1)) bottom += 1;
+      const above = document.elementFromPoint(x, top - 1);
+      return {
+        liveHeight: bottom - top,
+        // The defect this replaced: the target reached into the full-bleed
+        // title input and answered taps meant for it.
+        takesTheTitle: answers(title.getBoundingClientRect().top + 1),
+        aboveTarget: above === null ? "none" : above.tagName,
+      };
+    });
+    // The target a thumb needs is really there, not merely declared…
+    expect(probe.liveHeight).toBeGreaterThanOrEqual(44);
+    // …it is not paid for with the title underneath…
+    expect(probe.takesTheTitle).toBe(false);
+    // …and it stops short of anything clickable in the topbar above.
+    expect(["SECTION", "HEADER", "P", "DIV"]).toContain(probe.aboveTarget);
+  }
 });

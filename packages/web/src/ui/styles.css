@@ -1670,18 +1670,27 @@ body {
 /* The 44x44 target a thumb needs, without giving the identity row 44px of
    height. The tap area is this pseudo-element rather than the button's own box,
    so the words stay the size of the line they sit in and the row keeps its
-   height; centred on the button, the extra height falls into the pane's own
-   padding above and into the two pixels of gap plus the very top of the title
-   below — at the row's right end, where nothing else is asking for a click.
-   `max()` is what keeps a wider label from *shrinking* the target. */
+   height. `max()` is what keeps a wider label from *shrinking* the target.
+
+   It grows *upward*, and that direction is the whole point. The button is 16px
+   in a 25px row with only ~5px of dead space beneath it before `.ub-title`
+   begins — the title input is full-bleed, so it runs the entire width of the
+   column and passes directly under this control. A target centred on the button
+   therefore reached about 7px into the top of the title and swallowed taps meant
+   for it (#535, Codex round 1). Above the button there is ~17px of the pane's
+   own padding before the topbar, and nothing interactive until the header's
+   presence strip at ~27px. Anchoring the bottom edge just short of the title
+   spends the 44px in that dead space instead: it clears the title below and
+   stops short of anything in the header above. The e2e case measures both
+   clearances rather than trusting this comment. */
 .ub-copy-link::after {
   content: "";
   position: absolute;
-  top: 50%;
+  bottom: -5px;
   left: 50%;
   width: max(100%, 44px);
   height: 44px;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
 }
 
 /* Out of flow, and only there while it has something to say: a confirmation
@@ -1733,7 +1742,14 @@ body {
   gap: 0.5rem;
   flex-wrap: nowrap;
   min-height: 1.55rem;
-  margin: 0 0 0.15rem;
+  /* The top margin is the copy control's tap area, not decoration. `.ub-pane`
+     scrolls, so it clips anything reaching above its padding, and `.ub-title`
+     is full-bleed directly below this row — between those two edges there was
+     about 40px, and the 44px target has to live inside them (#535, Codex round
+     1). Eight pixels here is what makes the target real rather than declared;
+     the e2e case hit-tests it, so a future change to this rhythm fails loudly
+     instead of quietly shrinking the target again. */
+  margin: 0.5rem 0 0.15rem;
   font-size: 0.75rem;
   color: var(--muted-foreground);
 }
