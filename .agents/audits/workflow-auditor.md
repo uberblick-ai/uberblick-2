@@ -12,13 +12,13 @@ Use the launcher's run identity verbatim. If none was supplied, create one as
 effect and keep it unchanged. Reports live only in [Workflow audit
 reports](https://github.com/uberblick-ai/uberblick-2/discussions/540).
 
-A valid prior report is a top-level reply there that begins `Weekly workflow
-audit`, carries `Run: workflow-auditor`, and has a parseable `Cursor` block.
-Run at most once in any rolling seven-day window measured from the newest valid
-report. An early invocation returns `Audit not due` with that report's URL and
-stops without posting.
+A valid prior report is a top-level reply there that begins `Workflow audit` or
+the legacy `Weekly workflow audit`, carries `Run: workflow-auditor`, and has a
+parseable `Cursor` block. Run at most once in any rolling three-day window
+measured from the newest valid report. An early invocation returns `Audit not
+due` with that report's URL and stops without posting.
 
-The first run covers the preceding seven days. A later run resumes after the
+The first run covers the preceding three days. A later run resumes after the
 cursor in the newest valid report; it never rereads older history merely to
 produce activity. Expand farther back only to establish a claimed trend or to
 recover from a missing or invalid cursor.
@@ -142,7 +142,7 @@ Classify workflow impact independently from code-review severity:
 Post one concise, human-scannable top-level reply:
 
 ```text
-Weekly workflow audit — YYYY-MM-DD
+Workflow audit — YYYY-MM-DD
 Run: workflow-auditor <run id>
 Window: <start> through <end>
 Grounding: <origin/main SHA>

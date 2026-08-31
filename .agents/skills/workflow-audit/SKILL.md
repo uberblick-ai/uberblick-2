@@ -1,7 +1,7 @@
 ---
 name: workflow-audit
 description: >-
-  Run Uberblick's weekly read-only audit of issue preparation, implementation,
+  Run Uberblick's read-only audit every three days across issue preparation,
   queue health, workflow efficiency, and product-context use. Do not use for a
   delivery role, issue or PR review, implementation, or a merge gate.
 ---
