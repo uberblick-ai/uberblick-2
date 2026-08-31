@@ -25,7 +25,9 @@ const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bundled = [
   { woff2: "Geist-Variable.woff2", license: "LICENSE-Geist.txt" },
   { woff2: "GeistMono-Variable.woff2", license: "LICENSE-Geist.txt" },
-  { woff2: "Fraunces-Variable.woff2", license: "LICENSE-Fraunces.txt" },
+  { woff2: "Fraunces-Variable-latin.woff2", license: "LICENSE-Fraunces.txt" },
+  { woff2: "Fraunces-Variable-latin-ext.woff2", license: "LICENSE-Fraunces.txt" },
+  { woff2: "Fraunces-Variable-vietnamese.woff2", license: "LICENSE-Fraunces.txt" },
 ];
 
 describe("bundled fonts", () => {

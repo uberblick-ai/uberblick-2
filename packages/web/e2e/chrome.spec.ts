@@ -369,16 +369,21 @@ test("the document title is set in the bundled Fraunces, and nothing else moved"
   );
 
   // The stack above is satisfied by Georgia too, so it is not evidence on its
-  // own: this is the engine reporting that it fetched the vendored woff2 and
-  // has the face to paint with. A missing or unreadable file leaves the entry
-  // in `error`, and the title would quietly be Georgia.
-  const face = await page.evaluate(async () => {
-    await document.fonts.ready;
-    return [...document.fonts]
-      .filter((loaded) => loaded.family === "Fraunces")
-      .map((loaded) => loaded.status);
-  });
-  expect(face).toEqual(["loaded"]);
+  // own. A title that reaches into all three vendored cuts is: the engine only
+  // fetches a face whose characters it has to paint, so three `loaded` faces
+  // is three files it found and used. Polish and Turkish are the latin-ext
+  // cut, Vietnamese the third, and the rest of the line the first — a title
+  // this face could not cover would be quietly half Georgia.
+  await page.locator(".ub-title").fill("Łódź, Ağrı, Việt — a title");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        [...document.fonts]
+          .filter((face) => face.family === "Fraunces")
+          .map((face) => face.status),
+      ),
+    )
+    .toEqual(["loaded", "loaded", "loaded"]);
 
   // Title-only: the prose it sits above and the column beside it keep Geist,
   // and the title is not in it.
@@ -396,13 +401,18 @@ test("the document title is set in the bundled Fraunces, and nothing else moved"
   expect(await width(page, ".ub-title")).toBe(await width(page, ".ub-editor"));
 
   // "No font CDN" is not checkable by naming CDNs, so it is checked as what it
-  // is a case of: this app fetches nothing off its own origin. A websocket to
-  // the hub is not a resource and does not appear here.
-  const offOrigin = await page.evaluate(() =>
-    performance
+  // is a case of: every font file this page fetched came from the app's own
+  // origin, and Fraunces is among them.
+  const fetched = await page.evaluate(() => {
+    const fonts = performance
       .getEntriesByType("resource")
       .map((entry) => entry.name)
-      .filter((url) => new URL(url).origin !== location.origin),
-  );
-  expect(offOrigin).toEqual([]);
+      .filter((url) => /\.(woff2?|otf|ttf)(\?|$)/i.test(url));
+    return {
+      offOrigin: fonts.filter((url) => new URL(url).origin !== location.origin),
+      fraunces: fonts.filter((url) => /fraunces/i.test(url)).length,
+    };
+  });
+  expect(fetched.offOrigin).toEqual([]);
+  expect(fetched.fraunces).toBeGreaterThan(0);
 });
