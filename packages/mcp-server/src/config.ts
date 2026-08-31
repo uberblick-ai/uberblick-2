@@ -86,14 +86,17 @@ export interface McpConfig {
    */
   reconcileRetryMs: number;
   /**
-   * How stale a directory stub's `updatedAt` must be before an observed content
-   * change re-stamps it (ms).
+   * How stale a directory stub's `updatedAt` must be before a content change
+   * this server authored re-stamps it (ms).
    *
-   * The whole point of the field is to be coarse. Every keystroke in any
-   * document is an observed change, and stamping each one would put a directory
-   * update — broadcast to every client in the workspace — behind every one of
-   * them. A title or tag change still updates the stub immediately, because
-   * that write has to happen anyway.
+   * The whole point of the field is to be coarse. Every keystroke is a change,
+   * and stamping each one would put a directory update — broadcast to every
+   * client in the workspace — behind every one of them. A title or tag change
+   * still updates the stub immediately, because that write has to happen
+   * anyway.
+   *
+   * Only this server's own changes are on that clock at all: a change it merely
+   * observed is stamped by whoever made it, never here — see `repairStub`.
    */
   updatedAtCoarsenessMs: number;
 }
