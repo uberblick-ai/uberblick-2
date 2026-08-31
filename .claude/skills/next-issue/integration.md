@@ -79,7 +79,7 @@ of a queue, and start the long pole first.
   `cannot lock ref …: is at <new> but expected <old>` race — the one trap the
   fan-out itself creates, and it fires tens of percent of the time. Whichever
   ref lost, that signature fires because the objects landed and the loser's ref
-  already holds the newer value, so a fetch that exits non-zero with it is
+  already holds the winner's value, so a fetch that exits non-zero with it is
   re-run rather than reported as a red gate — any other fetch failure still is
   one. Then, by gate:
   - **The acceptance-criteria read and the `Touches` scope check** — `git fetch
@@ -102,11 +102,10 @@ of a queue, and start the long pole first.
     own checkout stays at freshly fetched `origin/main`: `main` supplies the
     build recipe (README, "Review isolation"), and archiving the SHA it is
     passed is what lets it grade the head from there. So `mise trust`, then
-    `mise run review <headRefOid>`. It resolves that SHA locally and fetches
-    only `main`, so the head commit has to be in the shared object store
-    already — that is the fetch "Gate mechanics" opens with. `mise run review`
-    re-fetches `main` and re-compares at run time while a worktree's `HEAD` is
-    frozen at creation, so a gate agent it refuses moves its own worktree to
+    `mise run review <headRefOid>`, which needs that commit already in the
+    shared object store — the fetch "Gate mechanics" opens with. `mise run
+    review` re-fetches `main` and re-compares at run time while a worktree's
+    `HEAD` is frozen at creation, so a gate agent it refuses moves its worktree to
     freshly fetched `origin/main` and re-runs instead of reporting a red gate.
     The SHA-tagged image outlives that worktree on the host daemon, so the
     failure-path probes above stay the integrator's own work, never the gate
