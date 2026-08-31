@@ -52,19 +52,28 @@ disposition.
 The gates above do not depend on each other, so run them as one fan-out instead
 of a queue, and start the long pole first.
 
-- **The owed external round goes first.** `review-protocol.md` decides whether a
-  round is owed and who owns it; dispatching it before the fan-out is ordering
-  only and never creates one. Its wait then overlaps the mechanical gates rather
-  than following them.
+- **The read that decides the round precedes the fan-out.** Deciding an external
+  round is owed, and writing the brief that makes its wall time worth spending,
+  is a `CLAUDE.md` judgment made from the change: read the diff far enough to
+  make it before launching anything. That read is the ordering's precondition,
+  not one of its members, and it is the integrator's own — "Tier check" below
+  classifies from the same full diff, never from a gate agent's summary.
+  `review-protocol.md` decides whether a round is owed and who owns it;
+  dispatching it before the fan-out is ordering only and never creates one. Its
+  wait then overlaps the mechanical gates rather than following them.
 - **One agent per gate, each in its own checkout.** Launch the mechanical gates
   concurrently — the immutable container review, the e2e proof where the outcome
-  is browser-observable, the acceptance-criteria read, the `Touches` scope check,
-  the diff read the tier call needs — with the `Agent` tool's
-  `isolation: "worktree"`, so each works in a checkout of its own. A shared
-  checkout is not an option here: concurrent gates install, build and check out
-  at the same time, and `mise run review` refuses to run anywhere but a checkout
-  that is itself at freshly fetched `origin/main` with `mise.toml`,
-  `Dockerfile.review` and `.dockerignore` unmodified.
+  is browser-observable, the acceptance-criteria read, the `Touches` scope check
+  — with the `Agent` tool's `isolation: "worktree"`, so each works in a checkout
+  of its own. Sharing one checkout is not an option: concurrent gates install,
+  build and check out in it at the same time. Two properties of a fresh worktree
+  bind the gate agent. It inherits the launching checkout's `HEAD`, so launch
+  only from a checkout at freshly fetched `origin/main` with `mise.toml`,
+  `Dockerfile.review` and `.dockerignore` unmodified, or every `mise run review`
+  worktree refuses before building. `mise` also trusts config by path, and every
+  worktree is a new path, so the gate agent's first command is `mise trust`:
+  without it every `mise` task there fails as untrusted, which looks like a red
+  gate but is not a branch result.
 - **Every gate agent reports; none writes.** Each returns its `gate`, `outcome`,
   a short `summary`, the `sha` it ran at, and its `start` and `end`, and performs
   no GitHub write at all — no claim, comment, label, review or merge. The
@@ -75,14 +84,19 @@ of a queue, and start the long pole first.
   the gate that covers it — a criterion observable only in a running browser goes
   to the e2e gate — instead of guessing. The integrator then reconciles that
   gate's result into a pass or fail for the criterion, at the same fresh head,
-  before ruling.
+  before ruling; when the named gate was not launched — the browser-observability
+  call is made before the acceptance read returns — launch it in a second wave at
+  that same head and reconcile against its result.
 - **Freshness survives the fan-out.** Every evidence item names the SHA it ran
   at. A commit landing mid-fan-out is resolved by the per-gate freshness rules
   above and in `review-protocol.md` — re-run what the new commit invalidates —
   never by carrying an item forward to a head it did not run at.
 - **The record carries the timings.** The integrator's PR record names each
   gate's start and end alongside its outcome, and the round's own claim→ruling
-  wall time.
+  wall time. Per-gate times happen inside subagents that write nothing, so they
+  are not derivable at all; the round total is the one deliberate exception to
+  the never-restate-a-timestamp rule below, because it is the telemetry this
+  fan-out exists to produce.
 
 ## Immediately before merging
 
