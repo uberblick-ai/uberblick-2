@@ -356,8 +356,8 @@ describe("annotations", () => {
 
     // Documented outcome: the mark is one value per character, so exactly one
     // thread keeps the anchor (Yjs picks deterministically) and the other
-    // resolves to null — but both conversations survive as JSON, on both
-    // replicas, which is what stops a comment from being silently destroyed.
+    // resolves to null — but both conversations survive, on both replicas,
+    // which is what stops a comment from being silently destroyed.
     const winners = [fromA.id, fromB.id].filter(
       (id) => resolveAnnotationRange(a, id) !== null,
     );
