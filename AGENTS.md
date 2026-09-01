@@ -8,19 +8,17 @@ eligibility, scheduling, and footprint rules. Do not infer missing product
 decisions from this file.
 
 GitHub is the source of truth for coordination state. Claims, decisions,
-handoffs, finding dispositions, and gate results are written there before a
-transient notification announces them. Herdr is a doorbell for dispatch and
-status only; interactive control traffic such as approval keystrokes or
-`continue` carries no durable content and is exempt. Recovery must be possible
-from GitHub alone, without terminal history or a local worktree.
+handoffs, finding dispositions, and gate results are written there, and nothing
+else announces them. Recovery must be possible from GitHub alone, without
+terminal history or a local worktree.
 
 ## Claim and recovery
 
-Implementation runs in one of two lanes: an isolated Opus sub-agent by
-default, or a Codex session dispatched through Herdr. Either way the implementer
-claims its own item: it adds `in-progress` and posts the claim defined by
-`.github/ISSUE_SPEC.md`, recording the branch, implementer type, and implementer
-session or agent id so reviewers can prove that they did not author the diff.
+An implementer is one isolated session of either runtime — Codex by default,
+Claude on request — started by the launcher. Either way it claims its own
+item: it adds `in-progress` and posts the claim defined by
+`.github/ISSUE_SPEC.md`, recording the branch, runtime, and run id so
+reviewers can prove that they did not author the diff.
 Who may claim what, in what order, and how competing claims resolve belong to
 the role contracts in `.agents/roles/`; this file does not restate them.
 
@@ -79,26 +77,23 @@ record and contains `Closes #N`. Before announcing completion, post the minimal
 PR handoff `.github/ISSUE_SPEC.md` defines. Do not duplicate either record with
 an issue completion comment. Never commit to `main` and never merge your own PR.
 
-Where `CLAUDE.md` requires a local Codex review, the implementer opens the PR as
-a draft and delegates one fresh independent critical review before handoff so it
-can correct clear findings in the same run. The reviewer authors no diff and the
-implementer makes no authoritative disposition; after any corrections the
-integrator owns final-head review, gate evidence, and every disposition. The
-exact delegation and convergence procedure lives in the role contracts and
+Where `CLAUDE.md` requires a pre-handoff challenge, the implementer opens the
+PR as a draft and delegates one fresh independent critical review on the other
+runtime before handoff, so it can correct clear findings in the same run. The
+reviewer authors no diff and the implementer makes no authoritative
+disposition; after any corrections the integrator owns final-head review, gate
+evidence, and every disposition. The exact delegation and convergence
+procedure lives in the role contracts and
 `.claude/skills/next-issue/review-protocol.md`.
 
-Only after that durable comment may the implementer notify the coordinator. A
-Codex Herdr message carries the PR URL and exact head SHA; for an Opus
-sub-agent, its return to the coordinator is that notification. Polling GitHub
-is the fallback when the doorbell is unavailable.
+That handoff comment is the completion signal. The launcher relaunches from
+it, and the integrator's queue reads it there; no other notification exists.
 
 ## Review and coordination
 
-The author of a diff never reviews it authoritatively. Use an independent
-session and follow CLAUDE.md's gates and merge tiers. A mandatory Codex round
-on a Codex-authored PR uses a different Codex session where one is available;
-only otherwise use an independent Opus reviewer. Record the reviewing session
-on the PR.
+The author of a diff never reviews it authoritatively. Every challenge runs on
+a session that did not write the diff, follows CLAUDE.md's gates and merge
+tiers, and records the reviewing run on the PR.
 
 Independence follows the durable authoring session, not the fresh role run. A
 Claude Agent child shares its launching Claude session's authorship identity.
@@ -108,8 +103,9 @@ session launched an implementer whose commit remains in the head, the PR is
 ineligible for that session. A new run id, context reset, or nested agent does
 not change that result.
 
-When CLAUDE.md's dual-challenge gate applies, the implementer owns the fresh
-Codex challenge and the integrator owns a distinct Opus challenge. Both use the
+When CLAUDE.md's dual-challenge gate applies, the implementer owns the first
+challenge, on the other runtime from the diff's author, and the integrator owns
+the second, a fresh session of the author's runtime. Both use the
 `implementation-reviewer` role and write exact-head verdicts on the PR. The
 integrator's own acceptance and gate validation, and a Copilot review, are
 additional evidence rather than either required challenge.
@@ -120,11 +116,11 @@ dispositions on the PR; merge authority comes from CLAUDE.md.
 
 ## Loop pacing
 
-A coordinator that repeatedly launches a continuous entry role (issue-preparer,
-implementer, integrator) — including a `/loop`-style session — paces relaunch
-by actual queue depth, not a fixed idle interval. Before waiting out a fallback
-delay after a run completes, check the role's queue for another eligible,
-unclaimed item (per that role's `Pickup` section in `.agents/roles/`). If one
-exists, launch the next run immediately with a fresh run id; reserve the
-longer fallback delay for a genuinely empty queue, as a safety net rather than
-the normal cadence.
+A loop that repeatedly launches a continuous entry role (issue-preparer,
+implementer, integrator) — `ub launch`, or a `/loop /next-issue` session until
+it lands — paces relaunch by the session's own result, not a fixed interval. A
+session that did work, or stopped on a recorded boundary, is followed by the
+next fresh session at once. A session that ended with its role's
+`No eligible … work:` line is followed by an idle wait of about 30 minutes
+(owner direction, 2026-09-01), then a fresh session. The loop never selects,
+claims or transitions work itself.

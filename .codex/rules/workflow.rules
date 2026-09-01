@@ -44,3 +44,38 @@ prefix_rule(
         "mise trust /tmp/review/mise.toml",
     ],
 )
+
+# The implementer's own durable records and branch work (codex-first lane, 2026-09-01).
+prefix_rule(
+    pattern = ["gh", "issue", ["comment", "edit"]],
+    decision = "allow",
+    justification = "An implementer writes its claim, admission, renewal and return on the issue it holds.",
+    match = [
+        "gh issue comment 495 --body-file claim.md",
+        "gh issue edit 495 --add-label in-progress",
+    ],
+)
+
+prefix_rule(
+    pattern = ["gh", "pr", ["create", "edit", "ready"]],
+    decision = "allow",
+    justification = "An implementer opens its draft PR, updates its body and marks it ready.",
+    match = [
+        "gh pr create --draft --title t --body-file body.md",
+        "gh pr ready 514",
+    ],
+)
+
+prefix_rule(
+    pattern = ["gh", "api"],
+    decision = "allow",
+    justification = "Reading the Priority field and comment timestamps is GitHub-only pickup input.",
+    match = ["gh api graphql -f query=q"],
+)
+
+prefix_rule(
+    pattern = ["git", "push"],
+    decision = "allow",
+    justification = "Only the claim holder pushes, and only to its own feature branch; main is protected by policy, not by this rule.",
+    match = ["git push -u origin feat/slug", "git push origin HEAD:feat/slug"],
+)
