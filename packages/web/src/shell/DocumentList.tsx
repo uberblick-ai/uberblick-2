@@ -18,10 +18,15 @@
  * case, over stubs that are already in memory: synchronous, no request, no
  * room, and correct offline. The title alone, because the title is all a row
  * shows — matching on a description the row does not print looks like a row
- * that matched on nothing. That is also its whole scope, so the pane says so on
- * screen rather than letting a reader assume the words in their documents were
- * searched. Full-text over document *bodies* is the agents' `search` tool over
- * the MCP server's own index — not this (owner decision, 2026-08-27).
+ * that matched on nothing. That is also its whole scope, so the field's own
+ * label says it rather than letting a reader assume the words in their
+ * documents were searched: naming the scope beside the control left the
+ * meaning in a second, quieter line, and a description is not what a reader
+ * scanning chrome reads first (owner feedback, 2026-08-30). In the label it is
+ * the field's accessible name too, so it reaches a screen reader with the
+ * control instead of after it. Full-text over document *bodies* is the agents'
+ * `search` tool over the MCP server's own index — not this (owner decision,
+ * 2026-08-27).
  *
  * **An empty listing is never a claim this client cannot make.** Nothing heard
  * yet is not "no documents", and nothing matched among what has arrived is not
@@ -61,11 +66,13 @@ const WEEK = 7 * DAY;
 const MONTH = 30 * DAY;
 const YEAR = 365 * DAY;
 
-/** What the filter looks at, said on screen so nobody has to guess. */
-const SCOPE = "Filters titles alone — not the text inside documents.";
-
-/** One list per screen, so the sentence the search field points at has one id. */
-const SCOPE_ID = "ub-docs-scope";
+/**
+ * The field's label, which is also the whole answer to *what does typing here
+ * do?* — both halves of it, so nobody has to guess at the half that is missing.
+ * Short, because a label is also the accessible name a screen reader repeats
+ * every time the field is reached and in every listing of the form's controls.
+ */
+const SEARCH_LABEL = "Find by title, not document text";
 
 /** `3 days ago`, at the coarseness a reader actually reads. */
 export function relativeAge(iso: string, now: number = Date.now()): string {
@@ -272,23 +279,20 @@ export function DocumentList({
     <section className="ub-pane">
       <div className="ub-column ub-docs">
         <h1 className="ub-docs-heading">Documents</h1>
+        {/* The scope is the label, not a sentence beside it. A filter that
+            quietly skipped the words inside documents would be read as a search
+            that found nothing in them, so what it does and does not look at is
+            what the control is called — for a screen reader as much as for the
+            eye. */}
         <label className="ub-docs-search-label">
-          <span>Find a document</span>
+          <span>{SEARCH_LABEL}</span>
           <input
             type="search"
             className="ub-docs-search"
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
-            aria-describedby={SCOPE_ID}
           />
         </label>
-        {/* The scope, on screen rather than assumed. A filter that quietly
-            skipped the words inside documents would be read as a search that
-            found nothing in them — so the field itself carries the sentence as
-            its description, not only the sighted reader. */}
-        <p id={SCOPE_ID} className="ub-docs-scope ub-muted">
-          {SCOPE}
-        </p>
         {/* A caption over a set of related controls is what a fieldset is —
             the same shape the appearance choice in the user menu takes. The
             pressed option is the answer to "which order is this?", so it is

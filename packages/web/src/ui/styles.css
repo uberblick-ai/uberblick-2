@@ -3021,13 +3021,6 @@ h3.ub-heading {
   font: inherit;
 }
 
-/* What the field looks at, in the field's own voice — one line under it, the
-   size of the label above it. */
-.ub-docs-scope {
-  margin: 0;
-  font-size: 0.8rem;
-}
-
 /* The order chooser, in the shape the appearance choice already uses: a
    caption over its options, quiet enough to stay a setting rather than compete
    with the heading above it. The options sit in their own row because a
