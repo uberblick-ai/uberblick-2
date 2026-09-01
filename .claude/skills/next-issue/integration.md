@@ -192,7 +192,8 @@ integrator does not own or restart another session's development processes.
 **Housekeeping, last** (owner direction, 2026-09-01). Once the probes on the
 retained review image are done, run `sh scripts/housekeeping.sh <headRefOid>`
 and paste its output under the post-merge result. It removes this run's and
-older review images, stopped containers and dangling layers, keeps build cache
-for a week, and removes worktrees whose git state is a day old and whose branch
-is merged, gone from `origin`, or detached — never one on a branch still open
-on `origin`, never the main checkout. `--dry-run` shows what it would do.
+older review images, stopped containers and dangling layers, and every host-wide
+unused image older than a week while keeping newer images and build cache warm.
+It removes only clean worktrees whose git state is a day old and whose branch is
+merged, gone from `origin`, or detached — never one on a branch still open on
+`origin`, never the main checkout. `--dry-run` shows what it would do.
