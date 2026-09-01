@@ -53,6 +53,8 @@ interface Row {
 }
 
 function mount(element: ReactElement): Row {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+    true;
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
@@ -101,8 +103,10 @@ describe("the header is the one activation target", () => {
     // and no text of the component's own beside them.
     expect(row.head().textContent).toBe("Options considered2 options");
 
-    // The mark is drawn, not conjured on hover: it is in the header from the
-    // first paint, and only its angle moves.
+    // The mark is in the markup unconditionally — the component renders it in
+    // both states rather than on a hover or focus condition of its own. That
+    // it is also *painted* in both states is a stylesheet claim, and this file
+    // makes none of those.
     expect(row.head().querySelector(".ub-disclosure-mark")).not.toBeNull();
   });
 

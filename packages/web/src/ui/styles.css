@@ -2720,14 +2720,27 @@ h3.ub-heading {
 
 /* The label takes what is left of the row and wraps inside it. The value and
    the mark keep their own width at the end and stay centred against however
-   many lines the label became, so a wrap moves neither of them. */
+   many lines the label became, so a wrap moves neither of them.
+
+   Both halves have to be able to give, or the row pushes its own mark out of
+   the header and the pane scrolls sideways (#640). The label wraps even
+   mid-token — `overflow-wrap: anywhere`, the idiom this file already uses for
+   caller-supplied strings — because a label with no break opportunity, a UUID
+   or a URL, is otherwise one unbreakable box. The value shrinks to an ellipsis
+   rather than holding its full width against everything else: it is a short
+   value by contract, and truncating it is the failure that still leaves a
+   readable row. Only the mark keeps its width, because it is the one thing in
+   the header that says open or closed. */
 .ub-disclosure-label {
   flex: 1;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .ub-disclosure-secondary {
-  flex: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.8125rem;
   color: var(--muted-foreground);
