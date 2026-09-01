@@ -104,8 +104,8 @@ const EDITING_CLASS = "ub-mermaid-editing";
  * gains that this hand-copy does not know makes {@link lineEdges}
  * *under*-count — the unsafe direction — and that {@link HEADERS} still names
  * every keyword `parseHeader` opens a chart on, because a header spelling
- * ablauf gains that this does not know lets a source past {@link MAX_SOURCE}
- * reach `parse`, which is the same unsafe direction one gate earlier.
+ * ablauf gains that this does not know makes an over-cap drawable source stay
+ * silent instead of explaining its refusal. The cap itself still holds.
  */
 const THEME: Partial<Theme> = (() => {
   const merged: Record<string, string | number> = { ...DEFAULT_THEME };
@@ -146,7 +146,7 @@ const THEME: Partial<Theme> = (() => {
  * that shape: 576 arrows, which the arrow cap refuses.)
  *
  * **Source length is the third axis, and it is checked before `parse` builds
- * anything — for a source ablauf would read.** The counts can only refuse a
+ * anything, for every source.** The counts can only refuse a
  * graph that already exists, and building it is itself the attack: with
  * repeated one-character ids in one `&` line, edges grow as `(chars/8)²`, so
  * 16 kB parses to 4.2M edges in 113ms and 378 MB, 32 kB takes 434ms and
@@ -160,10 +160,10 @@ const THEME: Partial<Theme> = (() => {
  * 16,385-character label is one box and no arrows. It bounds the picture too —
  * `title: source` makes the SVG at least the source's size, and every label in
  * it comes from the source — which is what keeps a block the counts accept from
- * putting a 100 MB SVG in the DOM. Both of those are properties of a diagram
- * that gets drawn, which is why {@link opensAsFlowchart} gates this cap: a
- * source ablauf never reads has no picture to bound, and telling it that it
- * is too large is the lie F-1 named.
+ * putting a 100 MB SVG in the DOM. A source ablauf never reads has no picture
+ * to bound, so {@link opensAsFlowchart} decides only whether the refusal speaks:
+ * the source stays silent while the cap still keeps it from reaching the
+ * per-line scan and parser below.
  *
  * Deliberately not configurable: a budget a document can raise is a budget an
  * agent can raise, and the freeze it prevents is everyone's, not the author's.
@@ -355,7 +355,8 @@ const HEADERS: readonly string[] = ["flowchart", "graph"];
  * will succeed.
  *
  * This exists so that the two pre-`parse` refusals speak only about diagrams
- * that could otherwise be drawn. The byte cap used to answer for every
+ * that could otherwise be drawn. Both still refuse every source. The byte cap
+ * used to answer aloud for every
  * source, so a
  * `sequenceDiagram` past 16,384 characters was told it was too large and to
  * split itself — false in both halves, since nothing would have been laid out
@@ -366,16 +367,12 @@ const HEADERS: readonly string[] = ["flowchart", "graph"];
  *
  * **Deliberately more permissive than `parseHeader`, because the two ways of
  * being wrong do not cost the same.** Saying yes to a source ablauf then
- * refuses only puts a size refusal back in front of a `ParseError`, for that
- * source alone. Saying no to one ablauf accepts would let a source past the
- * byte cap reach `parse`, which is the cap's whole job. So this asks the one
- * question
- * with no false negatives in it: `parseHeader` reads letters and accepts
- * exactly {@link HEADERS}, so a first statement line opening on any other word
- * cannot parse, and {@link drawDiagram} may hand it to `parse` at any size —
- * `parse` splits the text into lines and then fails on that first statement
- * line, so no graph is built however long the text is. Checked against ablauf
- * over 200k first lines: no false negative, and every false positive a
+ * refuses only puts a size note back in front of a `ParseError`, for that
+ * source alone. Saying no to one ablauf accepts keeps the refusal but drops its
+ * explanation, leaving source where a reader should have learned which budget
+ * it crossed. So this still asks the question with no false negatives in it:
+ * `parseHeader` reads letters and accepts exactly {@link HEADERS}, and the
+ * 200k-case check against ablauf found none; every false positive was a
  * malformed `flowchart` header.
  *
  * **The false positives are a real, bounded gap, not a rounding error.** A
@@ -386,9 +383,9 @@ const HEADERS: readonly string[] = ["flowchart", "graph"];
  * out of `parse`, so it stays open and stays written down. Everything below
  * the cap is unaffected — there, `parse` classifies, as it always did.
  *
- * {@link lineEdgesAtMost} still runs for every source whatever this answers,
- * so the fatal `&` class is closed even if this drifts from ablauf; a drift
- * costs a refusal its explanation, never its refusal.
+ * {@link MAX_SOURCE} and {@link lineEdgesAtMost} both run for every source
+ * whatever this answers, so a drift costs a refusal its explanation, never its
+ * refusal.
  */
 function opensAsFlowchart(source: string): boolean {
   for (const line of source.split(/\r?\n/)) {
@@ -464,18 +461,19 @@ function drawDiagram(target: HTMLElement, source: string): Drawing {
     //
     // Neither may *speak* for a source ablauf will not read, whatever its
     // size, or it says "too large to draw" about a picture that was never
-    // going to be drawn (#514 review, F-1 and R6-2). So both ask this first,
-    // and the arrow bound still refuses when the answer is no — it just
-    // refuses the way ablauf would have, in silence. That keeps the `&` bomb
-    // unreachable even if this question ever drifts from ablauf's grammar.
+    // going to be drawn (#514 review, F-1 and R6-2). So both refuse regardless
+    // of this answer and use it only to choose between the note and the silence
+    // ablauf would have returned. That keeps both caps intact even if this
+    // question ever drifts from ablauf's grammar.
     //
     // What it does not fix, because fixing it means parsing the very source
     // the byte cap exists to keep out of `parse`: a source that opens on a
     // real header and is rejected later — a `subgraph`, a bad direction, a
     // trailing `;` — still gets the byte note past MAX_SOURCE (R6-1).
     const readable = opensAsFlowchart(source);
-    if (readable && source.length > MAX_SOURCE) {
+    if (source.length > MAX_SOURCE) {
       target.replaceChildren();
+      if (!readable) return UNREADABLE;
       return {
         drawn: false,
         note: tooLarge(`${source.length} characters of source past this block's ${MAX_SOURCE}`),
