@@ -265,8 +265,14 @@ export function BlockMenu({
   const chosen = highlight.list === list ? highlight.index : 0;
   const active = entries.length === 0 ? -1 : Math.min(chosen, entries.length - 1);
 
+  // Idempotent, because the pointer calls it on every `mousemove` over the
+  // entry it is already on: returning the same state is how React is told there
+  // is nothing to render.
   const highlightAt = useCallback(
-    (index: number): void => setHighlight({ list, index }),
+    (index: number): void =>
+      setHighlight((current) =>
+        current.list === list && current.index === index ? current : { list, index },
+      ),
     [list],
   );
 
@@ -549,7 +555,11 @@ export function BlockMenu({
                     // Same reason as the gutter button: picking an entry must
                     // not move the caret out of the block being converted.
                     onMouseDown={(event) => event.preventDefault()}
-                    onMouseEnter={() => highlightAt(position)}
+                    // `mousemove`, not `mouseenter`: an entry the keyboard
+                    // scrolled under a resting hand is entered too, and taking
+                    // that for a choice would undo the keystroke that caused
+                    // it. Only a hand that moves is choosing.
+                    onMouseMove={() => highlightAt(position)}
                     onClick={() => choose(entry)}
                   >
                     <span className="ub-blockmenu-label">{entry.label}</span>

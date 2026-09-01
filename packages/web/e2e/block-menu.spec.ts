@@ -321,29 +321,49 @@ test("the gutter menu reveals with the keyboard, and scrolls for no pointer", as
   const search = page.locator(".ub-blockmenu-search");
   await expect(search).toBeFocused();
 
+  /** The middle of an entry's visible part, in page coordinates. */
+  async function over(entry: Geometry["entries"][number], view: Geometry) {
+    const box = await page.locator(".ub-blockmenu-list").boundingBox();
+    if (box === null) throw new Error("e2e: the list has no box");
+    return {
+      x: box.x + box.width / 2,
+      y: (Math.max(entry.top, view.top) + Math.min(entry.bottom, view.bottom)) / 2,
+    };
+  }
+
+  // The pointer takes the entry it is on, and takes nothing else with it.
+  const first = start.entries[0];
+  if (first === undefined) throw new Error("e2e: the list is empty");
+  const rest = await over(first, start);
+  await page.mouse.move(rest.x, rest.y);
+  const pointed = await listGeometry(page);
+  expect(pointed.scrollTop).toBe(0);
+  expect(visibleSelection(pointed)).toBe(first.label);
+
+  // Now the hand stays exactly there while the keys walk past the fold. The
+  // scroll that reveals the entry slides a *different* entry under the
+  // stationary pointer, and the browser reports that as entering it — read as a
+  // choice, it would undo the keystroke that caused it and leave Enter aimed at
+  // an entry the reader never chose.
   for (let step = 1; step < start.entries.length; step += 1) {
     await page.keyboard.press("ArrowDown");
   }
-  const last = await listGeometry(page);
-  expect(visibleSelection(last)).toBe(start.entries[start.entries.length - 1]?.label);
-  expect(last.scrollTop).toBeGreaterThan(0);
-  // The list scrolled; the caret in the search field did not go with it.
-  await expect(search).toBeFocused();
+  const walked = await listGeometry(page);
+  expect(walked.scrollTop).toBeGreaterThan(0);
+  expect(visibleSelection(walked)).toBe(start.entries[start.entries.length - 1]?.label);
 
-  // The pointer highlights what it is already on, so it never scrolls — a list
-  // that moved under a resting hand would put a different entry beneath it.
-  // The entry at the top edge is the one a naive reveal would jump to, and the
-  // one the scroll above is most likely to have left half shown.
-  const edge = last.entries.find((entry) => entry.bottom > last.top + 1);
-  const box = await page.locator(".ub-blockmenu-list").boundingBox();
-  if (edge === undefined || box === null) throw new Error("e2e: nothing to hover");
-  await page.mouse.move(
-    box.x + box.width / 2,
-    (Math.max(edge.top, last.top) + Math.min(edge.bottom, last.bottom)) / 2,
-  );
+  // A list that has scrolled leaves an entry half shown at the top edge; the
+  // pointer takes that one too, and still moves nothing.
+  const edge = walked.entries.find((entry) => entry.bottom > walked.top + 1);
+  if (edge === undefined) throw new Error("e2e: nothing is on screen");
+  const half = await over(edge, walked);
+  await page.mouse.move(half.x, half.y);
   const hovered = await listGeometry(page);
-  expect(hovered.scrollTop).toBe(last.scrollTop);
+  expect(hovered.scrollTop).toBe(walked.scrollTop);
   expect(hovered.entries.find((entry) => entry.selected)?.label).toBe(edge.label);
+
+  // The keys have not left the search field through any of it.
+  await expect(search).toBeFocused();
 
   // Filtering makes a different list, so the highlight goes back to its first
   // entry — and the scroll position from the list before it goes with it.
