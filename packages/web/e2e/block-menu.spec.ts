@@ -97,51 +97,114 @@ async function walk(
   await page.mouse.move(to.x, to.y, { steps });
 }
 
+/** Move slowly enough for hover state and the opacity transition to settle. */
+async function humanWalk(
+  page: Page,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): Promise<void> {
+  const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y)));
+  for (let step = 1; step <= steps; step += 1) {
+    const progress = step / steps;
+    await page.mouse.move(
+      from.x + (to.x - from.x) * progress,
+      from.y + (to.y - from.y) * progress,
+    );
+    await page.waitForTimeout(8);
+  }
+}
+
 /**
- * The journey, in the order a hand makes it: click the first character, walk
- * left onto the `+`, walk off it, come back and press it.
+ * The journey, in the order a hand makes it: select prose, walk diagonally from
+ * a lower line onto the first-line `+`, walk off it, come back and press it.
  */
 test("the pointer can walk from the prose onto the gutter + and press it", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1395, height: 720 });
   await openDoc(page, "reach me");
+  await page.keyboard.type(" reach me".repeat(50));
+  // Scale the document to the fractional geometry a 125% browser zoom adds.
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = "125%";
+  });
 
   const button = page.locator(".ub-gutter-add");
-  const prose = await blocks(page).first().boundingBox();
+  const block = blocks(page).first();
+  const prose = await block.boundingBox();
   if (prose === null) throw new Error("e2e: the first block has no box");
-  const middle = prose.y + prose.height / 2;
+  const lineHeight = await block.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).lineHeight),
+  );
+  const firstLine = prose.y + lineHeight / 2;
 
-  // Whatever the gutter claims, it claims none of the prose: the first
-  // character is still the editor's, and clicking it still puts the caret
-  // before it.
-  await page.mouse.click(prose.x + 1, middle);
+  // Whatever the gutter claims, it claims none of the prose: caret placement
+  // and a real pointer selection still belong to the editor.
+  await page.mouse.click(prose.x + 1, firstLine);
   await page.keyboard.type("X", { delay: 15 });
-  await expect(blocks(page).nth(0)).toHaveText("Xreach me");
+  await expect(block).toContainText(/^Xreach me/);
+  await page.mouse.move(prose.x + 2, firstLine);
+  await page.mouse.down();
+  await page.mouse.move(prose.x + 70, firstLine, { steps: 12 });
+  await page.mouse.up();
+  expect(await page.evaluate(() => window.getSelection()?.toString().length ?? 0)).toBeGreaterThan(
+    0,
+  );
 
-  // An edit hides the hint until the pointer moves again, so the walk starts
-  // with a move into the prose.
-  const inProse = { x: prose.x + prose.width / 2, y: middle };
+  // The ordinary hard case: a multi-line paragraph, approached from its last
+  // line to the button beside its first. The full-height strip must carry the
+  // diagonal without giving up hover.
+  const inProse = {
+    x: prose.x + 120,
+    y: prose.y + prose.height - lineHeight / 2,
+  };
   await page.mouse.move(inProse.x, inProse.y);
   await expect(button).toHaveCSS("opacity", "1");
   const target = await button.boundingBox();
   if (target === null) throw new Error("e2e: the gutter button has no box");
+  expect(prose.height).toBeGreaterThan(3 * target.height);
   const centre = { x: target.x + target.width / 2, y: target.y + target.height / 2 };
-  const away = { x: prose.x - 2 * target.width, y: middle };
+  // A point on the diagonal inside the button's gutter column but still below
+  // its box. Only the full-height corridor owns this part of the hand's route.
+  const gutterX = target.x + target.width - 0.5;
+  const progress = (inProse.x - gutterX) / (inProse.x - centre.x);
+  const gutterPause = {
+    x: gutterX,
+    y: inProse.y + (centre.y - inProse.y) * progress,
+  };
+  expect(gutterPause.y).toBeGreaterThan(target.y + target.height);
+  const away = { x: prose.x - 2 * target.width, y: centre.y };
 
-  await walk(page, inProse, centre);
-  await expect(button).toHaveCSS("opacity", "1");
+  const approach = async (): Promise<void> => {
+    await page.mouse.move(inProse.x, inProse.y);
+    await expect(button).toHaveCSS("opacity", "1");
+    await humanWalk(page, inProse, gutterPause);
+    await page.waitForTimeout(180);
+    await expect(button).toHaveCSS("opacity", "1");
+    await humanWalk(page, gutterPause, centre);
+    await page.waitForTimeout(180);
+    await expect(button).toHaveCSS("opacity", "1");
+    expect(
+      await button.evaluate((control) => {
+        const box = control.getBoundingClientRect();
+        return control.contains(
+          document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2),
+        );
+      }),
+    ).toBe(true);
+  };
+
+  await approach();
 
   // And it still goes when the walk continues past the gutter, which is neither
   // the block nor its strip.
   await walk(page, centre, away);
   await expect(button).toHaveCSS("opacity", "0");
 
-  // Back, and pressed where the pointer already is: `click()` would move it
-  // first, which is the gesture this test exists to avoid. The insertion comes
-  // last because a heading fills the outline rail, which re-centres the column
-  // and makes every measurement above stale.
-  await walk(page, away, inProse);
-  await walk(page, inProse, centre);
+  // Back by the same human-paced route, and pressed where the pointer already
+  // is: `click()` would move it first, which is the gesture this test exists to
+  // avoid. Insertion comes last because it re-centres the column.
+  await approach();
   await page.mouse.down();
   await page.mouse.up();
   await page.getByRole("option", { name: "Heading 2" }).click();
