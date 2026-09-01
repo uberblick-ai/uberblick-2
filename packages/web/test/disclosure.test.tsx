@@ -111,6 +111,25 @@ describe("the header is the one activation target", () => {
     expect(row.head().querySelector(".ub-disclosure-secondary")).toBeNull();
     expect(row.head().textContent).toBe("Reconsider when");
   });
+
+  /**
+   * Two shapes the props deliberately cannot express. The assertions are the
+   * `@ts-expect-error` comments themselves — `tsc --noEmit` covers this file,
+   * so widening either type back makes the typecheck fail here rather than
+   * letting a consumer discover it. Nothing is rendered: there is no runtime
+   * behaviour to observe, which is the point.
+   */
+  it("cannot be given a second target in the header, or a value it cannot report", () => {
+    // A link inside the header button would be invalid content for a button
+    // and a second thing to click. `label` and `secondary` are text.
+    // @ts-expect-error the label is text, not arbitrary nodes
+    const nested = <Disclosure label={<a href="#none">linked</a>}>body</Disclosure>;
+    // A controlled row that cannot ask the caller to change its value is an
+    // enabled control that does nothing at all.
+    // @ts-expect-error a controlled row must take the activation it reports
+    const inert = <Disclosure label="Options" open={false}>body</Disclosure>;
+    expect([nested, inert]).toHaveLength(2);
+  });
 });
 
 describe("closing hides the body", () => {

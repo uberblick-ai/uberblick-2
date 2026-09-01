@@ -2735,15 +2735,14 @@ h3.ub-heading {
 
 /* One shape, one transform — the chevron reasoning of #110, and the reason the
    mark is never hover-only: it is drawn at full strength in both states, and
-   only its angle says which one. */
+   only its angle says which one. It turns instantly: #563 puts open/close
+   animation out of scope, and the angle carries the state without it. */
 .ub-disclosure-mark {
   display: block;
   width: 0.75rem;
   height: 0.75rem;
   flex: none;
   color: var(--muted-foreground);
-  transform: rotate(0deg);
-  transition: transform 160ms ease;
 }
 
 .ub-disclosure-head[aria-expanded="true"] .ub-disclosure-mark {
@@ -2768,7 +2767,6 @@ h3.ub-heading {
   .ub-group-body,
   .ub-group-act,
   .ub-copy,
-  .ub-disclosure-mark,
   .ub-gutter-add {
     transition: none;
   }

@@ -17,10 +17,13 @@
  *   then push back against it. A button carrying `aria-expanded` is the ARIA
  *   disclosure pattern, it is what `Sidebar.tsx` already uses, and it leaves the
  *   state where this component's contract says it lives.
- * - **The button is the whole header.** Not a row containing a button: the
- *   activation target is every pixel of the header, for a finger as much as for
- *   a pointer, and there is nothing else inside it to compete for the click or
- *   for the tab stop. `styles.css` gives it the 44px minimum.
+ * - **The button is the whole header, and only the header is in it.** Not a row
+ *   containing a button: the activation target is every pixel of the header,
+ *   for a finger as much as for a pointer. `label` and `secondary` are
+ *   therefore text rather than nodes — a caller handed `ReactNode` slots can
+ *   put a link or a button inside this one, which is both invalid content for
+ *   a button and a second thing to click where the contract promises one.
+ *   `styles.css` gives the header the 44px minimum.
  * - **A closed body is hidden, never unmounted.** `hidden` takes it off screen
  *   and out of the accessibility tree while React keeps the subtree mounted, so
  *   a child holding state — a draft in a field, a scroll position — is still
@@ -30,24 +33,37 @@
 import { useId, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
-export interface DisclosureProps {
+interface DisclosureContent {
   /** The row's primary label. May wrap; nothing else in the header moves. */
-  label: ReactNode;
+  label: string;
   /** An optional short value beside the mark — "2 options", "read when needed". */
-  secondary?: ReactNode;
+  secondary?: string;
   /** What the row discloses. Mounted whether the row is open or closed. */
   children: ReactNode;
-  /** Uncontrolled: the state the row opens in. Ignored when `open` is given. */
+}
+
+/** The row keeps the state, starting where the caller asked. */
+interface Uncontrolled {
+  open?: never;
+  /** The state the row opens in. */
   defaultOpen?: boolean;
-  /**
-   * Controlled: the caller's state, rendered as given. Supplying it hands the
-   * component's own state cell over — the row then only reports activations
-   * through `onOpenChange` and never holds a second answer that could drift.
-   */
-  open?: boolean;
-  /** Every activation, in both modes, with the state the row is moving to. */
+  /** Every activation, with the state the row is moving to. */
   onOpenChange?: (open: boolean) => void;
 }
+
+/**
+ * The caller keeps the state; the row renders it and holds no second answer of
+ * its own. Taking `open` therefore *requires* taking `onOpenChange`: a row
+ * given a value it cannot ask to have changed is an enabled control that does
+ * nothing at all, which is worse than either mode.
+ */
+interface Controlled {
+  open: boolean;
+  defaultOpen?: never;
+  onOpenChange: (open: boolean) => void;
+}
+
+export type DisclosureProps = DisclosureContent & (Uncontrolled | Controlled);
 
 export function Disclosure({
   label,
