@@ -97,8 +97,13 @@ reviews or merges a diff it authored.
    Findings are triaged into an explicit disposition: fixed on the branch;
    deferred to a linked issue with the accepted risk recorded on the PR
    (never for data loss, auth/security exposure, or a violated invariant);
+   accepted as debt on the PR when P3, or when a P2's claimed impact remains
+   theoretical because no current supported-usage failure is established; or,
+   under that theoretical condition, closed `wontfix` if already an issue. Both
+   record the consequence and disproportionate delivery cost;
    documented as an out-of-usage-model boundary; or rejected with an
-   explicit reply on the PR thread — never silent dismissal.
+   explicit reply on the PR thread — never silent dismissal. A concrete bug
+   observed later is new evidence and may be filed or reopened then.
    GitHub Copilot is optional additional evidence, not a gate. When requested,
    record a platform refusal or outage once and continue; every review remark it
    actually posts still falls under the zero-remark gate above.

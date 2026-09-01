@@ -88,7 +88,7 @@ Parent: #486
   packages.
 - Order among eligible issues: dependency topology, then **`Priority`** — the
   organization issue field, Urgent → High → Medium → Low — then ascending issue
-  number. An unset value sorts as Medium; it does not make prepared work
+  number. An unset value sorts as Low; it does not make prepared work
   ineligible. The product owner owns every explicit Priority value. Agents may
   report evidence that the order looks wrong, but never write the field.
 
@@ -116,10 +116,18 @@ the issue was mis-scoped or the agent scope-crept. The resolution is explicit
 | `ready` | Spec-complete; the loop may claim it | Human, or issue-preparer after one-pass clearance |
 | `in-progress` | Claimed; branch named in a comment | Loop |
 | `needs-decision` | Parked on a question only a human can answer | Loop |
+| `wontfix` | Low-impact theoretical work closed as not planned | Human or issue-preparer after grounding |
 
 There is deliberately **no `blocked` label**: blocked is derived from
 `Depends-on` plus issue closed-state, and stored copies of derivable state
 rot.
+
+An issue-preparer may close a low-impact theoretical finding as not planned
+with `wontfix` when no current supported-usage failure is established and a
+delivery cycle is disproportionate. Record the consequence and that rationale;
+remove preparation and delivery labels. Never use this route for data loss,
+auth or security exposure, or a violated invariant. A concrete bug observed
+later is new evidence and may be filed or reopened then.
 
 Preparation is one foreground issue-preparer run. A narrowly mechanical, local,
 understood and easily reversible issue gets a code-grounded self-check and no

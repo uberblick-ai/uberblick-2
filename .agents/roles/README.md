@@ -70,7 +70,7 @@ issues. Do not queue work that current main already resolved or already tracks.
 
 `Priority` means the organization issue field: Urgent → High → Medium → Low.
 The product owner owns every explicit value; agents never write it. Unset is
-ignored by preparation and sorts as Medium for implementation pickup.
+ignored by preparation and sorts as Low for implementation pickup.
 
 **The claim record.** The implementer claims in `.github/ISSUE_SPEC.md`'s
 grammar: `Claimed: <branch>` / `Implementer: <opus|codex> <id>`. Every other

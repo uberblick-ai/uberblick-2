@@ -41,8 +41,8 @@ validate them without rediscovering the lineage.
 ## Outcome
 
 Every gate `CLAUDE.md` requires, run at the SHA the merge will use, and every
-finding dispositioned against `CLAUDE.md`'s four dispositions — a finding is
-never left undispositioned, silence is never one, and each disposition is
+finding dispositioned against `CLAUDE.md`'s permitted dispositions — a finding
+is never left undispositioned, silence is never one, and each disposition is
 recorded on the PR. The merge executes `CLAUDE.md`'s merge policy as written,
 including its named exceptions. `CLAUDE.md` step 5 makes the post-merge
 documentation pass part of this pickup too.

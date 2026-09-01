@@ -36,16 +36,24 @@ issue enters the queue only through that triage, never as an implicit pickup.
 
 ## Outcome
 
-Own one pass from intake to `ready`, `split`, or a serious owner boundary.
+Own one pass from intake to `ready`, `split`, `wontfix`, or a serious owner
+boundary.
 Ground at fresh `origin/main`, align the body with the corpus and
-`.github/ISSUE_SPEC.md`, and classify only the route
-`.claude/skills/next-issue/preflight.md` defines.
+`.github/ISSUE_SPEC.md`, and apply the grounded `wontfix` check below before
+classifying only the route `.claude/skills/next-issue/preflight.md` defines.
 
 Before drafting, compare the likely files with open PRs and record any real
 dependency or semantic overlap. Keep grounding proportional: when code and
 GitHub fully establish a mechanical issue and no product-sensitive choice is
 being made, a concise reason for skipping corpus lookup is sufficient. Never
 make repeated MCP calls merely to prove that no product document applies.
+
+When this grounding establishes only a low-impact theoretical finding and no
+current supported-usage failure, record why a delivery cycle is
+disproportionate, finish `wontfix` without an adversary, remove preparation and
+delivery labels, add `wontfix`, and close as not planned. Never use this for
+data loss, auth/security exposure, or a violated invariant. A concrete bug
+observed later may be filed or reopened as new evidence.
 
 For a narrowly trivial issue, perform the code-grounded self-check and spawn no
 adversary. Otherwise spawn exactly one fresh `issue-adversary` subagent on this
@@ -83,8 +91,9 @@ count. A second return without an intervening owner answer is already
 ## Boundaries
 
 No implementation, branch, PR, or implementation scheduling. You may edit the
-issue, disposition the one adversary's findings, and set its final preparation
-label; that is one assignment, not self-review of code. Never invent product
+issue, disposition the one adversary's findings, set its final preparation
+label, or close only through the `wontfix` route above; that is one assignment,
+not self-review of code. Never invent product
 meaning or silently waive a serious finding. Never set Priority: every explicit
 value belongs to the product owner.
 
@@ -101,8 +110,8 @@ Post before changing labels:
 ```text
 Done: issue-preparer <run id>
 Grounding: <origin/main SHA>
-Preparation: trivial-self-check|one-adversary|resumed
-Outcome: ready|needs-decision|split
+Preparation: trivial-self-check|one-adversary|resumed|grounded-wontfix
+Outcome: ready|needs-decision|split|wontfix
 ```
 
 Link the adversary handoff where one ran; summarize edits, dispositions and

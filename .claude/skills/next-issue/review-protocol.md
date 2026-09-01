@@ -72,6 +72,13 @@ finding — severity does not decide the other two:
   If the finding already identifies a product or authority choice, create it at
   `needs-decision` with the focused question, options and recommendation instead
   of paying a preparation/adversary pass to rediscover the same boundary.
+  *Accept debt / wontfix* — for a P3, or a P2 whose claimed impact remains
+  theoretical because no current supported-usage failure is established,
+  record the consequence and why another delivery cycle is disproportionate,
+  without creating a linked issue. When an issue already exists, close it as
+  not planned with `wontfix`. A concrete bug observed later is new evidence and
+  may be filed or reopened then. Never use either route for data loss,
+  auth/security exposure, or a violated invariant.
   *Document boundary* — reachable only outside the usage
   model: the smallest useful code/doc statement naming the boundary; no behavior
   changes, no mechanism tests for an unsupported scenario. *Reject* — not
@@ -118,7 +125,8 @@ risk. Record every round as a PR comment — `Codex round N (head <sha>):
 
 Review exits only when: no P1 remains; every supported-usage P2 is fixed or
 explicitly deferred (linked issue, accepted-risk rationale); every remark is
-fixed, deferred, documented or rejected explicitly; all gate evidence is fresh
+fixed, deferred, accepted, documented or rejected explicitly; all gate evidence
+is fresh
 at the exact merge head; and any earlier external-review reasoning carried
 across a later local fix is recorded on the PR with scope and rationale. If a
 confirmation round surfaces a net-new triaged P1, or the open-P1 set fails to
