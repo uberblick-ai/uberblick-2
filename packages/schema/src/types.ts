@@ -248,6 +248,12 @@ export interface DocMeta {
    * this change deliberately needs no user-facing entry; a non-empty string is
    * the suggestion. Absent and null are kept apart on purpose — collapsing them
    * would make every internal-only change look unfinished.
+   *
+   * The three are not equally durable under concurrency. Going back to absent
+   * deletes the key, which takes back only the value the deleting replica has
+   * already seen, so a concurrent write of `null` or a sentence outlives it and
+   * both replicas converge on that write. `null` and a sentence compete
+   * normally, converging on one of the two.
    */
   changelogSuggestion?: string | null;
   /** The record shape. Absent means an ordinary document. */

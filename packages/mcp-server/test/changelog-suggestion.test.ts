@@ -90,31 +90,22 @@ describe("set_changelog_suggestion", () => {
     );
   });
 
-  it("leaves the rest of the metadata alone, in both directions", async () => {
+  it("reaches neither the listing nor the search index", async () => {
     const rig = await localRig();
     const uuid = await describedDoc(rig);
-    await rig.ok("set_tags", { uuid, tags: ["web", "presence"] });
 
     await rig.ok("set_changelog_suggestion", {
       uuid,
       suggestion: "Agent bubbles now appear only while an agent is working.",
     });
-    expect(await rig.ok("get_doc", { uuid })).toMatchObject({
-      title: "Agent presence",
-      description: "How agent cursors appear and when they disappear.",
-      tags: ["web", "presence"],
-    });
 
     // Nothing caches it: the listing and the index are the description's
-    // surfaces, not this field's.
+    // surfaces, not this field's. Metadata isolation itself is the schema
+    // suite's — every setter writes one key of the same `meta` map — so this
+    // suite defends only the boundary the MCP layer owns.
     const listed = (await rig.ok("list_docs")).docs[0];
     expect(listed).not.toHaveProperty("changelogSuggestion");
     expect((await rig.ok("search", { query: "bubbles" })).hits).toEqual([]);
-
-    await rig.ok("set_description", { uuid, description: "Rewritten." });
-    expect((await rig.ok("get_doc", { uuid })).changelogSuggestion).toBe(
-      "Agent bubbles now appear only while an agent is working.",
-    );
   });
 
   it("refuses more than a description's worth, and an archived document", async () => {

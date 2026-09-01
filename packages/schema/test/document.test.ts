@@ -123,6 +123,30 @@ describe("document round-trip", () => {
     expect(getMetaMap(doc).has("changelogSuggestion")).toBe(false);
   });
 
+  it("lets a concurrent changelog write outlive a clear, in both merge orders", () => {
+    // Clearing deletes the key, which reaches only the value the clearing
+    // replica has already seen — so the other writer's state survives, and the
+    // three states are not equally durable. Both `DocMeta.changelogSuggestion`
+    // and set_changelog_suggestion say so; this is what they say it about.
+    for (const concurrent of ["A later sentence.", null]) {
+      const a = seeded();
+      setChangelogSuggestion(a, "The stored suggestion.");
+      const b = new Y.Doc();
+      Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+
+      setChangelogSuggestion(a, "");
+      setChangelogSuggestion(b, concurrent);
+      const updateA = Y.encodeStateAsUpdate(a);
+      const updateB = Y.encodeStateAsUpdate(b);
+      Y.applyUpdate(a, updateB);
+      Y.applyUpdate(b, updateA);
+
+      for (const replica of [a, b]) {
+        expect(getMeta(replica).changelogSuggestion).toBe(concurrent);
+      }
+    }
+  });
+
   it("holds the changelog suggestion beside the other metadata, not instead of it", () => {
     const doc = seeded();
     setDescription(doc, "What this document is for.");
