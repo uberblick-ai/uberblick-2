@@ -241,6 +241,21 @@ function press(element: Element | null, key: string): void {
   element?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
 }
 
+/** The landmarks the sidebar column is made of, in the order they are drawn. */
+const LANDMARKS = ["ub-list-head", "ub-nav", "ub-empty", "ub-group", "ub-list-foot"];
+
+function columnOrder(host: HTMLElement): string[] {
+  const list = host.querySelector(".ub-list");
+  return [...(list?.children ?? [])].flatMap((child) =>
+    LANDMARKS.filter((mark) => child.classList.contains(mark)),
+  );
+}
+
+/** The navigation rows, top to bottom. */
+function navRows(host: HTMLElement): HTMLButtonElement[] {
+  return [...host.querySelectorAll<HTMLButtonElement>(".ub-nav li button")];
+}
+
 describe("the sidebar is the _sidebar document", () => {
   it("renders groups and pins in stored order, and a drag lands where it was dropped", async () => {
     seedDirectory();
@@ -362,7 +377,7 @@ describe("the sidebar is the _sidebar document", () => {
 
     // The open document's row says so the way the All-docs entry always has
     // (#481): one state, `aria-current`, reaching the styling and a screen
-    // reader together — where a class reached only the styling. The footer
+    // reader together — where a class reached only the styling. The navigation
     // entry is the discriminator: "current" has to mean the thing that is
     // open, not every row in the column.
     expect(rows(host, 0)[0]?.getAttribute("aria-current")).toBe("page");
@@ -519,6 +534,87 @@ describe("the sidebar is the _sidebar document", () => {
       "Untitled",
       unknown,
     ]);
+  });
+});
+
+/**
+ * The fixed navigation section (#483). Everything here asks one question: is it
+ * chrome? Curation moves, is stored in `_sidebar` and can be dropped into;
+ * chrome is in the same place on every page, and the two destinations that do
+ * not exist yet are shown as absent affordances rather than as broken links.
+ */
+describe("the sidebar's fixed navigation", () => {
+  it("stands above the curation, pinned or not, and is not a drop target", async () => {
+    seedDirectory();
+    const host = await openApp(`/${WORKSPACE}`);
+
+    // Nothing pinned yet: the section is already there, above the line that
+    // says so — an empty sidebar still opens with somewhere to go.
+    expect(columnOrder(host)).toEqual([
+      "ub-list-head",
+      "ub-nav",
+      "ub-empty",
+      "ub-list-foot",
+    ]);
+    expect(navRows(host).map((row) => row.textContent)).toEqual([
+      "All docs",
+      "Dashboard",
+      "Product requirements",
+    ]);
+
+    // A pin arrives and the groups appear under it; the section has not moved,
+    // and the footer it left holds the user card alone.
+    act(() => {
+      const sidebar = sidebarDoc();
+      pinDoc(sidebar, createGroup(sidebar, "Reading"), ONE);
+    });
+    expect(columnOrder(host)).toEqual([
+      "ub-list-head",
+      "ub-nav",
+      "ub-group",
+      "ub-list-foot",
+    ]);
+    expect(host.querySelector(".ub-list-foot .ub-all-open-entry")).toBeNull();
+    expect(host.querySelector(".ub-list-foot .ub-user-card")).not.toBeNull();
+
+    // Chrome, not curation: nothing in it can be dragged, and no drag of any
+    // kind can land in it.
+    const nav = host.querySelector(".ub-nav");
+    expect(nav?.querySelectorAll("[draggable]")).toHaveLength(0);
+    expect(nav?.querySelectorAll(".ub-drop-slot")).toHaveLength(0);
+  });
+
+  it("shows the two destinations it does not have as unavailable, not as links", async () => {
+    seedDirectory();
+    const doc = room(roomForDoc(WORKSPACE, THREE)).ydoc;
+    initDoc(doc, { uuid: THREE, title: "Sync" });
+    appendBlock(doc, { type: "paragraph", text: "how sync behaves" });
+
+    const host = await openApp(`/${WORKSPACE}/${THREE}`);
+    const [, ...soon] = navRows(host);
+    expect(soon.map((row) => row.getAttribute("aria-disabled"))).toEqual([
+      "true",
+      "true",
+    ]);
+    expect(soon.map((row) => row.getAttribute("title"))).toEqual([
+      "Coming soon",
+      "Coming soon",
+    ]);
+
+    for (const row of soon) {
+      // Focusable on purpose. `disabled` would take the row out of the tab
+      // order, and a destination nobody can reach is a destination nobody is
+      // told about — `aria-disabled` announces it instead.
+      expect(row.disabled).toBe(false);
+      act(() => row.focus());
+      expect(document.activeElement).toBe(row);
+      // A button's Enter and Space are this click, so activating it either way
+      // is this call: the row has no handler, so nothing happens.
+      act(() => row.click());
+    }
+
+    expect(window.location.pathname).toBe(`/${WORKSPACE}/${THREE}`);
+    expect(host.querySelector(".ub-title")).toHaveProperty("value", "Sync");
   });
 });
 

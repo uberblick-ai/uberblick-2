@@ -200,13 +200,15 @@ for (const scheme of ["light", "dark"] as const) {
  * (#529). Beside the loop above, because it asks the same kind of question of
  * the same column in the same two appearances.
  *
- * The sidebar's four row controls share one hover rule, and `+ new doc` is the
- * one of them that can be disabled: it creates into the directory room, and at
- * an address naming no workspace this client can use there is none. Only a
- * browser can be asked — `:hover` is a state nothing but a pointer sets, and
- * the ground it would paint is a `light-dark()` token — so the enabled control
- * beside it takes the same gesture, which is what makes "unchanged" mean the
- * rule missed it rather than that the measurement cannot see a change.
+ * The sidebar's row controls share one hover rule, and two of them can be
+ * unavailable: `+ new doc`, which creates into the directory room and has none
+ * at an address naming no workspace this client can use, and Navigation's
+ * placeholder destinations, which are `aria-disabled` rather than `disabled`
+ * because they stay in the tab order (#483). Only a browser can be asked —
+ * `:hover` is a state nothing but a pointer sets, and the ground it would paint
+ * is a `light-dark()` token — so the enabled control beside them takes the same
+ * gesture, which is what makes "unchanged" mean the rule missed it rather than
+ * that the measurement cannot see a change.
  */
 for (const scheme of ["light", "dark"] as const) {
   test(`a disabled sidebar control keeps its ground under the pointer — ${scheme}`, async ({
@@ -219,6 +221,17 @@ for (const scheme of ["light", "dark"] as const) {
     const disabled = await paintedIn(create, "background-color");
     await create.hover();
     expect(await paintedIn(create, "background-color")).toBe(disabled);
+
+    const soon = page.getByRole("button", { name: "Dashboard" });
+    await expect(soon).toHaveAttribute("aria-disabled", "true");
+    const placeholder = await paintedIn(soon, "background-color");
+    await soon.hover();
+    expect(await paintedIn(soon, "background-color")).toBe(placeholder);
+    // Muted, in whichever appearance this run is in: an unavailable row reads
+    // a step back from the live one it sits beside.
+    expect(await paintedIn(soon, "color")).not.toBe(
+      await paintedIn(page.locator(".ub-all-open-entry"), "color"),
+    );
 
     const allDocs = page.locator(".ub-all-open-entry");
     const ground = await paintedIn(allDocs, "background-color");

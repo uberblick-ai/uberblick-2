@@ -566,7 +566,10 @@ describe("an empty list", () => {
 /**
  * The sidebar's "All docs" entry, unchanged by this leaf: the sidebar is
  * curation and stays as it was, and these cases move here with the listing it
- * opens rather than dying with `AllDocsPane`.
+ * opens rather than dying with `AllDocsPane`. Where in the column the entry is
+ * drawn is the sidebar's own business (#483 moved it into Navigation) and is
+ * asserted in `sidebar.test.tsx`; what is asked here is only that it is there,
+ * says "All docs", and opens the listing.
  */
 describe("the sidebar entry", () => {
   it("is there whether anything is pinned or not, and opens the listing", async () => {
@@ -590,7 +593,7 @@ describe("the sidebar entry", () => {
     ).toBe("page");
 
     // And with a pin in the sidebar it is exactly where it was: the entry is
-    // not part of the curation above it.
+    // not part of the curation below it (#483).
     const pin = host.querySelector<HTMLButtonElement>(".ub-docs-pin");
     await act(async () => pin?.click());
     expect(host.querySelectorAll(".ub-list .ub-group")).toHaveLength(1);
