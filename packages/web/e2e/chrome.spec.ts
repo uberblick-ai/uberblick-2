@@ -178,13 +178,15 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(configured).toHaveAttribute("data-highlighted", /.*/);
     expect(await paintedIn(configured, "background-color")).not.toBe(ground);
 
-    // Management is on the menu and unavailable — not hidden.
-    for (const name of ["New workspace", "Workspace settings"]) {
-      await expect(menu.getByRole("menuitem", { name })).toHaveAttribute(
-        "aria-disabled",
-        "true",
-      );
-    }
+    // Management is on the menu and unavailable — not hidden. Making a
+    // workspace is still `ub init` on a machine; workspace settings have been a
+    // place to go since #485, so that item is live rather than shown-and-dead.
+    await expect(
+      menu.getByRole("menuitem", { name: "New workspace" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    await expect(
+      menu.getByRole("menuitem", { name: "Workspace settings" }),
+    ).not.toHaveAttribute("aria-disabled", "true");
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
 
