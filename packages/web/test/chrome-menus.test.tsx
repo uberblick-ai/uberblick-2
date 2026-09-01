@@ -135,6 +135,7 @@ describe("the workspace switcher renders configuration", () => {
     docs: number,
     current: Workspace | null = WORKSPACE,
     onOpenSettings: () => void = () => {},
+    active = true,
   ): ReactElement {
     return (
       <WorkspaceSwitcher
@@ -143,6 +144,7 @@ describe("the workspace switcher renders configuration", () => {
         docs={docs}
         onSwitch={() => {}}
         onOpenSettings={onOpenSettings}
+        active={active}
       />
     );
   }
@@ -193,7 +195,26 @@ describe("the workspace switcher renders configuration", () => {
     expect(trigger?.querySelector(".ub-workspace-name")?.textContent).toBe("no workspace");
     expect(trigger?.querySelector(".ub-workspace-name")?.hasAttribute("title")).toBe(false);
     expect(trigger?.querySelector(".ub-menu-caret")).not.toBe(null);
+    open(none);
+    const settings = panel("[data-slot=dropdown-menu-item]").find(
+      (item) => item.textContent === "Workspace settings",
+    );
+    expect(settings?.hasAttribute("data-disabled")).toBe(true);
     none.unmount();
+  });
+
+  it("closes its portalled menu when the document pane becomes inactive", () => {
+    const view = mount(switcher(0));
+    open(view);
+    expect(panel("[data-slot=dropdown-menu-content]")).toHaveLength(1);
+
+    view.render(switcher(0, WORKSPACE, () => {}, false));
+    expect(panel("[data-slot=dropdown-menu-content]")).toHaveLength(0);
+
+    // Returning to the document pane must not revive the old open state.
+    view.render(switcher(0));
+    expect(panel("[data-slot=dropdown-menu-content]")).toHaveLength(0);
+    view.unmount();
   });
 
   it("keeps machine-owned creation disabled and opens workspace settings", () => {

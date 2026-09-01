@@ -234,9 +234,20 @@ test("workspace settings is an address-selected, inert sidebar drill-in", async 
   await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
   await expect(settingsEntry).toBeFocused();
 
-  // A portalled user panel sits outside the pane's inert subtree. Browser
-  // Forward changes the address without clicking underneath that panel, and
-  // the mode change must still take the outgoing surface and its focus away.
+  // Portalled controls sit outside the pane's inert subtree. Browser Forward
+  // changes the address without clicking underneath them, and the mode change
+  // must still take each outgoing surface and its focus away.
+  await page.locator(".ub-workspace").click();
+  const workspaceMenu = page.locator("[data-slot=dropdown-menu-content]");
+  await expect(workspaceMenu).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await expect(workspaceMenu).toBeHidden();
+  await expect(back).toBeFocused();
+  await page.goBack();
+  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+  await expect(settingsEntry).toBeFocused();
+
   await page.locator(".ub-user-card").click();
   const userPanel = page.locator("[data-slot=popover-content]");
   await expect(userPanel).toBeVisible();

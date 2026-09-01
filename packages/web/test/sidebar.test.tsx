@@ -623,6 +623,11 @@ describe("workspace settings is a route-driven sidebar mode", () => {
       true,
     );
   });
+
+  it("offers no settings destination when the address names no workspace", async () => {
+    const host = await openApp("/not-a-workspace");
+    expect(host.querySelector(".ub-settings-entry")).toBeNull();
+  });
 });
 
 /**

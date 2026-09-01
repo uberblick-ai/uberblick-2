@@ -299,6 +299,7 @@ export function Sidebar({
             docs={entries.length}
             onSwitch={onSwitchWorkspace}
             onOpenSettings={onOpenSettings}
+            active={!settingsOpen}
           />
           <div className="ub-list-head">
             <button type="button" onClick={onCreate} disabled={connection === null}>
@@ -362,15 +363,17 @@ export function Sidebar({
             + group
           </button>
           <div className="ub-list-foot">
-            <button
-              type="button"
-              className="ub-settings-entry"
-              data-swap-focus
-              onClick={onOpenSettings}
-            >
-              <GearIcon />
-              Workspace settings
-            </button>
+            {workspace !== null && (
+              <button
+                type="button"
+                className="ub-settings-entry"
+                data-swap-focus
+                onClick={onOpenSettings}
+              >
+                <GearIcon />
+                Workspace settings
+              </button>
+            )}
             {!settingsOpen && (
               <UserMenu identity={identity} agentSessions={agentSessions} />
             )}

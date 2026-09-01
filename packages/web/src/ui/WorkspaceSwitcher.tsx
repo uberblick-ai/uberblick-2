@@ -28,6 +28,7 @@
  * product surface. See `ui/tailwind.css` for why the two coexist.
  */
 
+import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import { initialOf } from "./PeerAvatar.js";
 import {
@@ -51,6 +52,7 @@ export function WorkspaceSwitcher({
   docs,
   onSwitch,
   onOpenSettings,
+  active = true,
 }: {
   /** What to offer, already validated and deduplicated — see `workspaceList`. */
   workspaces: readonly Workspace[];
@@ -66,9 +68,19 @@ export function WorkspaceSwitcher({
   onSwitch: (segment: string) => void;
   /** Go to this workspace's settings address. */
   onOpenSettings: () => void;
+  /** Whether the document-sidebar pane that owns this portalled menu is live. */
+  active?: boolean;
 }): ReactElement {
+  const [open, setOpen] = useState(false);
+
+  // The menu is portalled outside the sidebar pane, so `inert` on that pane
+  // cannot retire it when history changes the route underneath an open menu.
+  useEffect(() => {
+    if (!active) setOpen(false);
+  }, [active]);
+
   return (
-    <DropdownMenu>
+    <DropdownMenu open={active && open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <button type="button" className="ub-workspace" aria-label="Workspace">
           {/* Hidden like the user card's tile: a letter announced beside the
@@ -113,7 +125,9 @@ export function WorkspaceSwitcher({
         <DropdownMenuSeparator />
         {/* Configuration, not accounts — see the header. */}
         <DropdownMenuItem disabled>New workspace</DropdownMenuItem>
-        <DropdownMenuItem onSelect={onOpenSettings}>Workspace settings</DropdownMenuItem>
+        <DropdownMenuItem disabled={current === null} onSelect={onOpenSettings}>
+          Workspace settings
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
