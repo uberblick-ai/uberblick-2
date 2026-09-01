@@ -41,14 +41,24 @@ Record fresh `origin/main` and read the current versions of `AGENTS.md`,
 `CLAUDE.md`, `.github/ISSUE_SPEC.md`, the six role contracts, and only the
 procedures implicated by the audit window.
 
+Record workflow-rule commits since the prior report's grounding. Judge a
+historical action against the rules in force when it occurred, not today's
+replacement text. For a change that claims to correct a prior finding, inspect
+comparable later runs and classify the correction as effective, regressed, or
+not yet measurable; absence of a later comparable run is not evidence either
+way.
+
 The sample is deterministic:
 
-- every top-level issue-preparation retrospective in Discussion #506 whose
-  creation time falls in the window;
-- every top-level implementation retrospective in Discussion #522 whose
-  creation time falls in the window;
-- every issue, adversary handoff, return, PR, review, or gate record linked by
-  those entries;
+- shallow-index every top-level issue-preparation retrospective in Discussion
+  #506 whose creation time falls in the window: item, outcome, run, links, and
+  any claimed anomaly, cost or avoided rework;
+- shallow-index the same fields for every top-level implementation
+  retrospective in Discussion #522 whose creation time falls in the window;
+- fully read a retrospective and reconstruct its linked issue, adversary
+  handoff, return, PR, review and gate records only when that index or another
+  sample signal indicates an anomaly, a convergence concern, or evidence for a
+  claimed trend;
 - every implementer return or `needs-decision` transition in the window, even
   when no retrospective links it;
 - every PR active in the window, meaning its `createdAt`, `updatedAt`,
@@ -82,9 +92,10 @@ choices and triggers. Duplicated or stale truth is itself a possible finding.
 
 ## Audit method
 
-1. Reconstruct each sampled run from durable records. Check eligibility,
-   claims, delegation, recovery, owner boundaries, final labels, PR handoffs,
-   review independence, and whether linked evidence supports the outcome.
+1. Reconstruct each run selected for full reading from durable records. Check
+   eligibility, claims, delegation, recovery, owner boundaries, final labels,
+   PR handoffs, review independence, and whether linked evidence supports the
+   outcome.
 2. Compare retrospective claims with those records. Correlate preparation
    choices with downstream returns, clarification, scope growth, review
    findings, and avoidable rework. Calm wording is neither success nor a defect.
