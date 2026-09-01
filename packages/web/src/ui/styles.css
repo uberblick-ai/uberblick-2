@@ -3025,20 +3025,19 @@ h3.ub-heading {
    the frame's own `mouseleave`. A pointer walking from the prose towards the
    button therefore left the frame in the few pixels between the two and the
    button was already hidden by the time it arrived (#507). This claims the
-   gap back for the frame: events over a pseudo-element are the originating
-   element's, so crossing it never leaves the frame.
+   whole strip back for the frame: events over a pseudo-element are the
+   originating element's, so crossing it never leaves the frame.
 
-   Hit-testing only — no chrome, nothing to see. It bridges only the space
-   between the button's 22px box and the frame's left edge: overlapping the
-   button would let the corridor take its target at fractional layout scales.
-   It stops at the frame, so it takes not one pixel of the prose. */
+   Hit-testing only — no chrome, nothing to see. It stops exactly at the frame's
+   left edge, so it covers the gutter and takes not one pixel of the prose. The
+   button's explicit stacking order keeps its complete target above the strip. */
 .ub-editor-frame::before {
   content: "";
   position: absolute;
   top: 0;
   bottom: 0;
   right: 100%;
-  width: calc(var(--block-gutter) - 22px);
+  width: var(--block-gutter);
 }
 
 /* The gutter `+`. Absolutely positioned inside the column's reserved left
@@ -3047,6 +3046,7 @@ h3.ub-heading {
    block's own box. */
 .ub-gutter-add {
   position: absolute;
+  z-index: 1;
   left: calc(-1 * var(--block-gutter));
   width: 22px;
   height: 22px;
