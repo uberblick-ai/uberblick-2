@@ -120,7 +120,10 @@ A loop that repeatedly launches a continuous entry role (issue-preparer,
 implementer, integrator) — `ub launch`, or a `/loop /next-issue` session until
 it lands — paces relaunch by the session's own result, not a fixed interval. A
 session that did work, or stopped on a recorded boundary, is followed by the
-next fresh session at once. A session that ended with its role's
-`No eligible … work:` line is followed by an idle wait of about 30 minutes
-(owner direction, 2026-09-01), then a fresh session. The loop never selects,
-claims or transitions work itself.
+next fresh session at once. A session that ended with the exact line
+`No eligible <role slug> work: <reason>.` is followed by an idle wait of about
+30 minutes (owner direction, 2026-09-01), then a fresh session; every entry
+role contract emits that line and nothing else on an empty queue. The loop may
+run the over-inclusive `scripts/probe-work.sh <role>` first to skip a session
+that could only end that way. The loop never selects, claims or transitions
+work itself.

@@ -163,7 +163,7 @@ A top-level implementer returns a stale, unsafe, unnecessarily complex, or
 owner-bound contract with this issue comment:
 
 ```text
-Returned: implementer <opus|codex> <session-or-agent id>
+Returned: implementer <claude|codex> <session-or-agent id>
 Grounding: <origin/main SHA>
 Reason: <stale-contract|unsafe|unnecessary-complexity|owner-decision> — <one sentence>
 Evidence: <URL or concise pointer>
@@ -190,20 +190,20 @@ Claimed: feat/mcp-server
 Implementer: opus a12a538d
 ```
 
-`Implementer` is `<opus|codex> <session-or-agent id>`. Completion is a PR body
+`Implementer` is `<claude|codex> <session-or-agent id>`. Completion is a PR body
 recording the outcome, verification, material findings, and KISS/overtesting
 self-review. A fix-up claim is posted on the PR:
 
 ```text
 Claimed: <existing branch>
-Implementer: <opus|codex> <session-or-agent id>
+Implementer: <claude|codex> <session-or-agent id>
 Ruling: <integrator comment URL>
 ```
 
 After opening or updating the PR, post only:
 
 ```text
-Done: implementer <opus|codex> <session-or-agent id>
+Done: implementer <claude|codex> <session-or-agent id>
 Grounding: <origin/main SHA>
 ```
 

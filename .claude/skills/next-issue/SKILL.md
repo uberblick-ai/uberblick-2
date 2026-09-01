@@ -47,9 +47,7 @@ runtime's own configuration owns the rest.
    check before claiming.
 
    - **Claude:** the `Agent` tool with `subagent_type` set to the role slug
-     (its adapter under `.claude/agents/`) and `model: opus`. The integrator
-     runs on `sonnet`; its work is procedural, and the two challenges carry
-     the judgment.
+     (its adapter under `.claude/agents/`) and `model: opus`.
    - **Codex:** give the run its own worktree,
      `git worktree add --detach <scratch>/<run id> origin/main`, write the
      assignment to `<scratch>/<run id>.prompt`, then run from that worktree as
@@ -61,23 +59,34 @@ runtime's own configuration owns the rest.
        -o <scratch>/<run id>.last - < <scratch>/<run id>.prompt > <scratch>/<run id>.log 2>&1
      ```
 
-     `codex exec` selects no `.codex/agents/*.toml` adapter, which is why the
-     assignment names the contract. Never start it from an empty scratch
-     directory (Codex refuses an untrusted directory) and never in the
-     foreground (a foreground shell call is killed at ten minutes). The role
-     claims, pushes and opens its PR from that worktree; remove the worktree
-     once the session has exited. Known gap (2026-09-01): this sandbox denies
-     `git commit` (`.git/index.lock: Operation not permitted`) and an
-     unattended run cannot answer the approval, so an implementer needs the
-     sandbox off inside its worktree; the owner decides that flag on the PR
-     that introduced this lane, and until then a Codex implementer run may
-     stall at its first commit.
+     For the `implementer` only, replace `-s workspace-write -c '…'` with
+     `--dangerously-bypass-approvals-and-sandbox` (owner decision,
+     2026-09-01): that sandbox denies `git fetch` and `git commit` in a linked
+     worktree (`.git/index.lock: Operation not permitted`), and an unattended
+     run cannot answer the approval. The worktree isolates files only; the
+     trust boundary is the machine the lane runs on — the remote runner with
+     its repository-scoped write token, or the owner's own machine — and the
+     lane is supported nowhere else. Reviewers and adversaries keep the
+     sandbox. `codex exec` selects no `.codex/agents/*.toml` adapter, which
+     is why the assignment names the contract. Never start it from an empty
+     scratch directory (Codex refuses an untrusted directory) and never in
+     the foreground (a foreground shell call is killed at ten minutes). The
+     role claims, pushes and opens its PR from that worktree; remove the
+     worktree once the session has exited.
 4. **Report and return.** Name the role, the runtime and the run id, and
    repeat the session's final line verbatim. `No eligible <role> work:
    <reason>.` means the queue was empty: the caller idles for about 30 minutes
    (owner direction, 2026-09-01) before launching again. Any other ending is
    work done or a recorded stop, and the caller launches the next session at
    once. Then stop.
+
+   Before paying for a session, the caller may run
+   `sh scripts/probe-work.sh <role>`: exit 1 means nothing can be eligible
+   and the caller idles as if it had read the sentinel; exit 2 means the read
+   failed and the caller idles too; exit 0 launches. The probe is
+   deliberately over-inclusive and claims nothing — a false yes costs one
+   session that ends with the sentinel — and the session's own final line
+   stays the authority.
 
 Everything else belongs to the role: this file observes no GitHub state,
 selects nothing, claims nothing, and performs no gate, review, disposition or

@@ -14,17 +14,25 @@ gates' order and mechanics.
 CLAUDE.md's gate list is the authority on *when* a pre-handoff review is
 required. The implementer opens a draft PR and posts the README's exact-PR
 delegation at its current head before starting a fresh
-`implementation-reviewer`. One transport per direction; both run from the
-parent's own worktree, detached (a foreground shell call is killed at ten
-minutes), with the prompt read from a file and the log kept in private scratch:
+`implementation-reviewer`. One transport per *reviewer* runtime — the command
+is chosen by the runtime the round must run on, not by the caller's, so a
+same-runtime round (a `--codex` integrator on a Codex-authored PR) uses the
+same two commands. Both run from the parent's own worktree, detached (a
+foreground shell call is killed at ten minutes), with the prompt read from a
+file and the log kept in private scratch:
 
 ```sh
-# From Claude, start Codex — the transport issue preparation validated.
+# A Codex reviewer — the transport issue preparation validated.
 codex exec -s workspace-write -c 'sandbox_workspace_write.network_access=true' - < <prompt-file> > <scratch-log> 2>&1
 
-# From Codex, start Claude — the project adapter selects the role.
+# A Claude reviewer — the project adapter selects the role.
 claude -p --agent implementation-reviewer --model opus --permission-mode bypassPermissions < <prompt-file> > <scratch-log> 2>&1
 ```
+
+Each is a fresh top-level session: `codex exec` always is, and a headless
+`claude -p` carries its own `Claude-Session` trailer, unlike an `Agent`-tool
+child, which shares its launcher's authorship identity and is never a
+reviewer.
 
 `codex exec` selects no `.codex/agents/*.toml` adapter, so the prompt tells a
 Codex child to read the `implementation-reviewer` role contract; the Claude

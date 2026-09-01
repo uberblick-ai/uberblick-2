@@ -37,7 +37,7 @@ Top-level assignment: one GitHub-only shallow pass, in this order.
    prepare again.
 
 With nothing eligible, or at the cap, end with exactly
-`No eligible implementation work: <one reason>.` and stop. The launcher reads
+`No eligible implementer work: <one reason>.` and stop. The launcher reads
 that line to idle. Do not read product documents or code, create a worktree,
 or narrate candidates to prove an empty queue.
 

@@ -26,7 +26,9 @@ The owner makes a parked tier-3 PR eligible by replacing `needs-human` with
 only enough to exclude them; their state is derived, so do not narrate the queue
 or skipped PRs. Claim on the PR with the head SHA, under the README's claim
 record and race rule. One PR — merged with its post-merge pass, or parked with
-the ruling — then stop.
+the ruling — then stop. With nothing eligible, end with exactly
+`No eligible integrator work: <one reason>.` and stop; the launcher reads that
+line to idle.
 
 Prove the authorship condition before claiming: compare every commit's
 `Claude-Session` trailer and the linked implementer claim/delegation lineage

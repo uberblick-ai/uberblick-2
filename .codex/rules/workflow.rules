@@ -67,15 +67,9 @@ prefix_rule(
 )
 
 prefix_rule(
-    pattern = ["gh", "api"],
+    pattern = ["gh", "api", "graphql"],
     decision = "allow",
-    justification = "Reading the Priority field and comment timestamps is GitHub-only pickup input.",
+    justification = "Reading the Priority field is GitHub-only pickup input. Every other `gh api` verb, and every `git push`, keeps its prompt: a prefix rule cannot bind a write to the claim holder's own target, so none is written for one.",
     match = ["gh api graphql -f query=q"],
-)
-
-prefix_rule(
-    pattern = ["git", "push"],
-    decision = "allow",
-    justification = "Only the claim holder pushes, and only to its own feature branch; main is protected by policy, not by this rule.",
-    match = ["git push -u origin feat/slug", "git push origin HEAD:feat/slug"],
+    not_match = ["gh api --method DELETE repos/uberblick-ai/uberblick-2/git/refs/heads/x"],
 )
