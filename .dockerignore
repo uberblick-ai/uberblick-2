@@ -1,11 +1,9 @@
 .git
 .github
 .claude
-# …except the coordinator's skills. `.claude/skills/next-issue` holds the
-# preflight decision table next to the procedure it describes, and
-# `preflight-tier.test.mjs` beside them reads both to prove they agree — a
-# review image without them can only skip that suite. Everything else under
-# `.claude` (worktrees, local settings) stays out.
+# …except the launcher and review-transport skills. Provider-neutral issue
+# shaping and preparation live under `.agents`, which remains in the image.
+# Everything else under `.claude` (worktrees, local settings) stays out.
 !.claude/skills
 !.claude/skills/**
 node_modules
@@ -24,4 +22,3 @@ test-results
 playwright-report
 .DS_Store
 .vite
-

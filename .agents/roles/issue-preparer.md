@@ -43,7 +43,7 @@ Own one pass from intake to `ready`, `split`, `wontfix`, or a serious owner
 boundary.
 Ground at fresh `origin/main`, align the body with the corpus and
 `.github/ISSUE_SPEC.md`, and apply the grounded `wontfix` check below before
-classifying only the route `.claude/skills/next-issue/preflight.md` defines.
+classifying only the route `.agents/protocols/issue-preparation.md` defines.
 
 Before drafting, compare the likely files with open PRs and record any real
 dependency or semantic overlap. Keep grounding proportional: when code and
@@ -65,7 +65,7 @@ code-grounded self-check regardless of package path. Otherwise spawn exactly
 one fresh `issue-adversary` subagent on this issue, giving it its own run
 identity and this parent run. Prefer the other runtime/model when available —
 Claude calls Codex and Codex calls Claude — dispatching it as
-`.claude/skills/next-issue/preflight.md` states, and stay in your assignment
+`.agents/protocols/issue-preparation.md` states, and stay in your assignment
 until its durable handoff exists. If that dispatch produces no verdict, record
 it on the issue rather than substituting a same-runtime adversary silently.
 

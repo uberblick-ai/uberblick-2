@@ -15,6 +15,13 @@ these descriptions starts nothing, and merge authority still comes only from
 repository policy. The role split's reasoning is Uberblick project agent
 workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
 
+Issue shaping before queue entry follows
+`.agents/protocols/issue-shaping.md` and grants no lifecycle state beyond a
+confirmed `needs-preparation` intake. The issue-preparer owns queue authority
+and side effects; `.agents/protocols/issue-preparation.md` owns its shared
+grounding, challenge, and recheck procedure; `.github/ISSUE_SPEC.md` alone owns
+the final issue schema and lifecycle.
+
 ## One bounded assignment
 
 An entry role receives its role and session or run identity, then self-picks one

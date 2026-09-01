@@ -217,10 +217,13 @@ The PR supplies the branch, head SHA, diff and check state; do not copy them
 into the handoff or add a second completion comment to the issue. Recovery and
 independent-review rules live only in `AGENTS.md`.
 
-The executable routing detail lives under `.claude/skills/next-issue/`: it owns
-the grounded trivial-vs-challenged classification, challenge questions, recheck
-and focused parity test. This spec owns only the authority and lifecycle above;
-do not grow a second copy of that procedure here or in `AGENTS.md`.
+Conversation-to-intake behavior lives in
+`.agents/protocols/issue-shaping.md`; it grants no `ready` state. The shared
+preparation detail lives in `.agents/protocols/issue-preparation.md`: it owns
+the grounded trivial-vs-challenged classification, challenge questions,
+recheck, and focused parity test. The issue-preparer role owns queue authority
+and side effects. This spec owns only the final schema and lifecycle above; do
+not grow a second copy of either procedure here or in `AGENTS.md`.
 
 ## Body sections
 

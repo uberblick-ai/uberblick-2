@@ -1,0 +1,35 @@
+name: Product improvement or bug
+description: Describe a goal, problem, or bug; preparation will turn it into an implementation-ready issue
+labels:
+  - needs-preparation
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Incomplete reports are welcome. The issue-preparer will ground and shape this intake into the final implementation contract.
+
+        Want to shape the idea conversationally first? Use the `shape-issue` skill or follow the [provider-neutral shaping protocol](https://github.com/uberblick-ai/uberblick-2/blob/main/.agents/protocols/issue-shaping.md). Do not include secrets.
+  - type: textarea
+    id: goal-or-problem
+    attributes:
+      label: Goal or problem
+      description: What happens now, who is affected if relevant, and what outcome would be better?
+      placeholder: Describe the problem or desired outcome in your own words.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence-or-example
+    attributes:
+      label: Evidence or example
+      description: Add anything useful, such as an example, screenshot, log, or observation. For a bug, actual behavior, expected behavior, and reproduction steps are helpful.
+    validations:
+      required: false
+  - type: textarea
+    id: known-constraints
+    attributes:
+      label: Known constraints
+      description: Note anything that must not change, or leave this blank when none are known.
+      placeholder: None known.
+    validations:
+      required: false
