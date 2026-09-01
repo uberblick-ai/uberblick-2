@@ -28,15 +28,24 @@
  * "nothing matches" — until the directory has synced, both say what they
  * actually know.
  *
+ * **Two orders, and the reader picks.** Last changed first is what a working
+ * session opens on; title order is the other scan a corpus is read with — *what
+ * is in here*, which filtering by a name you already know cannot answer (owner
+ * feedback, 2026-08-30). The choice is the mounted pane's own state, so
+ * filtering and a directory update leave it alone and nothing is remembered
+ * across a reload.
+ *
  * The stamps are the stubs' own `updatedAt` — cache-quality freshness hints
  * written by whichever replica last stamped them, never history — and optional
  * by construction, which is why {@link sortDirectory} sorts the unstamped last
- * rather than treating absence as epoch zero: a document nobody has stamped is
- * not the oldest document, it is the one with no answer. Last changed is shown
- * as an age rather than a date ("3 days ago" is what a scan of a listing is
- * asking), and the pane keeps its own clock so a label goes stale by at most a
- * minute even when nothing else re-renders. The absolute date stays one hover
- * away, and the machine value in `dateTime`.
+ * in last-changed order rather than treating absence as epoch zero: a document
+ * nobody has stamped is not the oldest document, it is the one with no answer.
+ * In title order they sort by title like every other row — grouping them at the
+ * bottom there would not be title order — and the row's own dash carries "no
+ * answer" in both. A stamp is shown as an age rather than a date ("3 days ago"
+ * is what a scan of a listing is asking), and the pane keeps its own clock so a
+ * label goes stale by at most a minute even when nothing else re-renders. The
+ * absolute date stays one hover away, and the machine value in `dateTime`.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -103,23 +112,37 @@ function byTitle(a: DirectoryEntry, b: DirectoryEntry): number {
   return a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0;
 }
 
+/** The two orders the list offers, first the one it opens on. */
+const ORDERS = ["changed", "title"] as const;
+
+export type Order = (typeof ORDERS)[number];
+
+const ORDER_LABELS: Record<Order, string> = {
+  changed: "Last changed",
+  title: "Title",
+};
+
 /**
- * The entries as the list shows them: last changed first, unstamped last.
+ * The entries as the list shows them, in the order the reader chose.
  *
- * One order, and it is the one a working session opens on — what was touched
- * most recently is what is being worked on. Finding a document by name is what
- * the filter is for, so there is no second order to choose between and nothing
- * to remember across reloads.
+ * Both orders are total, because neither may let two rows swap places between
+ * renders — that is exactly the layout shift the calm-UI rules forbid. Title
+ * order is {@link byTitle}, whose uuid tiebreak is unique by construction; last
+ * changed breaks its ties the same way, since two documents can share a coarse
+ * millisecond.
  *
- * Entries with no usable stamp go last, in title order, and that is a decision
- * rather than a fallback: the stamps are optional, so a listing that read
- * "absent" as "very old" would still be sorting them — into a wall at the
- * bottom that hides nothing, instead of pretending they are ancient. Ties break
- * by title so the order is total: two documents stamped in the same coarse
- * millisecond must not swap places between renders, which is exactly the layout
- * shift the calm-UI rules forbid.
+ * In last-changed order, entries with no usable stamp go last, and that is a
+ * decision rather than a fallback: the stamps are optional, so a listing that
+ * read "absent" as "very old" would still be sorting them — into a wall at the
+ * bottom that hides nothing, instead of pretending they are ancient. It is a
+ * rule about *this* order only; in title order an unstamped document is sorted
+ * by its title like every other row.
  */
-export function sortDirectory(entries: readonly DirectoryEntry[]): DirectoryEntry[] {
+export function sortDirectory(
+  entries: readonly DirectoryEntry[],
+  order: Order,
+): DirectoryEntry[] {
+  if (order === "title") return [...entries].sort(byTitle);
   return [...entries].sort((a, b) => {
     const left = usableStamp(a.updatedAt);
     const right = usableStamp(b.updatedAt);
@@ -215,6 +238,12 @@ export function DocumentList({
 }): ReactElement {
   const status = useRoomStatus(connection);
   const [query, setQuery] = useState("");
+  /**
+   * The chosen order, held beside the query rather than derived from it: the
+   * two are independent, so switching one leaves the other exactly as it was.
+   * Mounted-pane state and nothing more — no storage, no preference mechanism.
+   */
+  const [order, setOrder] = useState<Order>("changed");
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
@@ -234,8 +263,8 @@ export function DocumentList({
   }, [groups]);
   const needle = query.trim().toLowerCase();
   const rows = useMemo(
-    () => sortDirectory(entries.filter((entry) => matches(entry, needle))),
-    [entries, needle],
+    () => sortDirectory(entries.filter((entry) => matches(entry, needle)), order),
+    [entries, needle, order],
   );
 
   return (
@@ -259,6 +288,26 @@ export function DocumentList({
         <p id={SCOPE_ID} className="ub-docs-scope ub-muted">
           {SCOPE}
         </p>
+        {/* A caption over a set of related controls is what a fieldset is —
+            the same shape the appearance choice in the user menu takes. The
+            pressed option is the answer to "which order is this?", so it is
+            readable without touching anything. */}
+        <fieldset className="ub-docs-order">
+          <legend className="ub-docs-order-label">Order</legend>
+          <div className="ub-docs-order-options">
+            {ORDERS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className="ub-docs-order-option"
+                aria-pressed={option === order}
+                onClick={() => setOrder(option)}
+              >
+                {ORDER_LABELS[option]}
+              </button>
+            ))}
+          </div>
+        </fieldset>
         {rows.length === 0 ? (
           /* Four silences, and only two of them are answers. A client that has
              not heard from the directory yet knows neither that the workspace

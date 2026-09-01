@@ -2897,6 +2897,51 @@ h3.ub-heading {
   font-size: 0.8rem;
 }
 
+/* The order chooser, in the shape the appearance choice already uses: a
+   caption over its options, quiet enough to stay a setting rather than compete
+   with the heading above it. The options sit in their own row because a
+   `legend` is laid out by the fieldset, not by its display. */
+.ub-docs-order {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-inline-size: 0;
+}
+
+.ub-docs-order-label {
+  padding: 0;
+  margin-bottom: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+}
+
+.ub-docs-order-options {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.ub-docs-order-option {
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.ub-docs-order-option:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+/* Which order this is, without touching anything. */
+.ub-docs-order-option[aria-pressed="true"] {
+  background: var(--brand-subtle);
+  border-color: var(--brand);
+}
+
 /* Its own class rather than the sidebar's `.ub-empty`: two components on one
    screen now, and a page with two elements of the same name is a page whose
    selectors are ambiguous — for a stylesheet and for a test alike. */
