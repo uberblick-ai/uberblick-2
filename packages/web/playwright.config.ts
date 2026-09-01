@@ -25,7 +25,10 @@ export default defineConfig({
   // `list` is still the suite's reporter. The second one is #628's throwaway
   // spike: it files evidence for tests that carry a `scenario` annotation and
   // ignores every other test, so nothing here switches recording on suite-wide
-  // — the video comes from a `test.use` scoped to one describe block.
+  // — the video comes from the `scenario` project below, paired with
+  // `chromium`'s `grepInvert`. The two filters are one mechanism: removing the
+  // scenario project without the inverse filter drops that test entirely, and
+  // an explicit `--project=chromium` run omits it (33 of 34 tests).
   reporter: [["list"], ["./e2e/scenarios/evidence-reporter.ts"]],
   // Generous per test, not per run: the whole file is meant to finish in well
   // under 90s, and a stuck test should fail rather than hang the suite.

@@ -2,19 +2,24 @@
  * #628's throwaway prototype: the only thing that notices when the human half
  * of a behavior and the machine half stop pointing at each other.
  *
- * A scenario in `e2e/scenarios/` names a spec file and a test title; the test
- * carries the scenario id as a Playwright annotation. Neither end knows about
- * the other at runtime, so on its own the link is *silent* — rename the test
- * and the suite still passes, rename the scenario and the evidence is still
- * filed. This test is what turns either break into a failure, and it runs in
- * `mise run test`, where a rename is made.
+ * A scenario in `e2e/scenarios/` uses the `Test:` grammar
+ * `<spec> › <test's own title>`, explicitly not Playwright's full title path
+ * (which includes describe blocks and is what #668's enumeration returns); the
+ * test carries the scenario id as a Playwright annotation. Neither end knows
+ * about the other at runtime, so on its own the link is *silent* — rename the
+ * test and the suite still passes, rename the scenario and the evidence is
+ * still filed. This test is what turns either break into a failure, and it runs
+ * in `mise run test`, where a rename is made.
  *
  * It reads source text, and that is the whole limitation. Source text is not
  * Playwright's list of tests, so this check is wrong in both directions and
  * knows it:
  *
- * - **False break.** A title built from a variable, or an id behind a constant,
- *   reads as a broken link.
+ * - **False break.** A title built from a variable or an id behind a constant
+ *   reads as a broken link. `test.skip(`, `test.only(` and `test.fixme(` make
+ *   the source scan misattribute the annotation to the preceding plain
+ *   `test(`; if there is none, its `lastIndexOf` degeneracy fails at the end of
+ *   the file instead.
  * - **False green, which is worse.** Comment the test out and this still finds
  *   its text and passes, while `playwright test --list` reports no tests at all
  *   (Codex round 1 on #669 demonstrated exactly that). It also does not require
