@@ -9,6 +9,7 @@ import { spawnSync } from "node:child_process";
 import {
 	cpSync,
 	copyFileSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -34,8 +35,9 @@ function completeFixture() {
 function setClaudeKey(fixture, slug, key, value) {
 	const path = join(fixture, ".claude/agents", `${slug}.md`);
 	const lines = readFileSync(path, "utf8").split("\n");
-	const existing = lines.findIndex((line, index) => index > 0 && line.startsWith(`${key}:`));
-	if (existing !== -1) lines.splice(existing, 1);
+	// Only the frontmatter block: a body line opening `effort:` is prose, not a pin.
+	const existing = lines.slice(1, lines.indexOf("---", 1)).findIndex((line) => line.startsWith(`${key}:`));
+	if (existing !== -1) lines.splice(existing + 1, 1);
 	if (value !== null) lines.splice(lines.indexOf("---", 1), 0, `${key}: ${value}`);
 	writeFileSync(path, lines.join("\n"));
 }
@@ -68,7 +70,13 @@ test("an incomplete role tree fails, and the absent Claude third says so", () =>
 	assert.match(run.stderr, /value is not one quoted string: description = "ok" trailing/);
 });
 
-test("only the two owner-approved high effort pins are permitted", () => {
+// `.claude/agents` is absent from the immutable review image, which the script
+// itself skips loudly; this test needs it as a fixture, so it skips loudly too.
+const claudeSkip = existsSync(join(root, ".claude/agents"))
+	? false
+	: ".claude/agents is absent from this checkout, so the effort pins cannot be checked here";
+
+test("only the two owner-approved high effort pins are permitted", { skip: claudeSkip }, () => {
 	const fixture = completeFixture();
 	assert.equal(run(fixture).status, 0);
 

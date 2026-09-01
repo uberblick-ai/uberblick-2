@@ -7,8 +7,10 @@
  * three agree on identity, that each adapter parses as its runtime's format and
  * names the exact contract, and that none pins runtime policy — except the
  * owner-approved `effort: high` pins on issue-preparer and implementer from
- * directive 438df7d. Model, tools, permissions, sandbox and MCP configuration
- * belong to the runtime and the invoker, never to a checked-in description.
+ * directive 438df7d, whose value is checked where the key is present and whose
+ * presence is not required. Model, tools, permissions, sandbox and MCP
+ * configuration belong to the runtime and the invoker, never to a checked-in
+ * description.
  *
  * It deliberately does not check the contracts' prose: no headings, no required
  * sentences, no uuids, no wording. Encoding editorial rules here would make the
