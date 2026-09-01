@@ -15,7 +15,9 @@
  *
  * A web tab publishes `WEB_CLIENT` (#74) and an MCP session publishes
  * `AGENT_CLIENT` (#494) — both positively, beside the `user` they belong to, so
- * a reader classifies on what a session claims rather than on what it omits.
+ * a session is read *as an agent* only from the agent marker it publishes,
+ * never from what it omits. (Omission still has a meaning, just not that one: a
+ * session claiming nothing is drawn as a person, `ui/doc-chrome.ts`.)
  * The old absence test ("not a web client, therefore an agent") counted a
  * browser tab running a bundle from before the marker as an MCP connection for
  * as long as that tab stayed open, and held a closed tab's caret over the prose
