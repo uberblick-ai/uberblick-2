@@ -522,10 +522,36 @@ for (const scheme of ["light", "dark"] as const) {
       cardHighlightFloor[scheme],
     );
 
-    // And it is one answer rather than three: the same painted fill, whichever
+    // The fourth: the `resolved` chip, which is inside the card button and so
+    // sits on the card's own `--card` (#572).
+    await handle.click();
+    await expect(page.locator(".ub-thread")).toBeVisible();
+    await page.getByRole("button", { name: "Resolve" }).click();
+
+    // A card is focused from the moment its thread is created, and a focused
+    // card is grounded `--brand-subtle`. The floor is about the resting pair,
+    // so this measures the card a reader finds on opening the document.
+    await page.reload();
+    await expect(page.locator(".ub-workspace")).toBeVisible();
+    await handle.click();
+    const thread = page.locator(".ub-thread").first();
+    const chip = page.locator(".ub-thread .ub-chip");
+    await expect(chip).toBeVisible();
+    const resting = await paintedIn(thread, "background-color");
+    expect(resting).toBe(header);
+    const pill = await paintedIn(chip, "background-color");
+    expect(separation(pill, resting)).toBeGreaterThanOrEqual(
+      cardHighlightFloor[scheme],
+    );
+    expect(
+      contrast(await paintedIn(chip, "color"), pill),
+    ).toBeGreaterThanOrEqual(4.5);
+
+    // And it is one answer rather than four: the same painted fill, whichever
     // `--card` surface it lands on.
     expect(entry).toBe(toggle);
     expect(drawer).toBe(toggle);
+    expect(pill).toBe(toggle);
   });
 }
 
