@@ -97,6 +97,51 @@ async function walk(
   await page.mouse.move(to.x, to.y, { steps });
 }
 
+/** What actually owns the button's centre, and whether the corridor overlaps it. */
+async function gutterHitTesting(page: Page): Promise<{
+  buttonOwnsCentre: boolean;
+  corridorOverlap: number;
+}> {
+  return page.locator(".ub-gutter-add").evaluate((button) => {
+    const frame = button.parentElement;
+    if (frame === null || frame.clientWidth === 0) throw new Error("e2e: no editor frame");
+    const control = button.getBoundingClientRect();
+    const host = frame.getBoundingClientRect();
+    const scale = host.width / frame.clientWidth;
+    const corridorWidth =
+      Number.parseFloat(getComputedStyle(frame, "::before").width) * scale;
+    const owner = document.elementFromPoint(
+      control.left + control.width / 2,
+      control.top + control.height / 2,
+    );
+    return {
+      buttonOwnsCentre: button.contains(owner),
+      corridorOverlap: Math.max(
+        0,
+        Math.min(control.right, host.left) -
+          Math.max(control.left, host.left - corridorWidth),
+      ),
+    };
+  });
+}
+
+/** Move slowly enough for hover state and the opacity transition to settle. */
+async function humanWalk(
+  page: Page,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): Promise<void> {
+  const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y)));
+  for (let step = 1; step <= steps; step += 1) {
+    const progress = step / steps;
+    await page.mouse.move(
+      from.x + (to.x - from.x) * progress,
+      from.y + (to.y - from.y) * progress,
+    );
+    await page.waitForTimeout(8);
+  }
+}
+
 /**
  * The journey, in the order a hand makes it: click the first character, walk
  * left onto the `+`, walk off it, come back and press it.
@@ -104,7 +149,13 @@ async function walk(
 test("the pointer can walk from the prose onto the gutter + and press it", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1395, height: 720 });
   await openDoc(page, "reach me");
+  // Scale the document to the fractional geometry a 125% browser zoom adds:
+  // the corridor and button no longer happen to meet on whole CSS pixels.
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = "125%";
+  });
 
   const button = page.locator(".ub-gutter-add");
   const prose = await blocks(page).first().boundingBox();
@@ -117,6 +168,13 @@ test("the pointer can walk from the prose onto the gutter + and press it", async
   await page.mouse.click(prose.x + 1, middle);
   await page.keyboard.type("X", { delay: 15 });
   await expect(blocks(page).nth(0)).toHaveText("Xreach me");
+  await page.mouse.move(prose.x + 2, middle);
+  await page.mouse.down();
+  await page.mouse.move(prose.x + 70, middle, { steps: 12 });
+  await page.mouse.up();
+  expect(await page.evaluate(() => window.getSelection()?.toString().length ?? 0)).toBeGreaterThan(
+    0,
+  );
 
   // An edit hides the hint until the pointer moves again, so the walk starts
   // with a move into the prose.
@@ -126,10 +184,27 @@ test("the pointer can walk from the prose onto the gutter + and press it", async
   const target = await button.boundingBox();
   if (target === null) throw new Error("e2e: the gutter button has no box");
   const centre = { x: target.x + target.width / 2, y: target.y + target.height / 2 };
+  const corridor = {
+    x: (target.x + target.width + prose.x) / 2,
+    y: middle,
+  };
+  const proseEdge = { x: prose.x + 2, y: middle };
   const away = { x: prose.x - 2 * target.width, y: middle };
 
-  await walk(page, inProse, centre);
+  // The fast stepped walk this test used to make outran both React's hover
+  // update and the 120ms fade. A hand can stop in the gap and over the control,
+  // so settle longer than that transition at both points.
+  await walk(page, inProse, proseEdge);
+  await humanWalk(page, proseEdge, corridor);
+  await page.waitForTimeout(180);
   await expect(button).toHaveCSS("opacity", "1");
+  await humanWalk(page, corridor, centre);
+  await page.waitForTimeout(180);
+  await expect(button).toHaveCSS("opacity", "1");
+  expect(await gutterHitTesting(page)).toEqual({
+    buttonOwnsCentre: true,
+    corridorOverlap: 0,
+  });
 
   // And it still goes when the walk continues past the gutter, which is neither
   // the block nor its strip.
