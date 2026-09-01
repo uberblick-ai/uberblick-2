@@ -81,7 +81,7 @@ test("an incomplete role tree fails, and the absent Claude third says so", () =>
 // itself skips loudly; this test needs it as a fixture, so it skips loudly too.
 const claudeSkip = existsSync(join(root, ".claude/agents"))
 	? false
-	: ".claude/agents is absent from this checkout, so the effort pins cannot be checked here";
+	: ".claude/agents is absent from this checkout, so the complete role fixture cannot be built here";
 
 test("only the two owner-approved high effort pins are permitted", { skip: claudeSkip }, () => {
 	const fixture = completeFixture();

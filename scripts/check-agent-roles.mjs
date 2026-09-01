@@ -43,9 +43,10 @@ const ISSUE_PREPARATION = [
 	".agents/protocols/issue-preparation.mjs",
 	".agents/protocols/issue-preparation.test.mjs",
 ];
+const CLAUDE_SKILLS = ".claude/skills";
+const CLAUDE_SHAPING_ADAPTER = ".claude/skills/shape-issue/SKILL.md";
 const SHAPING_ADAPTERS = [
 	".agents/skills/shape-issue/SKILL.md",
-	".claude/skills/shape-issue/SKILL.md",
 	".agents/adapters/chatgpt-voice.md",
 ];
 
@@ -150,6 +151,10 @@ const claudePresent = existsSync(join(root, CLAUDE));
 if (!claudePresent)
 	console.log(`skipped: ${CLAUDE} is absent from this checkout, so the Claude adapters cannot be checked here`);
 
+const claudeSkillsPresent = existsSync(join(root, CLAUDE_SKILLS));
+if (!claudeSkillsPresent)
+	console.log(`skipped: ${CLAUDE_SKILLS} is absent from this checkout, so the Claude shaping adapter cannot be checked here`);
+
 const expected = [...SLUGS].sort();
 const contracts = listFiles(ROLES)
 	.filter((name) => name.endsWith(".md") && name !== "README.md")
@@ -191,7 +196,10 @@ for (const relative of [ISSUE_SHAPING, ...ISSUE_PREPARATION]) {
 	if (!existsSync(join(root, relative))) fail(`${relative}: missing provider-neutral issue-authoring file`);
 }
 
-for (const relative of SHAPING_ADAPTERS) {
+for (const relative of [
+	...SHAPING_ADAPTERS,
+	...(claudeSkillsPresent ? [CLAUDE_SHAPING_ADAPTER] : []),
+]) {
 	if (!existsSync(join(root, relative))) {
 		fail(`${relative}: missing issue-shaping adapter`);
 		continue;

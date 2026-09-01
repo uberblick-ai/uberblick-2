@@ -1,6 +1,5 @@
 name: Product improvement or bug
 description: Describe a goal, problem, or bug; preparation will turn it into an implementation-ready issue
-title: ""
 labels:
   - needs-preparation
 assignees: []
