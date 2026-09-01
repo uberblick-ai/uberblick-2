@@ -262,11 +262,14 @@ describe("relative changed time", () => {
 
 describe("the order", () => {
   it("puts the most recently changed first", () => {
-    const titles = sortDirectory([
-      entry({ uuid: ONE, title: "Beta", updatedAt: 100 }),
-      entry({ uuid: TWO, title: "Alpha", updatedAt: 300 }),
-      entry({ uuid: THREE, title: "Gamma", updatedAt: 200 }),
-    ]).map((row) => row.title);
+    const titles = sortDirectory(
+      [
+        entry({ uuid: ONE, title: "Beta", updatedAt: 100 }),
+        entry({ uuid: TWO, title: "Alpha", updatedAt: 300 }),
+        entry({ uuid: THREE, title: "Gamma", updatedAt: 200 }),
+      ],
+      "changed",
+    ).map((row) => row.title);
     expect(titles).toEqual(["Alpha", "Gamma", "Beta"]);
   });
 
@@ -275,16 +278,19 @@ describe("the order", () => {
     // existed carries none, and "no answer" is not "very old". A stamp no
     // `Date` can hold is the same kind of no-answer — the stubs are written by
     // whichever replica had the clock, so a finite absurdity is a real state.
-    const titles = sortDirectory([
-      entry({ uuid: ONE, title: "Beta", updatedAt: 100 }),
-      entry({ uuid: GONE, title: "Zeta" }),
-      entry({ uuid: "aaaa1111-2222-4333-8444-555566667777", title: "Aardvark" }),
-      entry({
-        uuid: "bbbb2222-3333-4444-8555-666677778888",
-        title: "Skewed",
-        updatedAt: Number.MAX_VALUE,
-      }),
-    ]).map((row) => row.title);
+    const titles = sortDirectory(
+      [
+        entry({ uuid: ONE, title: "Beta", updatedAt: 100 }),
+        entry({ uuid: GONE, title: "Zeta" }),
+        entry({ uuid: "aaaa1111-2222-4333-8444-555566667777", title: "Aardvark" }),
+        entry({
+          uuid: "bbbb2222-3333-4444-8555-666677778888",
+          title: "Skewed",
+          updatedAt: Number.MAX_VALUE,
+        }),
+      ],
+      "changed",
+    ).map((row) => row.title);
     expect(titles).toEqual(["Beta", "Aardvark", "Skewed", "Zeta"]);
   });
 
@@ -293,10 +299,112 @@ describe("the order", () => {
       entry({ uuid: ONE, title: "Second", updatedAt: 500 }),
       entry({ uuid: TWO, title: "First", updatedAt: 500 }),
     ];
-    expect(sortDirectory(tied).map((row) => row.title)).toEqual([
+    expect(sortDirectory(tied, "changed").map((row) => row.title)).toEqual([
       "First",
       "Second",
     ]);
+  });
+
+  /**
+   * Unstamped-last is a rule about last changed alone. Title order that swept
+   * the unstamped into a wall at the bottom would not be title order, and the
+   * "no answer" the stamps are missing is carried by the row's dash in either.
+   */
+  it("in title order sorts every row by its title, stamped or not", () => {
+    const titles = sortDirectory(
+      [
+        entry({ uuid: ONE, title: "Beta", updatedAt: 100 }),
+        entry({ uuid: GONE, title: "Zeta", updatedAt: 300 }),
+        entry({ uuid: "aaaa1111-2222-4333-8444-555566667777", title: "Aardvark" }),
+      ],
+      "title",
+    ).map((row) => row.title);
+    expect(titles).toEqual(["Aardvark", "Beta", "Zeta"]);
+  });
+
+  it("breaks a shared title by uuid, so title order is total too", () => {
+    const same = [
+      entry({ uuid: ONE, title: "Notes" }),
+      entry({ uuid: TWO, title: "Notes" }),
+    ];
+    expect(sortDirectory(same, "title").map((row) => row.uuid)).toEqual([
+      TWO,
+      ONE,
+    ]);
+  });
+});
+
+/**
+ * Which scan the list is being read with. Last changed answers *what am I
+ * working on*; title answers *what is in here*, which the filter cannot —
+ * filtering needs a name you already have (owner feedback, 2026-08-30).
+ */
+describe("choosing the order", () => {
+  /** The order option that is on, read the way the screen shows it. */
+  function activeOrder(host: HTMLElement): string | undefined {
+    return [...host.querySelectorAll(".ub-docs-order-option")].find(
+      (option) => option.getAttribute("aria-pressed") === "true",
+    )?.textContent ?? undefined;
+  }
+
+  function chooseOrder(host: HTMLElement, label: string): HTMLButtonElement {
+    const option = [
+      ...host.querySelectorAll<HTMLButtonElement>(".ub-docs-order-option"),
+    ].find((button) => button.textContent === label);
+    if (option === undefined) throw new Error(`no order option "${label}"`);
+    return option;
+  }
+
+  async function seeded(): Promise<{ host: HTMLElement; peer: Y.Doc }> {
+    const peer = peerOf(directoryDoc());
+    upsertDirectoryEntry(peer, { uuid: ONE, title: "Zebra", updatedAt: 300 });
+    upsertDirectoryEntry(peer, { uuid: TWO, title: "Alpha", updatedAt: 100 });
+    // No stamp at all: last in one order, alphabetical in the other, and a
+    // dash in its row either way.
+    upsertDirectoryEntry(peer, { uuid: THREE, title: "Middle" });
+    return { host: await openApp(`/${WORKSPACE}`), peer };
+  }
+
+  it("opens on last changed and puts the list in title order when asked", async () => {
+    const { host } = await seeded();
+    expect(rowTitles(host)).toEqual(["Zebra", "Alpha", "Middle"]);
+    expect(activeOrder(host)).toBe("Last changed");
+
+    await act(async () => chooseOrder(host, "Title").click());
+    expect(rowTitles(host)).toEqual(["Alpha", "Middle", "Zebra"]);
+    expect(activeOrder(host)).toBe("Title");
+
+    // The unstamped row still says "no answer" rather than reading as a date.
+    const middle = [...host.querySelectorAll(".ub-docs-row")][1];
+    expect(middle?.querySelectorAll("time")).toHaveLength(0);
+    expect(middle?.textContent).toContain("—");
+
+    await act(async () => chooseOrder(host, "Last changed").click());
+    expect(rowTitles(host)).toEqual(["Zebra", "Alpha", "Middle"]);
+    expect(activeOrder(host)).toBe("Last changed");
+  });
+
+  it("leaves the filter alone, and neither a query nor a remote change resets it", async () => {
+    const { host, peer } = await seeded();
+    await act(async () => typeInto(search(host), "a"));
+    expect(rowTitles(host)).toEqual(["Zebra", "Alpha"]);
+
+    // Switching the order narrows nothing and widens nothing.
+    await act(async () => chooseOrder(host, "Title").click());
+    expect(search(host).value).toBe("a");
+    expect(rowTitles(host)).toEqual(["Alpha", "Zebra"]);
+
+    // Typing again, and then a second client writing to the directory: the
+    // chosen order is the reader's, and neither of them is the reader.
+    await act(async () => typeInto(search(host), ""));
+    expect(activeOrder(host)).toBe("Title");
+    expect(rowTitles(host)).toEqual(["Alpha", "Middle", "Zebra"]);
+
+    await act(async () => {
+      upsertDirectoryEntry(peer, { uuid: GONE, title: "Beta", updatedAt: 900 });
+    });
+    expect(activeOrder(host)).toBe("Title");
+    expect(rowTitles(host)).toEqual(["Alpha", "Beta", "Middle", "Zebra"]);
   });
 });
 
