@@ -47,7 +47,10 @@ runtime's own configuration owns the rest.
    check before claiming.
 
    - **Claude:** the `Agent` tool with `subagent_type` set to the role slug
-     (its adapter under `.claude/agents/`) and `model: opus`.
+     (its adapter under `.claude/agents/`) and `model: opus` — except the
+     issue-preparer, which runs on `fable` (owner direction, 2026-09-01):
+     grounding a new ticket is where the extra judgment pays, and its adapter
+     already pins the owner-approved `effort: high`.
    - **Codex:** give the run its own worktree,
      `git worktree add --detach <scratch>/<run id> origin/main`, write the
      assignment to `<scratch>/<run id>.prompt`, then run from that worktree as
