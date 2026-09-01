@@ -320,6 +320,17 @@ test("document actions stay reachable, close with the route, and archive into Re
   const confirmation = page.getByRole("alertdialog");
   await expect(confirmation).toContainText("Archive Lifecycle notes?");
   await expect(confirmation).toContainText("read-only");
+  // The dropdown returns focus to its trigger a macrotask after it closes, so
+  // an `aria-modal` dialog that merely focuses Cancel loses focus again and Tab
+  // walks into the editable title behind the backdrop. Both halves are asserted
+  // here because neither is visible to jsdom, which never flushes that timer.
+  await expect(confirmation.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(
+    confirmation.getByRole("button", { name: "Archive document" }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(confirmation.getByRole("button", { name: "Cancel" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();

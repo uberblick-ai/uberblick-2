@@ -211,7 +211,7 @@ describe("the doc chrome reads the document, the awareness and the status", () =
       ].find(
         (item) =>
           item.textContent ===
-          "Archive unavailable — document is not in the directory",
+          "Archive unavailable — no directory connection, or no live entry for this document",
       );
       expect(unavailable?.hasAttribute("data-disabled")).toBe(true);
     } finally {

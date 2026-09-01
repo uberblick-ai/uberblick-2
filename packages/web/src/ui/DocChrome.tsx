@@ -572,11 +572,9 @@ function DocumentActions({
 }): ReactElement {
   const trigger = useRef<HTMLButtonElement | null>(null);
   const cancel = useRef<HTMLButtonElement | null>(null);
+  /** Set while Archive is closing the menu *into* the confirmation. */
+  const opening = useRef(false);
   const [confirming, setConfirming] = useState(false);
-
-  useLayoutEffect(() => {
-    if (confirming) cancel.current?.focus();
-  }, [confirming]);
 
   useEffect(() => {
     if (!confirming) return;
@@ -669,7 +667,19 @@ function DocumentActions({
             ⋯
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent
+          align="end"
+          onCloseAutoFocus={(event) => {
+            if (!opening.current) return;
+            opening.current = false;
+            // Where the confirmation takes focus, because it is the first
+            // moment it can hold it: the menu's focus scope pulls focus back
+            // while it is still mounted, and Radix then returns it to the
+            // trigger — outside an `aria-modal` dialog — one macrotask later.
+            event.preventDefault();
+            cancel.current?.focus();
+          }}
+        >
           <DropdownMenuItem
             disabled={onTogglePin === null}
             className={pinned ? "ub-action-pinned" : ""}
@@ -684,10 +694,13 @@ function DocumentActions({
           <DropdownMenuItem
             disabled={onArchive === null}
             className="ub-action-danger"
-            onSelect={() => setConfirming(true)}
+            onSelect={() => {
+              opening.current = true;
+              setConfirming(true);
+            }}
           >
             {onArchive === null
-              ? "Archive unavailable — document is not in the directory"
+              ? "Archive unavailable — no directory connection, or no live entry for this document"
               : "Archive document"}
           </DropdownMenuItem>
         </DropdownMenuContent>

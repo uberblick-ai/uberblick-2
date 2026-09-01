@@ -294,7 +294,8 @@ export function Sidebar({
       <Navigation allOpen={allOpen} onOpenAll={onOpenAll} />
       {groups.length === 0 && (
         <p className="ub-muted ub-empty">
-          Nothing pinned yet. Pin the open document from its header.
+          Nothing pinned yet. Pin the open document from its Document actions
+          menu.
         </p>
       )}
       {groups.map((group, index) => (
