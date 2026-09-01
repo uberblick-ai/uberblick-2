@@ -26,7 +26,9 @@ The owner makes a parked tier-3 PR eligible by replacing `needs-human` with
 only enough to exclude them; their state is derived, so do not narrate the queue
 or skipped PRs. Claim on the PR with the head SHA, under the README's claim
 record and race rule. One PR — merged with its post-merge pass, or parked with
-the ruling — then stop.
+the ruling — then stop. With nothing eligible, end with exactly
+`No eligible integrator work: <one reason>.` and stop; the launcher reads that
+line to idle.
 
 Prove the authorship condition before claiming: compare every commit's
 `Claude-Session` trailer and the linked implementer claim/delegation lineage
@@ -34,9 +36,10 @@ with this run's launching session. A Claude Agent child shares the launcher's
 authorship identity. If that session launched an implementer whose commit is in
 the current head, skip the PR; a fresh integrator run id or child context is not
 independence. Do only this eligibility proof before the race; run no gate and
-write no candidate analysis. Record the launcher session, the distinct head
-session trailers and one lineage link in the claim so a delegated reviewer can
-validate them without rediscovering the lineage.
+write no candidate analysis. Record the launcher session, authorship result and
+one lineage link in the claim; link the evidence and narrate only material
+ambiguity so a delegated reviewer can validate it without rediscovering the
+lineage.
 
 ## Outcome
 
@@ -48,13 +51,14 @@ including its named exceptions. `CLAUDE.md` step 5 makes the post-merge
 documentation pass part of this pickup too.
 
 When CLAUDE.md's dual-challenge gate applies, require both distinct adversarial
-records: the implementer's Codex challenge and an Opus challenge owned by this
-integrator. A current-head Codex verdict never substitutes for the Opus
-challenge, and this role's own gate and acceptance validation does not count as
-one. If the Opus challenge has neither a current-head record nor earlier
-reasoning that `review-protocol.md` permits the integrator to carry across the
-author's corrections, post the README's exact-PR delegation record before
-starting a fresh Opus `implementation-reviewer`.
+records: the implementer's challenge on the other runtime from the diff's
+author, and a second challenge owned by this integrator on the author's
+runtime, in a fresh session. Neither verdict substitutes for the other, and
+this role's own gate and acceptance validation does not count as one. If the
+second challenge has neither a current-head record nor earlier reasoning that
+`review-protocol.md` permits the integrator to carry across the author's
+corrections, post the README's exact-PR delegation record before starting a
+fresh `implementation-reviewer` on that runtime.
 
 An owed round is dispatched *before* the mechanical gates rather than after
 them, because its wait is the round's long pole; the mechanical gates then run
@@ -98,7 +102,9 @@ post-merge pass result. Keep the record proportional: link gate and reviewer
 evidence instead of restating it; do not repeat queue exclusions; and state each
 finding once with severity, disposition, verification and only new rationale. A
 clean ruling should be brief; a parked ruling includes only enough detail to
-make its one batched fix-up implementable without rediscovery.
+make its one batched fix-up implementable without rediscovery. For Tier 1
+existing-behavior-only work, the post-merge docs disposition is one sentence;
+no fresh corpus search is owed unless the issue says existing docs are stale.
 
 After that durable outcome, post one concise
 self-assessment to [Implementation and integration run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/522),

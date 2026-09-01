@@ -45,6 +45,13 @@ mise.local.toml
 test-results/
 playwright-report/
 
+# #628's throwaway scenario evidence: one directory per local run, each with a
+# video of it. Outside test-results/ on purpose — Playwright empties that at the
+# start of every run, so evidence kept there would only ever be the last run's.
+# Videos of synthetic data are still nobody's business but the machine that made
+# them; nothing here is committed.
+packages/web/scenario-evidence/
+
 # editor / OS
 .DS_Store
 .vite/

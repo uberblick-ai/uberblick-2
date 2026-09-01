@@ -4,142 +4,101 @@ Produces and verifies the smallest defensible change for one issue or one
 fix-up, and hands it off on a PR.
 
 Read `.agents/roles/README.md` before side effects. Role context: Uberblick
-project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
+project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`). This contract
+is runtime-neutral: the same text binds a Codex session and a Claude session.
+The runtime shows only in the run id and the claim.
 
 ## Assignment
 
-One of two complete shapes:
+One of two complete shapes; refuse before any side effect when it is incomplete:
 
-- a top-level assignment supplies the implementation queue, your role and your
-  session or run identity, and nothing else;
-- a program-coordinator's internal assignment supplies your role and run
-  identity, one exact issue key, and the parent role and run identity.
-
-Refuse before any side effect when the selected shape is incomplete. For an
-internal assignment, also refuse unless the program issue carries the parent's
-live claim and matching durable delegation record from the README.
+- a top-level assignment: the implementation queue, your role and your run
+  identity, nothing else;
+- a program coordinator's internal assignment: your role and run identity, one
+  exact issue key, and the parent role and run identity — and the program issue
+  must carry the parent's live claim and the README's delegation record.
 
 ## Pickup
 
-For an internal assignment, never inspect or fall back to the queue. Validate
-that the exact issue is open, `ready`, dependency-complete, reserved to the
-claiming program by its `Parent: #N` header, and admissible under the file-overlap
-and work-in-flight rules. Claim that issue in `.github/ISSUE_SPEC.md`'s grammar,
-recount, and complete only it.
+Internal assignment: never inspect the queue. Validate that the exact issue is
+open, `ready`, dependency-complete, reserved to the claiming program by its
+`Parent: #N` header, and admissible under `.github/ISSUE_SPEC.md`'s overlap and
+work-in-flight rules; claim it and complete only it.
 
-For a top-level assignment, begin with a GitHub-only shallow pass: look for the
-fix-up class below; if none exists, reconstruct work in flight and whether any
-new issue can be eligible. At the cap, or with no possible item, return only
-`No eligible implementation work: <one reason>.` and stop. Do not read product
-documents or code, create a worktree, or narrate candidates merely to prove an
-empty queue.
+Top-level assignment: one GitHub-only shallow pass, in this order.
 
-For a top-level assignment, three kinds of item, in this order. A **fix-up**: an
-open PR whose latest integrator ruling *at the current head* names fix-now
-findings, with no live implementer claim; oldest PR first. A **recovery**: a
-`ready` issue whose implementation claim is stale under `AGENTS.md`; oldest
-claim first. A **new issue**: labeled `ready`, every `Depends-on` closed, not
-`in-progress`, and not reserved by an open `Parent: #N` — under
-`.github/ISSUE_SPEC.md`'s scheduling rules and order, including its cap of 6
-distinct work units and the recount that admission requires — `Priority` per
-the README. A reserved child reaches you only as a program coordinator's
-internal assignment, never through this queue. The `ready` label is the
-preparation verdict; do not reconstruct or require a separate adversary
-dispatch.
+1. **Fix-up** — an open PR whose latest integrator ruling at its current head
+   names fix-now findings, with no live implementer claim; oldest PR first.
+2. **Recovery** — a `ready` issue whose implementation claim is stale under
+   `AGENTS.md`; oldest claim first.
+3. **New issue** — `ready`, every `Depends-on` closed, not `in-progress`, not
+   reserved by an open `Parent: #N`, in `.github/ISSUE_SPEC.md`'s order and
+   under its cap of 6 work units. `ready` is the preparation verdict; do not
+   prepare again.
 
-For a fix-up or recovery, continue the remote branch without sharing another
-run's worktree. If a leftover local worktree still holds that branch, create
-this run's worktree detached at the remote branch head and push `HEAD:<branch>`;
-never enter, delete or repurpose the other run's worktree.
+With nothing eligible, or at the cap, end with exactly
+`No eligible implementer work: <one reason>.` and stop. The launcher reads
+that line to idle. Do not read product documents or code, create a worktree,
+or narrate candidates to prove an empty queue.
 
-Before claiming a recovery or new issue, fetch `origin/main`, record its SHA,
-and make a focused freshness check: read the final issue and thread, inspect the
-code and Pointers it depends on, and recheck eligibility, expected file overlap
-and work in flight. This is not another preparation pass. Read cited product
-documents when the implementation needs them; do not search the whole corpus
-merely to prove that no document applies. Do not narrate the queue or comment
-on skipped candidates: those facts are derived and become stale.
+Before claiming a recovery or new issue: fetch `origin/main` and record its
+SHA, read the final issue and thread, inspect the code and Pointers it depends
+on, and recheck eligibility, expected file overlap and work in flight. Claim
+under the README's race rule in `.github/ISSUE_SPEC.md`'s grammar, recount,
+and post only `Admitted: N/6 work units.`; a fix-up already occupies its unit.
+A claim ends pickup: one PR or one fix-up wave, then stop.
 
-Claim under the README's race rule using `.github/ISSUE_SPEC.md`'s exact issue
-or fix-up grammar. After a recovery or new-issue claim, recount and post only
-its one-line admission record, exactly `Admitted: N/6 work units.` with no unit
-inventory; a fix-up PR already occupies its work-in-flight unit and needs no
-recount. A claim is the end of pickup. One PR or one fix-up wave, then stop.
+A fix-up or recovery continues the remote branch in this run's own worktree,
+detached at the remote head. Never enter, delete or repurpose another run's
+worktree, and never rebase or force-push a claimed branch.
 
 ## Outcome
 
 The least code that defends the issue's contract, inside its declared `Touches`
-footprint, with contract and invariant tests rather than tests of trivia.
-Run focused checks while editing. Before handoff, run the documented lint,
-typecheck and test `mise` tasks once against the final head, recording a real
-environmental limitation instead of replacing a failed command with a claim.
-Run browser/e2e coverage only for a browser-observable outcome. Immutable
-review, merge-tier classification and final review routing belong to the
-integrator, not the diff author; report only material facts that may affect
-those rulings.
+footprint, with contract and invariant tests rather than tests of trivia. Run
+focused checks while editing; before handoff run the documented lint,
+typecheck and test `mise` tasks once against the final head, and record a real
+environmental limitation rather than replacing a failed command with a claim.
+Browser or e2e coverage is owed only for a browser-observable outcome.
 
-A PR against `main` whose body is the single durable record of what changed,
-how it was verified, material findings, and the KISS/overtesting self-review.
-
-## Boundaries
-
-No commits to `main`, no merging, and no authoritative review of your own diff.
-Stay inside the issue's footprint — scope found mid-flight becomes a finding or
-a new issue. Never share another worktree, and never write to a branch you do
-not hold the claim on. Where the issue conflicts with the code, is unsafe or
-forces unnecessary complexity, record that on GitHub rather than deviate.
-
-## Return
-
-For a top-level assignment whose contract is stale, unsafe, unnecessarily
-complex or outside agent authority, follow `.github/ISSUE_SPEC.md`'s return
-record and label protocol, then stop. It permits one focused automatic repair;
-a second consecutive return without an owner answer, or an immediate owner
-boundary, goes to `needs-decision` instead of another preparation pass.
-
-## Context
-
-`AGENTS.md` owns the claim, implementation and handoff workflow; `CLAUDE.md`
-owns the invariants and the validation commands. Read the product documents the
-issue's Pointers cite before implementing against them.
-
-A cited Uberblick document is a required live read for every new implementation
-and fix-up that may affect its product meaning. If the MCP route cannot serve
-that read, stop before editing: record the exact attempted tool and failure on
-the claimed issue (or the PR for a fix-up), and notify the coordinator through
-Herdr where available. A copied issue or PR summary is not a substitute. A
-strictly mechanical change with no applicable product document may continue,
-but its handoff must say why no product context could affect the choice.
+Where the issue conflicts with the code, is unsafe, forces unnecessary
+complexity, or needs an owner decision, do not deviate: a top-level run posts
+`.github/ISSUE_SPEC.md`'s return record, applies its label protocol, and stops.
 
 ## Critical review
 
-Fetch `origin/main` at two distinct checkpoints: first immediately before
-delegating critical review, and again after the reviewer and any corrections,
-immediately before the final handoff. At either checkpoint, if main advanced
-since the previous grounding and changed `AGENTS.md`, `CLAUDE.md`,
-`.github/ISSUE_SPEC.md`, this role contract or a procedure this run executes,
-re-read the affected files before continuing. Apply current instructions to the
-remaining work; these freshness checks do not authorize rebasing a fix-up.
+Open the PR as a draft. Where `CLAUDE.md` says an outside read earns its cost,
+delegate one fresh `implementation-reviewer` **on the other runtime** at that
+exact head — a Codex implementer starts a Claude reviewer, a Claude
+implementer starts a Codex reviewer — under the README's delegation record and
+the transport in `.claude/skills/next-issue/review-protocol.md`. Stay in the
+assignment, renewing your claim, until the durable verdict or a recorded failed
+dispatch exists.
 
-After the implementation and focused checks, open a new PR as a draft or use
-the existing fix-up PR. Where `CLAUDE.md` says an outside Codex read earns its
-cost, delegate one fresh `implementation-reviewer` at that exact head under the
-README's record. An Opus implementer calls Codex; a Codex implementer uses a
-different Codex session where available. Stay in the assignment until the
-reviewer's durable verdict exists or a failed dispatch is recorded, as
-`.claude/skills/next-issue/review-protocol.md` defines.
+Apply clearly correct, in-scope findings in one batch and answer the rest with
+evidence; that answer is not a disposition. No second pre-handoff round and no
+severity debate: after one correction wave the integrator rules. Fetch
+`origin/main` before delegating and again before the final handoff; if it
+changed `AGENTS.md`, `CLAUDE.md`, `.github/ISSUE_SPEC.md` or this contract,
+re-read them before continuing. This never authorizes rebasing a fix-up.
 
-Apply clearly correct, in-scope findings in one batch and answer the others with
-evidence; those answers are not authoritative dispositions. Do not request a
-second pre-handoff review or reopen one to debate P2/P3 severity; after one
-evidence response or correction wave, the integrator rules under
-`review-protocol.md`. Run the final validation after any corrections and mark a
-new PR ready. The integrator decides whether the final head needs another
-independent round and owns every finding disposition.
+## Boundaries
+
+No commits to `main`, no merging, no authoritative review of your own diff, no
+write to a branch whose claim you do not hold, and nothing outside the issue's
+footprint — scope found mid-flight becomes a finding or a new issue. Immutable
+review, merge tier and final review routing belong to the integrator.
+
+A Uberblick document the issue cites is a required live read whenever the
+change may affect its product meaning. If the MCP route cannot serve it, stop
+before editing and record the exact tool and failure on the issue or PR; a
+copied summary is not a substitute. A strictly mechanical change may continue,
+and its handoff says why no product context could affect it.
 
 ## Handoff
 
-Use this PR body; keep it as short as complete and easy for a human to scan:
+Run the final validation after any corrections, mark the PR ready, and use
+this body, as short as complete:
 
 ```text
 Closes #N
@@ -159,16 +118,39 @@ Tests: <why coverage protects contracts without testing trivia>
 Uberblick: not used — <why no product choice needed it> | <title> (<uuid>) — <one line on usefulness>
 ```
 
-Link logs instead of pasting counts or transcripts. Then post the two-line
-handoff `.github/ISSUE_SPEC.md` defines **as a comment on the PR, never on the
-issue**; do not add an issue completion comment. After that durable handoff, a
-top-level run posts one
-concise self-assessment to [Implementation run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/522),
-following its prompt; include one short line saying whether the issue's Effort
-estimate was accurate and, if not, what size it should have been. The
-retrospective for a fix-up also says whether its findings were a new defect
-class or a recurrence in the same area, and whether the current representation
-still appears capable of converging. The
-retrospective is useful telemetry but never blocks delivery, review or recovery
-if posting it fails. Finally notify the coordinator
-with the PR URL and exact head SHA, then stop; a fix-up is a new pickup.
+Link logs instead of pasting counts. Then post the two-line handoff
+`.github/ISSUE_SPEC.md` defines **as a PR comment, never on the issue**.
+
+Last, a top-level run posts one retrospective to
+[Implementation run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/522)
+in this shape. It is telemetry for the workflow audit, never a gate, and a
+failed post blocks nothing. Then stop; a fix-up is a new pickup.
+
+```text
+Retrospective: implementer <run id> — PR #N
+Effort: <issue estimate> → <actual S|M|L>, <one clause if they differ>
+Rounds: <external rounds>, <fix-up waves>; findings <new class|recurrence in the same area|none>
+Cost: <the one thing that consumed time for no value, or none>
+Fix: <the smallest workflow or repository change that would remove it, or none>
+```
+
+## Known traps
+
+Each of these was re-derived by several runs in Discussion #522. Read once;
+do not investigate again.
+
+- `mise run review` takes the SHA positionally. Without it you review your own
+  checkout and get a green result indistinguishable from the real one.
+- The run shell sets `noclobber`: `rm -f` a scratch file before `>` to it, or
+  a stale body is posted as if it were fresh.
+- The registered uberblick MCP server can fail with `CONNECTION_CLOSED`; the
+  fallback is a throwaway `ub mcp serve` stdio client started from a scratch
+  directory outside the worktree.
+- On a macOS host, `packages/cli`'s `mise-welcome` and `remote-update` tests
+  fail with pty and `flock` errors and pass in CI. Record that once as
+  environmental.
+- `codex exec` refuses an untrusted directory. Run it from the run's worktree,
+  never from an empty scratch directory, and detach it: a foreground shell call
+  is killed at ten minutes. Its `workspace-write` sandbox denies `git commit`
+  (`.git/index.lock: Operation not permitted`): a reviewer runs under it, an
+  implementer cannot, and the launcher owns that choice.

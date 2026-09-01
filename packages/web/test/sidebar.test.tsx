@@ -215,7 +215,7 @@ function docSlots(host: HTMLElement, index: number): HTMLElement[] {
 
 /** The insertion points between groups — the ones a dragged group can land in. */
 function groupSlots(host: HTMLElement): HTMLElement[] {
-  const list = host.querySelector(".ub-list");
+  const list = host.querySelector(".ub-document-sidebar");
   return [...(list?.children ?? [])].filter((child): child is HTMLElement =>
     child.classList.contains("ub-drop-slot"),
   );
@@ -271,7 +271,7 @@ function press(element: Element | null, key: string): void {
 const LANDMARKS = ["ub-list-head", "ub-nav", "ub-empty", "ub-group", "ub-list-foot"];
 
 function columnOrder(host: HTMLElement): string[] {
-  const list = host.querySelector(".ub-list");
+  const list = host.querySelector(".ub-document-sidebar");
   return [...(list?.children ?? [])].flatMap((child) =>
     LANDMARKS.filter((mark) => child.classList.contains(mark)),
   );
@@ -279,7 +279,11 @@ function columnOrder(host: HTMLElement): string[] {
 
 /** The navigation rows, top to bottom. */
 function navRows(host: HTMLElement): HTMLButtonElement[] {
-  return [...host.querySelectorAll<HTMLButtonElement>(".ub-nav li button")];
+  return [
+    ...host.querySelectorAll<HTMLButtonElement>(
+      ".ub-document-sidebar .ub-nav li button",
+    ),
+  ];
 }
 
 describe("the sidebar is the _sidebar document", () => {
@@ -567,6 +571,95 @@ describe("the sidebar is the _sidebar document", () => {
       "Untitled",
       unknown,
     ]);
+  });
+});
+
+describe("workspace settings is a route-driven sidebar mode", () => {
+  function pane(host: HTMLElement, selector: string): HTMLElement {
+    return host.querySelector<HTMLElement>(selector) as HTMLElement;
+  }
+
+  function expectDead(offscreen: HTMLElement): void {
+    expect(offscreen.hasAttribute("inert")).toBe(true);
+    expect(offscreen.getAttribute("aria-hidden")).toBe("true");
+    // The controls, draggable rows and drop targets remain mounted for the CSS
+    // transition, but every one is beneath the inert boundary for its whole
+    // duration — transform and opacity are never the interaction boundary.
+    const reachable = offscreen.querySelectorAll(
+      "button, input, [draggable=true], .ub-drop-slot",
+    );
+    expect(reachable.length).toBeGreaterThan(0);
+    for (const node of reachable) expect(node.closest("[inert]")).toBe(offscreen);
+  }
+
+  function expectLive(onscreen: HTMLElement): void {
+    expect(onscreen.hasAttribute("inert")).toBe(false);
+    expect(onscreen.getAttribute("aria-hidden")).toBe("false");
+  }
+
+  it("drills in from the footer, makes the document pane inert immediately, and goes back", async () => {
+    seedDirectory();
+    const sidebar = sidebarDoc();
+    pinDoc(sidebar, createGroup(sidebar, "Reading"), ONE);
+    const host = await openApp(`/${WORKSPACE}`);
+    const documents = pane(host, ".ub-document-sidebar");
+    const settings = pane(host, ".ub-settings-sidebar");
+    const settingsEntry = documents.querySelector<HTMLButtonElement>(
+      ".ub-settings-entry",
+    );
+
+    expectLive(documents);
+    expectDead(settings);
+    expect(host.querySelectorAll(".ub-user-card")).toHaveLength(1);
+
+    settingsEntry?.focus();
+    act(() => settingsEntry?.click());
+    expect(window.location.pathname).toBe(`/${WORKSPACE}/settings`);
+    // This assertion runs in the same task as the route change, while the
+    // 180ms CSS transition is still in flight.
+    expect(host.querySelector(".ub-list")?.getAttribute("data-mode")).toBe(
+      "settings",
+    );
+    expectDead(documents);
+    expectLive(settings);
+    expect(host.querySelectorAll(".ub-user-card")).toHaveLength(1);
+    expect(document.activeElement).toBe(
+      settings.querySelector(".ub-settings-back"),
+    );
+    expect(settings.textContent).toContain(`Back to ${WORKSPACE}`);
+    expect(settings.querySelector(".ub-nav-label")?.textContent).toBe(
+      "Workspace settings",
+    );
+    expect(settings.querySelector('[aria-current="page"]')?.textContent).toContain(
+      "General",
+    );
+    expect(host.querySelector("#ub-settings-title")?.textContent).toBe("General");
+    expect(
+      host.querySelector(".ub-sidebar-toggle")?.getAttribute("aria-label"),
+    ).toBe("Hide sidebar");
+
+    act(() => settings.querySelector<HTMLButtonElement>(".ub-settings-back")?.click());
+    expect(window.location.pathname).toBe(`/${WORKSPACE}`);
+    expectDead(settings);
+    expectLive(documents);
+    expect(document.activeElement).toBe(settingsEntry);
+  });
+
+  it("opens a pasted settings address directly", async () => {
+    seedDirectory();
+    const host = await openApp(`/${WORKSPACE}/settings`);
+    expect(host.querySelector(".ub-list")?.getAttribute("data-mode")).toBe(
+      "settings",
+    );
+    expect(host.querySelector("#ub-settings-title")?.textContent).toBe("General");
+    expect(host.querySelector(".ub-document-sidebar")?.hasAttribute("inert")).toBe(
+      true,
+    );
+  });
+
+  it("offers no settings destination when the address names no workspace", async () => {
+    const host = await openApp("/not-a-workspace");
+    expect(host.querySelector(".ub-settings-entry")).toBeNull();
   });
 });
 

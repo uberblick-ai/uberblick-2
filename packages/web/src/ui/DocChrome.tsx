@@ -16,7 +16,6 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { createPortal } from "react-dom";
 import type * as Y from "yjs";
 import { getMeta, parseRoom, setTags } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
@@ -40,6 +39,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./shadcn/dropdown-menu.js";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  DialogTrigger,
+} from "./shadcn/dialog.js";
 
 /** What an untitled document is called wherever its name is shown. */
 const UNTITLED = "Untitled";
@@ -570,156 +577,74 @@ function DocumentActions({
   onTogglePin: (() => void) | null;
   onArchive: (() => void) | null;
 }): ReactElement {
-  const trigger = useRef<HTMLButtonElement | null>(null);
-  const cancel = useRef<HTMLButtonElement | null>(null);
   const [confirming, setConfirming] = useState(false);
 
-  useEffect(() => {
-    if (!confirming) return;
-    const close = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setConfirming(false);
-      queueMicrotask(() => trigger.current?.focus());
-    };
-    document.addEventListener("keydown", close);
-    return () => document.removeEventListener("keydown", close);
-  }, [confirming]);
-
-  const cancelArchive = (): void => {
-    setConfirming(false);
-    queueMicrotask(() => trigger.current?.focus());
-  };
-
-  const confirmation = confirming
-    ? createPortal(
-        <div
-          className="ub-confirm-backdrop"
-          onPointerDown={(event) => {
-            if (event.target !== event.currentTarget) return;
-            // The browser's own focus adjustment for the `mousedown` that
-            // follows runs after `cancelArchive`'s microtask, resolves against
-            // a backdrop that is already unmounted, and clears focus to
-            // `<body>` — so without this the return to the trigger is written
-            // and then overwritten. Radix's `DismissableLayer` suppresses the
-            // same default for outside-pointer dismissal.
-            event.preventDefault();
-            cancelArchive();
-          }}
-        >
-          <div
-            className="ub-confirm"
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="ub-archive-title"
-            aria-describedby="ub-archive-detail"
-            // A click on the dialog's own heading, text or padding focuses the
-            // nearest focusable ancestor; without this there is none, so focus
-            // rests on `<body>`, where a keydown never reaches the handler
-            // below and Shift+Tab walks out of the modal into the editable
-            // title behind it.
-            tabIndex={-1}
-            onKeyDown={(event) => {
-              if (event.key !== "Tab") return;
-              const buttons =
-                event.currentTarget.querySelectorAll<HTMLButtonElement>("button");
-              const first = buttons.item(0);
-              const last = buttons.item(buttons.length - 1);
-              // Backwards from the dialog itself leaves the modal, because the
-              // portal sits after the app in the document; forwards from it
-              // reaches Cancel on its own.
-              const leaving = event.shiftKey
-                ? document.activeElement === first ||
-                  document.activeElement === event.currentTarget
-                : document.activeElement === last;
-              if (!leaving) return;
-              event.preventDefault();
-              (event.shiftKey ? last : first).focus();
-            }}
-          >
-            <h2 id="ub-archive-title">Archive {title}?</h2>
-            <p id="ub-archive-detail">
-              Its content is preserved, but the document becomes read-only and
-              leaves normal listings until you Restore it.
-            </p>
-            <span className="ub-confirm-actions">
+  return (
+    <Dialog
+      open={confirming}
+      onOpenChange={(open) => {
+        if (!open) setConfirming(false);
+      }}
+    >
+      <span className="ub-document-actions">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <DialogTrigger asChild>
               <button
-                ref={cancel}
                 type="button"
-                className="ub-tool"
-                onClick={cancelArchive}
+                className="ub-actions-trigger"
+                aria-label="Document actions"
+                title="Document actions"
               >
+                ⋯
+              </button>
+            </DialogTrigger>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              disabled={onTogglePin === null}
+              className={pinned ? "ub-action-pinned" : ""}
+              onSelect={() => onTogglePin?.()}
+            >
+              {pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              disabled={onArchive === null}
+              className="ub-action-danger"
+              onSelect={() => setConfirming(true)}
+            >
+              {onArchive === null
+                ? "Archive unavailable — no directory connection, or no live entry for this document"
+                : "Archive document"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DialogContent className="ub-confirm" role="alertdialog">
+          <DialogTitle>Archive {title}?</DialogTitle>
+          <DialogDescription>
+            Its content is preserved, but the document becomes read-only and
+            leaves normal listings until you Restore it.
+          </DialogDescription>
+          <span className="ub-confirm-actions">
+            <DialogClose asChild>
+              <button type="button" className="ub-tool">
                 Cancel
               </button>
-              <button
-                type="button"
-                className="ub-tool ub-tool-danger"
-                onClick={() => {
-                  setConfirming(false);
-                  onArchive?.();
-                }}
-              >
-                Archive document
-              </button>
-            </span>
-          </div>
-        </div>,
-        document.body,
-      )
-    : null;
-
-  return (
-    <span className="ub-document-actions">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            ref={trigger}
-            type="button"
-            className="ub-actions-trigger"
-            aria-label="Document actions"
-            title="Document actions"
-          >
-            ⋯
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          onCloseAutoFocus={(event) => {
-            // Where the confirmation takes focus, because it is the first
-            // moment it can hold it: the menu's focus scope pulls focus back
-            // while it is still mounted, and Radix then returns it to the
-            // trigger — outside an `aria-modal` dialog — one macrotask later.
-            // A mounted Cancel means the confirmation is open, and focus
-            // belongs inside it — which in this product only follows the
-            // Archive selection, because nothing focuses the trigger while
-            // `confirming`. Every other close leaves it null and keeps Radix's
-            // own return to the trigger.
-            const confirmation = cancel.current;
-            if (confirmation === null) return;
-            event.preventDefault();
-            confirmation.focus();
-          }}
-        >
-          <DropdownMenuItem
-            disabled={onTogglePin === null}
-            className={pinned ? "ub-action-pinned" : ""}
-            onSelect={() => onTogglePin?.()}
-          >
-            {pinned ? "Unpin from sidebar" : "Pin to sidebar"}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            disabled={onArchive === null}
-            className="ub-action-danger"
-            onSelect={() => setConfirming(true)}
-          >
-            {onArchive === null
-              ? "Archive unavailable — no directory connection, or no live entry for this document"
-              : "Archive document"}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {confirmation}
-    </span>
+            </DialogClose>
+            <button
+              type="button"
+              className="ub-tool ub-tool-danger"
+              onClick={() => {
+                setConfirming(false);
+                onArchive?.();
+              }}
+            >
+              Archive document
+            </button>
+          </span>
+        </DialogContent>
+      </span>
+    </Dialog>
   );
 }

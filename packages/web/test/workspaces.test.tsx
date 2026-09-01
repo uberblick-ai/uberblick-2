@@ -99,7 +99,9 @@ function Probe({ configured }: { configured: readonly string[] }): ReactElement 
       current={current}
       docs={0}
       onSwitch={(segment) => navigate(`/${segment}`)}
-      onOpenSettings={() => {}}
+      onOpenSettings={() => {
+        if (current !== null) navigate(`/${current.segment}/settings`);
+      }}
     />
   );
 }
@@ -129,14 +131,7 @@ function items(): HTMLElement[] {
   return [...document.querySelectorAll<HTMLElement>("[data-slot=dropdown-menu-item]")];
 }
 
-/**
- * The workspaces the menu offers, in order.
- *
- * A workspace row is the one that carries `.ub-menu-text`; the management items
- * below the separator are plain labels. Selecting on that rather than on "not
- * disabled", because since #485 one of those items is live — a filter that
- * meant "a place to go" would now count workspace settings as a workspace.
- */
+/** The workspace rows the menu offers, in order — management is not a workspace. */
 function offered(): string[] {
   return items()
     .filter((item) => item.querySelector(".ub-menu-text") !== null)

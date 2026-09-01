@@ -50,11 +50,15 @@ endpoint. Rule: no hardcoded hub addresses anywhere except that in-code default.
 `AGENTS.md` is the canonical agent-neutral workflow for every implementer lane,
 and `.agents/roles/` defines three continuous entry roles (`issue-preparer`,
 `implementer`, `integrator`), two exact-key internal roles, and the explicitly
-invoked program role. Implementers run in isolation — Opus sub-agents by default,
-or Codex sessions through Herdr — under the same claim, handoff and review rules.
+invoked program role. Every contract is runtime-neutral: a role runs as a Codex
+session or a Claude session, started by the launcher (`/next-issue <role>
+--codex|--claude` today, `ub launch` once #489 lands), and its runtime shows
+only in the run id and the claim. The implementer's default runtime is Codex.
+Implementers run in isolation under the same claim, handoff and review rules.
 An entry role self-picks under its contract; an internal child follows its
 parent's durable exact-key assignment and never searches a queue. No session
-reviews or merges a diff it authored.
+reviews or merges a diff it authored, and a challenge of a diff always runs on
+a session that did not write it.
 
 ## Development workflow (every functionality)
 
@@ -70,26 +74,30 @@ reviews or merges a diff it authored.
    `main`.
 3. **PR.** Open a PR against `main` linked to the issue (`Closes #N`), with a
    body stating what changed and how it was verified.
-4. **Gates — all of them, before merge:**
+4. **Gates — all of them, before merge.** Effort follows semantic risk. Paths
+   and line counts are inspection signals, not automatic extra rounds; link
+   exact-head evidence instead of repeating it:
    - immutable Docker review green (`mise run review <head-sha>`),
      run from a trusted checkout of `origin/main`; worktree tests are useful
      during implementation but are not merge evidence because a shared
      checkout can change during review;
    - integrator validation against the issue's acceptance criteria;
-   - **two independent implementation challenges** wherever an outside read
-     earns its cost (owner decision, 2026-08-24, clarified 2026-08-30): first a
-     fresh Codex `implementation-reviewer` delegated by the implementer before
-     handoff, then a separate Opus `implementation-reviewer` delegated by the
-     integrator. Both actively hunt for counterexamples, missing failure paths,
-     incorrect assumptions, overengineering and overtesting; the integrator's
-     own gate work and Copilot do not substitute for either challenge. The pair
-     is required when the diff touches `packages/schema`,
-     `packages/mcp-server`, `packages/hub`, or `pnpm-lock.yaml`, when the PR
-     runs to several hundred lines or more, when it changes something genuinely
-     architectural, and whenever the implementer or integrator judges an
-     external review worthwhile. Only when none of those fire does the relaxation apply: a
-     trivial or UI/design-only diff — where the rounds would spend time and
-     tokens on nothing — merges on the remaining gates without the pair;
+   - **independent implementation challenge, proportionate to semantic risk.**
+     Two challenges are required when the diff changes schema meaning,
+     persistence, synchronization, concurrency, auth, runtime dependencies, or
+     decided architecture, or when the implementer or integrator names a
+     concrete unresolved risk warranting both perspectives: first a fresh
+     `implementation-reviewer` on the other runtime from the diff's author,
+     delegated by the implementer before handoff; then a separate
+     `implementation-reviewer` on the author's runtime in a fresh session,
+     delegated by the integrator. One implementer-owned cross-runtime
+     challenge is enough when an outside read is useful but those boundaries
+     do not fire. No challenge is required for test-only,
+     docs-only, or narrowly mechanical changes that preserve production
+     behavior when focused validation directly proves the contract. Every
+     challenge actively hunts for counterexamples, missing failure paths,
+     incorrect assumptions, overengineering and overtesting; integrator gate
+     work and Copilot do not substitute for a required challenge;
    - **zero unaddressed PR remarks** — immediately before merging, re-fetch
      the PR's reviews and comment threads (human and bot alike, including
      remarks that arrived after the other gates passed); merge only when
@@ -125,11 +133,15 @@ reviews or merges a diff it authored.
 
 ### Merge policy — the rules are the authority, not a session
 
-- **Tier 1 — self-merge.** `Touches ⊆ {repo}` and no new dependencies: the
-  integrator merges as soon as all gates are green.
-- **Tier 2 — self-merge with evidence.** All changes that meet neither tier 1
-  nor tier 3, including feature packages and backward-compatible additive
-  schema work: all gates green **plus** a merge-report comment on the PR —
+- **Tier 1 — existing behavior only.** No change to production behavior,
+  persisted state, public command or interface surface, dependencies, or
+  decided architecture. This includes focused tests, documentation corrections,
+  and mechanical maintenance that defend or describe an existing contract. The
+  integrator merges when the ordinary gates and acceptance criteria are green;
+  no merge report is owed.
+- **Tier 2 — self-merge with evidence.** Production-behavior changes that meet
+  neither tier 1 nor tier 3, including feature packages and backward-compatible
+  additive schema work: all gates green **plus** a merge-report comment on the PR —
   acceptance criteria checked off one by one, gate outcomes, any rejected
   review findings with reasons. The integrator audits post-merge while updating
   the product docs; audit findings become issues, not reverts, unless critical.
@@ -141,7 +153,7 @@ reviews or merges a diff it authored.
   change, data migration, or break in persisted-data compatibility; a change to
   CRDT or concurrency semantics; changes to this file's decided-architecture or
   invariants sections; new *runtime* dependencies; auth/token semantics;
-  overruling a major Copilot/Codex finding; and process changes that alter
+  overruling a major reviewer finding; and process changes that alter
   authority, eligibility, merge/approval rules, or destructive automation.
   Paths identify what to inspect; they never trigger tier 3 by themselves.
 - **Owner approval — one decision, not a late ceremony.** `human-approved` may

@@ -33,6 +33,9 @@ then claim under the README's record and race rule **before** reading the full
 body, thread, dependency graph, corpus or code. A losing claimer moves to the
 next candidate before doing that deeper intake. Prepare one. An unlabelled
 issue enters the queue only through that triage, never as an implicit pickup.
+With nothing eligible, end with exactly
+`No eligible issue-preparer work: <one reason>.` and stop; the launcher reads
+that line to idle.
 
 ## Outcome
 
@@ -55,14 +58,16 @@ delivery labels, add `wontfix`, and close as not planned. Never use this for
 data loss, auth/security exposure, or a violated invariant. A concrete bug
 observed later may be filed or reopened as new evidence.
 
-For a narrowly trivial issue, perform the code-grounded self-check and spawn no
-adversary. Otherwise spawn exactly one fresh `issue-adversary` subagent on this
-issue, giving it its own run identity and this parent run. Prefer the other
-runtime/model when available — Claude calls Codex and Codex calls Claude —
-dispatching it as `.claude/skills/next-issue/preflight.md` states, and stay in
-your assignment until its durable handoff exists. If that dispatch produces no
-verdict, record it on the issue rather than substituting a same-runtime
-adversary silently.
+Use an adversary only when independent challenge could materially change the
+contract. A grounded issue that names a narrow existing invariant, leaves no
+product decision open, and has direct focused verification takes a
+code-grounded self-check regardless of package path. Otherwise spawn exactly
+one fresh `issue-adversary` subagent on this issue, giving it its own run
+identity and this parent run. Prefer the other runtime/model when available —
+Claude calls Codex and Codex calls Claude — dispatching it as
+`.claude/skills/next-issue/preflight.md` states, and stay in your assignment
+until its durable handoff exists. If that dispatch produces no verdict, record
+it on the issue rather than substituting a same-runtime adversary silently.
 
 Apply every meaning-preserving, correctable finding yourself, then repeat the
 affected grounding and final recheck without launching a second adversary. If

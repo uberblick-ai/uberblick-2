@@ -17,8 +17,8 @@
  *
  * Hand-rolled on purpose (#68). There are four routes — the workspace, one
  * document, the whole corpus listed (`/<workspace>/all`, #118), and workspace
- * settings (`/<workspace>/settings`, #485); a router library would be a new
- * runtime dependency buying nothing but indirection.
+ * settings (`/<workspace>/settings`); a router library would be a new runtime
+ * dependency buying nothing but indirection.
  *
  * The address bar is the selection. Nothing else stores "which document is
  * open": the sidebar navigates, Back navigates, a pasted link navigates, and
@@ -71,15 +71,7 @@ export type Route =
  */
 export const ALL_SEGMENT = "all";
 
-/**
- * The other reserved second segment: workspace settings (#485).
- *
- * `settings` is the whole address. The mode has no page segment, so
- * `/<workspace>/settings/<anything>` is not an address at all — the third-segment
- * rejection below already answers it, and General is simply what the mode shows.
- * Reserving a word costs nothing here for the reason `all` does: a second
- * segment is otherwise a uuid, and no uuid spells a word.
- */
+/** The workspace-settings mode. It has no page segment of its own. */
 export const SETTINGS_SEGMENT = "settings";
 
 /**
@@ -249,7 +241,7 @@ export function allPath(segment: string): string {
   return `/${segment}/${ALL_SEGMENT}`;
 }
 
-/** The path of workspace settings (#485) — the mode's whole address. */
+/** The path of the workspace's settings mode. */
 export function settingsPath(segment: string): string {
   return `/${segment}/${SETTINGS_SEGMENT}`;
 }

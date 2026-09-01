@@ -92,8 +92,9 @@ async function openApp(
   browser: Browser,
   colorScheme: "light" | "dark",
   path = "",
+  hasTouch = false,
 ): Promise<Page> {
-  const context = await browser.newContext({ colorScheme });
+  const context = await browser.newContext({ colorScheme, hasTouch });
   contexts.push(context);
   const page = await context.newPage();
   await page.goto(new URL(path, harness().appUrl).href);
@@ -178,12 +179,11 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(configured).toHaveAttribute("data-highlighted", /.*/);
     expect(await paintedIn(configured, "background-color")).not.toBe(ground);
 
-    // Management is on the menu and unavailable — not hidden. Making a
-    // workspace is still `ub init` on a machine; workspace settings have been a
-    // place to go since #485, so that item is live rather than shown-and-dead.
-    await expect(
-      menu.getByRole("menuitem", { name: "New workspace" }),
-    ).toHaveAttribute("aria-disabled", "true");
+    // Machine-owned creation stays unavailable; settings is now a route.
+    await expect(menu.getByRole("menuitem", { name: "New workspace" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
     await expect(
       menu.getByRole("menuitem", { name: "Workspace settings" }),
     ).not.toHaveAttribute("aria-disabled", "true");
@@ -200,6 +200,78 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(panel).toBeHidden();
   });
 }
+
+test("workspace settings is an address-selected, inert sidebar drill-in", async ({
+  browser,
+}) => {
+  const page = await openApp(browser, "light");
+  const workspacePath = `/${harness().workspace}`;
+  const settingsPath = `${workspacePath}/settings`;
+  const documents = page.locator(".ub-document-sidebar");
+  const settings = page.locator(".ub-settings-sidebar");
+
+  const settingsEntry = page.getByRole("button", {
+    name: "Workspace settings",
+    exact: true,
+  });
+  await settingsEntry.click();
+  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
+  const back = settings.getByRole("button", { name: /^Back to / });
+  await expect(back).toBeVisible();
+  await expect(back).toBeFocused();
+  expect(await paintedIn(settings, "transition-duration")).toContain("0.18s");
+  expect(
+    await documents.evaluate((pane) => ({
+      inert: (pane as HTMLElement).inert,
+      hidden: pane.getAttribute("aria-hidden"),
+      pointer: getComputedStyle(pane).pointerEvents,
+    })),
+  ).toEqual({ inert: true, hidden: "true", pointer: "none" });
+
+  // The route is the selection: browser Back restores the document sidebar.
+  await page.goBack();
+  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
+  await expect(settingsEntry).toBeFocused();
+
+  // Portalled controls sit outside the pane's inert subtree. Browser Forward
+  // changes the address without clicking underneath them, and the mode change
+  // must still take each outgoing surface and its focus away.
+  await page.locator(".ub-workspace").click();
+  const workspaceMenu = page.locator("[data-slot=dropdown-menu-content]");
+  await expect(workspaceMenu).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await expect(workspaceMenu).toBeHidden();
+  await expect(back).toBeFocused();
+  await page.goBack();
+  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+  await expect(settingsEntry).toBeFocused();
+
+  await page.locator(".ub-user-card").click();
+  const userPanel = page.locator("[data-slot=popover-content]");
+  await expect(userPanel).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await expect(userPanel).toBeHidden();
+  await expect(back).toBeFocused();
+  await page.goBack();
+  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+  await expect(settingsEntry).toBeFocused();
+
+  // The switcher's existing entry is the second front door, and Back in the
+  // settings pane always targets the workspace list rather than a remembered doc.
+  await page.locator(".ub-workspace").click();
+  await page.getByRole("menuitem", { name: "Workspace settings" }).click();
+  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await settings.getByRole("button", { name: /^Back to / }).click();
+  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+  expect(await paintedIn(settings, "transition-duration")).toBe("0s");
+});
 
 /**
  * A hover ground is an offer, and a disabled control has nothing to offer
@@ -286,7 +358,7 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
 test("document actions stay reachable, close with the route, and archive into Restore", async ({
   browser,
 }) => {
-  const page = await openApp(browser, "light");
+  const page = await openApp(browser, "light", "", true);
   await page.getByRole("button", { name: "+ new doc" }).click();
   await page.locator(".ub-title").fill("Lifecycle notes");
   await page.setViewportSize({ width: 360, height: 720 });
@@ -305,10 +377,14 @@ test("document actions stay reachable, close with the route, and archive into Re
     page.getByRole("menuitem", { name: "Unpin from sidebar" }),
   ).toBeVisible();
 
-  // The menu is portalled outside the routed pane. A route change must still
-  // remove it rather than leaving an action for the document just left.
+  // The menu is portalled outside the routed pane. The settings route replaces
+  // that pane entirely, so the portal must still leave with its document.
   await page.evaluate(() => {
-    history.pushState(null, "", `${location.pathname.split("/").slice(0, 2).join("/")}/all`);
+    history.pushState(
+      null,
+      "",
+      `${location.pathname.split("/").slice(0, 2).join("/")}/settings`,
+    );
     dispatchEvent(new PopStateEvent("popstate"));
   });
   await expect(page.locator("[data-slot=dropdown-menu-content]")).toHaveCount(0);
@@ -320,11 +396,21 @@ test("document actions stay reachable, close with the route, and archive into Re
   const confirmation = page.getByRole("alertdialog");
   await expect(confirmation).toContainText("Archive Lifecycle notes?");
   await expect(confirmation).toContainText("read-only");
-  // The dropdown returns focus to its trigger a macrotask after it closes, so
-  // an `aria-modal` dialog that merely focuses Cancel loses focus again and Tab
-  // walks into the editable title behind the backdrop. Both halves are asserted
-  // here because neither is visible to jsdom, which never flushes that timer.
-  await expect(confirmation.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await expect(confirmation).toHaveAccessibleName("Archive Lifecycle notes?");
+  await expect(confirmation).toHaveAccessibleDescription(/content is preserved/);
+  await expect(page.locator("#root")).toHaveAttribute("aria-hidden", "true");
+  const cancel = confirmation.getByRole("button", { name: "Cancel" });
+  await expect(cancel).toBeFocused();
+
+  // Scripted focus stands in for the programmatic/assistive path that escaped
+  // the hand-written trap. Radix returns it to the last in-dialog target, while
+  // the background remains absent from the accessibility tree.
+  await page.locator(".ub-title").evaluate((title) =>
+    (title as HTMLInputElement).focus(),
+  );
+  await expect(cancel).toBeFocused();
+  await expect(page.getByRole("textbox")).toHaveCount(0);
+
   await page.keyboard.press("Tab");
   await expect(
     confirmation.getByRole("button", { name: "Archive document" }),
@@ -335,35 +421,22 @@ test("document actions stay reachable, close with the route, and archive into Re
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();
 
-  // The third dismissal: clicking outside is a cancelled confirmation too, and
-  // it is the one the browser fights for. Its `mousedown` focus adjustment runs
-  // after the cancel's microtask and against a backdrop already gone, so
-  // without `preventDefault` focus lands on `<body>` and the next Tab restarts
-  // at the top of the app. jsdom cannot see it: a synthetic `pointerdown`
-  // returns focus correctly.
+  // Outside pointer dismissal is a cancelled confirmation and restores the
+  // menu trigger through the primitive's own trigger/content relationship.
   await trigger.click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
   await expect(confirmation).toHaveCount(1);
-  await page.locator(".ub-confirm-backdrop").click({ position: { x: 4, y: 4 } });
+  await page.locator("[data-slot=dialog-overlay]").click({ position: { x: 4, y: 4 } });
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();
 
-  // A click inside the confirmation that misses both buttons is not a
-  // dismissal, and it must not park focus on `<body>`: from there the Tab trap
-  // never fires and Shift+Tab walks out of the `aria-modal` dialog into the
-  // editable title, where one keystroke replaces it. jsdom has no focus
-  // adjustment for a real pointer press, so only Chromium sees this.
+  // A touch pointer takes the same outside-dismissal path.
   await trigger.click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
   await expect(confirmation).toHaveCount(1);
-  await page.locator("#ub-archive-detail").click();
-  await page.keyboard.press("Shift+Tab");
-  await expect(
-    confirmation.getByRole("button", { name: "Archive document" }),
-  ).toBeFocused();
-  await expect(confirmation).toHaveCount(1);
-  await page.keyboard.press("Escape");
+  await page.touchscreen.tap(4, 4);
   await expect(confirmation).toHaveCount(0);
+  await expect(trigger).toBeFocused();
 
   await trigger.click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();

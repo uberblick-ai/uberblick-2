@@ -254,7 +254,10 @@ describe("an archived document is readable, says so, and offers one way back", (
         .find((button) => button.textContent === "Cancel")
         ?.click();
     });
-    await Promise.resolve();
+    // Dialog restores its trigger after the content's unmount autofocus runs.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
     expect(document.activeElement).toBe(trigger);
 
