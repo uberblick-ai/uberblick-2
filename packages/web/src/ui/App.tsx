@@ -102,6 +102,7 @@ export function RoutePane({
   onTogglePin = null,
   onArchive = null,
   focusRestore = false,
+  onRestoreFocused,
   onRestore,
   onSelectThread,
 }: {
@@ -147,6 +148,8 @@ export function RoutePane({
   onArchive?: (() => void) | null;
   /** A local confirmed archive moves focus to the surviving Restore action. */
   focusRestore?: boolean;
+  /** Consume that one-shot focus request after the Restore control receives it. */
+  onRestoreFocused?: (() => void) | undefined;
   /** Lift that tombstone. The only action an archived document offers. */
   onRestore: () => void;
   onSelectThread: SelectThread;
@@ -247,6 +250,7 @@ export function RoutePane({
       onTogglePin={onTogglePin}
       onArchive={onArchive}
       focusRestore={focusRestore}
+      onRestoreFocused={onRestoreFocused}
       onRestore={onRestore}
       onSelectThread={onSelectThread}
     />
@@ -452,7 +456,7 @@ export function App(): ReactElement {
   const knownTags = useMemo(() => workspaceTags(entries), [entries]);
   const meta = useDocMeta(doc);
   const archived = useArchived(directory, selected);
-  const focusRestoreAfterArchive = useRef(false);
+  const restoreFocusRoom = useRef<string | null>(null);
   const liveDirectoryEntry =
     directory === null || selected === null
       ? undefined
@@ -503,9 +507,13 @@ export function App(): ReactElement {
    */
   const onRestore = useCallback(() => {
     if (directory === null || selected === null) return;
-    focusRestoreAfterArchive.current = false;
+    restoreFocusRoom.current = null;
     restoreDirectoryEntry(directory.ydoc, selected);
   }, [directory, selected]);
+
+  const onRestoreFocused = useCallback(() => {
+    restoreFocusRoom.current = null;
+  }, []);
 
   /**
    * Archive only a live directory stub, matching the MCP lifecycle boundary.
@@ -513,12 +521,12 @@ export function App(): ReactElement {
    * optimistic archived state here.
    */
   const onArchive = useCallback(() => {
-    if (directory === null || selected === null) return;
+    if (directory === null || doc === null || selected === null) return;
     const entry = getDirectoryEntry(directory.ydoc, selected);
     if (entry === null || entry.deleted === true) return;
-    focusRestoreAfterArchive.current = true;
+    restoreFocusRoom.current = doc.room;
     tombstoneDirectoryEntry(directory.ydoc, selected);
-  }, [directory, selected]);
+  }, [directory, doc, selected]);
 
   /**
    * Normalise the address to the one form the app hands out: `/` becomes the
@@ -840,7 +848,8 @@ export function App(): ReactElement {
                 ? onArchive
                 : null
             }
-            focusRestore={focusRestoreAfterArchive.current}
+            focusRestore={doc !== null && restoreFocusRoom.current === doc.room}
+            onRestoreFocused={onRestoreFocused}
             onRestore={onRestore}
             onSelectThread={onFocusThread}
           />

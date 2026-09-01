@@ -69,14 +69,18 @@ export function PaneNotice({ children }: { children: ReactNode }): ReactElement 
 function ArchivedBanner({
   onRestore,
   focusRestore,
+  onRestoreFocused,
 }: {
   onRestore: () => void;
   focusRestore: boolean;
+  onRestoreFocused?: (() => void) | undefined;
 }): ReactElement {
   const restore = useRef<HTMLButtonElement | null>(null);
   useLayoutEffect(() => {
-    if (focusRestore) restore.current?.focus();
-  }, [focusRestore]);
+    if (!focusRestore) return;
+    restore.current?.focus();
+    onRestoreFocused?.();
+  }, [focusRestore, onRestoreFocused]);
   return (
     <p className="ub-archived-banner">
       <strong>Archived.</strong> This document is tombstoned in the directory:
@@ -546,6 +550,7 @@ export function EditorPane({
   onTogglePin = null,
   onArchive = null,
   focusRestore = false,
+  onRestoreFocused,
   docLinks,
   onRestore,
   onSelectThread,
@@ -571,6 +576,7 @@ export function EditorPane({
   onTogglePin?: (() => void) | null;
   onArchive?: (() => void) | null;
   focusRestore?: boolean;
+  onRestoreFocused?: (() => void) | undefined;
   /**
    * What a `docLink` resolves against: the address of a document in the
    * workspace on screen, the directory that names it, and where a click goes
@@ -605,7 +611,11 @@ export function EditorPane({
     <section className="ub-pane">
       <div className="ub-column">
         {archived && (
-          <ArchivedBanner onRestore={onRestore} focusRestore={focusRestore} />
+          <ArchivedBanner
+            onRestore={onRestore}
+            focusRestore={focusRestore}
+            onRestoreFocused={onRestoreFocused}
+          />
         )}
         {/* The eyebrow: what this document is, what it is tagged, and which
             version of it is on screen — above the title, as design 1a has it. */}

@@ -41,6 +41,7 @@ import {
   listDirectory,
   pinDoc,
   readSidebar,
+  restoreDirectoryEntry,
   roomForDoc,
   sidebarRoom,
   tombstoneDirectoryEntry,
@@ -264,6 +265,14 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(host.querySelector(".ub-actions-trigger")).toBeNull();
     expect(document.activeElement).toBe(restoreButton(host));
     expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
+
+    // The confirmed archive owns exactly one focus transfer. A later restore
+    // and remote re-archive must not replay that stale local intent.
+    act(() => restoreDirectoryEntry(directory, UUID));
+    const title = host.querySelector<HTMLInputElement>(".ub-title");
+    title?.focus();
+    act(() => tombstoneDirectoryEntry(directory, UUID));
+    expect(document.activeElement).toBe(title);
   });
 
   it("follows the directory tombstone in both directions, under an open pane", async () => {
