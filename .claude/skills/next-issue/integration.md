@@ -2,7 +2,7 @@
 
 The mechanics of the `integrator` role, for one PR at one head SHA. CLAUDE.md's
 "Development workflow" owns *which* gates exist and when each applies,
-including the Codex-plus-Opus dual challenge; drive them in the order it lists.
+including the dual challenge; drive them in the order it lists.
 This file owns only their mechanics, and `review-protocol.md` beside it owns the
 findings-conditional protocol.
 
@@ -152,7 +152,7 @@ itself. The triggers live in the change — for example breaking persisted-data
 compatibility rather than an additive optional schema field; authority or merge
 rules rather than routine process clarification; a runtime dependency rather
 than a dev dependency; auth/token semantics; a decided-architecture or
-invariants edit; or overruling a major Copilot/Codex finding. A tier-3 trigger
+invariants edit; or overruling a major reviewer finding. A tier-3 trigger
 means you do not merge: label the PR `needs-human`, comment which trigger fired,
 fire a PushNotification naming the PR and the trigger so the owner learns a
 merge decision awaits them, then park it and report.

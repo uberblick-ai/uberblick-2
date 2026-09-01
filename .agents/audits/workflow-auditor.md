@@ -31,7 +31,7 @@ documents, or workflow files. Recommend the smallest follow-up and name its
 responsible owner; do not perform it. A missing retrospective is telemetry
 loss, never a delivery defect by itself.
 
-GitHub is the durable execution record. Herdr transcripts, local panes, and
+GitHub is the durable execution record. Local panes, transcripts, and
 private reasoning are not evidence. Discussion self-assessments are useful
 claims to verify, not ground truth.
 

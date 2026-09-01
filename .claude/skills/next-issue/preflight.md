@@ -91,14 +91,11 @@ applies correctable findings in this same run and repeats the affected grounding
 and final recheck. It does not call a second adversary to review those edits.
 Another adversary is exceptional and requires an explicit owner request.
 
-**Dispatching the other runtime.** From Claude, use:
-
-```sh
-codex exec -s workspace-write -c 'sandbox_workspace_write.network_access=true' - < <prompt-file> > <scratch-log> 2>&1
-```
-
-`codex exec` consumes that prompt; it does not select a
-`.codex/agents/*.toml` adapter. The prompt therefore tells the child to read the
+**Dispatching the other runtime.** Use the two commands under "Requesting the
+round" in `review-protocol.md` beside this file, with `issue-adversary` in
+place of `implementation-reviewer`: from Claude, `codex exec`; from Codex,
+`claude -p --agent issue-adversary …`. `codex exec` selects no
+`.codex/agents/*.toml` adapter, so that prompt tells the child to read the
 `issue-adversary` role contract and supplies the exact issue, child run id and
 parent run id. Do not route this through the companion `codex-rescue`/task
 helper: its read-only Git metadata cannot satisfy the role's grounding fetch.

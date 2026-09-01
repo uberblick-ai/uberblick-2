@@ -1,38 +1,51 @@
 # Review protocol — external rounds, and what happens once a review returns
 
 Read this whenever a PR has an external round to request or a finding to
-handle. When CLAUDE.md requires the pair, the implementer owns the Codex
-challenge before handoff and the integrator owns the separate Opus challenge;
-when it requires one, the implementer owns that round. These are real
-adversarial reads, not gate checks. The integrator owns authoritative
-dispositions and any risk-scoped final-head round. `integration.md` beside this
-file owns the gates' order and mechanics.
+handle. When CLAUDE.md requires the pair, the implementer owns the first
+challenge before handoff, on the other runtime from the diff's author, and the
+integrator owns the second, a fresh session of the author's runtime; when it
+requires one, the implementer owns that round. These are real adversarial
+reads, not gate checks. The integrator owns authoritative dispositions and any
+risk-scoped final-head round. `integration.md` beside this file owns the
+gates' order and mechanics.
 
 ## Requesting the round
 
-CLAUDE.md's gate list is the authority on *when* a local Codex review is
+CLAUDE.md's gate list is the authority on *when* a pre-handoff review is
 required. The implementer opens a draft PR and posts the README's exact-PR
 delegation at its current head before starting a fresh
-`implementation-reviewer`. An Opus implementer calls Codex with the same
-validated transport as issue preparation:
+`implementation-reviewer`. One transport per *reviewer* runtime — the command
+is chosen by the runtime the round must run on, not by the caller's, so a
+same-runtime round (a `--codex` integrator on a Codex-authored PR) uses the
+same two commands. Both run from the parent's own worktree, detached (a
+foreground shell call is killed at ten minutes), with the prompt read from a
+file and the log kept in private scratch:
 
 ```sh
+# A Codex reviewer — the transport issue preparation validated.
 codex exec -s workspace-write -c 'sandbox_workspace_write.network_access=true' - < <prompt-file> > <scratch-log> 2>&1
+
+# A Claude reviewer — the project adapter selects the role.
+claude -p --agent implementation-reviewer --model opus --permission-mode bypassPermissions < <prompt-file> > <scratch-log> 2>&1
 ```
 
-This command selects no `.codex/agents/*.toml` adapter, so the prompt tells the
-child to read the `implementation-reviewer` role contract. A Codex implementer
-uses a different Codex session where one is available. The assignment names the
-exact PR, head, child run id, and implementer parent run id, and nothing else
-— the reviewer contract supplies the critical brief. Read the verdict from the
-PR; inspect the private scratch log only when dispatch fails or no durable
-verdict appears, so the child's reasoning transcript does not consume the
-parent context.
+Each is a fresh top-level session: `codex exec` always is, and a headless
+`claude -p` carries its own `Claude-Session` trailer, unlike an `Agent`-tool
+child, which shares its launcher's authorship identity and is never a
+reviewer.
 
-The implementer stays in the foreground until the reviewer writes its durable
-verdict. A dispatch failure is recorded on the PR, never presented as a review;
-the integrator later supplies the missing Codex challenge as well as its own
-Opus challenge. A further round is never a resumed session — it is a fresh
+`codex exec` selects no `.codex/agents/*.toml` adapter, so the prompt tells a
+Codex child to read the `implementation-reviewer` role contract; the Claude
+adapter already does. Either assignment names the exact PR, head, child run id
+and parent run id, and nothing else — the reviewer contract supplies the
+critical brief. Read the verdict from the PR; inspect the private scratch log
+only when dispatch fails or no durable verdict appears, so the child's
+reasoning transcript does not consume the parent context.
+
+The implementer stays in the assignment, renewing its claim, until the
+reviewer writes its durable verdict. A dispatch failure is recorded on the PR,
+never presented as a review; the integrator later supplies the missing
+challenge as well as its own. A further round is never a resumed session — it is a fresh
 reviewer at the new head, within the re-review scoping below. Every brief says:
 be critical, try to falsify the implementation with focused failure-path or
 mutation probes, and hunt specifically for overtesting and overengineering per
@@ -43,7 +56,7 @@ invariants rather than implementation trivia).
 
 The two challenges need not be repeated automatically after every correction.
 Their reasoning may carry across a later head only under the risk-scoped rule
-below, recorded separately for the Codex and Opus verdicts. If a fresh round is
+below, recorded separately for the two verdicts. If a fresh round is
 required, use the same runtime as the stale challenge it replaces unless the
 required runtime is unavailable; record an unavailable runtime as a failed
 dispatch, never as equivalent evidence.
@@ -94,7 +107,7 @@ finding — severity does not decide the other two:
 
 ## One batched fix-up wave per review head
 
-Collect Codex, Opus, any Copilot and integrator findings against the same head
+Collect both challenges', any Copilot and integrator findings against the same head
 and triage them all first; then one decision-complete brief, one implementer
 pickup, one re-gate at the new head — never a pickup per finding or per
 reviewer. Standing
@@ -109,7 +122,7 @@ integrator dispositions it and verifies any accepted local correction directly.
 
 ## Risk-scoped external re-review
 
-A further Codex round is required while a P1 remains open; and for a P2/P3 fix
+A further external round is required while a P1 remains open; and for a P2/P3 fix
 when it sits at a data-critical boundary (security/auth, persistence,
 concurrency, schema/CRDT semantics, cross-process lifecycle) **and** is
 non-local, introduces new state or synchronization, changes the design that
@@ -119,8 +132,8 @@ and whenever reviewer or integrator names a concrete risk rationale. Re-review
 briefs are delta-first: the fixes and the invariants they touch, expanding to
 the whole PR only when a fix invalidates earlier reasoning. After four external
 rounds, a further full round needs a PR comment naming the concrete unresolved
-risk. Record every round as a PR comment — `Codex round N (head <sha>):
-<verdict>` — so round counts stay derivable from the thread.
+risk. Record every round as a PR comment — `Review round N (<runtime>, head
+<sha>): <verdict>` — so round counts stay derivable from the thread.
 
 ## Exit and convergence
 
