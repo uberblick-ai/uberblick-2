@@ -59,15 +59,25 @@ function ageWorktree(worktree) {
 	utimesSync(join(absoluteGitDir, "index"), old, old);
 }
 
-test("keeps an old dirty worktree and removes an old clean worktree", (t) => {
+test("removes only old worktrees whose work is still reachable", (t) => {
 	const { base, bin, checkout } = fixture(t);
 	const clean = join(base, "clean");
 	const dirty = join(base, "dirty");
+	const locked = join(base, "locked");
+	const unmerged = join(base, "unmerged");
 	run("git", ["-C", checkout, "worktree", "add", "--detach", clean, "HEAD"]);
 	run("git", ["-C", checkout, "worktree", "add", "--detach", dirty, "HEAD"]);
+	run("git", ["-C", checkout, "worktree", "add", "--detach", locked, "HEAD"]);
+	run("git", ["-C", checkout, "worktree", "add", "--detach", unmerged, "HEAD"]);
+	writeFileSync(join(unmerged, "committed-work"), "keep me too\n");
+	run("git", ["-C", unmerged, "add", "committed-work"]);
+	run("git", ["-C", unmerged, "commit", "-m", "unmerged work"]);
 	ageWorktree(clean);
 	ageWorktree(dirty);
+	ageWorktree(locked);
+	ageWorktree(unmerged);
 	writeFileSync(join(dirty, "valuable-uncommitted.txt"), "keep me\n");
+	run("git", ["-C", checkout, "worktree", "lock", locked]);
 	fakeDocker(bin, "exit 0");
 
 	const result = spawnSync("sh", [script, "test-sha"], {
@@ -78,14 +88,16 @@ test("keeps an old dirty worktree and removes an old clean worktree", (t) => {
 
 	assert.equal(result.status, 0, result.stderr);
 	assert.match(result.stdout, new RegExp(`keep   ${dirty} \\(dirty\\)`));
+	assert.match(result.stdout, new RegExp(`keep   ${locked} \\(locked\\)`));
+	assert.match(result.stdout, new RegExp(`keep   ${unmerged} \\(unmerged commits\\)`));
 	assert.match(result.stdout, new RegExp(`remove ${clean} \\(detached, idle a day\\)`));
-	assert.match(run("git", ["-C", checkout, "worktree", "list", "--porcelain"]), new RegExp(dirty));
-	assert.doesNotMatch(run("git", ["-C", checkout, "worktree", "list", "--porcelain"]), new RegExp(clean));
+	const worktrees = run("git", ["-C", checkout, "worktree", "list", "--porcelain"]);
+	for (const kept of [dirty, locked, unmerged]) assert.match(worktrees, new RegExp(kept));
+	assert.doesNotMatch(worktrees, new RegExp(clean));
 });
 
 test("reports a failing Docker cleanup and exits nonzero", (t) => {
-	const { base, bin, checkout } = fixture(t);
-	const calls = join(base, "docker-calls");
+	const { bin, checkout } = fixture(t);
 	fakeDocker(
 		bin,
 		'if [ "$1 $2" = "image ls" ]; then\n' +
@@ -93,14 +105,13 @@ test("reports a failing Docker cleanup and exits nonzero", (t) => {
 			'  printf "old-image\\n"\n' +
 			'  exit 0\n' +
 			'fi\n' +
-			'printf "%s\\n" "$*" >> "$HOUSEKEEPING_DOCKER_CALLS"\n' +
 			'exit 17',
 	);
 
 	const result = spawnSync("sh", [script, "test-sha"], {
 		cwd: checkout,
 		encoding: "utf8",
-		env: environment(bin, { HOUSEKEEPING_DOCKER_CALLS: calls }),
+		env: environment(bin),
 	});
 
 	assert.notEqual(result.status, 0);
