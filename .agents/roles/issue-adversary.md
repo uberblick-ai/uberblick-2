@@ -24,7 +24,7 @@ README's race rule.
 ## Outcome
 
 Run exactly one proportional, code- and corpus-grounded challenge using
-`.claude/skills/next-issue/preflight.md`. Look for wrong assumptions, missing
+`.agents/protocols/issue-preparation.md`. Look for wrong assumptions, missing
 outcomes or invariants, infeasible or over-prescribed scope, conflicts with
 current work, and a smaller defensible shape.
 

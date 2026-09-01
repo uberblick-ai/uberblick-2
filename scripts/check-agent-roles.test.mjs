@@ -13,6 +13,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,6 +30,12 @@ function completeFixture() {
 	copyFileSync(join(here, "check-agent-roles.mjs"), join(fixture, "scripts/check-agent-roles.mjs"));
 	for (const relative of [".agents/roles", ".claude/agents", ".codex/agents"])
 		cpSync(join(root, relative), join(fixture, relative), { recursive: true });
+	for (const relative of [
+		".agents/protocols",
+		".agents/skills/shape-issue",
+		".agents/adapters",
+		".claude/skills/shape-issue",
+	]) cpSync(join(root, relative), join(fixture, relative), { recursive: true });
 	return fixture;
 }
 
@@ -95,4 +102,27 @@ test("only the two owner-approved high effort pins are permitted", { skip: claud
 		assert.match(result.stderr, new RegExp(`${slug}\\.md: key "effort" pins runtime policy`));
 		setClaudeKey(fixture, slug, "effort", null);
 	}
+});
+
+test("issue-authoring adapters point to the neutral protocol and its files exist", { skip: claudeSkip }, () => {
+	const missingProtocol = completeFixture();
+	rmSync(join(missingProtocol, ".agents/protocols/issue-shaping.md"));
+	let result = run(missingProtocol);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /issue-shaping\.md: missing provider-neutral issue-authoring file/);
+
+	const staleAdapter = completeFixture();
+	writeFileSync(
+		join(staleAdapter, ".agents/skills/shape-issue/SKILL.md"),
+		"Read .claude/skills/shape-issue/protocol.md\n",
+	);
+	result = run(staleAdapter);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /does not point to \.agents\/protocols\/issue-shaping\.md/);
+
+	const missingPreparationTest = completeFixture();
+	rmSync(join(missingPreparationTest, ".agents/protocols/issue-preparation.test.mjs"));
+	result = run(missingPreparationTest);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /issue-preparation\.test\.mjs: missing provider-neutral issue-authoring file/);
 });

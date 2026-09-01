@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The six agent roles, checked for portability — nothing more.
+ * The six agent roles and issue-authoring adapters, checked for portability.
  *
  * A role is a triplet: the contract at `.agents/roles/<slug>.md` and two thin
  * adapters that point a runtime at it. This proves the triplets exist, that all
@@ -12,11 +12,12 @@
  * configuration belong to the runtime and the invoker, never to a checked-in
  * description.
  *
- * It deliberately does not check the contracts' prose: no headings, no required
- * sentences, no uuids, no wording. Encoding editorial rules here would make the
- * documents harder to improve and turn every clarification into a build break.
- * Structure is all it checks, and a green run says nothing about whether a
- * runtime discovers these files or reads a contract.
+ * It deliberately does not check the contracts' or protocols' prose: no
+ * headings, required sentences, uuids, product judgments or readiness rules.
+ * Encoding editorial rules here would make the documents harder to improve and
+ * turn every clarification into a build break. Structure is all it checks, and
+ * a green run says nothing about whether a runtime discovers these files or
+ * reads a contract.
  *
  * Plain Node, no imports beyond `node:`, like `fue-assert.mjs` beside it.
  * `.claude/agents` is absent from the immutable review image (`.dockerignore`
@@ -36,6 +37,17 @@ const SLUGS = ["issue-preparer", "issue-adversary", "implementer",
 const ROLES = ".agents/roles";
 const CLAUDE = ".claude/agents";
 const CODEX = ".codex/agents";
+const ISSUE_SHAPING = ".agents/protocols/issue-shaping.md";
+const ISSUE_PREPARATION = [
+	".agents/protocols/issue-preparation.md",
+	".agents/protocols/issue-preparation.mjs",
+	".agents/protocols/issue-preparation.test.mjs",
+];
+const SHAPING_ADAPTERS = [
+	".agents/skills/shape-issue/SKILL.md",
+	".claude/skills/shape-issue/SKILL.md",
+	".agents/adapters/chatgpt-voice.md",
+];
 
 /** Anything outside these would pin policy the runtime and invoker own. */
 const CLAUDE_REQUIRED = ["name", "description"];
@@ -175,9 +187,22 @@ for (const slug of SLUGS) {
 	check(codexPath, slug, keys, CODEX_ALLOWED, CODEX_ALLOWED, tables, body);
 }
 
+for (const relative of [ISSUE_SHAPING, ...ISSUE_PREPARATION]) {
+	if (!existsSync(join(root, relative))) fail(`${relative}: missing provider-neutral issue-authoring file`);
+}
+
+for (const relative of SHAPING_ADAPTERS) {
+	if (!existsSync(join(root, relative))) {
+		fail(`${relative}: missing issue-shaping adapter`);
+		continue;
+	}
+	if (!read(relative).includes(ISSUE_SHAPING))
+		fail(`${relative}: does not point to ${ISSUE_SHAPING}`);
+}
+
 if (failures.length > 0) {
 	for (const message of failures) console.error(`check-agent-roles: ${message}`);
 	process.exit(1);
 }
 
-console.log(`check-agent-roles: ${SLUGS.length} roles, structure only.`);
+console.log(`check-agent-roles: ${SLUGS.length} roles and issue-authoring wiring, structure only.`);
