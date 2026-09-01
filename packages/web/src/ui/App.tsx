@@ -689,9 +689,16 @@ export function App(): ReactElement {
             reachable. */}
         {!collapsed && (
           <div className="ub-sidebar-panes" data-mode={sidebarMode}>
+            {/* Each column is keyed on whether its pane is the live one, so
+                becoming the outgoing pane remounts it. That is what takes its
+                menus with it: a Radix popover is portalled to <body>, outside
+                this subtree, where `inert` cannot reach it — and a swap
+                interrupted by a second swap would otherwise leave that panel on
+                screen, focused, belonging to a column that is sliding away. */}
             <div className="ub-sidebar-pane" inert={settingsMode}>
               {(!settingsMode || swapping) && (
                 <Sidebar
+                  key={settingsMode ? "leaving" : "live"}
                   connection={directory}
                   sidebar={sidebar}
                   groups={sidebarGroups}
@@ -716,6 +723,7 @@ export function App(): ReactElement {
                   always has something in it when it is asked for. */}
               {workspace !== null && (settingsMode || swapping) && (
                 <SettingsNav
+                  key={settingsMode ? "live" : "leaving"}
                   workspace={workspace}
                   identity={identity}
                   agentSessions={agentSessions}
@@ -742,7 +750,6 @@ export function App(): ReactElement {
             workspace={workspace}
             connection={directory}
             endpoint={endpoint}
-            docs={entries.length}
             agentSessions={agentSessions}
           />
         ) : listing ? (

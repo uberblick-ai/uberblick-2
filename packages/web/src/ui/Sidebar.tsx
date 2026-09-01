@@ -339,14 +339,20 @@ export function Sidebar({
           because it is a place to go — and it is above the user card, which is
           about this client rather than the workspace. */}
       <div className="ub-list-foot">
-        <ul>
-          <li>
-            <button type="button" onClick={onOpenSettings}>
-              <SettingsIcon />
-              Workspace settings
-            </button>
-          </li>
-        </ul>
+        {/* Only where the address names a workspace to have settings for: a row
+            offering a destination it cannot reach is the one thing this column
+            is careful never to do (#529). The workspace menu above says the
+            same thing its own way, with a disabled item. */}
+        {workspace !== null && (
+          <ul>
+            <li>
+              <button type="button" onClick={onOpenSettings}>
+                <SettingsIcon />
+                Workspace settings
+              </button>
+            </li>
+          </ul>
+        )}
         <UserMenu identity={identity} agentSessions={agentSessions} />
       </div>
     </nav>

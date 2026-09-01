@@ -117,7 +117,13 @@ export function WorkspaceSwitcher({
         <DropdownMenuSeparator />
         {/* Configuration, not accounts — see the header. */}
         <DropdownMenuItem disabled>New workspace</DropdownMenuItem>
-        <DropdownMenuItem onSelect={onOpenSettings}>Workspace settings</DropdownMenuItem>
+        {/* Unavailable where the address names no workspace: there would be no
+            workspace to have settings, so the item would promise a navigation
+            it cannot make. Shown and disabled rather than hidden, like the
+            item above it. */}
+        <DropdownMenuItem disabled={current === null} onSelect={onOpenSettings}>
+          Workspace settings
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

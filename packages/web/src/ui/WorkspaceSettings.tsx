@@ -20,6 +20,7 @@
  */
 
 import type { ReactElement } from "react";
+import { directoryRoom, listDirectory } from "@uberblick/schema";
 import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { AwarenessUser } from "../collab/identity.js";
@@ -119,16 +120,16 @@ export function WorkspaceSettings({
   workspace,
   connection,
   endpoint,
-  docs,
   agentSessions,
 }: {
   workspace: Workspace;
-  /** The room the connection fact reports on — the directory, in this mode. */
+  /**
+   * The workspace's directory room: the connection fact reports on it, and the
+   * document count is read out of it.
+   */
   connection: RoomConnection | null;
   /** The endpoint the provider was constructed with, or null until resolved. */
   endpoint: HubEndpoint | null;
-  /** How many documents the workspace holds, live from the directory. */
-  docs: number;
   /** MCP sessions in the workspace right now — see `useAgentSessions`. */
   agentSessions: number;
 }): ReactElement {
@@ -142,6 +143,30 @@ export function WorkspaceSettings({
    */
   const reading = statusReading(status, settled);
   const cache = useLocalCacheSize(true);
+  /**
+   * How many documents this workspace holds — `null` until this replica has
+   * answered about *this* workspace's directory.
+   *
+   * Read from the connection rather than from a count passed in, and from
+   * `connection.status` rather than from the state above, because both of those
+   * lag the address by one commit: on the render where the workspace changes,
+   * a count derived elsewhere and a status read into state still belong to the
+   * workspace just left, and the room the address names has not been read at
+   * all. Printing `0` there is a definite claim about a corpus nobody has
+   * looked in yet — the one thing a facts page must not do. The room is
+   * compared as well as the flag, so this promise holds whatever a caller hands
+   * it.
+   *
+   * Live without an observer of its own: the shell holds the directory's
+   * listing and this page subscribes to the same room's status, so every change
+   * that could move this number already re-renders the page, and the read is of
+   * the document as it is at that moment.
+   */
+  const answered =
+    connection !== null &&
+    connection.room === directoryRoom(workspace.uuid) &&
+    connection.status.localReplicaLoaded;
+  const docs = answered ? listDirectory(connection.ydoc).length : null;
 
   return (
     <section className="ub-pane">
@@ -152,7 +177,7 @@ export function WorkspaceSettings({
               (route.ts), and only the uuid reaches a room key. */}
           <Fact label="Workspace" value={workspace.uuid} />
           <Fact label="Address" value={workspace.segment} />
-          <Fact label="Documents" value={String(docs)} />
+          <Fact label="Documents" value={docs === null ? UNKNOWN : String(docs)} />
           <Fact label="Hub" value={endpoint?.url ?? UNKNOWN} />
           <Fact
             label="Source"

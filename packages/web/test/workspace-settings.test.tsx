@@ -78,6 +78,7 @@ vi.mock("../src/collab/rooms.js", () => ({
 }));
 
 const { App } = await import("../src/ui/App.js");
+const { WorkspaceSettings } = await import("../src/ui/WorkspaceSettings.js");
 
 /** A fresh in-memory Storage — Node's own global shadows jsdom's here. */
 function installStorage(): void {
@@ -95,8 +96,17 @@ function installStorage(): void {
 
 let mounted: { root: Root; host: HTMLElement } | null = null;
 
+/** jsdom has neither, and Radix's floating surfaces use both. */
+class FakeResizeObserver {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+
 beforeEach(() => {
   installStorage();
+  vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 404 }));
 });
 
@@ -110,6 +120,7 @@ afterEach(() => {
   rooms.clear();
   roomStatus = OFFLINE;
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -274,10 +285,39 @@ describe("exactly one sidebar pane is live", () => {
     expect(reachable(docs)).toHaveLength(0);
     expect(reachable(settings).length).toBeGreaterThan(0);
   });
+
+  it("takes the outgoing column's open menu with it, portal and all", async () => {
+    // Codex round 1, and the reason this assertion looks at the whole document
+    // rather than at the pane: a Radix surface is portalled to <body>, where
+    // `inert` on the pane cannot reach it. The exposure needs a swap
+    // *interrupted* by a second swap — otherwise the outgoing column unmounts
+    // on the address change and takes its portal with it.
+    seedDirectory();
+    const host = await openApp(`/${SEGMENT}`);
+
+    // A swap starts, and the way back interrupts it, so the window stays open.
+    click(row(host, "Workspace settings"));
+    click(liveColumn(host).querySelector(".ub-back-entry"));
+
+    // The reader opens the user card on the column that is live again.
+    click(liveColumn(host).querySelector(".ub-user-card"));
+    expect(document.querySelectorAll("[data-slot=popover-content]")).toHaveLength(1);
+
+    // And goes back into settings before that window is over. The panel belongs
+    // to a column that is now sliding away, so it goes with it — an open,
+    // focused panel outside every inert subtree is exactly what the one-live-pane
+    // guarantee cannot allow.
+    click(row(host, "Workspace settings"));
+    expect(document.querySelectorAll("[data-slot=popover-content]")).toHaveLength(0);
+  });
 });
 
 describe("the General page reads state this client already holds", () => {
   it("names the workspace, its documents, its hub and its connection", async () => {
+    // The replica has read its local copy of the directory, so the count is a
+    // fact this client can vouch for — see the test below for what it says
+    // before that.
+    roomStatus = { ...OFFLINE, localReplicaLoaded: true };
     seedDirectory();
     const host = await openApp(`/${SEGMENT}/settings`);
     const endpoint = hubEndpoint();
@@ -300,6 +340,35 @@ describe("the General page reads state this client already holds", () => {
     // jsdom has no Storage API, and a browser that will not estimate gets an
     // omitted row rather than a zero nobody can vouch for.
     expect(shown["Local cache"]).toBeUndefined();
+  });
+
+  it("says nothing about a corpus this replica has not read yet", async () => {
+    // Codex round 1: the count was a definite number from the moment the page
+    // drew, so an address whose directory had not been read yet — a cold pasted
+    // link — claimed `0` documents. The room here demonstrably holds two, and
+    // the honest answer is still that nobody has looked.
+    seedDirectory();
+    const host = await openApp(`/${SEGMENT}/settings`);
+    expect(facts(host).Documents).toBe("—");
+  });
+
+  it("never counts another workspace's corpus as this one's", async () => {
+    // The other half of the same finding: on the render after a switch, a count
+    // derived elsewhere still belongs to the workspace just left. This is that
+    // render — a read directory, holding a document, belonging to a *different*
+    // workspace than the one the page is about.
+    const foreign = room(directoryRoom("0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"));
+    upsertDirectoryEntry(foreign.ydoc, { uuid: ONE, title: "Somebody else's" });
+    foreign.status.localReplicaLoaded = true;
+    const host = await mount(
+      <WorkspaceSettings
+        workspace={{ uuid: WORKSPACE, segment: SEGMENT }}
+        connection={foreign}
+        endpoint={null}
+        agentSessions={0}
+      />,
+    );
+    expect(facts(host).Documents).toBe("—");
   });
 
   it("reads a refusal in the words the status line reads it in", async () => {

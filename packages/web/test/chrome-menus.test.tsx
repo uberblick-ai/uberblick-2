@@ -218,6 +218,18 @@ describe("the workspace switcher renders configuration", () => {
     click(settings);
     expect(settingsOpened).toBe(1);
     view.unmount();
+
+    // Except where the address names no workspace: there is nothing to have
+    // settings, so the item is unavailable rather than a command that would go
+    // nowhere (Codex round 1 on #650).
+    const none = mount(switcher(0, null));
+    open(none);
+    expect(
+      panel("[data-slot=dropdown-menu-item][data-disabled]").map(
+        (item) => item.textContent,
+      ),
+    ).toEqual(["New workspace", "Workspace settings"]);
+    none.unmount();
   });
 });
 
