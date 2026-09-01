@@ -87,8 +87,8 @@ test("the workspace address is the list, and it holds what another browser creat
   await expect(reader).toHaveURL(new RegExp(`/${harness().workspace}$`));
   // Most recently changed first — the second document was created last.
   await expect(listedTitles(reader)).toHaveText([second, first]);
-  // The scope is on the page, not assumed: this filters stubs, not bodies.
-  await expect(reader.locator(".ub-docs-scope")).toContainText("not the text");
+  // The scope is on the page, not assumed: this filters titles alone, not bodies.
+  await expect(reader.locator(".ub-docs-scope")).toContainText("titles alone");
 
   // Typing filters what is already here — no request, no room.
   await reader.locator(".ub-docs-search").fill(first);

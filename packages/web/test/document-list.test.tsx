@@ -332,7 +332,7 @@ describe("the list", () => {
     );
   });
 
-  it("shows the title, the tags, the pinned group, the description and the age", async () => {
+  it("shows the title, the pinned group and the age — and neither description nor tags", async () => {
     const peer = peerOf(directoryDoc());
     upsertDirectoryEntry(peer, {
       uuid: ONE,
@@ -349,15 +349,14 @@ describe("the list", () => {
     const host = await openApp(`/${WORKSPACE}`);
     const row = host.querySelector(".ub-docs-row");
     expect(row?.querySelector(".ub-docs-title")?.textContent).toBe("Overview");
-    expect([...(row?.querySelectorAll(".ub-tag") ?? [])].map((n) => n.textContent))
-      .toEqual(["product", "reference"]);
     expect(row?.querySelector(".ub-docs-group")?.textContent).toBe("Reading");
-    expect(row?.querySelector(".ub-docs-desc")?.textContent).toBe(
-      "What uberblick is, and what it deliberately is not.",
-    );
     expect(row?.querySelector("time")?.getAttribute("dateTime")).toBe(
       "2026-01-03T00:00:00.000Z",
     );
+    // The stub still caches both — this is what one screen renders.
+    expect(row?.textContent).not.toContain("deliberately is not");
+    expect(row?.textContent).not.toContain("product");
+    expect(row?.textContent).not.toContain("reference");
   });
 
   it("names the group a document is pinned into while the list is open", async () => {
@@ -427,7 +426,7 @@ describe("the list", () => {
 });
 
 describe("the filter", () => {
-  it("matches title, tag and description over the stubs, and opens no room", async () => {
+  it("matches the title alone over the stubs, and opens no room", async () => {
     const peer = peerOf(directoryDoc());
     upsertDirectoryEntry(peer, {
       uuid: ONE,
@@ -439,20 +438,17 @@ describe("the filter", () => {
     const host = await openApp(`/${WORKSPACE}`);
     const field = search(host);
 
-    // On the description, which the row shows — so a match is visible.
-    await act(async () => typeInto(field, "LIGHTHOUSE"));
+    // On the title, folded — the needle and the haystack fold the same way.
+    await act(async () => typeInto(field, "OVER"));
     expect(rowTitles(host)).toEqual(["Overview"]);
-    expect(host.querySelector(".ub-docs-desc")?.textContent).toContain(
-      "lighthouse",
-    );
 
-    // On a tag.
+    // Not on a description, and not on a tag: a row the list does not print
+    // them on would look like a row that matched on nothing.
+    await act(async () => typeInto(field, "lighthouse"));
+    expect(rowTitles(host)).toEqual([]);
+
     await act(async () => typeInto(field, "howto"));
-    expect(rowTitles(host)).toEqual(["Editing"]);
-
-    // On the title.
-    await act(async () => typeInto(field, "over"));
-    expect(rowTitles(host)).toEqual(["Overview"]);
+    expect(rowTitles(host)).toEqual([]);
 
     // The whole of it is a derivation over stubs already in memory: no query
     // has joined a room, and none ever can — the corpus is filterable offline.
@@ -464,42 +460,28 @@ describe("the filter", () => {
     expect(rowTitles(host)).toEqual(["Editing", "Overview"]);
   });
 
-  it("follows a description an agent changes under an open query", async () => {
+  it("follows a title an agent changes under an open query", async () => {
     const peer = peerOf(directoryDoc());
-    upsertDirectoryEntry(peer, {
-      uuid: ONE,
-      title: "Overview",
-      description: "A lighthouse phrase",
-    });
+    upsertDirectoryEntry(peer, { uuid: ONE, title: "Lighthouse" });
     upsertDirectoryEntry(peer, { uuid: TWO, title: "Editing" });
 
     const host = await openApp(`/${WORKSPACE}`);
     await act(async () => typeInto(search(host), "lighthouse"));
-    expect(rowTitles(host)).toEqual(["Overview"]);
+    expect(rowTitles(host)).toEqual(["Lighthouse"]);
 
     await act(async () => {
-      upsertDirectoryEntry(peer, {
-        uuid: ONE,
-        title: "Overview",
-        description: "No longer a match",
-      });
-      upsertDirectoryEntry(peer, {
-        uuid: TWO,
-        title: "Editing",
-        description: "Lighthouse moved here",
-      });
+      upsertDirectoryEntry(peer, { uuid: ONE, title: "Overview" });
+      upsertDirectoryEntry(peer, { uuid: TWO, title: "Lighthouse keeping" });
     });
-    expect(rowTitles(host)).toEqual(["Editing"]);
+    expect(rowTitles(host)).toEqual(["Lighthouse keeping"]);
   });
 
   it("says what it looks at, on screen", async () => {
     const host = await openApp(`/${WORKSPACE}`);
     const scope = host.querySelector(".ub-docs-scope")?.textContent ?? "";
-    expect(scope).toContain("titles");
-    expect(scope).toContain("tags");
-    expect(scope).toContain("descriptions");
-    // And it says what it does *not* look at, which is the assumption a reader
-    // would otherwise make: full text lives in the agents' `search`.
+    // No row matches on something its row does not show, and the sentence says
+    // exactly that.
+    expect(scope).toContain("titles alone");
     expect(scope).toContain("not the text inside documents");
   });
 

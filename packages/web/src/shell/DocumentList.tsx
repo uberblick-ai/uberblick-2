@@ -14,13 +14,14 @@
  * whole corpus opens no document room. The one other room it reads is
  * `_sidebar`, for the group a row is pinned in — the shell already holds both.
  *
- * **Filtering is that same derivation, narrowed.** Title, tags and description,
- * folded to lower case, over stubs that are already in memory: synchronous, no
- * request, no room, and correct offline. That is also its whole scope, so the
- * pane says so on screen rather than letting a reader assume the words in their
- * documents were searched. Full-text over document *bodies* is the agents'
- * `search` tool over the MCP server's own index — not this (owner decision,
- * 2026-08-27).
+ * **Filtering is that same derivation, narrowed.** The title, folded to lower
+ * case, over stubs that are already in memory: synchronous, no request, no
+ * room, and correct offline. The title alone, because the title is all a row
+ * shows — matching on a description the row does not print looks like a row
+ * that matched on nothing. That is also its whole scope, so the pane says so on
+ * screen rather than letting a reader assume the words in their documents were
+ * searched. Full-text over document *bodies* is the agents' `search` tool over
+ * the MCP server's own index — not this (owner decision, 2026-08-27).
  *
  * **An empty listing is never a claim this client cannot make.** Nothing heard
  * yet is not "no documents", and nothing matched among what has arrived is not
@@ -52,8 +53,7 @@ const MONTH = 30 * DAY;
 const YEAR = 365 * DAY;
 
 /** What the filter looks at, said on screen so nobody has to guess. */
-const SCOPE =
-  "Filters titles, tags and descriptions — not the text inside documents.";
+const SCOPE = "Filters titles alone — not the text inside documents.";
 
 /** One list per screen, so the sentence the search field points at has one id. */
 const SCOPE_ID = "ub-docs-scope";
@@ -141,11 +141,7 @@ export function sortDirectory(entries: readonly DirectoryEntry[]): DirectoryEntr
  */
 function matches(entry: DirectoryEntry, needle: string): boolean {
   if (needle === "") return true;
-  return (
-    entry.title.toLowerCase().includes(needle) ||
-    (entry.description ?? "").toLowerCase().includes(needle) ||
-    entry.tags.some((tag) => tag.toLowerCase().includes(needle))
-  );
+  return entry.title.toLowerCase().includes(needle);
 }
 
 /**
@@ -298,21 +294,6 @@ export function DocumentList({
                     )}
                     <ChangedStamp at={entry.updatedAt} now={now} />
                   </span>
-                  {/* Shown, not just filtered on: a row that matched on its
-                      description with the description invisible looks like a
-                      row that matched on nothing. */}
-                  {entry.description !== undefined && entry.description !== "" && (
-                    <span className="ub-docs-desc">{entry.description}</span>
-                  )}
-                  {entry.tags.length > 0 && (
-                    <span className="ub-docs-tags">
-                      {entry.tags.map((tag) => (
-                        <span className="ub-tag" key={tag}>
-                          {tag}
-                        </span>
-                      ))}
-                    </span>
-                  )}
                 </button>
                 {/* Curation from the one screen that shows every document —
                     the sidebar lists what is already pinned, so this is where
