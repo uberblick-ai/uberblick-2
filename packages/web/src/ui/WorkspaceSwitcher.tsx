@@ -18,14 +18,12 @@
  * same gesture. Nothing here knows about rooms, and nothing carries across the
  * switch — two workspaces are two corpora.
  *
- * It renders *configuration*, not accounts. "New workspace" is on the menu and
- * disabled: making a workspace is `ub init` on a machine, and there is nothing
- * here that could do it. It is rendered rather than hidden because a disabled
- * item says "this exists and is not yours to do from here", which is the truth,
- * while an absent one says the idea does not exist. "Workspace settings" shipped
- * disabled under that same rationale and is now live (#485) — settings exist as
- * a place, so the item goes there; the reasoning survives for the item that
- * still has nowhere to go.
+ * It renders *configuration*, not accounts. "New workspace" and "Workspace
+ * settings" are on the menu and disabled: making a workspace is `ub init` on a
+ * machine, and there is nothing here that could do it. They are rendered rather
+ * than hidden because a disabled item says "this exists and is not yours to do
+ * from here", which is the truth, while an absent one says the idea does not
+ * exist.
  *
  * The surface is the vendored shadcn menu (#27); everything about how this
  * particular menu *looks* is plain CSS on `.ub-*` classes, like every other
@@ -54,7 +52,6 @@ export function WorkspaceSwitcher({
   current,
   docs,
   onSwitch,
-  onOpenSettings,
 }: {
   /** What to offer, already validated and deduplicated — see `workspaceList`. */
   workspaces: readonly Workspace[];
@@ -68,8 +65,6 @@ export function WorkspaceSwitcher({
   docs: number;
   /** Go there. The value is a segment, spelled as the list spells it. */
   onSwitch: (segment: string) => void;
-  /** Open workspace settings (#485) — a navigation, like switching. */
-  onOpenSettings: () => void;
 }): ReactElement {
   return (
     <DropdownMenu>
@@ -117,13 +112,7 @@ export function WorkspaceSwitcher({
         <DropdownMenuSeparator />
         {/* Configuration, not accounts — see the header. */}
         <DropdownMenuItem disabled>New workspace</DropdownMenuItem>
-        {/* Unavailable where the address names no workspace: there would be no
-            workspace to have settings, so the item would promise a navigation
-            it cannot make. Shown and disabled rather than hidden, like the
-            item above it. */}
-        <DropdownMenuItem disabled={current === null} onSelect={onOpenSettings}>
-          Workspace settings
-        </DropdownMenuItem>
+        <DropdownMenuItem disabled>Workspace settings</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

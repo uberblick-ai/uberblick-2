@@ -627,33 +627,6 @@ body {
   position: relative;
 }
 
-/* ---- the sidebar's two modes (#485) ----
-   The document sidebar and the settings navigation, side by side in one track
-   the width of the column. Settings slides the track one pane to the left and
-   Back slides it home; the pane that is off the edge is clipped rather than
-   widening the shell. One transform on the track moves both panes, so there is
-   no second animation to keep in step — and the panes' own `inert` (App.tsx) is
-   bound to the address rather than to this transition, which is what makes the
-   outgoing pane dead for the whole of the slide. */
-.ub-sidebar-panes {
-  width: var(--sidebar-width);
-  flex: none;
-  display: flex;
-  overflow: hidden;
-}
-
-.ub-sidebar-pane {
-  flex: none;
-  width: 100%;
-  display: flex;
-  transform: translateX(0);
-  transition: transform 180ms ease;
-}
-
-.ub-sidebar-panes[data-mode="settings"] > .ub-sidebar-pane {
-  transform: translateX(-100%);
-}
-
 /* ---- doc list ---- */
 
 .ub-list {
@@ -852,13 +825,8 @@ body {
 /* The workspace, across the top of the sidebar. Full-bleed: it pulls back
    through the column's padding so its underline meets both edges, which is
    what makes it read as the sidebar's own header rather than as a control
-   sitting inside it.
-   Settings mode's back row (#485) is the same header in the same place, so it
-   is the same rule — and a class of its own rather than this one, because a
-   selector that matched both would find two headers for the length of the
-   slide. */
-.ub-workspace,
-.ub-back-entry {
+   sitting inside it. */
+.ub-workspace {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -874,8 +842,7 @@ body {
   cursor: pointer;
 }
 
-.ub-workspace:hover,
-.ub-back-entry:hover {
+.ub-workspace:hover {
   background: var(--sidebar-accent);
   color: var(--accent-foreground);
 }
@@ -1121,43 +1088,6 @@ body {
   margin: 0;
   font-family: var(--font-mono);
   font-size: 0.75rem;
-}
-
-/* ---- settings mode (#485) ----
-   The back row is the switcher's row in the switcher's place: same full-bleed
-   header, same tile, so leaving settings sits exactly where entering them was.
-   Only the tile's content differs — a chevron rather than a letter, because
-   that is the one thing that says this row goes back. */
-.ub-back-caret {
-  width: 1rem;
-  height: 1rem;
-  color: var(--brand-foreground);
-}
-
-/* The General page: one heading over the facts. The measure is `.ub-column`'s,
-   like every other pane. */
-.ub-settings-heading {
-  margin: 0 0 1rem;
-  font-size: 1.4rem;
-  font-weight: 500;
-}
-
-/* The user panel's readouts, as a card of their own — same rows, same mono
-   values, on the ground and border that make them a panel on a page rather than
-   a list under a heading. The popover version's top border is the line back to
-   its controls, and there are none here, so it is replaced rather than kept. */
-.ub-settings-facts {
-  gap: 0.35rem;
-  padding: 0.9rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--card);
-}
-
-/* On this ground the sidebar's muted ink is the wrong one — the page reads its
-   own (#515 is why that distinction exists at all). */
-.ub-settings-facts .ub-panel-fact dt {
-  color: var(--muted-foreground);
 }
 
 /* ---- doc list groups ---- */
@@ -2925,8 +2855,7 @@ h3.ub-heading {
   .ub-group-body,
   .ub-group-act,
   .ub-copy,
-  .ub-gutter-add,
-  .ub-sidebar-pane {
+  .ub-gutter-add {
     transition: none;
   }
 

@@ -131,9 +131,6 @@ describe("the workspace switcher renders configuration", () => {
     });
   }
 
-  /** What "Workspace settings" was chosen with, so a live item can be proved. */
-  let settingsOpened = 0;
-
   function switcher(docs: number, current: Workspace | null = WORKSPACE): ReactElement {
     return (
       <WorkspaceSwitcher
@@ -141,9 +138,6 @@ describe("the workspace switcher renders configuration", () => {
         current={current}
         docs={docs}
         onSwitch={() => {}}
-        onOpenSettings={() => {
-          settingsOpened += 1;
-        }}
       />
     );
   }
@@ -197,39 +191,16 @@ describe("the workspace switcher renders configuration", () => {
     none.unmount();
   });
 
-  it("renders the workspace it cannot make disabled, and the settings it can open live", () => {
+  it("renders workspace management disabled rather than hiding it", () => {
     // A disabled item says "this exists and is not yours to do from here", which
-    // is the truth; an absent one says the idea does not exist. Making a
-    // workspace is still `ub init` on a machine, so that item stays disabled —
-    // and "Workspace settings" no longer is, because settings now exist as a
-    // place (#485). An item that looked live but went nowhere would be the one
-    // failure worse than a disabled one.
-    settingsOpened = 0;
+    // is the truth; an absent one says the idea does not exist.
     const view = mount(switcher(0));
     open(view);
     const disabled = panel("[data-slot=dropdown-menu-item][data-disabled]").map(
       (item) => item.textContent,
     );
-    expect(disabled).toEqual(["New workspace"]);
-
-    const settings = panel("[data-slot=dropdown-menu-item]").find(
-      (item) => item.textContent === "Workspace settings",
-    );
-    click(settings);
-    expect(settingsOpened).toBe(1);
+    expect(disabled).toEqual(["New workspace", "Workspace settings"]);
     view.unmount();
-
-    // Except where the address names no workspace: there is nothing to have
-    // settings, so the item is unavailable rather than a command that would go
-    // nowhere (Codex round 1 on #650).
-    const none = mount(switcher(0, null));
-    open(none);
-    expect(
-      panel("[data-slot=dropdown-menu-item][data-disabled]").map(
-        (item) => item.textContent,
-      ),
-    ).toEqual(["New workspace", "Workspace settings"]);
-    none.unmount();
   });
 });
 

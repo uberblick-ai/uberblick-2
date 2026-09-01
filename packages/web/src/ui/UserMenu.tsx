@@ -47,12 +47,8 @@ const APPEARANCE_LABELS: Record<Appearance, string> = {
 /**
  * How much this browser is holding, in the units `storage.estimate()` reports
  * it in — decimal, like the browser's own storage panel.
- *
- * Exported for the General settings page (#485), which says the same fact in the
- * same words: two spellings of one number is how "12.4 MB" and "12 MB" end up on
- * screen at once claiming to be the same reading.
  */
-export function formatBytes(bytes: number): string {
+function formatBytes(bytes: number): string {
   const mb = bytes / 1_000_000;
   if (mb < 1) return `${Math.round(bytes / 1_000)} kB`;
   return mb < 10 ? `${mb.toFixed(1)} MB` : `${Math.round(mb)} MB`;
@@ -69,13 +65,8 @@ export function formatBytes(bytes: number): string {
  * Closing forgets it, which matters for the same reason the re-read does: a
  * kept number is a stale number, and the next open would paint the last
  * session's figure for as long as the fresh estimate takes to answer.
- *
- * `open` is "is this surface on screen": a panel's open state here, and simply
- * `true` on the General settings page (#485), which is on screen for as long as
- * it is mounted. Exported so that page reads the estimate through the same
- * three-valued answer — a row omitted rather than a zero nobody can vouch for.
  */
-export function useLocalCacheSize(open: boolean): number | null {
+function useLocalCacheSize(open: boolean): number | null {
   const [bytes, setBytes] = useState<number | null>(null);
   useEffect(() => {
     if (!open) {

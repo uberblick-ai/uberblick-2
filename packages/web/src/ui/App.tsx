@@ -45,11 +45,9 @@ import {
   docPath,
   parseRoute,
   replicaHasAnswered,
-  settingsPath,
   useRoutePath,
   workspaceList,
 } from "./route.js";
-import { SettingsNav, WorkspaceSettings } from "./WorkspaceSettings.js";
 import type { Route } from "./route.js";
 import {
   useAgentSessions,
@@ -69,14 +67,6 @@ import {
 
 /** Sidebar preference, persisted per browser. */
 const SIDEBAR_COLLAPSED_KEY = "uberblick.sidebar.collapsed";
-
-/**
- * How long the sidebar's drill-in takes (#485) — the same 180ms
- * `.ub-sidebar-pane` transitions over, and the reason the two have to agree:
- * this is how long the pane being left keeps its contents. CSS cannot be asked
- * for the number, so it is written twice and said once, here.
- */
-const SIDEBAR_SWAP_MS = 180;
 
 /**
  * What the address resolves to on screen.
@@ -264,47 +254,6 @@ export function App(): ReactElement {
   // Both addresses that name the workspace render the document list, so the
   // sidebar's entry for it is the current page at either one.
   const listing = route.kind === "all" || route.kind === "list";
-  /**
-   * Whether the app is in settings mode (#485). One address, no page segment:
-   * the sidebar swaps to the settings navigation and the pane shows General.
-   */
-  const settingsMode = route.kind === "settings";
-  const sidebarMode = settingsMode ? "settings" : "docs";
-  /**
-   * Whether the sidebar's drill-in is in flight.
-   *
-   * The two panes slide as one track, so the pane being left has to still be
-   * there while it slides — and only then. At rest the column holds exactly one
-   * sidebar, which is what keeps "the user card" and "the document list" single
-   * things to a reader, to a screen reader and to a locator; for the length of
-   * the slide it holds two, and the outgoing one is `inert` throughout.
-   */
-  const [swapping, setSwapping] = useState(false);
-  const shownMode = useRef(sidebarMode);
-  useEffect(() => {
-    // A first render is not a swap: arriving at `/settings` in a fresh tab draws
-    // the mode, it does not transition into it — and a pasted link must not take
-    // focus from wherever the reader landed.
-    if (shownMode.current === sidebarMode) return;
-    shownMode.current = sidebarMode;
-    // The row the reader just activated is inside the column that is leaving, so
-    // the remount below destroys it and focus falls to <body> — the only
-    // navigation in the app that would drop it. It goes to the row the incoming
-    // column leads with instead: Back on the way in, and the way in on the way
-    // out.
-    document
-      .querySelector<HTMLElement>(".ub-sidebar-pane:not([inert]) [data-swap-focus]")
-      ?.focus();
-    // Nothing slides under reduced motion (styles.css says so), and the window
-    // exists only to keep a column alive while it slides: no transition, no
-    // window, and the column that is left goes at once rather than sitting there
-    // inert with nothing to animate. Optional call because jsdom has no
-    // `matchMedia` at all, and a runtime that cannot be asked keeps the default.
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-    setSwapping(true);
-    const timer = setTimeout(() => setSwapping(false), SIDEBAR_SWAP_MS);
-    return () => clearTimeout(timer);
-  }, [sidebarMode]);
   const [collapsed, setCollapsed] = useStoredFlag(SIDEBAR_COLLAPSED_KEY, false);
   /**
    * The thread the reader is looking at. It lives here because the two ends of
@@ -575,25 +524,6 @@ export function App(): ReactElement {
   }, [navigate, segment]);
 
   /**
-   * Settings mode, and back out of it (#485). Both are plain navigations, which
-   * is what makes browser Back the way out and a pasted `/settings` link the way
-   * in — the mode is the address and nothing else remembers it. Back goes to the
-   * workspace rather than to whatever document was last open: the address bar is
-   * the selection, so there is no remembered document to return to.
-   */
-  const onOpenSettings = useCallback(() => {
-    if (segment !== null) navigate(settingsPath(segment));
-  }, [navigate, segment]);
-  const onLeaveSettings = useCallback(() => {
-    if (segment !== null) navigate(`/${segment}`);
-  }, [navigate, segment]);
-
-  /** What the collapse control hides — the column that is actually there. */
-  const sidebarToggleLabel = `${collapsed ? "Show" : "Hide"} ${
-    settingsMode ? "settings navigation" : "document list"
-  }`;
-
-  /**
    * A create needs the new document's Y.Doc *before* React has mounted the
    * editor pane for it, so the handle is held here until `useRoom` has acquired
    * the same room. Room connections are refcounted and keyed by room name, so
@@ -652,17 +582,13 @@ export function App(): ReactElement {
   return (
     <main className="ub-app">
       <header className="ub-header">
-        {/* Lives in the header so it stays visible while the sidebar is gone.
-            It names what it hides, and in settings mode that is not the document
-            list (#485): the column is the settings navigation there, and a
-            control that called it the document list would be describing a pane
-            that is not on screen. */}
+        {/* Lives in the header so it stays visible while the sidebar is gone. */}
         <button
           type="button"
           className="ub-sidebar-toggle"
           aria-expanded={!collapsed}
-          aria-label={sidebarToggleLabel}
-          title={sidebarToggleLabel}
+          aria-label={collapsed ? "Show document list" : "Hide document list"}
+          title={collapsed ? "Show document list" : "Hide document list"}
           onClick={() => setCollapsed(!collapsed)}
         >
           {collapsed ? "»" : "«"}
@@ -692,66 +618,23 @@ export function App(): ReactElement {
         </span>
       </header>
       <div className="ub-body">
-        {/* The sidebar's two modes, side by side in one track that slides (#485).
-            The pane the address does not name is empty at rest and holds the
-            column it is leaving for the length of the slide — CSS cannot animate
-            an element that is not there. Whenever it holds anything it is
-            `inert`, the way a collapsed group's body already is: no pointer, no
-            focus, out of the accessibility tree. That is bound to the address
-            rather than to the animation, so the outgoing pane is dead for the
-            whole of the transition rather than at the end of it — a transform
-            alone would leave its draggable rows and drop slots sitting there,
-            reachable. */}
         {!collapsed && (
-          <div className="ub-sidebar-panes" data-mode={sidebarMode}>
-            {/* Each column is keyed on whether its pane is the live one, so
-                becoming the outgoing pane remounts it. That is what takes its
-                menus with it: a Radix popover is portalled to <body>, outside
-                this subtree, where `inert` cannot reach it — and a swap
-                interrupted by a second swap would otherwise leave that panel on
-                screen, focused, belonging to a column that is sliding away. The
-                accepted cost is that the outgoing column is a fresh node, so a
-                scrolled list starts its slide back at the top: under 180ms, on
-                the way out, and cheaper than driving every portalled surface's
-                open state by hand. */}
-            <div className="ub-sidebar-pane" inert={settingsMode}>
-              {(!settingsMode || swapping) && (
-                <Sidebar
-                  key={settingsMode ? "leaving" : "live"}
-                  connection={directory}
-                  sidebar={sidebar}
-                  groups={sidebarGroups}
-                  entries={entries}
-                  workspaces={workspaces}
-                  workspace={workspace}
-                  onSwitchWorkspace={onSwitchWorkspace}
-                  identity={identity}
-                  agentSessions={agentSessions}
-                  selected={selected}
-                  onSelect={onSelect}
-                  onCreate={onCreate}
-                  onOpenAll={onOpenAll}
-                  onOpenSettings={onOpenSettings}
-                  allOpen={listing}
-                />
-              )}
-            </div>
-            <div className="ub-sidebar-pane" inert={!settingsMode}>
-              {/* Only where the address names a workspace to have settings for.
-                  Settings mode always does, so the pane the track slides to
-                  always has something in it when it is asked for. */}
-              {workspace !== null && (settingsMode || swapping) && (
-                <SettingsNav
-                  key={settingsMode ? "live" : "leaving"}
-                  workspace={workspace}
-                  identity={identity}
-                  agentSessions={agentSessions}
-                  onBack={onLeaveSettings}
-                  onOpenGeneral={onOpenSettings}
-                />
-              )}
-            </div>
-          </div>
+          <Sidebar
+            connection={directory}
+            sidebar={sidebar}
+            groups={sidebarGroups}
+            entries={entries}
+            workspaces={workspaces}
+            workspace={workspace}
+            onSwitchWorkspace={onSwitchWorkspace}
+            identity={identity}
+            agentSessions={agentSessions}
+            selected={selected}
+            onSelect={onSelect}
+            onCreate={onCreate}
+            onOpenAll={onOpenAll}
+            allOpen={listing}
+          />
         )}
         {/* The corpus journey (#406): both addresses that name the workspace
             rather than a document — `/<workspace>`, the first screen of a
@@ -760,18 +643,7 @@ export function App(): ReactElement {
             document, so it takes the pane rather than passing four more props
             through `RoutePane`, which exists to say what a *document* address
             resolves to. */}
-        {settingsMode && workspace !== null ? (
-          /* The workspace's own page (#485): facts about where this client is,
-             every one of them state it already holds. The directory is the room
-             the connection fact reports on, because in this mode there is no
-             document open — the same room the pill reports on here. */
-          <WorkspaceSettings
-            workspace={workspace}
-            connection={directory}
-            endpoint={endpoint}
-            agentSessions={agentSessions}
-          />
-        ) : listing ? (
+        {listing ? (
           /* Keyed by the workspace, because everything the pane holds is
              about one corpus: a filter typed in workspace A would otherwise
              survive the switch and make workspace B's first screen look
