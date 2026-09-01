@@ -819,7 +819,6 @@ body {
   border-top: 1px solid var(--sidebar-border);
 }
 
-
 /* ---- the sidebar's two anchored menus (#74, design 1c) ----
 
    Both are the vendored shadcn menu (#27) in the product's own clothes. The

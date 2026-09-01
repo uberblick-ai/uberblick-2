@@ -283,9 +283,24 @@ export function App(): ReactElement {
   const shownMode = useRef(sidebarMode);
   useEffect(() => {
     // A first render is not a swap: arriving at `/settings` in a fresh tab draws
-    // the mode, it does not transition into it.
+    // the mode, it does not transition into it — and a pasted link must not take
+    // focus from wherever the reader landed.
     if (shownMode.current === sidebarMode) return;
     shownMode.current = sidebarMode;
+    // The row the reader just activated is inside the column that is leaving, so
+    // the remount below destroys it and focus falls to <body> — the only
+    // navigation in the app that would drop it. It goes to the row the incoming
+    // column leads with instead: Back on the way in, and the way in on the way
+    // out.
+    document
+      .querySelector<HTMLElement>(".ub-sidebar-pane:not([inert]) [data-swap-focus]")
+      ?.focus();
+    // Nothing slides under reduced motion (styles.css says so), and the window
+    // exists only to keep a column alive while it slides: no transition, no
+    // window, and the column that is left goes at once rather than sitting there
+    // inert with nothing to animate. Optional call because jsdom has no
+    // `matchMedia` at all, and a runtime that cannot be asked keeps the default.
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     setSwapping(true);
     const timer = setTimeout(() => setSwapping(false), SIDEBAR_SWAP_MS);
     return () => clearTimeout(timer);
@@ -694,7 +709,11 @@ export function App(): ReactElement {
                 menus with it: a Radix popover is portalled to <body>, outside
                 this subtree, where `inert` cannot reach it — and a swap
                 interrupted by a second swap would otherwise leave that panel on
-                screen, focused, belonging to a column that is sliding away. */}
+                screen, focused, belonging to a column that is sliding away. The
+                accepted cost is that the outgoing column is a fresh node, so a
+                scrolled list starts its slide back at the top: under 180ms, on
+                the way out, and cheaper than driving every portalled surface's
+                open state by hand. */}
             <div className="ub-sidebar-pane" inert={settingsMode}>
               {(!settingsMode || swapping) && (
                 <Sidebar

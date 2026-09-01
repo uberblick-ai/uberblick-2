@@ -346,7 +346,9 @@ export function Sidebar({
         {workspace !== null && (
           <ul>
             <li>
-              <button type="button" onClick={onOpenSettings}>
+              {/* `data-swap-focus`: the row a mode swap hands focus to
+                  (App.tsx) — leaving settings lands on the way back in. */}
+              <button type="button" data-swap-focus onClick={onOpenSettings}>
                 <SettingsIcon />
                 Workspace settings
               </button>

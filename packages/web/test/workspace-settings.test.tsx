@@ -62,7 +62,9 @@ function room(name: string): RoomConnection {
     room: name,
     ydoc: new Y.Doc(),
     provider: { awareness: null },
-    status: roomStatus,
+    // A copy: a test that reaches into `connection.status` would otherwise
+    // mutate the shared `OFFLINE` object every other room is pointed at.
+    status: { ...roomStatus },
     onStatusChange: (listener: (next: RoomStatus) => void) => {
       listener(roomStatus);
       return () => {};
@@ -310,6 +312,41 @@ describe("exactly one sidebar pane is live", () => {
     click(row(host, "Workspace settings"));
     expect(document.querySelectorAll("[data-slot=popover-content]")).toHaveLength(0);
   });
+
+  it("hands focus to the incoming column, in both directions", async () => {
+    // The column that is left is remounted, which destroys the row the reader
+    // just activated: without this, keyboard navigation of the sidebar — the one
+    // the column's `aria-label`, `aria-current` and `inert` are all for — ends on
+    // <body>, at the top of the page. Asserted through `row`/`liveColumn`, which
+    // look only inside the pane that is not inert.
+    seedDirectory();
+    const host = await openApp(`/${SEGMENT}`);
+
+    click(row(host, "Workspace settings"));
+    expect(document.activeElement).toBe(
+      liveColumn(host).querySelector(".ub-back-entry"),
+    );
+
+    click(liveColumn(host).querySelector(".ub-back-entry"));
+    expect(document.activeElement).toBe(row(host, "Workspace settings"));
+  });
+
+  it("mounts no second column where nothing slides", async () => {
+    // Reduced motion turns the transition off (styles.css), so there is nothing
+    // for the outgoing column to stay alive for — and two document lists in the
+    // DOM for 180ms is two of them to a screen reader, bought with no animation.
+    seedDirectory();
+    const host = await openApp(`/${SEGMENT}`);
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("prefers-reduced-motion"),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+
+    click(row(host, "Workspace settings"));
+    expect(reachable(panes(host)[0] as HTMLElement)).toHaveLength(0);
+  });
 });
 
 describe("the General page reads state this client already holds", () => {
@@ -339,17 +376,11 @@ describe("the General page reads state this client already holds", () => {
     expect(shown["MCP connections"]).toBe("0");
     // jsdom has no Storage API, and a browser that will not estimate gets an
     // omitted row rather than a zero nobody can vouch for.
-    expect(shown["Local cache"]).toBeUndefined();
-  });
-
-  it("says nothing about a corpus this replica has not read yet", async () => {
-    // Codex round 1: the count was a definite number from the moment the page
-    // drew, so an address whose directory had not been read yet — a cold pasted
-    // link — claimed `0` documents. The room here demonstrably holds two, and
-    // the honest answer is still that nobody has looked.
-    seedDirectory();
-    const host = await openApp(`/${SEGMENT}/settings`);
-    expect(facts(host).Documents).toBe("—");
+    // By prefix, so the row's absence is what is asserted rather than the scope
+    // its label names.
+    expect(Object.keys(shown).some((label) => label.startsWith("Local cache"))).toBe(
+      false,
+    );
   });
 
   it("never counts another workspace's corpus as this one's", async () => {
@@ -368,6 +399,18 @@ describe("the General page reads state this client already holds", () => {
         agentSessions={0}
       />,
     );
+    expect(facts(host).Documents).toBe("—");
+  });
+
+  // Deliberately after the foreign-room case, which reaches into a room's own
+  // status: the unread reading has to survive that, not merely precede it.
+  it("says nothing about a corpus this replica has not read yet", async () => {
+    // Codex round 1: the count was a definite number from the moment the page
+    // drew, so an address whose directory had not been read yet — a cold pasted
+    // link — claimed `0` documents. The room here demonstrably holds two, and
+    // the honest answer is still that nobody has looked.
+    seedDirectory();
+    const host = await openApp(`/${SEGMENT}/settings`);
     expect(facts(host).Documents).toBe("—");
   });
 

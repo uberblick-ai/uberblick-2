@@ -77,7 +77,8 @@ export function SettingsNav({
           a letter, which is the one thing that says this row goes back. Its own
           class, not the switcher's, so that nothing selecting the sidebar header
           finds two of them for the length of a slide. */}
-      <button type="button" className="ub-back-entry" onClick={onBack}>
+      {/* `data-swap-focus`: the row a mode swap hands focus to (App.tsx). */}
+      <button type="button" className="ub-back-entry" data-swap-focus onClick={onBack}>
         <span className="ub-identity-tile ub-workspace-tile" aria-hidden="true">
           <BackChevron />
         </span>
@@ -187,7 +188,12 @@ export function WorkspaceSettings({
           {/* Only under a refusal, like the sync panel's Reason row: there is no
               such sentence for the ordinary states. */}
           {reading.detail !== null && <Fact label="Reason" value={reading.detail} />}
-          {cache !== null && <Fact label="Local cache" value={formatBytes(cache)} />}
+          {/* The browser estimates per origin, not per workspace, and this page
+              is about one workspace — so the label says whose figure it is
+              rather than letting the row read as this corpus's. */}
+          {cache !== null && (
+            <Fact label="Local cache (all workspaces)" value={formatBytes(cache)} />
+          )}
           <Fact label="MCP connections" value={String(agentSessions)} />
         </dl>
       </div>
