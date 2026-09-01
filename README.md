@@ -359,14 +359,17 @@ credential, and a checkout is not a configuration layer — its tasks *consume*
 this machine's configuration through `ub env` rather than keeping a copy.
 
 One further variable is a test seam, not a configuration layer:
-`UB_TEST_MAX_WAIT_MS` caps the deadlines `ub` spends probing something remote —
-the hub connect and sync budgets, the port-owner and hub-clock probes — so a
-suite that spawns `ub` as a real process does not sit out budgets sized for a
-person on a tethered laptop. It is a ceiling, never a floor: unset or unusable
-it changes nothing, and it cannot lengthen any default. Being ordinary
-environment it reaches everything `ub` spawns, children included — the reason
-it is a variable and not an option. `packages/cli/src/budget.ts`'s header is
-the account of which deadlines it may cap and which it must not.
+`UB_TEST_MAX_WAIT_MS` caps four deadlines `ub` spends probing something
+remote — the hub connect and sync budgets, the port-owner and hub-clock
+probes — so a suite that spawns `ub` as a real process does not sit out
+budgets sized for a person on a tethered laptop. Those four are not every
+remote deadline `ub` owns, and no value of this variable shortens the others:
+`ub remote init`, for one, budgets a deployment's first answer at 90 s and
+gives each of its two HTTP probes 10 s. It is a ceiling, never a floor: unset
+or unusable it changes nothing, and it cannot lengthen any default. Being
+ordinary environment it reaches everything `ub` spawns, children included —
+the reason it is a variable and not an option. `packages/cli/src/budget.ts`'s
+header is the account of which deadlines it may cap and which it must not.
 
 ### Where your files live
 

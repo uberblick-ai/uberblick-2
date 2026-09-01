@@ -78,24 +78,29 @@ describe("the init lock", () => {
     // this wait through it made `ub open` give up on a lock a test was still
     // legitimately holding, and the spawned case that caught it only fails
     // about half the time, because it needs the waiter to arrive early enough
-    // in the holder's 500 ms. Here the margins are the test's own: both maps a
-    // regression could read carry a ceiling far under `WAIT_TIMEOUT_MS`, and
-    // the holder outlives both by 200 ms.
-    vi.stubEnv("UB_TEST_MAX_WAIT_MS", "50");
+    // in the holder's 500 ms. Here every margin is the test's own: both maps a
+    // regression could read carry `CEILING_MS`, and the holder outlives it by
+    // 200 ms while staying far under `init-lock.ts`'s own 2 s wait. Reading
+    // the suite ceiling out of the sandbox instead would couple the hold to
+    // `helpers.ts`: raise that value past ~1 800 and this case fails wearing
+    // #524's own lock-timeout message, pointing the next reader at a defect
+    // that is not there.
+    const CEILING_MS = 50;
+    vi.stubEnv("UB_TEST_MAX_WAIT_MS", String(CEILING_MS));
     try {
-      const box = sandbox(); // whose own env carries the suite's 400 ms ceiling
-      const ceiling = Number(box.env.UB_TEST_MAX_WAIT_MS);
+      const box = sandbox();
+      box.env.UB_TEST_MAX_WAIT_MS = String(CEILING_MS);
       const holder = await acquireInitLock(box.env);
 
       const started = Date.now();
-      setTimeout(() => holder.release(), ceiling + 200);
+      setTimeout(() => holder.release(), CEILING_MS + 200);
       const waiter = await acquireInitLock(box.env);
       const waited = Date.now() - started;
       waiter.release();
 
       // Acquiring at all is the contract. Outlasting the ceiling is what keeps
       // the case honest — otherwise a lock that was never really held passes.
-      expect(waited).toBeGreaterThan(ceiling);
+      expect(waited).toBeGreaterThan(CEILING_MS);
     } finally {
       vi.unstubAllEnvs();
     }
