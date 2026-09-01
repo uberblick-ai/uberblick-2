@@ -160,6 +160,8 @@ export function BlockMenu({
   const card = useRef<HTMLDivElement | null>(null);
   /** The gutter menu's search field, when one is open — a composition surface. */
   const search = useRef<HTMLInputElement | null>(null);
+  /** The entries' scroll container: the palette is taller than its viewport. */
+  const listBox = useRef<HTMLDivElement | null>(null);
 
   /**
    * Which of the menu's two typing surfaces holds `target`, if either does. The
@@ -268,6 +270,38 @@ export function BlockMenu({
     [list],
   );
 
+  /**
+   * Bring the entry at `index` fully into the list's viewport, moving the list
+   * by the least it takes and moving nothing else.
+   *
+   * The arrow keys are the only caller. A pointer needs no help — the entry it
+   * highlights is the one it is already on — and scrolling under a resting hand
+   * would slide a different entry beneath it.
+   *
+   * Read straight off the DOM rather than from measured entry heights: the
+   * entries are separated by group headings, so their offsets are not a
+   * multiple of anything. Called before React re-renders, which is soon enough
+   * — the highlight is a background and a border colour, so nothing about to be
+   * painted moves the box being measured.
+   */
+  const reveal = useCallback((index: number): void => {
+    const box = listBox.current;
+    if (box === null) return;
+    const entry = box.querySelectorAll<HTMLElement>('[role="option"]')[index];
+    if (entry === undefined) return;
+    const view = box.getBoundingClientRect();
+    const rect = entry.getBoundingClientRect();
+    if (rect.top < view.top) box.scrollTop -= view.top - rect.top;
+    else if (rect.bottom > view.bottom) box.scrollTop += rect.bottom - view.bottom;
+  }, []);
+
+  // A closed menu keeps no highlight, so the next one opens on its first entry
+  // — which is the entry a list scrolled back to the top is showing. Remembering
+  // an index instead would reopen the menu highlighting something off screen.
+  useEffect(() => {
+    if (!open) setHighlight({ list: "", index: 0 });
+  }, [open]);
+
   const closeGutter = useCallback((): void => {
     setGutter(null);
     setGutterQuery("");
@@ -341,9 +375,11 @@ export function BlockMenu({
   const step = useCallback(
     (delta: number): void => {
       if (entries.length === 0) return;
-      highlightAt((active + delta + entries.length) % entries.length);
+      const next = (active + delta + entries.length) % entries.length;
+      highlightAt(next);
+      reveal(next);
     },
-    [entries.length, active, highlightAt],
+    [entries.length, active, highlightAt, reveal],
   );
 
   /** The keys the menu owns while it is open. Returns false for the rest. */
@@ -472,7 +508,18 @@ export function BlockMenu({
             // A listbox of buttons rather than a list of them: an `option` has
             // to be a child of its `listbox`, so a <ul>/<li> scaffold between
             // the two would break the role it is there to carry.
-            <div className="ub-blockmenu-list" role="listbox" aria-label="Block types">
+            //
+            // Keyed by the list it is showing, so a different query gets a
+            // different element: the highlight goes back to the first entry and
+            // a scroll offset that described the entries before it goes with
+            // it, rather than surviving into a list they are not in.
+            <div
+              key={list}
+              className="ub-blockmenu-list"
+              role="listbox"
+              aria-label="Block types"
+              ref={listBox}
+            >
               {entries.map((entry, position) => (
                 <Fragment key={entry.id}>
                   {/* A heading before the first entry of each group. The

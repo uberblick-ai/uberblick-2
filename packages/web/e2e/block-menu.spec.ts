@@ -14,7 +14,10 @@
  *   onto their target, so only a stepped move asks the question;
  * - the three gestures end to end through the browser's own event plumbing —
  *   typed keys reaching ProseMirror, a click reaching the menu, and a markdown
- *   prefix reaching `handleTextInput`, which only a real keystroke does.
+ *   prefix reaching `handleTextInput`, which only a real keystroke does;
+ * - the arrow keys keeping the highlighted entry inside a list that is taller
+ *   than its viewport, which is a claim about a scroll container and the boxes
+ *   inside it — jsdom measures every one of them as zero.
  */
 
 import { expect, test } from "@playwright/test";
@@ -187,6 +190,168 @@ test("typing / on an empty block filters, and Enter converts it", async ({
 
   await page.keyboard.type("a heading", { delay: 15 });
   await expect(blocks(page).nth(1)).toHaveText("a heading");
+});
+
+/** The list's viewport and every entry in it, measured in one pass. */
+async function listGeometry(page: Page) {
+  return page.locator(".ub-blockmenu-list").evaluate((box) => {
+    const view = box.getBoundingClientRect();
+    return {
+      scrollTop: box.scrollTop,
+      top: view.top,
+      bottom: view.bottom,
+      entries: Array.from(box.querySelectorAll('[role="option"]')).map((option) => {
+        const rect = option.getBoundingClientRect();
+        return {
+          label: option.textContent ?? "",
+          top: rect.top,
+          bottom: rect.bottom,
+          selected: option.getAttribute("aria-selected") === "true",
+        };
+      }),
+    };
+  });
+}
+
+type Geometry = Awaited<ReturnType<typeof listGeometry>>;
+
+/** The highlighted entry, whole and inside the list's viewport. */
+function visibleSelection(geometry: Geometry): string {
+  const entry = geometry.entries.find((candidate) => candidate.selected);
+  if (entry === undefined) throw new Error("e2e: no entry is highlighted");
+  // A pixel of slack: scroll offsets are subpixel, and so is the arithmetic
+  // that produced them.
+  expect(entry.top).toBeGreaterThanOrEqual(geometry.top - 1);
+  expect(entry.bottom).toBeLessThanOrEqual(geometry.bottom + 1);
+  return entry.label;
+}
+
+/**
+ * Arrow keys through a list too long to show at once.
+ *
+ * The bug this pins: the highlight moved to an entry below the fold and the
+ * list stayed where it was, so the reader could no longer see what Enter would
+ * choose. What makes it a browser test is that every term in it — the
+ * viewport, the entry boxes, the scroll offset — exists only where there is
+ * layout.
+ */
+test("arrow keys keep the highlighted block type in view, and move nothing else", async ({
+  page,
+}) => {
+  await openDoc(page, "first");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("/", { delay: 15 });
+
+  const start = await listGeometry(page);
+  // The premise: the palette really is taller than the box it is shown in.
+  // Without this the rest of the test would pass on a list that never scrolls.
+  expect(start.entries[start.entries.length - 1]?.bottom).toBeGreaterThan(start.bottom);
+  expect(start.scrollTop).toBe(0);
+
+  const card = page.locator(".ub-blockmenu");
+  const cardBefore = await card.boundingBox();
+  const proseBefore = await blocks(page).first().boundingBox();
+  const focusBefore = await page.evaluate(() => document.activeElement?.className ?? "");
+  const shown = start.entries.filter((entry) => entry.bottom <= start.bottom + 1).length;
+
+  // Down to the last entry that was already visible: nothing needed revealing,
+  // so nothing scrolled.
+  for (let step = 1; step < shown; step += 1) await page.keyboard.press("ArrowDown");
+  const atFold = await listGeometry(page);
+  expect(atFold.scrollTop).toBe(0);
+  expect(visibleSelection(atFold)).toBe(start.entries[shown - 1]?.label);
+
+  // One more, onto the first entry below the fold. The list moves by exactly
+  // what that entry needed and no further: its bottom edge lands on the
+  // viewport's.
+  await page.keyboard.press("ArrowDown");
+  const revealed = await listGeometry(page);
+  const entry = revealed.entries.find((candidate) => candidate.selected);
+  expect(visibleSelection(revealed)).toBe(start.entries[shown]?.label);
+  expect(entry?.bottom).toBeCloseTo(revealed.bottom, 0);
+
+  // On to the end, then past it: Down from the last entry wraps to the first,
+  // which is now above the viewport, and Up from there wraps back.
+  const remaining = start.entries.length - 1 - shown;
+  for (let step = 0; step < remaining; step += 1) await page.keyboard.press("ArrowDown");
+  const last = await listGeometry(page);
+  expect(visibleSelection(last)).toBe(start.entries[start.entries.length - 1]?.label);
+
+  await page.keyboard.press("ArrowDown");
+  const wrapped = await listGeometry(page);
+  expect(visibleSelection(wrapped)).toBe(start.entries[0]?.label);
+
+  await page.keyboard.press("ArrowUp");
+  const back = await listGeometry(page);
+  expect(visibleSelection(back)).toBe(start.entries[start.entries.length - 1]?.label);
+
+  // Revealing an entry moves the list and nothing else: the menu keeps its
+  // place at the caret, the prose under it has not moved, and the keys are
+  // still the editor's.
+  expect(await card.boundingBox()).toEqual(cardBefore);
+  expect(await blocks(page).first().boundingBox()).toEqual(proseBefore);
+  expect(await page.evaluate(() => document.activeElement?.className ?? "")).toBe(
+    focusBefore,
+  );
+
+  // And a menu opened again starts at the top, rather than wearing the scroll
+  // the last one ended on.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".ub-blockmenu")).toHaveCount(0);
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type("/", { delay: 15 });
+  const reopened = await listGeometry(page);
+  expect(reopened.scrollTop).toBe(0);
+  expect(visibleSelection(reopened)).toBe(start.entries[0]?.label);
+});
+
+/**
+ * The same list, reached the other way. The gutter menu keeps the keys in its
+ * search field rather than in the prose, and it is the one that can be filtered
+ * down to a different list under the same open menu.
+ */
+test("the gutter menu reveals with the keyboard, and scrolls for no pointer", async ({
+  page,
+}) => {
+  await openDoc(page, "first");
+  await blocks(page).first().hover();
+  await page.locator(".ub-gutter-add").click();
+
+  const start = await listGeometry(page);
+  const search = page.locator(".ub-blockmenu-search");
+  await expect(search).toBeFocused();
+
+  for (let step = 1; step < start.entries.length; step += 1) {
+    await page.keyboard.press("ArrowDown");
+  }
+  const last = await listGeometry(page);
+  expect(visibleSelection(last)).toBe(start.entries[start.entries.length - 1]?.label);
+  expect(last.scrollTop).toBeGreaterThan(0);
+  // The list scrolled; the caret in the search field did not go with it.
+  await expect(search).toBeFocused();
+
+  // The pointer highlights what it is already on, so it never scrolls — a list
+  // that moved under a resting hand would put a different entry beneath it.
+  // The entry at the top edge is the one a naive reveal would jump to, and the
+  // one the scroll above is most likely to have left half shown.
+  const edge = last.entries.find((entry) => entry.bottom > last.top + 1);
+  const box = await page.locator(".ub-blockmenu-list").boundingBox();
+  if (edge === undefined || box === null) throw new Error("e2e: nothing to hover");
+  await page.mouse.move(
+    box.x + box.width / 2,
+    (Math.max(edge.top, last.top) + Math.min(edge.bottom, last.bottom)) / 2,
+  );
+  const hovered = await listGeometry(page);
+  expect(hovered.scrollTop).toBe(last.scrollTop);
+  expect(hovered.entries.find((entry) => entry.selected)?.label).toBe(edge.label);
+
+  // Filtering makes a different list, so the highlight goes back to its first
+  // entry — and the scroll position from the list before it goes with it.
+  await search.fill("he");
+  const filtered = await listGeometry(page);
+  expect(filtered.entries).toHaveLength(3);
+  expect(filtered.scrollTop).toBe(0);
+  expect(visibleSelection(filtered)).toBe(filtered.entries[0]?.label);
 });
 
 /**
