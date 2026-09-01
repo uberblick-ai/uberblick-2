@@ -170,6 +170,25 @@
 
   --brand: light-dark(oklch(0.75 0.15 65), oklch(0.8 0.18 65));
   --brand-subtle: light-dark(oklch(0.95 0.03 65), oklch(0.25 0.04 65));
+
+  /* The brand *as text* — the one value every functional brand ink reads (#569).
+     `--brand` above stays the accent it always was: borders, outlines, fills,
+     `--brand-subtle`, and the wordmark, which WCAG's logotype exception covers.
+
+     Two values in light rather than one, by owner decision (2026-08-31, option
+     C): the amber reaches 1.65:1 on `--sidebar-accent` and 2.04–2.30:1 on every
+     other light ground, so text painted in it is not readable — and darkening
+     `--brand` itself to fix that would repaint every brand stroke in the app a
+     brown. Dark never had the problem (7.2–10.2:1), so its half is the accent's
+     own value; only light needs a second one.
+
+     `oklch(0.48 0.1 65)` is the accent's hue at the lightness AA allows:
+     4.82:1 on `--sidebar-accent`, the tightest ground in the app, rising to
+     6.71:1 on the page's white. One rung lighter (0.49) leaves 4.61:1, which is
+     the floor with nothing in hand; chroma comes down with the lightness
+     because sRGB does not hold 0.15 this dark. */
+  --brand-ink: light-dark(oklch(0.48 0.1 65), oklch(0.8 0.18 65));
+
   /* Ink on a `--brand` fill (#482, the workspace tile). Theme-invariant for the
      same reason as `--cursor-label-foreground` below: `--brand` is a light
      amber in *both* appearances, so the ink on it is dark in both, and a
@@ -508,7 +527,7 @@ body {
 }
 
 .ub-pin-toggle[aria-pressed="true"] {
-  color: var(--brand);
+  color: var(--brand-ink);
   border-color: var(--border);
 }
 
@@ -963,7 +982,7 @@ body {
 }
 
 .ub-menu-current {
-  color: var(--brand);
+  color: var(--brand-ink);
 }
 
 /* The user panel: three stacked sections, each a label over its controls. */
@@ -1908,12 +1927,13 @@ body {
   color: var(--muted-foreground);
 }
 
-/* Outlined, in the brand amber: what kind of document this is, said once. */
+/* Outlined in the brand amber, lettered in the brand's ink: what kind of
+   document this is, said once. */
 .ub-badge {
   border: 1px solid var(--brand);
   border-radius: 999px;
   padding: 0.05rem 0.5rem;
-  color: var(--brand);
+  color: var(--brand-ink);
 }
 
 /* The document's tags, in the row's flexible middle (#122). The scroll is the
@@ -2425,7 +2445,7 @@ h3.ub-heading {
 }
 
 .ub-link {
-  color: var(--brand);
+  color: var(--brand-ink);
   text-decoration: underline;
   text-underline-offset: 0.15em;
 }
@@ -2433,7 +2453,7 @@ h3.ub-heading {
 /* An inline reference to another document. Dotted where an external link is
    solid, so the two read apart at a glance (#444). */
 .ub-doclink {
-  color: var(--brand);
+  color: var(--brand-ink);
   text-decoration: underline dotted;
   text-underline-offset: 0.15em;
   cursor: pointer;

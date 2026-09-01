@@ -28,6 +28,10 @@
  *   wish; only an engine that fetched the woff2 and put it in `document.fonts`
  *   says the title is set in the face the app ships rather than in the serif
  *   behind it (#536).
+ * - **The brand's ink is one value, and readable.** Five rules across three
+ *   surfaces are meant to resolve to the same colour and clear AA on every
+ *   ground they land on; only an engine that ran the cascade can say whether
+ *   they did (#569).
  * - **A surface is measured, not a selector list.** The sidebar's interior is
  *   held to its own strokes and to WCAG AA by walking what the column and its
  *   two menus actually paint — which needs a cascade, a `light-dark()` and a
@@ -529,12 +533,6 @@ type Reading = {
   kind: "text" | "stroke";
   colour: string;
   ground: string;
-  /**
-   * Inside the current workspace's row — the one text this surface may paint in
-   * the accent, and only until #569 answers for it. Carried on texts, which are
-   * the only readings that exemption applies to.
-   */
-  current?: boolean;
 };
 
 /**
@@ -614,7 +612,6 @@ function surface(page: Page, root: string): Promise<Reading[]> {
           kind: "text",
           colour: style.color,
           ground: groundOf(element),
-          current: element.closest(".ub-menu-current") !== null,
         });
       }
 
@@ -687,28 +684,18 @@ function surface(page: Page, root: string): Promise<Reading[]> {
  *   closest call in the change unmeasured while everything else passes.
  *
  * Chroma is what separates an accent from the surface: every neutral this column
- * paints sits at or under 0.015, and both accents — `--brand` and the 28% edge
- * derived from it — at 0.15 or above. The two populations are a tenfold apart,
- * and the threshold below sits about three times clear of each of them, so it is
- * a gap rather than a number picked to make something pass. What it buys differs
- * by kind, and the difference is #515's:
+ * paints sits at or under 0.015, and the 28% brand edge at 0.15. The two
+ * populations are a tenfold apart, and the threshold below sits about three
+ * times clear of each of them, so it is a gap rather than a number picked to
+ * make something pass. It buys a stroke exactly what #515's criterion says —
+ * "a stroke carrying its own meaning (`--brand`, a focus ring)" is excluded.
+ * Meaning, not a named token: a list of accent rules would be the selector list
+ * this test exists not to be.
  *
- * - **A stroke above it is excluded, and the criterion says so** — "a stroke
- *   carrying its own meaning (`--brand`, a focus ring)". Meaning, not a named
- *   token: a list of accent rules would be the selector list this test exists
- *   not to be.
- * - **Ink has no such exclusion, so chroma alone must not let a text through.**
- *   A chromatic text has to *be* the accent, compared against what the wordmark
- *   is painted, *and* be the one text that is allowed to be: `.ub-menu-current`,
- *   the current workspace's row, at 1.93:1 in light. Naming it is the opposite
- *   of the selector list this test exists not to be — a coverage list fails open
- *   and omits silently, an exception list fails closed, so a second brand-inked
- *   text fails here instead of inheriting the carve-out, and the carve-out ends
- *   with the decision rather than outliving it. What reserves that one text is
- *   not #515: the reading is a property of `--brand` rather than of this surface
- *   (2.04 to 2.30:1 against every other light ground in the app), and a
- *   sidebar-private brand ink is what #569's own criterion forbids — open,
- *   `needs-decision`, unanswered.
+ * Ink has no such exclusion, and since #569 no text has one either. The one text
+ * that used to be let through — `.ub-menu-current`, the current workspace's row,
+ * at 1.93:1 in light — now reads `--brand-ink`, so it is measured like every
+ * other text on the surface and the carve-out is gone rather than inherited.
  */
 const accentChroma = 0.05;
 
@@ -729,11 +716,6 @@ for (const scheme of ["light", "dark"] as const) {
     // 0.040, so light holds that absolutely too. Dark's floor is relative by the
     // criterion's own construction and has no such number.
     if (scheme === "light") expect(floor).toBeGreaterThanOrEqual(0.04);
-
-    // And the accent as this page paints it, read off the wordmark — the app's
-    // other `--brand` ink, so this is the same property resolved by the same
-    // engine. It names the one text the loop below may let through.
-    const accent = await painted(page, ".ub-brand", "color");
 
     // A group, so the header's rule, its count pill and the two quiet actions
     // are on screen. "+ group" makes one and opens its rename field, so the
@@ -771,19 +753,16 @@ for (const scheme of ["light", "dark"] as const) {
       `no text measured on ${highlight}`,
     ).not.toHaveLength(0);
 
-    for (const { where, kind, colour, ground: under, current } of readings) {
+    for (const { where, kind, colour, ground: under } of readings) {
       const ink = oklab(colour);
       const seen = `${where} — ${colour} on ${under}`;
-      if (ink.chroma > accentChroma) {
-        if (kind === "text") {
-          expect(colour, seen).toBe(accent);
-          expect(current, seen).toBe(true);
-        }
-        continue;
-      }
       if (kind === "text") {
         expect(contrast(colour, under), seen).toBeGreaterThanOrEqual(4.5);
-      } else if (scheme === "dark") {
+        continue;
+      }
+      // A stroke above the threshold is the accent, which the criterion excludes.
+      if (ink.chroma > accentChroma) continue;
+      if (scheme === "dark") {
         expect(contrast(colour, under), seen).toBeGreaterThanOrEqual(floor);
       } else {
         // A separation is between two opaque colours. Light has no translucent
@@ -793,6 +772,142 @@ for (const scheme of ["light", "dark"] as const) {
         expect(separation(colour, under), seen).toBeGreaterThanOrEqual(floor);
       }
     }
+  });
+}
+
+/**
+ * Every ground one text is read against: the nearest ancestor that paints an
+ * opaque colour, the way `surface()` above finds one — or, where nothing over
+ * the page does, `--page-ground`'s own stops, because the page's ground is a
+ * gradient rather than a colour and a text on it is read against all of it.
+ *
+ * Derived rather than named, for the reason the walk exists: a link that lands
+ * inside an annotated range or an inline-code span has a ground its rule never
+ * mentions, and a list of expected grounds would keep passing after that ground
+ * moved.
+ */
+async function groundsUnder(page: Page, locator: Locator): Promise<string[]> {
+  const over = await locator.evaluate((element) => {
+    const opaque = (colour: string): boolean => {
+      const rgba = /^rgba?\(([^)]*)\)$/.exec(colour);
+      if (rgba !== null) {
+        const parts = (rgba[1] ?? "").split(",");
+        return parts.length !== 4 || Number(parts[3]) === 1;
+      }
+      const slashed = /\/\s*(\d*\.?\d+)\s*\)$/.exec(colour);
+      return slashed === null || Number(slashed[1]) === 1;
+    };
+    for (let node: Element | null = element; node !== null; node = node.parentElement) {
+      const colour = getComputedStyle(node).backgroundColor;
+      if (opaque(colour)) return colour;
+    }
+    return null;
+  });
+  if (over !== null) return [over];
+  // The stops are the only parenthesised colours in the value — `at 0% 0%`
+  // carries none — so matching them is the whole parse.
+  const stops = (await painted(page, "body", "background-image")).match(
+    /(?:rgba?|oklch)\([^)]*\)/g,
+  );
+  // A serialization this cannot read must fail here rather than pass as "no
+  // ground to check".
+  if (stops === null) throw new Error("no ground under this text");
+  return stops;
+}
+
+/**
+ * One brand ink, wherever the brand is text (#569).
+ *
+ * The walk above measures `.ub-menu-current` on `--sidebar` and on
+ * `--sidebar-accent`. It cannot see the other four functional consumers: they
+ * live on the document page. So this reads all five as the browser paints them,
+ * holds each to AA on the grounds it actually sits on, and asserts they are
+ * *one* value — no surface owning a private copy is the criterion, and five
+ * rules reading five near-identical ambers would pass every contrast assertion
+ * here while failing it.
+ *
+ * A link is read twice, because a document link is reachable on two very
+ * different grounds: on the page's gradient, and inside an annotated range,
+ * where `.ub-comment` paints `--brand-subtle` under it. Both are derived from
+ * the rendered element rather than named here.
+ *
+ * The wordmark is read with them as the named logotype exception: it stays the
+ * accent, which in light is a different colour from the ink — the two-value cost
+ * of keeping the amber for everything that is not text.
+ */
+for (const scheme of ["light", "dark"] as const) {
+  test(`the brand's functional ink is one readable value — ${scheme}`, async ({
+    browser,
+  }) => {
+    const page = await openApp(browser, scheme);
+
+    // A document carrying the four consumers outside the sidebar. It needs a
+    // title before the header offers Pin at all, and a canonical group tag
+    // before there is a badge to letter.
+    await page.getByRole("button", { name: "+ new doc" }).click();
+    await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+    const uuid = new URL(page.url()).pathname.split("/")[2] ?? "";
+    await page.locator(".ub-title").fill(`brand ink ${scheme}`);
+    await page.getByLabel("Add a tag").fill("feature");
+    await page.getByLabel("Add a tag").press("Enter");
+    await expect(page.locator(".ub-badge")).toBeVisible();
+
+    // Two links in one paragraph, and a thread over the second of them: the
+    // external link stays on the page's own ground, the reference ends up on
+    // `--brand-subtle`, and neither ground is named below.
+    const label = "reference";
+    await page.locator(".ub-editor .ProseMirror").click();
+    await page.keyboard.type(`[a page](https://example.com/) and [${label}](${uuid})`);
+    const reference = page.locator(".ub-editor a.ub-doclink");
+    // An unresolved reference is painted `--muted-foreground` instead, so the
+    // resolved state is what makes this a reading of the brand ink at all.
+    await expect(reference).toHaveAttribute("data-doc-link-state", "resolved");
+    // Back over the reference's own label, which the caret is sitting after —
+    // Home would take the external link with it and leave nothing on the page's
+    // ground.
+    for (let back = 0; back < label.length; back += 1) {
+      await page.keyboard.press("Shift+ArrowLeft");
+    }
+    await page.locator(".ub-composer-open").click();
+    await page.keyboard.type("a thread", { delay: 15 });
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".ub-editor .ub-comment a.ub-doclink")).toBeVisible();
+
+    await page.locator(".ub-pin-toggle").click();
+    await expect(page.locator(".ub-pin-toggle")).toHaveAttribute("aria-pressed", "true");
+
+    const consumers: Array<[string, Locator]> = [
+      [".ub-badge", page.locator(".ub-badge")],
+      [".ub-link", page.locator(".ub-editor a.ub-link")],
+      [".ub-doclink, annotated", reference],
+      [".ub-pin-toggle", page.locator(".ub-pin-toggle")],
+    ];
+
+    // And the fifth rule, in the switcher the walk above opens for its own
+    // reasons.
+    await page.locator(".ub-workspace").click();
+    await expect(page.locator("[data-slot=dropdown-menu-content]")).toBeVisible();
+    consumers.push([".ub-menu-current", page.locator(".ub-menu-current")]);
+
+    const inks = new Set<string>();
+    for (const [where, locator] of consumers) {
+      const ink = await paintedIn(locator, "color");
+      inks.add(ink);
+      for (const ground of await groundsUnder(page, locator)) {
+        expect(
+          contrast(ink, ground),
+          `${where} — ${ink} on ${ground}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+    expect([...inks], "the functional brand ink is one value").toHaveLength(1);
+
+    // The badge is where both halves of the decision are painted at once: its
+    // outline is the accent and its letters are the ink, and the wordmark is
+    // still that same accent.
+    const accent = await paintedIn(page.locator(".ub-badge"), "border-top-color");
+    expect(await painted(page, ".ub-brand", "color")).toBe(accent);
+    if (scheme === "light") expect([...inks][0]).not.toBe(accent);
   });
 }
 
