@@ -34,9 +34,10 @@ with this run's launching session. A Claude Agent child shares the launcher's
 authorship identity. If that session launched an implementer whose commit is in
 the current head, skip the PR; a fresh integrator run id or child context is not
 independence. Do only this eligibility proof before the race; run no gate and
-write no candidate analysis. Record the launcher session, the distinct head
-session trailers and one lineage link in the claim so a delegated reviewer can
-validate them without rediscovering the lineage.
+write no candidate analysis. Record the launcher session, authorship result and
+one lineage link in the claim; link the evidence and narrate only material
+ambiguity so a delegated reviewer can validate it without rediscovering the
+lineage.
 
 ## Outcome
 
@@ -98,7 +99,9 @@ post-merge pass result. Keep the record proportional: link gate and reviewer
 evidence instead of restating it; do not repeat queue exclusions; and state each
 finding once with severity, disposition, verification and only new rationale. A
 clean ruling should be brief; a parked ruling includes only enough detail to
-make its one batched fix-up implementable without rediscovery.
+make its one batched fix-up implementable without rediscovery. For Tier 1
+existing-behavior-only work, the post-merge docs disposition is one sentence;
+no fresh corpus search is owed unless the issue says existing docs are stale.
 
 After that durable outcome, post one concise
 self-assessment to [Implementation and integration run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/522),

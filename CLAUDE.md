@@ -70,26 +70,28 @@ reviews or merges a diff it authored.
    `main`.
 3. **PR.** Open a PR against `main` linked to the issue (`Closes #N`), with a
    body stating what changed and how it was verified.
-4. **Gates — all of them, before merge:**
+4. **Gates — all of them, before merge.** Effort follows semantic risk. Paths
+   and line counts are inspection signals, not automatic extra rounds; link
+   exact-head evidence instead of repeating it:
    - immutable Docker review green (`mise run review <head-sha>`),
      run from a trusted checkout of `origin/main`; worktree tests are useful
      during implementation but are not merge evidence because a shared
      checkout can change during review;
    - integrator validation against the issue's acceptance criteria;
-   - **two independent implementation challenges** wherever an outside read
-     earns its cost (owner decision, 2026-08-24, clarified 2026-08-30): first a
-     fresh Codex `implementation-reviewer` delegated by the implementer before
-     handoff, then a separate Opus `implementation-reviewer` delegated by the
-     integrator. Both actively hunt for counterexamples, missing failure paths,
-     incorrect assumptions, overengineering and overtesting; the integrator's
-     own gate work and Copilot do not substitute for either challenge. The pair
-     is required when the diff touches `packages/schema`,
-     `packages/mcp-server`, `packages/hub`, or `pnpm-lock.yaml`, when the PR
-     runs to several hundred lines or more, when it changes something genuinely
-     architectural, and whenever the implementer or integrator judges an
-     external review worthwhile. Only when none of those fire does the relaxation apply: a
-     trivial or UI/design-only diff — where the rounds would spend time and
-     tokens on nothing — merges on the remaining gates without the pair;
+   - **independent implementation challenge, proportionate to semantic risk.**
+     Two challenges are required when the diff changes schema meaning,
+     persistence, synchronization, concurrency, auth, runtime dependencies, or
+     decided architecture, or when the implementer or integrator names a
+     concrete unresolved risk warranting both perspectives: first a fresh Codex
+     `implementation-reviewer` delegated by the implementer, then a separate
+     Opus `implementation-reviewer` delegated by the integrator. One
+     implementer-owned Codex challenge is enough when an outside read is useful
+     but those boundaries do not fire. No challenge is required for test-only,
+     docs-only, or narrowly mechanical changes that preserve production
+     behavior when focused validation directly proves the contract. Every
+     challenge actively hunts for counterexamples, missing failure paths,
+     incorrect assumptions, overengineering and overtesting; integrator gate
+     work and Copilot do not substitute for a required challenge;
    - **zero unaddressed PR remarks** — immediately before merging, re-fetch
      the PR's reviews and comment threads (human and bot alike, including
      remarks that arrived after the other gates passed); merge only when
@@ -125,11 +127,15 @@ reviews or merges a diff it authored.
 
 ### Merge policy — the rules are the authority, not a session
 
-- **Tier 1 — self-merge.** `Touches ⊆ {repo}` and no new dependencies: the
-  integrator merges as soon as all gates are green.
-- **Tier 2 — self-merge with evidence.** All changes that meet neither tier 1
-  nor tier 3, including feature packages and backward-compatible additive
-  schema work: all gates green **plus** a merge-report comment on the PR —
+- **Tier 1 — existing behavior only.** No change to production behavior,
+  persisted state, public command or interface surface, dependencies, or
+  decided architecture. This includes focused tests, documentation corrections,
+  and mechanical maintenance that defend or describe an existing contract. The
+  integrator merges when the ordinary gates and acceptance criteria are green;
+  no merge report is owed.
+- **Tier 2 — self-merge with evidence.** Production-behavior changes that meet
+  neither tier 1 nor tier 3, including feature packages and backward-compatible
+  additive schema work: all gates green **plus** a merge-report comment on the PR —
   acceptance criteria checked off one by one, gate outcomes, any rejected
   review findings with reasons. The integrator audits post-merge while updating
   the product docs; audit findings become issues, not reverts, unless critical.

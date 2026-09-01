@@ -1,11 +1,12 @@
 # Review protocol — external rounds, and what happens once a review returns
 
 Read this whenever a PR has an external round to request or a finding to
-handle. When CLAUDE.md's outside-read trigger fires, the implementer owns the
-Codex challenge before handoff and the integrator owns a separate Opus
-challenge. These are two real adversarial reads, not two gate checks. The
-integrator owns authoritative dispositions and any risk-scoped final-head
-round. `integration.md` beside this file owns the gates' order and mechanics.
+handle. When CLAUDE.md requires the pair, the implementer owns the Codex
+challenge before handoff and the integrator owns the separate Opus challenge;
+when it requires one, the implementer owns that round. These are real
+adversarial reads, not gate checks. The integrator owns authoritative
+dispositions and any risk-scoped final-head round. `integration.md` beside this
+file owns the gates' order and mechanics.
 
 ## Requesting the round
 
