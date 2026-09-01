@@ -99,7 +99,8 @@ const STAMP_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" })
  * only checks `Number.isFinite`, and `new Date(1e308).toISOString()` throws.
  * An uncaught throw in a cell would blank the whole listing over one bad stub,
  * so an unusable stamp is treated exactly like a missing one: a dash in the
- * row, and last in the order.
+ * row, and last in *last-changed* order. Title order never asks — a row with no
+ * answer about its age still has a title, and sorts by it.
  */
 function usableStamp(at: number | undefined): number | undefined {
   if (at === undefined) return undefined;
@@ -115,7 +116,7 @@ function byTitle(a: DirectoryEntry, b: DirectoryEntry): number {
 /** The two orders the list offers, first the one it opens on. */
 const ORDERS = ["changed", "title"] as const;
 
-export type Order = (typeof ORDERS)[number];
+type Order = (typeof ORDERS)[number];
 
 const ORDER_LABELS: Record<Order, string> = {
   changed: "Last changed",
