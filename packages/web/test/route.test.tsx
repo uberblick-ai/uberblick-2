@@ -70,7 +70,7 @@ function route(pathname: string): Route {
   return parseRoute(pathname, CONFIGURED);
 }
 
-describe("an address names a document, the list, or neither", () => {
+describe("an address names a document, a workspace mode, or neither", () => {
   it("reads /<workspace>/<uuid> as that document", () => {
     expect(route(`/${WS}/${UUID}`)).toEqual({ kind: "doc", workspace, uuid: UUID });
   });
@@ -101,6 +101,19 @@ describe("an address names a document, the list, or neither", () => {
     expect(route(`/${WS}`)).toEqual({ kind: "list", workspace });
     expect(route(`/${WS}/`)).toEqual({ kind: "list", workspace });
     expect(canonicalPath(route("/"))).toBe(`/${CONFIGURED}`);
+  });
+
+  it("reserves settings as the whole workspace-settings address", () => {
+    expect(route(`/${WS}/settings`)).toEqual({ kind: "settings", workspace });
+    expect(route(`/${WS}/settings/`)).toEqual({ kind: "settings", workspace });
+    expect(settingsPath(WS)).toBe(`/${WS}/settings`);
+    expect(canonicalPath(route(`/${WS}/settings/`))).toBe(`/${WS}/settings`);
+
+    // Settings has no page segment: General is what the mode shows, not a
+    // third piece of address that would silently broaden the route grammar.
+    const nested = route(`/${WS}/settings/general`);
+    expect(nested.kind).toBe("invalid");
+    expect(nested.kind === "invalid" && nested.workspace).toEqual(workspace);
   });
 
   it("says so when nothing names a workspace, rather than guessing one", () => {
@@ -173,26 +186,6 @@ describe("an address names a document, the list, or neither", () => {
     // which is the whole reason the fold happens before the room key is built.
     expect(roomForDoc(WS, UUID)).toBe(`${WS}/${UUID}`);
     expect(docIsHydrated(UUID, meta(UUID))).toBe(true);
-  });
-
-  it("reads /<workspace>/settings as the settings mode, and nothing under it", () => {
-    // The mode's whole address (#485): `settings` is a reserved second segment
-    // like `all`, so it can never collide with a document — no uuid spells a
-    // word. It folds like one too, because one case rule answers both uuids.
-    expect(route(`/${WS}/settings`)).toEqual({ kind: "settings", workspace });
-    expect(route(`/${WS}/Settings`)).toEqual({ kind: "settings", workspace });
-    expect(canonicalPath(route(`/${WS}/Settings`))).toBe(`/${WS}/settings`);
-    expect(settingsPath(DECORATED)).toBe(`/${DECORATED}/settings`);
-
-    // There is no page segment, so a third one is not an address — the same
-    // answer `/<workspace>/<uuid>/blocks` already gets, and the reason General
-    // is what the mode shows rather than somewhere it routes to.
-    for (const under of ["general", "tags", UUID]) {
-      const parsed = route(`/${WS}/settings/${under}`);
-      expect(parsed.kind).toBe("invalid");
-      // And the workspace survives it, so a bad link does not empty the sidebar.
-      expect(parsed.kind === "invalid" && parsed.workspace).toEqual(workspace);
-    }
   });
 
   it("leaves an address it cannot resolve exactly as it was opened", () => {

@@ -178,12 +178,11 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(configured).toHaveAttribute("data-highlighted", /.*/);
     expect(await paintedIn(configured, "background-color")).not.toBe(ground);
 
-    // Management is on the menu and unavailable — not hidden. Making a
-    // workspace is still `ub init` on a machine; workspace settings have been a
-    // place to go since #485, so that item is live rather than shown-and-dead.
-    await expect(
-      menu.getByRole("menuitem", { name: "New workspace" }),
-    ).toHaveAttribute("aria-disabled", "true");
+    // Machine-owned creation stays unavailable; settings is now a route.
+    await expect(menu.getByRole("menuitem", { name: "New workspace" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
     await expect(
       menu.getByRole("menuitem", { name: "Workspace settings" }),
     ).not.toHaveAttribute("aria-disabled", "true");
@@ -200,6 +199,78 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(panel).toBeHidden();
   });
 }
+
+test("workspace settings is an address-selected, inert sidebar drill-in", async ({
+  browser,
+}) => {
+  const page = await openApp(browser, "light");
+  const workspacePath = `/${harness().workspace}`;
+  const settingsPath = `${workspacePath}/settings`;
+  const documents = page.locator(".ub-document-sidebar");
+  const settings = page.locator(".ub-settings-sidebar");
+
+  const settingsEntry = page.getByRole("button", {
+    name: "Workspace settings",
+    exact: true,
+  });
+  await settingsEntry.click();
+  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
+  const back = settings.getByRole("button", { name: /^Back to / });
+  await expect(back).toBeVisible();
+  await expect(back).toBeFocused();
+  expect(await paintedIn(settings, "transition-duration")).toContain("0.18s");
+  expect(
+    await documents.evaluate((pane) => ({
+      inert: (pane as HTMLElement).inert,
+      hidden: pane.getAttribute("aria-hidden"),
+      pointer: getComputedStyle(pane).pointerEvents,
+    })),
+  ).toEqual({ inert: true, hidden: "true", pointer: "none" });
+
+  // The route is the selection: browser Back restores the document sidebar.
+  await page.goBack();
+  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
+  await expect(settingsEntry).toBeFocused();
+
+  // Portalled controls sit outside the pane's inert subtree. Browser Forward
+  // changes the address without clicking underneath them, and the mode change
+  // must still take each outgoing surface and its focus away.
+  await page.locator(".ub-workspace").click();
+  const workspaceMenu = page.locator("[data-slot=dropdown-menu-content]");
+  await expect(workspaceMenu).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await expect(workspaceMenu).toBeHidden();
+  await expect(back).toBeFocused();
+  await page.goBack();
+  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+  await expect(settingsEntry).toBeFocused();
+
+  await page.locator(".ub-user-card").click();
+  const userPanel = page.locator("[data-slot=popover-content]");
+  await expect(userPanel).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await expect(userPanel).toBeHidden();
+  await expect(back).toBeFocused();
+  await page.goBack();
+  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+  await expect(settingsEntry).toBeFocused();
+
+  // The switcher's existing entry is the second front door, and Back in the
+  // settings pane always targets the workspace list rather than a remembered doc.
+  await page.locator(".ub-workspace").click();
+  await page.getByRole("menuitem", { name: "Workspace settings" }).click();
+  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await settings.getByRole("button", { name: /^Back to / }).click();
+  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+  expect(await paintedIn(settings, "transition-duration")).toBe("0s");
+});
 
 /**
  * A hover ground is an offer, and a disabled control has nothing to offer

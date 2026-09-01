@@ -8,8 +8,8 @@
  * be lied to about.
  *
  * - The switcher renders *configuration*, not accounts: the workspace it is in
- *   with a count that follows the directory, and management items that are
- *   present and disabled rather than quietly absent.
+ *   with a count that follows the directory, the settings destination enabled,
+ *   and machine-owned workspace creation present but disabled.
  * - Each end draws an identity tile (#482) carrying a first character, and the
  *   header's hover carries the whole segment the name truncates. Where the
  *   address names no workspace, neither the letter nor the count is invented.
@@ -131,19 +131,20 @@ describe("the workspace switcher renders configuration", () => {
     });
   }
 
-  /** What "Workspace settings" was chosen with, so a live item can be proved. */
-  let settingsOpened = 0;
-
-  function switcher(docs: number, current: Workspace | null = WORKSPACE): ReactElement {
+  function switcher(
+    docs: number,
+    current: Workspace | null = WORKSPACE,
+    onOpenSettings: () => void = () => {},
+    active = true,
+  ): ReactElement {
     return (
       <WorkspaceSwitcher
         workspaces={[WORKSPACE]}
         current={current}
         docs={docs}
         onSwitch={() => {}}
-        onOpenSettings={() => {
-          settingsOpened += 1;
-        }}
+        onOpenSettings={onOpenSettings}
+        active={active}
       />
     );
   }
@@ -194,42 +195,43 @@ describe("the workspace switcher renders configuration", () => {
     expect(trigger?.querySelector(".ub-workspace-name")?.textContent).toBe("no workspace");
     expect(trigger?.querySelector(".ub-workspace-name")?.hasAttribute("title")).toBe(false);
     expect(trigger?.querySelector(".ub-menu-caret")).not.toBe(null);
+    open(none);
+    const settings = panel("[data-slot=dropdown-menu-item]").find(
+      (item) => item.textContent === "Workspace settings",
+    );
+    expect(settings?.hasAttribute("data-disabled")).toBe(true);
     none.unmount();
   });
 
-  it("renders the workspace it cannot make disabled, and the settings it can open live", () => {
-    // A disabled item says "this exists and is not yours to do from here", which
-    // is the truth; an absent one says the idea does not exist. Making a
-    // workspace is still `ub init` on a machine, so that item stays disabled —
-    // and "Workspace settings" no longer is, because settings now exist as a
-    // place (#485). An item that looked live but went nowhere would be the one
-    // failure worse than a disabled one.
-    settingsOpened = 0;
+  it("closes its portalled menu when the document pane becomes inactive", () => {
     const view = mount(switcher(0));
+    open(view);
+    expect(panel("[data-slot=dropdown-menu-content]")).toHaveLength(1);
+
+    view.render(switcher(0, WORKSPACE, () => {}, false));
+    expect(panel("[data-slot=dropdown-menu-content]")).toHaveLength(0);
+
+    // Returning to the document pane must not revive the old open state.
+    view.render(switcher(0));
+    expect(panel("[data-slot=dropdown-menu-content]")).toHaveLength(0);
+    view.unmount();
+  });
+
+  it("keeps machine-owned creation disabled and opens workspace settings", () => {
+    const onOpenSettings = vi.fn();
+    const view = mount(switcher(0, WORKSPACE, onOpenSettings));
     open(view);
     const disabled = panel("[data-slot=dropdown-menu-item][data-disabled]").map(
       (item) => item.textContent,
     );
     expect(disabled).toEqual(["New workspace"]);
-
     const settings = panel("[data-slot=dropdown-menu-item]").find(
       (item) => item.textContent === "Workspace settings",
     );
+    expect(settings?.hasAttribute("data-disabled")).toBe(false);
     click(settings);
-    expect(settingsOpened).toBe(1);
+    expect(onOpenSettings).toHaveBeenCalledOnce();
     view.unmount();
-
-    // Except where the address names no workspace: there is nothing to have
-    // settings, so the item is unavailable rather than a command that would go
-    // nowhere (Codex round 1 on #650).
-    const none = mount(switcher(0, null));
-    open(none);
-    expect(
-      panel("[data-slot=dropdown-menu-item][data-disabled]").map(
-        (item) => item.textContent,
-      ),
-    ).toEqual(["New workspace", "Workspace settings"]);
-    none.unmount();
   });
 });
 
