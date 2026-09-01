@@ -23,9 +23,17 @@ set -eu
 checkout=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 deployed_ref=refs/uberblick/deployed
 
-# Outside the checkout, which this script rewrites underneath itself. The lock
-# is what keeps a by-hand run and an `ub remote update` from colliding. The fd
-# is held for the life of the script, so a run that is still building keeps it.
+# The lock is the checkout directory itself, because one checkout is exactly
+# what two runs must not rewrite and build at once. A path under
+# `$XDG_RUNTIME_DIR` excluded only runs that shared a session, so a sudoed
+# by-hand run and an `ub remote update` each took their own lock and both built
+# (#574); a path keyed to the host would tell the mirror-image lie, and two
+# independent checkouts would report "already running" having deployed nothing.
+# The directory outlives the `git reset --hard` below, which rewrites the files
+# under it and not the directory, and opening it for *reading* is enough to lock
+# it — so a run never needs to own a lock file some other user created first.
+# The fd is held for the life of the script, so a run that is still building
+# keeps it.
 #
 # Contention is told apart from a broken lock by a status nothing else answers
 # with. `-E` makes flock report "somebody else holds it" as 100, so 0 is ours,
@@ -35,9 +43,8 @@ deployed_ref=refs/uberblick/deployed
 # every failure that way (busybox) or does not understand `-E` at all. Reading
 # any of those as "already running" is how a host without flock reported an
 # update it never ran as a success, so they refuse, before anything is fetched.
-lock="${XDG_RUNTIME_DIR:-/tmp}/uberblick-update.lock"
 busy=100
-exec 9>"$lock"
+exec 9<"$checkout"
 lock_status=0
 flock -n -E "$busy" 9 || lock_status=$?
 if [ "$lock_status" -eq "$busy" ]; then
@@ -46,7 +53,7 @@ if [ "$lock_status" -eq "$busy" ]; then
 fi
 if [ "$lock_status" -ne 0 ]; then
   printf 'uberblick-update: cannot lock %s (flock exited %s); refusing to update.\n' \
-    "$lock" "$lock_status" >&2
+    "$checkout" "$lock_status" >&2
   exit 1
 fi
 
