@@ -22,7 +22,7 @@ import {
 } from "y-prosemirror";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
-import { WEB_CLIENT } from "../collab/identity.js";
+import { AGENT_CLIENT } from "../collab/identity.js";
 
 /**
  * How long a departed agent's caret stays on screen after its session left the
@@ -52,19 +52,22 @@ type AwarenessState = Record<string, unknown> & {
 };
 
 /**
- * Whether this state is an agent caret worth holding onto: a cursor, a name to
- * write beside it, and no claim to be a browser tab.
+ * Whether this state is an agent caret worth holding onto: the agent marker, a
+ * cursor, and a name to write beside it.
  *
  * The name is part of the test, not an afterthought: a caret retained without
  * one would draw a bare line over the prose saying nothing about who left it,
- * which is the opposite of what the grace period exists for. Browser tabs are
- * excluded because a reader who closes a tab is *gone*, and the person still
- * looking at the document knows it.
+ * which is the opposite of what the grace period exists for. The marker is
+ * required *positively* (#564): the grace exists for agents, and a session that
+ * merely omits `client` — a browser tab on a bundle from before #267, or any
+ * future non-agent client — is not one. Held on omission, a person who closed
+ * their tab kept a caret over the prose under their own name for the full
+ * grace, which is the opposite of the rule that a reader who leaves is *gone*.
  */
 function isAttributedAgentCursor(
   state: AwarenessState | undefined,
 ): state is AwarenessState {
-  if (state === undefined || state.client === WEB_CLIENT) return false;
+  if (state === undefined || state.client !== AGENT_CLIENT) return false;
   if (state.cursor === null || state.cursor === undefined) return false;
   const name = state.user?.name;
   return typeof name === "string" && name.trim() !== "";

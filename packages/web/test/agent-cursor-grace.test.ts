@@ -20,6 +20,7 @@ import {
 } from "y-protocols/awareness";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
+import { AGENT_CLIENT } from "../src/collab/identity.js";
 import {
   AGENT_CURSOR_GRACE_MS,
   withDepartedAgentCursors,
@@ -30,18 +31,29 @@ const AGENT_NAME = "Uberblick Coordinator Agent";
 let viewer: Awareness;
 let agent: Awareness;
 
-/** The agent publishes a cursor, and the viewer's room receives it. */
-function publishAgentCursor(head: number): void {
+/**
+ * A session publishes a cursor, and the viewer's room receives it.
+ *
+ * `client` is the whole question the grace asks, so it is a parameter: the
+ * agent marker is what production publishes, and `undefined` is the session
+ * that claims to be nothing — a tab on a bundle from before the marker.
+ */
+function publishCursor(head: number, client: string | undefined): void {
   agent.setLocalState({
     user: { name: AGENT_NAME, color: "#a33" },
     cursor: { anchor: head, head },
-    client: "mcp",
+    ...(client === undefined ? {} : { client }),
   });
   applyAwarenessUpdate(
     viewer,
     encodeAwarenessUpdate(agent, [agent.clientID]),
     "test",
   );
+}
+
+/** The production case: an MCP session, publishing the agent marker. */
+function publishAgentCursor(head: number): void {
+  publishCursor(head, AGENT_CLIENT);
 }
 
 /** The session exits: the room drops its state, as the hub's does. */
@@ -91,6 +103,20 @@ it("holds a departed agent's caret for the grace the editor wires, then drops it
   vi.advanceTimersByTime(1_001);
   expect(view.getStates().has(agent.clientID)).toBe(false);
   expect(changes.at(-1)?.removed).toEqual([agent.clientID]);
+});
+
+it("drops a departed session that never claimed to be an agent", () => {
+  const view = withDepartedAgentCursors(viewer, AGENT_CURSOR_GRACE_MS);
+  view.on("change", () => {});
+
+  // Everything the grace looks at except the marker: a name and a live cursor.
+  publishCursor(3, undefined);
+  expect(caretIn(view)).toEqual({ anchor: 3, head: 3 });
+
+  agentLeaves();
+
+  // The person closed the tab, so the caret goes with them — not in 30 seconds.
+  expect(view.getStates().has(agent.clientID)).toBe(false);
 });
 
 it("lets a returning session replace its own retained caret at once", () => {

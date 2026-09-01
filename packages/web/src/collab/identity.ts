@@ -18,8 +18,8 @@
  * a reader classifies on what a session claims rather than on what it omits.
  * The old absence test ("not a web client, therefore an agent") counted a
  * browser tab running a bundle from before the marker as an MCP connection for
- * as long as that tab stayed open. One reader still classifies on omission:
- * `editor/collaboration.ts`'s caret grace, until #564 lands.
+ * as long as that tab stayed open, and held a closed tab's caret over the prose
+ * for the whole of `editor/collaboration.ts`'s agent grace (#564).
  *
  * They live here, with the rest of the awareness identity, because the readers
  * that classify a peer are presentation code: routing them through `rooms.ts`
