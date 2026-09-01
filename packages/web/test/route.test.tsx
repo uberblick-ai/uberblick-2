@@ -43,6 +43,7 @@ import {
   docIsHydrated,
   docPath,
   parseRoute,
+  settingsPath,
   shareUrl,
   useRoutePath,
 } from "../src/ui/route.js";
@@ -69,7 +70,7 @@ function route(pathname: string): Route {
   return parseRoute(pathname, CONFIGURED);
 }
 
-describe("an address names a document, the list, or neither", () => {
+describe("an address names a document, a workspace mode, or neither", () => {
   it("reads /<workspace>/<uuid> as that document", () => {
     expect(route(`/${WS}/${UUID}`)).toEqual({ kind: "doc", workspace, uuid: UUID });
   });
@@ -100,6 +101,19 @@ describe("an address names a document, the list, or neither", () => {
     expect(route(`/${WS}`)).toEqual({ kind: "list", workspace });
     expect(route(`/${WS}/`)).toEqual({ kind: "list", workspace });
     expect(canonicalPath(route("/"))).toBe(`/${CONFIGURED}`);
+  });
+
+  it("reserves settings as the whole workspace-settings address", () => {
+    expect(route(`/${WS}/settings`)).toEqual({ kind: "settings", workspace });
+    expect(route(`/${WS}/settings/`)).toEqual({ kind: "settings", workspace });
+    expect(settingsPath(WS)).toBe(`/${WS}/settings`);
+    expect(canonicalPath(route(`/${WS}/settings/`))).toBe(`/${WS}/settings`);
+
+    // Settings has no page segment: General is what the mode shows, not a
+    // third piece of address that would silently broaden the route grammar.
+    const nested = route(`/${WS}/settings/general`);
+    expect(nested.kind).toBe("invalid");
+    expect(nested.kind === "invalid" && nested.workspace).toEqual(workspace);
   });
 
   it("says so when nothing names a workspace, rather than guessing one", () => {

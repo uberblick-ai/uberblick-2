@@ -8,8 +8,8 @@
  * be lied to about.
  *
  * - The switcher renders *configuration*, not accounts: the workspace it is in
- *   with a count that follows the directory, and management items that are
- *   present and disabled rather than quietly absent.
+ *   with a count that follows the directory, the settings destination enabled,
+ *   and machine-owned workspace creation present but disabled.
  * - Each end draws an identity tile (#482) carrying a first character, and the
  *   header's hover carries the whole segment the name truncates. Where the
  *   address names no workspace, neither the letter nor the count is invented.
@@ -131,13 +131,18 @@ describe("the workspace switcher renders configuration", () => {
     });
   }
 
-  function switcher(docs: number, current: Workspace | null = WORKSPACE): ReactElement {
+  function switcher(
+    docs: number,
+    current: Workspace | null = WORKSPACE,
+    onOpenSettings: () => void = () => {},
+  ): ReactElement {
     return (
       <WorkspaceSwitcher
         workspaces={[WORKSPACE]}
         current={current}
         docs={docs}
         onSwitch={() => {}}
+        onOpenSettings={onOpenSettings}
       />
     );
   }
@@ -191,15 +196,20 @@ describe("the workspace switcher renders configuration", () => {
     none.unmount();
   });
 
-  it("renders workspace management disabled rather than hiding it", () => {
-    // A disabled item says "this exists and is not yours to do from here", which
-    // is the truth; an absent one says the idea does not exist.
-    const view = mount(switcher(0));
+  it("keeps machine-owned creation disabled and opens workspace settings", () => {
+    const onOpenSettings = vi.fn();
+    const view = mount(switcher(0, WORKSPACE, onOpenSettings));
     open(view);
     const disabled = panel("[data-slot=dropdown-menu-item][data-disabled]").map(
       (item) => item.textContent,
     );
-    expect(disabled).toEqual(["New workspace", "Workspace settings"]);
+    expect(disabled).toEqual(["New workspace"]);
+    const settings = panel("[data-slot=dropdown-menu-item]").find(
+      (item) => item.textContent === "Workspace settings",
+    );
+    expect(settings?.hasAttribute("data-disabled")).toBe(false);
+    click(settings);
+    expect(onOpenSettings).toHaveBeenCalledOnce();
     view.unmount();
   });
 });

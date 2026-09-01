@@ -34,6 +34,7 @@ import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { SyncPanel } from "./SyncPanel.js";
 import { ThreadsPane } from "./ThreadsPane.js";
+import { WorkspaceSettings } from "./WorkspaceSettings.js";
 import { workspaceTags } from "./tags.js";
 import { focusThread } from "./threads.js";
 import type { SelectThread, ThreadFocus } from "./threads.js";
@@ -45,6 +46,7 @@ import {
   docPath,
   parseRoute,
   replicaHasAnswered,
+  settingsPath,
   useRoutePath,
   workspaceList,
 } from "./route.js";
@@ -251,6 +253,7 @@ export function App(): ReactElement {
   // and then there are no rooms to join at all.
   const workspace = route.kind === "no-workspace" ? null : route.workspace;
   const selected = route.kind === "doc" ? route.uuid : null;
+  const settings = route.kind === "settings";
   // Both addresses that name the workspace render the document list, so the
   // sidebar's entry for it is the current page at either one.
   const listing = route.kind === "all" || route.kind === "list";
@@ -523,6 +526,14 @@ export function App(): ReactElement {
     if (segment !== null) navigate(allPath(segment));
   }, [navigate, segment]);
 
+  /** Enter settings, or leave it for the workspace's fixed list address. */
+  const onOpenSettings = useCallback(() => {
+    if (segment !== null) navigate(settingsPath(segment));
+  }, [navigate, segment]);
+  const onBackToWorkspace = useCallback(() => {
+    if (segment !== null) navigate(`/${segment}`);
+  }, [navigate, segment]);
+
   /**
    * A create needs the new document's Y.Doc *before* React has mounted the
    * editor pane for it, so the handle is held here until `useRoom` has acquired
@@ -579,6 +590,14 @@ export function App(): ReactElement {
     return watchDocumentStub(doc.ydoc, directory.ydoc);
   }, [doc, directory]);
 
+  const sidebarToggleLabel = settings
+    ? collapsed
+      ? "Show sidebar"
+      : "Hide sidebar"
+    : collapsed
+      ? "Show document list"
+      : "Hide document list";
+
   return (
     <main className="ub-app">
       <header className="ub-header">
@@ -587,8 +606,8 @@ export function App(): ReactElement {
           type="button"
           className="ub-sidebar-toggle"
           aria-expanded={!collapsed}
-          aria-label={collapsed ? "Show document list" : "Hide document list"}
-          title={collapsed ? "Show document list" : "Hide document list"}
+          aria-label={sidebarToggleLabel}
+          title={sidebarToggleLabel}
           onClick={() => setCollapsed(!collapsed)}
         >
           {collapsed ? "»" : "«"}
@@ -633,17 +652,29 @@ export function App(): ReactElement {
             onSelect={onSelect}
             onCreate={onCreate}
             onOpenAll={onOpenAll}
+            onOpenSettings={onOpenSettings}
+            onBackToWorkspace={onBackToWorkspace}
             allOpen={listing}
+            settingsOpen={settings}
           />
         )}
-        {/* The corpus journey (#406): both addresses that name the workspace
+        {/* Workspace modes own the content pane directly. The corpus journey
+            (#406): both addresses that name the workspace
             rather than a document — `/<workspace>`, the first screen of a
             session, and `/<workspace>/all` — are the document list. It is the
             only pane that is about the workspace rather than about one
             document, so it takes the pane rather than passing four more props
             through `RoutePane`, which exists to say what a *document* address
             resolves to. */}
-        {listing ? (
+        {settings ? (
+          <WorkspaceSettings
+            workspace={route.workspace}
+            documents={entries.length}
+            endpoint={endpoint}
+            connection={directory}
+            agentSessions={agentSessions}
+          />
+        ) : listing ? (
           /* Keyed by the workspace, because everything the pane holds is
              about one corpus: a filter typed in workspace A would otherwise
              survive the switch and make workspace B's first screen look

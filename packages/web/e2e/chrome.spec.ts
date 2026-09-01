@@ -178,13 +178,14 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(configured).toHaveAttribute("data-highlighted", /.*/);
     expect(await paintedIn(configured, "background-color")).not.toBe(ground);
 
-    // Management is on the menu and unavailable — not hidden.
-    for (const name of ["New workspace", "Workspace settings"]) {
-      await expect(menu.getByRole("menuitem", { name })).toHaveAttribute(
-        "aria-disabled",
-        "true",
-      );
-    }
+    // Machine-owned creation stays unavailable; settings is now a route.
+    await expect(menu.getByRole("menuitem", { name: "New workspace" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    await expect(
+      menu.getByRole("menuitem", { name: "Workspace settings" }),
+    ).not.toHaveAttribute("aria-disabled", "true");
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
 
@@ -198,6 +199,46 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(panel).toBeHidden();
   });
 }
+
+test("workspace settings is an address-selected, inert sidebar drill-in", async ({
+  browser,
+}) => {
+  const page = await openApp(browser, "light");
+  const workspacePath = `/${harness().workspace}`;
+  const settingsPath = `${workspacePath}/settings`;
+  const documents = page.locator(".ub-document-sidebar");
+  const settings = page.locator(".ub-settings-sidebar");
+
+  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
+  await expect(settings.getByRole("button", { name: /^Back to / })).toBeVisible();
+  expect(await paintedIn(settings, "transition-duration")).toContain("0.18s");
+  expect(
+    await documents.evaluate((pane) => ({
+      inert: (pane as HTMLElement).inert,
+      hidden: pane.getAttribute("aria-hidden"),
+      pointer: getComputedStyle(pane).pointerEvents,
+    })),
+  ).toEqual({ inert: true, hidden: "true", pointer: "none" });
+
+  // The route is the selection: browser Back restores the document sidebar.
+  await page.goBack();
+  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
+
+  // The switcher's existing entry is the second front door, and Back in the
+  // settings pane always targets the workspace list rather than a remembered doc.
+  await page.locator(".ub-workspace").click();
+  await page.getByRole("menuitem", { name: "Workspace settings" }).click();
+  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await settings.getByRole("button", { name: /^Back to / }).click();
+  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+
+  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await paintedIn(settings, "transition-duration")).toBe("0s");
+});
 
 /**
  * A hover ground is an offer, and a disabled control has nothing to offer

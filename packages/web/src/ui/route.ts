@@ -15,9 +15,10 @@
  * typed: the slug is display, so nothing here rewrites somebody's spelling of
  * their own workspace. Only {@link Workspace.uuid} reaches a room key.
  *
- * Hand-rolled on purpose (#68). There are three routes — the workspace, one
- * document, and the whole corpus listed (`/<workspace>/all`, #118); a router
- * library would be a new runtime dependency buying nothing but indirection.
+ * Hand-rolled on purpose (#68). There are four routes — the workspace, one
+ * document, the whole corpus listed (`/<workspace>/all`, #118), and workspace
+ * settings (`/<workspace>/settings`); a router library would be a new runtime
+ * dependency buying nothing but indirection.
  *
  * The address bar is the selection. Nothing else stores "which document is
  * open": the sidebar navigates, Back navigates, a pasted link navigates, and
@@ -57,6 +58,7 @@ export type Route =
   | { kind: "no-workspace"; reason: "invalid"; configured: string }
   | { kind: "list"; workspace: Workspace }
   | { kind: "all"; workspace: Workspace }
+  | { kind: "settings"; workspace: Workspace }
   | { kind: "doc"; workspace: Workspace; uuid: string }
   | { kind: "invalid"; reason: string; workspace: Workspace | null };
 
@@ -68,6 +70,9 @@ export type Route =
  * derived, so the listing has an address to be linked to and returned to.
  */
 export const ALL_SEGMENT = "all";
+
+/** The workspace-settings mode. It has no page segment of its own. */
+export const SETTINGS_SEGMENT = "settings";
 
 /**
  * Canonical UUID shape — lowercase, and a *shape* check only.
@@ -176,6 +181,7 @@ export function parseRoute(pathname: string, configured: string | null): Route {
   // screen.
   const canonical = second.toLowerCase();
   if (canonical === ALL_SEGMENT) return { kind: "all", workspace };
+  if (canonical === SETTINGS_SEGMENT) return { kind: "settings", workspace };
   if (!UUID.test(canonical)) {
     return {
       kind: "invalid",
@@ -235,6 +241,11 @@ export function allPath(segment: string): string {
   return `/${segment}/${ALL_SEGMENT}`;
 }
 
+/** The path of the workspace's settings mode. */
+export function settingsPath(segment: string): string {
+  return `/${segment}/${SETTINGS_SEGMENT}`;
+}
+
 /**
  * The address `route` should be shown at, or `null` to leave the URL alone.
  *
@@ -249,6 +260,8 @@ export function canonicalPath(route: Route): string | null {
       return `/${route.workspace.segment}`;
     case "all":
       return allPath(route.workspace.segment);
+    case "settings":
+      return settingsPath(route.workspace.segment);
     case "doc":
       return docPath(route.workspace.segment, route.uuid);
     default:

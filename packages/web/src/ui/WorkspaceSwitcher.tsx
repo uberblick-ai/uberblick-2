@@ -18,12 +18,10 @@
  * same gesture. Nothing here knows about rooms, and nothing carries across the
  * switch — two workspaces are two corpora.
  *
- * It renders *configuration*, not accounts. "New workspace" and "Workspace
- * settings" are on the menu and disabled: making a workspace is `ub init` on a
- * machine, and there is nothing here that could do it. They are rendered rather
- * than hidden because a disabled item says "this exists and is not yours to do
- * from here", which is the truth, while an absent one says the idea does not
- * exist.
+ * It renders *configuration*, not accounts. "New workspace" remains disabled:
+ * making a workspace is `ub init` on a machine, and there is nothing here that
+ * could do it. Workspace settings is navigation now that the client has that
+ * address, and uses the same route-driven selection as switching workspaces.
  *
  * The surface is the vendored shadcn menu (#27); everything about how this
  * particular menu *looks* is plain CSS on `.ub-*` classes, like every other
@@ -52,6 +50,7 @@ export function WorkspaceSwitcher({
   current,
   docs,
   onSwitch,
+  onOpenSettings,
 }: {
   /** What to offer, already validated and deduplicated — see `workspaceList`. */
   workspaces: readonly Workspace[];
@@ -65,6 +64,8 @@ export function WorkspaceSwitcher({
   docs: number;
   /** Go there. The value is a segment, spelled as the list spells it. */
   onSwitch: (segment: string) => void;
+  /** Go to this workspace's settings address. */
+  onOpenSettings: () => void;
 }): ReactElement {
   return (
     <DropdownMenu>
@@ -112,7 +113,7 @@ export function WorkspaceSwitcher({
         <DropdownMenuSeparator />
         {/* Configuration, not accounts — see the header. */}
         <DropdownMenuItem disabled>New workspace</DropdownMenuItem>
-        <DropdownMenuItem disabled>Workspace settings</DropdownMenuItem>
+        <DropdownMenuItem onSelect={onOpenSettings}>Workspace settings</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

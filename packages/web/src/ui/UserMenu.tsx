@@ -48,7 +48,7 @@ const APPEARANCE_LABELS: Record<Appearance, string> = {
  * How much this browser is holding, in the units `storage.estimate()` reports
  * it in — decimal, like the browser's own storage panel.
  */
-function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number): string {
   const mb = bytes / 1_000_000;
   if (mb < 1) return `${Math.round(bytes / 1_000)} kB`;
   return mb < 10 ? `${mb.toFixed(1)} MB` : `${Math.round(mb)} MB`;
@@ -66,7 +66,7 @@ function formatBytes(bytes: number): string {
  * kept number is a stale number, and the next open would paint the last
  * session's figure for as long as the fresh estimate takes to answer.
  */
-function useLocalCacheSize(open: boolean): number | null {
+export function useLocalCacheSize(open: boolean): number | null {
   const [bytes, setBytes] = useState<number | null>(null);
   useEffect(() => {
     if (!open) {

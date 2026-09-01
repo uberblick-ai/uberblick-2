@@ -632,14 +632,63 @@ body {
 .ub-list {
   width: var(--sidebar-width);
   flex: none;
-  /* A column, so the footer below can take the space the documents leave. */
+  /* A column, so the pane stack fills it without changing the shell width. */
   display: flex;
   flex-direction: column;
   background: var(--sidebar);
   color: var(--sidebar-foreground);
   border-right: 1px solid var(--sidebar-border);
-  overflow-y: auto;
+  overflow: hidden;
   padding: 0.5rem;
+}
+
+/* Both sidebar modes stay mounted so their transform can cross-fade, but only
+   the address-selected one is live (`inert` + `aria-hidden` in Sidebar.tsx).
+   Grid puts the panes in one cell without absolute positioning away their
+   height; each pane owns its own scroll and footer. */
+.ub-sidebar-stack {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ub-sidebar-pane {
+  grid-area: 1 / 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  transition:
+    transform 180ms ease,
+    opacity 180ms ease;
+}
+
+.ub-sidebar-pane[inert],
+.ub-sidebar-pane[inert] * {
+  pointer-events: none;
+}
+
+.ub-document-sidebar {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+.ub-settings-sidebar {
+  z-index: 1;
+  transform: translateX(100%);
+  opacity: 0;
+}
+
+.ub-list[data-mode="settings"] .ub-document-sidebar {
+  transform: translateX(-25%);
+  opacity: 0;
+}
+
+.ub-list[data-mode="settings"] .ub-settings-sidebar {
+  transform: translateX(0);
+  opacity: 1;
 }
 
 .ub-list-head {
@@ -678,6 +727,8 @@ body {
    and reserving it here is what stops selection from nudging every row. */
 .ub-list-head button,
 .ub-list li button,
+.ub-settings-entry,
+.ub-settings-back,
 .ub-group-add {
   display: flex;
   align-items: center;
@@ -702,6 +753,8 @@ body {
    focusable (#483), and they are declined here for the same reason. */
 .ub-list-head button:hover:not(:disabled),
 .ub-list li button:hover:not(:disabled, [aria-disabled="true"]),
+.ub-settings-entry:hover,
+.ub-settings-back:hover,
 .ub-group-add:hover:not(:disabled) {
   background: var(--sidebar-accent);
   color: var(--sidebar-foreground);
@@ -801,7 +854,7 @@ body {
    would need a second scroll container for no gain. Nothing above it may
    shrink: the groups animate their own height (see `.ub-group-body`), and a
    flex column is otherwise free to squeeze them to make room. */
-.ub-list > * {
+.ub-sidebar-pane > * {
   flex: none;
 }
 
@@ -809,6 +862,42 @@ body {
   margin-top: auto;
   padding-top: 0.5rem;
   border-top: 1px solid var(--sidebar-border);
+}
+
+.ub-settings-entry,
+.ub-settings-back {
+  width: 100%;
+}
+
+.ub-settings-back {
+  margin-bottom: 0.5rem;
+}
+
+.ub-settings-back-tile {
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--brand-subtle);
+  color: var(--brand);
+}
+
+.ub-settings-back-tile svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ub-settings-back-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ub-settings-nav {
+  margin-top: 0.25rem;
 }
 
 /* ---- the sidebar's two anchored menus (#74, design 1c) ----
@@ -1270,7 +1359,7 @@ body {
 }
 
 .ub-list[data-dragging="doc"] .ub-group-body .ub-drop-slot,
-.ub-list[data-dragging="group"] > .ub-drop-slot {
+.ub-list[data-dragging="group"] .ub-document-sidebar > .ub-drop-slot {
   pointer-events: auto;
 }
 
@@ -1287,6 +1376,68 @@ body {
   flex-direction: column;
   padding: 0.75rem 1rem;
   overflow-y: auto;
+}
+
+/* ---- workspace settings ---- */
+
+.ub-settings-column {
+  width: 100%;
+  max-width: 48rem;
+  margin-inline: auto;
+}
+
+.ub-settings-column h1 {
+  margin: 0 0 1rem;
+  font-size: 1.5rem;
+  font-weight: 500;
+}
+
+.ub-settings-card {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--card-foreground);
+}
+
+.ub-settings-facts {
+  gap: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.ub-settings-facts .ub-panel-fact {
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ub-settings-facts .ub-panel-fact:first-child {
+  padding-top: 0;
+}
+
+.ub-settings-facts .ub-panel-fact:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.ub-settings-facts dt {
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+}
+
+.ub-settings-facts dd {
+  max-width: 70%;
+  color: var(--foreground);
+  font-size: 0.8rem;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.ub-settings-fact-detail {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
 }
 
 /* The reading column: capped at the measure and centred, so collapsing the
@@ -2854,6 +3005,7 @@ h3.ub-heading {
   .ub-group-caret,
   .ub-group-body,
   .ub-group-act,
+  .ub-sidebar-pane,
   .ub-copy,
   .ub-gutter-add {
     transition: none;

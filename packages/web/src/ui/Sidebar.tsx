@@ -137,7 +137,10 @@ export function Sidebar({
   onSelect,
   onCreate,
   onOpenAll,
+  onOpenSettings,
+  onBackToWorkspace,
   allOpen,
+  settingsOpen,
 }: {
   /** The directory room: its sync state, and whether a document can be created. */
   connection: RoomConnection | null;
@@ -166,8 +169,14 @@ export function Sidebar({
   onCreate: () => void;
   /** Go to the "All docs" listing (#118) — the live row in Navigation. */
   onOpenAll: () => void;
+  /** Enter workspace settings. Like every selection, this is navigation. */
+  onOpenSettings: () => void;
+  /** Leave settings for the workspace's fixed list address. */
+  onBackToWorkspace: () => void;
   /** Whether that listing is what the address currently names. */
   allOpen: boolean;
+  /** Whether the address names workspace settings. */
+  settingsOpen: boolean;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const reading = statusReading(status, rawSyncState(status));
@@ -255,84 +264,158 @@ export function Sidebar({
   };
 
   return (
-    <nav className="ub-list" data-dragging={drag?.kind}>
-      {/* The workspace, across the top of the column it is the workspace of
-          (#74). Above the head rather than in it: the head is about this
-          workspace's documents, and the switcher is about which workspace. */}
-      <WorkspaceSwitcher
-        workspaces={workspaces}
-        current={workspace}
-        docs={entries.length}
-        onSwitch={onSwitchWorkspace}
-      />
-      <div className="ub-list-head">
-        <button type="button" onClick={onCreate} disabled={connection === null}>
-          + new doc
-        </button>
-        {/* A refusal takes this line's word, because the three readings below
-            all describe a connection that is working or coming back and none of
-            them is true of a page the hub will not admit (#448). The ordinary
-            readings stay exactly as they were — uncalmed, and saying
-            "directory", since this line is about the directory room — so the
-            settled state is passed only because the shared derivation takes
-            one, and the word it makes from it is unused here. */}
-        <span className="ub-muted">
-          {reading.detail !== null
-            ? reading.word
-            : status.connected
-              ? status.synced
-                ? "directory synced"
-                : "syncing…"
-              : "offline"}
-        </span>
-      </div>
-      <Navigation allOpen={allOpen} onOpenAll={onOpenAll} />
-      {groups.length === 0 && (
-        <p className="ub-muted ub-empty">
-          Nothing pinned yet. Pin the open document from its header.
-        </p>
-      )}
-      {groups.map((group, index) => (
-        <Fragment key={group.id}>
+    <aside
+      className="ub-list"
+      aria-label="Sidebar"
+      data-mode={settingsOpen ? "settings" : "documents"}
+      data-dragging={drag?.kind}
+    >
+      <div className="ub-sidebar-stack">
+        <nav
+          className="ub-sidebar-pane ub-document-sidebar"
+          aria-label="Documents"
+          aria-hidden={settingsOpen}
+          inert={settingsOpen}
+        >
+          {/* The workspace, across the top of the column it is the workspace of
+              (#74). Above the head rather than in it: the head is about this
+              workspace's documents, and the switcher is about which workspace. */}
+          <WorkspaceSwitcher
+            workspaces={workspaces}
+            current={workspace}
+            docs={entries.length}
+            onSwitch={onSwitchWorkspace}
+            onOpenSettings={onOpenSettings}
+          />
+          <div className="ub-list-head">
+            <button type="button" onClick={onCreate} disabled={connection === null}>
+              + new doc
+            </button>
+            {/* A refusal takes this line's word, because the three readings below
+                all describe a connection that is working or coming back and none of
+                them is true of a page the hub will not admit (#448). The ordinary
+                readings stay exactly as they were — uncalmed, and saying
+                "directory", since this line is about the directory room. */}
+            <span className="ub-muted">
+              {reading.detail !== null
+                ? reading.word
+                : status.connected
+                  ? status.synced
+                    ? "directory synced"
+                    : "syncing…"
+                  : "offline"}
+            </span>
+          </div>
+          <Navigation allOpen={allOpen} onOpenAll={onOpenAll} />
+          {groups.length === 0 && (
+            <p className="ub-muted ub-empty">
+              Nothing pinned yet. Pin the open document from its header.
+            </p>
+          )}
+          {groups.map((group, index) => (
+            <Fragment key={group.id}>
+              <DropSlot
+                slot={`group-${index}`}
+                active={drag?.kind === "group"}
+                dnd={dnd}
+                onDrop={() => dropGroup(index)}
+              />
+              <GroupSection
+                group={group}
+                ydoc={ydoc}
+                labels={labels}
+                selected={selected}
+                onSelect={onSelect}
+                dnd={dnd}
+                editing={renaming?.id === group.id}
+                onEdit={() => setRenaming({ id: group.id, fresh: false })}
+                onCancel={cancelRename}
+                onCommit={(name) => commitRename(group.id, name)}
+              />
+            </Fragment>
+          ))}
           <DropSlot
-            slot={`group-${index}`}
+            slot={`group-${groups.length}`}
             active={drag?.kind === "group"}
             dnd={dnd}
-            onDrop={() => dropGroup(index)}
+            onDrop={() => dropGroup(groups.length)}
           />
-          <GroupSection
-            group={group}
-            ydoc={ydoc}
-            labels={labels}
-            selected={selected}
-            onSelect={onSelect}
-            dnd={dnd}
-            editing={renaming?.id === group.id}
-            onEdit={() => setRenaming({ id: group.id, fresh: false })}
-            onCancel={cancelRename}
-            onCommit={(name) => commitRename(group.id, name)}
-          />
-        </Fragment>
-      ))}
-      <DropSlot
-        slot={`group-${groups.length}`}
-        active={drag?.kind === "group"}
-        dnd={dnd}
-        onDrop={() => dropGroup(groups.length)}
-      />
-      <button
-        type="button"
-        className="ub-group-add"
-        onClick={addGroup}
-        disabled={ydoc === null}
-      >
-        + group
+          <button
+            type="button"
+            className="ub-group-add"
+            onClick={addGroup}
+            disabled={ydoc === null}
+          >
+            + group
+          </button>
+          <div className="ub-list-foot">
+            <button
+              type="button"
+              className="ub-settings-entry"
+              onClick={onOpenSettings}
+            >
+              <GearIcon />
+              Workspace settings
+            </button>
+            {!settingsOpen && (
+              <UserMenu identity={identity} agentSessions={agentSessions} />
+            )}
+          </div>
+        </nav>
+        <SettingsNavigation
+          workspace={workspace}
+          identity={identity}
+          agentSessions={agentSessions}
+          active={settingsOpen}
+          onBack={onBackToWorkspace}
+        />
+      </div>
+    </aside>
+  );
+}
+
+/** The navigation pane that replaces the document sidebar in settings mode. */
+function SettingsNavigation({
+  workspace,
+  identity,
+  agentSessions,
+  active,
+  onBack,
+}: {
+  workspace: Workspace | null;
+  identity: AwarenessUser;
+  agentSessions: number;
+  active: boolean;
+  onBack: () => void;
+}): ReactElement {
+  return (
+    <nav
+      className="ub-sidebar-pane ub-settings-sidebar"
+      aria-label="Workspace settings"
+      aria-hidden={!active}
+      inert={!active}
+    >
+      <button type="button" className="ub-settings-back" onClick={onBack}>
+        <span className="ub-settings-back-tile" aria-hidden="true">
+          <BackIcon />
+        </span>
+        <span className="ub-settings-back-label">
+          Back to {workspace?.segment ?? "workspace"}
+        </span>
       </button>
-      {/* The sidebar's footer. Who this client is (#74), and nothing else: it
-          is the one row that is about the person rather than about the corpus,
-          so it is the one row that belongs below the line the groups end at. */}
+      <section className="ub-nav ub-settings-nav">
+        <p className="ub-nav-label">Workspace settings</p>
+        <ul>
+          <li>
+            <button type="button" aria-current="page">
+              <GearIcon />
+              General
+            </button>
+          </li>
+        </ul>
+      </section>
       <div className="ub-list-foot">
-        <UserMenu identity={identity} agentSessions={agentSessions} />
+        {active && <UserMenu identity={identity} agentSessions={agentSessions} />}
       </div>
     </nav>
   );
@@ -445,6 +528,37 @@ function ChecklistIcon(): ReactElement {
         fill="none"
         stroke="currentColor"
         strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** The settings mark, drawn locally like the rest of the sidebar glyphs. */
+function GearIcon(): ReactElement {
+  return (
+    <svg className="ub-nav-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M6.8 2.2h2.4l.4 1.6 1.4.8 1.6-.5 1.2 2.1-1.2 1.1v1.5l1.2 1.1-1.2 2.1-1.6-.5-1.4.8-.4 1.6H6.8l-.4-1.6-1.4-.8-1.6.5-1.2-2.1 1.2-1.1V7.3L2.2 6.2l1.2-2.1 1.6.5 1.4-.8z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinejoin="round"
+      />
+      <circle cx="8" cy="8" r="1.7" fill="none" stroke="currentColor" />
+    </svg>
+  );
+}
+
+function BackIcon(): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M10.5 3.5 6 8l4.5 4.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
