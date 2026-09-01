@@ -5,9 +5,10 @@
  * A role is a triplet: the contract at `.agents/roles/<slug>.md` and two thin
  * adapters that point a runtime at it. This proves the triplets exist, that all
  * three agree on identity, that each adapter parses as its runtime's format and
- * names the exact contract, and that none pins runtime policy — model, tools,
- * permissions, sandbox and MCP configuration belong to the runtime and the
- * invoker, never to a checked-in description.
+ * names the exact contract, and that none pins runtime policy — except the
+ * owner-approved `effort: high` pins on issue-preparer and implementer from
+ * directive 438df7d. Model, tools, permissions, sandbox and MCP configuration
+ * belong to the runtime and the invoker, never to a checked-in description.
  *
  * It deliberately does not check the contracts' prose: no headings, no required
  * sentences, no uuids, no wording. Encoding editorial rules here would make the
@@ -37,6 +38,10 @@ const CODEX = ".codex/agents";
 /** Anything outside these would pin policy the runtime and invoker own. */
 const CLAUDE_REQUIRED = ["name", "description"];
 const CLAUDE_ALLOWED = [...CLAUDE_REQUIRED, "isolation"];
+const CLAUDE_APPROVED_EFFORT = new Map([
+	["issue-preparer", "high"],
+	["implementer", "high"],
+]);
 const CODEX_ALLOWED = ["name", "description", "developer_instructions"];
 
 const failures = [];
@@ -147,7 +152,15 @@ for (const slug of SLUGS) {
 		const front = parseFrontmatter(claudePath, read(claudePath));
 		// `isolation` is permitted but optional, so it is not in the required set.
 		if (!front) fail(`${claudePath}: no "---" frontmatter block`);
-		else check(claudePath, slug, front.keys, CLAUDE_REQUIRED, CLAUDE_ALLOWED, [], front.body);
+		else {
+			const approvedEffort = CLAUDE_APPROVED_EFFORT.get(slug);
+			const allowed = approvedEffort
+				? [...CLAUDE_ALLOWED, "effort"]
+				: CLAUDE_ALLOWED;
+			check(claudePath, slug, front.keys, CLAUDE_REQUIRED, allowed, [], front.body);
+			if (approvedEffort && front.keys.has("effort") && front.keys.get("effort") !== approvedEffort)
+				fail(`${claudePath}: effort is "${front.keys.get("effort")}", expected owner-approved "${approvedEffort}"`);
+		}
 	}
 
 	const codexPath = `${CODEX}/${slug}.toml`;
