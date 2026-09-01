@@ -478,7 +478,35 @@ for (const scheme of ["light", "dark"] as const) {
     // so the measurement needs a real one.
     await page.keyboard.type("annotate me", { delay: 15 });
     await page.keyboard.press("Shift+Home");
+
+    // A second client on the same document, because a mention chip is offered
+    // for a peer publishing awareness and for nobody else — there is no chip to
+    // measure in a room with one client in it.
+    await openApp(browser, scheme, new URL(page.url()).pathname);
+
     await page.locator(".ub-composer-open").click();
+
+    // The open composer is its own `--card`, and the two `--secondary` fills on
+    // it are the same pair as the three above (#567).
+    const composer = await painted(page, ".ub-composer", "background-color");
+    const cancel = page.getByRole("button", { name: "Cancel" });
+    for (const fill of [cancel, page.locator(".ub-mention").first()]) {
+      const ground = await paintedIn(fill, "background-color");
+      expect(separation(ground, composer)).toBeGreaterThanOrEqual(
+        cardHighlightFloor[scheme],
+      );
+      // The ground moved under an ink that did not, so the label is measured on
+      // the fill it ended up on rather than on the one it was written for.
+      const ink = await paintedIn(fill, "color");
+      expect(contrast(ink, ground)).toBeGreaterThanOrEqual(4.5);
+    }
+    // And the submit beside Cancel keeps the emphasis that is not this repair.
+    const submit = await paintedIn(
+      page.getByRole("button", { name: "Comment", exact: true }),
+      "background-color",
+    );
+    expect(submit).not.toBe(await paintedIn(cancel, "background-color"));
+
     await page.keyboard.type("a thread", { delay: 15 });
     await page.keyboard.press("Enter");
     const handle = page.locator(".ub-threads-toggle");

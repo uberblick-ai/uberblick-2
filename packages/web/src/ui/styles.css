@@ -1714,6 +1714,19 @@ body {
   cursor: default;
 }
 
+/* The open composer is a `--card` surface, so the two `--secondary` fills it
+   paints step onto the card accent — the same repair, from the same cause, that
+   #516 made for the three affordances it named (see `--card-accent`). Scoped to
+   the composer because `.ub-tool` and `.ub-mention` are shared: `CommentForm`
+   also renders in the rail, on `--background`, where `--secondary` is already a
+   step. Two exclusions the selector makes rather than states: the submit keeps
+   `.ub-tool-on`'s brand emphasis, and the closed "Comment on …" affordance is
+   outside `.ub-comment-buttons` — it floats over the prose, not on `--card`. */
+.ub-composer .ub-mention,
+.ub-composer .ub-comment-buttons .ub-tool:not(.ub-tool-on) {
+  background: var(--card-accent);
+}
+
 .ub-comment-error {
   margin: 0;
   font-size: 0.75rem;
