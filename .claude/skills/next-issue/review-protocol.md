@@ -30,9 +30,15 @@ claude -p --agent implementation-reviewer --model opus --permission-mode bypassP
 ```
 
 Each is a fresh top-level session: `codex exec` always is, and a headless
-`claude -p` carries its own `Claude-Session` trailer, unlike an `Agent`-tool
-child, which shares its launcher's authorship identity and is never a
-reviewer.
+`claude -p` carries its own `Claude-Session` trailer. A Claude parent may
+instead start the reviewer with the `Agent` tool (`subagent_type:
+implementation-reviewer`, `model: opus`). That child shares its launcher's
+authorship identity, so it may review only a diff that identity did not
+author — proven the way an integrator proves its own independence: no commit
+in the head carries the launcher's `Claude-Session` trailer, and the launcher
+launched no implementer whose commit is in the head. Under that proof the
+`Agent` child is the Claude transport for a Codex-authored diff (owner
+decision, 2026-09-01); without it, it is never a reviewer.
 
 `codex exec` selects no `.codex/agents/*.toml` adapter, so the prompt tells a
 Codex child to read the `implementation-reviewer` role contract; the Claude
