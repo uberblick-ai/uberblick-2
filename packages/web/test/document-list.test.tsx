@@ -584,13 +584,15 @@ describe("the filter", () => {
     expect(rowTitles(host)).toEqual(["Lighthouse keeping"]);
   });
 
-  it("says what it looks at, on screen", async () => {
+  it("says what it looks at in the field's own name", async () => {
     const host = await openApp(`/${WORKSPACE}`);
-    const scope = host.querySelector(".ub-docs-scope")?.textContent ?? "";
-    // No row matches on something its row does not show, and the sentence says
-    // exactly that.
-    expect(scope).toContain("titles alone");
-    expect(scope).toContain("not the text inside documents");
+    // The scope is the label the field is named by, not a sentence beside it:
+    // both halves reach a screen reader as the control's own name.
+    const named = [...(search(host).labels ?? [])]
+      .map((label) => label.textContent)
+      .join(" ");
+    expect(named).toContain("title");
+    expect(named).toContain("not by the text inside it");
   });
 
   /**
