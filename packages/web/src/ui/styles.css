@@ -1550,13 +1550,17 @@ body {
   color: var(--muted-foreground);
 }
 
+/* The plain chip has one consumer — the `resolved` pill inside a thread card,
+   which is a `--card` surface — so it takes the card accent for the same reason
+   the composer's own fills do (#516, and see `--card-accent`). The ink does not
+   move: every other card-accent consumer keeps `--secondary-foreground`. */
 .ub-chip {
   font-size: 0.65rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   padding: 0 0.3rem;
   border-radius: var(--radius-sm);
-  background: var(--secondary);
+  background: var(--card-accent);
   color: var(--secondary-foreground);
 }
 
