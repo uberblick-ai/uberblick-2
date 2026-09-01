@@ -776,30 +776,60 @@ for (const scheme of ["light", "dark"] as const) {
 }
 
 /**
- * The page's ground, which is a gradient and so is more than one colour:
- * `--page-ground`'s stops, as the engine resolved them. A text on the page is
- * read against each, because each of them is painted somewhere under it — the
- * `background-color` those elements report is transparent, so there is no single
- * ground to compare them against.
+ * Every ground one text is read against: the nearest ancestor that paints an
+ * opaque colour, the way `surface()` above finds one — or, where nothing over
+ * the page does, `--page-ground`'s own stops, because the page's ground is a
+ * gradient rather than a colour and a text on it is read against all of it.
+ *
+ * Derived rather than named, for the reason the walk exists: a link that lands
+ * inside an annotated range or an inline-code span has a ground its rule never
+ * mentions, and a list of expected grounds would keep passing after that ground
+ * moved.
  */
-async function pageGrounds(page: Page): Promise<string[]> {
-  const ground = await painted(page, "body", "background-image");
+async function groundsUnder(page: Page, locator: Locator): Promise<string[]> {
+  const over = await locator.evaluate((element) => {
+    const opaque = (colour: string): boolean => {
+      const rgba = /^rgba?\(([^)]*)\)$/.exec(colour);
+      if (rgba !== null) {
+        const parts = (rgba[1] ?? "").split(",");
+        return parts.length !== 4 || Number(parts[3]) === 1;
+      }
+      const slashed = /\/\s*(\d*\.?\d+)\s*\)$/.exec(colour);
+      return slashed === null || Number(slashed[1]) === 1;
+    };
+    for (let node: Element | null = element; node !== null; node = node.parentElement) {
+      const colour = getComputedStyle(node).backgroundColor;
+      if (opaque(colour)) return colour;
+    }
+    return null;
+  });
+  if (over !== null) return [over];
   // The stops are the only parenthesised colours in the value — `at 0% 0%`
   // carries none — so matching them is the whole parse.
-  return ground.match(/(?:rgba?|oklch)\([^)]*\)/g) ?? [];
+  const stops = (await painted(page, "body", "background-image")).match(
+    /(?:rgba?|oklch)\([^)]*\)/g,
+  );
+  // A serialization this cannot read must fail here rather than pass as "no
+  // ground to check".
+  if (stops === null) throw new Error("no ground under this text");
+  return stops;
 }
 
 /**
  * One brand ink, wherever the brand is text (#569).
  *
  * The walk above measures `.ub-menu-current` on `--sidebar` and on
- * `--sidebar-accent`, which are the tightest grounds this app has in either
- * appearance. It cannot see the other four functional consumers: they live on
- * the document page, on the gradient and on `--card`. So this reads all five as
- * the browser paints them, holds each to AA on the grounds it actually sits on,
- * and asserts they are *one* value — no surface owning a private copy is the
- * criterion, and five rules reading five near-identical ambers would pass every
- * contrast assertion here while failing it.
+ * `--sidebar-accent`. It cannot see the other four functional consumers: they
+ * live on the document page. So this reads all five as the browser paints them,
+ * holds each to AA on the grounds it actually sits on, and asserts they are
+ * *one* value — no surface owning a private copy is the criterion, and five
+ * rules reading five near-identical ambers would pass every contrast assertion
+ * here while failing it.
+ *
+ * A link is read twice, because a document link is reachable on two very
+ * different grounds: on the page's gradient, and inside an annotated range,
+ * where `.ub-comment` paints `--brand-subtle` under it. Both are derived from
+ * the rendered element rather than named here.
  *
  * The wordmark is read with them as the named logotype exception: it stays the
  * accent, which in light is a different colour from the ink — the two-value cost
@@ -812,55 +842,58 @@ for (const scheme of ["light", "dark"] as const) {
     const page = await openApp(browser, scheme);
 
     // A document carrying the four consumers outside the sidebar. It needs a
-    // title before the header offers Pin at all, a canonical group tag before
-    // there is a badge to letter, and two links in its prose.
+    // title before the header offers Pin at all, and a canonical group tag
+    // before there is a badge to letter.
     await page.getByRole("button", { name: "+ new doc" }).click();
     await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
     const uuid = new URL(page.url()).pathname.split("/")[2] ?? "";
     await page.locator(".ub-title").fill(`brand ink ${scheme}`);
     await page.getByLabel("Add a tag").fill("feature");
     await page.getByLabel("Add a tag").press("Enter");
-    await expect(page.locator(".ub-badge")).toHaveText("Features");
+    await expect(page.locator(".ub-badge")).toBeVisible();
 
+    // Two links in one paragraph, and a thread over the second of them: the
+    // external link stays on the page's own ground, the reference ends up on
+    // `--brand-subtle`, and neither ground is named below.
+    const label = "reference";
     await page.locator(".ub-editor .ProseMirror").click();
-    await page.keyboard.type(`[a page](https://example.com/) and [this one](${uuid})`);
+    await page.keyboard.type(`[a page](https://example.com/) and [${label}](${uuid})`);
     const reference = page.locator(".ub-editor a.ub-doclink");
     // An unresolved reference is painted `--muted-foreground` instead, so the
     // resolved state is what makes this a reading of the brand ink at all.
     await expect(reference).toHaveAttribute("data-doc-link-state", "resolved");
+    // Back over the reference's own label, which the caret is sitting after —
+    // Home would take the external link with it and leave nothing on the page's
+    // ground.
+    for (let back = 0; back < label.length; back += 1) {
+      await page.keyboard.press("Shift+ArrowLeft");
+    }
+    await page.locator(".ub-composer-open").click();
+    await page.keyboard.type("a thread", { delay: 15 });
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".ub-editor .ub-comment a.ub-doclink")).toBeVisible();
 
     await page.locator(".ub-pin-toggle").click();
     await expect(page.locator(".ub-pin-toggle")).toHaveAttribute("aria-pressed", "true");
 
-    const onThePage = await pageGrounds(page);
-    // Two stops, so an unmatched serialization cannot pass as "no ground to
-    // check".
-    expect(onThePage).toHaveLength(2);
-    const consumers: Array<[string, Locator, string[]]> = [
-      [".ub-badge", page.locator(".ub-badge"), onThePage],
-      [".ub-link", page.locator(".ub-editor a.ub-link"), onThePage],
-      [".ub-doclink", reference, onThePage],
-      [
-        ".ub-pin-toggle",
-        page.locator(".ub-pin-toggle"),
-        [await painted(page, ".ub-header", "background-color")],
-      ],
+    const consumers: Array<[string, Locator]> = [
+      [".ub-badge", page.locator(".ub-badge")],
+      [".ub-link", page.locator(".ub-editor a.ub-link")],
+      [".ub-doclink, annotated", reference],
+      [".ub-pin-toggle", page.locator(".ub-pin-toggle")],
     ];
 
-    // And the fifth, in the switcher the walk above opens for its own reasons.
+    // And the fifth rule, in the switcher the walk above opens for its own
+    // reasons.
     await page.locator(".ub-workspace").click();
     await expect(page.locator("[data-slot=dropdown-menu-content]")).toBeVisible();
-    consumers.push([
-      ".ub-menu-current",
-      page.locator(".ub-menu-current"),
-      [await painted(page, "[data-slot=dropdown-menu-content]", "background-color")],
-    ]);
+    consumers.push([".ub-menu-current", page.locator(".ub-menu-current")]);
 
     const inks = new Set<string>();
-    for (const [where, locator, grounds] of consumers) {
+    for (const [where, locator] of consumers) {
       const ink = await paintedIn(locator, "color");
       inks.add(ink);
-      for (const ground of grounds) {
+      for (const ground of await groundsUnder(page, locator)) {
         expect(
           contrast(ink, ground),
           `${where} — ${ink} on ${ground}`,
