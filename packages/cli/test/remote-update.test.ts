@@ -128,12 +128,17 @@ function push(fix: Fixture, files: Record<string, string>): string {
 function updateEnv(fix: Fixture, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
     ...GIT_ENV,
-    // The lock lives here, so each fixture locks against itself alone.
-    XDG_RUNTIME_DIR: fix.root,
     UB_TEST_COMPOSE_LOG: fix.composeLog,
     UB_TEST_COMPOSE_FAIL: fix.failFile,
     ...extra,
   };
+}
+
+/** A session directory of its own, as `pam_systemd` would give a login. */
+function session(fix: Fixture, name: string): string {
+  const dir = join(fix.root, `session-${name}`);
+  mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 function update(fix: Fixture, extra: NodeJS.ProcessEnv = {}): SpawnSyncReturns<string> {
@@ -186,6 +191,37 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Start a run and return once its build is in progress — so it is holding the
+ * lock, and whatever the caller does next races a real deployment rather than
+ * an already-finished one. `release` lets the build finish and yields the run's
+ * exit status.
+ */
+async function startHeldBuild(
+  fix: Fixture,
+  extra: NodeJS.ProcessEnv = {},
+): Promise<{ release: () => Promise<number | null> }> {
+  const hold = join(fix.root, "hold");
+  writeFileSync(hold, "", "utf8");
+  const run = spawn("sh", [join(fix.checkout, "remote-update.sh")], {
+    cwd: fix.checkout,
+    env: updateEnv(fix, { ...extra, UB_TEST_COMPOSE_HOLD: hold }),
+  });
+  const exited = new Promise<number | null>((resolve) => {
+    run.on("close", resolve);
+  });
+  for (let waited = 0; !existsSync(`${hold}.started`) && waited < 200; waited += 1) {
+    await sleep(50);
+  }
+  expect(existsSync(`${hold}.started`)).toBe(true);
+  return {
+    release: () => {
+      spawnSync("rm", [hold]);
+      return exited;
+    },
+  };
+}
+
 describe("remote-update.sh", () => {
   it("does nothing at all when origin/main is the deployed commit", () => {
     const fix = fixture();
@@ -231,31 +267,47 @@ describe("remote-update.sh", () => {
     expect(deployedRef(fix)).toBe(next);
   });
 
-  it("starts no second build while one is running", async () => {
+  /**
+   * What the lock is addressed to, not merely that it is taken: one checkout is
+   * the resource, so two runs against it exclude each other however their
+   * sessions differ. Addressed per session — as it was before #574 — these two
+   * open different lock files, both succeed, and both build the same checkout.
+   */
+  it("starts no second build while one is running, whatever session it runs in", async () => {
     const fix = fixture();
     push(fix, { "marker.txt": "two\n" });
-    const hold = join(fix.root, "hold");
-    writeFileSync(hold, "", "utf8");
+    const first = await startHeldBuild(fix, { XDG_RUNTIME_DIR: session(fix, "a") });
 
-    const first = spawn("sh", [join(fix.checkout, "remote-update.sh")], {
-      cwd: fix.checkout,
-      env: updateEnv(fix, { UB_TEST_COMPOSE_HOLD: hold }),
-    });
-    const firstExit = new Promise<number | null>((resolve) => {
-      first.on("close", resolve);
-    });
-    for (let waited = 0; !existsSync(`${hold}.started`) && waited < 200; waited += 1) {
-      await sleep(50);
-    }
-    expect(existsSync(`${hold}.started`)).toBe(true);
-
-    const second = update(fix);
+    const second = update(fix, { XDG_RUNTIME_DIR: session(fix, "b") });
     expect(second.status).toBe(0);
     expect(second.stdout).toContain("already running");
 
-    spawnSync("rm", [hold]);
-    expect(await firstExit).toBe(0);
+    expect(await first.release()).toBe(0);
     expect(builds(fix)).toEqual(["up --build --detach"]);
+  });
+
+  /**
+   * The mirror-image lie, which addressing the lock to the host would tell: a
+   * second checkout on the same machine is a different deployment, and must not
+   * be told somebody else's update is already running while it deploys nothing.
+   */
+  it("lets a second checkout on the same host deploy while the first builds", async () => {
+    const busy = fixture();
+    const other = fixture();
+    // One session for both runs: whatever the host's own XDG_RUNTIME_DIR is,
+    // these two would have shared a lock file under the old addressing.
+    const shared = session(busy, "host");
+    push(busy, { "marker.txt": "two\n" });
+    const next = push(other, { "marker.txt": "two\n" });
+    const first = await startHeldBuild(busy, { XDG_RUNTIME_DIR: shared });
+
+    const ran = update(other, { XDG_RUNTIME_DIR: shared });
+    expect(ran.status).toBe(0);
+    expect(ran.stdout).not.toContain("already running");
+    expect(ran.stdout).toContain(`deployed ${next}`);
+    expect(builds(other)).toEqual(["up --build --detach"]);
+
+    expect(await first.release()).toBe(0);
   });
 
   /**

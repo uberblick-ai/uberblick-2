@@ -132,9 +132,11 @@ ub remote update uberblick@box.tailnet.ts.net
 
 It runs `remote-update.sh` in the host's checkout — the same script you would
 run by hand there — and reports either "up to date" or the commit it moved to.
-A `flock` outside the checkout keeps two runs from colliding, and a host that
-cannot take that lock at all refuses with a non-zero exit rather than reporting
-an update it never ran as success.
+A `flock` on the checkout keeps two runs of the script from deploying it at once
+— whichever sessions or users they run as — while leaving a second checkout on
+the same host free to deploy itself, and a host that cannot take that lock at all
+refuses with a non-zero exit rather than reporting an update it never ran as
+success.
 
 **When to update:** when a merged change is one you want live — a fix you are
 waiting on, a feature you are about to demonstrate, a deployment you are about
