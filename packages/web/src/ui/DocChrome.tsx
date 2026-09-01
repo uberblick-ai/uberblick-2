@@ -572,8 +572,6 @@ function DocumentActions({
 }): ReactElement {
   const trigger = useRef<HTMLButtonElement | null>(null);
   const cancel = useRef<HTMLButtonElement | null>(null);
-  /** Set while Archive is closing the menu *into* the confirmation. */
-  const opening = useRef(false);
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
@@ -670,14 +668,16 @@ function DocumentActions({
         <DropdownMenuContent
           align="end"
           onCloseAutoFocus={(event) => {
-            if (!opening.current) return;
-            opening.current = false;
             // Where the confirmation takes focus, because it is the first
             // moment it can hold it: the menu's focus scope pulls focus back
             // while it is still mounted, and Radix then returns it to the
             // trigger — outside an `aria-modal` dialog — one macrotask later.
+            // A mounted Cancel is exactly the Archive selection; every other
+            // close leaves it null and keeps Radix's own return to the trigger.
+            const confirmation = cancel.current;
+            if (confirmation === null) return;
             event.preventDefault();
-            cancel.current?.focus();
+            confirmation.focus();
           }}
         >
           <DropdownMenuItem
@@ -685,6 +685,8 @@ function DocumentActions({
             className={pinned ? "ub-action-pinned" : ""}
             onSelect={() => {
               onTogglePin?.();
+              // Radix's own close-autofocus does this too, but only on a
+              // deferred task no test environment without timers observes.
               queueMicrotask(() => trigger.current?.focus());
             }}
           >
@@ -694,10 +696,7 @@ function DocumentActions({
           <DropdownMenuItem
             disabled={onArchive === null}
             className="ub-action-danger"
-            onSelect={() => {
-              opening.current = true;
-              setConfirming(true);
-            }}
+            onSelect={() => setConfirming(true)}
           >
             {onArchive === null
               ? "Archive unavailable — no directory connection, or no live entry for this document"
