@@ -32,7 +32,9 @@ import {
   setChangelogSuggestion,
   setDescription,
   setKind,
+  setLinks,
   setStatus,
+  setTags,
   setTitle,
 } from "@uberblick/schema";
 import * as Y from "yjs";
@@ -86,6 +88,26 @@ describe("docFingerprint", () => {
   it("is stable across replication", () => {
     const doc = source();
     expect(docFingerprint(replicate(doc))).toBe(docFingerprint(doc));
+  });
+
+  it("is unmoved by tag order", () => {
+    const doc = source();
+    setTags(doc, ["one", "two"]);
+    const copy = replicate(doc);
+    setTags(copy, ["two", "one"]);
+
+    expect(getMeta(doc).tags).not.toEqual(getMeta(copy).tags);
+    expect(docFingerprint(doc)).toBe(docFingerprint(copy));
+  });
+
+  it("is unmoved by link order", () => {
+    const doc = source();
+    setLinks(doc, [DECISION_A, DECISION_B]);
+    const copy = replicate(doc);
+    setLinks(copy, [DECISION_B, DECISION_A]);
+
+    expect(getMeta(doc).links).not.toEqual(getMeta(copy).links);
+    expect(docFingerprint(doc)).toBe(docFingerprint(copy));
   });
 
   it("changes when a block's text changes", () => {
