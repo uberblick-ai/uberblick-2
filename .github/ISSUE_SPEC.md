@@ -86,15 +86,16 @@ Parent: #486
 - This includes `schema`: its keystone risk is paid by exact-head review and
   gates after upstream reconciliation, not by locking unrelated files or
   packages.
-- Order among eligible issues: **`Priority`** first — the organization issue
-  field, Urgent → High → Medium → Low — then oldest first (ascending issue
-  number). So the oldest Urgent issue goes before any High one, and only when
-  no High is left does the oldest Medium go (owner direction, 2026-09-01). An
-  unset value sorts as Low; it does not make prepared work ineligible.
-  Dependencies gate eligibility — every `Depends-on` closed — and never reorder:
-  being depended on earns no place in line. The product owner owns every
-  explicit Priority value. Agents may report evidence that the order looks
-  wrong, but never write the field.
+- Order among eligible issues: **effective `Priority`** first — the
+  organization issue field, Urgent → High → Medium → Low — then oldest first
+  (ascending issue number). An issue's effective Priority is the highest of its
+  own and of every open issue whose `Depends-on` chain reaches it: a Medium
+  that blocks a High is picked as a High, and the oldest Urgent goes before any
+  High (owner direction, 2026-09-01). An unset value sorts as Low; it does not
+  make prepared work ineligible. Dependencies otherwise gate eligibility —
+  every `Depends-on` closed — and earn no other place in line. The product
+  owner owns every explicit Priority value. Agents may report evidence that
+  the order looks wrong, but never write the field.
 
 `Priority` is that field, read through the API — never a line in the issue body:
 
