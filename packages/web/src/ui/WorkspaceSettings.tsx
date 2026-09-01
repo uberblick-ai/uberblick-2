@@ -1,6 +1,7 @@
 /** The facts-only General page for workspace settings. */
 
 import type { ReactElement, ReactNode } from "react";
+import { directoryRoom, listDirectory } from "@uberblick/schema";
 import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
@@ -29,13 +30,11 @@ function Fact({ label, children }: { label: string; children: ReactNode }): Reac
  */
 export function WorkspaceSettings({
   workspace,
-  documents,
   endpoint,
   connection,
   agentSessions,
 }: {
   workspace: Workspace;
-  documents: number;
   endpoint: HubEndpoint | null;
   connection: RoomConnection | null;
   agentSessions: number;
@@ -44,6 +43,11 @@ export function WorkspaceSettings({
   const state = useCalmSyncState(rawSyncState(status));
   const reading = statusReading(status, state);
   const cache = useLocalCacheSize(true);
+  const directoryAnswered =
+    connection !== null &&
+    connection.room === directoryRoom(workspace.uuid) &&
+    connection.status.localReplicaLoaded;
+  const documents = directoryAnswered ? listDirectory(connection.ydoc).length : null;
 
   return (
     <section className="ub-pane ub-settings-page" aria-labelledby="ub-settings-title">
@@ -53,24 +57,20 @@ export function WorkspaceSettings({
           <dl className="ub-panel-facts ub-settings-facts">
             <Fact label="Workspace UUID">{workspace.uuid}</Fact>
             <Fact label="Address segment">{workspace.segment}</Fact>
-            <Fact label="Documents">{documents}</Fact>
+            <Fact label="Documents">{documents ?? UNKNOWN}</Fact>
             <Fact label="Hub">{endpoint?.url ?? UNKNOWN}</Fact>
             <Fact label="Source">
               {endpoint === null ? UNKNOWN : endpointSourceLabel(endpoint.source)}
             </Fact>
             <Fact label="Connection">
-              {connection === null ? (
-                UNKNOWN
-              ) : (
-                <>
-                  <span>{reading.word}</span>
-                  {reading.detail !== null && (
-                    <span className="ub-settings-fact-detail"> {reading.detail}</span>
-                  )}
-                </>
+              <span>{reading.word}</span>
+              {reading.detail !== null && (
+                <span className="ub-settings-fact-detail"> {reading.detail}</span>
               )}
             </Fact>
-            {cache !== null && <Fact label="Local cache">{formatBytes(cache)}</Fact>}
+            {cache !== null && (
+              <Fact label="Local cache (all workspaces)">{formatBytes(cache)}</Fact>
+            )}
             <Fact label="MCP connections">{agentSessions}</Fact>
           </dl>
         </div>

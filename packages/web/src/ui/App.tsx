@@ -669,7 +669,6 @@ export function App(): ReactElement {
         {settings ? (
           <WorkspaceSettings
             workspace={route.workspace}
-            documents={entries.length}
             endpoint={endpoint}
             connection={directory}
             agentSessions={agentSessions}

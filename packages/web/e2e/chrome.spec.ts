@@ -209,10 +209,16 @@ test("workspace settings is an address-selected, inert sidebar drill-in", async 
   const documents = page.locator(".ub-document-sidebar");
   const settings = page.locator(".ub-settings-sidebar");
 
-  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+  const settingsEntry = page.getByRole("button", {
+    name: "Workspace settings",
+    exact: true,
+  });
+  await settingsEntry.click();
   await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
   await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
-  await expect(settings.getByRole("button", { name: /^Back to / })).toBeVisible();
+  const back = settings.getByRole("button", { name: /^Back to / });
+  await expect(back).toBeVisible();
+  await expect(back).toBeFocused();
   expect(await paintedIn(settings, "transition-duration")).toContain("0.18s");
   expect(
     await documents.evaluate((pane) => ({
@@ -226,6 +232,21 @@ test("workspace settings is an address-selected, inert sidebar drill-in", async 
   await page.goBack();
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
   await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
+  await expect(settingsEntry).toBeFocused();
+
+  // A portalled user panel sits outside the pane's inert subtree. Browser
+  // Forward changes the address without clicking underneath that panel, and
+  // the mode change must still take the outgoing surface and its focus away.
+  await page.locator(".ub-user-card").click();
+  const userPanel = page.locator("[data-slot=popover-content]");
+  await expect(userPanel).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await expect(userPanel).toBeHidden();
+  await expect(back).toBeFocused();
+  await page.goBack();
+  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+  await expect(settingsEntry).toBeFocused();
 
   // The switcher's existing entry is the second front door, and Back in the
   // settings pane always targets the workspace list rather than a remembered doc.
@@ -235,8 +256,8 @@ test("workspace settings is an address-selected, inert sidebar drill-in", async 
   await settings.getByRole("button", { name: /^Back to / }).click();
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
 
-  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
   await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
   expect(await paintedIn(settings, "transition-duration")).toBe("0s");
 });
 

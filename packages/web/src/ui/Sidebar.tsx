@@ -31,7 +31,7 @@
  * for a drag that lands near a header rather than in a slot.
  */
 
-import { Fragment, useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent, ReactElement, ReactNode } from "react";
 import type * as Y from "yjs";
 import {
@@ -204,6 +204,18 @@ export function Sidebar({
     () => new Map(stubs.map((entry) => [entry.uuid, entry])),
     [stubs],
   );
+  const shownMode = useRef(settingsOpen);
+  const sidebarRoot = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (shownMode.current === settingsOpen) return;
+    shownMode.current = settingsOpen;
+    sidebarRoot.current
+      ?.querySelector<HTMLElement>(
+        ".ub-sidebar-pane:not([inert]) [data-swap-focus]",
+      )
+      ?.focus();
+  }, [settingsOpen]);
 
   const end = useCallback(() => {
     setDrag(null);
@@ -265,6 +277,7 @@ export function Sidebar({
 
   return (
     <aside
+      ref={sidebarRoot}
       className="ub-list"
       aria-label="Sidebar"
       data-mode={settingsOpen ? "settings" : "documents"}
@@ -352,6 +365,7 @@ export function Sidebar({
             <button
               type="button"
               className="ub-settings-entry"
+              data-swap-focus
               onClick={onOpenSettings}
             >
               <GearIcon />
@@ -395,7 +409,12 @@ function SettingsNavigation({
       aria-hidden={!active}
       inert={!active}
     >
-      <button type="button" className="ub-settings-back" onClick={onBack}>
+      <button
+        type="button"
+        className="ub-settings-back"
+        data-swap-focus
+        onClick={onBack}
+      >
         <span className="ub-settings-back-tile" aria-hidden="true">
           <BackIcon />
         </span>

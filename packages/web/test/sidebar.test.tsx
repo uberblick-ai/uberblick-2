@@ -571,12 +571,16 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     const host = await openApp(`/${WORKSPACE}`);
     const documents = pane(host, ".ub-document-sidebar");
     const settings = pane(host, ".ub-settings-sidebar");
+    const settingsEntry = documents.querySelector<HTMLButtonElement>(
+      ".ub-settings-entry",
+    );
 
     expectLive(documents);
     expectDead(settings);
     expect(host.querySelectorAll(".ub-user-card")).toHaveLength(1);
 
-    act(() => host.querySelector<HTMLButtonElement>(".ub-settings-entry")?.click());
+    settingsEntry?.focus();
+    act(() => settingsEntry?.click());
     expect(window.location.pathname).toBe(`/${WORKSPACE}/settings`);
     // This assertion runs in the same task as the route change, while the
     // 180ms CSS transition is still in flight.
@@ -586,6 +590,9 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     expectDead(documents);
     expectLive(settings);
     expect(host.querySelectorAll(".ub-user-card")).toHaveLength(1);
+    expect(document.activeElement).toBe(
+      settings.querySelector(".ub-settings-back"),
+    );
     expect(settings.textContent).toContain(`Back to ${WORKSPACE}`);
     expect(settings.querySelector(".ub-nav-label")?.textContent).toBe(
       "Workspace settings",
@@ -602,6 +609,7 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     expect(window.location.pathname).toBe(`/${WORKSPACE}`);
     expectDead(settings);
     expectLive(documents);
+    expect(document.activeElement).toBe(settingsEntry);
   });
 
   it("opens a pasted settings address directly", async () => {
