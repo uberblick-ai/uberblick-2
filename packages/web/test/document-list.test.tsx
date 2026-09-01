@@ -592,7 +592,7 @@ describe("the filter", () => {
       .map((label) => label.textContent)
       .join(" ");
     expect(named).toContain("title");
-    expect(named).toContain("not by the text inside it");
+    expect(named).toContain("not document text");
   });
 
   /**

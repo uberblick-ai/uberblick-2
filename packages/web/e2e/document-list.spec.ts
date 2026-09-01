@@ -90,7 +90,7 @@ test("the workspace address is the list, and it holds what another browser creat
   // The scope is the field's accessible name in a real browser, not a sentence
   // beside it: this filters titles alone, not bodies.
   await expect(
-    reader.getByRole("searchbox", { name: /title.*not by the text inside it/i }),
+    reader.getByRole("searchbox", { name: /title.*not document text/i }),
   ).toBeVisible();
 
   // Typing filters what is already here — no request, no room.

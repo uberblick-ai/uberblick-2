@@ -69,8 +69,10 @@ const YEAR = 365 * DAY;
 /**
  * The field's label, which is also the whole answer to *what does typing here
  * do?* — both halves of it, so nobody has to guess at the half that is missing.
+ * Short, because a label is also the accessible name a screen reader repeats
+ * every time the field is reached and in every listing of the form's controls.
  */
-const SEARCH_LABEL = "Find a document by title — not by the text inside it";
+const SEARCH_LABEL = "Find by title, not document text";
 
 /** `3 days ago`, at the coarseness a reader actually reads. */
 export function relativeAge(iso: string, now: number = Date.now()): string {
