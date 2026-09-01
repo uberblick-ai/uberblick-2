@@ -83,11 +83,11 @@ function ceiling(env: NodeJS.ProcessEnv): number | null {
  * `ms`, or the ceiling if one is set and shorter.
  *
  * This process's own environment, which is what both call sites want: they run
- * inside a spawned `ub` and have no other map in hand. An in-process caller
- * that resolved a configuration from a map of its own goes through
- * {@link resolveMcpConfig} and {@link bridgeConfig}, which take that map — and
- * `bridgeConfig` takes it as a *required* argument, because defaulting it is
- * what let a caller-supplied ceiling be ignored one call later.
+ * inside a spawned `ub` and have no other map in hand. Neither deadline is an
+ * `McpConfig` field, so {@link resolveMcpConfig} and {@link bridgeConfig} do
+ * not reach them: `whoHoldsPort` is module-private, and `probeHubClock` takes
+ * its `timeoutMs` explicitly, so an in-process caller wanting its own ceiling
+ * passes one rather than inheriting this environment.
  */
 export function budget(ms: number): number {
   const cap = ceiling(process.env);
