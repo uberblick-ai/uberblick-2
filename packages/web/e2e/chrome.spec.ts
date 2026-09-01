@@ -348,6 +348,23 @@ test("document actions stay reachable, close with the route, and archive into Re
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();
 
+  // A click inside the confirmation that misses both buttons is not a
+  // dismissal, and it must not park focus on `<body>`: from there the Tab trap
+  // never fires and Shift+Tab walks out of the `aria-modal` dialog into the
+  // editable title, where one keystroke replaces it. jsdom has no focus
+  // adjustment for a real pointer press, so only Chromium sees this.
+  await trigger.click();
+  await page.getByRole("menuitem", { name: "Archive document" }).click();
+  await expect(confirmation).toHaveCount(1);
+  await page.locator("#ub-archive-detail").click();
+  await page.keyboard.press("Shift+Tab");
+  await expect(
+    confirmation.getByRole("button", { name: "Archive document" }),
+  ).toBeFocused();
+  await expect(confirmation).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(confirmation).toHaveCount(0);
+
   await trigger.click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
   await page.getByRole("button", { name: "Archive document" }).click();

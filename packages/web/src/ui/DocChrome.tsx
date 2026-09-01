@@ -613,19 +613,28 @@ function DocumentActions({
             aria-modal="true"
             aria-labelledby="ub-archive-title"
             aria-describedby="ub-archive-detail"
+            // A click on the dialog's own heading, text or padding focuses the
+            // nearest focusable ancestor; without this there is none, so focus
+            // rests on `<body>`, where a keydown never reaches the handler
+            // below and Shift+Tab walks out of the modal into the editable
+            // title behind it.
+            tabIndex={-1}
             onKeyDown={(event) => {
               if (event.key !== "Tab") return;
               const buttons =
                 event.currentTarget.querySelectorAll<HTMLButtonElement>("button");
               const first = buttons.item(0);
               const last = buttons.item(buttons.length - 1);
-              if (event.shiftKey && document.activeElement === first) {
-                event.preventDefault();
-                last.focus();
-              } else if (!event.shiftKey && document.activeElement === last) {
-                event.preventDefault();
-                first.focus();
-              }
+              // Backwards from the dialog itself leaves the modal, because the
+              // portal sits after the app in the document; forwards from it
+              // reaches Cancel on its own.
+              const leaving = event.shiftKey
+                ? document.activeElement === first ||
+                  document.activeElement === event.currentTarget
+                : document.activeElement === last;
+              if (!leaving) return;
+              event.preventDefault();
+              (event.shiftKey ? last : first).focus();
             }}
           >
             <h2 id="ub-archive-title">Archive {title}?</h2>

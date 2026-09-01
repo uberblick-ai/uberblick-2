@@ -183,7 +183,7 @@ describe("the doc chrome reads the document, the awareness and the status", () =
     vi.unstubAllGlobals();
   });
 
-  it("explains why archive is unavailable without a live directory stub", () => {
+  it("disables the archive item and explains why when archiving is unavailable", () => {
     vi.useFakeTimers();
     vi.stubGlobal(
       "ResizeObserver",
