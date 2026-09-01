@@ -139,8 +139,6 @@ function Chrome({
         presence={presence}
         endpoint={endpoint}
         meta={getMeta(fix.ydoc)}
-        pinned={false}
-        onTogglePin={null}
         threads={[]}
         threadsOpen={false}
         onToggleThreads={() => {}}
@@ -182,6 +180,44 @@ function text(host: HTMLElement, selector: string): string | null {
 describe("the doc chrome reads the document, the awareness and the status", () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("explains why archive is unavailable without a live directory stub", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      },
+    );
+    Element.prototype.scrollIntoView = function scrollIntoView() {};
+    const { host, root } = mount(fixture());
+    try {
+      act(() => {
+        const trigger =
+          host.querySelector<HTMLButtonElement>(".ub-actions-trigger");
+        trigger?.focus();
+        trigger?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+        );
+      });
+      const unavailable = [
+        ...document.querySelectorAll<HTMLElement>(
+          "[data-slot=dropdown-menu-item]",
+        ),
+      ].find(
+        (item) =>
+          item.textContent ===
+          "Archive unavailable — document is not in the directory",
+      );
+      expect(unavailable?.hasAttribute("data-disabled")).toBe(true);
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
   });
 
   it("names the group and the title, the caret's block, the state and the rev", () => {

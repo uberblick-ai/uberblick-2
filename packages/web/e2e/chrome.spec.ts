@@ -283,6 +283,61 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   expect(await painted(page, ".ub-list", "background-color")).toBe(sidebar);
 });
 
+test("document actions stay reachable, close with the route, and archive into Restore", async ({
+  browser,
+}) => {
+  const page = await openApp(browser, "light");
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.locator(".ub-title").fill("Lifecycle notes");
+  await page.setViewportSize({ width: 360, height: 720 });
+
+  const trigger = page.getByRole("button", { name: "Document actions" });
+  await expect(trigger).toBeVisible();
+  await expect(page.locator(".ub-doc-ids")).toBeVisible();
+  await expect(page.locator(".ub-copy-link")).toBeVisible();
+  await expect(page.locator(".ub-title")).toBeVisible();
+
+  await trigger.click();
+  await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await expect(
+    page.getByRole("menuitem", { name: "Unpin from sidebar" }),
+  ).toBeVisible();
+
+  // The menu is portalled outside the routed pane. A route change must still
+  // remove it rather than leaving an action for the document just left.
+  await page.evaluate(() => {
+    history.pushState(null, "", `${location.pathname.split("/").slice(0, 2).join("/")}/all`);
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect(page.locator("[data-slot=dropdown-menu-content]")).toHaveCount(0);
+  await page.goBack();
+  await expect(trigger).toBeVisible();
+
+  await trigger.click();
+  await page.getByRole("menuitem", { name: "Archive document" }).click();
+  const confirmation = page.getByRole("alertdialog");
+  await expect(confirmation).toContainText("Archive Lifecycle notes?");
+  await expect(confirmation).toContainText("read-only");
+  await page.keyboard.press("Escape");
+  await expect(confirmation).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await page.getByRole("menuitem", { name: "Archive document" }).click();
+  await page.getByRole("button", { name: "Archive document" }).click();
+  const restore = page.getByRole("button", { name: "Restore" });
+  await expect(restore).toBeVisible();
+  await expect(restore).toBeFocused();
+  await expect(trigger).toHaveCount(0);
+  await expect(page.locator(".ub-editor .ProseMirror")).toHaveAttribute(
+    "contenteditable",
+    "false",
+  );
+  await expect(page.getByRole("button", { name: /Lifecycle notes.*archived/ })).toBeVisible();
+});
+
 test("MCP connections counts a connected agent session, and stops when it goes", async ({
   browser,
 }) => {
@@ -901,24 +956,21 @@ for (const scheme of ["light", "dark"] as const) {
     await page.keyboard.press("Enter");
     await expect(page.locator(".ub-editor .ub-comment a.ub-doclink")).toBeVisible();
 
-    await page.locator(".ub-pin-toggle").click();
-    await expect(page.locator(".ub-pin-toggle")).toHaveAttribute("aria-pressed", "true");
+    const actions = page.getByRole("button", { name: "Document actions" });
+    await actions.click();
+    await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
+    await actions.click();
+    const pin = page.getByRole("menuitem", { name: "Unpin from sidebar" });
+    await expect(pin).toBeVisible();
 
     const consumers: Array<[string, Locator]> = [
       [".ub-badge", page.locator(".ub-badge")],
       [".ub-link", page.locator(".ub-editor a.ub-link")],
       [".ub-doclink, annotated", reference],
-      [".ub-pin-toggle", page.locator(".ub-pin-toggle")],
     ];
 
-    // And the fifth rule, in the switcher the walk above opens for its own
-    // reasons.
-    await page.locator(".ub-workspace").click();
-    await expect(page.locator("[data-slot=dropdown-menu-content]")).toBeVisible();
-    consumers.push([".ub-menu-current", page.locator(".ub-menu-current")]);
-
     const inks = new Set<string>();
-    for (const [where, locator] of consumers) {
+    for (const [where, locator] of [...consumers, [".ub-action-pinned", pin] as const]) {
       const ink = await paintedIn(locator, "color");
       inks.add(ink);
       for (const ground of await groundsUnder(page, locator)) {
@@ -927,6 +979,18 @@ for (const scheme of ["light", "dark"] as const) {
           `${where} — ${ink} on ${ground}`,
         ).toBeGreaterThanOrEqual(4.5);
       }
+    }
+    await page.keyboard.press("Escape");
+
+    // And the fifth rule, in the switcher the walk above opens for its own
+    // reasons.
+    await page.locator(".ub-workspace").click();
+    await expect(page.locator("[data-slot=dropdown-menu-content]")).toBeVisible();
+
+    const currentInk = await paintedIn(page.locator(".ub-menu-current"), "color");
+    inks.add(currentInk);
+    for (const ground of await groundsUnder(page, page.locator(".ub-menu-current"))) {
+      expect(contrast(currentInk, ground)).toBeGreaterThanOrEqual(4.5);
     }
     expect([...inks], "the functional brand ink is one value").toHaveLength(1);
 

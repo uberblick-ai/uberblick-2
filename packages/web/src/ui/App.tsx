@@ -13,10 +13,12 @@ import type { ReactElement } from "react";
 import {
   appendBlock,
   directoryRoom,
+  getDirectoryEntry,
   initDoc,
   restoreDirectoryEntry,
   roomForDoc,
   sidebarRoom,
+  tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
@@ -96,6 +98,10 @@ export function RoutePane({
   knownTags,
   archived,
   docLinks,
+  pinned = false,
+  onTogglePin = null,
+  onArchive = null,
+  focusRestore = false,
   onRestore,
   onSelectThread,
 }: {
@@ -135,6 +141,12 @@ export function RoutePane({
   archived: boolean;
   /** What an inline document reference resolves against — see {@link EditorPane}. */
   docLinks: DocLinkContext | null;
+  /** Sidebar curation and lifecycle actions for the live document. */
+  pinned?: boolean;
+  onTogglePin?: (() => void) | null;
+  onArchive?: (() => void) | null;
+  /** A local confirmed archive moves focus to the surviving Restore action. */
+  focusRestore?: boolean;
   /** Lift that tombstone. The only action an archived document offers. */
   onRestore: () => void;
   onSelectThread: SelectThread;
@@ -231,6 +243,10 @@ export function RoutePane({
       knownTags={knownTags}
       archived={archived}
       docLinks={docLinks}
+      pinned={pinned}
+      onTogglePin={onTogglePin}
+      onArchive={onArchive}
+      focusRestore={focusRestore}
       onRestore={onRestore}
       onSelectThread={onSelectThread}
     />
@@ -436,6 +452,11 @@ export function App(): ReactElement {
   const knownTags = useMemo(() => workspaceTags(entries), [entries]);
   const meta = useDocMeta(doc);
   const archived = useArchived(directory, selected);
+  const focusRestoreAfterArchive = useRef(false);
+  const liveDirectoryEntry =
+    directory === null || selected === null
+      ? undefined
+      : getDirectoryEntry(directory.ydoc, selected);
   /**
    * The open document's threads: the rail's content, read once here because two
    * things depend on it — the handle in the topbar, and whether the drawer is
@@ -482,7 +503,21 @@ export function App(): ReactElement {
    */
   const onRestore = useCallback(() => {
     if (directory === null || selected === null) return;
+    focusRestoreAfterArchive.current = false;
     restoreDirectoryEntry(directory.ydoc, selected);
+  }, [directory, selected]);
+
+  /**
+   * Archive only a live directory stub, matching the MCP lifecycle boundary.
+   * The pane follows the resulting tombstone through `useArchived`; there is no
+   * optimistic archived state here.
+   */
+  const onArchive = useCallback(() => {
+    if (directory === null || selected === null) return;
+    const entry = getDirectoryEntry(directory.ydoc, selected);
+    if (entry === null || entry.deleted === true) return;
+    focusRestoreAfterArchive.current = true;
+    tombstoneDirectoryEntry(directory.ydoc, selected);
   }, [directory, selected]);
 
   /**
@@ -678,8 +713,6 @@ export function App(): ReactElement {
           endpoint={endpoint}
           meta={meta}
           threads={threads}
-          pinned={pinned}
-          onTogglePin={sidebar !== null && selected !== null ? onTogglePin : null}
           threadsOpen={threadsOpen}
           onToggleThreads={onToggleThreads}
           syncOpen={syncOpen}
@@ -798,6 +831,16 @@ export function App(): ReactElement {
             knownTags={knownTags}
             archived={archived}
             docLinks={docLinks}
+            pinned={pinned}
+            onTogglePin={sidebar !== null && selected !== null ? onTogglePin : null}
+            onArchive={
+              liveDirectoryEntry !== null &&
+              liveDirectoryEntry !== undefined &&
+              liveDirectoryEntry.deleted !== true
+                ? onArchive
+                : null
+            }
+            focusRestore={focusRestoreAfterArchive.current}
             onRestore={onRestore}
             onSelectThread={onFocusThread}
           />

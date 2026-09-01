@@ -66,13 +66,23 @@ export function PaneNotice({ children }: { children: ReactNode }): ReactElement 
  * does not do is take an edit: restoring is the way back, and there is no
  * second path that quietly writes to a document someone archived.
  */
-function ArchivedBanner({ onRestore }: { onRestore: () => void }): ReactElement {
+function ArchivedBanner({
+  onRestore,
+  focusRestore,
+}: {
+  onRestore: () => void;
+  focusRestore: boolean;
+}): ReactElement {
+  const restore = useRef<HTMLButtonElement | null>(null);
+  useLayoutEffect(() => {
+    if (focusRestore) restore.current?.focus();
+  }, [focusRestore]);
   return (
     <p className="ub-archived-banner">
       <strong>Archived.</strong> This document is tombstoned in the directory:
       it is read-only here and hidden from the document list. Restore it to edit
       it again.
-      <button type="button" className="ub-tool" onClick={onRestore}>
+      <button ref={restore} type="button" className="ub-tool" onClick={onRestore}>
         Restore
       </button>
     </p>
@@ -532,6 +542,10 @@ export function EditorPane({
   author,
   knownTags,
   archived,
+  pinned = false,
+  onTogglePin = null,
+  onArchive = null,
+  focusRestore = false,
   docLinks,
   onRestore,
   onSelectThread,
@@ -553,6 +567,10 @@ export function EditorPane({
    * the value changes under an open pane when anyone archives or restores.
    */
   archived: boolean;
+  pinned?: boolean;
+  onTogglePin?: (() => void) | null;
+  onArchive?: (() => void) | null;
+  focusRestore?: boolean;
   /**
    * What a `docLink` resolves against: the address of a document in the
    * workspace on screen, the directory that names it, and where a click goes
@@ -586,7 +604,9 @@ export function EditorPane({
   return (
     <section className="ub-pane">
       <div className="ub-column">
-        {archived && <ArchivedBanner onRestore={onRestore} />}
+        {archived && (
+          <ArchivedBanner onRestore={onRestore} focusRestore={focusRestore} />
+        )}
         {/* The eyebrow: what this document is, what it is tagged, and which
             version of it is on screen — above the title, as design 1a has it. */}
         <DocMetaLine
@@ -595,6 +615,9 @@ export function EditorPane({
           meta={meta}
           knownTags={knownTags}
           archived={archived}
+          pinned={pinned}
+          onTogglePin={onTogglePin}
+          onArchive={onArchive}
         />
         <input
           className="ub-title"

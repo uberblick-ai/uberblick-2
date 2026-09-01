@@ -33,12 +33,16 @@ import type { ReactNode } from "react";
 import * as Y from "yjs";
 import {
   appendBlock,
+  createGroup,
   directoryRoom,
   getDirectoryEntry,
   getMeta,
   initDoc,
   listDirectory,
+  pinDoc,
+  readSidebar,
   roomForDoc,
+  sidebarRoom,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -110,6 +114,15 @@ beforeEach(() => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response("", { status: 404 }),
   );
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    },
+  );
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
 });
 
 afterEach(() => {
@@ -121,6 +134,7 @@ afterEach(() => {
   }
   rooms.clear();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 /**
@@ -183,7 +197,75 @@ function restoreButton(host: HTMLElement): HTMLButtonElement | null {
   return host.querySelector(".ub-archived-banner button");
 }
 
+function openActions(host: HTMLElement): void {
+  act(() => {
+    const trigger = host.querySelector<HTMLButtonElement>(".ub-actions-trigger");
+    trigger?.focus();
+    trigger?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+  });
+}
+
+function action(label: string): HTMLElement | undefined {
+  return [
+    ...document.querySelectorAll<HTMLElement>("[data-slot=dropdown-menu-item]"),
+  ].find((item) => item.textContent === label);
+}
+
 describe("an archived document is readable, says so, and offers one way back", () => {
+  it("curates and archives from the identity-row menu without losing the pin", async () => {
+    const directory = room(directoryRoom(WORKSPACE)).ydoc;
+    const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
+    const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+    initDoc(ydoc, { uuid: UUID, title: "Retired protocol" });
+    appendBlock(ydoc, { type: "paragraph", text: "still every byte of it" });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired protocol" });
+    pinDoc(sidebar, createGroup(sidebar, "Reading"), UUID);
+
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    const trigger = host.querySelector<HTMLButtonElement>(".ub-actions-trigger");
+    expect(trigger?.getAttribute("aria-label")).toBe("Document actions");
+
+    openActions(host);
+    act(() => action("Unpin from sidebar")?.click());
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
+    await Promise.resolve();
+    expect(document.activeElement).toBe(trigger);
+
+    openActions(host);
+    act(() => action("Pin to sidebar")?.click());
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
+
+    openActions(host);
+    act(() => action("Archive document")?.click());
+    const dialog = document.querySelector('[role="alertdialog"]');
+    expect(dialog?.textContent).toContain("Archive Retired protocol?");
+    expect(dialog?.textContent).toContain("read-only");
+    expect(dialog?.textContent).toContain("Restore");
+
+    act(() => {
+      [...(dialog?.querySelectorAll("button") ?? [])]
+        .find((button) => button.textContent === "Cancel")
+        ?.click();
+    });
+    await Promise.resolve();
+    expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
+    expect(document.activeElement).toBe(trigger);
+
+    openActions(host);
+    act(() => action("Archive document")?.click());
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>('[role="alertdialog"] .ub-tool-danger')
+        ?.click();
+    });
+    expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
+    expect(host.querySelector(".ub-actions-trigger")).toBeNull();
+    expect(document.activeElement).toBe(restoreButton(host));
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
+  });
+
   it("follows the directory tombstone in both directions, under an open pane", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;

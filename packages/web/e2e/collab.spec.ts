@@ -81,7 +81,8 @@ async function createDoc(page: Page, title: string): Promise<void> {
   await page.locator(".ub-title").fill(title);
   // Pinned, because the sidebar lists what is pinned and nothing else (#115) —
   // and this is how the *other* context navigates to it.
-  await page.locator(".ub-pin-toggle").click();
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
   // The sidebar doc carries the pin and the directory stub carries the title,
   // and both are what the *other* context navigates by.
   await expect(docButton(page, title)).toBeVisible();

@@ -16,6 +16,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
+import { createPortal } from "react-dom";
 import type * as Y from "yjs";
 import { getMeta, parseRoom, setTags } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
@@ -32,6 +33,13 @@ import { useDocRev, useRoomStatus } from "./hooks.js";
 import { shareUrl } from "./route.js";
 import { distinctTags, withTag, withoutTag } from "./tags.js";
 import type { ThreadView } from "./threads.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./shadcn/dropdown-menu.js";
 
 /** What an untitled document is called wherever its name is shown. */
 const UNTITLED = "Untitled";
@@ -88,8 +96,6 @@ export function DocChrome({
   presence,
   endpoint,
   meta,
-  pinned,
-  onTogglePin,
   threads,
   threadsOpen,
   onToggleThreads,
@@ -110,14 +116,6 @@ export function DocChrome({
   endpoint: HubEndpoint | null;
   /** The open document's metadata, or null when none is open or read yet. */
   meta: DocMeta | null;
-  /** Whether the open document is pinned to the sidebar (#115). */
-  pinned: boolean;
-  /**
-   * Pin it, or unpin it — null while there is no sidebar room to write to, or
-   * no document to pin. The control is not drawn then: an affordance that
-   * cannot act is worse than none.
-   */
-  onTogglePin: (() => void) | null;
   /**
    * The open document's threads — what the rail would show. Passed rather than
    * read here, because the app shell decides on the same value whether the
@@ -168,24 +166,6 @@ export function DocChrome({
   return (
     <>
       {named && <Breadcrumb meta={meta} />}
-      {/* The document's own context is where pinning belongs, and this is the
-          least of it: one control, both directions, in the tab order — so the
-          sidebar can be curated without a pointer, let alone a drag. Where in
-          the sidebar the document lands is the drag's business (#115). */}
-      {named && onTogglePin !== null && (
-        <button
-          type="button"
-          className="ub-pin-toggle"
-          aria-pressed={pinned}
-          aria-label={pinned ? "Unpin from the sidebar" : "Pin to the sidebar"}
-          title={pinned ? "Unpin from the sidebar" : "Pin to the sidebar"}
-          onClick={onTogglePin}
-        >
-          {/* The word never changes and the mark carries the state, so the
-              header does not move when a document is pinned. */}
-          <span aria-hidden="true">{pinned ? "◆" : "◇"}</span> Pin
-        </button>
-      )}
       <span className="ub-chrome-pills">
         {/* The drawer's handle (#101). Below 1100px there is no room for the
             rail beside the prose, so it is hidden and this opens it as an
@@ -523,6 +503,9 @@ export function DocMetaLine({
   meta,
   knownTags,
   archived,
+  pinned = false,
+  onTogglePin = null,
+  onArchive = null,
 }: {
   connection: RoomConnection;
   /** The workspace as the address spells it — what a copied link carries. */
@@ -532,6 +515,10 @@ export function DocMetaLine({
   knownTags: readonly string[];
   /** Whether the directory tombstones this document: no writes from here. */
   archived: boolean;
+  pinned?: boolean;
+  onTogglePin?: (() => void) | null;
+  /** Null means this replica cannot establish a current live directory stub. */
+  onArchive?: (() => void) | null;
 }): ReactElement {
   const rev = useDocRev(connection);
   const group = meta === null ? null : groupOf(meta);
@@ -557,8 +544,155 @@ export function DocMetaLine({
           {/* Archived or not: a tombstoned document still has an address, and
               handing somebody the link to it is not a write. */}
           <CopyLink room={connection.room} segment={segment} />
+          {!archived && (
+            <DocumentActions
+              key={connection.room}
+              title={titleOf(meta)}
+              pinned={pinned}
+              onTogglePin={onTogglePin}
+              onArchive={onArchive}
+            />
+          )}
         </>
       )}
     </p>
+  );
+}
+
+function DocumentActions({
+  title,
+  pinned,
+  onTogglePin,
+  onArchive,
+}: {
+  title: string;
+  pinned: boolean;
+  onTogglePin: (() => void) | null;
+  onArchive: (() => void) | null;
+}): ReactElement {
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const cancel = useRef<HTMLButtonElement | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  useLayoutEffect(() => {
+    if (confirming) cancel.current?.focus();
+  }, [confirming]);
+
+  useEffect(() => {
+    if (!confirming) return;
+    const close = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setConfirming(false);
+      queueMicrotask(() => trigger.current?.focus());
+    };
+    document.addEventListener("keydown", close);
+    return () => document.removeEventListener("keydown", close);
+  }, [confirming]);
+
+  const cancelArchive = (): void => {
+    setConfirming(false);
+    queueMicrotask(() => trigger.current?.focus());
+  };
+
+  const confirmation = confirming
+    ? createPortal(
+        <div
+          className="ub-confirm-backdrop"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) cancelArchive();
+          }}
+        >
+          <div
+            className="ub-confirm"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="ub-archive-title"
+            aria-describedby="ub-archive-detail"
+            onKeyDown={(event) => {
+              if (event.key !== "Tab") return;
+              const buttons =
+                event.currentTarget.querySelectorAll<HTMLButtonElement>("button");
+              const first = buttons.item(0);
+              const last = buttons.item(buttons.length - 1);
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+              }
+            }}
+          >
+            <h2 id="ub-archive-title">Archive {title}?</h2>
+            <p id="ub-archive-detail">
+              Its content is preserved, but the document becomes read-only and
+              leaves normal listings until you Restore it.
+            </p>
+            <span className="ub-confirm-actions">
+              <button
+                ref={cancel}
+                type="button"
+                className="ub-tool"
+                onClick={cancelArchive}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ub-tool ub-tool-danger"
+                onClick={() => {
+                  setConfirming(false);
+                  onArchive?.();
+                }}
+              >
+                Archive document
+              </button>
+            </span>
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <span className="ub-document-actions">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            ref={trigger}
+            type="button"
+            className="ub-actions-trigger"
+            aria-label="Document actions"
+            title="Document actions"
+          >
+            ⋯
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            disabled={onTogglePin === null}
+            className={pinned ? "ub-action-pinned" : ""}
+            onSelect={() => {
+              onTogglePin?.();
+              queueMicrotask(() => trigger.current?.focus());
+            }}
+          >
+            {pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={onArchive === null}
+            className="ub-action-danger"
+            onSelect={() => setConfirming(true)}
+          >
+            {onArchive === null
+              ? "Archive unavailable — document is not in the directory"
+              : "Archive document"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {confirmation}
+    </span>
   );
 }
