@@ -513,6 +513,7 @@ export function DocMetaLine({
   pinned = false,
   onTogglePin = null,
   onArchive = null,
+  onArchiveConfirmationFocusChange,
 }: {
   connection: RoomConnection;
   /** The workspace as the address spells it — what a copied link carries. */
@@ -526,6 +527,8 @@ export function DocMetaLine({
   onTogglePin?: (() => void) | null;
   /** Null means this replica cannot establish a current live directory stub. */
   onArchive?: (() => void) | null;
+  /** Whether focus is inside the confirmation a remote archive may remove. */
+  onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
 }): ReactElement {
   const rev = useDocRev(connection);
   const group = meta === null ? null : groupOf(meta);
@@ -558,6 +561,7 @@ export function DocMetaLine({
               pinned={pinned}
               onTogglePin={onTogglePin}
               onArchive={onArchive}
+              onConfirmationFocusChange={onArchiveConfirmationFocusChange}
             />
           )}
         </>
@@ -571,18 +575,28 @@ function DocumentActions({
   pinned,
   onTogglePin,
   onArchive,
+  onConfirmationFocusChange,
 }: {
   title: string;
   pinned: boolean;
   onTogglePin: (() => void) | null;
   onArchive: (() => void) | null;
+  onConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
 }): ReactElement {
   const [confirming, setConfirming] = useState(false);
+
+  useEffect(
+    () => () => onConfirmationFocusChange?.(false),
+    [onConfirmationFocusChange],
+  );
 
   return (
     <Dialog
       open={confirming}
       onOpenChange={(open) => {
+        // The persistent menu button is also DialogTrigger so Radix can return
+        // focus to it. Its ordinary menu click therefore requests a dialog
+        // open too; only the Archive item below is allowed to accept that half.
         if (!open) setConfirming(false);
       }}
     >
@@ -620,7 +634,17 @@ function DocumentActions({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <DialogContent className="ub-confirm" role="alertdialog">
+        <DialogContent
+          className="ub-confirm"
+          role="alertdialog"
+          onFocusCapture={() => onConfirmationFocusChange?.(true)}
+          onBlurCapture={(event) => {
+            const next = event.relatedTarget;
+            if (!(next instanceof Node) || !event.currentTarget.contains(next)) {
+              onConfirmationFocusChange?.(false);
+            }
+          }}
+        >
           <DialogTitle>Archive {title}?</DialogTitle>
           <DialogDescription>
             Its content is preserved, but the document becomes read-only and

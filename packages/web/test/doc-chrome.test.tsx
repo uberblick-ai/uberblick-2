@@ -214,6 +214,7 @@ describe("the doc chrome reads the document, the awareness and the status", () =
           "Archive unavailable — no directory connection, or no live entry for this document",
       );
       expect(unavailable?.hasAttribute("data-disabled")).toBe(true);
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
     } finally {
       act(() => root.unmount());
       host.remove();

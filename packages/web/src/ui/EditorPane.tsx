@@ -549,6 +549,7 @@ export function EditorPane({
   pinned = false,
   onTogglePin = null,
   onArchive = null,
+  onArchiveConfirmationFocusChange,
   focusRestore = false,
   onRestoreFocused,
   docLinks,
@@ -575,6 +576,7 @@ export function EditorPane({
   pinned?: boolean;
   onTogglePin?: (() => void) | null;
   onArchive?: (() => void) | null;
+  onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
   focusRestore?: boolean;
   onRestoreFocused?: (() => void) | undefined;
   /**
@@ -628,6 +630,7 @@ export function EditorPane({
           pinned={pinned}
           onTogglePin={onTogglePin}
           onArchive={onArchive}
+          onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
         />
         <input
           className="ub-title"

@@ -93,6 +93,7 @@ export function RoutePane({
   pinned = false,
   onTogglePin = null,
   onArchive = null,
+  onArchiveConfirmationFocusChange,
   focusRestore = false,
   onRestoreFocused,
   onRestore,
@@ -138,6 +139,8 @@ export function RoutePane({
   pinned?: boolean;
   onTogglePin?: (() => void) | null;
   onArchive?: (() => void) | null;
+  /** Track focus that should survive a remote archive closing its confirmation. */
+  onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
   /** A local confirmed archive moves focus to the surviving Restore action. */
   focusRestore?: boolean;
   /** Consume that one-shot focus request after the Restore control receives it. */
@@ -241,6 +244,7 @@ export function RoutePane({
       pinned={pinned}
       onTogglePin={onTogglePin}
       onArchive={onArchive}
+      onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
       focusRestore={focusRestore}
       onRestoreFocused={onRestoreFocused}
       onRestore={onRestore}
@@ -409,6 +413,7 @@ export function App(): ReactElement {
   const meta = useDocMeta(doc);
   const archived = useArchived(directory, selected);
   const restoreFocusRoom = useRef<string | null>(null);
+  const archiveConfirmationFocusRoom = useRef<string | null>(null);
   const liveDirectoryEntry =
     directory === null || selected === null
       ? undefined
@@ -465,7 +470,25 @@ export function App(): ReactElement {
 
   const onRestoreFocused = useCallback(() => {
     restoreFocusRoom.current = null;
+    archiveConfirmationFocusRoom.current = null;
   }, []);
+
+  /**
+   * Remember focus only while it is inside the archive confirmation. A remote
+   * tombstone can remove that portalled surface without calling `onArchive`,
+   * and the surviving Restore control is then the nearest place to stand.
+   */
+  const onArchiveConfirmationFocusChange = useCallback(
+    (focused: boolean) => {
+      if (doc === null) return;
+      if (focused) {
+        archiveConfirmationFocusRoom.current = doc.room;
+      } else if (archiveConfirmationFocusRoom.current === doc.room) {
+        archiveConfirmationFocusRoom.current = null;
+      }
+    },
+    [doc],
+  );
 
   /**
    * Archive only a live directory stub, matching the MCP lifecycle boundary.
@@ -750,7 +773,12 @@ export function App(): ReactElement {
                 ? onArchive
                 : null
             }
-            focusRestore={doc !== null && restoreFocusRoom.current === doc.room}
+            onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
+            focusRestore={
+              doc !== null &&
+              (restoreFocusRoom.current === doc.room ||
+                archiveConfirmationFocusRoom.current === doc.room)
+            }
             onRestoreFocused={onRestoreFocused}
             onRestore={onRestore}
             onSelectThread={onFocusThread}

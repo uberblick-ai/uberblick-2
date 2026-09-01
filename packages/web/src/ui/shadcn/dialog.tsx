@@ -33,7 +33,7 @@ function DialogTitle({
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("font-medium text-foreground", className)}
+      className={cn("text-foreground", className)}
       {...props}
     />
   );
@@ -65,8 +65,7 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-30 grid w-[min(32rem,calc(100vw-2rem))] max-h-[calc(100vh-2rem)] -translate-x-1/2 -translate-y-1/2 gap-3 overflow-y-auto",
-          "rounded-(--radius) border border-border bg-card p-4 text-[0.85rem] text-card-foreground shadow-(--shadow-float) outline-hidden",
+          "fixed top-1/2 left-1/2 z-30 grid max-h-[calc(100vh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto text-[0.85rem] outline-hidden",
           className,
         )}
         {...props}

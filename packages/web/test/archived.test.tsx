@@ -280,6 +280,15 @@ describe("an archived document is readable, says so, and offers one way back", (
     title?.focus();
     act(() => tombstoneDirectoryEntry(directory, UUID));
     expect(document.activeElement).toBe(title);
+
+    // The same remote transition must repair focus when what it removes is the
+    // confirmation itself, without broadening that repair to the title above.
+    act(() => restoreDirectoryEntry(directory, UUID));
+    openActions(host);
+    act(() => action("Archive document")?.click());
+    expect(document.activeElement?.textContent).toBe("Cancel");
+    act(() => tombstoneDirectoryEntry(directory, UUID));
+    expect(document.activeElement).toBe(restoreButton(host));
   });
 
   it("follows the directory tombstone in both directions, under an open pane", async () => {
