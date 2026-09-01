@@ -51,6 +51,7 @@ import { useDirectory, useRoomStatus, useStoredFlag } from "./hooks.js";
 import { rawSyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
 import { UserMenu } from "./UserMenu.js";
+import { SettingsIcon } from "./WorkspaceSettings.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import type { Workspace } from "./route.js";
 
@@ -137,6 +138,7 @@ export function Sidebar({
   onSelect,
   onCreate,
   onOpenAll,
+  onOpenSettings,
   allOpen,
 }: {
   /** The directory room: its sync state, and whether a document can be created. */
@@ -166,6 +168,8 @@ export function Sidebar({
   onCreate: () => void;
   /** Go to the "All docs" listing (#118) — the live row in Navigation. */
   onOpenAll: () => void;
+  /** Go to workspace settings (#485) — the footer's gear row, and the menu's. */
+  onOpenSettings: () => void;
   /** Whether that listing is what the address currently names. */
   allOpen: boolean;
 }): ReactElement {
@@ -264,6 +268,7 @@ export function Sidebar({
         current={workspace}
         docs={entries.length}
         onSwitch={onSwitchWorkspace}
+        onOpenSettings={onOpenSettings}
       />
       <div className="ub-list-head">
         <button type="button" onClick={onCreate} disabled={connection === null}>
@@ -328,10 +333,20 @@ export function Sidebar({
       >
         + group
       </button>
-      {/* The sidebar's footer. Who this client is (#74), and nothing else: it
-          is the one row that is about the person rather than about the corpus,
-          so it is the one row that belongs below the line the groups end at. */}
+      {/* The sidebar's footer: the two rows that are about neither the corpus
+          nor one document, below the line the groups end at. The way into
+          workspace settings (#485) is a row rather than a menu item alone,
+          because it is a place to go — and it is above the user card, which is
+          about this client rather than the workspace. */}
       <div className="ub-list-foot">
+        <ul>
+          <li>
+            <button type="button" onClick={onOpenSettings}>
+              <SettingsIcon />
+              Workspace settings
+            </button>
+          </li>
+        </ul>
         <UserMenu identity={identity} agentSessions={agentSessions} />
       </div>
     </nav>
