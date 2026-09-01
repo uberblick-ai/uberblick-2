@@ -20,6 +20,7 @@ import {
   insertBlock,
   setBlockLanguage,
   setBlockLevel,
+  setChangelogSuggestion,
   setDescription,
   setKind,
   setLinks,
@@ -98,6 +99,82 @@ describe("document round-trip", () => {
 
     setDescription(doc, "");
     expect(getMeta(doc).description).toBeNull();
+  });
+
+  it("keeps the changelog suggestion's three states apart", () => {
+    const doc = seeded();
+    // Nobody has written one: the key is absent, not null. Collapsing the two
+    // would make every internal-only change look unfinished.
+    expect(getMeta(doc)).not.toHaveProperty("changelogSuggestion");
+
+    setChangelogSuggestion(doc, "Documents now carry a changelog suggestion.");
+    expect(getMeta(doc).changelogSuggestion).toBe(
+      "Documents now carry a changelog suggestion.",
+    );
+
+    // The deliberate decision that this work needs no user-facing entry.
+    setChangelogSuggestion(doc, null);
+    expect(getMeta(doc).changelogSuggestion).toBeNull();
+
+    // And back to nobody having written one, with the key gone rather than
+    // blank — otherwise a clear would read as that decision.
+    setChangelogSuggestion(doc, "");
+    expect(getMeta(doc)).not.toHaveProperty("changelogSuggestion");
+    expect(getMetaMap(doc).has("changelogSuggestion")).toBe(false);
+  });
+
+  it("lets a concurrent changelog write outlive a clear, in both merge orders", () => {
+    // Clearing deletes the key, which reaches only the value the clearing
+    // replica has already seen — so the other writer's state survives, and the
+    // three states are not equally durable. Both `DocMeta.changelogSuggestion`
+    // and set_changelog_suggestion say so; this is what they say it about.
+    for (const concurrent of ["A later sentence.", null]) {
+      const a = seeded();
+      setChangelogSuggestion(a, "The stored suggestion.");
+      const b = new Y.Doc();
+      Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+
+      setChangelogSuggestion(a, "");
+      setChangelogSuggestion(b, concurrent);
+      const updateA = Y.encodeStateAsUpdate(a);
+      const updateB = Y.encodeStateAsUpdate(b);
+      Y.applyUpdate(a, updateB);
+      Y.applyUpdate(b, updateA);
+
+      for (const replica of [a, b]) {
+        expect(getMeta(replica).changelogSuggestion).toBe(concurrent);
+      }
+    }
+  });
+
+  it("holds the changelog suggestion beside the other metadata, not instead of it", () => {
+    const doc = seeded();
+    setDescription(doc, "What this document is for.");
+    setKind(doc, "decision");
+    setStatus(doc, "open");
+    const target = "22222222-2222-4222-8222-222222222222";
+    setLinks(doc, [target]);
+
+    setChangelogSuggestion(doc, "Nothing a user can see changed here.");
+    expect(getMeta(doc)).toEqual({
+      uuid: UUID,
+      title: "Block model",
+      tags: ["schema"],
+      description: "What this document is for.",
+      changelogSuggestion: "Nothing a user can see changed here.",
+      kind: "decision",
+      status: "open",
+      links: [target],
+    });
+
+    // And the traffic runs the other way too: a metadata write is not a
+    // wholesale replacement of `meta`.
+    setTitle(doc, "Block model, revised");
+    setTags(doc, ["schema", "keystone"]);
+    setDescription(doc, "Rewritten.");
+    expect(getMeta(doc).changelogSuggestion).toBe(
+      "Nothing a user can see changed here.",
+    );
   });
 
   it("writes every legal kind/status pair and refuses every illegal one", () => {

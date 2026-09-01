@@ -4,8 +4,9 @@
  * A document is one Y.Doc (room name = document UUID) with exactly four
  * top-level shared types:
  *
- *   - `meta`        Y.Map     — uuid, title, description, tags, links,
- *                              kind, status and decision remove/add levels
+ *   - `meta`        Y.Map     — uuid, title, description, changelog suggestion,
+ *                              tags, links, kind, status and decision
+ *                              remove/add levels
  *   - `blocks`      Y.XmlFragment — one Y.XmlElement per block
  *   - `annotations` Y.Map     — threadId → that thread's own Y.Map
  *   - `decisions`   Y.Array   — decision-document uuids, in stored order
@@ -188,9 +189,28 @@ export function getMeta(ydoc: Y.Doc): DocMeta {
     tags: readStringArray(meta.get("tags")),
     description:
       typeof description === "string" && description !== "" ? description : null,
+    ...readChangelogSuggestion(meta.get("changelogSuggestion")),
     ...lifecycle,
     links: effectiveLinks(ydoc, readStringArray(meta.get("links"))),
   };
+}
+
+/**
+ * The three states of {@link DocMeta.changelogSuggestion}, read tolerantly.
+ *
+ * One key carries all three, so concurrent writers converge on one state rather
+ * than on an invalid pair. Stored null is the deliberate "no user-facing entry";
+ * a non-empty string is the suggestion; anything else — no key at all, or a
+ * value only a foreign writer could have left — is nobody having written one.
+ */
+function readChangelogSuggestion(
+  value: unknown,
+): { changelogSuggestion?: string | null } {
+  if (value === null) return { changelogSuggestion: null };
+  if (typeof value === "string" && value !== "") {
+    return { changelogSuggestion: value };
+  }
+  return {};
 }
 
 export function setTitle(ydoc: Y.Doc, title: string): void {
@@ -216,6 +236,32 @@ export function setDescription(ydoc: Y.Doc, description: string): void {
   const meta = getMetaMap(ydoc);
   ydoc.transact(() => {
     meta.set("description", description);
+  });
+}
+
+/**
+ * Write the changelog suggestion, or clear it back to absent.
+ *
+ * `null` is the deliberate decision that this work needs no user-facing entry,
+ * and is stored as null. The empty string removes the key instead, so the field
+ * reads as nobody having written one rather than as that decision — the two are
+ * different answers and only the key distinguishes them.
+ *
+ * Length is not enforced here, exactly as it is not for a description: the write
+ * boundary checks it against {@link MAX_DESCRIPTION_LENGTH}. The directory stub
+ * does not cache the field, so nothing follows this write.
+ */
+export function setChangelogSuggestion(
+  ydoc: Y.Doc,
+  suggestion: string | null,
+): void {
+  const meta = getMetaMap(ydoc);
+  ydoc.transact(() => {
+    if (suggestion === "") {
+      meta.delete("changelogSuggestion");
+    } else {
+      meta.set("changelogSuggestion", suggestion);
+    }
   });
 }
 

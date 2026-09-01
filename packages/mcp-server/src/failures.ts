@@ -116,6 +116,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "set_links",
   "set_title",
   "set_description",
+  "set_changelog_suggestion",
   "archive_doc",
   "restore_doc",
   "annotate",
@@ -317,11 +318,11 @@ export const FAILURE_CODES: readonly string[] = [
  * The whole contract, in the words an agent reads — carried ONCE, in the
  * server's `instructions` (see ./server.ts).
  *
- * Repeating a hundred and fifty words on all twenty-four tools cost every
- * session tens of kilobytes of `tools/list` to say the same thing twenty-four
- * times. The prose belongs where a client reads it once; the per-tool
- * descriptions carry {@link failureContract}, which is the machine shape and
- * nothing else.
+ * Repeating a hundred and fifty words on every tool cost each session tens of
+ * kilobytes of `tools/list` to say the same thing once per tool, and the bill
+ * grew with the tool set. The prose belongs where a client reads it once; the
+ * per-tool descriptions carry {@link failureContract}, which is the machine
+ * shape and nothing else.
  */
 export const FAILURE_INSTRUCTIONS =
   "Failures are JSON with a stable `error` code and a human `message`, and — wherever recovery is actionable — a " +

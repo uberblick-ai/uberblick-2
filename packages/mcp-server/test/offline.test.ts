@@ -65,6 +65,7 @@ describe("with the hub stopped", () => {
       "rate_doc",
       "restore_doc",
       "search",
+      "set_changelog_suggestion",
       "set_description",
       "set_links",
       "set_tags",
