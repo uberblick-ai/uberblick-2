@@ -177,10 +177,11 @@ export default class ScenarioEvidenceReporter implements Reporter {
       },
     };
 
-    const video = result.attachments.find((a) => a.name === "video" && a.path !== undefined);
-    if (video?.path !== undefined && existsSync(video.path)) {
-      copyFileSync(video.path, join(dir, "video.webm"));
-    }
+    // Only claim a video on the page when one was actually copied: an attachment
+    // whose file is gone would otherwise leave a broken player behind.
+    const source = result.attachments.find((a) => a.name === "video")?.path;
+    const recorded = source !== undefined && existsSync(source);
+    if (recorded) copyFileSync(source, join(dir, "video.webm"));
 
     const scenarioText = existsSync(scenarioFile)
       ? readFileSync(scenarioFile, "utf8")
@@ -189,7 +190,7 @@ export default class ScenarioEvidenceReporter implements Reporter {
     writeFileSync(join(dir, "provenance.json"), `${JSON.stringify(provenance, null, 2)}\n`);
     writeFileSync(
       join(dir, "index.html"),
-      page(provenance, video?.path === undefined ? null : "video.webm", scenarioText),
+      page(provenance, recorded ? "video.webm" : null, scenarioText),
     );
     process.stdout.write(`  scenario evidence: ${relative(repoRoot, join(dir, "index.html"))}\n`);
   }

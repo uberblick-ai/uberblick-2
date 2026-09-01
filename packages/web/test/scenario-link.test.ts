@@ -9,11 +9,21 @@
  * filed. This test is what turns either break into a failure, and it runs in
  * `mise run test`, where a rename is made.
  *
- * It reads source text, which is the cheapest thing that works and the most
- * obvious thing to break: it recognises a literal title and a literal
- * annotation, so a title built from a variable, or a scenario named through a
- * constant, would read as a broken link. That fragility is a finding of the
- * spike, not an oversight — see the PR paper on #628.
+ * It reads source text, and that is the whole limitation. Source text is not
+ * Playwright's list of tests, so this check is wrong in both directions and
+ * knows it:
+ *
+ * - **False break.** A title built from a variable, or an id behind a constant,
+ *   reads as a broken link.
+ * - **False green, which is worse.** Comment the test out and this still finds
+ *   its text and passes, while `playwright test --list` reports no tests at all
+ *   (Codex round 1 on #669 demonstrated exactly that). It also does not require
+ *   scenario ids to be unique, so two scenario files may claim one test.
+ *
+ * So this catches a renamed or deleted test and a dropped annotation — the
+ * breaks #628 actually probed — and does not catch a test removed by any means
+ * that leaves its text behind. #668 replaces the source scan with Playwright's
+ * own enumeration, which is the only thing that can close that gap.
  */
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -64,6 +74,7 @@ describe("scenario ↔ test links", () => {
   const scenarios = readdirSync(scenarioDir)
     .filter((f) => f.endsWith(".md"))
     .map(readScenario);
+  const annotated = annotatedTests();
 
   it("has at least one scenario to check", () => {
     expect(scenarios.length).toBeGreaterThan(0);
@@ -73,7 +84,7 @@ describe("scenario ↔ test links", () => {
     for (const scenario of scenarios) {
       const spec = resolve(webRoot, scenario.spec);
       expect(existsSync(spec), `${scenario.id} names a spec that does not exist`).toBe(true);
-      const match = annotatedTests().find(
+      const match = annotated.find(
         (t) => t.spec === scenario.spec && t.title === scenario.title,
       );
       expect(match, `${scenario.id} names no annotated test in ${scenario.spec}`).toBeDefined();
@@ -82,7 +93,7 @@ describe("scenario ↔ test links", () => {
   });
 
   it("resolves every annotated test to a scenario file that names it back", () => {
-    for (const test of annotatedTests()) {
+    for (const test of annotated) {
       const file = resolve(scenarioDir, `${test.id}.md`);
       expect(existsSync(file), `${test.title} annotates an unknown scenario`).toBe(true);
       const scenario = readScenario(`${test.id}.md`);

@@ -171,11 +171,12 @@ test("the gutter + inserts the chosen block below, with the caret in it", async 
  *   `scenario` project of playwright.config.ts, which is the one project that
  *   records video. Playwright's `video` option is worker-scoped, so it cannot
  *   be set per test or even per describe block; a project is the narrowest
- *   thing that can carry it. The other eight proof points still run with no
+ *   thing that can carry it. The suite's other 33 tests still run with no
  *   video, no trace and no HTML report.
  * - The `annotation` is the machine end of the link to
  *   `e2e/scenarios/slash-menu-heading.md`. `test/scenario-link.test.ts` is the
- *   only thing that notices when either end is renamed.
+ *   only thing that notices when either end is renamed — within the limits its
+ *   own header records.
  *
  * The assertions below are unchanged, and no assertion was added: the journey
  * was already covered, which is the point.
