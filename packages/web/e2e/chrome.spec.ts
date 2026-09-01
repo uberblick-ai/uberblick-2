@@ -335,6 +335,19 @@ test("document actions stay reachable, close with the route, and archive into Re
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();
 
+  // The third dismissal: clicking outside is a cancelled confirmation too, and
+  // it is the one the browser fights for. Its `mousedown` focus adjustment runs
+  // after the cancel's microtask and against a backdrop already gone, so
+  // without `preventDefault` focus lands on `<body>` and the next Tab restarts
+  // at the top of the app. jsdom cannot see it: a synthetic `pointerdown`
+  // returns focus correctly.
+  await trigger.click();
+  await page.getByRole("menuitem", { name: "Archive document" }).click();
+  await expect(confirmation).toHaveCount(1);
+  await page.locator(".ub-confirm-backdrop").click({ position: { x: 4, y: 4 } });
+  await expect(confirmation).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+
   await trigger.click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
   await page.getByRole("button", { name: "Archive document" }).click();

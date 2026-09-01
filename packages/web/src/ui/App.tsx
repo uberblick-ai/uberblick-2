@@ -444,7 +444,7 @@ export function App(): ReactElement {
    * one synced document.
    */
   const sidebarGroups = useSidebar(sidebar);
-  /** Whether the open document is pinned — what the header's Pin control shows. */
+  /** Whether the open document is pinned — what its actions menu shows. */
   const pinned =
     selected !== null && sidebarGroups.some((group) => group.docs.includes(selected));
   /**

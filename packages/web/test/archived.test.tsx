@@ -231,7 +231,11 @@ describe("an archived document is readable, says so, and offers one way back", (
     openActions(host);
     act(() => action("Unpin from sidebar")?.click());
     expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
-    await Promise.resolve();
+    // The dropdown returns focus to its trigger a macrotask after it closes, so
+    // this waits a timer; a microtask flush would ask before Radix answers.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     expect(document.activeElement).toBe(trigger);
 
     openActions(host);

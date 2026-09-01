@@ -547,7 +547,7 @@ function DropSlot({
     <div
       className="ub-drop-slot"
       // A pointer affordance and nothing else: it holds no content, and the
-      // keyboard path into the sidebar is the header's Pin control, not a drag.
+      // keyboard path into the sidebar is the document actions menu, not a drag.
       // Announcing an empty box between every pair of rows would be noise.
       aria-hidden="true"
       data-over={active && dnd.over === slot ? "true" : undefined}

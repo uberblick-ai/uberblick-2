@@ -596,7 +596,15 @@ function DocumentActions({
         <div
           className="ub-confirm-backdrop"
           onPointerDown={(event) => {
-            if (event.target === event.currentTarget) cancelArchive();
+            if (event.target !== event.currentTarget) return;
+            // The browser's own focus adjustment for the `mousedown` that
+            // follows runs after `cancelArchive`'s microtask, resolves against
+            // a backdrop that is already unmounted, and clears focus to
+            // `<body>` — so without this the return to the trigger is written
+            // and then overwritten. Radix's `DismissableLayer` suppresses the
+            // same default for outside-pointer dismissal.
+            event.preventDefault();
+            cancelArchive();
           }}
         >
           <div
@@ -672,8 +680,11 @@ function DocumentActions({
             // moment it can hold it: the menu's focus scope pulls focus back
             // while it is still mounted, and Radix then returns it to the
             // trigger — outside an `aria-modal` dialog — one macrotask later.
-            // A mounted Cancel is exactly the Archive selection; every other
-            // close leaves it null and keeps Radix's own return to the trigger.
+            // A mounted Cancel means the confirmation is open, and focus
+            // belongs inside it — which in this product only follows the
+            // Archive selection, because nothing focuses the trigger while
+            // `confirming`. Every other close leaves it null and keeps Radix's
+            // own return to the trigger.
             const confirmation = cancel.current;
             if (confirmation === null) return;
             event.preventDefault();
@@ -683,12 +694,7 @@ function DocumentActions({
           <DropdownMenuItem
             disabled={onTogglePin === null}
             className={pinned ? "ub-action-pinned" : ""}
-            onSelect={() => {
-              onTogglePin?.();
-              // Radix's own close-autofocus does this too, but only on a
-              // deferred task no test environment without timers observes.
-              queueMicrotask(() => trigger.current?.focus());
-            }}
+            onSelect={() => onTogglePin?.()}
           >
             {pinned ? "Unpin from sidebar" : "Pin to sidebar"}
           </DropdownMenuItem>
