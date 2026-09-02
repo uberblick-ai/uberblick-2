@@ -51,6 +51,8 @@ const GIT_ENV: NodeJS.ProcessEnv = {
 
 /** The host's `.env`, which the updater must never touch. */
 const HOST_ENV = "TAILSCALE_HOST=box.tailnet.ts.net\nHUB_AUTH_TOKEN=a-secret\n";
+const RERUN_ENV =
+  "TAILSCALE_HOST=box.tailnet.ts.net\nHUB_AUTH_TOKEN=replaced-secret\n";
 
 /**
  * Stands in for the compose wrapper: records the invocation, optionally blocks
@@ -150,6 +152,24 @@ function update(fix: Fixture, extra: NodeJS.ProcessEnv = {}): SpawnSyncReturns<s
   });
 }
 
+function initRerun(
+  fix: Fixture,
+  input = RERUN_ENV,
+  extra: NodeJS.ProcessEnv = {},
+): SpawnSyncReturns<string> {
+  return spawnSync(
+    "sh",
+    [join(fix.checkout, "remote-update.sh"), "--remote-init-rerun"],
+    {
+      cwd: fix.checkout,
+      encoding: "utf8",
+      env: updateEnv(fix, extra),
+      input,
+      timeout: 20_000,
+    },
+  );
+}
+
 /** Every compose invocation so far, one per line. */
 function builds(fix: Fixture): string[] {
   if (!existsSync(fix.composeLog)) return [];
@@ -222,7 +242,111 @@ async function startHeldBuild(
   };
 }
 
+async function startHeldInitRerun(
+  fix: Fixture,
+  input = RERUN_ENV,
+): Promise<{ release: () => Promise<number | null> }> {
+  const hold = join(fix.root, "init-hold");
+  writeFileSync(hold, "", "utf8");
+  const run = spawn(
+    "sh",
+    [join(fix.checkout, "remote-update.sh"), "--remote-init-rerun"],
+    {
+      cwd: fix.checkout,
+      env: updateEnv(fix, { UB_TEST_COMPOSE_HOLD: hold }),
+    },
+  );
+  run.stdin.end(input);
+  const exited = new Promise<number | null>((resolve) => {
+    run.on("close", resolve);
+  });
+  for (let waited = 0; !existsSync(`${hold}.started`) && waited < 200; waited += 1) {
+    await sleep(50);
+  }
+  expect(existsSync(`${hold}.started`)).toBe(true);
+  return {
+    release: () => {
+      spawnSync("rm", [hold]);
+      return exited;
+    },
+  };
+}
+
 describe("remote-update.sh", () => {
+  it("deploys an init re-run's own env under the checkout lock", () => {
+    const fix = fixture();
+    const next = push(fix, { "marker.txt": "two\n" });
+
+    const ran = initRerun(fix);
+
+    expect(ran.status).toBe(0);
+    expect(builds(fix)).toEqual(["up --build --detach"]);
+    expect(readFileSync(join(fix.checkout, ".env"), "utf8")).toBe(RERUN_ENV);
+    expect(readFileSync(join(fix.checkout, "marker.txt"), "utf8")).toBe("two\n");
+    expect(deployedRef(fix)).toBe(next);
+  });
+
+  it("refuses an init re-run before changing anything while an update holds the lock", async () => {
+    const fix = fixture();
+    const before = deployedRef(fix);
+    push(fix, { "marker.txt": "two\n" });
+    const first = await startHeldBuild(fix);
+
+    const rerun = initRerun(fix);
+    expect(rerun.status).toBe(100);
+    expect(readFileSync(join(fix.checkout, ".env"), "utf8")).toBe(HOST_ENV);
+
+    expect(await first.release()).toBe(0);
+    expect(builds(fix)).toEqual(["up --build --detach"]);
+    expect(deployedRef(fix)).not.toBe(before);
+  });
+
+  it("makes updates no-op and excludes a second re-run while an init re-run builds", async () => {
+    const fix = fixture();
+    push(fix, { "marker.txt": "two\n" });
+    const first = await startHeldInitRerun(fix);
+
+    const updater = update(fix);
+    expect(updater.status).toBe(0);
+    expect(updater.stdout).toContain("already running");
+    expect(initRerun(fix, "HUB_AUTH_TOKEN=other\n").status).toBe(100);
+
+    expect(await first.release()).toBe(0);
+    expect(builds(fix)).toEqual(["up --build --detach"]);
+    expect(readFileSync(join(fix.checkout, ".env"), "utf8")).toBe(RERUN_ENV);
+  });
+
+  it("lets an init re-run deploy a second checkout while the first is locked", async () => {
+    const busy = fixture();
+    const other = fixture();
+    push(busy, { "marker.txt": "two\n" });
+    const next = push(other, { "marker.txt": "two\n" });
+    const first = await startHeldInitRerun(busy);
+
+    const ran = initRerun(other);
+    expect(ran.status).toBe(0);
+    expect(deployedRef(other)).toBe(next);
+    expect(builds(other)).toEqual(["up --build --detach"]);
+
+    expect(await first.release()).toBe(0);
+  });
+
+  it("refuses an init re-run before fetch, env or build when the lock cannot be taken", () => {
+    const fix = fixture();
+    const before = deployedRef(fix);
+    push(fix, { "marker.txt": "two\n" });
+
+    const ran = initRerun(fix, RERUN_ENV, {
+      PATH: pathWithBrokenFlock(fix, null),
+    });
+
+    expect(ran.status).toBe(101);
+    expect(builds(fix)).toEqual([]);
+    expect(deployedRef(fix)).toBe(before);
+    expect(readFileSync(join(fix.checkout, ".env"), "utf8")).toBe(HOST_ENV);
+    expect(readFileSync(join(fix.checkout, "marker.txt"), "utf8")).toBe("one\n");
+  });
+
   it("does nothing at all when origin/main is the deployed commit", () => {
     const fix = fixture();
     const ran = update(fix);

@@ -114,7 +114,14 @@ hand:
    with this workspace's id on the end.
 
 Every step is idempotent: re-running `ub remote init` against a host it already
-stood up adds no second deploy key and re-clones nothing.
+stood up adds no second deploy key and re-clones nothing. The re-run locks that
+checkout continuously while it fast-forwards, replaces `.env`, rebuilds, and
+records the deployed commit, so it cannot interleave with another re-run or
+`ub remote update`. A contending re-run refuses as an operational failure.
+
+That guarantee starts once the checkout already exists. The first invocation
+creates the directory before it writes `.env` and builds, so do not overlap a
+second invocation with that initial stand-up.
 
 ### Updating the host — deliberately
 
@@ -132,11 +139,13 @@ ub remote update uberblick@box.tailnet.ts.net
 
 It runs `remote-update.sh` in the host's checkout — the same script you would
 run by hand there — and reports either "up to date" or the commit it moved to.
-A `flock` on the checkout keeps two runs of the script from deploying it at once
-— whichever sessions or users they run as — while leaving a second checkout on
-the same host free to deploy itself, and a host that cannot take that lock at all
-refuses with a non-zero exit rather than reporting an update it never ran as
-success.
+A `flock` on the checkout keeps every deployment of an existing checkout — this
+script or an `ub remote init` re-run, whichever sessions or users they run as —
+from interleaving. Updater contention remains the successful no-op "already
+running; nothing to do"; an explicit init re-run that cannot apply its
+configuration refuses non-zero. A second checkout on the same host remains free
+to deploy itself, and a host that cannot take a lock at all refuses non-zero
+rather than reporting an update it never ran as success.
 
 **When to update:** when a merged change is one you want live — a fix you are
 waiting on, a feature you are about to demonstrate, a deployment you are about

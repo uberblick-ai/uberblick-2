@@ -13,8 +13,8 @@
  * scheduled is installed on the host, updates being deliberate; that the
  * signing secret is in no argument vector and on neither stream; that a failed
  * `up` persists nothing; that a failed step is reported in the vendor's own
- * words, bounded; that the endpoint it stood up is persisted; and that a second
- * run is a no-op.
+ * words, bounded; that the endpoint it stood up is persisted; and that a re-run
+ * sends one private payload through one locked deploy.
  */
 
 import { parseWorkspaceId } from "@uberblick/schema";
@@ -492,7 +492,7 @@ describe("ub remote init", () => {
     );
   });
 
-  it("is a no-op against a host it already initialised", async () => {
+  it("reuses an existing checkout through one locked deploy", async () => {
     const rig = harness({
       facts: { checkout: "present", deploykey: HOST_KEY },
       keys: `[{"id":1,"title":"uberblick-box-something","key":"${HOST_KEY}"}]`,
@@ -503,13 +503,51 @@ describe("ub remote init", () => {
     // No second key, and detection is by the key itself rather than the title.
     expect(labels.join("\n")).not.toContain("ensure-key");
     expect(labels.join("\n")).not.toContain("deploy-key add");
-    // And no second clone: the existing checkout is fast-forwarded.
-    expect(labels).toContain(`ssh ${TARGET} uberblick:fast-forward`);
+    // And no second clone: one checkout-owned lock spans the replacement env,
+    // fast-forward, build and deployed-ref move.
+    expect(labels).toContain(`ssh ${TARGET} uberblick:init-rerun`);
     expect(labels.join("\n")).not.toContain("uberblick:clone");
-    expect(stepFor(rig, "uberblick:fast-forward").args.join("\n")).toContain(
-      "git merge --ff-only origin/main",
+    expect(labels.join("\n")).not.toContain("uberblick:env");
+    expect(labels.join("\n")).not.toContain("uberblick:up");
+    expect(stepFor(rig, "uberblick:init-rerun").args.join("\n")).toContain(
+      "sh remote-update.sh --remote-init-rerun",
+    );
+    expect(stepFor(rig, "uberblick:init-rerun").stdin).toContain(
+      `HUB_AUTH_TOKEN=${SECRET}`,
     );
   });
+
+  for (const failure of [
+    { status: 100, cause: "another deploy already holds the checkout lock" },
+    { status: 101, cause: "the checkout lock could not be taken" },
+    { status: 102, cause: "the checkout could not be fast-forwarded" },
+    { status: 103, cause: "the replacement .env could not be written" },
+    { status: 104, cause: "the stack could not be built and started" },
+    { status: 105, cause: "the deployed commit could not be recorded" },
+  ]) {
+    it(`owns the status ${failure.status} re-run diagnostic without relaying host bytes`, async () => {
+      const rig = harness({
+        facts: { checkout: "present", deploykey: HOST_KEY },
+        keys: `[{"id":1,"title":"uberblick-box-something","key":"${HOST_KEY}"}]`,
+        ssh: `  *"uberblick:init-rerun"*)
+    tr '\\0' '\\n' < "$UB_TEST_RECORD/$(printf '%03d' "$count")-ssh" >&2
+    exit ${failure.status}
+    ;;`,
+      });
+
+      expect(await init(rig)).toBe(1);
+      expect(rig.err()).toContain(TARGET);
+      expect(rig.err()).toContain("~/uberblick-remote");
+      expect(rig.err()).toContain(failure.cause);
+      expect(rig.output()).not.toContain(SECRET);
+      expect(rig.output()).not.toContain("HUB_AUTH_TOKEN");
+      const deploy = stepFor(rig, "uberblick:init-rerun");
+      expect(deploy.args.join("\n")).not.toContain(SECRET);
+      expect(deploy.env.join("\n")).not.toContain(SECRET);
+      expect(deploy.stdin).toContain(SECRET);
+      expect(rig.labels().at(-1)).toBe(`ssh ${TARGET} uberblick:init-rerun`);
+    });
+  }
 
   it("reports replacing a different workspace on a re-run", async () => {
     const rig = harness({
@@ -540,7 +578,7 @@ describe("ub remote init", () => {
     expect(await init(rig)).toBe(0);
     expect(rig.out()).not.toContain("WEB_WORKSPACES");
     expect(
-      stepFor(rig, "uberblick:env").stdin
+      stepFor(rig, "uberblick:init-rerun").stdin
         .split("\n")
         .filter((line) => line.startsWith("WEB_WORKSPACES=")),
     ).toEqual([`WEB_WORKSPACES=${WORKSPACE}`]);
