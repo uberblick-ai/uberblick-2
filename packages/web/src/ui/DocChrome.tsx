@@ -624,9 +624,15 @@ function DocumentActions({
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              disabled={onArchive === null}
+              aria-disabled={onArchive === null}
               className="ub-action-danger"
-              onSelect={() => setConfirming(true)}
+              onSelect={(event) => {
+                if (onArchive === null) {
+                  event.preventDefault();
+                  return;
+                }
+                setConfirming(true);
+              }}
             >
               {onArchive === null
                 ? "Archive unavailable — no directory connection, or no live entry for this document"

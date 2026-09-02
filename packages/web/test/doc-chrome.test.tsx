@@ -151,6 +151,7 @@ function Chrome({
         meta={getMeta(fix.ydoc)}
         knownTags={["reference"]}
         archived={false}
+        onTogglePin={() => {}}
       />
     </>
   );
@@ -183,7 +184,7 @@ describe("the doc chrome reads the document, the awareness and the status", () =
     vi.unstubAllGlobals();
   });
 
-  it("disables the archive item and explains why when archiving is unavailable", () => {
+  it("makes archive unavailability reachable and non-activating", () => {
     vi.useFakeTimers();
     vi.stubGlobal(
       "ResizeObserver",
@@ -213,7 +214,20 @@ describe("the doc chrome reads the document, the awareness and the status", () =
           item.textContent ===
           "Archive unavailable — no directory connection, or no live entry for this document",
       );
-      expect(unavailable?.hasAttribute("data-disabled")).toBe(true);
+      expect(unavailable?.getAttribute("aria-disabled")).toBe("true");
+      expect(document.activeElement?.textContent).toBe("Pin to sidebar");
+      act(() => {
+        document.activeElement?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+        );
+        vi.runOnlyPendingTimers();
+      });
+      expect(document.activeElement).toBe(unavailable);
+      act(() => {
+        unavailable?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+        );
+      });
       expect(document.querySelector('[role="alertdialog"]')).toBeNull();
     } finally {
       act(() => root.unmount());
