@@ -1,5 +1,5 @@
 /**
- * `ub mcp install [target]` — register uberblick with an MCP client.
+ * `ub mcp install [client]` — register uberblick with an MCP client.
  *
  * The thing being installed is always the same line, `ub mcp serve`. Which hub
  * and which credential apply is resolved by `ub` itself (see `config.ts`); a
@@ -14,8 +14,8 @@
  * project file for this, because the client config the process already needs is
  * the one that travels with the repository.
  *
- * Without `--name` the pin lands on the primary `uberblick` entry — the ordinary
- * "this repository works in that workspace". `--name <label>` puts it on a
+ * Without `--label` the pin lands on the primary `uberblick` entry — the ordinary
+ * "this repository works in that workspace". `--label <label>` puts it on a
  * separately named `uberblick-<label>` instead, which is how one agent session
  * reads two corpora: one process per workspace, two toolsets, no workspace
  * parameter on any tool. Either way a pinned entry does not follow
@@ -117,10 +117,10 @@ export const INSTALL_OPTIONS = {
   user: { type: "boolean", default: false },
   print: { type: "boolean", default: false },
   workspace: { type: "string" },
-  name: { type: "string" },
+  label: { type: "string" },
 } as const;
 
-export const INSTALL_HELP = `usage: ub mcp install [target] [options] [-- <command>]
+export const INSTALL_HELP = `usage: ub mcp install [client] [options] [-- <command>]
 
 Register uberblick with an MCP client, so there is no JSON to hand-edit. What is
 registered is \`ub mcp serve\`: endpoint and credential are resolved by \`ub\`
@@ -134,7 +134,7 @@ that client's own MCP configuration. This command edits no config file, and
 never replaces an entry it did not register.
 
 operands:
-  target            the client: ${TARGETS.join(", ")} (default ${DEFAULT_TARGET}).
+  client            one of: ${TARGETS.join(", ")} (default ${DEFAULT_TARGET}).
                     Any other name needs --print, which gives the generic stdio
                     snippet to paste into that client's own config.
 
@@ -145,7 +145,7 @@ options:
   --workspace <id>  pin the entry to this workspace by setting WORKSPACE_ID in
                     it, resolved the way \`ub workspace use\` resolves an id.
                     With --project that is the repository's workspace binding
-  --name <label>    pin a second entry called "uberblick-<label>" instead of
+  --label <label>   pin a second entry called "uberblick-<label>" instead of
                     the primary one, so one session can read two corpora;
                     needs --workspace, which is what it names
   -h, --help        show this help
@@ -173,7 +173,7 @@ function parseFlags(argv: string[]): Flags {
   const known = named !== undefined && TARGETS.includes(named as TargetName);
   if (named !== undefined && !known && values.print !== true) {
     throw new Error(
-      `unknown target ${JSON.stringify(named)} — expected one of ${TARGETS.join(", ")}. ` +
+      `unknown client ${JSON.stringify(named)} — expected one of ${TARGETS.join(", ")}. ` +
         "Add --print for the snippet to paste into any other client",
     );
   }
@@ -183,15 +183,15 @@ function parseFlags(argv: string[]): Flags {
   if (override !== null && override.length === 0) {
     throw new Error("`--` must be followed by the command to install");
   }
-  const label = values.name ?? null;
+  const label = values.label ?? null;
   if (label !== null && values.workspace === undefined) {
     throw new Error(
-      "--name names the entry --workspace pins, so it needs a --workspace",
+      "--label names the entry --workspace pins, so it needs a --workspace",
     );
   }
   if (label !== null && !LABEL.test(label)) {
     throw new Error(
-      `--name ${JSON.stringify(label)} cannot be part of an entry name — ` +
+      `--label ${JSON.stringify(label)} cannot be part of an entry name — ` +
         'letters, digits, "-" and "_", starting with a letter or a digit',
     );
   }
@@ -222,7 +222,7 @@ function commandLine(entry: Entry): string {
 }
 
 /**
- * The entry, pinned to one workspace — the primary one unless `--name` asked for
+ * The entry, pinned to one workspace — the primary one unless `--label` asked for
  * a second.
  *
  * The id is stored as it was typed, decoration included, exactly as
@@ -424,7 +424,7 @@ export async function installCommand(
   }
 
   // What is being installed: the entry, pinned when `--workspace` says so and
-  // under a second name when `--name` does. Resolved before anything runs, so a
+  // under a second name when `--label` does. Resolved before anything runs, so a
   // bad id is a usage error rather than a half-finished install — and resolved
   // exactly as `ub workspace use` resolves one, so a prefix names the same
   // workspace in both commands.

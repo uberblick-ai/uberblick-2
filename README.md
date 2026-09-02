@@ -145,7 +145,7 @@ redeploy does not replace the JavaScript a tab already loaded.
 
 ## The MCP server, as a client sees it
 
-`ub mcp install [target]` wires uberblick into an MCP client, so nobody has to
+`ub mcp install [client]` wires uberblick into an MCP client, so nobody has to
 hand-edit JSON. It knows `claude`, `codex` and `cursor`; `--project` means the
 current directory's config and `--user` the per-user one; `--print` emits the
 snippet and runs nothing, which is also the answer for a client it does not
@@ -252,12 +252,12 @@ prints the workspace in force and which layer chose it; `ub workspace list`
 shows the workspaces this machine has a database for, so `use` and
 `--workspace` both also take a unique uuid prefix from that list.
 
-One agent session can hold **two** workspaces at once: `--name <label>` puts the
+One agent session can hold **two** workspaces at once: `--label <label>` puts the
 pin on a separately named `uberblick-<label>` entry instead of the primary one,
 so two processes serve two corpora under two tool prefixes.
 
 ```
-ub mcp install claude --project --workspace <other-uuid> --name ablauf
+ub mcp install claude --project --workspace <other-uuid> --label ablauf
 ```
 
 Either way it is the same server, the same hub and a different corpus.

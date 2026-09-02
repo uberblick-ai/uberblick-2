@@ -509,7 +509,7 @@ the documents come off the wire. An unreachable or auth-rejecting remote writes
 nothing at all.
 
 A machine that already had a workspace of its own keeps it. It is not merged and
-not moved: `ub workspace list` shows both, and `ub workspace use <id> --user`
+not moved: `ub workspace list` shows both, and `ub workspace use <id>`
 switches back. The endpoint, though, is machine-wide — after a join, the
 workspace that was here syncs with this hub too, under its own rooms.
 
