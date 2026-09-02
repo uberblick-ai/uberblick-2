@@ -480,6 +480,7 @@ export function focusThreadCard(threadId: string): void {
  */
 export interface CommentTimestamp {
   label: string;
+  /** Absent when `createdAt` is not a date — an invalid `dateTime` is worse than none. */
   dateTime?: string;
   title?: string;
 }

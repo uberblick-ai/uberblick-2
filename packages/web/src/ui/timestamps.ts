@@ -1,3 +1,14 @@
+/**
+ * The one visible timestamp policy for the web UI.
+ *
+ * Recent activity is easiest to place as elapsed time, with its exact local
+ * date and time available on hover. Once it is 30 days old, a calendar date is
+ * easier to place and the time of day stops adding useful precision. Invalid
+ * values return `null` so each consuming surface keeps its own honest fallback.
+ * A surface calls {@link useTimestampClock} once, rather than giving every
+ * timestamp its own timer, so relative labels stay current without per-row work.
+ */
+
 import { useEffect, useState } from "react";
 
 const MINUTE = 60_000;

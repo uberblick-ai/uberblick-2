@@ -171,9 +171,7 @@ function ChangedStamp({
   at: number | undefined;
   now: number;
 }): ReactElement {
-  const stamp = usableStamp(at);
-  if (stamp === undefined) return <span className="ub-docs-age ub-muted">—</span>;
-  const formatted = formatTimestamp(stamp, now);
+  const formatted = at === undefined ? null : formatTimestamp(at, now);
   if (formatted === null) {
     return <span className="ub-docs-age ub-muted">—</span>;
   }
