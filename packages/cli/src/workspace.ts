@@ -49,12 +49,6 @@ commands:
   use <id>               make a workspace this machine's default, by writing
                          the user config
 
-<id> is any of three things:
-  <uuid>                 a workspace uuid — accepted even if this machine has
-                         never seen it; the replica hydrates on next use
-  <slug>-<uuid>          a decorated id, stored exactly as you type it
-  <prefix>               a unique prefix of a uuid \`ub workspace list\` shows
-
 options:
   -h, --help             show this help; after a command, that command's help
 `;

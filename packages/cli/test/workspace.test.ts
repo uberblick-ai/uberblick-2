@@ -284,16 +284,20 @@ describe("ub workspace use and the init lock", () => {
 });
 
 describe("ub workspace help", () => {
-  it("documents the three forms, in both helps", () => {
+  it("keeps the group concise and documents id forms at the accepting command", () => {
     const top = runUb(["--help"], sandbox());
-    expect(top.stdout).toMatch(/workspace list/);
-    expect(top.stdout).toMatch(/workspace use <id>/);
+    expect(top.stdout).toMatch(/^  workspace \[command\]/m);
+    expect(top.stdout).not.toMatch(/^  workspace (?:list|use)/m);
 
-    const help = runUb(["workspace", "--help"], sandbox());
-    expect(help.status).toBe(0);
-    expect(help.stdout).toMatch(/list \[--json\]/);
-    expect(help.stdout).toMatch(/use <id>/);
-    expect(help.stdout).toMatch(/<slug>-<uuid>/);
-    expect(help.stdout).toMatch(/prefix/);
+    const group = runUb(["workspace", "--help"], sandbox());
+    expect(group.status).toBe(0);
+    expect(group.stdout).toMatch(/list \[--json\]/);
+    expect(group.stdout).toMatch(/use <id>/);
+    expect(group.stdout).not.toMatch(/<slug>-<uuid>|prefix/);
+
+    const command = runUb(["workspace", "use", "--help"], sandbox());
+    expect(command.status).toBe(0);
+    expect(command.stdout).toMatch(/<slug>-<uuid>/);
+    expect(command.stdout).toMatch(/prefix/);
   });
 });

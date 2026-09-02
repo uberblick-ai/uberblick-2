@@ -31,43 +31,14 @@ commands:
   init [hub-url]         identity, workspace and a signing secret — with a hub
                          given, the new workspace is created on that hub
   open [options]         serve the web app and a hub in the foreground, and
-                         open the browser (--no-browser, --port <n>)
+                         open the browser
   status [--json]        workspace, hub, credential, database and sync state
   doctor [--json]        check the local stack against its known failure modes
   workspace [command]    which workspace is in force, and how to change it
   remote [command]       the endpoint documents sync with, and the one-time bridge
-  mcp install [target]   register uberblick with an MCP client
+  mcp [command]          register uberblick with an MCP client
   env -- <command...>    run a command with uberblick's configuration in its
                          environment
-
-workspace commands:
-  workspace              the workspace in force, and which layer chose it
-  workspace list         workspaces this machine has a database for ([--json])
-  workspace use <id>     make a workspace this machine's default, by uuid,
-                         <slug>-<uuid> or a unique prefix
-
-remote commands:
-  remote                 the endpoint in force and what sharing it buys
-  remote init <target>   stand up the remote hub + web stack on a tailnet host
-  remote update <target> deploy origin/main onto that host now
-  remote join <url>/<id> bind this machine to the remote workspace the URL names
-
-init options:
-  -y, --yes         take every default; never prompt (also the default with no TTY)
-  --name <name>     awareness display name
-  --color <#rrggbb> awareness cursor colour
-  --workspace <id>  workspace to work in
-  --mcp, --no-mcp   whether to wire up an MCP client
-
-mcp install options:
-  target            claude, codex or cursor (default claude)
-  --project         this directory's config (the default)
-  --user            the per-user config
-  --print           print the snippet to paste; run nothing
-  --workspace <id>  pin the entry to this workspace, as WORKSPACE_ID
-  --name <label>    pin a second entry called "uberblick-<label>" instead of
-                    the primary one; needs --workspace
-  -- <command>      register this command instead of uberblick's own
 
 options:
   -h, --help        show this help; after a command, that command's help

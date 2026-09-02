@@ -98,7 +98,12 @@ interface Path {
  * proves `ub mcp --help` does not advertise them either.
  */
 const PATHS: Path[] = [
-  { argv: [], help: HELP, options: {}, children: ["init", "open", "status", "doctor"] },
+  {
+    argv: [],
+    help: HELP,
+    options: {},
+    children: ["init", "open", "status", "doctor", "workspace", "remote", "mcp", "env"],
+  },
   { argv: ["init"], help: INIT_HELP, options: INIT_OPTIONS },
   { argv: ["open"], help: OPEN_HELP, options: OPEN_OPTIONS },
   { argv: ["status"], help: STATUS_HELP, options: STATUS_OPTIONS },
@@ -138,6 +143,26 @@ const DISPATCHERS = [
 
 /** Not commands: the hidden machine entry, the help words, the version flags. */
 const HIDDEN = ["serve", "help", "--help", "-h", "--version", "-v"];
+
+/** Command names and description columns from one contextual catalog. */
+function commandRows(help: string): Array<{ command: string; descriptionColumn: number }> {
+  const catalog = help.match(/\ncommands:\n((?:  .+\n)+)\noptions:\n/);
+  expect(catalog, "command help contains only its catalog before its own options").not.toBeNull();
+
+  return (catalog?.[1] ?? "")
+    .split("\n")
+    .filter((line) => /^  \S/.test(line))
+    .map((line) => {
+      const row = line.match(/^  (.+?) {2,}(\S.*)$/);
+      expect(row, `aligned command row: ${line}`).not.toBeNull();
+      const usage = row?.[1] ?? "";
+      const description = row?.[2] ?? "";
+      return {
+        command: usage.split(" ")[0] ?? "",
+        descriptionColumn: line.length - description.length,
+      };
+    });
+}
 
 /**
  * Everything under the sandbox root, so "it wrote nothing" is checkable.
@@ -211,8 +236,16 @@ describe("every human-facing command path", () => {
         }
       }
       expect(path.help, `${name} help documents -h, --help`).toContain("-h, --help");
-      for (const child of path.children ?? []) {
-        expect(path.help, `${name} help lists ${child}`).toContain(child);
+      if (path.children !== undefined) {
+        const rows = commandRows(path.help);
+        expect(
+          rows.map(({ command }) => command).filter((command) => command !== "(none)"),
+          `${name} help lists each immediate command once`,
+        ).toEqual(path.children);
+        expect(
+          new Set(rows.map(({ descriptionColumn }) => descriptionColumn)).size,
+          `${name} command descriptions share one column`,
+        ).toBe(1);
       }
     });
   }

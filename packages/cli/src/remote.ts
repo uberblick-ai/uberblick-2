@@ -86,23 +86,7 @@ commands:
   (none)                 the endpoint in force and what sharing it buys
   init <ssh-target>      stand up the remote hub + web stack on a tailnet host
   update <ssh-target>    deploy origin/main onto that host now
-  join <url>/<id> [opts] bind this machine to the remote workspace the URL names
-
-options for init:
-  --dir <path>           checkout directory on the host (default ~/uberblick-remote)
-  --host <fqdn>          the host's MagicDNS name, when detection cannot see it
-  --ip <v4>              the host's Tailscale IPv4, likewise
-
-The join URL is an endpoint with the workspace id as its last path segment —
-\`ub remote init\` prints it. Joining never merges and never seeds: a workspace
-already on this machine keeps its documents and its \`ub workspace list\` entry.
-
-options for join:
-  --secret-file <path>   read the remote's signing secret from a file only you
-                         can read (mode 0600). Without it the secret already
-                         configured is tried first, and a terminal is prompted
-                         with the input hidden. Never pass a secret as an
-                         argument.
+  join <url>/<id>        bind this machine to the remote workspace the URL names
 
 options:
   -h, --help             show this help; after a command, that command's help
