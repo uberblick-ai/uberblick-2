@@ -89,7 +89,7 @@ export function SyncPanel({
   // different words in one corner of the screen would be worse than either.
   const reading = statusReading(status, state ?? raw);
   const localCopy = localCopyState(status, docPresent);
-  const current =
+  const hasReading =
     connection !== null && (state !== null || reading.detail !== null);
 
   /**
@@ -143,14 +143,14 @@ export function SyncPanel({
           value={endpoint === null ? UNKNOWN : endpointSourceLabel(endpoint.source)}
         />
         <Fact label="Room" value={connection?.room ?? UNKNOWN} />
-        <Fact label="State" value={current ? reading.word : UNKNOWN} />
+        <Fact label="State" value={hasReading ? reading.word : UNKNOWN} />
         {/* Drawn only under a refusal (#448). This is the panel the pill opens,
             and the pill has room for the word alone — so the sentence saying
             what to do about it belongs here, and nowhere else. There is no such
             sentence for the ordinary states, so the row is absent rather than
             empty: a Reason row that read "—" three states out of four would be
             noise in the place a reader looks during an outage. */}
-        {current && reading.detail !== null && (
+        {connection !== null && reading.detail !== null && (
           <Fact label="Reason" value={reading.detail} />
         )}
         {/* Always drawn, zero included: this is the panel someone opens to ask
@@ -159,7 +159,7 @@ export function SyncPanel({
         <Fact
           label="Backlog"
           value={
-            current ? backlogLabel(status.unsyncedChanges) : UNKNOWN
+            connection === null ? UNKNOWN : backlogLabel(status.unsyncedChanges)
           }
         />
         {/* Same rule, and the reason the status line above no longer says this
@@ -170,7 +170,7 @@ export function SyncPanel({
         <Fact
           label="Local copy"
           value={
-            !current || localCopy === null
+            connection === null || localCopy === null
               ? UNKNOWN
               : localCopy
                 ? "available"

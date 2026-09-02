@@ -22,7 +22,7 @@
  * never a quieter version of the truth.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RoomStatus } from "../collab/rooms.js";
 
 export type SyncState = "offline" | "syncing" | "synced";
@@ -107,9 +107,11 @@ export function localCopyState(
  *
  * `source` is the connection whose reading this is. A component can survive a
  * room change, but the settled state must not: a new source begins with an
- * empty slot and earns its first reading through the same settle window as
- * every later change. This keeps a short initial catch-up calm without borrowing
- * the preceding room's state. Callers without a source retain the original
+ * empty slot and earns its first reading by one deadline measured from that
+ * source's arrival. Changes before the deadline update what will be shown but
+ * do not move the deadline, so continuous typing cannot hide the current room
+ * forever. Once the first reading is shown, later changes use the ordinary
+ * persistence windows above. Callers without a source retain the original
  * mount behaviour and begin from `raw`.
  */
 export function useCalmSyncState(raw: SyncState): SyncState;
@@ -127,10 +129,38 @@ export function useCalmSyncState(
     source: object | null;
     state: SyncState | null;
   }>(() => ({ source: key, state: scoped ? null : raw }));
+  const latestRaw = useRef(raw);
+  latestRaw.current = raw;
+  const boundary = useRef({ source: key, raw });
+  if (boundary.current.source !== key) boundary.current = { source: key, raw };
+  const firstRaw = boundary.current.raw;
   const shown = settled.source === key ? settled.state : null;
+
+  // A source gets one bounded initial window. This effect intentionally does
+  // not follow `raw`: its timer reads the latest value through the ref, while
+  // its deadline remains anchored to the source change.
   useEffect(() => {
-    if (settled.source !== key) {
-      setSettled({ source: key, state: null });
+    if (!scoped) return;
+    setSettled({ source: key, state: null });
+    if (key === null) return;
+    if (SETTLE_MS[firstRaw] === 0) {
+      setSettled({ source: key, state: firstRaw });
+      return;
+    }
+    const timer = setTimeout(
+      () => setSettled({ source: key, state: latestRaw.current }),
+      SETTLE_MS[firstRaw],
+    );
+    return () => clearTimeout(timer);
+  }, [firstRaw, key, scoped]);
+
+  useEffect(() => {
+    if (settled.source !== key) return;
+    if (shown === null) {
+      // Bad news keeps its zero-delay contract even inside the initial window.
+      if (scoped && key !== null && SETTLE_MS[raw] === 0) {
+        setSettled({ source: key, state: raw });
+      }
       return;
     }
     if (raw === shown) return;
@@ -143,6 +173,6 @@ export function useCalmSyncState(
       SETTLE_MS[raw],
     );
     return () => clearTimeout(timer);
-  }, [key, raw, shown, settled.source]);
+  }, [key, raw, scoped, shown, settled.source]);
   return shown;
 }

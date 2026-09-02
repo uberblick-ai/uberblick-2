@@ -233,6 +233,28 @@ describe("the sync panel renders the state this client holds", () => {
     }
   });
 
+  it("keeps current raw facts available while the state word settles", () => {
+    vi.useFakeTimers();
+    const fix = fixture({ unsyncedChanges: 3 });
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() => root.render(<Panel fix={fix} />));
+    try {
+      expect(facts(host)).toEqual({
+        Hub: ENDPOINT.url,
+        Source: "served /uberblick-config.json",
+        Room: ROOM,
+        State: "—",
+        Backlog: "3 sync messages unacked",
+        "Local copy": "unavailable",
+      });
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
   it("names the endpoint, the room, the state and the backlog's unit", () => {
     vi.useFakeTimers();
     const fix = fixture({ connected: true, synced: true, unsyncedChanges: 4 });

@@ -426,8 +426,9 @@ export function App(): ReactElement {
   const threads = useThreads(doc);
   /**
    * The room the connection pill reports on and the sync panel details: the
-   * open document's, or the directory's when none is open. The socket is
-   * shared, so it is the same truth about the same hub either way.
+   * selected document's when one is requested, or the directory's when the
+   * route names no document. A selected document whose connection is still
+   * opening stays null here; the directory must not answer in its place.
    */
   const chromeRoom = selected === null ? directory : doc;
   /**

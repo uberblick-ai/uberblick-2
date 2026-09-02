@@ -75,6 +75,37 @@ function probe(initial: RoomStatus): {
   };
 }
 
+/** The same reading, scoped to one newly selected room connection. */
+function scopedProbe(initial: RoomStatus): {
+  shown: () => SyncState | null;
+  feed: (status: RoomStatus) => void;
+  wait: (ms: number) => void;
+  unmount: () => void;
+} {
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  const source = {};
+  let shown: SyncState | null = null;
+  function Probe({ status }: { status: RoomStatus }): null {
+    shown = useCalmSyncState(rawSyncState(status), source);
+    return null;
+  }
+  const feed = (status: RoomStatus): void => {
+    act(() => root.render(<Probe status={status} />));
+  };
+  feed(initial);
+  return {
+    shown: () => shown,
+    feed,
+    wait: (ms) => act(() => void vi.advanceTimersByTime(ms)),
+    unmount: () => {
+      act(() => root.unmount());
+      host.remove();
+    },
+  };
+}
+
 describe("the sync indicator only draws a state that has persisted", () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -105,6 +136,27 @@ describe("the sync indicator only draws a state that has persisted", () => {
       view.wait(60);
       expect(view.shown()).toBe("synced");
     }
+    view.unmount();
+  });
+
+  it("bounds a new room's blank slot even while its reading oscillates", () => {
+    const view = scopedProbe(UNACKED);
+    expect(view.shown()).toBeNull();
+
+    // Neither state persists for its own window, but the first-reading deadline
+    // belongs to the source, not to those transitions. At 400ms the slot earns
+    // the latest reading instead of staying blank for the whole typing burst.
+    view.wait(100);
+    view.feed(room());
+    view.wait(100);
+    view.feed(UNACKED);
+    view.wait(100);
+    view.feed(room());
+    view.wait(99);
+    expect(view.shown()).toBeNull();
+    view.wait(1);
+    expect(view.shown()).toBe("synced");
+
     view.unmount();
   });
 

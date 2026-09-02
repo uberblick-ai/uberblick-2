@@ -388,9 +388,7 @@ test("the served configuration names the workspaces, and the build's define is o
   // from a served document through the shell to both surfaces. On a document
   // route, because that is where the status surfaces are (#424).
   await createDoc(page, docTitle("served"));
-  // The document room starts with an empty fixed slot. The button exists only
-  // once this room has produced the reading whose details it can open.
-  await page.locator("button.ub-sync-toggle").click();
+  await page.locator(".ub-sync-toggle").click();
   const source = page.locator('.ub-sync-fact:has(dt:text-is("Source")) dd');
   // "served …", not either of the two "… not used" answers: falling back to
   // the compiled value while still reading *synced* is the failure #362 exists

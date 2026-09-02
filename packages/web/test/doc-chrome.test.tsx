@@ -208,12 +208,16 @@ describe("the doc chrome reads the document, the awareness and the status", () =
     );
     try {
       const slot = host.querySelector(".ub-sync-toggle");
-      expect(slot?.tagName).toBe("SPAN");
+      expect(slot?.tagName).toBe("BUTTON");
       expect(slot?.textContent).toBe("");
-      expect(slot?.getAttribute("aria-hidden")).toBe("true");
+      expect(slot?.getAttribute("aria-label")).toBe(
+        "Sync details — hub wss://hub.example/ws (served /uberblick-config.json)",
+      );
       expect(slot?.querySelector(".ub-status-mark")).not.toBeNull();
       expect(slot?.querySelector(".ub-status-word")).not.toBeNull();
-      expect(host.querySelector("button.ub-sync-toggle")).toBeNull();
+      expect(slot?.classList.contains("ub-pill-offline")).toBe(false);
+      expect(slot?.classList.contains("ub-pill-syncing")).toBe(false);
+      expect(slot?.classList.contains("ub-pill-synced")).toBe(false);
     } finally {
       act(() => root.unmount());
       host.remove();

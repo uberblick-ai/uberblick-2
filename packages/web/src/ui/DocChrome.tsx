@@ -168,6 +168,7 @@ export function DocChrome({
     endpoint === null
       ? null
       : `${endpoint.url ?? "unknown"} (${endpointSourceLabel(endpoint.source)})`;
+  const blank = connection === null || (state === null && reading.detail === null);
   // `meta.uuid === ""` is a room that answered with nothing in it — see
   // `useDocMeta`. There is no document to name, so the breadcrumb says nothing.
   const named = meta !== null && meta.uuid !== "";
@@ -205,47 +206,41 @@ export function DocChrome({
             when they wonder about sync is the thing to press for the detail.
             It stays a pill — same slots, same widths — so nothing beside it
             moves when it becomes operable. */}
-        {connection === null || (state === null && reading.detail === null) ? (
-          /* The requested document has no settled current reading yet. Keep
-              both fixed slots, but make no visible or accessible status claim
-              for the directory room or a synthetic fallback (#606). */
-          <span className="ub-pill ub-sync-toggle" aria-hidden="true">
-            <span className="ub-status-mark" />
-            <span className="ub-status-word" />
-          </span>
-        ) : (
-          <button
-            type="button"
-            className={`ub-pill ub-pill-${reading.tone} ub-sync-toggle`}
-            aria-expanded={syncOpen}
-            aria-controls="ub-sync-panel"
-            // The visible label is one word about the state, not about the
-            // action, and `title` is not reliably announced — so the accessible
-            // name carries both, keeping the visible word inside it. The hub
-            // rides along in both, so the endpoint is one hover away for a
-            // pointer and part of the name for everyone else.
-            aria-label={
-              hub === null
+        <button
+          type="button"
+          className={`ub-pill ub-sync-toggle${blank ? "" : ` ub-pill-${reading.tone}`}`}
+          aria-expanded={syncOpen}
+          aria-controls="ub-sync-panel"
+          // While blank this remains the panel's focusable handle, but neither
+          // its name nor its fixed slots make a status claim. Once current, the
+          // visible word enters the accessible name too. The hub rides along in
+          // either case: it belongs to the session, not to a borrowed reading.
+          aria-label={
+            blank
+              ? hub === null
+                ? "Sync details"
+                : `Sync details — hub ${hub}`
+              : hub === null
                 ? `Sync details — ${reading.word}`
                 : `Sync details — ${reading.word}, hub ${hub}`
-            }
-            title={hub === null ? "Sync details" : `Sync details — hub ${hub}`}
-            onClick={onToggleSync}
-          >
-            <span className="ub-status-mark" aria-hidden="true">
-              {reading.tone === "syncing" ? (
+          }
+          title={hub === null ? "Sync details" : `Sync details — hub ${hub}`}
+          onClick={onToggleSync}
+        >
+          <span className="ub-status-mark" aria-hidden="true">
+            {!blank &&
+              (reading.tone === "syncing" ? (
                 <span className="ub-spinner" />
               ) : (
                 <span
                   className={`ub-dot ${reading.tone === "synced" ? "ub-dot-live" : "ub-dot-off"}`}
                 />
-              )}
-            </span>
-            {/* The same fixed-width slot the status line uses, sized for the
-                longest reading either can show, so nothing beside it moves. */}
-            <span className="ub-status-word">{reading.word}</span>
-          </button>
-        )}
+              ))}
+          </span>
+          {/* The same fixed-width slot the status line uses, sized for the
+              longest reading either can show, so nothing beside it moves. */}
+          <span className="ub-status-word">{blank ? null : reading.word}</span>
+        </button>
       </span>
     </>
   );
