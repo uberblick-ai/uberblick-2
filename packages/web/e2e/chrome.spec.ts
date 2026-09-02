@@ -307,9 +307,12 @@ for (const scheme of ["light", "dark"] as const) {
     expect(await paintedIn(soon, "background-color")).toBe(placeholder);
     // Muted, in whichever appearance this run is in: an unavailable row reads
     // a step back from the live one it sits beside.
-    expect(await paintedIn(soon, "color")).not.toBe(
-      await paintedIn(page.locator(".ub-all-open-entry"), "color"),
-    );
+    const mutedInk = oklab(await paintedIn(soon, "color"));
+    const liveInk = oklab(await paintedIn(page.locator(".ub-all-open-entry"), "color"));
+    expect(
+      [mutedInk.L, mutedInk.a, mutedInk.b, mutedInk.alpha < liveInk.alpha],
+      "a placeholder reuses the live row's base ink at lower alpha",
+    ).toEqual([liveInk.L, liveInk.a, liveInk.b, true]);
 
     const allDocs = page.locator(".ub-all-open-entry");
     const ground = await paintedIn(allDocs, "background-color");
