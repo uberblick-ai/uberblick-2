@@ -339,13 +339,14 @@ export function App(): ReactElement {
     document.querySelector<HTMLElement>(".ub-sync-toggle")?.focus();
   }, []);
 
-  const onFocusThread = useCallback<SelectThread>((threadId, viaKeyboard) => {
-    setFocusedThread((previous) =>
-      focusThread(previous, threadId, viaKeyboard === true),
-    );
+  const onFocusThread = useCallback<SelectThread>((threadId, selection) => {
+    setFocusedThread((previous) => focusThread(previous, threadId, selection));
     // The highlight is still what holds focus here — the card takes it a commit
     // later, from the rail's own effect — so this is the reader's way back.
-    if (viaKeyboard === true && document.activeElement instanceof HTMLElement) {
+    if (
+      selection?.viaKeyboard === true &&
+      document.activeElement instanceof HTMLElement
+    ) {
       threadsOpener.current = document.activeElement;
     }
     // Selecting a thread is asking to read it, so the drawer opens whether the

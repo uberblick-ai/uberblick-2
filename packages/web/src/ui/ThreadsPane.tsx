@@ -224,9 +224,16 @@ export function ThreadsPane({
   // selection opened: the card is focusable once React has committed it.
   useEffect(() => {
     if (focused === null) return;
+    // The first committed frame still has the collapsed card to focus. Reveal
+    // it, then let this effect's second pass scroll and focus the expanded card.
+    // A card selection never sets this flag, so its own toggle remains intact.
+    if (focused.revealResolved && expanded !== focused.id) {
+      setExpanded(focused.id);
+      return;
+    }
     scrollThreadCardIntoView(focused.id);
     if (focused.viaKeyboard) focusThreadCard(focused.id);
-  }, [focused]);
+  }, [focused, expanded]);
 
   // A pending reply outlives the conversation it belonged to unless it is let
   // go: hiding the form while a thread reads as resolved is not the same as
