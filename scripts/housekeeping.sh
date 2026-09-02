@@ -6,8 +6,20 @@
 #   Stopped containers and dangling layers go too. Build cache and unused images
 #   are kept for a week (`until=168h`) so the next review still starts warm.
 set -u
-sha=${1:?usage: housekeeping.sh <review sha> [--dry-run]}
+usage='usage: housekeeping.sh <review sha> [--dry-run]'
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  echo "$usage" >&2
+  exit 2
+fi
+case $1 in
+  -*) echo "$usage" >&2; exit 2 ;;
+esac
+sha=$1
 dry=${2:-}
+case $dry in
+  ''|--dry-run) ;;
+  *) echo "$usage" >&2; exit 2 ;;
+esac
 failed=0
 run() {
   if [ -n "$dry" ]; then
@@ -47,7 +59,7 @@ review_images() {
 }
 
 review_images || failed=1
-run docker container prune -f
+run docker container prune -f --filter until=168h
 run docker image prune -f
 run docker image prune -a -f --filter until=168h
 run docker builder prune -f --filter until=168h

@@ -193,8 +193,9 @@ processes.
 
 **Housekeeping, last** (owner direction, 2026-09-01). On every durable outcome —
 merge or parked ruling — once the probes on the retained review image are done,
-run `sh scripts/housekeeping.sh <headRefOid>` and record a concise summary on
-the PR.
+run `sh scripts/housekeeping.sh <headRefOid>` from the same freshly fetched
+`origin/main` checkout used for the container review, and record a concise
+summary on the PR.
 It removes this run's and older review images, stopped containers and dangling
 layers, and every host-wide unused image older than a week while keeping newer
 images and build cache warm.

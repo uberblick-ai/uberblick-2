@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -53,7 +61,7 @@ test("cleans the current and older review images plus stale Docker artifacts", (
 	const commands = readFileSync(calls, "utf8");
 	assert.match(commands, /image rm -f older-a older-b/);
 	assert.match(commands, /image rm -f uberblick-review:test-sha/);
-	assert.match(commands, /container prune -f/);
+	assert.match(commands, /container prune -f --filter until=168h/);
 	assert.match(commands, /image prune -f/);
 	assert.match(commands, /image prune -a -f --filter until=168h/);
 	assert.match(commands, /builder prune -f --filter until=168h/);
@@ -81,6 +89,21 @@ test("cleans all review images when this run's image is already absent", (t) => 
 	assert.match(readFileSync(calls, "utf8"), /image rm -f remaining-a remaining-b/);
 });
 
+test("rejects --dry-run without a review sha before invoking Docker", (t) => {
+	const { base, bin, calls } = fixture(t);
+	fakeDocker(bin, 'printf "%s\\n" "$*" >> "$HOUSEKEEPING_CALLS"');
+
+	const result = spawnSync("sh", [script, "--dry-run"], {
+		cwd: base,
+		encoding: "utf8",
+		env: environment(bin, calls),
+	});
+
+	assert.notEqual(result.status, 0);
+	assert.match(result.stderr, /usage: housekeeping\.sh <review sha> \[--dry-run\]/);
+	assert.equal(existsSync(calls), false);
+});
+
 test("reports a failing Docker cleanup and exits nonzero", (t) => {
 	const { base, bin, calls } = fixture(t);
 	fakeDocker(
@@ -102,5 +125,8 @@ test("reports a failing Docker cleanup and exits nonzero", (t) => {
 
 	assert.notEqual(result.status, 0);
 	assert.match(result.stderr, /housekeeping: failed \(17\): docker image rm -f old-image/);
-	assert.match(result.stderr, /housekeeping: failed \(17\): docker container prune -f/);
+	assert.match(
+		result.stderr,
+		/housekeeping: failed \(17\): docker container prune -f --filter until=168h/,
+	);
 });
