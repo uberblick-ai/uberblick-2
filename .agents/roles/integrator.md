@@ -111,6 +111,9 @@ clean ruling should be brief; a parked ruling includes only enough detail to
 make its one batched fix-up implementable without rediscovery. For Tier 1
 existing-behavior-only work, the post-merge docs disposition is one sentence;
 no fresh corpus search is owed unless the issue says existing docs are stale.
+A Tier 1 ruling is the merge SHA, the gate links, one line per acceptance
+criterion, one line per finding with its disposition, and at most one evidence
+link for a local probe without a durable URL — nothing else.
 
 Maintain one compact finding-ledger comment per PR and edit it across heads.
 Each row has a stable id, first head, current status and a link to the evidence
