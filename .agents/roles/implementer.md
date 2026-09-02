@@ -78,8 +78,11 @@ complexity, or needs an owner decision, do not deviate: a top-level run posts
 
 ## Critical review
 
-Open the PR as a draft. Where `CLAUDE.md` says an outside read earns its cost,
-delegate one fresh `implementation-reviewer` **on the other runtime** at that
+Open the PR as a draft. First apply `CLAUDE.md`'s exemption: a test-only,
+docs-only or narrowly mechanical diff that preserves production behavior owes
+no challenge — write `Challenge: none owed (<reason>)` in the handoff and
+dispatch nothing. Otherwise, where `CLAUDE.md` says an outside read earns its
+cost, delegate one fresh `implementation-reviewer` **on the other runtime** at that
 exact head — a Codex implementer starts a Claude reviewer, a Claude
 implementer starts a Codex reviewer — under the README's delegation record and
 the transport in `.claude/skills/next-issue/review-protocol.md`. Stay in the

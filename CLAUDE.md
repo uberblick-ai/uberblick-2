@@ -95,7 +95,12 @@ neither shaping nor its adapters grant `ready` or choose Priority.
      shared checkout can change during review;
    - integrator validation against the issue's acceptance criteria;
    - **independent implementation challenge, proportionate to semantic risk.**
-     Two challenges are required when the diff changes schema meaning,
+     First the exemption: a test-only, docs-only or narrowly mechanical diff
+     that preserves production behavior owes **no** challenge when focused
+     validation directly proves the contract — the implementer writes
+     `Challenge: none owed (<reason>)` in its handoff and dispatches nothing,
+     and the integrator dispatches nothing either. Otherwise two challenges
+     are required when the diff changes schema meaning,
      persistence, synchronization, concurrency, auth, runtime dependencies, or
      decided architecture, or when the implementer or integrator names a
      concrete unresolved risk warranting both perspectives: first a fresh
@@ -109,9 +114,7 @@ neither shaping nor its adapters grant `ready` or choose Priority.
      the freeze; its corrected head re-establishes the required independent
      evidence before merge. One implementer-owned cross-runtime
      challenge is enough when an outside read is useful but those boundaries
-     do not fire. No challenge is required for test-only,
-     docs-only, or narrowly mechanical changes that preserve production
-     behavior when focused validation directly proves the contract. Every
+     do not fire. Every
      challenge actively hunts for counterexamples, missing failure paths,
      incorrect assumptions, overengineering and overtesting; integrator gate
      work and Copilot do not substitute for a required challenge;
