@@ -1789,13 +1789,122 @@ body {
   font-size: 0.85rem;
 }
 
-/* Before the field opens the card is just the affordance, so it shrinks to it. */
-.ub-composer:has(.ub-composer-open) {
+/* Source and cross-block ranges keep the old Comment-only affordance. */
+.ub-comment-only-menu {
   width: auto;
   padding: 0;
   border: 0;
   background: none;
   box-shadow: none;
+}
+
+/* A prose selection gets one compact surface. Its absolute coordinates are
+   measured against `.ub-editor-frame`; the card itself owns only its shape. */
+.ub-selection-menu {
+  width: max-content;
+  max-width: min(100%, calc(100vw - 1rem));
+  flex-direction: row;
+  align-items: center;
+  gap: 0;
+  padding: 0.25rem;
+  border-left-width: 1px;
+  border-radius: calc(var(--radius-sm) + 2px);
+  background: color-mix(in srgb, var(--card) 95%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.ub-selection-toolbar,
+.ub-selection-link {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.ub-selection-tool {
+  position: relative;
+  min-width: 1.8rem;
+  min-height: 1.8rem;
+  display: inline-grid;
+  place-items: center;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--card-foreground);
+  font: inherit;
+  font-size: 0.72rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ub-selection-tool:hover,
+.ub-selection-tool:focus-visible {
+  border-color: var(--border);
+  background: var(--card-accent);
+}
+
+/* The glyph is a non-colour state cue: check, dash, or no corner mark. */
+.ub-selection-tool[data-state="on"]::after,
+.ub-selection-tool[data-state="mixed"]::after {
+  position: absolute;
+  top: 0;
+  right: 0.1rem;
+  font-size: 0.55rem;
+  line-height: 1;
+}
+
+.ub-selection-tool[data-state="on"]::after {
+  content: "✓";
+}
+
+.ub-selection-tool[data-state="mixed"]::after {
+  content: "−";
+}
+
+.ub-selection-tool[aria-pressed="true"] {
+  border-color: var(--brand);
+  background: var(--brand-subtle);
+}
+
+.ub-selection-tool[aria-pressed="mixed"] {
+  border-style: dashed;
+  border-color: var(--muted-foreground);
+}
+
+.ub-selection-separator {
+  width: 1px;
+  height: 1rem;
+  margin: 0 0.2rem;
+  background: var(--border);
+}
+
+.ub-selection-link-input {
+  width: min(15rem, 48vw);
+  min-height: 1.8rem;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.ub-selection-link-input:focus {
+  outline: none;
+  border-color: var(--ring);
+}
+
+.ub-selection-apply {
+  border-color: var(--brand);
+  background: var(--brand-subtle);
+}
+
+.ub-selection-error {
+  max-width: 11rem;
+  color: var(--destructive);
+  font-size: 0.68rem;
+  line-height: 1.2;
 }
 
 .ub-composer-head {

@@ -33,7 +33,7 @@ import { commentTargetOf } from "../src/editor/selection.js";
 import { withMention } from "../src/ui/CommentForm.js";
 import { resolvedHighlightCss } from "../src/ui/threads.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
-import { mountEditor } from "./helpers.js";
+import { mountEditor, snapshotFragment } from "./helpers.js";
 import { useThreads } from "../src/ui/hooks.js";
 
 /**
@@ -303,6 +303,266 @@ describe("the selection a thread anchors to", () => {
   });
 });
 
+describe("the prose selection toolbar", () => {
+  /** A toolbar button by its stable accessible name. */
+  function tool(
+    view: ReturnType<typeof mountComposer>,
+    label: string,
+  ): HTMLButtonElement {
+    const found = [
+      ...document.querySelectorAll<HTMLButtonElement>(".ub-selection-tool"),
+    ].find((button) => button.getAttribute("aria-label") === label);
+    if (found === undefined || !view.query(".ub-selection-menu")?.contains(found)) {
+      throw new Error(`no selection tool ${label}`);
+    }
+    return found;
+  }
+
+  /** Change the link field through the browser event React listens to. */
+  function linkValue(view: ReturnType<typeof mountComposer>, value: string): void {
+    const field = view.query<HTMLInputElement>(".ub-selection-link-input");
+    if (field === null) throw new Error("no external link field");
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        field,
+        value,
+      );
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  it("shows full, empty and mixed mark state, and preserves compatible marks", () => {
+    const { ydoc } = annotatedDoc();
+    const view = mountComposer(ydoc);
+    try {
+      select(view.editor, 1, 4, 9);
+      expect(tool(view, "Bold").getAttribute("aria-pressed")).toBe("false");
+      const selected = {
+        from: view.editor.state.selection.from,
+        to: view.editor.state.selection.to,
+      };
+      act(() => tool(view, "Bold").click());
+      expect(tool(view, "Bold").getAttribute("aria-pressed")).toBe("true");
+      expect(view.editor.state.selection).toMatchObject(selected);
+
+      // Extend from "quick" to "quick brown": one run carries bold and one
+      // does not, so the button says mixed. Activating mixed applies it all.
+      select(view.editor, 1, 4, 15);
+      expect(tool(view, "Bold").getAttribute("aria-pressed")).toBe("mixed");
+      act(() => tool(view, "Bold").click());
+      act(() => tool(view, "Italic").click());
+      expect(tool(view, "Bold").getAttribute("aria-pressed")).toBe("true");
+      expect(tool(view, "Italic").getAttribute("aria-pressed")).toBe("true");
+
+      const marked = snapshotFragment(ydoc)[1]?.delta.find(
+        (run) => run.insert === "quick brown",
+      );
+      expect(marked?.attributes).toMatchObject({ bold: {}, italic: {} });
+
+      // A full-state click removes only its own mark.
+      act(() => tool(view, "Bold").click());
+      const italic = snapshotFragment(ydoc)[1]?.delta.find(
+        (run) => run.insert === "quick brown",
+      );
+      expect(italic?.attributes).toMatchObject({ italic: {} });
+      expect(italic?.attributes).not.toHaveProperty("bold");
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it("keeps a toolbar command out of the nearby typing undo item", () => {
+    const { ydoc } = annotatedDoc();
+    const view = mountComposer(ydoc);
+    try {
+      act(() => {
+        view.editor.commands.setTextSelection(posIn(view.editor, 1, PARAGRAPH.length));
+        view.editor.commands.insertContent(" Fresh");
+      });
+      select(view.editor, 1, 4, 15);
+      // No timer or test-owned stopCapturing: the command owns the boundary.
+      act(() => tool(view, "Inline code").click());
+
+      act(() => {
+        expect(view.editor.commands.keyboardShortcut("Mod-z")).toBe(true);
+      });
+      expect(getBlocks(ydoc)[1]?.text).toBe(`${PARAGRAPH} Fresh`);
+      expect(
+        snapshotFragment(ydoc)[1]?.delta.some(
+          (run) =>
+            typeof run.attributes === "object" &&
+            run.attributes !== null &&
+            "inlineCode" in run.attributes,
+        ),
+      ).toBe(false);
+
+      act(() => {
+        expect(view.editor.commands.keyboardShortcut("Mod-z")).toBe(true);
+      });
+      expect(getBlocks(ydoc)[1]?.text).toBe(PARAGRAPH);
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it("creates and edits only http(s) links without replacing document links", () => {
+    const { ydoc } = annotatedDoc();
+    const view = mountComposer(ydoc);
+    try {
+      select(view.editor, 1, 4, 15);
+      act(() => tool(view, "Bold").click());
+      expect(tool(view, "External link").getAttribute("aria-pressed")).toBeNull();
+      act(() => tool(view, "External link").click());
+      linkValue(view, "mailto:ben@example.com");
+      act(() => view.query<HTMLButtonElement>(".ub-selection-apply")?.click());
+      expect(view.query(".ub-selection-error")?.textContent).toContain("http");
+      expect(snapshotFragment(ydoc)[1]?.delta).not.toContainEqual(
+        expect.objectContaining({ attributes: expect.objectContaining({ link: {} }) }),
+      );
+
+      linkValue(view, "https://example.com/first");
+      act(() => view.query<HTMLButtonElement>(".ub-selection-apply")?.click());
+      const linked = snapshotFragment(ydoc)[1]?.delta.find(
+        (run) => run.insert === "quick brown",
+      );
+      expect(linked?.attributes).toMatchObject({
+        bold: {},
+        link: { href: "https://example.com/first" },
+      });
+
+      act(() => tool(view, "External link").click());
+      expect(view.query<HTMLInputElement>(".ub-selection-link-input")?.value).toBe(
+        "https://example.com/first",
+      );
+      linkValue(view, "https://example.com/cancelled");
+      act(() =>
+        view
+          .query<HTMLButtonElement>(".ub-selection-link button[type=button]")
+          ?.click(),
+      );
+      expect(snapshotFragment(ydoc)[1]?.delta).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            insert: "quick brown",
+            attributes: expect.objectContaining({
+              link: { href: "https://example.com/first" },
+            }),
+          }),
+        ]),
+      );
+
+      act(() => tool(view, "External link").click());
+      linkValue(view, "https://example.com/edited");
+      act(() => view.query<HTMLButtonElement>(".ub-selection-apply")?.click());
+      expect(
+        snapshotFragment(ydoc)[1]?.delta.find(
+          (run) => run.insert === "quick brown",
+        )?.attributes,
+      ).toMatchObject({ link: { href: "https://example.com/edited" } });
+
+      const { from, to } = view.editor.state.selection;
+      const docLink = view.editor.state.schema.marks.docLink;
+      if (docLink === undefined) throw new Error("docLink mark is unavailable");
+      act(() => {
+        view.editor.view.dispatch(
+          view.editor.state.tr.addMark(
+            from,
+            to,
+            docLink.create({ docId: "11111111-2222-3333-4444-555555555555" }),
+          ),
+        );
+      });
+      act(() => tool(view, "External link").click());
+      linkValue(view, "https://example.com/replacement");
+      act(() => view.query<HTMLButtonElement>(".ub-selection-apply")?.click());
+      expect(view.query(".ub-selection-error")?.textContent).toContain(
+        "document link",
+      );
+      expect(
+        snapshotFragment(ydoc)[1]?.delta.find(
+          (run) => run.insert === "quick brown",
+        )?.attributes,
+      ).toMatchObject({
+        docLink: { docId: "11111111-2222-3333-4444-555555555555" },
+      });
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it("keeps source and cross-block ranges on the Comment-only path", () => {
+    const { ydoc } = annotatedDoc();
+    appendBlock(ydoc, { type: "code", text: "const x = 1", language: "ts" });
+    const view = mountComposer(ydoc);
+    try {
+      select(view.editor, 1, 20, 6, 2);
+      expect(view.query(".ub-selection-toolbar")).toBeNull();
+      expect(view.query(".ub-composer-open")?.textContent).toBe(
+        "Comment on Paragraph 2",
+      );
+
+      select(view.editor, 3, 0, 5);
+      expect(view.query(".ub-selection-toolbar")).toBeNull();
+      expect(view.query(".ub-composer-open")?.textContent).toBe(
+        "Comment on Code block 4",
+      );
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it("dismisses on Escape and stays out of an active IME composition", () => {
+    const { ydoc } = annotatedDoc();
+    const view = mountComposer(ydoc);
+    try {
+      select(view.editor, 1, 4, 15);
+      expect(view.query(".ub-selection-toolbar")).not.toBeNull();
+      view.open();
+      expect(view.query(".ub-comment-form")).not.toBeNull();
+      act(() => {
+        view.query<HTMLTextAreaElement>("textarea")?.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      expect(view.query(".ub-selection-toolbar")).not.toBeNull();
+      expect(view.editor.state.selection.empty).toBe(false);
+
+      act(() => {
+        view.editor.view.dom.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      expect(view.query(".ub-composer")).toBeNull();
+      expect(view.editor.state.selection.empty).toBe(false);
+
+      select(view.editor, 1, 20, 25);
+      act(() => {
+        view.editor.view.dom.dispatchEvent(
+          new CompositionEvent("compositionstart", { bubbles: true }),
+        );
+      });
+      expect(view.query(".ub-composer")).toBeNull();
+      act(() => {
+        view.editor.view.dom.dispatchEvent(
+          new CompositionEvent("compositionend", { bubbles: true }),
+        );
+      });
+      expect(view.query(".ub-selection-toolbar")).not.toBeNull();
+      expect(view.editor.state.selection.empty).toBe(false);
+    } finally {
+      view.unmount();
+    }
+  });
+});
+
 describe("starting a thread from the prose", () => {
   it("marks the selected range and shows the thread to a second client", () => {
     const { ydoc, blocks } = annotatedDoc();
@@ -313,9 +573,8 @@ describe("starting a thread from the prose", () => {
       expect(view.query(".ub-composer")).toBeNull();
 
       select(view.editor, 1, 4, 15);
-      expect(view.query(".ub-composer-open")?.textContent).toBe(
-        "Comment on Paragraph 2",
-      );
+      expect(view.query(".ub-selection-toolbar")).not.toBeNull();
+      expect(view.query(".ub-composer-open")?.textContent).toBe("Comment");
 
       view.open();
       // The card quotes exactly the range the mark will cover.
