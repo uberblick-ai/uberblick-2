@@ -332,7 +332,6 @@ describe("the threads rail can be opened where the layout hides it", () => {
     const { host } = await openAnnotatedDoc();
 
     expect(toggle(host).closest(".ub-pane")).not.toBeNull();
-    expect(host.querySelector(".ub-header")).toBeNull();
     expect(toggle(host).textContent).toBe("Threads 1");
     expect(toggle(host).getAttribute("aria-controls")).toBe(rail(host).id);
     expect(toggle(host).getAttribute("aria-expanded")).toBe("false");

@@ -62,6 +62,10 @@ async function openApp(browser: Browser, path = "/"): Promise<Page> {
   return page;
 }
 
+function localCopyFact(page: Page) {
+  return page.locator('.ub-sync-fact:has(dt:text-is("Local copy")) dd');
+}
+
 /** Unique per run: every test in the file shares one workspace directory. */
 function docTitle(label: string): string {
   return `${label}-${Math.random().toString(36).slice(2, 8)}`;
@@ -216,6 +220,39 @@ test("a peer's cursor renders in the other context with its name and colour", as
   await a.keyboard.press("Escape");
   await caretTo(a, "end");
   await expect(label).toHaveCSS("background-color", chosen);
+});
+
+test("a document claims a local copy only after a hub-confirmed checkpoint", async ({
+  browser,
+}) => {
+  const seeded = await openApp(browser);
+  await createDoc(seeded, docTitle("checkpoint"));
+  const path = new URL(seeded.url()).pathname;
+
+  await harness().stopHub();
+  try {
+    // A fresh browser has neither this document nor its checkpoint. The
+    // waiting pane must not turn an empty IndexedDB read into availability.
+    const fresh = await openApp(browser, path);
+    await expect(fresh.locator(".ub-notice")).toContainText("Waiting for sync");
+    await fresh.locator(".ub-sync-toggle").click();
+    await expect(localCopyFact(fresh)).toHaveText("—");
+
+    // Only a completed hub sync writes the checkpoint beside the room state.
+    await harness().startHub();
+    await expect(editor(fresh)).toBeVisible();
+    await expect(localCopyFact(fresh)).toHaveText("available");
+
+    // The proof is the real browser database: the document and checkpoint
+    // survive a reload while the hub is unavailable.
+    await harness().stopHub();
+    await fresh.reload();
+    await expect(editor(fresh)).toBeVisible();
+    await fresh.locator(".ub-sync-toggle").click();
+    await expect(localCopyFact(fresh)).toHaveText("available");
+  } finally {
+    await harness().startHub();
+  }
 });
 
 test("a reload with the hub stopped renders from the local cache, and the offline edit converges on restart", async ({

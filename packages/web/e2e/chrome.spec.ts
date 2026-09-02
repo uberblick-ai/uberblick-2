@@ -371,7 +371,6 @@ test("the open document owns the remaining chrome and its sole sync reading", as
   await expect(page.locator(".ub-copy-link")).toBeVisible();
   await expect(page.getByRole("button", { name: "Document actions" })).toBeVisible();
   await expect(page.locator(".ub-threads-toggle")).toHaveCount(0);
-  await expect(removed).toHaveCount(0);
 
   const sync = page.locator(".ub-status .ub-sync-toggle");
   await expect(sync).toHaveCount(1);

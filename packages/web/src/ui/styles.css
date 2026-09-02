@@ -509,7 +509,8 @@ body {
   background: var(--sidebar);
   color: var(--sidebar-foreground);
   border-right: 1px solid var(--sidebar-border);
-  overflow: visible;
+  overflow: clip;
+  overflow-clip-margin: 1.25rem;
   padding: 0.5rem;
 }
 

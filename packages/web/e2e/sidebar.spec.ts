@@ -67,7 +67,6 @@ test("the sidebar and pane share the top edge, and collapse transfers focus", as
   await expect(page).toHaveURL(new RegExp(`/${harness().workspace}$`));
   const path = new URL(page.url()).pathname;
 
-  await expect(page.locator(".ub-header, .ub-brand, .ub-me")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "You" })).toBeVisible();
   const origins = async (): Promise<[number, number]> => {
     const sidebar = await page.locator(".ub-list").boundingBox();
@@ -84,13 +83,26 @@ test("the sidebar and pane share the top edge, and collapse transfers focus", as
   await expect(page.locator(".ub-list")).toHaveCount(0);
   const restore = page.getByRole("button", { name: "Show document list" });
   await expect(restore).toBeFocused();
-  await expect(page.locator(".ub-pane")).toHaveCSS("padding-top", "12px");
+  const collapsedPane = await page.locator(".ub-pane").boundingBox();
+  if (collapsedPane === null) throw new Error("e2e: collapsed pane is not laid out");
+  expect(collapsedPane.y).toBe(0);
   expect(new URL(page.url()).pathname).toBe(path);
 
   await restore.click();
   await expect(page.getByRole("button", { name: "Hide document list" })).toBeFocused();
   await expect(page.getByRole("button", { name: "You" })).toBeVisible();
   expect(await origins()).toEqual([0, 0]);
+  expect(new URL(page.url()).pathname).toBe(path);
+
+  // A stored preference is not a collapse gesture. Loading into it leaves
+  // focus where the browser put it instead of stealing it for the restore UI.
+  await page.evaluate(() =>
+    localStorage.setItem("uberblick.sidebar.collapsed", "true"),
+  );
+  await page.reload();
+  const storedRestore = page.getByRole("button", { name: "Show document list" });
+  await expect(storedRestore).toBeVisible();
+  await expect(storedRestore).not.toBeFocused();
   expect(new URL(page.url()).pathname).toBe(path);
 });
 

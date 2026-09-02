@@ -238,7 +238,7 @@ export function StatusLine({
     <div className="ub-status">
       {syncReading}
       {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
-      {copyNote}
+      {!blank && copyNote}
       {!blank &&
         reading.detail === null &&
         state !== "synced" &&
