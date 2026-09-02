@@ -356,9 +356,10 @@ export interface DirectoryEntry {
    */
   createdAt?: number;
   /**
-   * When a replica last observed the document change, epoch ms on that
-   * replica's clock — coarse by design, and cache-quality: a freshness hint to
-   * sort by, never history. Absent until something stamps it.
+   * When a replica authored a document change, epoch ms on that replica's
+   * clock. Concurrent candidates resolve to the greater finite stamp. Coarse
+   * by design and cache-quality: a freshness hint to sort by, never history.
+   * Absent until something stamps it.
    */
   updatedAt?: number;
   /**

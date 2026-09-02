@@ -20,7 +20,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import * as Y from "yjs";
 import { Awareness, removeAwarenessStates } from "y-protocols/awareness";
-import { appendBlock, getBlocksFragment, initDoc } from "@uberblick/schema";
+import { appendBlock, getBlocksFragment, initDoc, insertBlock } from "@uberblick/schema";
 import { SyncPanel } from "../src/ui/SyncPanel.js";
 import { usePresence } from "../src/ui/hooks.js";
 import type { HubEndpoint } from "../src/config.js";
@@ -448,6 +448,28 @@ describe("the sync panel renders the state this client holds", () => {
         expect(avatar.getAttribute("aria-label")).toBeNull();
         expect(avatar.getAttribute("title")).toBeNull();
       }
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("renumbers an idle caret when blocks move above it", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    publish(
+      fix,
+      AGENT_CLIENT,
+      { name: "Claude · demo agent", color: "#7b5ec7" },
+      1,
+    );
+    const { host, root } = mount(fix);
+    try {
+      expect(presentNow(host)).toEqual(["Claude · demo agent block 2"]);
+      act(() => {
+        insertBlock(fix.ydoc, null, { type: "paragraph", text: "a new first" });
+      });
+      expect(presentNow(host)).toEqual(["Claude · demo agent block 3"]);
     } finally {
       act(() => root.unmount());
       host.remove();

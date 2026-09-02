@@ -3,7 +3,8 @@
  *
  * Two claims, and both are about the *whole* app rather than a pane, because
  * both cross panes: a highlight lives in the editor and the card it leads to
- * lives in the rail, and the toggle that opens the rail lives in the topbar. So
+ * lives in the rail, and the toggle that opens the rail lives at the pane's
+ * right edge. So
  * this mounts `App` over rooms that are plain shared Y.Docs — the pattern
  * `archived.test.tsx` uses — and drives it the way a reader does.
  *
@@ -12,7 +13,7 @@
  *    card's button. Enter with the *caret* in the prose is untouched — the
  *    editor's own key, not an activation.
  * 2. **The rail can be opened where it is hidden.** Below 1100px the stylesheet
- *    hides the rail; the topbar's "Threads (N)" toggle opens it as a drawer, and
+ *    hides the rail; the pane's "Threads (N)" toggle opens it as a drawer, and
  *    Escape closes it again. The width itself is the stylesheet's business —
  *    jsdom computes no media queries — so what is pinned here is the mechanism
  *    the stylesheet keys off.
@@ -330,6 +331,7 @@ describe("the threads rail can be opened where the layout hides it", () => {
   it("counts the open threads, opens the rail as a drawer, and closes on Escape", async () => {
     const { host } = await openAnnotatedDoc();
 
+    expect(toggle(host).closest(".ub-pane")).not.toBeNull();
     expect(toggle(host).textContent).toBe("Threads 1");
     expect(toggle(host).getAttribute("aria-controls")).toBe(rail(host).id);
     expect(toggle(host).getAttribute("aria-expanded")).toBe("false");
@@ -347,8 +349,12 @@ describe("the threads rail can be opened where the layout hides it", () => {
     rail(host).removeEventListener("keydown", consume);
     expect(rail(host).classList.contains("ub-rail-open")).toBe(true);
 
-    press(document.body, "Escape");
+    const card = rail(host).querySelector<HTMLButtonElement>(".ub-thread");
+    card?.focus();
+    expect(document.activeElement).toBe(card);
+    press(card!, "Escape");
     expect(toggle(host).getAttribute("aria-expanded")).toBe("false");
     expect(rail(host).classList.contains("ub-rail-open")).toBe(false);
+    expect(document.activeElement).toBe(toggle(host));
   });
 });

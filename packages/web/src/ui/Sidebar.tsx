@@ -32,7 +32,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent, ReactElement, ReactNode } from "react";
+import type { DragEvent, ReactElement, ReactNode, Ref } from "react";
 import type * as Y from "yjs";
 import {
   createGroup,
@@ -124,6 +124,9 @@ interface Dnd {
 }
 
 export function Sidebar({
+  collapseButtonRef,
+  collapseLabel,
+  onCollapse,
   connection,
   sidebar,
   groups,
@@ -142,6 +145,10 @@ export function Sidebar({
   allOpen,
   settingsOpen,
 }: {
+  /** The pane-boundary control that removes this sidebar. */
+  collapseButtonRef?: Ref<HTMLButtonElement>;
+  collapseLabel: string;
+  onCollapse: () => void;
   /** The directory room: its sync state, and whether a document can be created. */
   connection: RoomConnection | null;
   /** The sidebar room — where every gesture here writes. Null: read-only. */
@@ -283,6 +290,17 @@ export function Sidebar({
       data-mode={settingsOpen ? "settings" : "documents"}
       data-dragging={drag?.kind}
     >
+      <button
+        ref={collapseButtonRef}
+        type="button"
+        className="ub-sidebar-toggle ub-sidebar-hide"
+        aria-expanded="true"
+        aria-label={collapseLabel}
+        title={collapseLabel}
+        onClick={onCollapse}
+      >
+        «
+      </button>
       <div className="ub-sidebar-stack">
         <nav
           className="ub-sidebar-pane ub-document-sidebar"

@@ -3,8 +3,8 @@
  *
  * One claim, told twice: **the chips are a human front door to the write an
  * agent already makes.** `set_tags` replaces `meta.tags` wholesale; so does the
- * header. Everything that follows a retag today — the directory stub, the
- * breadcrumb, `list_docs` on a second client — follows a chip for the same
+ * identity line. Everything that follows a retag today — the directory stub,
+ * its group badge, `list_docs` on a second client — follows a chip for the same
  * reason and over the same path, with nothing in the UI told about any of it.
  *
  * Both tests mount the real app over shared Y.Docs (the `archived.test.tsx`
@@ -167,12 +167,7 @@ function suggestions(host: HTMLElement): string[] {
   );
 }
 
-/** The breadcrumb's group — where the document lives right now. */
-function crumb(host: HTMLElement): string {
-  return host.querySelector(".ub-crumb-group")?.textContent ?? "";
-}
-
-/** The identity line's group badge — the same derivation, said again. */
+/** The identity line's group badge — where the document lives right now. */
 function badge(host: HTMLElement): string {
   return host.querySelector(".ub-badge")?.textContent ?? "";
 }
@@ -183,7 +178,7 @@ function addTag(host: HTMLElement, word: string): void {
   act(() => press(field(host), "Enter"));
 }
 
-describe("tags are editable in the doc header", () => {
+describe("tags are editable in the document identity line", () => {
   it("writes meta.tags wholesale, and the stub and the sidebar follow", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
@@ -211,10 +206,7 @@ describe("tags are editable in the doc header", () => {
     // workspace used first.
     expect(suggestions(host)).toEqual(["reference", "verify"]);
     expect(chips(host)).toEqual([]);
-    // No canonical tag, so no group to name: the crumb is the title alone,
-    // rather than a document filed under a word that names no group (#535).
-    // Both surfaces, because both used to say "Other".
-    expect(crumb(host)).toBe("");
+    // No canonical tag, so the document is not filed under an invented group.
     expect(badge(host)).toBe("");
 
     // ---- adding a tag is the write set_tags makes ----
@@ -232,8 +224,7 @@ describe("tags are editable in the doc header", () => {
     // The stub is repaired from meta, so the second client sees it without
     // anyone telling it: this is what `list_docs` reads.
     expect(getDirectoryEntry(peer, UUID)?.tags).toEqual(["feature"]);
-    // And the document has moved groups, live, in both.
-    expect(crumb(host)).toBe("Features");
+    // And the document has moved groups live.
     expect(badge(host)).toBe("Features");
     // A tag already on the document is not offered again.
     expect(suggestions(host)).toEqual(["reference", "verify"]);
@@ -262,7 +253,7 @@ describe("tags are editable in the doc header", () => {
     expect(getMeta(ydoc).tags).toEqual([]);
     expect(getDirectoryEntry(peer, UUID)?.tags).toEqual([]);
     // Removing the last canonical tag takes the group label away with it.
-    expect(crumb(host)).toBe("");
+    expect(badge(host)).toBe("");
   });
 
   /**
@@ -291,7 +282,7 @@ describe("tags are editable in the doc header", () => {
     act(() => setTags(agent, ["reference", "verify"]));
     expect(chips(host)).toEqual(["reference", "verify"]);
     expect(getMeta(ydoc).tags).toEqual(["reference", "verify"]);
-    expect(crumb(host)).toBe("Verify");
+    expect(badge(host)).toBe("Verify");
     expect(getDirectoryEntry(directory, UUID)?.tags).toEqual([
       "reference",
       "verify",

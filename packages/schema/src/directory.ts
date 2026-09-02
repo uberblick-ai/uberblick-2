@@ -16,16 +16,21 @@
  * single room — the whole point of having one.
  *
  * Entries are whole-object writes, so concurrent upserts to the same uuid
- * converge last-write-wins per key while different uuids never conflict.
+ * converge last-write-wins per key while different uuids never conflict. The
+ * one exception is `updatedAt`: one max candidate per Yjs client is kept in a
+ * sibling map, so a losing whole-entry write cannot discard the greater stamp.
+ * Those candidates are never pruned, so state grows by one key per
+ * `(uuid, Yjs client)` and resolving one entry scans the full candidate map.
  *
  * `createdAt` and `updatedAt` are epoch milliseconds read from the clock of
  * whichever replica wrote them, and they are cache-quality like the rest of the
  * stub: freshness hints good enough to sort a listing, never history and never
- * an audit trail. Two replicas stamping concurrently converge on whichever
- * update Yjs orders last — not on the later wall-clock reading — and a replica
- * with a skewed clock writes skewed stamps. Both fields are optional: an entry
- * written before they existed simply has none, so anything sorting on them must
- * tolerate `undefined` rather than assume a number.
+ * an audit trail. Concurrent `updatedAt` candidates resolve to the greater
+ * finite number. A replica with a clock in the future therefore pins the stamp
+ * until another authored write exceeds it; the clock merely catching up writes
+ * nothing. Both fields are optional: an entry written before they existed
+ * simply has none, so anything sorting on them must tolerate `undefined`
+ * rather than assume a number.
  */
 
 import type * as Y from "yjs";
@@ -38,6 +43,9 @@ import type {
 
 /** The key of the directory Y.Map inside the directory doc. */
 export const DIRECTORY_DOCS_KEY = "docs";
+
+/** Max-register candidates for directory `updatedAt`, keyed by uuid + client. */
+const DIRECTORY_UPDATED_AT_KEY = "updatedAt";
 
 interface StoredEntry {
   title: string;
@@ -68,6 +76,63 @@ function readDescription(value: unknown): string | undefined {
 
 export function getDirectoryMap(dirDoc: Y.Doc): Y.Map<unknown> {
   return dirDoc.getMap<unknown>(DIRECTORY_DOCS_KEY);
+}
+
+function getUpdatedAtMap(dirDoc: Y.Doc): Y.Map<unknown> {
+  return dirDoc.getMap<unknown>(DIRECTORY_UPDATED_AT_KEY);
+}
+
+function greaterStamp(
+  left: number | undefined,
+  right: number | undefined,
+): number | undefined {
+  if (left === undefined) return right;
+  if (right === undefined) return left;
+  return Math.max(left, right);
+}
+
+function candidateKey(uuid: string, clientId: number): string {
+  return `${uuid}:${clientId}`;
+}
+
+/**
+ * The maximum candidate recorded for one entry. A flat map avoids a race to
+ * install a nested shared type on legacy entries: concurrent writers use
+ * distinct client keys, so both candidates survive their first exchange.
+ */
+function recordedUpdatedAt(dirDoc: Y.Doc, uuid: string): number | undefined {
+  const prefix = `${uuid}:`;
+  let resolved: number | undefined;
+  for (const [key, value] of getUpdatedAtMap(dirDoc).entries()) {
+    if (!key.startsWith(prefix)) continue;
+    resolved = greaterStamp(resolved, readStamp(value));
+  }
+  return resolved;
+}
+
+function recordedUpdatedAts(dirDoc: Y.Doc): Map<string, number> {
+  const resolved = new Map<string, number>();
+  for (const [key, value] of getUpdatedAtMap(dirDoc).entries()) {
+    const separator = key.lastIndexOf(":");
+    const stamp = readStamp(value);
+    if (separator < 1 || stamp === undefined) continue;
+    const uuid = key.slice(0, separator);
+    const greater = greaterStamp(resolved.get(uuid), stamp);
+    if (greater !== undefined) resolved.set(uuid, greater);
+  }
+  return resolved;
+}
+
+function withResolvedUpdatedAt(
+  stored: StoredEntry | null,
+  recorded: number | undefined,
+): StoredEntry | null {
+  if (stored === null) return null;
+  const updatedAt = greaterStamp(stored.updatedAt, recorded);
+  return {
+    ...stored,
+    ...(updatedAt === undefined ? {} : { updatedAt }),
+  };
 }
 
 function readStored(value: unknown): StoredEntry | null {
@@ -123,9 +188,9 @@ export interface DirectoryUpsert {
    */
   createdAt?: number;
   /**
-   * When the document was last seen to change, epoch ms. Written when given and
-   * carried forward untouched otherwise, so a writer that only means to fix a
-   * title does not have to know the freshness stamp in order to preserve it.
+   * When this replica authored a document change, epoch ms. The greater finite
+   * stamp wins; a lower, missing or malformed value cannot lower the resolved
+   * one. A writer that only means to fix another field may omit it.
    */
   updatedAt?: number;
   /**
@@ -171,9 +236,22 @@ export function upsertDirectoryEntry(
 ): void {
   const docs = getDirectoryMap(dirDoc);
   dirDoc.transact(() => {
-    const existing = readStored(docs.get(entry.uuid));
+    const existing = withResolvedUpdatedAt(
+      readStored(docs.get(entry.uuid)),
+      recordedUpdatedAt(dirDoc, entry.uuid),
+    );
     const createdAt = existing?.createdAt ?? entry.createdAt;
-    const updatedAt = entry.updatedAt ?? existing?.updatedAt;
+    const candidate = readStamp(entry.updatedAt);
+    const updatedAt = greaterStamp(existing?.updatedAt, candidate);
+    if (
+      candidate !== undefined &&
+      (existing?.updatedAt === undefined || candidate > existing.updatedAt)
+    ) {
+      getUpdatedAtMap(dirDoc).set(
+        candidateKey(entry.uuid, dirDoc.clientID),
+        candidate,
+      );
+    }
     const description = readDescription(
       entry.description ?? existing?.description,
     );
@@ -204,7 +282,10 @@ export function upsertDirectoryEntry(
 export function tombstoneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
   const docs = getDirectoryMap(dirDoc);
   dirDoc.transact(() => {
-    const existing = readStored(docs.get(uuid));
+    const existing = withResolvedUpdatedAt(
+      readStored(docs.get(uuid)),
+      recordedUpdatedAt(dirDoc, uuid),
+    );
     docs.set(
       uuid,
       carryForward(
@@ -241,7 +322,10 @@ export function tombstoneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
  */
 export function restoreDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
   const docs = getDirectoryMap(dirDoc);
-  const existing = readStored(docs.get(uuid));
+  const existing = withResolvedUpdatedAt(
+    readStored(docs.get(uuid)),
+    recordedUpdatedAt(dirDoc, uuid),
+  );
   if (existing?.deleted !== true) {
     return;
   }
@@ -282,7 +366,10 @@ export function getDirectoryEntry(
   dirDoc: Y.Doc,
   uuid: string,
 ): DirectoryEntry | null {
-  const stored = readStored(getDirectoryMap(dirDoc).get(uuid));
+  const stored = withResolvedUpdatedAt(
+    readStored(getDirectoryMap(dirDoc).get(uuid)),
+    recordedUpdatedAt(dirDoc, uuid),
+  );
   if (stored === null) return null;
   return toEntry(uuid, stored);
 }
@@ -297,8 +384,12 @@ export function listDirectory(
 ): DirectoryEntry[] {
   const includeDeleted = options.includeDeleted ?? false;
   const out: DirectoryEntry[] = [];
+  const updatedAts = recordedUpdatedAts(dirDoc);
   for (const [uuid, value] of getDirectoryMap(dirDoc).entries()) {
-    const stored = readStored(value);
+    const stored = withResolvedUpdatedAt(
+      readStored(value),
+      updatedAts.get(uuid),
+    );
     if (stored === null) continue;
     if (stored.deleted === true && !includeDeleted) continue;
     out.push(toEntry(uuid, stored));

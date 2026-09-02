@@ -882,8 +882,10 @@ export class Replicas {
    *   replica noticed it. An update that merely arrived, a log replay, an index
    *   rebuild and an archive restore all still repair a stub that disagrees, and
    *   still backfill `createdAt`; they just never claim the document changed
-   *   now. Without that, hydrating a corpus stamped every document in it with
-   *   today's date and made "last changed" unreadable (#544).
+   *   now. A repair this server itself writes is authored even when received
+   *   state prompted it: the stamp records that document write, not the receipt.
+   *   Without that, hydrating a corpus stamped every document in it with today's
+   *   date and made "last changed" unreadable (#544).
    * - An authored change stamps immediately when the metadata changed — that
    *   write is happening anyway — and otherwise once the stored stamp is older
    *   than `updatedAtCoarsenessMs`. A burst of edits to one document therefore
@@ -892,10 +894,11 @@ export class Replicas {
    * This is the rule `packages/web/src/collab/directory-stub.ts` already
    * follows, where `transaction.local` is what `authored` is here.
    *
-   * The stamp read back is whatever the directory holds, so a second replica
-   * that has already stamped this window suppresses this one's write too. Two
-   * replicas that stamp concurrently converge last-write-wins on the entry,
-   * which is the accepted outcome for a cache-quality field.
+   * The stamp read back is the directory's resolved maximum, so a second
+   * replica that has already stamped this window suppresses this one's write
+   * too. Concurrent stamps keep the greater value even when that replica's
+   * whole-entry write loses Yjs ordering. A future-skewed value therefore
+   * stands until a later authored stamp exceeds it.
    */
   private repairStub(meta: DocMeta, authored: boolean): void {
     const directory = this.directory();

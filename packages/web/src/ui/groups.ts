@@ -1,11 +1,11 @@
 /**
- * The document's group, derived from its tags: what the breadcrumb and the
- * identity line's badge call the open document's neighbourhood.
+ * The document's group, derived from its tags: what the identity line's badge
+ * calls the open document's neighbourhood.
  *
  * This used to group the sidebar as well. It does not any more — the sidebar is
  * the `_sidebar` document, explicitly curated (#115) — so what is left is one
- * derivation over `meta.tags`, which is why a retag still reaches the breadcrumb
- * on the write itself with nothing stored in between.
+ * derivation over `meta.tags`, which is why a retag still reaches the badge on
+ * the write itself with nothing stored in between.
  */
 
 /**
@@ -47,8 +47,8 @@ export function groupKeyForTags(tags: readonly string[]): GroupKey {
 }
 
 /**
- * The label the breadcrumb and the identity-line badge show for a group, or
- * `null` where a group has no name to show. Both read the document's own
+ * The label the identity-line badge shows for a group, or `null` where a group
+ * has no name to show. It reads the document's own
  * `meta.tags` rather than its directory stub, because the stub is a cache of
  * them: a retag lands here on the write itself instead of waiting for the
  * repair that follows it.

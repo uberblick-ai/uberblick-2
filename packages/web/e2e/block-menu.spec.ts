@@ -244,7 +244,7 @@ test(
     // A second block, empty, the way a reader gets one.
     await page.keyboard.press("Enter");
     await page.keyboard.type("/he", { delay: 15 });
-    // Scoped to the menu: the topbar's workspace switcher is a `<select>`,
+    // Scoped to the menu: the sidebar's workspace switcher is a `<select>`,
     // and its options carry the same role.
     await expect(page.locator(".ub-blockmenu").getByRole("option")).toHaveCount(3);
 

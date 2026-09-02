@@ -69,10 +69,13 @@ function diagnostic(error: JSONReport["errors"][number]): string {
 function registeredTests(): RegisteredTest[] {
   const packageFile = require.resolve("@playwright/test/package.json");
   const cli = resolve(dirname(packageFile), "cli.js");
+  const env = { ...process.env };
+  delete env.PLAYWRIGHT_JSON_OUTPUT_NAME;
+  delete env.PLAYWRIGHT_JSON_OUTPUT_FILE;
   const result = spawnSync(
     process.execPath,
     [cli, "test", "--list", "--reporter=json"],
-    { cwd: webRoot, encoding: "utf8" },
+    { cwd: webRoot, encoding: "utf8", env },
   );
   if (result.error !== undefined) {
     throw new Error(`Playwright test enumeration failed: ${result.error.message}`);

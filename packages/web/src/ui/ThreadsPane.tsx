@@ -194,7 +194,7 @@ export function ThreadsPane({
   connection: RoomConnection | null;
   /**
    * Every thread in the open document, in reading order. Observed by the app
-   * shell rather than here: the topbar's handle and the drawer's own open/closed
+   * shell rather than here: the pane-edge handle and the drawer's own open/closed
    * state are read off the same list, and three observers over one Y.Doc would
    * recompute the same rail three times on every keystroke.
    */

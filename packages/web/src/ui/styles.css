@@ -153,8 +153,8 @@
 
   /* `--sidebar-accent`'s job, on the other surface (#516). #480 moved dark's
      neutral greys onto the scheme's warm hue, which narrowed every highlight
-     that sits on `--card` — the block-menu entry, the sidebar toggle, the
-     threads handle — from OKLab ΔE 0.064 against their ground to 0.018. The
+     that sits on `--card` — including block-menu entries and thread-card chips
+     — from OKLab ΔE 0.064 against their ground to 0.018. The
      sidebar got its own accent then; the card did not, and the three were left
      reading the globals. Owner decision, 2026-08-30: one card-scoped token, so
      the answer is one thing rather than three per-surface answers, and
@@ -173,7 +173,7 @@
 
   /* The brand *as text* — the one value every functional brand ink reads (#569).
      `--brand` above stays the accent it always was: borders, outlines, fills,
-     `--brand-subtle`, and the wordmark, which WCAG's logotype exception covers.
+     `--brand-subtle`, and non-text accents.
 
      Two values in light rather than one, by owner decision (2026-08-31, option
      C): the amber reaches 1.65:1 on `--sidebar-accent` and 2.04–2.30:1 on every
@@ -372,34 +372,41 @@ body {
   height: 100vh;
 }
 
-.ub-header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  background: var(--card);
-  color: var(--card-foreground);
-  border-bottom: 1px solid var(--border);
-}
-
-/* The wordmark is Geist like the rest of the UI. Fraunces came back with #536
-   for the document title and for nothing else, this included. */
-.ub-brand {
-  font-weight: 500;
-  color: var(--brand);
-}
-
-/* Stays in the header, so it is reachable in both states. */
+/* One control in either sidebar state: attached to the open pane's boundary,
+   or floating over the main pane while the sidebar is absent. Neither form
+   reserves a cross-pane row. */
 .ub-sidebar-toggle {
+  position: absolute;
+  z-index: 4;
   font: inherit;
   line-height: 1;
-  width: 1.6rem;
-  height: 1.6rem;
+  width: 2rem;
+  height: 2rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--card-accent);
   color: var(--secondary-foreground);
   cursor: pointer;
+}
+
+.ub-sidebar-toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.ub-sidebar-hide {
+  top: 0.5rem;
+  right: -1rem;
+  /* The accent fill is the boundary. A second quiet stroke against that fill
+     is neither distinct nor meaningful; focus supplies the operable outline. */
+  border-color: transparent;
+  background: var(--sidebar-accent);
+  color: var(--sidebar-foreground);
+}
+
+.ub-sidebar-restore {
+  top: 0.5rem;
+  left: 0.5rem;
 }
 
 .ub-muted {
@@ -414,22 +421,11 @@ body {
 
    `.ub-group-head` left this list with #481: a group name is a word somebody
    typed, not an identifier, and it now reads as a small-caps section label. */
-.ub-header .ub-muted,
 .ub-list-head .ub-muted,
 .ub-status,
 .ub-workspace-name,
 .ub-foreign-list {
   font-family: var(--font-mono);
-}
-
-/* Presence names are words, not identifiers, so the pill stays Geist wherever
-   it sits — including inside the mono status line. */
-.ub-me {
-  border: 2px solid var(--border);
-  border-radius: 999px;
-  padding: 0.1rem 0.5rem;
-  font-size: 0.75rem;
-  font-family: var(--font-sans);
 }
 
 /* A session as a circle (#494): a robot for an agent, an initial for a person.
@@ -473,105 +469,6 @@ body {
   font-weight: 400;
 }
 
-/* ---- doc chrome in the topbar (#69) ---- */
-
-/* `<group> / <title>`. It takes whatever width is left and gives it back: the
-   title truncates rather than pushing the pills off the end of a narrow
-   window. */
-.ub-crumb {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  min-width: 0;
-  font-size: 0.8rem;
-}
-
-.ub-crumb-group,
-.ub-crumb-sep {
-  color: var(--muted-foreground);
-  flex: none;
-}
-
-/* `min-width: 0` is what makes the ellipsis possible at all: a flex item's
-   automatic minimum size is its content, so without it a long title refuses to
-   shrink and pushes the pills off the end of a narrow window instead of
-   truncating. */
-.ub-crumb-title {
-  font-weight: 500;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Right-anchored, and the pills grow leftwards into the gap: the activity pill
-   is first in the group, so a session arriving or leaving never moves the
-   connection pill or the presence chip beside it. */
-.ub-chrome-pills {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-left: auto;
-}
-
-.ub-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.1rem 0.55rem;
-  font-size: 0.75rem;
-  font-family: var(--font-mono);
-  white-space: nowrap;
-  color: var(--muted-foreground);
-}
-
-/* A name is a word, not an identifier — the same reason the presence chips
-   stay in Geist. The colour is the session's own, written inline.
-
-   `inline-block` rather than the flex box above: a session may call itself
-   anything, and a long name has to end in an ellipsis rather than in a letter
-   sliced down the middle. */
-.ub-pill-agent {
-  display: inline-block;
-  font-family: var(--font-sans);
-  max-width: 32ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* The connection pill, made operable (#72): it is the handle for the sync
-   panel. Every `.ub-pill` rule still applies — the slots and widths are what
-   keep the topbar still — so only what a button needs is added here, and this
-   sits *before* the state rules so their tints still win over `background`. */
-.ub-sync-toggle {
-  background: none;
-  line-height: 1.6;
-  cursor: pointer;
-}
-
-.ub-sync-toggle:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-
-.ub-pill-synced {
-  border-color: var(--status-success-subtle);
-}
-
-.ub-pill-syncing {
-  border-color: var(--status-warning-subtle);
-  background: var(--status-warning-subtle);
-  color: var(--foreground);
-}
-
-.ub-pill-offline {
-  border-color: var(--destructive);
-  background: var(--destructive-subtle);
-  color: var(--foreground);
-}
-
 /* The threads drawer's handle (#101). `display: none` here and `inline-flex`
    inside the narrow media query below: above 1100px the rail is a column beside
    the prose, and a button that opens what is already open says nothing. */
@@ -603,6 +500,7 @@ body {
 /* ---- doc list ---- */
 
 .ub-list {
+  position: relative;
   width: var(--sidebar-width);
   flex: none;
   /* A column, so the pane stack fills it without changing the shell width. */
@@ -611,7 +509,8 @@ body {
   background: var(--sidebar);
   color: var(--sidebar-foreground);
   border-right: 1px solid var(--sidebar-border);
-  overflow: hidden;
+  overflow: clip;
+  overflow-clip-margin: 1.25rem;
   padding: 0.5rem;
 }
 
@@ -1461,6 +1360,14 @@ body {
     display: inline-flex;
   }
 
+  .ub-pane-threads-toggle {
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    align-self: flex-end;
+    margin-bottom: 0.25rem;
+  }
+
   .ub-rail.ub-rail-open {
     display: flex;
     position: absolute;
@@ -2024,6 +1931,32 @@ body {
   padding: 0.35rem 0;
   border-bottom: 1px solid var(--border);
   margin-bottom: 0.75rem;
+}
+
+/* The document's one sync reading is also the details-panel handle. It stays
+   inside the status line, so making it operable adds no second status surface. */
+.ub-status-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: -0.2rem 0;
+  padding: 0.2rem 0.3rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ub-status-sync:hover {
+  background: var(--card-accent);
+  color: var(--secondary-foreground);
+}
+
+.ub-status-sync:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
 }
 
 .ub-dot {
@@ -2984,6 +2917,8 @@ h3.ub-heading {
   width: 15ch;
   min-height: 1lh;
   flex: none;
+  line-height: 1.2;
+  text-align: left;
 }
 
 /* The dot's replacement, in the same slot: a ring with one lit quarter. Same

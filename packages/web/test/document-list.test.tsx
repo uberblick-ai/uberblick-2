@@ -33,6 +33,7 @@ import {
   appendBlock,
   createGroup,
   directoryRoom,
+  getDirectoryMap,
   initDoc,
   pinDoc,
   readSidebar,
@@ -430,6 +431,54 @@ describe("choosing the order", () => {
     });
     expect(activeOrder(host)).toBe("Title");
     expect(rowTitles(host)).toEqual(["Alpha", "Beta", "Middle", "Zebra"]);
+  });
+
+  it("reorders for a greater concurrent stamp whose whole entry loses", async () => {
+    const directory = directoryDoc();
+    directory.clientID = 2;
+    upsertDirectoryEntry(directory, {
+      uuid: ONE,
+      title: "One",
+      updatedAt: 100,
+    });
+    upsertDirectoryEntry(directory, {
+      uuid: TWO,
+      title: "Two",
+      updatedAt: 500,
+    });
+
+    const peer = new Y.Doc();
+    peer.clientID = 1;
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(directory));
+    const host = await openApp(`/${WORKSPACE}`);
+    expect(rowTitles(host)).toEqual(["Two", "One"]);
+
+    // Keep the replicas apart while both stamp the same entry. Client 2's
+    // whole object wins, but client 1 carries the greater timestamp candidate.
+    await act(async () => {
+      upsertDirectoryEntry(directory, {
+        uuid: ONE,
+        title: "One",
+        updatedAt: 200,
+      });
+      upsertDirectoryEntry(peer, {
+        uuid: ONE,
+        title: "One",
+        updatedAt: 900,
+      });
+    });
+    expect(rowTitles(host)).toEqual(["Two", "One"]);
+
+    await act(async () => {
+      Y.applyUpdate(
+        directory,
+        Y.encodeStateAsUpdate(peer, Y.encodeStateVector(directory)),
+      );
+    });
+    expect(
+      (getDirectoryMap(directory).get(ONE) as { updatedAt?: number }).updatedAt,
+    ).toBe(200);
+    expect(rowTitles(host)).toEqual(["One", "Two"]);
   });
 });
 

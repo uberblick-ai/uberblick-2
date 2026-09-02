@@ -51,7 +51,7 @@ import { useThreads } from "../src/ui/hooks.js";
  * `ThreadsPane` over a live document — the wiring the app shell provides.
  *
  * The pane takes its threads as a prop now (the shell observes them once, for
- * the rail and the topbar's handle together), so a test that mutates the
+ * the rail and the pane-edge handle together), so a test that mutates the
  * document under a mounted rail has to supply the same subscription. This is
  * that subscription, and it is the app's own hook doing it.
  */
