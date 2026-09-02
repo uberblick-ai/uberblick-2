@@ -193,10 +193,9 @@ processes.
 
 **Housekeeping, last** (owner direction, 2026-09-01). On every durable outcome —
 merge or parked ruling — once the probes on the retained review image are done,
-run `sh scripts/housekeeping.sh <headRefOid>` and record its output on the PR.
+run `sh scripts/housekeeping.sh <headRefOid>` and record a concise summary on
+the PR.
 It removes this run's and older review images, stopped containers and dangling
 layers, and every host-wide unused image older than a week while keeping newer
 images and build cache warm.
-It removes only clean worktrees whose git state is a day old and whose branch is
-merged, gone from `origin`, or detached — never one on a branch still open on
-`origin`, never the main checkout. `--dry-run` shows what it would do.
+`--dry-run` shows what it would do.

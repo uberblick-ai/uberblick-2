@@ -127,5 +127,5 @@ self-assessment to [Implementation and integration run retrospectives](https://g
 following its prompt. Say whether the latest findings were a new defect class
 or a recurrence in the same area, and whether the current representation still
 appears capable of converging. The retrospective is non-blocking telemetry.
-Last, run the host housekeeping `integration.md` names — review images and
-abandoned worktrees — and stop.
+Last, run the host housekeeping `integration.md` names for Docker review
+artifacts, and stop.
