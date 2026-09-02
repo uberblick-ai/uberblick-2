@@ -405,12 +405,13 @@ describe("the prose selection toolbar", () => {
     }
   });
 
-  it("creates and edits only http(s) links, and cancellation writes nothing", () => {
+  it("creates and edits only http(s) links without replacing document links", () => {
     const { ydoc } = annotatedDoc();
     const view = mountComposer(ydoc);
     try {
       select(view.editor, 1, 4, 15);
       act(() => tool(view, "Bold").click());
+      expect(tool(view, "External link").getAttribute("aria-pressed")).toBeNull();
       act(() => tool(view, "External link").click());
       linkValue(view, "mailto:ben@example.com");
       act(() => view.query<HTMLButtonElement>(".ub-selection-apply")?.click());
@@ -458,6 +459,32 @@ describe("the prose selection toolbar", () => {
           (run) => run.insert === "quick brown",
         )?.attributes,
       ).toMatchObject({ link: { href: "https://example.com/edited" } });
+
+      const { from, to } = view.editor.state.selection;
+      const docLink = view.editor.state.schema.marks.docLink;
+      if (docLink === undefined) throw new Error("docLink mark is unavailable");
+      act(() => {
+        view.editor.view.dispatch(
+          view.editor.state.tr.addMark(
+            from,
+            to,
+            docLink.create({ docId: "11111111-2222-3333-4444-555555555555" }),
+          ),
+        );
+      });
+      act(() => tool(view, "External link").click());
+      linkValue(view, "https://example.com/replacement");
+      act(() => view.query<HTMLButtonElement>(".ub-selection-apply")?.click());
+      expect(view.query(".ub-selection-error")?.textContent).toContain(
+        "document link",
+      );
+      expect(
+        snapshotFragment(ydoc)[1]?.delta.find(
+          (run) => run.insert === "quick brown",
+        )?.attributes,
+      ).toMatchObject({
+        docLink: { docId: "11111111-2222-3333-4444-555555555555" },
+      });
     } finally {
       view.unmount();
     }
@@ -490,6 +517,20 @@ describe("the prose selection toolbar", () => {
     try {
       select(view.editor, 1, 4, 15);
       expect(view.query(".ub-selection-toolbar")).not.toBeNull();
+      view.open();
+      expect(view.query(".ub-comment-form")).not.toBeNull();
+      act(() => {
+        view.query<HTMLTextAreaElement>("textarea")?.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      expect(view.query(".ub-selection-toolbar")).not.toBeNull();
+      expect(view.editor.state.selection.empty).toBe(false);
+
       act(() => {
         view.editor.view.dom.dispatchEvent(
           new KeyboardEvent("keydown", {

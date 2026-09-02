@@ -116,24 +116,9 @@ function visibleSelectionRect(editor: Editor, available: Rect): Rect | null {
       };
     }
   } catch {
-    // `coordsAtPos` below is also the layout-less DOM fallback.
-  }
-
-  try {
-    const start = editor.view.coordsAtPos(from);
-    const end = editor.view.coordsAtPos(to);
-    return clipped(
-      {
-        top: Math.min(start.top, end.top),
-        right: Math.max(start.right, end.right),
-        bottom: Math.max(start.bottom, end.bottom),
-        left: Math.min(start.left, end.left),
-      },
-      available,
-    );
-  } catch {
     return null;
   }
+  return null;
 }
 
 /**
@@ -195,7 +180,10 @@ function pointAt(
 }
 
 /** How much of the current selection carries `name`, plus its one URL if any. */
-function markReading(editor: Editor, name: FlagMark | "link"): MarkReading {
+function markReading(
+  editor: Editor,
+  name: FlagMark | "docLink" | "link",
+): MarkReading {
   const { doc, selection } = editor.state;
   let selected = 0;
   let marked = 0;
@@ -256,17 +244,24 @@ function toggleFlag(editor: Editor, ydoc: Y.Doc, name: FlagMark): void {
   });
 }
 
-function setExternalLink(editor: Editor, ydoc: Y.Doc, href: string): boolean {
+type LinkRefusal = "document-link" | "invalid-url";
+
+function setExternalLink(
+  editor: Editor,
+  ydoc: Y.Doc,
+  href: string,
+): LinkRefusal | null {
   if (selectedProseTarget(editor, ydoc) === null || !isExternalHref(href)) {
-    return false;
+    return "invalid-url";
   }
+  if (markReading(editor, "docLink").state !== "off") return "document-link";
   const { from, to } = editor.state.selection;
   const type = editor.state.schema.marks.link;
-  if (type === undefined) return false;
+  if (type === undefined) return "invalid-url";
   boundedWrite(editor, () => {
     editor.view.dispatch(editor.state.tr.addMark(from, to, type.create({ href })));
   });
-  return true;
+  return null;
 }
 
 /** What went wrong, in the reader's terms rather than the API's. */
@@ -393,6 +388,12 @@ export function CommentComposer({
       if (event.key !== "Escape" || draftNow.current === null) return;
       event.preventDefault();
       event.stopPropagation();
+      if (modeNow.current !== "toolbar") {
+        setMode("toolbar");
+        setHref("");
+        setError(null);
+        return;
+      }
       dismissed.current = rangeOf(draftNow.current.target);
       setDraft(null);
       setMode("toolbar");
@@ -519,8 +520,13 @@ export function CommentComposer({
           aria-label="External link"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!setExternalLink(editor, ydoc, href)) {
-              setError("Enter a complete http or https URL.");
+            const refusal = setExternalLink(editor, ydoc, href);
+            if (refusal !== null) {
+              setError(
+                refusal === "document-link"
+                  ? "Remove the document link before adding an external URL."
+                  : "Enter a complete http or https URL.",
+              );
               return;
             }
             close();
@@ -590,9 +596,11 @@ export function CommentComposer({
           >
             <code aria-hidden="true">&lt;/&gt;</code>
           </FormatButton>
-          <FormatButton
-            label="External link"
-            state={draft.marks.link.state}
+          <button
+            type="button"
+            className="ub-selection-tool"
+            aria-label="External link"
+            onPointerDown={(event) => event.preventDefault()}
             onClick={() => {
               setHref(draft.marks.link.href ?? "");
               setError(null);
@@ -600,7 +608,7 @@ export function CommentComposer({
             }}
           >
             Link
-          </FormatButton>
+          </button>
           <span className="ub-selection-separator" aria-hidden="true" />
           <button
             type="button"
