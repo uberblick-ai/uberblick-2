@@ -3029,8 +3029,8 @@ h3.ub-heading {
    originating element's, so crossing it never leaves the frame.
 
    Hit-testing only — no chrome, nothing to see. It stops exactly at the frame's
-   left edge, so it covers the gutter and takes not one pixel of the prose.
-   Painted before every child, so the button and the two cards stay above it. */
+   left edge, so it covers the gutter and takes not one pixel of the prose. The
+   button's explicit stacking order keeps its complete target above the strip. */
 .ub-editor-frame::before {
   content: "";
   position: absolute;
@@ -3046,6 +3046,7 @@ h3.ub-heading {
    block's own box. */
 .ub-gutter-add {
   position: absolute;
+  z-index: 1;
   left: calc(-1 * var(--block-gutter));
   width: 22px;
   height: 22px;

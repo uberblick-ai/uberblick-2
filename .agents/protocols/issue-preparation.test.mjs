@@ -1,6 +1,6 @@
 /**
  * Drift guard for the one-pass preparation policy. The prose tables in
- * `preflight.md` and the executable specification beside this file must route
+ * `issue-preparation.md` and the executable specification beside this file must route
  * the same cases: trivial gets no adversary, everything else gets exactly one,
  * correctable findings stay in the preparer pass, and owner boundaries park.
  */
@@ -10,10 +10,10 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { AXES, FINDING_STATES, classify, preflight } from "./preflight-tier.mjs";
+import { AXES, FINDING_STATES, classify, preflight } from "./issue-preparation.mjs";
 
-const SKILL_DIR = dirname(fileURLToPath(import.meta.url));
-const PREFLIGHT = readFileSync(join(SKILL_DIR, "preflight.md"), "utf8");
+const PROTOCOL_DIR = dirname(fileURLToPath(import.meta.url));
+const PREPARATION = readFileSync(join(PROTOCOL_DIR, "issue-preparation.md"), "utf8");
 
 function everyCombination() {
   let all = [{}];
@@ -24,10 +24,10 @@ function everyCombination() {
 }
 
 function markdownTable(...columns) {
-  const lines = PREFLIGHT.split("\n");
+  const lines = PREPARATION.split("\n");
   const header = lines.findIndex((line) => columns.every((column) => line.includes(column)));
   if (header === -1)
-    throw new Error(`preflight.md has no table with columns ${columns.join(", ")}`);
+    throw new Error(`issue-preparation.md has no table with columns ${columns.join(", ")}`);
 
   const rows = [];
   for (const line of lines.slice(header + 2)) {

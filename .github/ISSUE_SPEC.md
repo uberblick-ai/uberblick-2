@@ -86,11 +86,17 @@ Parent: #486
 - This includes `schema`: its keystone risk is paid by exact-head review and
   gates after upstream reconciliation, not by locking unrelated files or
   packages.
-- Order among eligible issues: dependency topology, then **`Priority`** — the
-  organization issue field, Urgent → High → Medium → Low — then ascending issue
-  number. An unset value sorts as Low; it does not make prepared work
-  ineligible. The product owner owns every explicit Priority value. Agents may
-  report evidence that the order looks wrong, but never write the field.
+- Order among eligible issues: **effective `Priority`** first — the
+  organization issue field, Urgent → High → Medium → Low — then oldest first
+  (ascending issue number). An issue's effective Priority is the highest of its
+  own and of every open issue whose `Depends-on` chain reaches it: a Medium
+  that blocks a High is picked as a High, and the oldest Urgent goes before any
+  High (owner direction, 2026-09-01). An unset value sorts as Medium — the owner
+  sets a value to move an issue, not to admit it — and does not make prepared
+  work ineligible. Dependencies otherwise gate eligibility —
+  every `Depends-on` closed — and earn no other place in line. The product
+  owner owns every explicit Priority value. Agents may report evidence that
+  the order looks wrong, but never write the field.
 
 `Priority` is that field, read through the API — never a line in the issue body:
 
@@ -211,10 +217,13 @@ The PR supplies the branch, head SHA, diff and check state; do not copy them
 into the handoff or add a second completion comment to the issue. Recovery and
 independent-review rules live only in `AGENTS.md`.
 
-The executable routing detail lives under `.claude/skills/next-issue/`: it owns
-the grounded trivial-vs-challenged classification, challenge questions, recheck
-and focused parity test. This spec owns only the authority and lifecycle above;
-do not grow a second copy of that procedure here or in `AGENTS.md`.
+Conversation-to-intake behavior lives in
+`.agents/protocols/issue-shaping.md`; it grants no `ready` state. The shared
+preparation detail lives in `.agents/protocols/issue-preparation.md`: it owns
+the grounded trivial-vs-challenged classification, challenge questions,
+recheck, and focused parity test. The issue-preparer role owns queue authority
+and side effects. This spec owns only the final schema and lifecycle above; do
+not grow a second copy of either procedure here or in `AGENTS.md`.
 
 ## Body sections
 

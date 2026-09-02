@@ -60,6 +60,12 @@ parent's durable exact-key assignment and never searches a queue. No session
 reviews or merges a diff it authored, and a challenge of a diff always runs on
 a session that did not write it.
 
+Issue shaping is a separate conversation entry point: the Codex and Claude
+`shape-issue` adapters both read `.agents/protocols/issue-shaping.md` and may
+create only a confirmed `needs-preparation` intake. Preparation still begins in
+the issue-preparer role and follows `.agents/protocols/issue-preparation.md`;
+neither shaping nor its adapters grant `ready` or choose Priority.
+
 ## Development workflow (every functionality)
 
 1. **Issue first.** Every piece of functionality starts as a GitHub issue:

@@ -16,8 +16,9 @@ change when the launcher does.
 **Roles.** The continuous entry roles `issue-preparer`, `implementer` and
 `integrator`, and `program-coordinator` for an explicitly requested program
 issue. `issue-adversary` and `implementation-reviewer` are internal: their
-parent starts them under `preflight.md` or `review-protocol.md` beside this
-file, never this launcher. Any other name: say so and return.
+parent starts them under `.agents/protocols/issue-preparation.md` or
+`review-protocol.md` beside this file, never this launcher. Any other name: say
+so and return.
 
 **Runtime.** `--codex` or `--claude`. Omitted, the implementer runs on Codex
 and every other role on Claude (owner direction, 2026-09-01). The launcher adds
@@ -47,7 +48,10 @@ runtime's own configuration owns the rest.
    check before claiming.
 
    - **Claude:** the `Agent` tool with `subagent_type` set to the role slug
-     (its adapter under `.claude/agents/`) and `model: opus`.
+     (its adapter under `.claude/agents/`) and `model: opus` — except the
+     issue-preparer, which runs on `fable` (owner direction, 2026-09-01):
+     grounding a new ticket is where the extra judgment pays, and its adapter
+     already pins the owner-approved `effort: high`.
    - **Codex:** give the run its own worktree,
      `git worktree add --detach <scratch>/<run id> origin/main`, write the
      assignment to `<scratch>/<run id>.prompt`, then run from that worktree as
@@ -100,7 +104,8 @@ merge. It never resumes a role after its handoff.
 - A runtime that is not installed or not authenticated is reported before any
   launch. Nothing is started on the other runtime silently.
 
-The roles' mechanics live beside this file and are read by the role that owns
-them, never here: `preflight.md` (issue preparer and its adversary),
-`review-protocol.md` and `integration.md` (implementation reviewer and
-integrator).
+Shared issue-preparation mechanics live at
+`.agents/protocols/issue-preparation.md`; this directory retains only runtime
+launch and review transport. The owning roles read those procedures, never this
+launcher: `review-protocol.md` and `integration.md` serve the implementation
+reviewer and integrator.

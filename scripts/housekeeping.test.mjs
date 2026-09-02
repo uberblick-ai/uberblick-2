@@ -96,13 +96,28 @@ test("removes only old worktrees whose work is still reachable", (t) => {
 	assert.doesNotMatch(worktrees, new RegExp(clean));
 });
 
-test("keeps worktrees when remote branches cannot be listed", (t) => {
+test("keeps worktrees for live branches and remote-query failures", (t) => {
 	const { base, bin, checkout } = fixture(t);
 	const worktree = join(base, "remote-branch");
 	run("git", ["-C", checkout, "worktree", "add", "-b", "still-open", worktree, "HEAD"]);
+	writeFileSync(join(worktree, "remote-work"), "still in progress\n");
+	run("git", ["-C", worktree, "add", "remote-work"]);
+	run("git", ["-C", worktree, "commit", "-m", "remote work"]);
 	run("git", ["-C", checkout, "push", "origin", "still-open"]);
 	ageWorktree(worktree);
 	fakeDocker(bin, "exit 0");
+	const liveBranch = spawnSync("sh", [script, "test-sha"], {
+		cwd: checkout,
+		encoding: "utf8",
+		env: environment(bin),
+	});
+	assert.equal(liveBranch.status, 0, liveBranch.stderr);
+	assert.match(liveBranch.stdout, new RegExp(`keep   ${worktree} \\(still-open still open\\)`));
+	assert.match(
+		run("git", ["-C", checkout, "worktree", "list", "--porcelain"]),
+		new RegExp(worktree),
+	);
+
 	const realGit = run("sh", ["-c", "command -v git"]);
 	const fakeGit = join(bin, "git");
 	writeFileSync(

@@ -7,6 +7,12 @@ Read [.github/ISSUE_SPEC.md](.github/ISSUE_SPEC.md) for the issue grammar,
 eligibility, scheduling, and footprint rules. Do not infer missing product
 decisions from this file.
 
+Before an issue enters that workflow, `.agents/protocols/issue-shaping.md`
+governs conversation to a confirmed `needs-preparation` intake. The
+issue-preparer role owns queue authority and side effects, while
+`.agents/protocols/issue-preparation.md` owns its provider-neutral grounding,
+challenge, and recheck procedure.
+
 GitHub is the source of truth for coordination state. Claims, decisions,
 handoffs, finding dispositions, and gate results are written there, and nothing
 else announces them. Recovery must be possible from GitHub alone, without
