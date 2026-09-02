@@ -557,8 +557,6 @@ function legacySrgb(painted: string): [number, number, number] | null {
  * off a rendered element.
  */
 function srgb(painted: string): [number, number, number] {
-  const legacy = legacySrgb(painted);
-  if (legacy !== null) return legacy;
   const { L, a, b } = oklab(painted);
   const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
   const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
@@ -579,7 +577,7 @@ function srgb(painted: string): [number, number, number] {
 
 /** WCAG's ratio between an ink — alpha composited where it has one — and its ground. */
 function contrast(ink: string, ground: string): number {
-  const under = srgb(ground);
+  const under = legacySrgb(ground) ?? srgb(ground);
   const alpha = oklab(ink).alpha;
   const over = srgb(ink).map((channel, index) => {
     const beneath = under[index] ?? 0;

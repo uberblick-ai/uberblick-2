@@ -923,7 +923,7 @@ body {
 }
 
 /* A segment can be a bare uuid, so it truncates rather than pushing the tile
-   and the caret out of the column. The whole of it is on the trigger's
+   and the caret out of the column. The whole of it is on this element's
    `title` — see WorkspaceSwitcher. */
 .ub-workspace-name {
   min-width: 0;
@@ -998,7 +998,6 @@ body {
    question from who you are. Both letters are `aria-hidden` in the markup, so
    this is decoration and never a reading. */
 .ub-identity-tile {
-  box-sizing: border-box;
   flex: none;
   width: 1.75rem;
   height: 1.75rem;
@@ -1006,7 +1005,6 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-sans);
   font-size: 0.8rem;
   /* 500, the emphasis weight of the two this file uses: a letter alone at 400
      reads as a stray character, and at 28px on a filled ground it needs no
