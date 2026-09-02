@@ -1,37 +1,57 @@
 /**
- * Starting a thread from the prose: select a range, and a card appears next to
- * it offering to comment on exactly that range.
+ * Selection chrome for the prose: inline formatting, external links and the
+ * existing comment composer.
  *
- * Two steps, not one. A composer that opened and grabbed focus the moment a
- * selection existed would break the commonest gesture there is — select, then
- * type over it — so the selection first raises a small "Comment" affordance,
- * and only clicking that opens the field. Nothing here touches focus until the
- * reader has asked for it.
- *
- * The write goes through `createAnnotation`, which marks the range and stores
- * the thread in one transaction. This module hand-rolls no Yjs at all; what it
- * owns is the translation from a ProseMirror selection to the block-and-offsets
- * that API takes (see editor/selection.ts) and the refusals it can answer with.
+ * A selection wholly inside one prose block gets the compact toolbar. Source
+ * blocks and cross-block ranges keep the older Comment-only affordance because
+ * the annotation API can clamp them honestly while inline marks cannot. The
+ * component is mounted only beside a live editable editor; archived and
+ * foreign-content panes never mount it.
  */
 
-import { useEffect, useRef, useState } from "react";
-import type { ReactElement, RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ReactElement, ReactNode, RefObject } from "react";
 import type * as Y from "yjs";
-import { AnnotationRangeError, createAnnotation } from "@uberblick/schema";
+import {
+  AnnotationRangeError,
+  createAnnotation,
+  isExternalHref,
+  isProseBlockType,
+} from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
+import { endUndoCapture } from "../editor/block-menu.js";
 import { commentTargetOf } from "../editor/selection.js";
 import type { CommentTarget } from "../editor/selection.js";
 import { CommentForm } from "./CommentForm.js";
 import { blockRefLabel } from "./threads.js";
 
-/** Where the card sits, in pixels inside the editor host. */
+type FlagMark = "bold" | "italic" | "strike" | "inlineCode";
+type MarkState = "off" | "mixed" | "on";
+type Mode = "toolbar" | "link" | "comment";
+
 interface Point {
   top: number;
   left: number;
+  placement: "above" | "below";
+  visible: boolean;
+}
+
+interface MarkReading {
+  state: MarkState;
+  /** Present only when the complete selection carries one external URL. */
+  href: string | null;
 }
 
 interface Draft extends Point {
   target: CommentTarget;
+  marks: Record<FlagMark, MarkReading> & { link: MarkReading };
+}
+
+interface Rect {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
 }
 
 /** The range a target names, as a value two reads can be compared by. */
@@ -39,29 +59,214 @@ function rangeOf(target: CommentTarget): string {
   return `${target.blockId}:${target.start}:${target.end}`;
 }
 
-/** The gap between the selection and the card, in pixels. */
 const OFFSET = 6;
 
-/**
- * The card's position: below the start of the selection, in the host's own
- * coordinates.
- *
- * ProseMirror measures through the live layout, which a headless DOM does not
- * have — every fallback here is that case, and a card at the host's origin is
- * fine there because nothing is looking at it.
- */
-function pointAt(editor: Editor, host: HTMLElement | null): Point {
-  if (host === null) return { top: 0, left: 0 };
-  try {
-    const coords = editor.view.coordsAtPos(editor.state.selection.from);
-    const rect = host.getBoundingClientRect();
-    const top = coords.bottom - rect.top + OFFSET;
-    const left = coords.left - rect.left;
-    if (!Number.isFinite(top) || !Number.isFinite(left)) return { top: 0, left: 0 };
-    return { top, left: Math.max(0, left) };
-  } catch {
-    return { top: 0, left: 0 };
+/** The visible part of the editor pane; the window is the test/fallback case. */
+function availableRect(host: HTMLElement): Rect {
+  const pane = host.closest(".ub-pane");
+  const paneRect = pane?.getBoundingClientRect();
+  const viewport: Rect = {
+    top: 0,
+    right: window.innerWidth,
+    bottom: window.innerHeight,
+    left: 0,
+  };
+  if (paneRect === undefined || paneRect.width === 0 || paneRect.height === 0) {
+    return viewport;
   }
+  return {
+    top: Math.max(viewport.top, paneRect.top),
+    right: Math.min(viewport.right, paneRect.right),
+    bottom: Math.min(viewport.bottom, paneRect.bottom),
+    left: Math.max(viewport.left, paneRect.left),
+  };
+}
+
+/** Intersect a client rect with the visible pane, or drop an invisible one. */
+function clipped(rect: Rect, available: Rect): Rect | null {
+  const visible = {
+    top: Math.max(rect.top, available.top),
+    right: Math.min(rect.right, available.right),
+    bottom: Math.min(rect.bottom, available.bottom),
+    left: Math.max(rect.left, available.left),
+  };
+  return visible.right > visible.left && visible.bottom > visible.top
+    ? visible
+    : null;
+}
+
+/** The browser-painted selection, reduced to the part a reader can see. */
+function visibleSelectionRect(editor: Editor, available: Rect): Rect | null {
+  const { from, to } = editor.state.selection;
+  try {
+    const start = editor.view.domAtPos(from);
+    const end = editor.view.domAtPos(to);
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+    const rects = [...range.getClientRects()]
+      .map((rect) => clipped(rect, available))
+      .filter((rect): rect is Rect => rect !== null);
+    if (rects.length > 0) {
+      return {
+        top: Math.min(...rects.map((rect) => rect.top)),
+        right: Math.max(...rects.map((rect) => rect.right)),
+        bottom: Math.max(...rects.map((rect) => rect.bottom)),
+        left: Math.min(...rects.map((rect) => rect.left)),
+      };
+    }
+  } catch {
+    // `coordsAtPos` below is also the layout-less DOM fallback.
+  }
+
+  try {
+    const start = editor.view.coordsAtPos(from);
+    const end = editor.view.coordsAtPos(to);
+    return clipped(
+      {
+        top: Math.min(start.top, end.top),
+        right: Math.max(start.right, end.right),
+        bottom: Math.max(start.bottom, end.bottom),
+        left: Math.min(start.left, end.left),
+      },
+      available,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Position a measured card inside the visible pane. Above is the ordinary
+ * placement; when that does not fit, below wins instead of covering the text.
+ */
+function pointAt(
+  editor: Editor,
+  host: HTMLElement | null,
+  floating: HTMLElement | null,
+  mode: Mode,
+): Point {
+  if (host === null) {
+    return { top: 0, left: 0, placement: "below", visible: true };
+  }
+  const hostRect = host.getBoundingClientRect();
+  // jsdom has no layout; keeping the card at the origin lets component tests
+  // exercise the behavior without pretending zero-sized geometry is offscreen.
+  if (hostRect.width === 0 && hostRect.height === 0) {
+    return { top: 0, left: 0, placement: "below", visible: true };
+  }
+
+  const available = availableRect(host);
+  const selection = visibleSelectionRect(editor, available);
+  if (selection === null) {
+    return { top: 0, left: 0, placement: "below", visible: false };
+  }
+
+  const width = floating?.offsetWidth ?? (mode === "comment" ? 320 : 360);
+  const height = floating?.offsetHeight ?? (mode === "comment" ? 180 : 34);
+  const fitsAbove = selection.top - OFFSET - height >= available.top;
+  const fitsBelow = selection.bottom + OFFSET + height <= available.bottom;
+  let placement: Point["placement"];
+  let viewportTop: number;
+  if (fitsAbove) {
+    placement = "above";
+    viewportTop = selection.top - OFFSET - height;
+  } else if (fitsBelow) {
+    placement = "below";
+    viewportTop = selection.bottom + OFFSET;
+  } else {
+    const roomAbove = selection.top - available.top;
+    const roomBelow = available.bottom - selection.bottom;
+    placement = roomBelow >= roomAbove ? "below" : "above";
+    viewportTop = placement === "below" ? available.bottom - height : available.top;
+  }
+
+  const centre = (selection.left + selection.right) / 2;
+  const viewportLeft = Math.max(
+    available.left,
+    Math.min(centre - width / 2, available.right - width),
+  );
+  return {
+    top: viewportTop - hostRect.top,
+    left: viewportLeft - hostRect.left,
+    placement,
+    visible: true,
+  };
+}
+
+/** How much of the current selection carries `name`, plus its one URL if any. */
+function markReading(editor: Editor, name: FlagMark | "link"): MarkReading {
+  const { doc, selection } = editor.state;
+  let selected = 0;
+  let marked = 0;
+  let href: string | null = null;
+  let oneHref = true;
+
+  doc.nodesBetween(selection.from, selection.to, (node, pos) => {
+    if (!node.isText) return;
+    const start = Math.max(selection.from, pos);
+    const end = Math.min(selection.to, pos + node.nodeSize);
+    if (end <= start) return;
+    const length = end - start;
+    selected += length;
+    const mark = node.marks.find((candidate) => candidate.type.name === name);
+    if (mark === undefined) return;
+    marked += length;
+    if (name === "link") {
+      const next = typeof mark.attrs.href === "string" ? mark.attrs.href : null;
+      if (href !== null && href !== next) oneHref = false;
+      href = next;
+    }
+  });
+
+  const state: MarkState =
+    marked === 0 || selected === 0
+      ? "off"
+      : marked === selected
+        ? "on"
+        : "mixed";
+  return { state, href: state === "on" && oneHref ? href : null };
+}
+
+/** A toolbar write is one bounded Yjs undo item, never part of nearby typing. */
+function boundedWrite(editor: Editor, write: () => void): void {
+  endUndoCapture(editor.state);
+  write();
+  endUndoCapture(editor.state);
+}
+
+function selectedProseTarget(editor: Editor, ydoc: Y.Doc): CommentTarget | null {
+  const target = commentTargetOf(editor, ydoc);
+  return target !== null && !target.clamped && isProseBlockType(target.blockType)
+    ? target
+    : null;
+}
+
+function toggleFlag(editor: Editor, ydoc: Y.Doc, name: FlagMark): void {
+  if (selectedProseTarget(editor, ydoc) === null) return;
+  const { from, to } = editor.state.selection;
+  const type = editor.state.schema.marks[name];
+  if (type === undefined) return;
+  const remove = markReading(editor, name).state === "on";
+  boundedWrite(editor, () => {
+    const transaction = editor.state.tr;
+    if (remove) transaction.removeMark(from, to, type);
+    else transaction.addMark(from, to, type.create());
+    editor.view.dispatch(transaction);
+  });
+}
+
+function setExternalLink(editor: Editor, ydoc: Y.Doc, href: string): boolean {
+  if (selectedProseTarget(editor, ydoc) === null || !isExternalHref(href)) {
+    return false;
+  }
+  const { from, to } = editor.state.selection;
+  const type = editor.state.schema.marks.link;
+  if (type === undefined) return false;
+  boundedWrite(editor, () => {
+    editor.view.dispatch(editor.state.tr.addMark(from, to, type.create({ href })));
+  });
+  return true;
 }
 
 /** What went wrong, in the reader's terms rather than the API's. */
@@ -72,6 +277,36 @@ function refusal(error: unknown): string {
       : "Select some text to comment on.";
   }
   return "Could not start the thread. Re-select the range and try again.";
+}
+
+function pressed(state: MarkState): boolean | "mixed" {
+  return state === "mixed" ? "mixed" : state === "on";
+}
+
+function FormatButton({
+  label,
+  state,
+  children,
+  onClick,
+}: {
+  label: string;
+  state: MarkState;
+  children: ReactNode;
+  onClick: () => void;
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      className="ub-selection-tool"
+      data-state={state}
+      aria-label={label}
+      aria-pressed={pressed(state)}
+      onPointerDown={(event) => event.preventDefault()}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
 }
 
 export function CommentComposer({
@@ -88,62 +323,130 @@ export function CommentComposer({
   author: string;
   /** Peer names offered as `@name` chips. */
   mentions: string[];
-  /** The positioned element the card is placed inside. */
+  /** The positioned element the selection chrome is placed inside. */
   host: RefObject<HTMLElement | null>;
   /** The new thread, so the rail can focus its card. */
   onCreated: (threadId: string) => void;
 }): ReactElement | null {
   const [draft, setDraft] = useState<Draft | null>(null);
-  /**
-   * Whether the field is open — a flag, deliberately not the draft it was
-   * opened on. The range a thread would anchor to moves under a remote edit,
-   * and the card is designed to follow it and quote it live; tying the open
-   * field to one particular range would throw away half-written text every time
-   * someone else typed above the selection. The field closes on the writer's
-   * own gestures — submit, cancel, or losing the selection entirely.
-   */
-  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<Mode>("toolbar");
+  const [href, setHref] = useState("");
   const [error, setError] = useState<string | null>(null);
-  /** The range the last read saw, so a *different* one can drop a stale refusal. */
   const range = useRef<string | null>(null);
+  const dismissed = useRef<string | null>(null);
+  const composing = useRef(false);
+  const floating = useRef<HTMLDivElement | null>(null);
+  const draftNow = useRef<Draft | null>(null);
+  const modeNow = useRef(mode);
+  draftNow.current = draft;
+  modeNow.current = mode;
 
-  // Every transaction, not just `selectionUpdate`: text arriving under the
-  // selection moves the range that would be annotated, and the card quotes it.
   useEffect(() => {
+    // Capture once: the editor can destroy its view before React runs this
+    // component's passive cleanup during a route or fallback transition.
+    const editorDom = editor.view.dom;
+    const hostDom = host.current;
     const read = (): void => {
+      if (composing.current) return;
       const target = commentTargetOf(editor, ydoc);
       if (target === null) {
-        // Nothing left to annotate: the card goes, and the field with it.
         setDraft(null);
-        setOpen(false);
+        setMode("toolbar");
+        setError(null);
         range.current = null;
+        dismissed.current = null;
         return;
       }
-      // A refusal is about one range. Aim at another and it no longer applies —
-      // which is how a reader answers "that range is already taken".
-      if (range.current !== rangeOf(target)) {
-        range.current = rangeOf(target);
+
+      const key = rangeOf(target);
+      if (dismissed.current !== null) {
+        if (dismissed.current === key) {
+          setDraft(null);
+          return;
+        }
+        dismissed.current = null;
+      }
+      if (range.current !== key) {
+        range.current = key;
         setError(null);
       }
-      // Rebuilt every read, position included. Everything on the card is derived
-      // from the target — the excerpt, the block reference, the clamped chip,
-      // and where the card sits — so anything held over from a previous read is
-      // a card describing a range that has moved on.
-      setDraft({ target, ...pointAt(editor, host.current) });
+      if (
+        modeNow.current === "link" &&
+        (target.clamped || !isProseBlockType(target.blockType))
+      ) {
+        setMode("toolbar");
+        setHref("");
+      }
+      setDraft({
+        target,
+        ...pointAt(editor, host.current, floating.current, modeNow.current),
+        marks: {
+          bold: markReading(editor, "bold"),
+          italic: markReading(editor, "italic"),
+          strike: markReading(editor, "strike"),
+          inlineCode: markReading(editor, "inlineCode"),
+          link: markReading(editor, "link"),
+        },
+      });
+    };
+    const dismiss = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || draftNow.current === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      dismissed.current = rangeOf(draftNow.current.target);
+      setDraft(null);
+      setMode("toolbar");
+      setHref("");
+      setError(null);
+    };
+    const startComposition = (): void => {
+      composing.current = true;
+      setDraft(null);
+    };
+    const endComposition = (): void => {
+      composing.current = false;
+      read();
     };
     read();
     editor.on("transaction", read);
+    editorDom.addEventListener("compositionstart", startComposition);
+    editorDom.addEventListener("compositionend", endComposition);
+    editorDom.addEventListener("keydown", dismiss, true);
+    hostDom?.addEventListener("keydown", dismiss, true);
+    window.addEventListener("resize", read);
+    window.addEventListener("scroll", read, true);
     return () => {
       editor.off("transaction", read);
+      editorDom.removeEventListener("compositionstart", startComposition);
+      editorDom.removeEventListener("compositionend", endComposition);
+      editorDom.removeEventListener("keydown", dismiss, true);
+      hostDom?.removeEventListener("keydown", dismiss, true);
+      window.removeEventListener("resize", read);
+      window.removeEventListener("scroll", read, true);
     };
   }, [editor, ydoc, host]);
 
+  // Opening a field changes the card's size; position the measured shape, not
+  // the toolbar dimensions from the preceding render.
+  useLayoutEffect(() => {
+    setDraft((current) =>
+      current === null
+        ? null
+        : {
+            ...current,
+            ...pointAt(editor, host.current, floating.current, mode),
+          },
+    );
+  }, [editor, host, mode]);
+
   if (draft === null) return null;
   const { target } = draft;
+  const prose = !target.clamped && isProseBlockType(target.blockType);
   const blockRef = blockRefLabel(target.blockType, target.blockIndex);
 
   const close = (): void => {
-    setOpen(false);
+    setMode("toolbar");
+    setHref("");
     setError(null);
   };
 
@@ -159,12 +462,6 @@ export function CommentComposer({
       );
       close();
       onCreated(thread.id);
-      // Back to the prose, with the caret at the end of the new highlight
-      // rather than still selecting it — a standing selection would re-offer to
-      // comment on a range that now belongs to this thread. The end of the
-      // *marked* range, not of the selection: a clamped selection reached into
-      // a later block, and the caret belongs where the thread actually starts
-      // and ends.
       editor.commands.focus(target.contentStart + target.end);
       return true;
     } catch (failure) {
@@ -173,12 +470,32 @@ export function CommentComposer({
     }
   };
 
+  const openComment = (): void => {
+    setError(null);
+    setMode("comment");
+  };
+
+  const className = [
+    "ub-composer",
+    mode === "comment" ? "" : "ub-selection-menu",
+    mode === "toolbar" && !prose ? "ub-comment-only-menu" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <div
-      className="ub-composer"
-      style={{ top: `${draft.top}px`, left: `${draft.left}px` }}
+      ref={floating}
+      className={className}
+      data-placement={draft.placement}
+      style={{
+        top: `${draft.top}px`,
+        left: `${draft.left}px`,
+        visibility: draft.visible ? "visible" : "hidden",
+        pointerEvents: draft.visible ? "auto" : "none",
+      }}
     >
-      {open ? (
+      {mode === "comment" ? (
         <>
           <p className="ub-composer-head">
             <span className="ub-thread-ref">{blockRef}</span>
@@ -186,8 +503,6 @@ export function CommentComposer({
               <span className="ub-chip ub-chip-orphaned">first block only</span>
             )}
           </p>
-          {/* Exactly what the mark will cover — the whole point of showing it is
-              that a clamped selection annotates less than the reader dragged. */}
           <p className="ub-thread-excerpt">{target.text}</p>
           <CommentForm
             placeholder={`Comment as ${author}…`}
@@ -198,16 +513,111 @@ export function CommentComposer({
             onCancel={close}
           />
         </>
+      ) : mode === "link" && prose ? (
+        <form
+          className="ub-selection-link"
+          aria-label="External link"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!setExternalLink(editor, ydoc, href)) {
+              setError("Enter a complete http or https URL.");
+              return;
+            }
+            close();
+          }}
+        >
+          <input
+            // biome-ignore lint/a11y/noAutofocus: the field exists only after the writer asks for it.
+            autoFocus
+            className="ub-selection-link-input"
+            aria-label="External link URL"
+            aria-invalid={error === null ? undefined : true}
+            placeholder="https://example.com"
+            value={href}
+            onChange={(event) => {
+              setHref(event.target.value);
+              setError(null);
+            }}
+          />
+          <button
+            type="button"
+            className="ub-selection-tool"
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={close}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="ub-selection-tool ub-selection-apply"
+            onPointerDown={(event) => event.preventDefault()}
+          >
+            Apply
+          </button>
+          {error !== null && <span className="ub-selection-error">{error}</span>}
+        </form>
+      ) : prose ? (
+        <div
+          className="ub-selection-toolbar"
+          role="toolbar"
+          aria-label="Text formatting and comment"
+        >
+          <FormatButton
+            label="Bold"
+            state={draft.marks.bold.state}
+            onClick={() => toggleFlag(editor, ydoc, "bold")}
+          >
+            <strong aria-hidden="true">B</strong>
+          </FormatButton>
+          <FormatButton
+            label="Italic"
+            state={draft.marks.italic.state}
+            onClick={() => toggleFlag(editor, ydoc, "italic")}
+          >
+            <em aria-hidden="true">I</em>
+          </FormatButton>
+          <FormatButton
+            label="Strikethrough"
+            state={draft.marks.strike.state}
+            onClick={() => toggleFlag(editor, ydoc, "strike")}
+          >
+            <s aria-hidden="true">S</s>
+          </FormatButton>
+          <FormatButton
+            label="Inline code"
+            state={draft.marks.inlineCode.state}
+            onClick={() => toggleFlag(editor, ydoc, "inlineCode")}
+          >
+            <code aria-hidden="true">&lt;/&gt;</code>
+          </FormatButton>
+          <FormatButton
+            label="External link"
+            state={draft.marks.link.state}
+            onClick={() => {
+              setHref(draft.marks.link.href ?? "");
+              setError(null);
+              setMode("link");
+            }}
+          >
+            Link
+          </FormatButton>
+          <span className="ub-selection-separator" aria-hidden="true" />
+          <button
+            type="button"
+            className="ub-selection-tool ub-composer-open"
+            aria-label="Comment"
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={openComment}
+          >
+            Comment
+          </button>
+        </div>
       ) : (
         <button
           type="button"
-          className="ub-tool ub-composer-open"
-          // Opening must not disturb the selection the thread will anchor to.
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => {
-            setError(null);
-            setOpen(true);
-          }}
+          className="ub-tool ub-composer-open ub-comment-only"
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={openComment}
         >
           Comment on {blockRef}
         </button>
