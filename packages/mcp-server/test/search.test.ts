@@ -2,12 +2,13 @@
  * What `search` matches.
  *
  * The installed tool description promises all-terms matching over one document,
- * no stemming, and a trailing `*` as the way to loosen a term. Nothing else in
- * the suite would notice any of those changing: a multi-term query appears in
- * `title.test.ts` without defending the semantics, and all-terms silently
- * becoming any-term would turn correct empty answers into wrong populated ones
- * while every existing test still passed. #560 exists because a correct zero-hit
- * result was read as a broken index, so the promise is what this defends.
+ * underscore adjacency, no stemming, and a trailing `*` as the way to loosen a
+ * term. Nothing else in the suite would notice any of those changing: a
+ * multi-term query appears in `title.test.ts` without defending the semantics,
+ * and all-terms silently becoming any-term would turn correct empty answers into
+ * wrong populated ones while every existing test still passed. #560 exists
+ * because a correct zero-hit result was read as a broken index, so the promise is
+ * what this defends.
  */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -38,7 +39,7 @@ afterAll(() => {
 });
 
 describe("search", () => {
-  it("needs every term in one document, stems nothing, and loosens on *", async () => {
+  it("needs every term in one document, matches underscore adjacency, stems nothing, and loosens on *", async () => {
     const rig = await localRig();
     await rig.ok("create_doc", {
       title: "Presence",
@@ -49,6 +50,16 @@ describe("search", () => {
       title: "Awareness",
       description: "The peer list every client publishes.",
       blocks: [{ type: "paragraph", text: "Names and colors travel with it." }],
+    });
+    await rig.ok("create_doc", {
+      title: "Adjacent",
+      description: "How to list docs from the directory.",
+      blocks: [],
+    });
+    await rig.ok("create_doc", {
+      title: "Separated",
+      description: "How to list all kinds of docs from the directory.",
+      blocks: [],
     });
 
     // All-terms, not any-term: both words exist in the corpus, but no document
@@ -64,6 +75,10 @@ describe("search", () => {
     expect(await hits(rig, "presence withdrawal")).toEqual([]);
     // And the documented way out of it.
     expect(await hits(rig, "presence withdraw*")).toEqual(["Presence"]);
+
+    // FTS5 tokenizes an underscore inside a quoted query token as an adjacent
+    // phrase: the separator need not appear, but another word cannot intervene.
+    expect(await hits(rig, "list_docs")).toEqual(["Adjacent"]);
 
     // A query with no searchable term is empty rather than an FTS5 syntax
     // error, so the description's "punctuation and emoji are not terms" holds
