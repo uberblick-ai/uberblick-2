@@ -54,11 +54,16 @@ When CLAUDE.md's dual-challenge gate applies, require both distinct adversarial
 records: the implementer's challenge on the other runtime from the diff's
 author, and a second challenge owned by this integrator on the author's
 runtime, in a fresh session. Neither verdict substitutes for the other, and
-this role's own gate and acceptance validation does not count as one. If the
-second challenge has neither a current-head record nor earlier reasoning that
-`review-protocol.md` permits the integrator to carry across the author's
-corrections, post the README's exact-PR delegation record before starting a
-fresh `implementation-reviewer` on that runtime.
+this role's own gate and acceptance validation does not count as one. On the
+initial dual-challenge pass, the implementer hands off the first-reviewed head
+without ordinary corrections; dispatch the second reviewer at that same SHA,
+but first initialize or update the PR's finding ledger from the first verdict
+so the second reviewer does not rediscover it. Then disposition both verdicts
+together. If a P1 or later risk-scoped change moved the head, follow
+`review-protocol.md`'s freshness rule. If the second
+challenge has neither a current-head record nor reasoning that rule permits the
+integrator to carry, create the README's mutable exact-PR delegation record
+before starting a fresh `implementation-reviewer` on that runtime.
 
 An owed round is dispatched *before* the mechanical gates rather than after
 them, because its wait is the round's long pole; the mechanical gates then run
@@ -68,11 +73,12 @@ which criteria they answer, who dispositions a finding and who rules are all
 unchanged, and a criterion this role cannot settle statically is routed to the
 gate that covers it rather than guessed.
 
-The reviewer's claim is the one permitted nested claim: the integrator's live
-claim remains in force and blocks a second integrator. Gate work continues while
-that child runs, but no ruling does — this assignment reaches a disposition, an
-acceptance verdict, a tier call or a merge only after the child's durable
-`Done:` or a recorded failed dispatch.
+The integrator's live claim remains in force and blocks a second integrator;
+the reviewer edits its delegation record from pending through complete and
+posts no nested claim. Gate work continues while that child runs, but no ruling
+does — this assignment reaches a disposition, an acceptance verdict, a tier
+call or a merge only after that record contains the durable verdict or a failed
+dispatch.
 Re-read the head before using that result; a review of another SHA is evidence
 only under that explicit risk-scoped carry-forward rule.
 
@@ -105,6 +111,16 @@ clean ruling should be brief; a parked ruling includes only enough detail to
 make its one batched fix-up implementable without rediscovery. For Tier 1
 existing-behavior-only work, the post-merge docs disposition is one sentence;
 no fresh corpus search is owed unless the issue says existing docs are stale.
+
+Maintain one compact finding-ledger comment per PR and edit it across heads.
+Each row has a stable id, first head, current status and a link to the evidence
+or disposition. A later ruling links that ledger and records only changed rows;
+it does not restate settled findings, full gate logs, test counts, timings or a
+previous tier analysis. GitHub checks and linked exact-head records carry that
+detail. Do not add a wrapper comment for a Copilot review that already exists or
+for a no-comment result. The ordinary durable footprint for one integration
+head is therefore the top-level claim, at most one mutable reviewer record, and
+one ruling; the finding ledger is edited, not appended.
 
 After that durable outcome, post one concise
 self-assessment to [Implementation and integration run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/522),

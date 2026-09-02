@@ -21,15 +21,18 @@ findings-conditional protocol.
   A failure may be called environmental only after the same failing spec is run
   against the base: green at the base and red at the head is a fix-now branch
   regression even when the stale code is a test fixture rather than production.
-- Record every gate result against the commit SHA it ran at — container review,
-  CI, the acceptance validation, both adversarial verdicts where the
-  dual-challenge gate applied, and any Copilot result when one was requested. A
-  Copilot platform refusal is recorded once and does not block merge. Any new
-  commit on the branch (fix-ups included) invalidates test/typecheck and
-  immutable review evidence: re-run those gates at the new `headRefOid`. For
-  either earlier adversarial verdict, follow `review-protocol.md`'s risk-scoped re-review rule;
-  either run a fresh round or record exactly which reasoning still applies and
-  why. The integrator's own gate work does not fill a missing challenger slot.
+- Record every gate outcome against the commit SHA it ran at — container
+  review, CI, the acceptance validation, both adversarial verdicts where the
+  dual-challenge gate applied, and any Copilot result when one was requested.
+  Link the check, review record or failure evidence; do not paste full logs,
+  test counts or timings into each ruling. A Copilot review is already its own
+  record and gets no wrapper comment; a platform refusal is recorded once and
+  does not block merge. Any new commit on the branch (fix-ups included)
+  invalidates test/typecheck and immutable review evidence: re-run those gates
+  at the new `headRefOid`. For either earlier adversarial verdict, follow
+  `review-protocol.md`'s risk-scoped re-review rule; either run a fresh round or
+  record exactly which reasoning still applies and why. The integrator's own
+  gate work does not fill a missing challenger slot.
 - Check an acceptance box on a linked issue only with evidence (command output,
   test name), and check that the diff stays within the declared `Touches` — the
   shared set when the PR closes a batch.
@@ -127,12 +130,10 @@ of a queue, and start the long pole first.
   at. A commit landing mid-fan-out is resolved by the per-gate freshness rules
   above and in `review-protocol.md` — re-run what the new commit invalidates —
   never by carrying an item forward to a head it did not run at.
-- **The record carries the timings.** The integrator's PR record names each
-  gate's start and end alongside its outcome, and the round's own claim→ruling
-  wall time. Per-gate times happen inside subagents that write nothing, so they
-  are not derivable at all; the round total is the one deliberate exception to
-  the never-restate-a-timestamp rule below, because it is the telemetry this
-  fan-out exists to produce.
+- **Telemetry stays out of the ruling.** Gate agents may return start/end times
+  to the integrator for the workflow retrospective, but the PR record links the
+  exact-head outcome only. GitHub already timestamps the claim, review records,
+  checks and ruling; repeating those times and counts obscures the decision.
 
 ## Immediately before merging
 

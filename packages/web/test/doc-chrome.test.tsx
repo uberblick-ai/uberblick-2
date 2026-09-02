@@ -139,8 +139,6 @@ function Chrome({
         presence={presence}
         endpoint={endpoint}
         meta={getMeta(fix.ydoc)}
-        pinned={false}
-        onTogglePin={null}
         threads={[]}
         threadsOpen={false}
         onToggleThreads={() => {}}
@@ -153,6 +151,7 @@ function Chrome({
         meta={getMeta(fix.ydoc)}
         knownTags={["reference"]}
         archived={false}
+        onTogglePin={() => {}}
       />
     </>
   );
@@ -182,6 +181,58 @@ function text(host: HTMLElement, selector: string): string | null {
 describe("the doc chrome reads the document, the awareness and the status", () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("makes archive unavailability reachable and non-activating", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      },
+    );
+    Element.prototype.scrollIntoView = function scrollIntoView() {};
+    const { host, root } = mount(fixture());
+    try {
+      act(() => {
+        const trigger =
+          host.querySelector<HTMLButtonElement>(".ub-actions-trigger");
+        trigger?.focus();
+        trigger?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+        );
+      });
+      const unavailable = [
+        ...document.querySelectorAll<HTMLElement>(
+          "[data-slot=dropdown-menu-item]",
+        ),
+      ].find(
+        (item) =>
+          item.textContent ===
+          "Archive unavailable — no directory connection, or no live entry for this document",
+      );
+      expect(unavailable?.getAttribute("aria-disabled")).toBe("true");
+      expect(document.activeElement?.textContent).toBe("Pin to sidebar");
+      act(() => {
+        document.activeElement?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+        );
+        vi.runOnlyPendingTimers();
+      });
+      expect(document.activeElement).toBe(unavailable);
+      act(() => {
+        unavailable?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+        );
+      });
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
   });
 
   it("names the group and the title, the caret's block, the state and the rev", () => {

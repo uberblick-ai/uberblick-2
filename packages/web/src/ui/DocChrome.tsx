@@ -32,6 +32,21 @@ import { useDocRev, useRoomStatus } from "./hooks.js";
 import { shareUrl } from "./route.js";
 import { distinctTags, withTag, withoutTag } from "./tags.js";
 import type { ThreadView } from "./threads.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./shadcn/dropdown-menu.js";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  DialogTrigger,
+} from "./shadcn/dialog.js";
 
 /** What an untitled document is called wherever its name is shown. */
 const UNTITLED = "Untitled";
@@ -88,8 +103,6 @@ export function DocChrome({
   presence,
   endpoint,
   meta,
-  pinned,
-  onTogglePin,
   threads,
   threadsOpen,
   onToggleThreads,
@@ -110,14 +123,6 @@ export function DocChrome({
   endpoint: HubEndpoint | null;
   /** The open document's metadata, or null when none is open or read yet. */
   meta: DocMeta | null;
-  /** Whether the open document is pinned to the sidebar (#115). */
-  pinned: boolean;
-  /**
-   * Pin it, or unpin it — null while there is no sidebar room to write to, or
-   * no document to pin. The control is not drawn then: an affordance that
-   * cannot act is worse than none.
-   */
-  onTogglePin: (() => void) | null;
   /**
    * The open document's threads — what the rail would show. Passed rather than
    * read here, because the app shell decides on the same value whether the
@@ -168,24 +173,6 @@ export function DocChrome({
   return (
     <>
       {named && <Breadcrumb meta={meta} />}
-      {/* The document's own context is where pinning belongs, and this is the
-          least of it: one control, both directions, in the tab order — so the
-          sidebar can be curated without a pointer, let alone a drag. Where in
-          the sidebar the document lands is the drag's business (#115). */}
-      {named && onTogglePin !== null && (
-        <button
-          type="button"
-          className="ub-pin-toggle"
-          aria-pressed={pinned}
-          aria-label={pinned ? "Unpin from the sidebar" : "Pin to the sidebar"}
-          title={pinned ? "Unpin from the sidebar" : "Pin to the sidebar"}
-          onClick={onTogglePin}
-        >
-          {/* The word never changes and the mark carries the state, so the
-              header does not move when a document is pinned. */}
-          <span aria-hidden="true">{pinned ? "◆" : "◇"}</span> Pin
-        </button>
-      )}
       <span className="ub-chrome-pills">
         {/* The drawer's handle (#101). Below 1100px there is no room for the
             rail beside the prose, so it is hidden and this opens it as an
@@ -523,6 +510,10 @@ export function DocMetaLine({
   meta,
   knownTags,
   archived,
+  pinned = false,
+  onTogglePin = null,
+  onArchive = null,
+  onArchiveConfirmationFocusChange,
 }: {
   connection: RoomConnection;
   /** The workspace as the address spells it — what a copied link carries. */
@@ -532,6 +523,12 @@ export function DocMetaLine({
   knownTags: readonly string[];
   /** Whether the directory tombstones this document: no writes from here. */
   archived: boolean;
+  pinned?: boolean;
+  onTogglePin?: (() => void) | null;
+  /** Null means this replica cannot establish a current live directory stub. */
+  onArchive?: (() => void) | null;
+  /** Whether focus is inside the confirmation a remote archive may remove. */
+  onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
 }): ReactElement {
   const rev = useDocRev(connection);
   const group = meta === null ? null : groupOf(meta);
@@ -557,8 +554,127 @@ export function DocMetaLine({
           {/* Archived or not: a tombstoned document still has an address, and
               handing somebody the link to it is not a write. */}
           <CopyLink room={connection.room} segment={segment} />
+          {!archived && (
+            <DocumentActions
+              key={connection.room}
+              title={titleOf(meta)}
+              pinned={pinned}
+              onTogglePin={onTogglePin}
+              onArchive={onArchive}
+              onConfirmationFocusChange={onArchiveConfirmationFocusChange}
+            />
+          )}
         </>
       )}
     </p>
+  );
+}
+
+function DocumentActions({
+  title,
+  pinned,
+  onTogglePin,
+  onArchive,
+  onConfirmationFocusChange,
+}: {
+  title: string;
+  pinned: boolean;
+  onTogglePin: (() => void) | null;
+  onArchive: (() => void) | null;
+  onConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
+}): ReactElement {
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(
+    () => () => onConfirmationFocusChange?.(false),
+    [onConfirmationFocusChange],
+  );
+
+  return (
+    <Dialog
+      open={confirming}
+      onOpenChange={(open) => {
+        // The persistent menu button is also DialogTrigger so Radix can return
+        // focus to it. Its ordinary menu click therefore requests a dialog
+        // open too; only the Archive item below is allowed to accept that half.
+        if (!open) setConfirming(false);
+      }}
+    >
+      <span className="ub-document-actions">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <DialogTrigger asChild>
+              <button
+                type="button"
+                className="ub-actions-trigger"
+                aria-label="Document actions"
+                title="Document actions"
+              >
+                ⋯
+              </button>
+            </DialogTrigger>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              disabled={onTogglePin === null}
+              className={pinned ? "ub-action-pinned" : ""}
+              onSelect={() => onTogglePin?.()}
+            >
+              {pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              aria-disabled={onArchive === null}
+              className="ub-action-danger"
+              onSelect={(event) => {
+                if (onArchive === null) {
+                  event.preventDefault();
+                  return;
+                }
+                setConfirming(true);
+              }}
+            >
+              {onArchive === null
+                ? "Archive unavailable — no directory connection, or no live entry for this document"
+                : "Archive document"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DialogContent
+          className="ub-confirm"
+          role="alertdialog"
+          onFocusCapture={() => onConfirmationFocusChange?.(true)}
+          onBlurCapture={(event) => {
+            const next = event.relatedTarget;
+            if (!(next instanceof Node) || !event.currentTarget.contains(next)) {
+              onConfirmationFocusChange?.(false);
+            }
+          }}
+        >
+          <DialogTitle>Archive {title}?</DialogTitle>
+          <DialogDescription>
+            Its content is preserved, but the document becomes read-only and
+            leaves normal listings until you Restore it.
+          </DialogDescription>
+          <span className="ub-confirm-actions">
+            <DialogClose asChild>
+              <button type="button" className="ub-tool">
+                Cancel
+              </button>
+            </DialogClose>
+            <button
+              type="button"
+              className="ub-tool ub-tool-danger"
+              onClick={() => {
+                setConfirming(false);
+                onArchive?.();
+              }}
+            >
+              Archive document
+            </button>
+          </span>
+        </DialogContent>
+      </span>
+    </Dialog>
   );
 }

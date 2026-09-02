@@ -37,11 +37,12 @@ from GitHub, never searches a queue and never acts on another item, and writes
 its durable result there before the parent acts on it. It does not consume or
 release the parent's claim, and a private transcript is never a handoff.
 
-Before starting that child, the parent writes this assignment on the item it
-holds:
+Before starting an internal child, the parent writes this assignment on the
+item it holds:
 
 ```text
 Delegated: <child role> <child run id>
+Status: pending
 Target: <issue|PR> #N
 Parent: <parent role> <parent run id>
 ```
@@ -51,9 +52,19 @@ live claim named by `Parent`; for an implementer's pre-handoff PR review, that
 is its issue claim naming the PR branch. The child validates that claim, that
 the latest `Delegated:` record for its role and target names its run id, and
 every supplied value before its first side effect. A missing or mismatched
-record is a refusal, not permission to fall back to the queue. The child's own
-claim and `Done:` repeat the parent and exact target so recovery can join the
-assignment to its outcome from GitHub alone.
+record is a refusal, not permission to fall back to the queue.
+
+For a delegated **implementation**, branch ownership still needs the child's
+separate implementation claim and `Done:` handoff. For a non-implementation
+child (`issue-adversary` or `implementation-reviewer`), the delegation comment
+is instead its one mutable lifecycle record: the child edits `Status: pending`
+to `Status: running` before substantive work and to `Status: complete` when it
+appends its grounded verdict. It posts no separate nested claim or `Done:`
+comment. The parent edits the same record to `Status: failed — <reason>` when
+the transport never starts or returns no verdict. This keeps assignment,
+liveness, authorship lineage and outcome recoverable from GitHub without three
+timeline comments for one read. The record's `created_at` orders competing
+assignments; its `updated_at` is liveness; its final body is the handoff.
 
 Each run uses fresh private scratch outside the worktree, namespaced by its run
 id; never share it or treat it as durable state.
@@ -80,30 +91,43 @@ The product owner owns every explicit value; agents never write it. Unset is
 ignored by preparation and sorts as Medium for implementation pickup.
 
 **The claim record.** The implementer claims in `.github/ISSUE_SPEC.md`'s
-grammar: `Claimed: <branch>` / `Implementer: <claude|codex> <id>`. Every other
-role posts `Claim: <role> <session-or-run id>`, plus the grounding SHA when its
-outcome is tied to one. A delegated subagent also posts `Parent: <parent role>
-<run id>` — a comment record, distinct from the `Parent: #N` reservation header
-`.github/ISSUE_SPEC.md` defines for an issue body. A handoff opens `Done: <role>
-<session-or-run id>` with that grounding and parent where applicable. Handoffs
-stay proportional: link evidence instead of narrating transcripts. GitHub must
-be sufficient for recovery.
+grammar: `Claimed: <branch>` / `Implementer: <claude|codex> <id>`. Every
+top-level role other than the implementer posts `Claim: <role> <session-or-run
+id>`, plus the grounding SHA when its outcome is tied to one. A delegated
+implementation also posts `Parent: <parent role> <run id>` — a comment record,
+distinct from the `Parent: #N` reservation header `.github/ISSUE_SPEC.md`
+defines for an issue body. A top-level handoff, and a delegated implementation
+handoff, opens `Done: <role> <session-or-run id>` with that grounding and parent
+where applicable. Non-implementation children use the single mutable
+delegation record above instead. Handoffs stay proportional: link evidence
+instead of narrating transcripts. GitHub must be sufficient for recovery.
 
 **A durable comment reaches GitHub as composed.** Every durable comment body —
-claim, renewal, delegation, return, `Done:`, review round, dispatch failure,
-finding disposition, merge report, retrospective reply — must land byte for
-byte: line breaks intact, backticks and `$` literal. Write it into a file under
-the run's own scratch directory, `<scratch>` here, and post that file; any
+claim, renewal, delegation update, return, `Done:`, review round, finding
+disposition, merge report, retrospective reply — must land byte for byte: line
+breaks intact, backticks and `$` literal. Write it into a file under the run's
+own scratch directory, `<scratch>` here, and post or patch from that file; any
 composition with that property is fine, and a quoted heredoc is one:
 
 ```sh
 rm -f <scratch>/done.md
 cat > <scratch>/done.md <<'EOF'
-Done: issue-adversary <run id>
+Done: issue-preparer <run id>
 Outcome: correctable-findings — `readDecisions` already pins it; cost is $0.
 EOF
 gh issue comment <N> --body-file <scratch>/done.md
 ```
+
+For a mutable record, resolve its immutable comment id from the matching run id
+and patch that exact object:
+
+```sh
+gh api --method PATCH repos/<owner>/<repo>/issues/comments/<comment-id> \
+  -F body=@<scratch>/record.md
+```
+
+Never use "edit last": another role or human may have commented since the
+assignment, and mutating that record would corrupt coordination state.
 
 The `rm -f` is load-bearing: the run shell sets `noclobber`, so `>` onto a
 file that already exists fails — and `gh` then posts the file's *previous*
@@ -117,11 +141,12 @@ garbled record survives only in the launching session's transcript, the private
 channel every rule here exists to keep out of the record.
 
 **The race rule.** A live top-level claim makes the item ineligible for every
-other queue pickup. The one permitted nested claim is the subagent explicitly
-delegated by the role that holds that item; it does not release the parent claim
-or admit any other role. Re-read immediately before and after claiming; the
-earliest valid claim wins, and a loser posts a one-line withdrawal and tries the
-next candidate.
+other queue pickup. A delegated implementation may hold the one nested claim;
+the mutable assignment record is the equivalent ownership record for a
+non-implementation child. Neither releases the parent claim or admits another
+role. Re-read immediately before and after a top-level or implementation claim;
+the earliest valid claim wins, and a loser posts a one-line withdrawal and
+tries the next candidate.
 
 Before that race, do only the grounding and safety checks the selected role
 explicitly requires. Run no delivery gate and write no explanation of derived
@@ -159,11 +184,13 @@ Every implementation claim, top-level or delegated, uses `AGENTS.md`'s
 continues the current remote branch head; the superseded holder stops if it
 resumes. A parent replaces a stale delegated implementer the same way.
 
-A nested **non-implementation** assignment expires with no claim 10 minutes
-after `Delegated:` (or immediately when the runtime confirms it never started),
-or with no matching `Done:` 30 minutes after its claim. The same live parent may
-then delegate one replacement; the latest-record check makes a late child
-refuse. An unfinished attempt produced no verdict, so replacement is not a
+A nested **non-implementation** assignment expires when its record remains
+`pending` for 10 minutes, when a `running` record's `updated_at` is more than 30
+minutes old, or immediately when the runtime confirms it stopped without a
+verdict. The same live parent marks that record failed and may then delegate
+one replacement; the latest-record check makes a late child refuse. A live
+child may renew by editing its record under the same 25/30-minute cadence as a
+claim. An unfinished attempt produced no verdict, so replacement is not a
 second adversary or review round.
 
 ## Product context, proportional to the action

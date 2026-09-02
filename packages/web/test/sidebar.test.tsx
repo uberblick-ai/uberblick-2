@@ -120,6 +120,15 @@ let mounted: { root: Root; host: HTMLElement } | null = null;
 beforeEach(() => {
   installStorage();
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 404 }));
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    },
+  );
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
 });
 
 afterEach(() => {
@@ -132,6 +141,7 @@ afterEach(() => {
   rooms.clear();
   roomStatus = OFFLINE;
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 async function mount(node: ReactNode): Promise<HTMLElement> {
@@ -215,8 +225,24 @@ function groupToggle(host: HTMLElement, index: number): HTMLButtonElement | null
   return sections(host)[index]?.querySelector<HTMLButtonElement>(".ub-group-toggle") ?? null;
 }
 
-function pinControl(host: HTMLElement): HTMLButtonElement | null {
-  return host.querySelector<HTMLButtonElement>(".ub-pin-toggle");
+function actionsTrigger(host: HTMLElement): HTMLButtonElement | null {
+  return host.querySelector<HTMLButtonElement>(".ub-actions-trigger");
+}
+
+function openActions(host: HTMLElement): void {
+  act(() => {
+    const trigger = actionsTrigger(host);
+    trigger?.focus();
+    trigger?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+  });
+}
+
+function documentAction(label: string): HTMLElement | undefined {
+  return [
+    ...document.querySelectorAll<HTMLElement>("[data-slot=dropdown-menu-item]"),
+  ].find((item) => item.textContent === label);
 }
 
 /** One native drag event, with the payload channel a browser would supply. */
@@ -353,7 +379,7 @@ describe("the sidebar is the _sidebar document", () => {
     ]);
   });
 
-  it("pins and unpins the open document from its header, with no drag", async () => {
+  it("pins and unpins the open document from its actions menu, with no drag", async () => {
     seedDirectory();
     const doc = room(roomForDoc(WORKSPACE, THREE)).ydoc;
     initDoc(doc, { uuid: THREE, title: "Sync" });
@@ -368,16 +394,22 @@ describe("the sidebar is the _sidebar document", () => {
     expect(host.querySelector(".ub-empty")?.textContent).toContain("Nothing pinned yet");
 
     // The keyboard path: a real control in the tab order, no pointer anywhere.
-    const pin = pinControl(host);
-    expect(pin?.getAttribute("aria-pressed")).toBe("false");
-    act(() => pin?.focus());
-    expect(document.activeElement).toBe(pin);
-    act(() => pin?.click());
+    const trigger = actionsTrigger(host);
+    expect(trigger?.getAttribute("aria-label")).toBe("Document actions");
+    openActions(host);
+    act(() => documentAction("Pin to sidebar")?.click());
+    // The dropdown returns focus to its trigger a macrotask after it closes, so
+    // this waits a timer; a microtask flush would ask before Radix answers.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(document.activeElement).toBe(trigger);
 
     // A pin with nowhere to go makes somewhere to go.
     expect(stored(peer)).toEqual([["Pinned", [THREE]]]);
     expect(rowTitles(host, 0)).toEqual(["Sync"]);
-    expect(pinControl(host)?.getAttribute("aria-pressed")).toBe("true");
+    openActions(host);
+    expect(documentAction("Unpin from sidebar")).not.toBeUndefined();
 
     // The open document's row says so the way the All-docs entry always has
     // (#481): one state, `aria-current`, reaching the styling and a screen
@@ -390,10 +422,11 @@ describe("the sidebar is the _sidebar document", () => {
     ).toBeNull();
 
     // And the same control is the way back out.
-    act(() => pinControl(host)?.click());
+    act(() => documentAction("Unpin from sidebar")?.click());
     expect(readSidebar(peer)[0]?.docs).toEqual([]);
     expect(rowTitles(host, 0)).toEqual([]);
-    expect(pinControl(host)?.getAttribute("aria-pressed")).toBe("false");
+    openActions(host);
+    expect(documentAction("Pin to sidebar")).not.toBeUndefined();
     // Unpinned is not deleted: the document is still open and still editable.
     expect(host.querySelector(".ub-title")).toHaveProperty("value", "Sync");
   });

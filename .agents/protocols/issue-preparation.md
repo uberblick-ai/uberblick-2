@@ -85,6 +85,14 @@ durable handoff, and does not edit the issue or implement. Ask for:
 - Would the expected diff be reviewable in one sitting, and would each proposed
   child have an independently useful outcome? Body length is not a split test.
 - Is anything over-prescribed — mechanics stated where an outcome would do?
+- Does the contract compress independently failing behaviors into compound
+  acceptance checkboxes merely to stay under the five-item cap? If so, regroup
+  only genuinely coupled conditions and split independently useful outcomes.
+- Does an acceptance boundary normally belong to an established primitive or
+  dependency, while avoiding that choice would require bespoke safety,
+  accessibility or protocol machinery? Surface the intended shape and any
+  owner decision before `ready`; merge tier routes approval and is not a reason
+  to prescribe a more complex workaround.
 - Does it conflict with current behavior, the decided architecture, existing
   tests, migrations, contracts, security or concurrency semantics, or work
   already in flight?
@@ -105,23 +113,25 @@ place of `implementation-reviewer`: from Claude, `codex exec`; from Codex,
 `issue-adversary` role contract and supplies the exact issue, child run id and
 parent run id. Do not route this through the companion `codex-rescue`/task
 helper: its read-only Git metadata cannot satisfy the role's grounding fetch.
-Read the verdict from the issue, not the terminal or log. The private scratch
-log prevents the child's reasoning transcript from consuming the parent's
-context and is inspected only when the command fails or no durable verdict
-appears.
+Read the verdict from the issue's completed mutable delegation record, not the
+terminal or log. The private scratch log prevents the child's reasoning
+transcript from consuming the parent's context and is inspected only when the
+command fails or no durable verdict appears.
 
 **Hold the pass open until the verdict exists.** A round takes 15–20 minutes
 and a foreground shell call is killed at ten, so a foreground dispatch
 guarantees a dead child and a lost round (observed 2026-08-31: SIGTERM at
 exactly 10:00, replacement delegation required). Dispatch `codex exec`
 detached — a background command still writing the scratch log — then stay in
-the assignment, watch the issue for the child's durable `Done:` record, and
-keep renewing your own claim meanwhile. A preparer that ends its turn after
-the `Delegated:` record leaves a live claim and a promised verdict nobody is
-waiting on, which reads to every other role exactly like work in progress.
+the assignment, watch the issue for the delegation record to become
+`Status: complete`, and keep renewing your own claim meanwhile. A preparer that
+ends its turn while that record is still `pending` or `running` leaves a live
+claim and a promised verdict nobody is waiting on, which reads to every other
+role exactly like work in progress.
 
 **A dispatch that produces no verdict is recorded, never papered over.** If the
-other runtime does not run, say so on the issue; if a same-runtime adversary
+other runtime does not run, edit its delegation record to `Status: failed` with
+one reason instead of adding a failure comment; if a same-runtime adversary
 stands in, its record names the runtime that actually challenged. A degradation
 nobody can see is worse than the round being skipped: the cross-runtime
 preference exists because a different model reads the same body differently, and
@@ -134,9 +144,12 @@ Last thing before posting the outcome, `git fetch origin main` again. Refresh
 only grounding affected by an upstream change, then re-read the issue, parent
 claim, nested adversary handoff and labels.
 
-The final body has one to five acceptance criteria. Every checkbox states an
-observable outcome or invariant, never a test/e2e recipe, test filename,
-implementation step, generic delivery gate or post-merge corpus task.
+The final body has one to five acceptance criteria. Every checkbox states one
+observable outcome or invariant; closely coupled conditions may clarify it,
+but independently failing behaviors do not get compressed into one sentence to
+meet the cap. Use a split when more than five distinct outcomes remain. A
+checkbox is never a test/e2e recipe, test filename, implementation step,
+generic delivery gate or post-merge corpus task.
 
 | Parent still owns the issue | Final finding state | Outcome | Labels | Comment |
 |---|---|---|---|---|
@@ -154,15 +167,15 @@ options and a recommendation, not another automatic adversary round.
 
 ## Record it once, and only after the recheck
 
-The nested adversary writes its `Done:` handoff before the preparer acts. After
-the recheck, the preparer writes one concise `Done:` handoff with the grounded
-commit, route, adversary link where applicable, only material findings and
-dispositions, and `Outcome: ready|needs-decision|split`. Use `Preparation:
-resumed` for an implementer-return or owner-answer continuation. Link the final
-body or children instead of restating them. After the four required lines, use
-only the material detail needed for recovery. Do not include transcripts, run
-narration, generic delivery gates, or the self-assessment. A requeue writes
-none.
+The nested adversary completes its mutable delegation record before the
+preparer acts. After the recheck, the preparer writes one concise `Done:`
+handoff with the grounded commit, route, adversary link where applicable, only
+material findings and dispositions, and `Outcome:
+ready|needs-decision|split`. Use `Preparation: resumed` for an
+implementer-return or owner-answer continuation. Link the final body or
+children instead of restating them. After the four required lines, use only the
+material detail needed for recovery. Do not include transcripts, run narration,
+generic delivery gates, or the self-assessment. A requeue writes none.
 
 The preparer posts `Done:` before applying the named label transition. A retry
 of the same run edits only its own record. If the durable handoff exists but the

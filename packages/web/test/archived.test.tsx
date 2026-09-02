@@ -33,12 +33,17 @@ import type { ReactNode } from "react";
 import * as Y from "yjs";
 import {
   appendBlock,
+  createGroup,
   directoryRoom,
   getDirectoryEntry,
   getMeta,
   initDoc,
   listDirectory,
+  pinDoc,
+  readSidebar,
+  restoreDirectoryEntry,
   roomForDoc,
+  sidebarRoom,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -110,6 +115,15 @@ beforeEach(() => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response("", { status: 404 }),
   );
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    },
+  );
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
 });
 
 afterEach(() => {
@@ -121,6 +135,7 @@ afterEach(() => {
   }
   rooms.clear();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 /**
@@ -183,7 +198,99 @@ function restoreButton(host: HTMLElement): HTMLButtonElement | null {
   return host.querySelector(".ub-archived-banner button");
 }
 
+function openActions(host: HTMLElement): void {
+  act(() => {
+    const trigger = host.querySelector<HTMLButtonElement>(".ub-actions-trigger");
+    trigger?.focus();
+    trigger?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+  });
+}
+
+function action(label: string): HTMLElement | undefined {
+  return [
+    ...document.querySelectorAll<HTMLElement>("[data-slot=dropdown-menu-item]"),
+  ].find((item) => item.textContent === label);
+}
+
 describe("an archived document is readable, says so, and offers one way back", () => {
+  it("curates and archives from the identity-row menu without losing the pin", async () => {
+    const directory = room(directoryRoom(WORKSPACE)).ydoc;
+    const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
+    const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+    initDoc(ydoc, { uuid: UUID, title: "Retired protocol" });
+    appendBlock(ydoc, { type: "paragraph", text: "still every byte of it" });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired protocol" });
+    pinDoc(sidebar, createGroup(sidebar, "Reading"), UUID);
+
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    const trigger = host.querySelector<HTMLButtonElement>(".ub-actions-trigger");
+    expect(trigger?.getAttribute("aria-label")).toBe("Document actions");
+
+    openActions(host);
+    act(() => action("Unpin from sidebar")?.click());
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
+    // The dropdown returns focus to its trigger a macrotask after it closes, so
+    // this waits a timer; a microtask flush would ask before Radix answers.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(document.activeElement).toBe(trigger);
+
+    openActions(host);
+    act(() => action("Pin to sidebar")?.click());
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
+
+    openActions(host);
+    act(() => action("Archive document")?.click());
+    const dialog = document.querySelector('[role="alertdialog"]');
+    expect(dialog?.textContent).toContain("Archive Retired protocol?");
+    expect(dialog?.textContent).toContain("read-only");
+    expect(dialog?.textContent).toContain("Restore");
+
+    act(() => {
+      [...(dialog?.querySelectorAll("button") ?? [])]
+        .find((button) => button.textContent === "Cancel")
+        ?.click();
+    });
+    // Dialog restores its trigger after the content's unmount autofocus runs.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
+    expect(document.activeElement).toBe(trigger);
+
+    openActions(host);
+    act(() => action("Archive document")?.click());
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>('[role="alertdialog"] .ub-tool-danger')
+        ?.click();
+    });
+    expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
+    expect(host.querySelector(".ub-actions-trigger")).toBeNull();
+    expect(document.activeElement).toBe(restoreButton(host));
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
+
+    // The confirmed archive owns exactly one focus transfer. A later restore
+    // and remote re-archive must not replay that stale local intent.
+    act(() => restoreDirectoryEntry(directory, UUID));
+    const title = host.querySelector<HTMLInputElement>(".ub-title");
+    title?.focus();
+    act(() => tombstoneDirectoryEntry(directory, UUID));
+    expect(document.activeElement).toBe(title);
+
+    // The same remote transition must repair focus when what it removes is the
+    // confirmation itself, without broadening that repair to the title above.
+    act(() => restoreDirectoryEntry(directory, UUID));
+    openActions(host);
+    act(() => action("Archive document")?.click());
+    expect(document.activeElement?.textContent).toBe("Cancel");
+    act(() => tombstoneDirectoryEntry(directory, UUID));
+    expect(document.activeElement).toBe(restoreButton(host));
+  });
+
   it("follows the directory tombstone in both directions, under an open pane", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;

@@ -13,10 +13,12 @@ import type { ReactElement } from "react";
 import {
   appendBlock,
   directoryRoom,
+  getDirectoryEntry,
   initDoc,
   restoreDirectoryEntry,
   roomForDoc,
   sidebarRoom,
+  tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
@@ -88,6 +90,12 @@ export function RoutePane({
   knownTags,
   archived,
   docLinks,
+  pinned = false,
+  onTogglePin = null,
+  onArchive = null,
+  onArchiveConfirmationFocusChange,
+  focusRestore = false,
+  onRestoreFocused,
   onRestore,
   onSelectThread,
 }: {
@@ -127,6 +135,16 @@ export function RoutePane({
   archived: boolean;
   /** What an inline document reference resolves against — see {@link EditorPane}. */
   docLinks: DocLinkContext | null;
+  /** Sidebar curation and lifecycle actions for the live document. */
+  pinned?: boolean;
+  onTogglePin?: (() => void) | null;
+  onArchive?: (() => void) | null;
+  /** Track focus that should survive a remote archive closing its confirmation. */
+  onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
+  /** A local confirmed archive moves focus to the surviving Restore action. */
+  focusRestore?: boolean;
+  /** Consume that one-shot focus request after the Restore control receives it. */
+  onRestoreFocused?: (() => void) | undefined;
   /** Lift that tombstone. The only action an archived document offers. */
   onRestore: () => void;
   onSelectThread: SelectThread;
@@ -223,6 +241,12 @@ export function RoutePane({
       knownTags={knownTags}
       archived={archived}
       docLinks={docLinks}
+      pinned={pinned}
+      onTogglePin={onTogglePin}
+      onArchive={onArchive}
+      onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
+      focusRestore={focusRestore}
+      onRestoreFocused={onRestoreFocused}
       onRestore={onRestore}
       onSelectThread={onSelectThread}
     />
@@ -376,7 +400,7 @@ export function App(): ReactElement {
    * one synced document.
    */
   const sidebarGroups = useSidebar(sidebar);
-  /** Whether the open document is pinned — what the header's Pin control shows. */
+  /** Whether the open document is pinned — what its actions menu shows. */
   const pinned =
     selected !== null && sidebarGroups.some((group) => group.docs.includes(selected));
   /**
@@ -388,6 +412,12 @@ export function App(): ReactElement {
   const knownTags = useMemo(() => workspaceTags(entries), [entries]);
   const meta = useDocMeta(doc);
   const archived = useArchived(directory, selected);
+  const restoreFocusRoom = useRef<string | null>(null);
+  const archiveConfirmationFocusRoom = useRef<string | null>(null);
+  const liveDirectoryEntry =
+    directory === null || selected === null
+      ? undefined
+      : getDirectoryEntry(directory.ydoc, selected);
   /**
    * The open document's threads: the rail's content, read once here because two
    * things depend on it — the handle in the topbar, and whether the drawer is
@@ -434,8 +464,44 @@ export function App(): ReactElement {
    */
   const onRestore = useCallback(() => {
     if (directory === null || selected === null) return;
+    restoreFocusRoom.current = null;
     restoreDirectoryEntry(directory.ydoc, selected);
   }, [directory, selected]);
+
+  const onRestoreFocused = useCallback(() => {
+    restoreFocusRoom.current = null;
+    archiveConfirmationFocusRoom.current = null;
+  }, []);
+
+  /**
+   * Remember focus only while it is inside the archive confirmation. A remote
+   * tombstone can remove that portalled surface without calling `onArchive`,
+   * and the surviving Restore control is then the nearest place to stand.
+   */
+  const onArchiveConfirmationFocusChange = useCallback(
+    (focused: boolean) => {
+      if (doc === null) return;
+      if (focused) {
+        archiveConfirmationFocusRoom.current = doc.room;
+      } else if (archiveConfirmationFocusRoom.current === doc.room) {
+        archiveConfirmationFocusRoom.current = null;
+      }
+    },
+    [doc],
+  );
+
+  /**
+   * Archive only a live directory stub, matching the MCP lifecycle boundary.
+   * The pane follows the resulting tombstone through `useArchived`; there is no
+   * optimistic archived state here.
+   */
+  const onArchive = useCallback(() => {
+    if (directory === null || doc === null || selected === null) return;
+    const entry = getDirectoryEntry(directory.ydoc, selected);
+    if (entry === null || entry.deleted === true) return;
+    restoreFocusRoom.current = doc.room;
+    tombstoneDirectoryEntry(directory.ydoc, selected);
+  }, [directory, doc, selected]);
 
   /**
    * Normalise the address to the one form the app hands out: `/` becomes the
@@ -623,8 +689,6 @@ export function App(): ReactElement {
           endpoint={endpoint}
           meta={meta}
           threads={threads}
-          pinned={pinned}
-          onTogglePin={sidebar !== null && selected !== null ? onTogglePin : null}
           threadsOpen={threadsOpen}
           onToggleThreads={onToggleThreads}
           syncOpen={syncOpen}
@@ -700,6 +764,22 @@ export function App(): ReactElement {
             knownTags={knownTags}
             archived={archived}
             docLinks={docLinks}
+            pinned={pinned}
+            onTogglePin={sidebar !== null && selected !== null ? onTogglePin : null}
+            onArchive={
+              liveDirectoryEntry !== null &&
+              liveDirectoryEntry !== undefined &&
+              liveDirectoryEntry.deleted !== true
+                ? onArchive
+                : null
+            }
+            onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
+            focusRestore={
+              doc !== null &&
+              (restoreFocusRoom.current === doc.room ||
+                archiveConfirmationFocusRoom.current === doc.room)
+            }
+            onRestoreFocused={onRestoreFocused}
             onRestore={onRestore}
             onSelectThread={onFocusThread}
           />
