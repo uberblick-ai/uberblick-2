@@ -53,6 +53,12 @@ review_images() {
 }
 
 git fetch -q origin main || exit 2
+remote_heads=$(git ls-remote --heads origin)
+status=$?
+if [ "$status" -ne 0 ]; then
+  echo "housekeeping: failed ($status): git ls-remote --heads origin" >&2
+  exit "$status"
+fi
 review_images || failed=1
 run docker container prune -f
 run docker image prune -f
@@ -72,7 +78,7 @@ git worktree list --porcelain | awk '
     gd=$(git -C "$wt" rev-parse --git-dir 2>/dev/null) || { echo "skip   $wt (unreadable)"; continue; }
     if [ -n "$(find "$gd/HEAD" "$gd/index" -mtime -1 2>/dev/null)" ]; then echo "keep   $wt (touched today)"; continue; fi
     [ "$locked" = "locked" ] && { echo "keep   $wt (locked)"; continue; }
-    state=$(git -C "$wt" status --porcelain 2>/dev/null)
+    state=$(git --no-optional-locks -C "$wt" status --porcelain 2>/dev/null)
     status=$?
     if [ "$status" -ne 0 ]; then echo "keep   $wt (status unavailable)"; continue; fi
     if [ -n "$state" ]; then echo "keep   $wt (dirty)"; continue; fi
@@ -83,7 +89,8 @@ git worktree list --porcelain | awk '
         reason="detached, idle a day"
       else echo "keep   $wt (unmerged commits)"; continue; fi
     elif git merge-base --is-ancestor "$head" origin/main 2>/dev/null; then reason="merged"
-    elif ! git ls-remote --exit-code --heads origin "${branch#refs/heads/}" >/dev/null 2>&1; then reason="branch gone from origin"
+    elif ! printf '%s\n' "$remote_heads" |
+      awk -v ref="$branch" '$2 == ref { found=1 } END { exit !found }'; then reason="branch gone from origin"
     fi
     if [ -n "$reason" ]; then
       if [ -n "$dry" ]; then echo "would: git worktree remove $wt ($reason)"

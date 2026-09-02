@@ -47,8 +47,8 @@ function fakeDocker(bin, body) {
 	chmodSync(path, 0o755);
 }
 
-function environment(bin, extra = {}) {
-	return { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...extra };
+function environment(bin) {
+	return { ...process.env, PATH: `${bin}:${process.env.PATH}` };
 }
 
 function ageWorktree(worktree) {
@@ -94,6 +94,35 @@ test("removes only old worktrees whose work is still reachable", (t) => {
 	const worktrees = run("git", ["-C", checkout, "worktree", "list", "--porcelain"]);
 	for (const kept of [dirty, locked, unmerged]) assert.match(worktrees, new RegExp(kept));
 	assert.doesNotMatch(worktrees, new RegExp(clean));
+});
+
+test("keeps worktrees when remote branches cannot be listed", (t) => {
+	const { base, bin, checkout } = fixture(t);
+	const worktree = join(base, "remote-branch");
+	run("git", ["-C", checkout, "worktree", "add", "-b", "still-open", worktree, "HEAD"]);
+	run("git", ["-C", checkout, "push", "origin", "still-open"]);
+	ageWorktree(worktree);
+	fakeDocker(bin, "exit 0");
+	const realGit = run("sh", ["-c", "command -v git"]);
+	const fakeGit = join(bin, "git");
+	writeFileSync(
+		fakeGit,
+		`#!/bin/sh\nif [ "$1" = "ls-remote" ]; then exit 17; fi\nexec ${JSON.stringify(realGit)} "$@"\n`,
+	);
+	chmodSync(fakeGit, 0o755);
+
+	const result = spawnSync("sh", [script, "test-sha"], {
+		cwd: checkout,
+		encoding: "utf8",
+		env: environment(bin),
+	});
+
+	assert.notEqual(result.status, 0);
+	assert.match(result.stderr, /git ls-remote --heads origin/);
+	assert.match(
+		run("git", ["-C", checkout, "worktree", "list", "--porcelain"]),
+		new RegExp(worktree),
+	);
 });
 
 test("reports a failing Docker cleanup and exits nonzero", (t) => {
