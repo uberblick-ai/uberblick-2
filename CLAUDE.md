@@ -223,8 +223,8 @@ the fallback, which is exactly why CI is high priority.
   filename — nothing two machines compare ever carries a slug. Tenancy lives in
   the room key from day one so a hosted hub never needs a room migration.
 - Doc layout is a closed set of four root types: `meta` (Y.Map: uuid, title,
-  description, tags, links-by-UUID, kind, status, and internal decision
-  remove/add levels), `blocks`
+  description, changelog suggestion, tags, links-by-UUID, kind, status, and
+  internal decision remove/add levels), `blocks`
   (Y.XmlFragment, one element per block with stable `id` attrs; types:
   paragraph, heading, code, mermaid, list-item, quote, table), `annotations`
   (Y.Map of one Y.Map per thread: anchor block, resolved flag, and the
