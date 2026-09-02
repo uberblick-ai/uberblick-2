@@ -48,6 +48,17 @@ under the README's race rule in `.github/ISSUE_SPEC.md`'s grammar, recount,
 and post only `Admitted: N/6 work units.`; a fix-up already occupies its unit.
 A claim ends pickup: one PR or one fix-up wave, then stop.
 
+A contract prepared more than six days ago is challenged before it is built:
+the `ready` label or the preparer's `Done:` comment dates it. Check that its
+Pointers still resolve at `origin/main`, that the code it targets still behaves
+as the body describes, and that no merged PR already delivers its outcomes.
+When any of those fails, do not claim it; post `.github/ISSUE_SPEC.md`'s
+`Returned:` record with `Reason: stale-contract — prepared <date>; re-check
+validity against current main` and the evidence, then swap `ready` for
+`needs-preparation` as that record's first-return rule states. When all three
+hold, claim it and say so in one line of the claim. Age alone is never a reason
+to return (owner decision, 2026-09-02).
+
 A fix-up or recovery continues the remote branch in this run's own worktree,
 detached at the remote head. Never enter, delete or repurpose another run's
 worktree, and never rebase or force-push a claimed branch.

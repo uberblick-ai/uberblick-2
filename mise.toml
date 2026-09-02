@@ -156,9 +156,9 @@ run = "pnpm -r typecheck"
 description = "Run all test suites"
 # `pnpm test` rather than `pnpm -r test`, for the same reason as lint above: the
 # root script is the one command, so the Docker review runs it identically. It
-# chains the workspace fan-out with the issue-preparation protocol suite under
-# `.agents/protocols`, which `pnpm -r` cannot reach — `pnpm-workspace.yaml`
-# globs `packages/*` only.
+# chains the workspace fan-out with the issue-preparation protocol, agent-role
+# and housekeeping suites outside `packages/*`, which `pnpm -r` cannot reach —
+# `pnpm-workspace.yaml` globs `packages/*` only.
 run = "pnpm test"
 
 [tasks.check-agents]
