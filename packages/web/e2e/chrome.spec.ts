@@ -918,9 +918,10 @@ for (const scheme of ["light", "dark"] as const) {
     // walk has to reach that state rather than proving its resting separator
     // twice. Dark had 1.46:1 here before the light-only repair and must keep it.
     const workspace = page.locator(".ub-workspace");
+    const resting = await paintedIn(workspace, "background-color");
     await workspace.hover();
     const workspaceGround = await paintedIn(workspace, "background-color");
-    expect(workspaceGround).not.toBe(ground);
+    expect(workspaceGround).not.toBe(resting);
     const workspaceEdge = await paintedIn(workspace, "border-bottom-color");
     if (scheme === "dark") {
       expect(contrast(workspaceEdge, workspaceGround)).toBeGreaterThanOrEqual(
