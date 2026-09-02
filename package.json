@@ -11,9 +11,10 @@
     "build": "pnpm -r build",
     "lint": "biome lint --error-on-warnings .",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test && pnpm run test:issue-preparation && pnpm run test:agent-roles",
+    "test": "pnpm -r test && pnpm run test:issue-preparation && pnpm run test:agent-roles && pnpm run test:housekeeping",
     "test:issue-preparation": "node --test .agents/protocols/issue-preparation.test.mjs",
-    "test:agent-roles": "node scripts/check-agent-roles.mjs && node --test scripts/check-agent-roles.test.mjs"
+    "test:agent-roles": "node scripts/check-agent-roles.mjs && node --test scripts/check-agent-roles.test.mjs",
+    "test:housekeeping": "node --test scripts/housekeeping.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.9",

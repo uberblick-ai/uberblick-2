@@ -183,9 +183,20 @@ advanced after the gates and its changed files overlap the PR, gate the
 prospective merged tree and repeat if the base moves again. Either kind of
 mismatch returns to the gates.
 
-## After merging
+## After ruling
 
-Confirm every issue the PR closes auto-closed. Then update the product docs to
-the new status quo (uberblick MCP tools once registered; until then, comment on
-the PR that the doc update is pending). Record the result on the PR. A fresh
-integrator does not own or restart another session's development processes.
+After a merge, confirm every issue the PR closes auto-closed. Then update the
+product docs to the new status quo (uberblick MCP tools once registered; until
+then, comment on the PR that the doc update is pending). Record the result on
+the PR. A fresh integrator does not own or restart another session's development
+processes.
+
+**Housekeeping, last** (owner direction, 2026-09-01). On every durable outcome —
+merge or parked ruling — once the probes on the retained review image are done,
+run `sh scripts/housekeeping.sh <headRefOid>` from the same freshly fetched
+`origin/main` checkout used for the container review, and record a concise
+summary on the PR.
+It removes this run's and older review images, stopped containers and dangling
+layers, and every host-wide unused image older than a week while keeping newer
+images and build cache warm.
+`--dry-run` shows what it would do.
