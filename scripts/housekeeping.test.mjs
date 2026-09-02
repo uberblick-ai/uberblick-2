@@ -39,13 +39,14 @@ function environment(bin, calls) {
 	};
 }
 
-test("cleans the current and older review images plus stale Docker artifacts", (t) => {
+test("cleans the current and expired review images plus stale Docker artifacts", (t) => {
 	const { base, bin, calls } = fixture(t);
 	fakeDocker(
 		bin,
 		'printf "%s\\n" "$*" >> "$HOUSEKEEPING_CALLS"\n' +
 			'case "$*" in\n' +
-			'  *"before=uberblick-review:test-sha"*) printf "older-b\\nolder-a\\nolder-a\\n" ;;\n' +
+			'  *"reference=uberblick-review"*"until=24h"*) printf "expired-b\\nexpired-a\\nexpired-a\\n" ;;\n' +
+			'  *"reference=uberblick-review"*) printf "expired-b\\nexpired-a\\nrecent-peer\\n" ;;\n' +
 			'  "image ls -q uberblick-review:test-sha") printf "current-image\\n" ;;\n' +
 			'esac\n' +
 			'exit 0',
@@ -59,7 +60,12 @@ test("cleans the current and older review images plus stale Docker artifacts", (
 
 	assert.equal(result.status, 0, result.stderr);
 	const commands = readFileSync(calls, "utf8");
-	assert.match(commands, /image rm -f older-a older-b/);
+	assert.match(
+		commands,
+		/image ls -q --filter reference=uberblick-review --filter until=24h/,
+	);
+	assert.match(commands, /image rm -f expired-a expired-b/);
+	assert.doesNotMatch(commands, /image rm -f .*recent-peer/);
 	assert.match(commands, /image rm -f uberblick-review:test-sha/);
 	assert.match(commands, /container prune -f --filter until=168h/);
 	assert.match(commands, /image prune -f/);
@@ -67,14 +73,15 @@ test("cleans the current and older review images plus stale Docker artifacts", (
 	assert.match(commands, /builder prune -f --filter until=168h/);
 });
 
-test("cleans all review images when this run's image is already absent", (t) => {
+test("cleans expired review images when this run's image is already absent", (t) => {
 	const { base, bin, calls } = fixture(t);
 	fakeDocker(
 		bin,
 		'printf "%s\\n" "$*" >> "$HOUSEKEEPING_CALLS"\n' +
 			'case "$*" in\n' +
 			'  "image ls -q uberblick-review:test-sha") ;;\n' +
-			'  "image ls -q --filter reference=uberblick-review") printf "remaining-b\\nremaining-a\\n" ;;\n' +
+			'  *"reference=uberblick-review"*"until=24h"*) printf "expired-b\\nexpired-a\\n" ;;\n' +
+			'  *"reference=uberblick-review"*) printf "expired-b\\nexpired-a\\nrecent-peer\\n" ;;\n' +
 			'esac\n' +
 			'exit 0',
 	);
@@ -86,7 +93,10 @@ test("cleans all review images when this run's image is already absent", (t) => 
 	});
 
 	assert.equal(result.status, 0, result.stderr);
-	assert.match(readFileSync(calls, "utf8"), /image rm -f remaining-a remaining-b/);
+	const commands = readFileSync(calls, "utf8");
+	assert.match(commands, /image rm -f expired-a expired-b/);
+	assert.doesNotMatch(commands, /image rm -f .*recent-peer/);
+	assert.doesNotMatch(commands, /image rm -f uberblick-review:test-sha/);
 });
 
 test("rejects --dry-run without a review sha before invoking Docker", (t) => {

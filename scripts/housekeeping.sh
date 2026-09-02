@@ -2,7 +2,7 @@
 # Integrator housekeeping, run last (owner direction, 2026-09-01):
 #   sh scripts/housekeeping.sh <review sha> [--dry-run]
 # Docker — what fills the disk is one retained review image per run, so those go
-#   at once: every uberblick-review image older than this run's, then this run's.
+#   once they are 24 hours old; this run's own image still goes at once.
 #   Stopped containers and dangling layers go too. Build cache and unused images
 #   are kept for a week (`until=168h`) so the next review still starts warm.
 set -u
@@ -47,11 +47,7 @@ image_list() {
 }
 review_images() {
   current=$(image_list "docker image ls uberblick-review:$sha" docker image ls -q "uberblick-review:$sha") || return 1
-  if [ -n "$current" ]; then
-    older=$(image_list "docker image ls before uberblick-review:$sha" docker image ls -q --filter reference=uberblick-review --filter "before=uberblick-review:$sha") || return 1
-  else
-    older=$(image_list "docker image ls review images" docker image ls -q --filter reference=uberblick-review) || return 1
-  fi
+  older=$(image_list "docker image ls review images older than 24h" docker image ls -q --filter reference=uberblick-review --filter until=24h) || return 1
   older=$(printf '%s\n' "$older" | sort -u)
   [ -n "$older" ] && run docker image rm -f $older
   [ -n "$current" ] && run docker image rm -f "uberblick-review:$sha"
