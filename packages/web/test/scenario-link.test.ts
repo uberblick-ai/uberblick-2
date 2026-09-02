@@ -1,109 +1,150 @@
 /**
- * #628's throwaway prototype: the only thing that notices when the human half
- * of a behavior and the machine half stop pointing at each other.
+ * The executable link between a repository scenario and the Playwright test
+ * that defends it (#668).
  *
- * A scenario in `e2e/scenarios/` uses the `Test:` grammar
- * `<spec> › <test's own title>`, explicitly not Playwright's full title path
- * (which includes describe blocks and is what #668's enumeration returns); the
- * test carries the scenario id as a Playwright annotation. Neither end knows
- * about the other at runtime, so on its own the link is *silent* — rename the
- * test and the suite still passes, rename the scenario and the evidence is
- * still filed. This test is what turns either break into a failure, and it runs
- * in `mise run test`, where a rename is made.
- *
- * It reads source text, and that is the whole limitation. Source text is not
- * Playwright's list of tests, so this check is wrong in both directions and
- * knows it:
- *
- * - **False break.** A title built from a variable or an id behind a constant
- *   reads as a broken link. `test.skip(`, `test.only(` and `test.fixme(` make
- *   the source scan misattribute the annotation to the preceding plain
- *   `test(`; if there is none, its `lastIndexOf` degeneracy fails at the end of
- *   the file instead.
- * - **False green, which is worse.** Comment the test out and this still finds
- *   its text and passes, while `playwright test --list` reports no tests at all
- *   (Codex round 1 on #669 demonstrated exactly that). It also does not require
- *   scenario ids to be unique, so two scenario files may claim one test.
- *
- * So this catches a renamed or deleted test and a dropped annotation — the
- * breaks #628 actually probed — and does not catch a test removed by any means
- * that leaves its text behind. #668 replaces the source scan with Playwright's
- * own enumeration, which is the only thing that can close that gap.
+ * A scenario in `e2e/scenarios/` names a registered test as
+ * `e2e/<spec> › <test's own title>`. The test names the scenario with a
+ * Playwright `scenario` annotation. Playwright's JSON list is the authority for
+ * the machine half: this catches commented-out tests and accepts titles built
+ * from variables or constants without trying to parse TypeScript source.
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { JSONReport, JSONReportSuite } from "@playwright/test/reporter";
 import { describe, expect, it } from "vitest";
 
+const require = createRequire(import.meta.url);
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const scenarioDir = resolve(webRoot, "e2e/scenarios");
 const e2eDir = resolve(webRoot, "e2e");
+const scenarioDir = resolve(e2eDir, "scenarios");
 
-/** `Scenario:` and `Test:` are the whole format; everything else is prose for a person. */
-function readScenario(file: string): { id: string; spec: string; title: string } {
-  const text = readFileSync(resolve(scenarioDir, file), "utf8");
-  const id = /^Scenario: (.+)$/m.exec(text)?.[1]?.trim();
-  const target = /^Test: (.+)$/m.exec(text)?.[1]?.trim();
-  if (id === undefined || target === undefined) {
-    throw new Error(`${file} needs both a "Scenario:" and a "Test:" line`);
-  }
-  const divider = target.indexOf("›");
-  if (divider === -1) throw new Error(`${file}'s "Test:" line needs "<spec> › <title>"`);
-  return { id, spec: target.slice(0, divider).trim(), title: target.slice(divider + 1).trim() };
+interface Scenario {
+  id: string;
+  spec: string;
+  title: string;
 }
 
-/**
- * Every scenario annotation in the e2e suite, with the test it is attached to:
- * the nearest `test(` above it, and the title that opens that call.
- */
-function annotatedTests(): { spec: string; title: string; id: string }[] {
-  const found: { spec: string; title: string; id: string }[] = [];
-  const annotation = /type:\s*"scenario",\s*description:\s*"([^"]+)"/g;
-  for (const name of readdirSync(e2eDir).filter((f) => f.endsWith(".spec.ts"))) {
-    const text = readFileSync(resolve(e2eDir, name), "utf8");
-    for (const match of text.matchAll(annotation)) {
-      const id = match[1];
-      const declaration = text.lastIndexOf("test(", match.index);
-      const title = /^test\(\s*"([^"]+)"/.exec(text.slice(declaration))?.[1];
-      if (id === undefined || title === undefined) {
-        throw new Error(`a scenario annotation in ${name} is not on a test with a literal title`);
-      }
-      found.push({ spec: `e2e/${name}`, title, id });
+interface RegisteredTest {
+  spec: string;
+  title: string;
+  scenarioIds: string[];
+}
+
+/** `Scenario:` and `Test:` are the whole format; everything else is prose. */
+function readScenario(file: string): Scenario {
+  const text = readFileSync(resolve(scenarioDir, file), "utf8");
+  const idLines = text.match(/^Scenario: (.+)$/gm) ?? [];
+  const testLines = text.match(/^Test: (.+)$/gm) ?? [];
+  if (idLines.length !== 1 || testLines.length !== 1) {
+    throw new Error(`${file} needs exactly one "Scenario:" and one "Test:" line`);
+  }
+
+  const id = idLines[0]?.slice("Scenario: ".length).trim() ?? "";
+  if (`${id}.md` !== file) {
+    throw new Error(`${file}'s scenario id must match its filename`);
+  }
+
+  const target = testLines[0]?.slice("Test: ".length).trim() ?? "";
+  const parts = target.split(" › ");
+  if (parts.length !== 2 || parts.some((part) => part.length === 0)) {
+    throw new Error(`${file}'s "Test:" line needs "e2e/<spec> › <title>"`);
+  }
+  return { id, spec: parts[0] ?? "", title: parts[1] ?? "" };
+}
+
+function diagnostic(error: JSONReport["errors"][number]): string {
+  return (
+    error.message?.trim() ||
+    error.stack?.trim() ||
+    JSON.stringify(error) ||
+    "unknown Playwright error"
+  );
+}
+
+/** Ask Playwright which tests it actually registered, without launching a browser. */
+function registeredTests(): RegisteredTest[] {
+  const packageFile = require.resolve("@playwright/test/package.json");
+  const cli = resolve(dirname(packageFile), "cli.js");
+  const result = spawnSync(
+    process.execPath,
+    [cli, "test", "--list", "--reporter=json"],
+    { cwd: webRoot, encoding: "utf8" },
+  );
+  if (result.error !== undefined) {
+    throw new Error(`Playwright test enumeration failed: ${result.error.message}`);
+  }
+
+  let report: JSONReport;
+  try {
+    report = JSON.parse(result.stdout) as JSONReport;
+  } catch {
+    const detail = result.stderr.trim() || result.stdout.trim() || "no JSON output";
+    throw new Error(`Playwright test enumeration failed: ${detail}`);
+  }
+
+  const diagnostics = report.errors.map(diagnostic).filter(Boolean);
+  if (result.status !== 0 || diagnostics.length > 0) {
+    const detail = diagnostics.join("\n") || result.stderr.trim() || `exit ${result.status}`;
+    throw new Error(`Playwright test enumeration failed:\n${detail}`);
+  }
+
+  const found: RegisteredTest[] = [];
+  const visit = (suite: JSONReportSuite): void => {
+    for (const spec of suite.specs) {
+      const file = relative(e2eDir, resolve(e2eDir, spec.file)).split(sep).join("/");
+      const scenarioIds = [
+        ...new Set(
+          spec.tests
+            .flatMap((test) => test.annotations)
+            .filter((annotation) => annotation.type === "scenario")
+            .map((annotation) => annotation.description?.trim() ?? ""),
+        ),
+      ];
+      found.push({ spec: `e2e/${file}`, title: spec.title, scenarioIds });
     }
+    for (const child of suite.suites ?? []) visit(child);
+  };
+  for (const suite of report.suites) visit(suite);
+
+  if (found.length === 0) {
+    throw new Error("Playwright test enumeration listed no tests");
   }
   return found;
 }
 
 describe("scenario ↔ test links", () => {
   const scenarios = readdirSync(scenarioDir)
-    .filter((f) => f.endsWith(".md"))
+    .filter((file) => file.endsWith(".md"))
     .map(readScenario);
-  const annotated = annotatedTests();
+  const registered = registeredTests();
+  const annotated = registered.filter((test) => test.scenarioIds.length > 0);
 
-  it("has at least one scenario to check", () => {
+  it("has at least one link to check", () => {
     expect(scenarios.length).toBeGreaterThan(0);
+    expect(annotated.length).toBeGreaterThan(0);
   });
 
-  it("resolves every scenario to a test that exists and names it back", () => {
+  it("resolves every scenario to exactly one registered test that names it back", () => {
     for (const scenario of scenarios) {
-      const spec = resolve(webRoot, scenario.spec);
-      expect(existsSync(spec), `${scenario.id} names a spec that does not exist`).toBe(true);
-      const match = annotated.find(
-        (t) => t.spec === scenario.spec && t.title === scenario.title,
+      const matches = registered.filter(
+        (test) => test.spec === scenario.spec && test.title === scenario.title,
       );
-      expect(match, `${scenario.id} names no annotated test in ${scenario.spec}`).toBeDefined();
-      expect(match?.id).toBe(scenario.id);
+      expect(matches, `${scenario.id} must name exactly one registered test`).toHaveLength(1);
+      expect(matches[0]?.scenarioIds).toEqual([scenario.id]);
     }
   });
 
-  it("resolves every annotated test to a scenario file that names it back", () => {
+  it("resolves every annotated test to exactly one scenario file that names it back", () => {
     for (const test of annotated) {
-      const file = resolve(scenarioDir, `${test.id}.md`);
-      expect(existsSync(file), `${test.title} annotates an unknown scenario`).toBe(true);
-      const scenario = readScenario(`${test.id}.md`);
-      expect(scenario.spec).toBe(test.spec);
-      expect(scenario.title).toBe(test.title);
+      expect(test.scenarioIds, `${test.spec} › ${test.title}`).toHaveLength(1);
+      const matches = scenarios.filter((scenario) => scenario.id === test.scenarioIds[0]);
+      expect(matches, `${test.spec} › ${test.title} must name one scenario`).toHaveLength(1);
+      expect(matches[0]?.spec).toBe(test.spec);
+      expect(matches[0]?.title).toBe(test.title);
     }
   });
 });
