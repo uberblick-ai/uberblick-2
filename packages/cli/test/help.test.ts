@@ -146,14 +146,14 @@ const HIDDEN = ["serve", "help", "--help", "-h", "--version", "-v"];
 
 /** Command names and description columns from one contextual catalog. */
 function commandRows(help: string): Array<{ command: string; descriptionColumn: number }> {
-  const catalog = help.match(/\ncommands:\n((?:  .+\n)+)\noptions:\n/);
+  const catalog = help.match(/\ncommands:\n((?: {2}.+\n)+)\noptions:\n/);
   expect(catalog, "command help contains only its catalog before its own options").not.toBeNull();
 
   return (catalog?.[1] ?? "")
     .split("\n")
-    .filter((line) => /^  \S/.test(line))
+    .filter((line) => /^ {2}\S/.test(line))
     .map((line) => {
-      const row = line.match(/^  (.+?) {2,}(\S.*)$/);
+      const row = line.match(/^ {2}(.+?) {2,}(\S.*)$/);
       expect(row, `aligned command row: ${line}`).not.toBeNull();
       const usage = row?.[1] ?? "";
       const description = row?.[2] ?? "";

@@ -286,8 +286,8 @@ describe("ub workspace use and the init lock", () => {
 describe("ub workspace help", () => {
   it("keeps the group concise and documents id forms at the accepting command", () => {
     const top = runUb(["--help"], sandbox());
-    expect(top.stdout).toMatch(/^  workspace \[command\]/m);
-    expect(top.stdout).not.toMatch(/^  workspace (?:list|use)/m);
+    expect(top.stdout).toMatch(/^ {2}workspace \[command\]/m);
+    expect(top.stdout).not.toMatch(/^ {2}workspace (?:list|use)/m);
 
     const group = runUb(["workspace", "--help"], sandbox());
     expect(group.status).toBe(0);
