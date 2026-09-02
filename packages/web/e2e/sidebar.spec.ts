@@ -65,8 +65,14 @@ async function createPinnedDoc(page: Page, title: string): Promise<void> {
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
   await page.locator(".ub-title").fill(title);
-  await page.locator(".ub-pin-toggle").click();
-  await expect(page.locator(".ub-pin-toggle")).toHaveAttribute("aria-pressed", "true");
+  const actions = page.getByRole("button", { name: "Document actions" });
+  await actions.click();
+  await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
+  await actions.click();
+  await expect(
+    page.getByRole("menuitem", { name: "Unpin from sidebar" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
 }
 
 /**

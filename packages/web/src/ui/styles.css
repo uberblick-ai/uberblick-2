@@ -504,33 +504,6 @@ body {
   white-space: nowrap;
 }
 
-/* Pin / unpin the open document (#115), beside the breadcrumb because that is
-   where the document's own context is. The word is fixed and the mark carries
-   the state, so pinning moves nothing in the header. */
-.ub-pin-toggle {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: none;
-  padding: 0.1rem 0.35rem;
-  color: var(--muted-foreground);
-  font: inherit;
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.ub-pin-toggle:hover {
-  color: var(--foreground);
-}
-
-.ub-pin-toggle[aria-pressed="true"] {
-  color: var(--brand-ink);
-  border-color: var(--border);
-}
-
 /* Right-anchored, and the pills grow leftwards into the gap: the activity pill
    is first in the group, so a session arriving or leaving never moves the
    connection pill or the presence chip beside it. */
@@ -2169,6 +2142,79 @@ body {
 .ub-doc-ids {
   font-family: var(--font-mono);
   flex: none;
+}
+
+/* The live document's lifecycle and sidebar curation share one compact home at
+   the row's right edge. The target stays 44px even when the tags give up width. */
+.ub-document-actions {
+  flex: none;
+  display: inline-flex;
+}
+
+.ub-actions-trigger {
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ub-actions-trigger:hover,
+.ub-actions-trigger[data-state="open"] {
+  border-color: var(--border);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.ub-actions-trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.ub-action-danger {
+  color: var(--destructive);
+}
+
+.ub-action-pinned {
+  color: var(--brand-ink);
+}
+
+.ub-confirm {
+  width: min(28rem, calc(100vw - 2rem));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--shadow-float);
+  padding: 1rem;
+}
+
+.ub-confirm h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.ub-confirm p {
+  margin: 0.65rem 0 1rem;
+  line-height: 1.5;
+}
+
+.ub-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.ub-tool-danger {
+  border-color: var(--destructive);
+  background: var(--destructive);
+  color: var(--destructive-foreground);
 }
 
 /* ---- editor chrome above the prose ---- */
