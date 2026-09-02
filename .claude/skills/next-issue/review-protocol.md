@@ -27,13 +27,16 @@ concrete unresolved risk; a package path is neither, and without that line the
 round is not dispatched. One transport per *reviewer* runtime — the command
 is chosen by the runtime the round must run on, not by the caller's, so a
 same-runtime round (a `--codex` integrator on a Codex-authored PR) uses the
-same two commands. Both run from the parent's own worktree, detached (a
-foreground shell call is killed at ten minutes), with the prompt read from a
-file and the log kept in private scratch:
+same two commands. Both run from the parent's own worktree, named explicitly
+for Codex instead of inherited from the shell, and detached (a foreground shell
+call is killed at ten minutes), with the prompt read from a file and the log
+kept in private scratch. An empty scratch directory is not a substitute, even
+with `--skip-git-repo-check`: it holds neither the role contracts nor current
+code, so bypassing the trust refusal only makes the round fail later.
 
 ```sh
 # A Codex reviewer — the transport issue preparation validated.
-codex exec -s workspace-write -c 'sandbox_workspace_write.network_access=true' - < <prompt-file> > <scratch-log> 2>&1
+codex exec -C <parent-worktree> -s workspace-write -c 'sandbox_workspace_write.network_access=true' - < <prompt-file> > <scratch-log> 2>&1
 
 # A Claude reviewer — the project adapter selects the role.
 claude -p --agent implementation-reviewer --model opus --permission-mode bypassPermissions < <prompt-file> > <scratch-log> 2>&1
