@@ -82,12 +82,15 @@ export function SyncPanel({
   onClose: () => void;
 }): ReactElement {
   const status = useRoomStatus(connection);
-  const state = useCalmSyncState(rawSyncState(status));
+  const raw = rawSyncState(status);
+  const state = useCalmSyncState(raw, connection);
   // The same settled word the pill this panel opens from shows. Calm is a
   // cadence, never a quieter version of the truth (see calm.ts) — and two
   // different words in one corner of the screen would be worse than either.
-  const reading = statusReading(status, state);
+  const reading = statusReading(status, state ?? raw);
   const localCopy = localCopyState(status, docPresent);
+  const hasReading =
+    connection !== null && (state !== null || reading.detail !== null);
 
   /**
    * Escape closes the panel, and the panel alone.
@@ -140,18 +143,25 @@ export function SyncPanel({
           value={endpoint === null ? UNKNOWN : endpointSourceLabel(endpoint.source)}
         />
         <Fact label="Room" value={connection?.room ?? UNKNOWN} />
-        <Fact label="State" value={reading.word} />
+        <Fact label="State" value={hasReading ? reading.word : UNKNOWN} />
         {/* Drawn only under a refusal (#448). This is the panel the pill opens,
             and the pill has room for the word alone — so the sentence saying
             what to do about it belongs here, and nowhere else. There is no such
             sentence for the ordinary states, so the row is absent rather than
             empty: a Reason row that read "—" three states out of four would be
             noise in the place a reader looks during an outage. */}
-        {reading.detail !== null && <Fact label="Reason" value={reading.detail} />}
+        {connection !== null && reading.detail !== null && (
+          <Fact label="Reason" value={reading.detail} />
+        )}
         {/* Always drawn, zero included: this is the panel someone opens to ask
             what the backlog is, and a row that vanished at zero would leave
             them unable to tell "nothing waiting" from "not reported". */}
-        <Fact label="Backlog" value={backlogLabel(status.unsyncedChanges)} />
+        <Fact
+          label="Backlog"
+          value={
+            connection === null ? UNKNOWN : backlogLabel(status.unsyncedChanges)
+          }
+        />
         {/* Same rule, and the reason the status line above no longer says this
             while everything is healthy (#535): the promise that this browser
             holds a durable copy belongs where somebody went looking for it.
@@ -160,7 +170,11 @@ export function SyncPanel({
         <Fact
           label="Local copy"
           value={
-            localCopy === null ? UNKNOWN : localCopy ? "available" : "unavailable"
+            connection === null || localCopy === null
+              ? UNKNOWN
+              : localCopy
+                ? "available"
+                : "unavailable"
           }
         />
       </dl>

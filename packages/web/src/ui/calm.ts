@@ -22,7 +22,7 @@
  * never a quieter version of the truth.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RoomStatus } from "../collab/rooms.js";
 
 export type SyncState = "offline" | "syncing" | "synced";
@@ -104,17 +104,75 @@ export function localCopyState(
  * whole debounce: a state that flickers away before its window is up is never
  * rendered, and a state that keeps flickering back and forth never accumulates
  * a window either — the indicator simply holds whatever it last settled on.
+ *
+ * `source` is the connection whose reading this is. A component can survive a
+ * room change, but the settled state must not: a new source begins with an
+ * empty slot and earns its first reading by one deadline measured from that
+ * source's arrival. Changes before the deadline update what will be shown but
+ * do not move the deadline, so continuous typing cannot hide the current room
+ * forever. Once the first reading is shown, later changes use the ordinary
+ * persistence windows above. Callers without a source retain the original
+ * mount behaviour and begin from `raw`.
  */
-export function useCalmSyncState(raw: SyncState): SyncState {
-  const [shown, setShown] = useState(raw);
+export function useCalmSyncState(raw: SyncState): SyncState;
+export function useCalmSyncState(
+  raw: SyncState,
+  source: object | null,
+): SyncState | null;
+export function useCalmSyncState(
+  raw: SyncState,
+  source?: object | null,
+): SyncState | null {
+  const scoped = source !== undefined;
+  const key = source ?? null;
+  const [settled, setSettled] = useState<{
+    source: object | null;
+    state: SyncState | null;
+  }>(() => ({ source: key, state: scoped ? null : raw }));
+  const latestRaw = useRef(raw);
+  latestRaw.current = raw;
+  const boundary = useRef({ source: key, raw });
+  if (boundary.current.source !== key) boundary.current = { source: key, raw };
+  const firstRaw = boundary.current.raw;
+  const shown = settled.source === key ? settled.state : null;
+
+  // A source gets one bounded initial window. This effect intentionally does
+  // not follow `raw`: its timer reads the latest value through the ref, while
+  // its deadline remains anchored to the source change.
   useEffect(() => {
-    if (raw === shown) return;
-    if (SETTLE_MS[raw] === 0) {
-      setShown(raw);
+    if (!scoped) return;
+    setSettled({ source: key, state: null });
+    if (key === null) return;
+    if (SETTLE_MS[firstRaw] === 0) {
+      setSettled({ source: key, state: firstRaw });
       return;
     }
-    const timer = setTimeout(() => setShown(raw), SETTLE_MS[raw]);
+    const timer = setTimeout(
+      () => setSettled({ source: key, state: latestRaw.current }),
+      SETTLE_MS[firstRaw],
+    );
     return () => clearTimeout(timer);
-  }, [raw, shown]);
+  }, [firstRaw, key, scoped]);
+
+  useEffect(() => {
+    if (settled.source !== key) return;
+    if (shown === null) {
+      // Bad news keeps its zero-delay contract even inside the initial window.
+      if (scoped && key !== null && SETTLE_MS[raw] === 0) {
+        setSettled({ source: key, state: raw });
+      }
+      return;
+    }
+    if (raw === shown) return;
+    if (SETTLE_MS[raw] === 0) {
+      setSettled({ source: key, state: raw });
+      return;
+    }
+    const timer = setTimeout(
+      () => setSettled({ source: key, state: raw }),
+      SETTLE_MS[raw],
+    );
+    return () => clearTimeout(timer);
+  }, [key, raw, scoped, shown, settled.source]);
   return shown;
 }

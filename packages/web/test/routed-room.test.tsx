@@ -25,6 +25,7 @@ import { createRoot } from "react-dom/client";
 import type { ReactElement } from "react";
 import * as Y from "yjs";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
+import { rawSyncState, useCalmSyncState } from "../src/ui/calm.js";
 
 /** The workspace these stub room keys sit in. A workspace id is a uuid. */
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
@@ -58,7 +59,7 @@ vi.mock("../src/collab/rooms.js", () => ({
   }),
 }));
 
-const { useRoom } = await import("../src/ui/hooks.js");
+const { useRoom, useRoomStatus } = await import("../src/ui/hooks.js");
 
 const IDENTITY = { name: "tester", color: "#888888" };
 
@@ -99,5 +100,81 @@ describe("a room connection is paired with the room it was asked for", () => {
 
     act(() => root.unmount());
     host.remove();
+  });
+
+  it("starts from the current connection and never carries a prior reading", () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+    vi.useFakeTimers();
+
+    const connection = (
+      room: string,
+      status: RoomStatus,
+    ): RoomConnection =>
+      ({
+        room,
+        status,
+        onStatusChange: (listener: (next: RoomStatus) => void) => {
+          listener(status);
+          return () => {};
+        },
+      }) as unknown as RoomConnection;
+    const synced = connection(`${WORKSPACE}/alpha`, {
+      ...OFFLINE,
+      connected: true,
+      synced: true,
+    });
+    const syncing = connection(`${WORKSPACE}/beta`, {
+      ...OFFLINE,
+      connected: true,
+      unsyncedChanges: 1,
+    });
+    // Same room key, new connection identity: replacing a refused or expired
+    // provider must reset the calm reading just as changing rooms does.
+    const replacement = connection(`${WORKSPACE}/beta`, OFFLINE);
+    const seen: Array<{ room: string; raw: string; shown: string | null }> = [];
+
+    function Probe({ current }: { current: RoomConnection }): null {
+      const status = useRoomStatus(current);
+      const raw = rawSyncState(status);
+      const shown = useCalmSyncState(raw, current);
+      seen.push({ room: current.room, raw, shown });
+      return null;
+    }
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    act(() => root.render(<Probe current={synced} />));
+    expect(seen.at(-1)).toEqual({
+      room: `${WORKSPACE}/alpha`,
+      raw: "synced",
+      shown: null,
+    });
+    act(() => void vi.advanceTimersByTime(300));
+    expect(seen.at(-1)?.shown).toBe("synced");
+
+    act(() => root.render(<Probe current={syncing} />));
+    const beta = seen.filter(({ room }) => room.endsWith("/beta"));
+    expect(beta.length).toBeGreaterThan(0);
+    expect(beta.every(({ raw, shown }) => raw === "syncing" && shown === null)).toBe(
+      true,
+    );
+    act(() => void vi.advanceTimersByTime(399));
+    expect(seen.at(-1)?.shown).toBeNull();
+    act(() => void vi.advanceTimersByTime(1));
+    expect(seen.at(-1)?.shown).toBe("syncing");
+
+    act(() => root.render(<Probe current={replacement} />));
+    expect(seen.at(-1)).toEqual({
+      room: `${WORKSPACE}/beta`,
+      raw: "offline",
+      shown: "offline",
+    });
+
+    act(() => root.unmount());
+    host.remove();
+    vi.useRealTimers();
   });
 });

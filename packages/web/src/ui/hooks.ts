@@ -109,16 +109,34 @@ const OFFLINE: RoomStatus = {
   tokenMissing: false,
 };
 
+/** A status snapshot and the exact connection that supplied it. */
+interface RoomStatusReading {
+  connection: RoomConnection;
+  status: RoomStatus;
+}
+
+/**
+ * The current connection's status, never a snapshot retained from another one.
+ *
+ * A connection already carries a seeded status and immediately supplies it to
+ * a subscriber. Returning that seed on the render before the effect subscribes
+ * avoids inventing an `offline` transition, while pairing later snapshots with
+ * their source keeps a room or replacement connection from inheriting its
+ * predecessor's reading.
+ *
+ * `OFFLINE` remains the no-connection answer for directory-level consumers.
+ * Document status surfaces suppress that value while their requested room has
+ * no connection, so an absent reading occupies its fixed slot without making a
+ * claim (#606).
+ */
 export function useRoomStatus(connection: RoomConnection | null): RoomStatus {
-  const [status, setStatus] = useState<RoomStatus>(OFFLINE);
+  const [reading, setReading] = useState<RoomStatusReading | null>(null);
   useEffect(() => {
-    if (connection === null) {
-      setStatus(OFFLINE);
-      return;
-    }
-    return connection.onStatusChange(setStatus);
+    if (connection === null) return;
+    return connection.onStatusChange((status) => setReading({ connection, status }));
   }, [connection]);
-  return status;
+  if (connection === null) return OFFLINE;
+  return reading?.connection === connection ? reading.status : connection.status;
 }
 
 /**

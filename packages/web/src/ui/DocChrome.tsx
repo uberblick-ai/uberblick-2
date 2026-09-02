@@ -144,10 +144,11 @@ export function DocChrome({
   // number follows the rail's head — including when that number is zero.
   const openThreads = threads.filter((thread) => !thread.resolved).length;
   const status = useRoomStatus(connection);
-  const state = useCalmSyncState(rawSyncState(status));
+  const raw = rawSyncState(status);
+  const state = useCalmSyncState(raw, connection);
   // The word only. A refusal's sentence never enters the header — it lives in
   // the sync panel this pill opens, where there is room to read it (#448).
-  const reading = statusReading(status, state);
+  const reading = statusReading(status, state ?? raw);
   /**
    * Which hub this state is about (#362) — the endpoint and how it was
    * resolved, or null while the read is still in flight.
@@ -167,6 +168,7 @@ export function DocChrome({
     endpoint === null
       ? null
       : `${endpoint.url ?? "unknown"} (${endpointSourceLabel(endpoint.source)})`;
+  const blank = connection === null || (state === null && reading.detail === null);
   // `meta.uuid === ""` is a room that answered with nothing in it — see
   // `useDocMeta`. There is no document to name, so the breadcrumb says nothing.
   const named = meta !== null && meta.uuid !== "";
@@ -206,35 +208,38 @@ export function DocChrome({
             moves when it becomes operable. */}
         <button
           type="button"
-          className={`ub-pill ub-pill-${reading.tone} ub-sync-toggle`}
+          className={`ub-pill ub-sync-toggle${blank ? "" : ` ub-pill-${reading.tone}`}`}
           aria-expanded={syncOpen}
           aria-controls="ub-sync-panel"
-          // The visible label is one word about the state, not about the
-          // action, and `title` is not reliably announced — so the accessible
-          // name carries both, keeping the visible word inside it. The hub
-          // rides along in both, so the endpoint is one hover away for a
-          // pointer and part of the name for everyone else.
+          // While blank this remains the panel's focusable handle, but neither
+          // its name nor its fixed slots make a status claim. Once current, the
+          // visible word enters the accessible name too. The hub rides along in
+          // either case: it belongs to the session, not to a borrowed reading.
           aria-label={
-            hub === null
-              ? `Sync details — ${reading.word}`
-              : `Sync details — ${reading.word}, hub ${hub}`
+            blank
+              ? hub === null
+                ? "Sync details"
+                : `Sync details — hub ${hub}`
+              : hub === null
+                ? `Sync details — ${reading.word}`
+                : `Sync details — ${reading.word}, hub ${hub}`
           }
           title={hub === null ? "Sync details" : `Sync details — hub ${hub}`}
           onClick={onToggleSync}
         >
           <span className="ub-status-mark" aria-hidden="true">
-            {reading.tone === "syncing" ? (
-              <span className="ub-spinner" />
-            ) : (
-              <span
-                className={`ub-dot ${reading.tone === "synced" ? "ub-dot-live" : "ub-dot-off"}`}
-              />
-            )}
+            {!blank &&
+              (reading.tone === "syncing" ? (
+                <span className="ub-spinner" />
+              ) : (
+                <span
+                  className={`ub-dot ${reading.tone === "synced" ? "ub-dot-live" : "ub-dot-off"}`}
+                />
+              ))}
           </span>
           {/* The same fixed-width slot the status line uses, sized for the
-              longest reading either can show, so the pill never changes size
-              and nothing beside it moves. */}
-          <span className="ub-status-word">{reading.word}</span>
+              longest reading either can show, so nothing beside it moves. */}
+          <span className="ub-status-word">{blank ? null : reading.word}</span>
         </button>
       </span>
     </>

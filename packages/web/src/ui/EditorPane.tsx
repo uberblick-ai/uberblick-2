@@ -139,8 +139,9 @@ export function StatusLine({
   docPresent: boolean;
 }): ReactElement {
   const status = useRoomStatus(connection);
-  const state = useCalmSyncState(rawSyncState(status));
-  const reading = statusReading(status, state);
+  const raw = rawSyncState(status);
+  const state = useCalmSyncState(raw, connection);
+  const reading = statusReading(status, state ?? raw);
   /**
    * Whether this client holds a durable copy of the document — the one
    * additional fact worth saying inline while syncing is not happening (owner,
@@ -157,6 +158,25 @@ export function StatusLine({
         {localCopy ? "local copy" : "no local copy"}
       </span>
     );
+  // Presence is independent of the connection's settled status word. Keep the
+  // current room's roster in its ordinary slot while that word is blank; the
+  // directory's roster is already excluded by App's room pairing (#606).
+  const peerStrip = (
+    <span className="ub-peers">
+      {presence.map((peer) => (
+        <PeerAvatar key={peer.clientId} session={peer} />
+      ))}
+    </span>
+  );
+  if (state === null && reading.detail === null) {
+    return (
+      <div className="ub-status">
+        <span className="ub-status-mark" />
+        <span className="ub-status-word" />
+        {peerStrip}
+      </div>
+    );
+  }
   if (reading.detail !== null) {
     // A refusal replaces the line rather than decorating it: the backlog and
     // the peer strip are about a connection that is working or coming back, and
@@ -197,11 +217,7 @@ export function StatusLine({
           is why this is the presence reading and not `usePeers`: the block a
           caret sits in is resolved once, in `readPresence`, so the hover and
           the activity pill cannot disagree about where a session is. */}
-      <span className="ub-peers">
-        {presence.map((peer) => (
-          <PeerAvatar key={peer.clientId} session={peer} />
-        ))}
-      </span>
+      {peerStrip}
     </div>
   );
 }

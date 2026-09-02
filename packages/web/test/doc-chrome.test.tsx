@@ -184,6 +184,46 @@ describe("the doc chrome reads the document, the awareness and the status", () =
     vi.unstubAllGlobals();
   });
 
+  it("keeps an empty fixed status slot until the requested room exists", () => {
+    vi.useFakeTimers();
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() =>
+      root.render(
+        <DocChrome
+          connection={null}
+          presence={[]}
+          endpoint={ENDPOINT}
+          meta={null}
+          threads={[]}
+          threadsOpen={false}
+          onToggleThreads={() => {}}
+          syncOpen={false}
+          onToggleSync={() => {}}
+        />,
+      ),
+    );
+    try {
+      const slot = host.querySelector(".ub-sync-toggle");
+      expect(slot?.tagName).toBe("BUTTON");
+      expect(slot?.textContent).toBe("");
+      expect(slot?.getAttribute("aria-label")).toBe(
+        "Sync details — hub wss://hub.example/ws (served /uberblick-config.json)",
+      );
+      expect(slot?.querySelector(".ub-status-mark")).not.toBeNull();
+      expect(slot?.querySelector(".ub-status-word")).not.toBeNull();
+      expect(slot?.classList.contains("ub-pill-offline")).toBe(false);
+      expect(slot?.classList.contains("ub-pill-syncing")).toBe(false);
+      expect(slot?.classList.contains("ub-pill-synced")).toBe(false);
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
   it("makes archive unavailability reachable and non-activating", () => {
     vi.useFakeTimers();
     vi.stubGlobal(
