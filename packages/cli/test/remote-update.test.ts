@@ -280,10 +280,24 @@ describe("remote-update.sh", () => {
     const ran = initRerun(fix);
 
     expect(ran.status).toBe(0);
+    expect(ran.stdout).toContain("uberblick-init-rerun: applied");
     expect(builds(fix)).toEqual(["up --build --detach"]);
     expect(readFileSync(join(fix.checkout, ".env"), "utf8")).toBe(RERUN_ENV);
     expect(readFileSync(join(fix.checkout, "marker.txt"), "utf8")).toBe("two\n");
     expect(deployedRef(fix)).toBe(next);
+  });
+
+  it("leaves the deployed ref unchanged when an init re-run build fails", () => {
+    const fix = fixture();
+    const before = deployedRef(fix);
+    push(fix, { "marker.txt": "two\n" });
+    writeFileSync(fix.failFile, "", "utf8");
+
+    const ran = initRerun(fix);
+
+    expect(ran.status).toBe(104);
+    expect(builds(fix)).toEqual(["up --build --detach"]);
+    expect(deployedRef(fix)).toBe(before);
   });
 
   it("refuses an init re-run before changing anything while an update holds the lock", async () => {

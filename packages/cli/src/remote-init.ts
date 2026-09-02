@@ -280,7 +280,7 @@ sh remote-update.sh --remote-init-rerun
 `;
 }
 
-function initRerunFailure(status: number | null): string {
+export function initRerunFailure(status: number | null): string {
   switch (status) {
     case 100:
       return "another deploy already holds the checkout lock";
@@ -882,6 +882,17 @@ export async function remoteInitCommand(
       io.err(
         `ub remote init: ${flags.target} could not deploy checkout ${flags.dir}: ` +
           `${initRerunFailure(deployed.status)}.\n`,
+      );
+      if (deployed.status === 104) {
+        io.err(ssh(flags.target, logsScript(flags.dir), { env }).stdout);
+      }
+      return 1;
+    }
+    if (!deployed.stdout.split(/\r?\n/).includes("uberblick-init-rerun: applied")) {
+      io.err(
+        `ub remote init: ${flags.target} could not deploy checkout ${flags.dir}: ` +
+          "the host updater did not confirm applying the replacement .env; " +
+          "update that checkout once with `ub remote update`, then retry.\n",
       );
       return 1;
     }

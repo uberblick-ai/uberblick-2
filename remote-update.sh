@@ -30,7 +30,7 @@ case "${1-}" in
     ;;
 esac
 
-set -u
+set -eu
 
 checkout=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 deployed_ref=refs/uberblick/deployed
@@ -81,21 +81,23 @@ cd "$checkout"
 # own words without relaying bytes from the secret-bearing SSH connection.
 if [ "$mode" = remote-init-rerun ]; then
   staged_env=.env.uberblick-init
-  umask 077
+  # HUP/INT/TERM remove a still-staged secret but deliberately do not exit: once
+  # the build has started, it finishes under this lock rather than being
+  # orphaned while another deploy begins.
   trap 'rm -f "$staged_env"' 0 HUP INT TERM
-  cat > "$staged_env" || exit 103
+  (umask 077 && cat > "$staged_env") || exit 103
   chmod 600 "$staged_env" || exit 103
 
-  git config core.sshCommand 'ssh -i ~/.ssh/uberblick-deploy -o IdentitiesOnly=yes' || exit 102
   git fetch --quiet origin main || exit 102
   git merge --ff-only origin/main || exit 102
   mv "$staged_env" .env || exit 103
   sh remote-compose.sh up --build --detach || exit 104
   git update-ref "$deployed_ref" HEAD || exit 105
+  # Private proof consumed by `ub remote init`; an older updater cannot emit it
+  # and therefore cannot turn an ignored configuration payload into success.
+  printf 'uberblick-init-rerun: applied\n'
   exit 0
 fi
-
-set -e
 
 git fetch --quiet origin main
 target=$(git rev-parse --verify origin/main)

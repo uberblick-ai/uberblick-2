@@ -34,6 +34,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { readUserConfig } from "../src/config.js";
 import type { Io } from "../src/io.js";
 import {
+  initRerunFailure,
   remoteInitCommand,
   remoteUpdateCommand,
   upgradeWebsocket,
@@ -95,6 +96,7 @@ function sshBehavior(host: Host): string {
     .join("\n");
   return `case "$*" in
 ${host.ssh ?? ""}
+  *"uberblick:init-rerun"*) printf 'uberblick-init-rerun: applied\n' ;;
   *"uberblick:preflight"*)
     cat <<'FACTS'
 ${preflight}
@@ -517,37 +519,51 @@ describe("ub remote init", () => {
     );
   });
 
-  for (const failure of [
-    { status: 100, cause: "another deploy already holds the checkout lock" },
-    { status: 101, cause: "the checkout lock could not be taken" },
-    { status: 102, cause: "the checkout could not be fast-forwarded" },
-    { status: 103, cause: "the replacement .env could not be written" },
-    { status: 104, cause: "the stack could not be built and started" },
-    { status: 105, cause: "the deployed commit could not be recorded" },
-  ]) {
-    it(`owns the status ${failure.status} re-run diagnostic without relaying host bytes`, async () => {
-      const rig = harness({
-        facts: { checkout: "present", deploykey: HOST_KEY },
-        keys: `[{"id":1,"title":"uberblick-box-something","key":"${HOST_KEY}"}]`,
-        ssh: `  *"uberblick:init-rerun"*)
-    tr '\\0' '\\n' < "$UB_TEST_RECORD/$(printf '%03d' "$count")-ssh" >&2
-    exit ${failure.status}
-    ;;`,
-      });
+  it("owns the reserved re-run diagnostics", () => {
+    expect([100, 101, 102, 103, 104, 105].map(initRerunFailure)).toEqual([
+      "another deploy already holds the checkout lock",
+      "the checkout lock could not be taken",
+      "the checkout could not be fast-forwarded",
+      "the replacement .env could not be written",
+      "the stack could not be built and started",
+      "the deployed commit could not be recorded",
+    ]);
+  });
 
-      expect(await init(rig)).toBe(1);
-      expect(rig.err()).toContain(TARGET);
-      expect(rig.err()).toContain("~/uberblick-remote");
-      expect(rig.err()).toContain(failure.cause);
-      expect(rig.output()).not.toContain(SECRET);
-      expect(rig.output()).not.toContain("HUB_AUTH_TOKEN");
-      const deploy = stepFor(rig, "uberblick:init-rerun");
-      expect(deploy.args.join("\n")).not.toContain(SECRET);
-      expect(deploy.env.join("\n")).not.toContain(SECRET);
-      expect(deploy.stdin).toContain(SECRET);
-      expect(rig.labels().at(-1)).toBe(`ssh ${TARGET} uberblick:init-rerun`);
+  it("prints build logs separately without relaying secret-bearing host bytes", async () => {
+    const rig = harness({
+      facts: { checkout: "present", deploykey: HOST_KEY },
+      keys: `[{"id":1,"title":"uberblick-box-something","key":"${HOST_KEY}"}]`,
+      ssh: `  *"uberblick:init-rerun"*)
+    tr '\\0' '\\n' < "$UB_TEST_RECORD/$(printf '%03d' "$count")-ssh" >&2
+    exit 104
+    ;;`,
     });
-  }
+
+    expect(await init(rig)).toBe(1);
+    expect(rig.err()).toContain("the stack could not be built and started");
+    expect(rig.err()).toContain("hub | boom");
+    expect(rig.output()).not.toContain(SECRET);
+    expect(rig.output()).not.toContain("HUB_AUTH_TOKEN");
+    const deploy = stepFor(rig, "uberblick:init-rerun");
+    expect(deploy.args.join("\n")).not.toContain(SECRET);
+    expect(deploy.env.join("\n")).not.toContain(SECRET);
+    expect(deploy.stdin).toContain(SECRET);
+    expect(rig.labels().at(-1)).toBe(`ssh ${TARGET} uberblick:logs`);
+  });
+
+  it("refuses success without proof that the host applied the replacement env", async () => {
+    const rig = harness({
+      facts: { checkout: "present", deploykey: HOST_KEY },
+      keys: `[{"id":1,"title":"uberblick-box-something","key":"${HOST_KEY}"}]`,
+      ssh: `  *"uberblick:init-rerun"*) printf 'uberblick-update: deployed old-updater\n' ;;`,
+    });
+
+    expect(await init(rig)).toBe(1);
+    expect(rig.err()).toContain("did not confirm applying the replacement .env");
+    expect(rig.err()).toContain("`ub remote update`");
+    expect(rig.labels().at(-1)).toBe(`ssh ${TARGET} uberblick:init-rerun`);
+  });
 
   it("reports replacing a different workspace on a re-run", async () => {
     const rig = harness({
