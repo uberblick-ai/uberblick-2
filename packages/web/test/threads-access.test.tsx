@@ -183,16 +183,18 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
     Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
       scrolled.push(this);
     };
-    const { host, ydoc, threadId } = await openAnnotatedDoc(true);
+    const { host, ydoc, threadId } = await openAnnotatedDoc();
 
-    // Already correct when the editor first binds after the rail mounts.
+    // The live annotations subscription repaints an already-mounted mark; this
+    // state change touches no prose and gives ProseMirror no reason to redraw.
     let span = highlight(host, threadId);
+    expect(span.getAttribute("aria-label")).toBe("Comment thread");
+    expect(span.getAttribute("title")).toBeNull();
+    await act(async () => setAnnotationResolved(ydoc, threadId, true));
     expect(span.getAttribute("aria-label")).toBe(
-      "Resolved comment thread — activate to open",
+      "Resolved comment thread",
     );
-    expect(span.getAttribute("title")).toBe(
-      "Resolved comment thread — activate to open",
-    );
+    expect(span.getAttribute("title")).toBe("Resolved comment thread");
 
     // And rewritten after the mark's DOM is redrawn, rather than being a
     // one-time class on a ProseMirror-owned span.
@@ -203,12 +205,8 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
       await Promise.resolve();
     });
     span = highlight(host, threadId);
-    expect(span.getAttribute("aria-label")).toBe(
-      "Resolved comment thread — activate to open",
-    );
-    expect(span.getAttribute("title")).toBe(
-      "Resolved comment thread — activate to open",
-    );
+    expect(span.getAttribute("aria-label")).toBe("Resolved comment thread");
+    expect(span.getAttribute("title")).toBe("Resolved comment thread");
 
     const before = [...Y.encodeStateAsUpdate(ydoc)];
     await act(async () => span.click());

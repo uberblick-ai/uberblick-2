@@ -395,6 +395,10 @@ export const CommentMark = Mark.create({
                 // no thread id has nothing to activate, and a focusable span
                 // that does nothing is a tab stop that wastes the reader's
                 // time.
+                //
+                // `CommentAnchors` owns these attributes on the live editor's
+                // mark view; this schema rendering remains the static HTML and
+                // clipboard form of the same mark.
                 tabindex: "0",
                 role: "button",
                 "aria-label": "Comment thread",

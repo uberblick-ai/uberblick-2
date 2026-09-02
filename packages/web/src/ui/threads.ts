@@ -448,8 +448,9 @@ export function flashThreadHighlight(threadId: string): void {
  * A stylesheet and not a class on the span, because the span is ProseMirror's:
  * it is rebuilt whenever the text inside it changes, and a class this app wrote
  * would vanish on the next keystroke and come back only at the next annotation
- * change. A selector matching `data-comment-thread` — which the mark itself
- * renders (editor/nodes.ts) — survives every redraw, and resolving a thread is
+ * change. A selector matching `data-comment-thread` — rendered by the live
+ * comment mark view (`editor/comment-anchors.ts`) and by the schema's static
+ * form (`editor/nodes.ts`) — survives every redraw, and resolving a thread is
  * rare enough that regenerating one rule costs nothing.
  *
  * The declarations are the resolved *state* of `.ub-comment` in styles.css: the

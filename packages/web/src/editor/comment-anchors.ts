@@ -21,7 +21,7 @@ import {
 import type * as Y from "yjs";
 
 const COMMENT_THREAD_LABEL = "Comment thread";
-const RESOLVED_THREAD_LABEL = "Resolved comment thread — activate to open";
+const RESOLVED_THREAD_LABEL = "Resolved comment thread";
 
 function commentMarkViews(ydoc: Y.Doc): Plugin {
   const painters = new Set<() => void>();

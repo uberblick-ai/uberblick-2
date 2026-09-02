@@ -426,9 +426,9 @@ function BoundEditor({
     const selectThread = (threadId: string, viaKeyboard = false): void => {
       onSelectThread(threadId, {
         viaKeyboard,
-        // Read the document at activation, not a render-old rail card. Only a
-        // resolved anchor asks the rail to open a collapsed conversation; a
-        // card keeps its own toggle gesture.
+        // Only a resolved anchor takes the rail's one expansion slot. An open
+        // anchor leaves the resolved conversation a reader already expanded
+        // alone, while a card keeps its own toggle gesture.
         revealResolved:
           getAnnotation(connection.ydoc, threadId)?.resolved === true,
       });
