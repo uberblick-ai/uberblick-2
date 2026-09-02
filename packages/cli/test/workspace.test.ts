@@ -282,18 +282,3 @@ describe("ub workspace use and the init lock", () => {
     }
   });
 });
-
-describe("ub workspace help", () => {
-  it("documents the three forms, in both helps", () => {
-    const top = runUb(["--help"], sandbox());
-    expect(top.stdout).toMatch(/workspace list/);
-    expect(top.stdout).toMatch(/workspace use <id>/);
-
-    const help = runUb(["workspace", "--help"], sandbox());
-    expect(help.status).toBe(0);
-    expect(help.stdout).toMatch(/list \[--json\]/);
-    expect(help.stdout).toMatch(/use <id>/);
-    expect(help.stdout).toMatch(/<slug>-<uuid>/);
-    expect(help.stdout).toMatch(/prefix/);
-  });
-});

@@ -97,8 +97,10 @@ interface Path {
  * deliberately absent: they are not part of this contract, and the test below
  * proves `ub mcp --help` does not advertise them either.
  */
+const ROOT_PATH: Path = { argv: [], help: HELP, options: {} };
+
 const PATHS: Path[] = [
-  { argv: [], help: HELP, options: {}, children: ["init", "open", "status", "doctor"] },
+  ROOT_PATH,
   { argv: ["init"], help: INIT_HELP, options: INIT_OPTIONS },
   { argv: ["open"], help: OPEN_HELP, options: OPEN_OPTIONS },
   { argv: ["status"], help: STATUS_HELP, options: STATUS_OPTIONS },
@@ -120,10 +122,12 @@ const PATHS: Path[] = [
   { argv: ["remote", "init"], help: REMOTE_INIT_HELP, options: REMOTE_INIT_OPTIONS },
   { argv: ["remote", "update"], help: REMOTE_UPDATE_HELP, options: REMOTE_UPDATE_OPTIONS },
   { argv: ["remote", "join"], help: REMOTE_JOIN_HELP, options: REMOTE_BRIDGE_OPTIONS },
-  { argv: ["env"], help: ENV_HELP, options: {} },
   { argv: ["mcp"], help: MCP_HELP, options: {}, children: ["install"] },
   { argv: ["mcp", "install"], help: INSTALL_HELP, options: INSTALL_OPTIONS },
+  { argv: ["env"], help: ENV_HELP, options: {} },
 ];
+
+ROOT_PATH.children = PATHS.flatMap(({ argv }) => (argv.length === 1 ? argv : []));
 
 /**
  * Where the dispatch actually happens, so the manifest can be checked against
@@ -138,6 +142,26 @@ const DISPATCHERS = [
 
 /** Not commands: the hidden machine entry, the help words, the version flags. */
 const HIDDEN = ["serve", "help", "--help", "-h", "--version", "-v"];
+
+/** Command names and description columns from one contextual catalog. */
+function commandRows(help: string): Array<{ command: string; descriptionColumn: number }> {
+  const catalog = help.match(/\ncommands:\n((?: {2}.+\n)+)\noptions:\n/);
+  expect(catalog, "command help contains only its catalog before its own options").not.toBeNull();
+
+  return (catalog?.[1] ?? "")
+    .split("\n")
+    .filter((line) => /^ {2}\S/.test(line))
+    .map((line) => {
+      const row = line.match(/^ {2}(.+?) {2,}(\S.*)$/);
+      expect(row, `aligned command row: ${line}`).not.toBeNull();
+      const usage = row?.[1] ?? "";
+      const description = row?.[2] ?? "";
+      return {
+        command: usage.split(" ")[0] ?? "",
+        descriptionColumn: line.length - description.length,
+      };
+    });
+}
 
 /**
  * Everything under the sandbox root, so "it wrote nothing" is checkable.
@@ -211,8 +235,16 @@ describe("every human-facing command path", () => {
         }
       }
       expect(path.help, `${name} help documents -h, --help`).toContain("-h, --help");
-      for (const child of path.children ?? []) {
-        expect(path.help, `${name} help lists ${child}`).toContain(child);
+      if (path.children !== undefined) {
+        const rows = commandRows(path.help);
+        expect(
+          rows.map(({ command }) => command).filter((command) => command !== "(none)"),
+          `${name} help lists each immediate command once`,
+        ).toEqual(path.children);
+        expect(
+          new Set(rows.map(({ descriptionColumn }) => descriptionColumn)).size,
+          `${name} command descriptions share one column`,
+        ).toBe(1);
       }
     });
   }
@@ -235,6 +267,10 @@ describe("every human-facing command path", () => {
         expect(listed, `the manifest lists \`ub ${path}\``).toContain(path);
       }
     }
+  });
+
+  it("keeps workspace id forms in the help of the accepting command", () => {
+    expect(WORKSPACE_USE_HELP).toMatch(/<slug>-<uuid>.*prefix/s);
   });
 
   it("keeps the hidden `mcp serve` out of the group help it is dispatched by", async () => {
