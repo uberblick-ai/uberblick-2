@@ -1106,9 +1106,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "The index is derived from the replicas and updated as updates are observed, so it reflects edits from any client this replica has seen.\n\n" +
         "Matching is all-terms: every searchable term in `query` must occur in one and the same document. " +
         "Letters and digits make a term; punctuation and emoji are not terms, so a query holding only those matches nothing. " +
+        "An underscore-separated group matches its words as an adjacent phrase: `list_docs` matches both `list_docs` and `list docs`, but not `a list of docs`. " +
         "Case and accents are folded, but nothing is stemmed — `withdrawal` does not find a document that says " +
         "`withdrawing`. A trailing `*` loosens one term to a prefix match, which is how to reach an inflection: " +
-        "`withdraw*` finds both. No hits means no indexed document matched the whole query under those rules; it does not by itself mean the index is empty.\n\n" +
+        "`withdraw*` finds both `withdrawal` and `withdrawing`. No hits means no indexed document matched the whole query under those rules; it does not by itself mean the index is empty.\n\n" +
         "Every hit carries the document's `description` — null where nobody has written one — so relevance can be " +
         "judged from the result list rather than by opening each document in turn." +
         failureContract("search"),
@@ -1117,7 +1118,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           .string()
           .min(1)
           .describe(
-            "Words to match; every one of them must occur in one and the same document. A trailing * is a prefix match.",
+            "Words to match; every term must occur in one document, `list_docs` matches both `list_docs` and `list docs` but not `a list of docs`, and a trailing * makes its term a prefix match.",
           ),
         limit: z.number().int().min(1).max(100).optional(),
       }),
