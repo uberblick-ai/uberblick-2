@@ -83,13 +83,10 @@ export function backlogLabel(count: number): string {
  * title and the sync panel's fact — read the pair through here and cannot end
  * up promising different things about one document.
  *
- * `docPresent` is the second way the answer is unknown, and it is why the flag
- * alone is not enough: `hasLocalCache` goes true when IndexedDB *opens*,
- * including a database this tab has just created empty, so on a deep link to a
- * document this machine has never seen it says "local copy" directly above
- * "has not reached this replica yet" (#601). Until that flag means what its
- * name says, a surface that knows the document is not here says nothing rather
- * than promising a copy of it.
+ * `docPresent` is the second way the answer is unknown. A durable checkpoint
+ * can prove that a room was cached after an earlier hub round-trip, but an
+ * absent deep-linked document is still not a copy this surface can identify,
+ * so it says nothing until the document itself reaches the replica (#601).
  */
 export function localCopyState(
   status: RoomStatus,

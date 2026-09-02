@@ -308,10 +308,10 @@ describe("the sync panel renders the state this client holds", () => {
   });
 
   it("knows nothing about a document that has not reached this replica", () => {
-    // The panel opens over the waiting screen too, and `hasLocalCache` is true
-    // there for a room whose document has never arrived — the flag reports that
-    // IndexedDB opened, not that anything was found in it (#601). Unknown, in
-    // the panel's own word for it, rather than a promise.
+    // The panel opens over the waiting screen too. A checkpoint can prove the
+    // room was cached, but not that the deep-linked document now on the route
+    // is the content this replica actually holds (#601). Unknown, in the
+    // panel's own word for it, rather than a promise.
     vi.useFakeTimers();
     const { host, root } = mount(
       fixture({ localReplicaLoaded: true, hasLocalCache: true }),
