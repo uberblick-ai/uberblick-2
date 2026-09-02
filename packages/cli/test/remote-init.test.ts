@@ -13,8 +13,8 @@
  * scheduled is installed on the host, updates being deliberate; that the
  * signing secret is in no argument vector and on neither stream; that a failed
  * `up` persists nothing; that a failed step is reported in the vendor's own
- * words, bounded; that the endpoint it stood up is persisted; and that a second
- * run is a no-op.
+ * words, bounded; that the endpoint it stood up is persisted; and that a re-run
+ * sends one private payload through one locked deploy.
  */
 
 import { parseWorkspaceId } from "@uberblick/schema";
@@ -34,6 +34,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { readUserConfig } from "../src/config.js";
 import type { Io } from "../src/io.js";
 import {
+  initRerunFailure,
   remoteInitCommand,
   remoteUpdateCommand,
   upgradeWebsocket,
@@ -95,6 +96,7 @@ function sshBehavior(host: Host): string {
     .join("\n");
   return `case "$*" in
 ${host.ssh ?? ""}
+  *"uberblick:init-rerun"*) printf 'uberblick-init-rerun: applied\n' ;;
   *"uberblick:preflight"*)
     cat <<'FACTS'
 ${preflight}
@@ -492,7 +494,7 @@ describe("ub remote init", () => {
     );
   });
 
-  it("is a no-op against a host it already initialised", async () => {
+  it("reuses an existing checkout through one locked deploy", async () => {
     const rig = harness({
       facts: { checkout: "present", deploykey: HOST_KEY },
       keys: `[{"id":1,"title":"uberblick-box-something","key":"${HOST_KEY}"}]`,
@@ -503,12 +505,64 @@ describe("ub remote init", () => {
     // No second key, and detection is by the key itself rather than the title.
     expect(labels.join("\n")).not.toContain("ensure-key");
     expect(labels.join("\n")).not.toContain("deploy-key add");
-    // And no second clone: the existing checkout is fast-forwarded.
-    expect(labels).toContain(`ssh ${TARGET} uberblick:fast-forward`);
+    // And no second clone: one checkout-owned lock spans the replacement env,
+    // fast-forward, build and deployed-ref move.
+    expect(labels).toContain(`ssh ${TARGET} uberblick:init-rerun`);
     expect(labels.join("\n")).not.toContain("uberblick:clone");
-    expect(stepFor(rig, "uberblick:fast-forward").args.join("\n")).toContain(
-      "git merge --ff-only origin/main",
+    expect(labels.join("\n")).not.toContain("uberblick:env");
+    expect(labels.join("\n")).not.toContain("uberblick:up");
+    expect(stepFor(rig, "uberblick:init-rerun").args.join("\n")).toContain(
+      "sh remote-update.sh --remote-init-rerun",
     );
+    expect(stepFor(rig, "uberblick:init-rerun").stdin).toContain(
+      `HUB_AUTH_TOKEN=${SECRET}`,
+    );
+  });
+
+  it("owns the reserved re-run diagnostics", () => {
+    expect([100, 101, 102, 103, 104, 105].map(initRerunFailure)).toEqual([
+      "another deploy already holds the checkout lock",
+      "the checkout lock could not be taken",
+      "the checkout could not be fast-forwarded",
+      "the replacement .env could not be written",
+      "the stack could not be built and started",
+      "the deployed commit could not be recorded",
+    ]);
+  });
+
+  it("prints build logs separately without relaying secret-bearing host bytes", async () => {
+    const rig = harness({
+      facts: { checkout: "present", deploykey: HOST_KEY },
+      keys: `[{"id":1,"title":"uberblick-box-something","key":"${HOST_KEY}"}]`,
+      ssh: `  *"uberblick:init-rerun"*)
+    tr '\\0' '\\n' < "$UB_TEST_RECORD/$(printf '%03d' "$count")-ssh" >&2
+    exit 104
+    ;;`,
+    });
+
+    expect(await init(rig)).toBe(1);
+    expect(rig.err()).toContain("the stack could not be built and started");
+    expect(rig.err()).toContain("hub | boom");
+    expect(rig.output()).not.toContain(SECRET);
+    expect(rig.output()).not.toContain("HUB_AUTH_TOKEN");
+    const deploy = stepFor(rig, "uberblick:init-rerun");
+    expect(deploy.args.join("\n")).not.toContain(SECRET);
+    expect(deploy.env.join("\n")).not.toContain(SECRET);
+    expect(deploy.stdin).toContain(SECRET);
+    expect(rig.labels().at(-1)).toBe(`ssh ${TARGET} uberblick:logs`);
+  });
+
+  it("refuses success without proof that the host applied the replacement env", async () => {
+    const rig = harness({
+      facts: { checkout: "present", deploykey: HOST_KEY },
+      keys: `[{"id":1,"title":"uberblick-box-something","key":"${HOST_KEY}"}]`,
+      ssh: `  *"uberblick:init-rerun"*) printf 'uberblick-update: deployed old-updater\n' ;;`,
+    });
+
+    expect(await init(rig)).toBe(1);
+    expect(rig.err()).toContain("did not confirm applying the replacement .env");
+    expect(rig.err()).toContain("`ub remote update`");
+    expect(rig.labels().at(-1)).toBe(`ssh ${TARGET} uberblick:init-rerun`);
   });
 
   it("reports replacing a different workspace on a re-run", async () => {
@@ -540,7 +594,7 @@ describe("ub remote init", () => {
     expect(await init(rig)).toBe(0);
     expect(rig.out()).not.toContain("WEB_WORKSPACES");
     expect(
-      stepFor(rig, "uberblick:env").stdin
+      stepFor(rig, "uberblick:init-rerun").stdin
         .split("\n")
         .filter((line) => line.startsWith("WEB_WORKSPACES=")),
     ).toEqual([`WEB_WORKSPACES=${WORKSPACE}`]);

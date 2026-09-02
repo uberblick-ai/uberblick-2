@@ -237,17 +237,6 @@ git rev-parse HEAD
 `;
 }
 
-function fastForwardScript(dir: string): string {
-  return `# uberblick:fast-forward
-set -eu
-cd ${hostPath(dir)}
-git config core.sshCommand ${q(SSH_COMMAND)}
-git fetch --quiet origin main
-git merge --ff-only origin/main
-git rev-parse HEAD
-`;
-}
-
 function envScript(dir: string): string {
   return `# uberblick:env
 set -eu
@@ -280,6 +269,36 @@ set -eu
 cd ${hostPath(dir)}
 sh remote-update.sh
 `;
+}
+
+/** One checkout-owned lock around every state change made by an init re-run. */
+function initRerunScript(dir: string): string {
+  return `# uberblick:init-rerun
+set -eu
+cd ${hostPath(dir)}
+sh remote-update.sh --remote-init-rerun
+`;
+}
+
+export function initRerunFailure(status: number | null): string {
+  switch (status) {
+    case 100:
+      return "another deploy already holds the checkout lock";
+    case 101:
+      return "the checkout lock could not be taken";
+    case 102:
+      return "the checkout could not be fast-forwarded";
+    case 103:
+      return "the replacement .env could not be written";
+    case 104:
+      return "the stack could not be built and started";
+    case 105:
+      return "the deployed commit could not be recorded";
+    case null:
+      return "the SSH command could not be started";
+    default:
+      return `the locked deploy exited ${status}`;
+  }
 }
 
 // --- reaching the deployment ------------------------------------------------
@@ -845,50 +864,73 @@ export async function remoteInitCommand(
   }
 
   const existing = facts.checkout === "present";
-  io.err(
-    existing
-      ? `ub remote: fast-forwarding the checkout on ${flags.target}…\n`
-      : `ub remote: cloning ${REPO} onto ${flags.target}…\n`,
-  );
-  const checkout = ssh(
-    flags.target,
-    existing ? fastForwardScript(flags.dir) : cloneScript(flags.dir),
-    { env },
-  );
-  if (checkout.status !== 0) {
-    // The whole of what git said, then the verdict — `ub remote update`'s
-    // shape. A clone that is refused the deploy key says so five lines from
-    // the end, behind git's own boilerplate, so the tail alone loses it.
-    io.err(
-      `${printable(checkout.stderr)}ub remote init: ${failed(existing ? "git fetch on the host" : "git clone on the host", checkout)}.\n`,
-    );
-    return 1;
-  }
-
   // Over stdin: the secret is never an argument, on either side.
   // resolveConfig's workspace grammar is a strict subset of the compose
   // script's JSON-interpolation charset, pinned by the companion contract test.
-  const wrote = ssh(flags.target, envScript(flags.dir), {
-    env,
-    input: `# Written by \`ub remote init\`. Untracked, so updates never touch it.\nTAILSCALE_HOST=${magicDns}\nTAILSCALE_IP=${address}\nHUB_AUTH_TOKEN=${secret}\nWEB_WORKSPACES=${webWorkspace}\n`,
-  });
-  if (wrote.status !== 0) {
-    // The one step handed the secret, and the only one whose words are not
-    // quoted: a host that echoed its stdin back on stderr would put the
-    // payload in this line. A shell's error message is not worth that.
-    io.err(
-      `ub remote init: ${failed("writing .env on the host", { ...wrote, stderr: "" })}.\n`,
-    );
-    return 1;
-  }
+  const envPayload = `# Written by \`ub remote init\`. Untracked, so updates never touch it.\nTAILSCALE_HOST=${magicDns}\nTAILSCALE_IP=${address}\nHUB_AUTH_TOKEN=${secret}\nWEB_WORKSPACES=${webWorkspace}\n`;
 
-  io.err(`ub remote: building and starting the stack on ${flags.target}…\n`);
-  const up = ssh(flags.target, upScript(flags.dir), { env });
-  if (up.status !== 0) {
-    io.err(`ub remote init: ${failed("sh remote-compose.sh up", up)}.\n`);
-    io.err(ssh(flags.target, logsScript(flags.dir), { env }).stdout);
-    io.err("Nothing was persisted here.\n");
-    return 1;
+  if (existing) {
+    io.err(`ub remote: updating and rebuilding the checkout on ${flags.target}…\n`);
+    const deployed = ssh(flags.target, initRerunScript(flags.dir), {
+      env,
+      input: envPayload,
+    });
+    if (deployed.status !== 0) {
+      // This SSH connection carried the secret on stdin. Never quote any host
+      // bytes from it: the updater reserves statuses so the CLI names the
+      // target, checkout and cause in words it owns.
+      io.err(
+        `ub remote init: ${flags.target} could not deploy checkout ${flags.dir}: ` +
+          `${initRerunFailure(deployed.status)}.\n`,
+      );
+      if (deployed.status === 104) {
+        io.err(ssh(flags.target, logsScript(flags.dir), { env }).stdout);
+      }
+      return 1;
+    }
+    if (!deployed.stdout.split(/\r?\n/).includes("uberblick-init-rerun: applied")) {
+      io.err(
+        `ub remote init: ${flags.target} could not deploy checkout ${flags.dir}: ` +
+          "the host updater did not confirm applying the replacement .env; " +
+          "update that checkout once with `ub remote update`, then retry.\n",
+      );
+      return 1;
+    }
+  } else {
+    io.err(`ub remote: cloning ${REPO} onto ${flags.target}…\n`);
+    const checkout = ssh(flags.target, cloneScript(flags.dir), { env });
+    if (checkout.status !== 0) {
+      // The whole of what git said, then the verdict — `ub remote update`'s
+      // shape. A clone that is refused the deploy key says so five lines from
+      // the end, behind git's own boilerplate, so the tail alone loses it.
+      io.err(
+        `${printable(checkout.stderr)}ub remote init: ${failed("git clone on the host", checkout)}.\n`,
+      );
+      return 1;
+    }
+
+    const wrote = ssh(flags.target, envScript(flags.dir), {
+      env,
+      input: envPayload,
+    });
+    if (wrote.status !== 0) {
+      // The one step handed the secret, and the only one whose words are not
+      // quoted: a host that echoed its stdin back on stderr would put the
+      // payload in this line. A shell's error message is not worth that.
+      io.err(
+        `ub remote init: ${failed("writing .env on the host", { ...wrote, stderr: "" })}.\n`,
+      );
+      return 1;
+    }
+
+    io.err(`ub remote: building and starting the stack on ${flags.target}…\n`);
+    const up = ssh(flags.target, upScript(flags.dir), { env });
+    if (up.status !== 0) {
+      io.err(`ub remote init: ${failed("sh remote-compose.sh up", up)}.\n`);
+      io.err(ssh(flags.target, logsScript(flags.dir), { env }).stdout);
+      io.err("Nothing was persisted here.\n");
+      return 1;
+    }
   }
 
   io.err(`ub remote: waiting for https://${magicDns}/ …\n`);

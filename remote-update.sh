@@ -2,9 +2,10 @@
 #
 # Bring this host's checkout, and the containers running from it, to origin/main.
 #
-# Runs only when somebody means it: by hand on the host, or from
-# `ub remote update <ssh-target>` — a person or an agent session over SSH.
-# Nothing schedules it; there is no timer (owner decision, 2026-08-25).
+# Runs only when somebody means it: by hand on the host, from
+# `ub remote update <ssh-target>`, or through the internal mode an explicit
+# `ub remote init` re-run uses. Nothing schedules it; there is no timer (owner
+# decision, 2026-08-25).
 #
 # The comparison is against the last *successfully deployed* commit, recorded in
 # refs/uberblick/deployed and moved only after a build exits 0 — never against
@@ -16,7 +17,18 @@
 # `git reset --hard` discards host-local edits to tracked files, deliberately:
 # the host mirrors main and is not a place to edit. What it discarded is printed
 # so the loss is visible rather than silent. The host's `.env` is untracked and
-# survives — nothing here runs `git clean`.
+# survives ordinary updates — nothing here runs `git clean`; only the init
+# re-run mode explicitly replaces it with the configuration received on stdin.
+
+mode=update
+case "${1-}" in
+  "") ;;
+  --remote-init-rerun) mode=remote-init-rerun ;;
+  *)
+    printf 'usage: sh remote-update.sh [--remote-init-rerun]\n' >&2
+    exit 2
+    ;;
+esac
 
 set -eu
 
@@ -48,16 +60,44 @@ exec 9<"$checkout"
 lock_status=0
 flock -n -E "$busy" 9 || lock_status=$?
 if [ "$lock_status" -eq "$busy" ]; then
+  if [ "$mode" = remote-init-rerun ]; then exit "$busy"; fi
   printf 'uberblick-update: already running; nothing to do.\n'
   exit 0
 fi
 if [ "$lock_status" -ne 0 ]; then
+  if [ "$mode" = remote-init-rerun ]; then exit 101; fi
   printf 'uberblick-update: cannot lock %s (flock exited %s); refusing to update.\n' \
     "$checkout" "$lock_status" >&2
   exit 1
 fi
 
 cd "$checkout"
+
+# An existing `ub remote init` checkout uses this internal mode so its fetch,
+# replacement `.env`, build and deployed ref share this script's one lock. Read
+# the secret-bearing stdin into a private staging file before any child runs;
+# no later command inherits payload bytes it could mistake for its own input.
+# Each failure has a reserved status so the local CLI can name the cause in its
+# own words without relaying bytes from the secret-bearing SSH connection.
+if [ "$mode" = remote-init-rerun ]; then
+  staged_env=.env.uberblick-init
+  # HUP/INT/TERM remove a still-staged secret but deliberately do not exit: once
+  # the build has started, it finishes under this lock rather than being
+  # orphaned while another deploy begins.
+  trap 'rm -f "$staged_env"' 0 HUP INT TERM
+  (umask 077 && cat > "$staged_env") || exit 103
+  chmod 600 "$staged_env" || exit 103
+
+  git fetch --quiet origin main || exit 102
+  git merge --ff-only origin/main || exit 102
+  mv "$staged_env" .env || exit 103
+  sh remote-compose.sh up --build --detach || exit 104
+  git update-ref "$deployed_ref" HEAD || exit 105
+  # Private proof consumed by `ub remote init`; an older updater cannot emit it
+  # and therefore cannot turn an ignored configuration payload into success.
+  printf 'uberblick-init-rerun: applied\n'
+  exit 0
+fi
 
 git fetch --quiet origin main
 target=$(git rev-parse --verify origin/main)
