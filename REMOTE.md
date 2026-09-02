@@ -475,8 +475,8 @@ exports, and Compose interpolates the whole model for every subcommand, so a bar
 ### What a backup is actually for
 
 Every MCP server holds the **entire** workspace and hydrates from its own
-append-only update log; `_directory`, `_sidebar` and `_feedback` are synced
-documents like any other, and the hub keeps no non-synced tables today. So the
+append-only update log; `_directory` and `_sidebar` are synced documents like
+any other, and the hub keeps no non-synced tables today. So the
 *content* is restorable without a backup at all: stand up an empty hub, let one
 machine reconnect, and the corpus comes back off that replica.
 

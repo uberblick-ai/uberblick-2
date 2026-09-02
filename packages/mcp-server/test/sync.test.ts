@@ -13,6 +13,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { appendBlock, getBlocks, getMeta, listDirectory } from "@uberblick/schema";
 import type { Hub, HubLogRecord } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import * as Y from "yjs";
+import { MirrorStore } from "../src/store.js";
 import {
   hubUrl,
   LIVE_HUB_SETTLE,
@@ -87,6 +89,45 @@ async function waitForQuiet(rig: Rig): Promise<void> {
 }
 
 describe("hub sync", () => {
+  it("drains a pending legacy feedback room, then leaves its residue inert", async () => {
+    const running = await hub();
+    const databasePath = tempDatabasePath();
+    const legacyRoom = `${WORKSPACE}/${["_feed", "back"].join("")}`;
+    const legacy = new Y.Doc();
+    legacy.getArray("events").push([{ legacy: true }]);
+    const seeded = new MirrorStore(databasePath, WORKSPACE);
+    seeded.appendUpdate(legacyRoom, Y.encodeStateAsUpdate(legacy), "local");
+    seeded.close();
+    legacy.destroy();
+
+    const draining = await serverOn(running.port, { databasePath });
+    await waitForQuiet(draining);
+    expect(
+      (await draining.ok("sync_status", {})).rooms.map(
+        (entry: { room: string }) => entry.room,
+      ),
+    ).toEqual([
+      `${WORKSPACE}/_directory`,
+      `${WORKSPACE}/_sidebar`,
+      legacyRoom,
+    ]);
+
+    await draining.close();
+    rigs.splice(rigs.indexOf(draining), 1);
+
+    const restarted = await serverOn(running.port, { databasePath });
+    const hubCopy = await peer(running.port, legacyRoom);
+    await waitUntil("the hub to retain the legacy feedback update", () =>
+      hubCopy.doc.getArray("events").length === 1,
+    );
+    const status = await restarted.ok("sync_status", {});
+    expect(restarted.instance.store.hasRoom(legacyRoom)).toBe(true);
+    expect(status.pendingRooms).toEqual([]);
+    expect(
+      status.rooms.map((entry: { room: string }) => entry.room),
+    ).toEqual([`${WORKSPACE}/_directory`, `${WORKSPACE}/_sidebar`]);
+  });
+
   it("delivers a document created while the hub was down", async () => {
     // Take a port, then give it back: the server dials an address that will
     // only start answering later.

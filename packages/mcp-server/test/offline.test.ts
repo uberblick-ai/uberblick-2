@@ -55,14 +55,12 @@ describe("with the hub stopped", () => {
       "delete_block",
       "edit_block",
       "export_markdown",
-      "feedback_report",
       "get_doc",
       "get_sidebar",
       "insert_block",
       "link_range",
       "list_docs",
       "pin_doc",
-      "rate_doc",
       "restore_doc",
       "search",
       "set_changelog_suggestion",
@@ -92,6 +90,29 @@ describe("with the hub stopped", () => {
     for (const type of BLOCK_TYPES) {
       expect(insert?.description).toContain(type);
     }
+  });
+
+  it("reads a document without writing to the replica log", async () => {
+    const rig = await offlineRig();
+    const created = await rig.ok("create_doc", {
+      title: "Read only",
+      description: "A test document.",
+    });
+    const logCounts = () =>
+      new Map(
+        rig.instance.replicas
+          .attachedReplicas()
+          .map((replica) => [
+            replica.room,
+            rig.instance.store.updateCount(replica.room),
+          ]),
+      );
+    const before = logCounts();
+
+    const read = await rig.ok("get_doc", { uuid: created.uuid });
+
+    expect(read).not.toHaveProperty("feedback");
+    expect(logCounts()).toEqual(before);
   });
 
   it("serves the whole tool set", async () => {
@@ -298,14 +319,13 @@ describe("with the hub stopped", () => {
     expect(missing.payload.error).toBe("doc_not_found");
     // A typo must not create an empty document on the hub.
     const status = await rig.ok("sync_status", {});
-    // The well-known rooms and nothing else: discovery, curation and usage
-    // telemetry are synced docs, attached from boot.
+    // The well-known rooms and nothing else: discovery and curation are synced
+    // docs, attached from boot.
     expect(
       status.rooms.map((room: { room: string }) => room.room),
     ).toEqual([
       `${WORKSPACE}/_directory`,
       `${WORKSPACE}/_sidebar`,
-      `${WORKSPACE}/_feedback`,
     ]);
   });
 

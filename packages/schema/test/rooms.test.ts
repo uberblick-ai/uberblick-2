@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   DIRECTORY_SUFFIX,
-  FEEDBACK_SUFFIX,
   InvalidRoomError,
   InvalidWorkspaceIdError,
   SIDEBAR_SUFFIX,
   assertCanonicalRoom,
   directoryRoom,
-  feedbackRoom,
   isCanonicalRoom,
   parseRoom,
   parseWorkspaceId,
@@ -66,8 +64,6 @@ describe("room names", () => {
     expect(directoryRoom(WORKSPACE)).toBe(`${WORKSPACE}/${DIRECTORY_SUFFIX}`);
     expect(SIDEBAR_SUFFIX).toBe("_sidebar");
     expect(sidebarRoom(WORKSPACE)).toBe(`${WORKSPACE}/${SIDEBAR_SUFFIX}`);
-    expect(FEEDBACK_SUFFIX).toBe("_feedback");
-    expect(feedbackRoom(WORKSPACE)).toBe(`${WORKSPACE}/${FEEDBACK_SUFFIX}`);
   });
 
   it("keeps the slug out of the room name, so both spellings name one room", () => {
@@ -145,7 +141,6 @@ describe("the canonical room grammar", () => {
       ["a document uuid", `${WORKSPACE}/${DOC}`],
       ["the directory", `${WORKSPACE}/${DIRECTORY_SUFFIX}`],
       ["the sidebar", `${WORKSPACE}/${SIDEBAR_SUFFIX}`],
-      ["the feedback doc", `${WORKSPACE}/${FEEDBACK_SUFFIX}`],
       // Reserved, and deliberately not built: nothing creates a `_settings`
       // document (#177). It is in the grammar so that building it later is not
       // a change to the grammar the hub authenticates against.
@@ -161,6 +156,10 @@ describe("the canonical room grammar", () => {
     const rejected: [label: string, room: string][] = [
       ["an arbitrary word", `${WORKSPACE}/notauuid`],
       ["a reserved-looking name nobody reserved", `${WORKSPACE}/_admin`],
+      [
+        "the retired feedback room",
+        `${WORKSPACE}/${["_feed", "back"].join("")}`,
+      ],
       ["a path with an extra segment", `${WORKSPACE}/${DOC}/extra`],
       ["an empty document segment", `${WORKSPACE}/`],
       // One case rule for both segments (#196): the workspace segment has

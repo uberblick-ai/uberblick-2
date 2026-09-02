@@ -19,8 +19,8 @@
  *
  * …plus workspace ids (a uuid, optionally slug-decorated for display), room
  * names (`<workspaceId>/<uuid>`), the directory doc that makes discovery a
- * synced doc, the sidebar doc that makes curation one, the feedback doc that
- * makes usage telemetry one, and one-way markdown export.
+ * synced doc, the sidebar doc that makes curation one, and one-way markdown
+ * export.
  *
  * Runtime dependencies are limited to `yjs` and `fast-diff`.
  *
@@ -113,32 +113,16 @@ export type {
 
 export {
   DIRECTORY_SUFFIX,
-  FEEDBACK_SUFFIX,
   SIDEBAR_SUFFIX,
   assertCanonicalRoom,
   canonicalDocumentUuid,
   directoryRoom,
-  feedbackRoom,
   isCanonicalRoom,
   parseRoom,
   roomForDoc,
   sidebarRoom,
 } from "./rooms.js";
 export type { ParsedRoom } from "./rooms.js";
-
-export {
-  compactFeedback,
-  getFeedbackEvents,
-  getFeedbackTotals,
-  readFeedback,
-  recordUsage,
-  recordVerdict,
-} from "./feedback.js";
-export type {
-  CompactFeedbackOptions,
-  RecordUsageInput,
-  RecordVerdictInput,
-} from "./feedback.js";
 
 export { parseWorkspaceId } from "./workspace.js";
 export type { WorkspaceId } from "./workspace.js";
@@ -227,15 +211,9 @@ export type {
   DecisionReference,
   DirectoryEntry,
   DecisionStatus,
-  DocFeedback,
   DocMeta,
   DocumentKind,
   DocumentStatus,
-  FeedbackEvent,
-  FeedbackKind,
-  FeedbackReason,
-  FeedbackTotals,
-  FeedbackVerdict,
   HeadingLevel,
   InlineMarkName,
   InlineMarkSet,
