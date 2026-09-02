@@ -27,9 +27,12 @@ import {
   appendBlock,
   createAnnotation,
   directoryRoom,
+  getAnnotation,
   getBlocks,
+  getBlocksFragment,
   initDoc,
   roomForDoc,
+  setAnnotationResolved,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
@@ -110,7 +113,7 @@ afterEach(() => {
  * back until it has read its hub endpoint, so a synchronous render commits a
  * shell with no panes in it.
  */
-async function openAnnotatedDoc(): Promise<{
+async function openAnnotatedDoc(resolved = false): Promise<{
   host: HTMLElement;
   ydoc: Y.Doc;
   threadId: string;
@@ -122,6 +125,7 @@ async function openAnnotatedDoc(): Promise<{
   upsertDirectoryEntry(directory, { uuid: UUID, title: "Annotated" });
   const blockId = getBlocks(ydoc)[0]!.id;
   const thread = createAnnotation(ydoc, blockId, 4, 15, "ben", "why quick?");
+  if (resolved) setAnnotationResolved(ydoc, thread.id, true);
 
   window.history.replaceState(null, "", `/${WORKSPACE}/${UUID}`);
   const host = document.createElement("div");
@@ -172,6 +176,82 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
     expect(card).not.toBeNull();
     expect(card?.textContent).toContain("why quick?");
     expect(document.activeElement).toBe(card);
+  });
+
+  it("reveals a resolved conversation without changing or toggling it", async () => {
+    const scrolled: Element[] = [];
+    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
+      scrolled.push(this);
+    };
+    const { host, ydoc, threadId } = await openAnnotatedDoc();
+
+    // The live annotations subscription repaints an already-mounted mark; this
+    // state change touches no prose and gives ProseMirror no reason to redraw.
+    let span = highlight(host, threadId);
+    expect(span.getAttribute("aria-label")).toBe("Comment thread");
+    expect(span.getAttribute("title")).toBeNull();
+    await act(async () => setAnnotationResolved(ydoc, threadId, true));
+    expect(span.getAttribute("aria-label")).toBe(
+      "Resolved comment thread",
+    );
+    expect(span.getAttribute("title")).toBe("Resolved comment thread");
+
+    // And rewritten after the mark's DOM is redrawn, rather than being a
+    // one-time class on a ProseMirror-owned span.
+    const text = (getBlocksFragment(ydoc).get(0) as Y.XmlElement)
+      .firstChild as Y.XmlText;
+    await act(async () => {
+      text.insert(0, "Now ");
+      await Promise.resolve();
+    });
+    span = highlight(host, threadId);
+    expect(span.getAttribute("aria-label")).toBe("Resolved comment thread");
+    expect(span.getAttribute("title")).toBe("Resolved comment thread");
+
+    const before = [...Y.encodeStateAsUpdate(ydoc)];
+    await act(async () => span.click());
+    const item = host.querySelector<HTMLElement>(
+      `#${CSS.escape(threadCardId(threadId))}`,
+    );
+    const card = item?.querySelector<HTMLButtonElement>(".ub-thread");
+    expect(card?.getAttribute("aria-expanded")).toBe("true");
+    expect(card?.textContent).toContain("why quick?");
+    expect(scrolled).toContain(item);
+    expect(getAnnotation(ydoc, threadId)?.resolved).toBe(true);
+    expect(item?.querySelector(".ub-comment-input")).toBeNull();
+    expect(
+      [...(item?.querySelectorAll<HTMLButtonElement>("button") ?? [])].some(
+        (button) => button.textContent === "Reply",
+      ),
+    ).toBe(false);
+
+    // A second anchor activation is another request to reveal, never the
+    // resolved card's own collapse toggle.
+    await act(async () => span.click());
+    expect(card?.getAttribute("aria-expanded")).toBe("true");
+
+    // The card itself keeps that existing toggle. Once it has collapsed the
+    // conversation, the keyboard path from the prose reveals it and lands on
+    // the card.
+    await act(async () => card?.click());
+    expect(card?.getAttribute("aria-expanded")).toBe("false");
+    span = highlight(host, threadId);
+    span.focus();
+    await act(async () => {
+      span.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(card?.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(card);
+
+    // Selection state, DOM state and scrolling are the whole operation.
+    expect(getAnnotation(ydoc, threadId)?.resolved).toBe(true);
+    expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
   });
 
   /**

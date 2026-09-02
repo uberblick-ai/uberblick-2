@@ -125,21 +125,41 @@ export interface ThreadFocus {
    * without this, the highlight is a control that leads nowhere.
    */
   viaKeyboard: boolean;
+  /**
+   * This selection activated an anchor that was resolved at that moment, so
+   * the rail reveals its collapsed conversation. A card click leaves this
+   * false: resolved cards keep their own expand/collapse gesture.
+   */
+  revealResolved: boolean;
 }
 
 /**
- * Select a thread. `viaKeyboard` says the selection came from a key press, which
- * is what decides whether DOM focus follows — see {@link ThreadFocus}.
+ * How a thread was selected. The defaults describe a card click: pointer-led,
+ * with the card retaining its own expand/collapse gesture.
  */
-export type SelectThread = (threadId: string, viaKeyboard?: boolean) => void;
+export interface ThreadSelection {
+  viaKeyboard?: boolean;
+  revealResolved?: boolean;
+}
+
+/** Select a thread, carrying only the behavior its activation requested. */
+export type SelectThread = (
+  threadId: string,
+  selection?: ThreadSelection,
+) => void;
 
 /** The focus after selecting `threadId`, given the focus before it. */
 export function focusThread(
   previous: ThreadFocus | null,
   threadId: string,
-  viaKeyboard = false,
+  selection: ThreadSelection = {},
 ): ThreadFocus {
-  return { id: threadId, click: (previous?.click ?? 0) + 1, viaKeyboard };
+  return {
+    id: threadId,
+    click: (previous?.click ?? 0) + 1,
+    viaKeyboard: selection.viaKeyboard === true,
+    revealResolved: selection.revealResolved === true,
+  };
 }
 
 interface Anchor {
@@ -429,8 +449,9 @@ export function flashThreadHighlight(threadId: string): void {
  * A stylesheet and not a class on the span, because the span is ProseMirror's:
  * it is rebuilt whenever the text inside it changes, and a class this app wrote
  * would vanish on the next keystroke and come back only at the next annotation
- * change. A selector matching `data-comment-thread` — which the mark itself
- * renders (editor/nodes.ts) — survives every redraw, and resolving a thread is
+ * change. A selector matching `data-comment-thread` — rendered by the live
+ * comment mark view (`editor/comment-anchors.ts`) and by the schema's static
+ * form (`editor/nodes.ts`) — survives every redraw, and resolving a thread is
  * rare enough that regenerating one rule costs nothing.
  *
  * The declarations are the resolved *state* of `.ub-comment` in styles.css: the

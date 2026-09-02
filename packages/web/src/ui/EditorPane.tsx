@@ -5,7 +5,12 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { getBlocksFragment, parseRoom, setTitle } from "@uberblick/schema";
+import {
+  getAnnotation,
+  getBlocksFragment,
+  parseRoom,
+  setTitle,
+} from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { bindGuardedEditor } from "../editor/guarded-binding.js";
 import { docLinkFromTarget } from "../editor/doc-links.js";
@@ -434,6 +439,16 @@ function BoundEditor({
     // and a click that both navigated and opened a thread would be two actions
     // from one gesture. The reference wins, and the thread stays reachable by
     // clicking the highlight beside the link or its card in the rail.
+    const selectThread = (threadId: string, viaKeyboard = false): void => {
+      onSelectThread(threadId, {
+        viaKeyboard,
+        // Only a resolved anchor takes the rail's one expansion slot. An open
+        // anchor leaves the resolved conversation a reader already expanded
+        // alone, while a card keeps its own toggle gesture.
+        revealResolved:
+          getAnnotation(connection.ydoc, threadId)?.resolved === true,
+      });
+    };
     const activate = (event: MouseEvent): void => {
       const docId = docLinkFromTarget(event.target);
       if (docId !== null) {
@@ -453,7 +468,7 @@ function BoundEditor({
         return;
       }
       const threadId = threadIdFromTarget(event.target);
-      if (threadId !== null) onSelectThread(threadId);
+      if (threadId !== null) selectThread(threadId);
     };
     // And the keyboard's version of that click (#101): the span is a
     // `role="button"` tab stop, so Enter and Space on a *focused* highlight
@@ -483,7 +498,7 @@ function BoundEditor({
       if (threadId === null) return;
       event.preventDefault();
       event.stopPropagation();
-      onSelectThread(threadId, true);
+      selectThread(threadId, true);
     };
     element.addEventListener("click", activate);
     element.addEventListener("keydown", activateThread, true);
