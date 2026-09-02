@@ -9,6 +9,8 @@ body:
       value: |
         Incomplete reports are welcome. The issue-preparer will ground and shape this intake into the final implementation contract.
 
+        After submitting, set Request Source: Human in the issue sidebar; leaving it unset does not block preparation.
+
         Want to shape the idea conversationally first? Use the `shape-issue` skill or follow the [provider-neutral shaping protocol](https://github.com/uberblick-ai/uberblick-2/blob/main/.agents/protocols/issue-shaping.md). Do not include secrets.
   - type: textarea
     id: goal-or-problem

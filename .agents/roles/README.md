@@ -85,6 +85,8 @@ preparation pass.
 Before creating a follow-up issue discovered during a run, fetch
 `origin/main` and check the observation against that commit and existing open
 issues. Do not queue work that current main already resolved or already tracks.
+Create it through `.github/ISSUE_SPEC.md`'s **Request source** path so its
+provenance is set and read back without becoming a gate.
 
 `Priority` means the organization issue field: Urgent → High → Medium → Low.
 The product owner owns every explicit value; agents never write it. Unset is
