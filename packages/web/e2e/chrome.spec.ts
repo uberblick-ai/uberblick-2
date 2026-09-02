@@ -1160,19 +1160,22 @@ test("the document title is set in the bundled Fraunces, and nothing else moved"
   expect(await painted(page, ".ub-title", "font-weight")).toBe("500");
   expect(await width(page, ".ub-title")).toBe(await width(page, ".ub-editor"));
 
-  // "No font CDN" is not checkable by naming CDNs, so it is checked as what it
-  // is a case of: every font file this page fetched came from the app's own
-  // origin, and Fraunces is among them.
+  // No font file comes from outside the app, and the Google Fonts stylesheet
+  // endpoint the feature replaced is absent too. Fraunces itself was fetched.
   const fetched = await page.evaluate(() => {
-    const fonts = performance
+    const resources = performance
       .getEntriesByType("resource")
-      .map((entry) => entry.name)
-      .filter((url) => /\.(woff2?|otf|ttf)(\?|$)/i.test(url));
+      .map((entry) => entry.name);
+    const fonts = resources.filter((url) => /\.(woff2?|otf|ttf)(\?|$)/i.test(url));
     return {
+      googleStylesheets: resources.filter(
+        (url) => new URL(url).hostname === "fonts.googleapis.com",
+      ),
       offOrigin: fonts.filter((url) => new URL(url).origin !== location.origin),
       fraunces: fonts.filter((url) => /fraunces/i.test(url)).length,
     };
   });
+  expect(fetched.googleStylesheets).toEqual([]);
   expect(fetched.offOrigin).toEqual([]);
   expect(fetched.fraunces).toBeGreaterThan(0);
 });
