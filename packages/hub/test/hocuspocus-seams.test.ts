@@ -503,3 +503,66 @@ describe("MessageReceiver.ts:72-110 — awareness has no readOnly check", () => 
     expect(document?.getText(TEXT_KEY).toString()).toBe("");
   });
 });
+
+describe("MessageReceiver.ts:88-107 — scratch re-encoding drops inbound awareness removals", () => {
+  /**
+   * The inbound update is decoded into a throwaway Awareness and then encoded
+   * again from only the client ids that remain in it. A removal leaves no id to
+   * encode, so the document and its peers retain the client's last state. An
+   * ordinary update that keeps the client while dropping one field is relayed.
+   *
+   * This is only the inbound MessageReceiver boundary. When a connection
+   * closes, `Document.removeConnection` calls `removeAwarenessStates` on the
+   * document itself, and that hub-generated removal is broadcast — the event
+   * the web's departed-agent grace observes.
+   */
+  it("relays a key removal but not the client's awareness removal", async () => {
+    const room = randomUUID();
+    let tokenRefreshed = false;
+
+    const { port } = await startServer({
+      onAuthenticate: async ({ token }) => ({ name: token }),
+      onTokenSync: async () => {
+        tokenRefreshed = true;
+      },
+    });
+
+    const sender = connect({ port, room, token: "sender" });
+    const observer = connect({ port, room, token: "observer" });
+    await Promise.all([sender.synced, observer.synced]);
+
+    const senderAwareness = sender.provider.awareness;
+    const observerAwareness = observer.provider.awareness;
+    if (!senderAwareness || !observerAwareness) {
+      throw new Error("the characterization requires provider awareness");
+    }
+    const senderId = senderAwareness.clientID;
+
+    senderAwareness.setLocalState({
+      name: "sender",
+      cursor: { anchor: 4, head: 4 },
+    });
+    await waitUntil("the observer to see both awareness fields", () =>
+      observerAwareness.getStates().get(senderId)?.cursor !== undefined,
+    );
+
+    senderAwareness.setLocalState({ name: "sender" });
+    await waitUntil("the key removal to reach the observer", () => {
+      const state = observerAwareness.getStates().get(senderId);
+      return state?.name === "sender" && !("cursor" in state);
+    });
+
+    // The token frame leaves after the removal on the same connection. The
+    // server drains that queue in order, so entering onTokenSync proves the
+    // removal has already passed through MessageReceiver without a timer.
+    senderAwareness.setLocalState(null);
+    sender.provider.sendToken();
+    await waitUntil("the later token frame to reach the server", () =>
+      tokenRefreshed,
+    );
+
+    expect(observerAwareness.getStates().get(senderId)).toEqual({
+      name: "sender",
+    });
+  });
+});
