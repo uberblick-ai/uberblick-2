@@ -356,6 +356,52 @@ describe("directory doc", () => {
     expect(getDirectoryEntry(dir, ALPHA)?.updatedAt).toBe(5_000);
     restoreDirectoryEntry(dir, ALPHA);
     expect(getDirectoryEntry(dir, ALPHA)?.updatedAt).toBe(5_000);
+
+    const losingMaximum = (deleted: boolean): Y.Doc => {
+      const author = new Y.Doc();
+      const observer = new Y.Doc();
+      author.clientID = 1;
+      observer.clientID = 2;
+      upsertDirectoryEntry(author, {
+        uuid: ALPHA,
+        title: "Alpha",
+        updatedAt: 1_000,
+      });
+      syncDocs(author, observer);
+
+      upsertDirectoryEntry(author, {
+        uuid: ALPHA,
+        title: "Authored",
+        updatedAt: 5_000,
+      });
+      upsertDirectoryEntry(observer, {
+        uuid: ALPHA,
+        title: "Observed",
+        updatedAt: 4_000,
+      });
+      if (deleted) tombstoneDirectoryEntry(observer, ALPHA);
+      syncDocs(author, observer);
+
+      expect(getDirectoryMap(observer).get(ALPHA)).toMatchObject({
+        updatedAt: 4_000,
+      });
+      expect(getDirectoryEntry(observer, ALPHA)?.updatedAt).toBe(5_000);
+      return observer;
+    };
+
+    const live = losingMaximum(false);
+    tombstoneDirectoryEntry(live, ALPHA);
+    expect(getDirectoryMap(live).get(ALPHA)).toMatchObject({
+      deleted: true,
+      updatedAt: 5_000,
+    });
+
+    const archived = losingMaximum(true);
+    restoreDirectoryEntry(archived, ALPHA);
+    expect(getDirectoryMap(archived).get(ALPHA)).toMatchObject({
+      updatedAt: 5_000,
+    });
+    expect(getDirectoryMap(archived).get(ALPHA)).not.toHaveProperty("deleted");
   });
 
   it("mirrors a description and carries it through every rewrite", () => {

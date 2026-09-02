@@ -19,6 +19,8 @@
  * converge last-write-wins per key while different uuids never conflict. The
  * one exception is `updatedAt`: one max candidate per Yjs client is kept in a
  * sibling map, so a losing whole-entry write cannot discard the greater stamp.
+ * Those candidates are never pruned, so state grows by one key per
+ * `(uuid, Yjs client)` and resolving one entry scans the full candidate map.
  *
  * `createdAt` and `updatedAt` are epoch milliseconds read from the clock of
  * whichever replica wrote them, and they are cache-quality like the rest of the
