@@ -29,6 +29,8 @@ findings-conditional protocol.
 - Record every gate outcome against the commit SHA it ran at — container
   review, CI, the acceptance validation, both adversarial verdicts where the
   dual-challenge gate applied, and any Copilot result when one was requested.
+  Record the exact `origin/main` SHA that the exact-head gate set began from as
+  its base-freshness point too.
   Link the check, review record or failure evidence; do not paste full logs,
   test counts or timings into each ruling. A Copilot review is already its own
   record and gets no wrapper comment; a platform refusal is recorded once and
@@ -38,6 +40,19 @@ findings-conditional protocol.
   `review-protocol.md`'s risk-scoped re-review rule; either run a fresh round or
   record exactly which reasoning still applies and why. The integrator's own
   gate work does not fill a missing challenger slot.
+- An advance of `origin/main` after those exact-head gates fires a separate
+  merged-tree gate, regardless of whether the two diffs appear to touch the
+  same files. Fetch the current base and PR head, use `git merge-tree
+  --write-tree <base-sha> <head-sha>` and `git commit-tree <tree> -p
+  <base-sha> -p <head-sha>` to make the prospective two-parent merge commit,
+  and hold that throwaway commit on a private ref for the gate's lifetime.
+  From the required checkout at that base, run `mise run review
+  <merge-commit>`; when the PR warrants browser e2e, run it from a detached
+  temporary worktree at the same merge commit. Record both the merge commit
+  and the exact `origin/main` SHA in the evidence, then remove the temporary
+  ref and worktree. Never push either. Exact-head gates are insufficient once
+  the base moves, and `merge-tree` reporting textual mergeability never
+  substitutes for the suite on the tree that will ship.
 - Check an acceptance box on a linked issue only with evidence (command output,
   test name), and check that the diff stays within the declared `Touches` — the
   shared set when the PR closes a batch.
@@ -188,10 +203,17 @@ principle).
 recorded gate SHA — `gh pr merge <n> --match-head-commit <gate-sha> …` — so a
 commit landing after the last check fails the merge instead of riding stale
 evidence; comparing `gh pr view <n> --json headRefOid` beforehand is for the
-report, not the guarantee. Freshness covers the base too: if `origin/main`
-advanced after the gates and its changed files overlap the PR, gate the
-prospective merged tree and repeat if the base moves again. Either kind of
-mismatch returns to the gates.
+report, not the guarantee. Freshness covers the base too, but GitHub provides
+no merge argument that binds it: immediately before merging, fetch
+`origin/main` and compare it with the main SHA named by the latest gate
+evidence. If it moved after the exact-head gates, or after a prior merged-tree
+gate, run the merged-tree gate above against the new base and recheck again;
+every observed move repeats that gate, without a file-overlap shortcut. Only
+then invoke the merge. `--match-head-commit` still protects only the PR head,
+so this immediate fetch-and-recheck is an honest best-effort base guard, not a
+claim that another merge cannot land before GitHub executes the command.
+Either an observed base move or a head mismatch returns to the applicable
+gates.
 
 ## After ruling
 
