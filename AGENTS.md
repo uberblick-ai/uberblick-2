@@ -85,11 +85,14 @@ an issue completion comment. Never commit to `main` and never merge your own PR.
 
 Where `CLAUDE.md` requires a pre-handoff challenge, the implementer opens the
 PR as a draft and delegates one fresh independent critical review on the other
-runtime before handoff, so it can correct clear findings in the same run. The
-reviewer authors no diff and the implementer makes no authoritative
-disposition; after any corrections the integrator owns final-head review, gate
-evidence, and every disposition. The exact delegation and convergence
-procedure lives in the role contracts and
+runtime before handoff. For a one-challenge change it may correct clear
+findings in the same run. For a dual-challenge change, ordinary findings wait:
+the implementer hands off the reviewed candidate head unchanged so the
+integrator's second reviewer examines that same SHA and one ruling can batch
+both verdicts. A P1 may interrupt that freeze. The reviewer authors no diff and
+the implementer makes no authoritative disposition; the integrator owns
+final-head review, gate evidence, and every disposition. The exact delegation
+and convergence procedure lives in the role contracts and
 `.claude/skills/next-issue/review-protocol.md`.
 
 That handoff comment is the completion signal. The launcher relaunches from
@@ -103,18 +106,21 @@ tiers, and records the reviewing run on the PR.
 
 Independence follows the durable authoring session, not the fresh role run. A
 Claude Agent child shares its launching Claude session's authorship identity.
-Before an implementation reviewer or integrator claims a PR, it checks commit
-`Claude-Session` trailers and the linked claim/delegation records; if this
-session launched an implementer whose commit remains in the head, the PR is
-ineligible for that session. A new run id, context reset, or nested agent does
-not change that result.
+Before an implementation reviewer marks its delegated record running, or an
+integrator claims a PR, it checks commit `Claude-Session` trailers and the
+linked claim/delegation records; if this session launched an implementer whose
+commit remains in the head, the PR is ineligible for that session. A new run
+id, context reset, or nested agent does not change that result.
 
 When CLAUDE.md's dual-challenge gate applies, the implementer owns the first
 challenge, on the other runtime from the diff's author, and the integrator owns
 the second, a fresh session of the author's runtime. Both use the
-`implementation-reviewer` role and write exact-head verdicts on the PR. The
+`implementation-reviewer` role and write exact-head verdicts against the same
+frozen candidate head before one consolidated correction wave. The
 integrator's own acceptance and gate validation, and a Copilot review, are
-additional evidence rather than either required challenge.
+additional evidence rather than either required challenge. Non-implementation
+children use the one mutable delegation record `.agents/roles/README.md`
+defines; they do not add separate claim and completion comments.
 
 Every role reconstructs claims and progress from GitHub and re-reads the issue
 and PR threads before acting. The integrator records validation and finding

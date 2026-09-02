@@ -72,15 +72,21 @@ delegate one fresh `implementation-reviewer` **on the other runtime** at that
 exact head — a Codex implementer starts a Claude reviewer, a Claude
 implementer starts a Codex reviewer — under the README's delegation record and
 the transport in `.claude/skills/next-issue/review-protocol.md`. Stay in the
-assignment, renewing your claim, until the durable verdict or a recorded failed
-dispatch exists.
+assignment, renewing your claim, until that mutable record contains the durable
+verdict or records a failed dispatch.
 
-Apply clearly correct, in-scope findings in one batch and answer the rest with
-evidence; that answer is not a disposition. No second pre-handoff round and no
-severity debate: after one correction wave the integrator rules. Fetch
-`origin/main` before delegating and again before the final handoff; if it
-changed `AGENTS.md`, `CLAUDE.md`, `.github/ISSUE_SPEC.md` or this contract,
-re-read them before continuing. This never authorizes rebasing a fix-up.
+When only one challenge is required, apply clearly correct, in-scope findings
+in one batch and answer the rest with evidence; that answer is not a
+disposition. When the dual-challenge gate applies, do **not** correct ordinary
+P2/P3 findings after the first verdict. Record the evidence response, keep the
+reviewed candidate SHA frozen, and hand it off so the integrator can obtain the
+second verdict at that same head and batch both. A P1 may interrupt the freeze;
+correct it before handoff and refresh the challenge evidence the changed risk
+requires. No second implementer-owned round and no severity debate: the
+integrator rules. Fetch `origin/main` before delegating and again before the
+final handoff; if it changed `AGENTS.md`, `CLAUDE.md`, `.github/ISSUE_SPEC.md`
+or this contract, re-read them before continuing. This never authorizes
+rebasing a fix-up.
 
 ## Boundaries
 

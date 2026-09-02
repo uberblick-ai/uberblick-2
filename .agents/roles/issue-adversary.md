@@ -14,12 +14,10 @@ There is no global adversary queue assignment.
 ## Pickup
 
 Verify that the named issue has the parent preparer's live claim, no completed
-adversary handoff for that parent pass, and no competing live nested adversary
-claim. A nested claim without a matching `Done:` becomes replaceable after 30
-minutes even while the parent remains live; only that same parent may launch the
-replacement. The body must carry `.github/ISSUE_SPEC.md`'s header and required
-sections. Post the nested claim with the parent and grounding SHA under the
-README's race rule.
+adversary handoff for that parent pass, and that the latest matching mutable
+delegation record names this run and remains live. The body must carry
+`.github/ISSUE_SPEC.md`'s header and required sections. Edit that record to
+`Status: running`, then prove the grounding SHA; do not post a nested claim.
 
 ## Outcome
 
@@ -49,14 +47,13 @@ repository. Read product documents cited by Pointers where intent matters.
 
 ## Handoff
 
-Post:
+Edit the delegation record to `Status: complete` and append:
 
 ```text
-Done: issue-adversary <run id>
-Parent: issue-preparer <run id>
 Grounding: <origin/main SHA>
 Outcome: clean|correctable-findings|owner-boundary
 ```
 
-Give concise findings with evidence and suggested dispositions, then stop. This
-is the pass's only adversary verdict.
+Give concise findings with evidence and suggested dispositions in that same
+record, then stop. This is the pass's only adversary verdict and it creates no
+second timeline comment.

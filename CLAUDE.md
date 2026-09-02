@@ -96,7 +96,12 @@ neither shaping nor its adapters grant `ready` or choose Priority.
      `implementation-reviewer` on the other runtime from the diff's author,
      delegated by the implementer before handoff; then a separate
      `implementation-reviewer` on the author's runtime in a fresh session,
-     delegated by the integrator. One implementer-owned cross-runtime
+     delegated by the integrator. Both challenges target the same frozen
+     candidate head before ordinary P2/P3 corrections: the implementer hands
+     off the first verdict without changing that head, the integrator obtains
+     the second, and one ruling batches both sets of findings. A P1 may break
+     the freeze; its corrected head re-establishes the required independent
+     evidence before merge. One implementer-owned cross-runtime
      challenge is enough when an outside read is useful but those boundaries
      do not fire. No challenge is required for test-only,
      docs-only, or narrowly mechanical changes that preserve production
@@ -167,6 +172,10 @@ neither shaping nor its adapters grant `ready` or choose Priority.
   It covers conforming fix-ups and non-rewriting synchronization with `main`.
   If later work materially expands the design or scope, replace it with
   `needs-human` and name the delta.
+- **Tier routes authority; it does not choose the design.** Never replace a
+  simpler established primitive or dependency with bespoke correctness
+  machinery merely to avoid tier 3. Make the intended shape visible early and
+  obtain the owner decision once; the approval can precede final gates.
 - **`packages/cli` — tiered from the diff, not the package name** (owner
   decision, 2026-08-24). A diff that adds or changes the user-facing command
   surface — new subcommands, a changed user↔uberblick interaction, anything
@@ -191,7 +200,10 @@ the fallback, which is exactly why CI is high priority.
   data safety, the things someone relies on — not implementation details or
   trivia. Every test must defend a behavior worth defending.
 - **Boring dependencies, few of them.** Adding a dependency is an
-  architectural decision, not a convenience.
+  architectural decision, not a convenience. That bar favors a justified,
+  established primitive over hand-rolling the same safety or accessibility
+  contract; tier escalation is approval routing, not a reason to write more
+  code.
 
 ## Architecture (decided — do not relitigate)
 

@@ -117,7 +117,12 @@ choices and triggers. Duplicated or stale truth is itself a possible finding.
    later substantial findings are a strong churn signal, but the auditor must
    establish the actual value and risk from durable evidence. Treat recurrence
    inside the same unit as a possible representation or workflow defect rather
-   than automatically as evidence that one more round is valuable.
+   than automatically as evidence that one more round is valuable. For a
+   dual-challenge PR, verify the required pair targeted one frozen candidate
+   head before an ordinary correction wave. Count coordination records too:
+   each non-implementation child should occupy one mutable delegation comment,
+   each PR one mutable finding ledger, and repeated claim/completion wrappers or
+   copied gate tables are churn unless a recovery boundary required them.
 5. Challenge every suspected finding. Record the exact rule, durable evidence,
    reachable consequence, and smallest correction. Put plausible but unproven
    risks under `Watch` and record important false alarms rejected.

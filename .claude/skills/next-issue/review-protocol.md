@@ -9,12 +9,20 @@ reads, not gate checks. The integrator owns authoritative dispositions and any
 risk-scoped final-head round. `integration.md` beside this file owns the
 gates' order and mechanics.
 
+For the required pair, both reviewers read the same frozen candidate head. The
+implementer records an evidence response but does not make ordinary P2/P3
+corrections between them; after handoff the integrator obtains the second
+verdict and batches both. A P1 may interrupt the freeze because another review
+of a head already known unsafe buys nothing.
+
 ## Requesting the round
 
 CLAUDE.md's gate list is the authority on *when* a pre-handoff review is
 required. The implementer opens a draft PR and posts the README's exact-PR
 delegation at its current head before starting a fresh
-`implementation-reviewer`. One transport per *reviewer* runtime — the command
+`implementation-reviewer`. Add `Round: N` to that mutable record; the reviewer
+edits its status and appends its verdict there rather than posting claim and
+completion comments. One transport per *reviewer* runtime — the command
 is chosen by the runtime the round must run on, not by the caller's, so a
 same-runtime round (a `--codex` integrator on a Codex-authored PR) uses the
 same two commands. Both run from the parent's own worktree, detached (a
@@ -44,14 +52,15 @@ decision, 2026-09-01); without it, it is never a reviewer.
 Codex child to read the `implementation-reviewer` role contract; the Claude
 adapter already does. Either assignment names the exact PR, head, child run id
 and parent run id, and nothing else — the reviewer contract supplies the
-critical brief. Read the verdict from the PR; inspect the private scratch log
-only when dispatch fails or no durable verdict appears, so the child's
-reasoning transcript does not consume the parent context.
+critical brief. Read the verdict from the completed PR record; inspect the
+private scratch log only when dispatch fails or no durable verdict appears, so
+the child's reasoning transcript does not consume the parent context.
 
 The implementer stays in the assignment, renewing its claim, until the
-reviewer writes its durable verdict. A dispatch failure is recorded on the PR,
-never presented as a review; the integrator later supplies the missing
-challenge as well as its own. A further round is never a resumed session — it is a fresh
+reviewer completes its durable record. A dispatch failure edits that record to
+`Status: failed — <reason>` and is never presented as a review or repeated in a
+new failure comment; the integrator later supplies the missing challenge as
+well as its own. A further round is never a resumed session — it is a fresh
 reviewer at the new head, within the re-review scoping below. Every brief says:
 be critical, try to falsify the implementation with focused failure-path or
 mutation probes, and hunt specifically for overtesting and overengineering per
@@ -66,6 +75,28 @@ below, recorded separately for the two verdicts. If a fresh round is
 required, use the same runtime as the stale challenge it replaces unless the
 required runtime is unavailable; record an unavailable runtime as a failed
 dispatch, never as equivalent evidence.
+
+## Finding continuity
+
+The integrator maintains one compact finding-ledger comment per PR and edits it
+across heads. Each row has a stable id, the head where it was first established,
+its current disposition and one evidence link. Reviewers read it before filing
+findings. A settled observation is not a new finding merely because another
+runtime assigns a different severity: cite the existing id and add only
+material new evidence. Reopen that id only when the affected code changed or a
+reproducible supported-usage consequence makes the prior disposition no longer
+sound. The integrator updates the row; later rulings link it and discuss only
+rows that changed. New reviewer findings use the collision-free id
+`R<round>-F<sequence>`; the id does not change when severity or disposition
+does. Before dispatching the second reviewer of a required pair, the integrator
+initializes or updates the ledger from the first verdict so the second read can
+distinguish new evidence from rediscovery.
+
+```text
+<!-- uberblick-finding-ledger -->
+Finding ledger — PR #N
+| ID | First head | Status | Evidence / disposition |
+```
 
 ## Finding triage — before any fix-up brief
 
@@ -113,10 +144,13 @@ finding — severity does not decide the other two:
 
 ## One batched fix-up wave per review head
 
-Collect both challenges', any Copilot and integrator findings against the same head
-and triage them all first; then one decision-complete brief, one implementer
-pickup, one re-gate at the new head — never a pickup per finding or per
-reviewer. Standing
+Collect both challenges', any Copilot and integrator findings against the same
+frozen head and triage them all first; then one decision-complete brief, one
+implementer pickup, one re-gate at the new head — never a correction between
+the required pair and never a pickup per finding or per reviewer. The
+implementer's first-review evidence response may reject or clarify a finding,
+but for a dual challenge it does not move the head before the integrator's
+review. Standing
 brief constraints: smallest diff that closes the accepted findings; tests only
 for the contract or invariant a finding names, never for the mechanics of the
 fix. Fix-up diffs face the same Touches, scope-escape and overtesting checks as
@@ -136,10 +170,12 @@ answered the original finding, or lacks a focused test proving it — a one-line
 mechanical fix at such a boundary, proven by its test, is integrator territory;
 and whenever reviewer or integrator names a concrete risk rationale. Re-review
 briefs are delta-first: the fixes and the invariants they touch, expanding to
-the whole PR only when a fix invalidates earlier reasoning. After four external
-rounds, a further full round needs a PR comment naming the concrete unresolved
-risk. Record every round as a PR comment — `Review round N (<runtime>, head
-<sha>): <verdict>` — so round counts stay derivable from the thread.
+the whole PR only when a fix materially changes the representation or
+invalidates earlier reasoning. Once the required pair has returned, another
+full-PR round needs a PR record naming that concrete reason; generic freshness,
+a new reviewer, or a severity disagreement is not one. Record every round in
+its mutable delegation comment as `Review round N (<runtime>, head <sha>):
+<verdict>` so round counts stay derivable without separate lifecycle comments.
 
 ## Exit and convergence
 
@@ -157,3 +193,11 @@ integrator rules from supported-usage impact; if it still cannot, park
 `needs-human` with the finding and one focused owner question. Never park for a
 false positive, an unrelated pre-existing issue, or a finding rejected with
 evidence.
+
+Two successive correction heads that surface new supported-usage defects in
+the same hand-built mechanism trigger a representation check before another
+local patch. Compare deletion or an established primitive against continuing
+the mechanism, and record why the chosen shape can now converge. If the simpler
+shape needs authority or a dependency decision the issue does not grant, park
+that focused question before paying for a third correction head. Merge tier is
+approval routing, never a reason to preserve bespoke correctness machinery.

@@ -67,7 +67,8 @@ identity and this parent run. Prefer the other runtime/model when available —
 Claude calls Codex and Codex calls Claude — dispatching it as
 `.agents/protocols/issue-preparation.md` states, and stay in your assignment
 until its durable handoff exists. If that dispatch produces no verdict, record
-it on the issue rather than substituting a same-runtime adversary silently.
+it by marking the mutable delegation record failed rather than adding a failure
+comment or substituting a same-runtime adversary silently.
 
 Apply every meaning-preserving, correctable finding yourself, then repeat the
 affected grounding and final recheck without launching a second adversary. If

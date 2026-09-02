@@ -148,8 +148,9 @@ Preparation may instead end in `split`. Decide from the expected diff, never
 the issue body's length: split when the combined change is not reviewable in
 one sitting or a child has an independently useful outcome; keep cohesive work
 together when a proposed child only enables its sibling. Technical decomposition
-is preparer judgment; choosing product behavior is an owner decision. Thousands
-of hand-written changed lines are a strong presumption to split. The source
+is preparer judgment; choosing product behavior is an owner decision. Several
+independent interaction or lifecycle boundaries, or thousands of hand-written
+changed lines, are a strong presumption to split. The source
 becomes a coordination-only parent: remove `needs-preparation`, never add
 `ready`, and close it after its independently reviewable children. Give each
 child `needs-preparation`, `Parent: #N`, and only real ordering dependencies.
@@ -235,12 +236,15 @@ doesn't answer? Then the issue is not `ready`.**
 - **Why** — a sentence or two, tied to the spike acceptance criteria or a
   doc. Keeps the agent from "improving" beyond intent.
 - **Acceptance criteria** — a short checkbox list (`- [ ]`) of **distinct,
-  observable and non-obvious outcomes or invariants**. Use one to five; regroup
-  or split when the contract needs more. State what must be true, not how to
-  prove it: unit/e2e scenarios, test files and implementation steps belong in
-  Pointers, not in checkboxes. Repository hygiene and delivery gates — lint,
-  typecheck, the general test suite, review and CI — already live in
-  `AGENTS.md`, `CLAUDE.md` and CI; they are never issue acceptance criteria.
+  observable and non-obvious outcomes or invariants**. Use one to five. Each
+  checkbox owns one independently pass/fail outcome; closely coupled conditions
+  may clarify it, but do not join distinct interaction paths, lifecycle changes
+  or failure modes into one long checkbox to satisfy the cap. Split the issue
+  when more than five independently useful outcomes remain. State what must be
+  true, not how to prove it: unit/e2e scenarios, test files and implementation
+  steps belong in Pointers, not in checkboxes. Repository hygiene and delivery
+  gates — lint, typecheck, the general test suite, review and CI — already live
+  in `AGENTS.md`, `CLAUDE.md` and CI; they are never issue acceptance criteria.
   A post-merge corpus update sequenced by `CLAUDE.md` is not a diff acceptance
   criterion either; point the coordinator to the document under Pointers.
 - **Out of scope** — explicit non-goals, or `None.` if genuinely none. This
@@ -285,7 +289,7 @@ issue's edit history for the raw draft. Keep every body as short as complete. A
 complex or security-sensitive issue may carry more context when it changes a
 decision; a coordination parent carries only the shared outcome and child
 routing. Length alone never decides whether to split. Acceptance criteria stay
-at one to five distinct outcomes.
+at one to five atomic outcomes; prose density is not a workaround for the cap.
 
 - **Mechanism belongs in a document, not an issue.** When the corpus is
   unreachable and a design lands in an issue body instead, that is a recorded

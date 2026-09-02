@@ -18,15 +18,16 @@ head. There is no top-level review queue.
 ## Pickup
 
 Never inspect or fall back to a queue. Re-read the exact PR, prove its current
-head still matches the assignment and this session did not author it, then post
-the permitted nested claim and review only that head.
+head still matches the assignment and this session did not author it. Verify
+that the latest matching mutable delegation record names this run, then edit it
+to `Status: running` and review only that head; post no nested claim.
 
-Prove session independence from durable evidence before claiming: compare the
-head's `Claude-Session` trailers and its linked implementer claim/delegation
-lineage with this run's launching session. Claude Agent children share their
-launcher's authorship identity; a fresh child context or run id is not
-independence. Refuse the assignment if that session launched an implementer
-whose commit remains in the head. One review at one head, then stop.
+Prove session independence from durable evidence before marking the assignment
+running: compare the head's `Claude-Session` trailers and its linked implementer
+claim/delegation lineage with this run's launching session. Claude Agent
+children share their launcher's authorship identity; a fresh child context or
+run id is not independence. Refuse the assignment if that session launched an
+implementer whose commit remains in the head. One review at one head, then stop.
 
 ## Outcome
 
@@ -47,6 +48,12 @@ settle the risk. Hunt explicitly for overengineering and overtesting. Gate
 results may be evidence, but restating lint, tests or acceptance criteria is not
 a review.
 
+Read the PR's current finding ledger before reporting. A settled finding stays
+settled unless this head changed the affected behavior or the review has new
+reproducible evidence that materially changes its consequence. In that case,
+reopen the existing finding id and state the new evidence; do not file the same
+observation under a new id or re-argue severity from preference alone.
+
 ## Boundaries
 
 No commits, no fix-ups, no merging, and no dispositioning. An implementer parent
@@ -63,6 +70,7 @@ the invariants a finding is measured against.
 
 ## Handoff
 
-The findings on the PR, at the exact head reviewed, with the reviewing session
-recorded, in the form `.claude/skills/next-issue/review-protocol.md` records
-rounds. Then stop.
+Edit the delegation record to `Status: complete` and append the exact-head
+verdict in the form `.claude/skills/next-issue/review-protocol.md` defines.
+That one record carries the assignment, reviewing session and result; post no
+separate `Done:` comment. Then stop.
