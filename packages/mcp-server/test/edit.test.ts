@@ -99,6 +99,36 @@ describe("edit_block", () => {
     expect(refused.payload.currentRev).not.toBe(staleRev);
   });
 
+  it("distinguishes an incorrect old_text when the asserted rev is current", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Wrong argument",
+      description: "A test document.",
+      blocks: [{ type: "paragraph", text: "the current text" }],
+    });
+    const block = doc.blocks[0];
+
+    const refused = await rig.call("edit_block", {
+      uuid: doc.uuid,
+      block_id: block.id,
+      old_text: "not the current text",
+      new_text: "my version",
+      rev: block.rev,
+    });
+
+    expect(refused.isError).toBe(true);
+    expect(refused.payload.error).toBe("old_text_mismatch");
+    expect(refused.payload.message).toContain("old_text");
+    expect(refused.payload.recoveryClass).toBe("manual");
+    expect(refused.payload.recovery).toContain("old_text");
+    expect(refused.payload.expectedRev).toBe(block.rev);
+    expect(refused.payload.currentText).toBe("the current text");
+    expect(refused.payload.currentRev).toBe(block.rev);
+
+    const read = await rig.ok("get_doc", { uuid: doc.uuid });
+    expect(read.blocks[0].text).toBe("the current text");
+  });
+
   it("merges concurrent edits to different blocks across two instances", async () => {
     const databasePath = testConfig().databasePath;
     const first = await localRig(databasePath);

@@ -188,12 +188,14 @@ export {
   InvalidRoomError,
   InvalidWorkspaceIdError,
   MarksNotAllowedError,
+  OldTextMismatchError,
   StaleBlockError,
 } from "./errors.js";
 export type {
   AnnotationRangeErrorReason,
   DecisionReferenceErrorReason,
   InlineLinkRangeErrorReason,
+  OldTextMismatchDetails,
   StaleBlockDetails,
 } from "./errors.js";
 

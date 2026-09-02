@@ -64,13 +64,19 @@ class ExplodingSearchStore extends MirrorStore {
 }
 
 /** A document with one paragraph, the starting point for the block failures. */
-async function seeded(rig: Rig): Promise<{ uuid: string; blockId: string }> {
+async function seeded(
+  rig: Rig,
+): Promise<{ uuid: string; blockId: string; rev: string }> {
   const created = await rig.ok("create_doc", {
     title: "Contract",
     description: "A document the failure contract is exercised against.",
     blocks: [{ type: "paragraph", text: "one" }],
   });
-  return { uuid: created.uuid, blockId: created.blocks[0].id };
+  return {
+    uuid: created.uuid,
+    blockId: created.blocks[0].id,
+    rev: created.blocks[0].rev,
+  };
 }
 
 /** A uuid the directory carries but whose room has never reached this replica. */
@@ -91,6 +97,10 @@ const EXPECTED: Record<
   persistence_failed: { recoveryClass: "manual", detail: ["room"] },
   stale_block: {
     recoveryClass: "reread",
+    detail: ["blockId", "currentText", "currentRev", "retry"],
+  },
+  old_text_mismatch: {
+    recoveryClass: "manual",
     detail: ["blockId", "currentText", "currentRev", "retry"],
   },
   block_not_found: { recoveryClass: "reread", detail: ["blockId"] },
@@ -182,6 +192,17 @@ describe("the failure contract", () => {
           block_id: doc.blockId,
           old_text: "not what is there",
           new_text: "two",
+        })
+      ).payload,
+    );
+    record(
+      (
+        await rig.call("edit_block", {
+          uuid: doc.uuid,
+          block_id: doc.blockId,
+          old_text: "still not what is there",
+          new_text: "two",
+          rev: doc.rev,
         })
       ).payload,
     );
@@ -315,6 +336,9 @@ describe("the failure contract", () => {
     const stale = failures.get("stale_block");
     expect(stale.currentText).toBe("one");
     expect(stale.currentRev).toBeTruthy();
+    const mismatch = failures.get("old_text_mismatch");
+    expect(mismatch.currentText).toBe("one");
+    expect(mismatch.currentRev).toBe(doc.rev);
 
     // An unmapped crash says one fixed thing. The exception's own text can hold
     // a path, a query or a secret, so it goes to the log and not to the caller.

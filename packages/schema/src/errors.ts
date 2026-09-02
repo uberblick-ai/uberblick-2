@@ -1,8 +1,8 @@
 /**
  * Typed failures for block-scoped operations.
  *
- * These are part of the MCP tool contract: `edit_block` fails safely and the
- * caller is expected to re-read and retry rather than force a write.
+ * These are part of the MCP tool contract: `edit_block` fails safely and tells
+ * a caller whether its revision is stale or its asserted text is wrong.
  */
 
 /** Thrown when a block id does not resolve to a live block in the document. */
@@ -33,9 +33,9 @@ export interface StaleBlockDetails {
 }
 
 /**
- * Thrown by `editBlock` when the block no longer matches what the caller
- * believed it was editing — either `oldText` or an asserted `rev` is stale —
- * and by `setInlineLink`, whose only assertion is the `rev`.
+ * Thrown by `editBlock` when an asserted `rev` is stale, or when `oldText`
+ * mismatches without a rev that could distinguish a bad argument from a stale
+ * read; and by `setInlineLink`, whose only assertion is the `rev`.
  *
  * `currentText` and `currentRev` carry the live state so the caller can
  * re-read, re-diff and retry without a second round trip.
@@ -59,6 +59,44 @@ export class StaleBlockError extends Error {
       `Stale edit for block ${details.blockId}: the block has changed since it was read`,
     );
     this.name = "StaleBlockError";
+    this.blockId = details.blockId;
+    this.expectedText = details.expectedText;
+    this.expectedRev = details.expectedRev;
+    this.currentText = details.currentText;
+    this.currentRev = details.currentRev;
+  }
+}
+
+export interface OldTextMismatchDetails {
+  blockId: string;
+  /** The incorrect text the caller passed as `old_text`. */
+  expectedText: string;
+  /** The matching rev that establishes which block content the caller meant. */
+  expectedRev: string;
+  /** The text actually in the document right now. */
+  currentText: string;
+  /** The content hash of the block right now. */
+  currentRev: string;
+}
+
+/**
+ * Thrown by `editBlock` when the caller asserted the current `rev`, but its
+ * `oldText` does not match that revision's plain text. This is an argument
+ * mismatch, not a stale read: the current text and rev are attached so the
+ * caller can correct the argument and re-diff without another read.
+ */
+export class OldTextMismatchError extends Error {
+  readonly blockId: string;
+  readonly expectedText: string;
+  readonly expectedRev: string;
+  readonly currentText: string;
+  readonly currentRev: string;
+
+  constructor(details: OldTextMismatchDetails) {
+    super(
+      `Old text mismatch for block ${details.blockId}: old_text does not match the current block text`,
+    );
+    this.name = "OldTextMismatchError";
     this.blockId = details.blockId;
     this.expectedText = details.expectedText;
     this.expectedRev = details.expectedRev;

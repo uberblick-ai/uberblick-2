@@ -57,6 +57,7 @@ import {
   BlockNotFoundError,
   ConflictingLinkMarksError,
   InlineLinkRangeError,
+  OldTextMismatchError,
   StaleBlockError,
 } from "@uberblick/schema";
 import { log } from "./log.js";
@@ -171,6 +172,13 @@ const RECOVERIES: Record<string, Recovery> = {
       "The block changed under you. This answer already carries `currentText` and `currentRev`, so call the same " +
       "tool again with `currentRev` — re-diffing against `currentText` first for edit_block, and re-measuring the " +
       "offsets against it for link_range. No extra read is needed.",
+  },
+  old_text_mismatch: {
+    recoveryClass: "manual",
+    guidance:
+      "The asserted `rev` is current, but `old_text` does not match this block. This answer already carries " +
+      "`currentText` and `currentRev`; correct `old_text`, re-diff the intended change against `currentText`, " +
+      "and call edit_block again with `currentRev`. No extra read is needed.",
   },
   block_not_found: {
     recoveryClass: "reread",
@@ -330,8 +338,8 @@ export const FAILURE_INSTRUCTIONS =
   "transient condition passes; `reread` means read current state and call again with what it says; `manual` means " +
   "nothing you can repeat helps until something changes — correct the arguments, run the repair tool the sentence " +
   "names, fix configuration, or restart the server. A retry that cannot work is never labelled `retry`. Domain " +
-  "detail stays with its code: `stale_block` carries `currentText` and `currentRev`, so a stale edit is re-diffed " +
-  "without another read; `persistence_failed` names the `room`. A failure of a WRITING tool also says what became " +
+  "detail stays with its code: `stale_block` and `old_text_mismatch` carry `currentText` and `currentRev`, so an " +
+  "edit can be re-diffed without another read; `persistence_failed` names the `room`. A failure of a WRITING tool also says what became " +
   "of the write: `applied` (everything it meant to write is durable in this server's update log), `partial` (only " +
   "some of it is — `completed` names the rooms that are) and `synced`; `applied: false, partial: false` means " +
   "nothing changed locally, and nothing is ever rolled back — a partial write is finished by following `recovery`. " +
@@ -397,9 +405,8 @@ function stamped(
 /**
  * Map a thrown error onto a tool failure.
  *
- * `StaleBlockError` is the interesting one: it comes back as the re-read
- * payload — `currentText` and `currentRev` — so a caller can re-diff and retry
- * without another round trip.
+ * Block comparison errors come back with `currentText` and `currentRev`, so a
+ * caller can re-diff and retry without another round trip.
  */
 export function toFailure(tool: string, error: unknown): CallToolResult {
   if (error instanceof PersistenceError) {
@@ -423,6 +430,18 @@ export function toFailure(tool: string, error: unknown): CallToolResult {
       currentText: error.currentText,
       currentRev: error.currentRev,
       retry: "re-read nothing: call again with currentRev, against currentText",
+    });
+  }
+  if (error instanceof OldTextMismatchError) {
+    return stamped(tool, {
+      error: "old_text_mismatch",
+      message: error.message,
+      blockId: error.blockId,
+      expectedText: error.expectedText,
+      expectedRev: error.expectedRev,
+      currentText: error.currentText,
+      currentRev: error.currentRev,
+      retry: "correct old_text, re-diff against currentText, and call again with currentRev",
     });
   }
   if (error instanceof BlockNotFoundError) {
