@@ -134,6 +134,10 @@ wait
 description = "Park a demo agent cursor in a document's first block (optional `-- <docUuid>`)"
 run = "fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web run agent-cursor"
 
+[tasks.spike-daemon-authority]
+description = "Run the disposable real-client daemon-authority spike for #704"
+run = "pnpm --filter @uberblick/web exec tsx e2e/daemon-authority-spike.ts"
+
 [tasks.install]
 description = "Install workspace dependencies (frozen lockfile in CI)"
 # PNPM_STORE_DIR is a convention of this task, not something pnpm reads: CI sets

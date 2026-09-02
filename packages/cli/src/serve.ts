@@ -17,8 +17,39 @@
  */
 
 import { fileURLToPath } from "node:url";
+import { createConnection } from "node:net";
 import { runChild } from "./child.js";
 import { resolveConfig } from "./config.js";
+
+/**
+ * Disposable #704 spike seam: keep the public `ub mcp serve` process and its
+ * stdio contract, but let the per-machine daemon own the actual MCP session.
+ * The environment variable exists only on the unmerged evidence branch.
+ */
+async function proxyDaemon(socketPath: string): Promise<number> {
+  return await new Promise((resolve) => {
+    const socket = createConnection(socketPath);
+    let settled = false;
+    const finish = (code: number): void => {
+      if (settled) return;
+      settled = true;
+      process.stdin.unpipe(socket);
+      socket.unpipe(process.stdout);
+      resolve(code);
+    };
+    socket.once("connect", () => {
+      process.stdin.pipe(socket);
+      socket.pipe(process.stdout);
+    });
+    socket.once("end", () => finish(0));
+    socket.once("close", () => finish(0));
+    socket.once("error", (error) => {
+      process.stderr.write(`ub mcp serve: daemon unavailable: ${error.message}\n`);
+      finish(1);
+    });
+    process.stdin.once("end", () => socket.end());
+  });
+}
 
 /**
  * tsx's loader, so the child can run the server's TypeScript source — the same
@@ -43,6 +74,11 @@ export async function serveCommand(
   if (argv.length > 0) {
     err(`ub mcp serve: unexpected argument ${JSON.stringify(argv[0])}\n`);
     return 2;
+  }
+
+  const daemonSocket = process.env.UBERBLICK_DAEMON_SOCKET?.trim();
+  if (daemonSocket) {
+    return await proxyDaemon(daemonSocket);
   }
 
   const resolved = resolveConfig();
