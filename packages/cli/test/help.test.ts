@@ -273,6 +273,39 @@ describe("every human-facing command path", () => {
     expect(WORKSPACE_USE_HELP).toMatch(/<slug>-<uuid>.*prefix/s);
   });
 
+  it("uses the same semantic operand name at every help level and in usage errors", async () => {
+    expect(MCP_HELP).toContain("install [client]");
+    expect(INSTALL_HELP).toMatch(/usage: ub mcp install \[client\]/);
+    expect(INSTALL_HELP).toMatch(/\noperands:\n {2}client\s/);
+
+    const unknownClient = await dispatch(["mcp", "install", "not-a-client"]);
+    expect(unknownClient.status).toBe(2);
+    expect(unknownClient.stderr).toMatch(/unknown client/);
+
+    expect(REMOTE_HELP).toContain("init <ssh-target>");
+    expect(REMOTE_HELP).toContain("update <ssh-target>");
+    expect(REMOTE_INIT_HELP).toMatch(/usage: ub remote init <ssh-target>/);
+    expect(REMOTE_UPDATE_HELP).toMatch(/usage: ub remote update <ssh-target>/);
+
+    for (const command of ["init", "update"]) {
+      const missingTarget = await dispatch(["remote", command]);
+      expect(missingTarget.status).toBe(2);
+      expect(missingTarget.stderr).toContain("expected exactly one <ssh-target>");
+    }
+
+    expect(REMOTE_HELP).toContain("join <url-with-workspace-id>");
+    expect(REMOTE_JOIN_HELP).toMatch(/usage: ub remote join <url-with-workspace-id>/);
+    const missingUrl = await dispatch(["remote", "join"]);
+    expect(missingUrl.status).toBe(2);
+    expect(missingUrl.stderr).toContain("expected exactly one <url-with-workspace-id>");
+  });
+
+  it("describes init's MCP option as print-only", () => {
+    expect(INIT_HELP).toMatch(
+      /--mcp, --no-mcp.*printing the MCP client snippet.*It prints;.*registering a client is `ub mcp install`/s,
+    );
+  });
+
   it("keeps the hidden `mcp serve` out of the group help it is dispatched by", async () => {
     const run = await dispatch(["mcp", "--help"]);
     expect(run.status).toBe(0);

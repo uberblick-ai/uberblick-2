@@ -277,7 +277,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     const box = sandbox();
     const stub = stubVendor(box, "claude");
     const run = runUb(
-      ["mcp", "install", "claude", "--project", "--workspace", WORKSPACE, "--name", "ablauf"],
+      ["mcp", "install", "claude", "--project", "--workspace", WORKSPACE, "--label", "ablauf"],
       box,
       stub.env,
     );
@@ -395,6 +395,7 @@ describe("ub mcp install, and what is registered already", () => {
     const run = runUb(["mcp", "install", "claude", "--project"], box, stub.env);
     expect(run.status).toBe(0);
     expect(run.stdout).toMatch(/already installed/);
+    expect(run.stdout).toMatch(/^client\s+claude \(project\)$/m);
     expect(read(path)).toBe(before);
     // Not "it exited 0": the vendor was never asked, so a duplicate add cannot
     // fail and a foreign entry cannot be clobbered by one.
@@ -700,9 +701,13 @@ describe("ub mcp install --workspace", () => {
 
     // A name with nothing to pin would be a second entry running the same
     // unpinned command under a second name, which is not a thing to install.
-    const unpinned = install("--name", "ablauf");
+    const unpinned = install("--label", "ablauf");
     expect(unpinned.status).toBe(2);
     expect(unpinned.stderr).toMatch(/needs a --workspace/);
+
+    const stale = install("--workspace", WORKSPACE, "--name", "ablauf");
+    expect(stale.status).toBe(2);
+    expect(stale.stderr).toMatch(/Unknown option '--name'/);
 
     expect(existsSync(stub.record)).toBe(false);
   });
@@ -777,7 +782,7 @@ describe("two entries, side by side", () => {
         "--print",
         "--workspace",
         PINNED,
-        "--name",
+        "--label",
         "other",
         "--",
         ...spawnLine,

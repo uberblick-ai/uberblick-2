@@ -557,7 +557,8 @@ describe("ub remote join", () => {
     // …and told where the other one went, because it did not go anywhere.
     expect(run.stdout).toContain(mine);
     expect(run.stdout).toContain("was not merged into this one");
-    expect(run.stdout).toContain(`ub workspace use ${mine} --user`);
+    expect(run.stdout).toContain(`ub workspace use ${mine}`);
+    expect(run.stdout).not.toContain(`ub workspace use ${mine} --user`);
     // Including the hazard the machine-wide endpoint creates for it: documents
     // that only ever reached the local hub are in that hub's database, and
     // nothing dials it any more.

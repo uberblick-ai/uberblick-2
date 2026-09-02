@@ -197,7 +197,7 @@ operands:
                      it. An endpoint this machine already stores is never
                      replaced: the same one changes nothing, and a different
                      one is refused, because moving a workspace between hubs is
-                     \`ub remote join <url>/<workspace-id>\`, which hydrates and
+                     \`ub remote join <url-with-workspace-id>\`, which hydrates and
                      verifies first
 
 options:

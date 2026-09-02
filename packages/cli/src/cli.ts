@@ -54,7 +54,7 @@ options:
 export const MCP_HELP = `usage: ub mcp <command>
 
 commands:
-  install [target]       register uberblick with an MCP client
+  install [client]       register uberblick with an MCP client
 
 options:
   -h, --help             show this help; after a command, that command's help
