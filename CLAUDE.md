@@ -83,10 +83,16 @@ neither shaping nor its adapters grant `ready` or choose Priority.
 4. **Gates — all of them, before merge.** Effort follows semantic risk. Paths
    and line counts are inspection signals, not automatic extra rounds; link
    exact-head evidence instead of repeating it:
-   - immutable Docker review green (`mise run review <head-sha>`),
-     run from a trusted checkout of `origin/main`; worktree tests are useful
-     during implementation but are not merge evidence because a shared
-     checkout can change during review;
+   - immutable review green at the exact merge head. The Docker review
+     (`mise run review <head-sha>`, from a trusted checkout of `origin/main`)
+     is required when the diff touches persistence, synchronization,
+     concurrency, process lifecycle or auth, when a challenge round is owed,
+     when `main` moved under the PR, or when CI is not green at that head;
+     otherwise, for tier 1, CI's `gates` check run at `headRefOid` is the
+     immutable review — verify its conclusion at that SHA and link it, since
+     nothing enforces it (owner decision, 2026-09-02). Worktree tests are
+     useful during implementation but are never merge evidence, because a
+     shared checkout can change during review;
    - integrator validation against the issue's acceptance criteria;
    - **independent implementation challenge, proportionate to semantic risk.**
      Two challenges are required when the diff changes schema meaning,

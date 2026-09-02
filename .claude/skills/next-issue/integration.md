@@ -8,11 +8,16 @@ findings-conditional protocol.
 
 ## Gate mechanics
 
-- Resolve and record the PR's immutable `headRefOid`, fetch that commit, and run
+- Resolve and record the PR's immutable `headRefOid`. Where CLAUDE.md's gate
+  list requires the Docker review, fetch that commit and run
   `mise run review <headRefOid>` — never check the PR branch out to
   review it, and never treat tests from a mutable shared checkout as review
-  evidence. CLAUDE.md's review paragraph and README's "Review isolation" state
-  what the runner refuses and why.
+  evidence; CLAUDE.md's review paragraph and README's "Review isolation" state
+  what the runner refuses and why. Otherwise the immutable review is CI at
+  that exact head: `gh api repos/{owner}/{repo}/commits/<headRefOid>/check-runs
+  --jq '.check_runs[]|select(.name|test("gates"))|.conclusion'` must print
+  `success`, and the ruling links that check run. A missing or non-green run
+  is not a fast path; it routes back to the Docker review.
 - Run the verification container without network, and pass no secrets, host
   mounts, privileged mode or Docker socket to either the build or the container.
   Keep the SHA-tagged image long enough for the failure-path probes CLAUDE.md
@@ -64,11 +69,16 @@ of a queue, and start the long pole first.
   `review-protocol.md` decides whether a round is owed and who owns it;
   dispatching it before the fan-out is ordering only and never creates one. Its
   wait then overlaps the mechanical gates rather than following them.
-- **One agent per gate, each in its own checkout.** Launch the mechanical gates
-  concurrently — the immutable container review, the e2e proof where the outcome
-  is browser-observable, the acceptance-criteria read, the `Touches` scope check
-  — with the `Agent` tool's `isolation: "worktree"`, so each works in a checkout
-  of its own. Sharing one checkout is not an option: concurrent gates install,
+- **A tier 1 PR on CI's fast path launches no gate agents.** The integrator
+  reads the small diff against the acceptance criteria itself, runs the
+  `Touches` check as one command (`git diff --name-only <base>..<headRefOid>`
+  against the header), and links the CI check run; an e2e proof is still run
+  where the outcome is browser-observable.
+- **Otherwise, one agent per gate, each in its own checkout.** Launch the
+  mechanical gates concurrently — the immutable container review, the e2e proof
+  where the outcome is browser-observable, the acceptance-criteria read, the
+  `Touches` scope check — with the `Agent` tool's `isolation: "worktree"`, so
+  each works in a checkout of its own. Sharing one checkout is not an option: concurrent gates install,
   build and check out in it at the same time. Every worktree inherits the
   launching checkout's `HEAD`, so launch only from a checkout at freshly fetched
   `origin/main` with `mise.toml`, `Dockerfile.review` and `.dockerignore`
