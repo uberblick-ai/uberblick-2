@@ -2917,7 +2917,6 @@ h3.ub-heading {
   width: 15ch;
   min-height: 1lh;
   flex: none;
-  min-height: 1.2em;
   line-height: 1.2;
   text-align: left;
 }
