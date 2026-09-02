@@ -13,7 +13,9 @@
  * merely observes — a log replay, an index rebuild, an archive restore — repairs
  * a stub that disagrees without ever restamping it (#544). The hub's own arm of
  * that rule, a peer's edit arriving over the wire, is in `sync.test.ts`, where
- * the hub and the second client already live.
+ * the hub and the second client already live. Concurrent authored stamps resolve
+ * to the greater number, so a future-skewed clock stands until a later authored
+ * stamp exceeds it.
  *
  * The clock is faked (`toFake: ["Date"]`) and the timers are not: these rigs
  * run a real server over a real store, and a window is crossed by moving the
@@ -166,6 +168,9 @@ describe("directory timestamps", () => {
       title: "Old",
       tags: [],
     });
+    // The current writer also records a max candidate. An entry that truly
+    // predates that representation has neither half.
+    rig.instance.replicas.directory().doc.getMap("updatedAt").clear();
     expect(stub(rig, doc.uuid).createdAt).toBeUndefined();
 
     vi.setSystemTime(T0 + 1_000);
@@ -211,6 +216,7 @@ describe("directory timestamps", () => {
       title: "Drifted",
       tags: [],
     });
+    rig.instance.replicas.directory().doc.getMap("updatedAt").clear();
 
     // Rebuilding the derived index is not editing a document — but it does reach
     // the stub, and the stub is the one thing here that is not rebuildable.
@@ -232,12 +238,10 @@ describe("directory timestamps", () => {
     });
     await rig.ok("archive_doc", { uuid: doc.uuid });
 
-    // The case `republishStub` exists for: a retag from a replica that had not
-    // seen the archive, which this server's own tools would refuse. Stub repair
-    // stops at a tombstone, so nobody stamped that edit — here or on the replica
-    // that made it. Restoring is when the stub catches up, and the honest answer
-    // to "when did this change?" is still the last stamp anyone actually wrote:
-    // the restore's own clock would be a time at which nothing was edited.
+    // The shape `republishStub` exists for: the document has metadata newer than
+    // its tombstoned stub. This server did not author that change, so restoring
+    // repairs the cached fields without inventing a stamp at the restore time.
+    // The honest answer remains the greatest stamp an author actually wrote.
     vi.setSystemTime(T0 + 3 * WINDOW);
     setTags(rig.instance.replicas.replica(doc.uuid).doc, ["retired"]);
     await rig.ok("restore_doc", { uuid: doc.uuid });
