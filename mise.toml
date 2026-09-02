@@ -161,10 +161,6 @@ description = "Run all test suites"
 # `pnpm-workspace.yaml` globs `packages/*` only.
 run = "pnpm test"
 
-[tasks.spike-shared-owner]
-description = "Run the disposable shared workspace owner architecture spike (#621)"
-run = "pnpm --filter @uberblick/mcp-server exec tsx spike/shared-owner.ts"
-
 [tasks.check-agents]
 description = "Check role triplets and provider-neutral issue-authoring wiring"
 # Portability invariants only, never the contracts' prose — see the script's
