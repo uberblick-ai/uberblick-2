@@ -155,9 +155,9 @@ export function endpointLabel(value: string): string | null {
 /**
  * How an endpoint's source reads to someone asking which hub they are on.
  *
- * One wording in one place: the sync panel states it and the header pill
- * carries it on hover, and two different phrasings for one fact would be worse
- * than either. Every non-document answer names {@link HUB_CONFIG_PATH} rather
+ * One wording in one place: the sync panel states it and the document status
+ * reading carries it on hover. Every non-document answer names
+ * {@link HUB_CONFIG_PATH} rather
  * than merely omitting it — "the served document did not decide this" is the
  * half that diagnoses a tab on the wrong hub.
  */

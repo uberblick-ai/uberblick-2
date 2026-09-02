@@ -2,8 +2,8 @@
  * The document's group, derived from its tags (#39's rule).
  *
  * What is left of the tag grouping now that the sidebar is the `_sidebar`
- * document (#115): the breadcrumb and the identity line's badge still name a
- * neighbourhood, and they name it from the document's own `meta.tags`. Two
+ * document (#115): the identity line's badge still names a neighbourhood, and
+ * names it from the document's own `meta.tags`. Two
  * properties are worth pinning — canonical order is the tie-break for a
  * document carrying several known tags, and everything else lands in one
  * trailing group — because both are what make two replicas name the same group

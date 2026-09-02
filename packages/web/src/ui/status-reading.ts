@@ -1,12 +1,11 @@
 /**
  * What a room's status reads as, in one place (#448).
  *
- * Four surfaces outside a document report the same connection — the topbar
- * pill, the sync panel, the sidebar's directory line and the status line under
- * the title — and before this each re-derived its own reading. Only the status
- * line read the failure flags, so a page served without a secret, or one whose
- * token the hub refused, said `syncing…` in the other three and sent the reader
- * off to restart things at random.
+ * Three surfaces report connection state — the sync panel, the sidebar's
+ * directory line and the document status line — and before this each
+ * re-derived its own reading. Only the status line read the failure flags, so a
+ * page served without a secret, or one whose token the hub refused, said
+ * `syncing…` elsewhere and sent the reader off to restart things at random.
  *
  * The precedence below is the status line's, unchanged, and the words are the
  * ones it already shipped. Two properties of it are load-bearing:

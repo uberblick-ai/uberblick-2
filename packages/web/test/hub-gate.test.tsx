@@ -76,7 +76,7 @@ it("holds the first connect until the endpoint resolves, without holding the ren
   });
 
   // The shell is up — the read gates the connect, not the render.
-  expect(container.querySelector(".ub-brand")?.textContent).toBe("uberblick");
+  expect(container.querySelector(".ub-app")).not.toBeNull();
   expect(acquireRoom).not.toHaveBeenCalled();
 
   await act(async () => {

@@ -355,6 +355,36 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   expect(await painted(page, ".ub-list", "background-color")).toBe(sidebar);
 });
 
+test("the open document owns the remaining chrome and its sole sync reading", async ({
+  browser,
+}) => {
+  const page = await openApp(browser, "light");
+  const removed = page.locator(".ub-header, .ub-brand, .ub-crumb, .ub-me");
+  await expect(removed).toHaveCount(0);
+  await expect(page.locator(".ub-sync-toggle")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+  await expect(page.locator(".ub-title")).toBeVisible();
+  await expect(page.locator(".ub-doc-meta")).toBeVisible();
+  await expect(page.locator(".ub-doc-ids")).toBeVisible();
+  await expect(page.locator(".ub-copy-link")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Document actions" })).toBeVisible();
+  await expect(page.locator(".ub-threads-toggle")).toHaveCount(0);
+
+  const sync = page.locator(".ub-status .ub-sync-toggle");
+  await expect(sync).toHaveCount(1);
+  const path = new URL(page.url()).pathname;
+  await sync.click();
+  await expect(
+    page.getByRole("complementary", { name: "Sync and presence" }),
+  ).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe(path);
+  await page.keyboard.press("Escape");
+  await expect(sync).toBeFocused();
+  expect(new URL(page.url()).pathname).toBe(path);
+});
+
 test("document actions stay reachable, close with the route, and archive into Restore", async ({
   browser,
 }) => {
@@ -622,16 +652,8 @@ for (const scheme of ["light", "dark"] as const) {
     // threads handle is on screen to be measured at all.
     await page.setViewportSize({ width: 1000, height: 800 });
 
-    // The header is `--card`, and the toggle that lives in it is the first of
-    // the three.
-    const header = await painted(page, ".ub-header", "background-color");
-    const toggle = await painted(page, ".ub-sidebar-toggle", "background-color");
-    expect(separation(toggle, header)).toBeGreaterThanOrEqual(
-      cardHighlightFloor[scheme],
-    );
-
-    // The second: the block menu is its own `--card` floating over the prose,
-    // and one entry carries the highlight from the moment it opens.
+    // The block menu is its own `--card` floating over the prose, and one entry
+    // carries the highlight from the moment it opens.
     await page.getByRole("button", { name: "+ new doc" }).click();
     await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
     await page.locator(".ub-editor .ProseMirror").click();
@@ -647,8 +669,8 @@ for (const scheme of ["light", "dark"] as const) {
     );
     await page.keyboard.press("Escape");
 
-    // The third: the drawer's handle appears once the document has a thread,
-    // so the measurement needs a real one.
+    // The drawer's handle appears once the document has a thread, so comparing
+    // every card-accent consumer below needs a real one.
     await page.keyboard.type("annotate me", { delay: 15 });
     await page.keyboard.press("Shift+Home");
 
@@ -685,9 +707,6 @@ for (const scheme of ["light", "dark"] as const) {
     const handle = page.locator(".ub-threads-toggle");
     await expect(handle).toBeVisible();
     const drawer = await paintedIn(handle, "background-color");
-    expect(separation(drawer, header)).toBeGreaterThanOrEqual(
-      cardHighlightFloor[scheme],
-    );
 
     // The fourth: the `resolved` chip, which is inside the card button and so
     // sits on the card's own `--card` (#572).
@@ -705,7 +724,7 @@ for (const scheme of ["light", "dark"] as const) {
     const chip = page.locator(".ub-thread .ub-chip");
     await expect(chip).toBeVisible();
     const resting = await paintedIn(thread, "background-color");
-    expect(resting).toBe(header);
+    expect(resting).toBe(card);
     const pill = await paintedIn(chip, "background-color");
     expect(separation(pill, resting)).toBeGreaterThanOrEqual(
       cardHighlightFloor[scheme],
@@ -714,11 +733,10 @@ for (const scheme of ["light", "dark"] as const) {
       contrast(await paintedIn(chip, "color"), pill),
     ).toBeGreaterThanOrEqual(4.5);
 
-    // And it is one answer rather than four: the same painted fill, whichever
-    // `--card` surface it lands on.
-    expect(entry).toBe(toggle);
-    expect(drawer).toBe(toggle);
-    expect(pill).toBe(toggle);
+    // And it is one answer rather than per-surface copies: the same painted
+    // fill wherever the card accent lands.
+    expect(entry).toBe(drawer);
+    expect(pill).toBe(entry);
   });
 }
 
@@ -1042,9 +1060,8 @@ async function groundsUnder(page: Page, locator: Locator): Promise<string[]> {
  * where `.ub-comment` paints `--brand-subtle` under it. Both are derived from
  * the rendered element rather than named here.
  *
- * The wordmark is read with them as the named logotype exception: it stays the
- * accent, which in light is a different colour from the ink — the two-value cost
- * of keeping the amber for everything that is not text.
+ * The badge also exposes the non-text accent on its outline; in light that is a
+ * different colour from the shared functional ink.
  */
 for (const scheme of ["light", "dark"] as const) {
   test(`the brand's functional ink is one readable value — ${scheme}`, async ({
@@ -1123,10 +1140,8 @@ for (const scheme of ["light", "dark"] as const) {
     expect([...inks], "the functional brand ink is one value").toHaveLength(1);
 
     // The badge is where both halves of the decision are painted at once: its
-    // outline is the accent and its letters are the ink, and the wordmark is
-    // still that same accent.
+    // outline is the accent and its letters are the ink.
     const accent = await paintedIn(page.locator(".ub-badge"), "border-top-color");
-    expect(await painted(page, ".ub-brand", "color")).toBe(accent);
     if (scheme === "light") expect([...inks][0]).not.toBe(accent);
   });
 }
@@ -1249,7 +1264,7 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
       const title = document.querySelector(".ub-title");
       const pane = document.querySelector(".ub-pane");
       if (control === null || title === null || pane === null) {
-        throw new Error("e2e: no header");
+        throw new Error("e2e: no document identity line");
       }
       if (flush) {
         // The last offset at which all of the control is still on screen: its

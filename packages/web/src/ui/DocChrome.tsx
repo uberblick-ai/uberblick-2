@@ -1,17 +1,9 @@
 /**
- * The doc view's chrome (#69, design surface 1a): what the topbar says about
- * the open document, and the identity line above its prose.
+ * The document identity line above its prose: editable tags, stable identity,
+ * copy affordance and document actions.
  *
- * Almost everything here is a reading of state the system already keeps — the
- * document's tags, its uuid and rev, the awareness of whoever else is in the
- * room, the provider's connection status. None of it is new state. The one
- * writer is the tag strip on the identity line (#122), and it writes `meta.tags`
- * wholesale through schema's `setTags` — the same call, on the same key, that
- * `set_tags` makes for an agent.
- *
- * The two pills are drawn on the same rules as the rest of the chrome (#76):
- * fixed slots and no growth, so a peer arriving or the hub going away swaps
- * words in place rather than moving the header around them.
+ * The tags are the one writer here: they write `meta.tags` wholesale through
+ * schema's `setTags`, the same call and key `set_tags` uses for an agent.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -20,18 +12,11 @@ import type * as Y from "yjs";
 import { getMeta, parseRoom, setTags } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
 import { writeToClipboard } from "../editor/source-chrome.js";
-import { endpointSourceLabel } from "../config.js";
-import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
-import { rawSyncState, useCalmSyncState } from "./calm.js";
-import { statusReading } from "./status-reading.js";
 import { GROUP_TAGS, groupKeyForTags, groupLabel } from "./groups.js";
-import { activeSession } from "./doc-chrome.js";
-import type { RemotePresence } from "./doc-chrome.js";
-import { useDocRev, useRoomStatus } from "./hooks.js";
+import { useDocRev } from "./hooks.js";
 import { shareUrl } from "./route.js";
 import { distinctTags, withTag, withoutTag } from "./tags.js";
-import type { ThreadView } from "./threads.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -63,189 +48,6 @@ function groupOf(meta: DocMeta): string | null {
   return groupLabel(groupKeyForTags(meta.tags));
 }
 
-/**
- * `<group> / <title>` for the open document — and just the title for a document
- * that is in no group.
- *
- * The group comes from the document's own `meta.tags`, which is what makes a
- * retag land here immediately — and it is the same derivation the sidebar
- * groups by, so the breadcrumb and the list agree on where a document lives.
- */
-function Breadcrumb({ meta }: { meta: DocMeta }): ReactElement {
-  const group = groupOf(meta);
-  return (
-    <nav className="ub-crumb" aria-label="Breadcrumb">
-      {group !== null && (
-        <>
-          <span className="ub-crumb-group">{group}</span>
-          <span className="ub-crumb-sep" aria-hidden="true">
-            /
-          </span>
-        </>
-      )}
-      <span className="ub-crumb-title">{titleOf(meta)}</span>
-    </nav>
-  );
-}
-
-/**
- * The doc chrome in the topbar: the breadcrumb, and the two pills on the right.
- *
- * `connection` is the room whose status the connection pill reports and whose
- * awareness the activity pill reads. The app hands it the open document's room,
- * falling back to the directory room when no document is open: the socket is
- * shared, so the directory's status is the same truth about the same hub — and
- * a document list that reads "offline" while it is plainly listing documents
- * would be the one thing #37 exists to prevent.
- */
-export function DocChrome({
-  connection,
-  presence,
-  endpoint,
-  meta,
-  threads,
-  threadsOpen,
-  onToggleThreads,
-  syncOpen,
-  onToggleSync,
-}: {
-  connection: RoomConnection | null;
-  /**
-   * Every remote session in that room, read once by the shell. The pill names
-   * one of them (`activeSession`) and the sync panel lists them all, from this
-   * same snapshot — one subscription, and no way for the two to disagree.
-   */
-  presence: readonly RemotePresence[];
-  /**
-   * The hub this session dialled, or null until the config read settles — what
-   * the connection pill carries on hover (#362).
-   */
-  endpoint: HubEndpoint | null;
-  /** The open document's metadata, or null when none is open or read yet. */
-  meta: DocMeta | null;
-  /**
-   * The open document's threads — what the rail would show. Passed rather than
-   * read here, because the app shell decides on the same value whether the
-   * drawer may be open at all.
-   */
-  threads: readonly ThreadView[];
-  /** Whether the threads rail is open as a drawer — see `.ub-rail-open`. */
-  threadsOpen: boolean;
-  onToggleThreads: () => void;
-  /** Whether the sync detail panel is open — the connection pill opens it. */
-  syncOpen: boolean;
-  onToggleSync: () => void;
-}): ReactElement {
-  const activity = activeSession(presence);
-  // The count is the open threads, the way the rail counts them. It is *not*
-  // what decides whether the handle is drawn: a document whose conversations are
-  // all resolved still has a rail full of them, and a reader who cannot reach it
-  // has lost the archive. So the handle follows the rail's content and the
-  // number follows the rail's head — including when that number is zero.
-  const openThreads = threads.filter((thread) => !thread.resolved).length;
-  const status = useRoomStatus(connection);
-  const raw = rawSyncState(status);
-  const state = useCalmSyncState(raw, connection);
-  // The word only. A refusal's sentence never enters the header — it lives in
-  // the sync panel this pill opens, where there is room to read it (#448).
-  const reading = statusReading(status, state ?? raw);
-  /**
-   * Which hub this state is about (#362) — the endpoint and how it was
-   * resolved, or null while the read is still in flight.
-   *
-   * On the pill rather than only in the panel, because the pill is what a
-   * reader glances at: two tabs of one workspace reading "synced" against
-   * different hubs is a diagnosis a hover should settle, without opening
-   * anything. The address is `config.ts`'s stripped label — an endpoint, never
-   * a credential.
-   *
-   * An address that could not be labelled still leaves a source worth saying,
-   * so the pill says it over "unknown" rather than falling silent: the panel
-   * draws that row either way, and one surface dropping a fact the other keeps
-   * is the disagreement this whole change exists to remove.
-   */
-  const hub =
-    endpoint === null
-      ? null
-      : `${endpoint.url ?? "unknown"} (${endpointSourceLabel(endpoint.source)})`;
-  const blank = connection === null || (state === null && reading.detail === null);
-  // `meta.uuid === ""` is a room that answered with nothing in it — see
-  // `useDocMeta`. There is no document to name, so the breadcrumb says nothing.
-  const named = meta !== null && meta.uuid !== "";
-  return (
-    <>
-      {named && <Breadcrumb meta={meta} />}
-      <span className="ub-chrome-pills">
-        {/* The drawer's handle (#101). Below 1100px there is no room for the
-            rail beside the prose, so it is hidden and this opens it as an
-            overlay instead; above that width the rail is already on screen and
-            the stylesheet drops this button. A document with nothing to say has
-            no handle either. */}
-        {threads.length > 0 && (
-          <button
-            type="button"
-            className="ub-threads-toggle"
-            aria-expanded={threadsOpen}
-            aria-controls="ub-rail"
-            onClick={onToggleThreads}
-          >
-            Threads <span className="ub-muted">{openThreads}</span>
-          </button>
-        )}
-        {activity !== null && (
-          <span
-            className="ub-pill ub-pill-agent"
-            // The session's presence colour, the same one its cursor carries in
-            // the prose — the pill and the caret are one identity in two places.
-            style={{ borderColor: activity.color, color: activity.color }}
-          >
-            {activity.name} editing block {activity.block}
-          </span>
-        )}
-        {/* The pill is the panel's handle (#72): the indicator someone looks at
-            when they wonder about sync is the thing to press for the detail.
-            It stays a pill — same slots, same widths — so nothing beside it
-            moves when it becomes operable. */}
-        <button
-          type="button"
-          className={`ub-pill ub-sync-toggle${blank ? "" : ` ub-pill-${reading.tone}`}`}
-          aria-expanded={syncOpen}
-          aria-controls="ub-sync-panel"
-          // While blank this remains the panel's focusable handle, but neither
-          // its name nor its fixed slots make a status claim. Once current, the
-          // visible word enters the accessible name too. The hub rides along in
-          // either case: it belongs to the session, not to a borrowed reading.
-          aria-label={
-            blank
-              ? hub === null
-                ? "Sync details"
-                : `Sync details — hub ${hub}`
-              : hub === null
-                ? `Sync details — ${reading.word}`
-                : `Sync details — ${reading.word}, hub ${hub}`
-          }
-          title={hub === null ? "Sync details" : `Sync details — hub ${hub}`}
-          onClick={onToggleSync}
-        >
-          <span className="ub-status-mark" aria-hidden="true">
-            {!blank &&
-              (reading.tone === "syncing" ? (
-                <span className="ub-spinner" />
-              ) : (
-                <span
-                  className={`ub-dot ${reading.tone === "synced" ? "ub-dot-live" : "ub-dot-off"}`}
-                />
-              ))}
-          </span>
-          {/* The same fixed-width slot the status line uses, sized for the
-              longest reading either can show, so nothing beside it moves. */}
-          <span className="ub-status-word">{blank ? null : reading.word}</span>
-        </button>
-      </span>
-    </>
-  );
-}
-
 /** The id the add field points at — one document is open at a time. */
 const SUGGESTIONS_ID = "ub-tag-suggestions";
 
@@ -256,7 +58,7 @@ const SUGGESTIONS_ID = "ub-tag-suggestions";
  * `set_tags` performs, on the same `meta.tags`. That is what makes this a
  * *human front door to the agent's write* rather than a second tagging
  * mechanism: the directory stub is repaired from `meta` by the shell's existing
- * observer, so the sidebar group, the breadcrumb, `list_docs` and every other
+ * observer, so the sidebar group, `list_docs` and every other
  * client follow a chip the way they follow an agent.
  *
  * The next array is folded from `getMeta(ydoc).tags`, never from the rendered
