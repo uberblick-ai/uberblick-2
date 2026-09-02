@@ -78,8 +78,6 @@ describe("token minting sites", () => {
     "packages/hub/test/credential.test.ts",
     "packages/hub/test/helpers.ts",
     "packages/hub/test/token.test.ts",
-    // Disposable architecture harness mints one peer token from its fixture secret.
-    "packages/mcp-server/spike/shared-owner.ts",
     "packages/mcp-server/src/sync.ts",
     // Wraps the real mint to hold a token call in flight — no minting site of its own.
     "packages/mcp-server/test/attach-bound.test.ts",
