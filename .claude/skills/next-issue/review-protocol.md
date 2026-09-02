@@ -9,11 +9,10 @@ reads, not gate checks. The integrator owns authoritative dispositions and any
 risk-scoped final-head round. `integration.md` beside this file owns the
 gates' order and mechanics.
 
-For the required pair, both reviewers read the same frozen candidate head. The
-implementer records an evidence response but does not make ordinary P2/P3
-corrections between them; after handoff the integrator obtains the second
-verdict and batches both. A P1 may interrupt the freeze because another review
-of a head already known unsafe buys nothing.
+How many challenges a diff owes, who owns each, and the candidate-head freeze
+are CLAUDE.md's gate and are not restated here. Read by role: an implementer or
+issue preparer needs only "Requesting the round" and "Challenge freshness"; the
+sections from "Finding continuity" on are the integrator's.
 
 ## Requesting the round
 
@@ -22,7 +21,10 @@ required. The implementer opens a draft PR and posts the README's exact-PR
 delegation at its current head before starting a fresh
 `implementation-reviewer`. Add `Round: N` to that mutable record; the reviewer
 edits its status and appends its verdict there rather than posting claim and
-completion comments. One transport per *reviewer* runtime — the command
+completion comments. A `Round: 2` of CLAUDE.md's required pair also carries one
+`Boundary:` line naming which of CLAUDE.md's listed boundaries fires, or the
+concrete unresolved risk; a package path is neither, and without that line the
+round is not dispatched. One transport per *reviewer* runtime — the command
 is chosen by the runtime the round must run on, not by the caller's, so a
 same-runtime round (a `--codex` integrator on a Codex-authored PR) uses the
 same two commands. Both run from the parent's own worktree, detached (a
@@ -194,10 +196,10 @@ integrator rules from supported-usage impact; if it still cannot, park
 false positive, an unrelated pre-existing issue, or a finding rejected with
 evidence.
 
-Two successive correction heads that surface new supported-usage defects in
-the same hand-built mechanism trigger a representation check before another
-local patch. Compare deletion or an established primitive against continuing
-the mechanism, and record why the chosen shape can now converge. If the simpler
-shape needs authority or a dependency decision the issue does not grant, park
-that focused question before paying for a third correction head. Merge tier is
+Count correction heads since the PR opened or since the owner's latest
+decision on it, whichever is later. The **third** parks the PR `needs-human`
+before it is built, with one question on the PR itself, never on a side issue:
+which mechanism keeps producing defects, whether deletion or an established
+primitive would replace it, and what the owner must decide for it to converge.
+"Continue" resets the count; a representation change restarts it. Merge tier is
 approval routing, never a reason to preserve bespoke correctness machinery.

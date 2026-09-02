@@ -85,15 +85,12 @@ an issue completion comment. Never commit to `main` and never merge your own PR.
 
 Where `CLAUDE.md` requires a pre-handoff challenge, the implementer opens the
 PR as a draft and delegates one fresh independent critical review on the other
-runtime before handoff. For a one-challenge change it may correct clear
-findings in the same run. For a dual-challenge change, ordinary findings wait:
-the implementer hands off the reviewed candidate head unchanged so the
-integrator's second reviewer examines that same SHA and one ruling can batch
-both verdicts. A P1 may interrupt that freeze. The reviewer authors no diff and
-the implementer makes no authoritative disposition; the integrator owns
-final-head review, gate evidence, and every disposition. The exact delegation
-and convergence procedure lives in the role contracts and
-`.claude/skills/next-issue/review-protocol.md`.
+runtime before handoff; CLAUDE.md's gate says when ordinary findings wait for
+the integrator's second reviewer, and
+`.claude/skills/next-issue/review-protocol.md` says how a round is requested
+and how findings converge. The reviewer authors no diff and the implementer
+makes no authoritative disposition; the integrator owns final-head review, gate
+evidence, and every disposition.
 
 That handoff comment is the completion signal. The launcher relaunches from
 it, and the integrator's queue reads it there; no other notification exists.
@@ -112,15 +109,11 @@ linked claim/delegation records; if this session launched an implementer whose
 commit remains in the head, the PR is ineligible for that session. A new run
 id, context reset, or nested agent does not change that result.
 
-When CLAUDE.md's dual-challenge gate applies, the implementer owns the first
-challenge, on the other runtime from the diff's author, and the integrator owns
-the second, a fresh session of the author's runtime. Both use the
-`implementation-reviewer` role and write exact-head verdicts against the same
-frozen candidate head before one consolidated correction wave. The
-integrator's own acceptance and gate validation, and a Copilot review, are
-additional evidence rather than either required challenge. Non-implementation
-children use the one mutable delegation record `.agents/roles/README.md`
-defines; they do not add separate claim and completion comments.
+How many challenges a diff owes, who owns each, and the candidate-head freeze
+are CLAUDE.md's gate; the round procedure is
+`.claude/skills/next-issue/review-protocol.md`. Non-implementation children use
+the one mutable delegation record `.agents/roles/README.md` defines; they do
+not add separate claim and completion comments.
 
 Every role reconstructs claims and progress from GitHub and re-reads the issue
 and PR threads before acting. The integrator records validation and finding
@@ -139,3 +132,14 @@ role contract emits that line and nothing else on an empty queue. The loop may
 run the over-inclusive `scripts/probe-work.sh <role>` first to skip a session
 that could only end that way. The loop never selects, claims or transitions
 work itself.
+
+## Process changes
+
+A change to `AGENTS.md`, `CLAUDE.md`, `.github/ISSUE_SPEC.md`, `.agents/` or
+`.claude/` is a change to the rules every session runs under. An agent-authored
+one is an ordinary PR through the queue, with one cross-runtime challenge.
+Whoever lands one directly — the owner may — relabels every `ready` issue whose
+body cites a file or section it moved or contradicted to `needs-preparation` in
+the same push, with one comment naming the commit; a contract that goes stale
+under a process commit is not the next implementer's to discover (owner
+decision, 2026-09-02, after #587 and #598).
