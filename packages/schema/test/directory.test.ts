@@ -286,28 +286,76 @@ describe("directory doc", () => {
     expect(getDirectoryEntry(dir, ALPHA)?.updatedAt).toBe(2_000);
   });
 
-  it("converges last-write-wins when two replicas stamp the same entry", () => {
-    const [a, b] = replicaPair((dir) => {
-      upsertDirectoryEntry(dir, {
+  it.each([
+    [5_000, 4_000],
+    [4_000, 5_000],
+  ])(
+    "keeps the greater concurrent stamp when the whole-entry winner carries %i and the other carries %i",
+    (stampA, stampB) => {
+      const a = new Y.Doc();
+      const b = new Y.Doc();
+      // Client 2 wins the whole-object key. Swapping the stamps forces both
+      // cases: the maximum wins once with and once without its entry winning.
+      a.clientID = 1;
+      b.clientID = 2;
+      upsertDirectoryEntry(a, {
         uuid: ALPHA,
         title: "Alpha",
         createdAt: 1_000,
         updatedAt: 1_000,
       });
+      syncDocs(a, b);
+
+      upsertDirectoryEntry(a, {
+        uuid: ALPHA,
+        title: "Renamed by A",
+        tags: ["a"],
+        updatedAt: stampA,
+      });
+      upsertDirectoryEntry(b, {
+        uuid: ALPHA,
+        title: "Renamed by B",
+        tags: ["b"],
+        updatedAt: stampB,
+      });
+      syncDocs(a, b);
+
+      const winner = getDirectoryEntry(a, ALPHA);
+      expect(getDirectoryEntry(b, ALPHA)).toEqual(winner);
+      expect(winner).toMatchObject({
+        title: "Renamed by B",
+        tags: ["b"],
+        createdAt: 1_000,
+        updatedAt: 5_000,
+      });
+    },
+  );
+
+  it("never lowers a stamp and carries the maximum through archive and restore", () => {
+    const dir = new Y.Doc();
+    upsertDirectoryEntry(dir, {
+      uuid: ALPHA,
+      title: "Alpha",
+      updatedAt: 5_000,
     });
 
-    // Two servers observing the same document, each on its own clock. The later
-    // reading does not win — the later Yjs update does. That is the accepted
-    // contract for a cache-quality field, not an accident.
-    upsertDirectoryEntry(a, { uuid: ALPHA, title: "Alpha", updatedAt: 5_000 });
-    upsertDirectoryEntry(b, { uuid: ALPHA, title: "Alpha", updatedAt: 4_000 });
-    syncDocs(a, b);
+    upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Missing stamp" });
+    upsertDirectoryEntry(dir, {
+      uuid: ALPHA,
+      title: "Lower stamp",
+      updatedAt: 4_000,
+    });
+    upsertDirectoryEntry(dir, {
+      uuid: ALPHA,
+      title: "Malformed stamp",
+      updatedAt: Number.NaN,
+    });
+    expect(getDirectoryEntry(dir, ALPHA)?.updatedAt).toBe(5_000);
 
-    const winner = getDirectoryEntry(a, ALPHA);
-    expect(getDirectoryEntry(b, ALPHA)).toEqual(winner);
-    expect([4_000, 5_000]).toContain(winner?.updatedAt);
-    // Whichever write won, created-at survives it untouched.
-    expect(winner?.createdAt).toBe(1_000);
+    tombstoneDirectoryEntry(dir, ALPHA);
+    expect(getDirectoryEntry(dir, ALPHA)?.updatedAt).toBe(5_000);
+    restoreDirectoryEntry(dir, ALPHA);
+    expect(getDirectoryEntry(dir, ALPHA)?.updatedAt).toBe(5_000);
   });
 
   it("mirrors a description and carries it through every rewrite", () => {

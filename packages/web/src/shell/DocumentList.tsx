@@ -41,8 +41,9 @@
  * across a reload.
  *
  * The stamps are the stubs' own `updatedAt` — cache-quality freshness hints
- * written by whichever replica last stamped them, never history — and optional
- * by construction, which is why {@link sortDirectory} sorts the unstamped last
+ * resolved to the greatest candidate an author wrote, never history — and
+ * optional by construction. A future-skewed writer can therefore pin one until
+ * a later candidate exceeds it. {@link sortDirectory} sorts the unstamped last
  * in last-changed order rather than treating absence as epoch zero: a document
  * nobody has stamped is not the oldest document, it is the one with no answer.
  * In title order they sort by title like every other row — grouping them at the

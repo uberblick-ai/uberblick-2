@@ -161,11 +161,13 @@ export function useDirectory(
       return;
     }
     const { ydoc } = connection;
-    const map = getDirectoryMap(ydoc);
     const read = (): void => setEntries(listDirectory(ydoc, { includeDeleted }));
     read();
-    map.observe(read);
-    return () => map.unobserve(read);
+    // `updatedAt` has its own CRDT max register beside the whole-object entry.
+    // Observe the directory document so either half makes a mounted listing
+    // re-read; observing only `docs` can miss a greater losing candidate.
+    ydoc.on("update", read);
+    return () => ydoc.off("update", read);
   }, [connection, includeDeleted]);
   return entries;
 }

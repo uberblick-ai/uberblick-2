@@ -27,14 +27,16 @@
  * for everything applied through `applyUpdate` — the Hocuspocus provider and
  * the IndexedDB replica both — and true for every write made through
  * `doc.transact`, which is every edit made here: the editor's, this app's own
- * schema calls, and an undo.
+ * schema calls, a repair this app performs after receiving state, and an undo.
+ * The repair is a document write this replica actually made; receiving the
+ * state that prompted it is not.
  *
- * Two replicas stamping the same entry — this one and an MCP server — need no
- * arbitration. Entries are whole-object writes, so they converge last-write-wins
- * on whichever update Yjs orders last, which is the accepted outcome for a
- * cache-quality freshness hint that nothing reads as history. Each also reads
- * the stored stamp before writing, so a window already stamped by the other
- * suppresses this one's write too.
+ * Two replicas stamping the same entry — this one and an MCP server — keep the
+ * greater stamp through the shared schema operation even when its whole-entry
+ * write loses Yjs ordering. Each also reads the resolved stamp before writing,
+ * so a window already stamped by the other suppresses this one's write too. A
+ * future-skewed clock can pin this cache-quality hint until a later authored
+ * stamp exceeds it.
  */
 
 import type * as Y from "yjs";

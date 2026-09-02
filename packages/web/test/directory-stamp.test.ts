@@ -6,7 +6,8 @@
  * directory is broadcast to every client in the workspace, so a stamp per
  * keystroke would turn one person typing into traffic for everyone. The
  * contract is "at most one bump per window, immediately on a title or tag
- * change, and never for merely opening or receiving a document".
+ * change, and never for merely opening or receiving a document". Concurrent
+ * authored stamps resolve to the greater number in the shared schema layer.
  *
  * Every assertion is read off a **peer** replica of the `_directory` room, and
  * the volume assertions count the updates that actually crossed to it. What
