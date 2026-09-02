@@ -54,17 +54,34 @@ runtime's own configuration owns the rest.
      already pins the owner-approved `effort: high`.
    - **Codex:** give the run its own worktree,
      `git worktree add --detach <scratch>/<run id> origin/main`, write the
-     assignment to `<scratch>/<run id>.prompt`, then run from that worktree as
-     a background command and wait for it to exit:
+     assignment to `<scratch>/<run id>.prompt`, then use the one runner below
+     as a background command and wait for it to exit. Use it unchanged for
+     every role named above; it applies the implementer's sandbox exception
+     itself:
 
      ```sh
-     codex exec -C <scratch>/<run id> -s workspace-write \
-       -c 'sandbox_workspace_write.network_access=true' \
-       -o <scratch>/<run id>.last - < <scratch>/<run id>.prompt > <scratch>/<run id>.log 2>&1
+     node scripts/run-codex-role.mjs <role> <run id> <scratch>/<run id> <scratch>
      ```
 
-     For the `implementer` only, replace `-s workspace-write -c '…'` with
-     `--dangerously-bypass-approvals-and-sandbox` (owner decision,
+     The runner keeps its supervisor outside the Codex process group and writes
+     `<run id>.status` from inside that group on every ending Codex produces.
+     A status file reports the real exit code, including nonzero. Its absence
+     after the group vanishes reports a lost run, its elapsed time, and whether
+     GitHub issue comments contain the exact claim line for that run id:
+     `found`, `not found`, or `could not be determined`. The GitHub read starts
+     at the run's launch time and checks the durable claim grammar directly;
+     the log is never claim authority.
+
+     On a normal ending the runner removes the worktree and leaves the log and
+     sentinels in scratch. On a loss it preserves the registered worktree and
+     log in every claim state, so a post-claim recovery cannot discard local
+     commits or uncommitted evidence. The launching session reports the
+     runner's classification before applying step 4; a lost run has no
+     trustworthy final line to repeat.
+
+     For the `implementer` only, the runner uses
+     `--dangerously-bypass-approvals-and-sandbox` instead of the other roles'
+     workspace sandbox (owner decision,
      2026-09-01): that sandbox denies `git fetch` and `git commit` in a linked
      worktree (`.git/index.lock: Operation not permitted`), and an unattended
      run cannot answer the approval. The worktree isolates files only; the
@@ -75,10 +92,12 @@ runtime's own configuration owns the rest.
      is why the assignment names the contract. Never start it from an empty
      scratch directory (Codex refuses an untrusted directory) and never in
      the foreground (a foreground shell call is killed at ten minutes). The
-     role claims, pushes and opens its PR from that worktree; remove the
-     worktree once the session has exited.
-4. **Report and return.** Name the role, the runtime and the run id, and
-   repeat the session's final line verbatim. `No eligible <role> work:
+     role claims, pushes and opens its PR from that worktree.
+4. **Report and return.** Name the role, the runtime and the run id. For a
+   normal ending, report the runner's real exit code and repeat the session's
+   final line verbatim. For a lost Codex run, repeat the runner's lost-run line,
+   including elapsed time and durable-claim state; do not infer or invent a
+   final line. `No eligible <role> work:
    <reason>.` means the queue was empty: the caller idles for about 30 minutes
    (owner direction, 2026-09-01) before launching again. Any other ending is
    work done or a recorded stop, and the caller launches the next session at
