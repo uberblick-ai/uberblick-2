@@ -122,6 +122,7 @@ neither shaping nor its adapters grant `ready` or choose Priority.
    Findings are triaged into an explicit disposition: fixed on the branch;
    deferred to a linked issue with the accepted risk recorded on the PR
    (never for data loss, auth/security exposure, or a violated invariant);
+   create that issue through `.github/ISSUE_SPEC.md`'s **Request source** path;
    accepted as debt on the PR when P3, or when a P2's claimed impact remains
    theoretical because no current supported-usage failure is established; or,
    under that theoretical condition, closed `wontfix` if already an issue. Both
