@@ -103,17 +103,23 @@ delegation record above instead. Handoffs stay proportional: link evidence
 instead of narrating transcripts. GitHub must be sufficient for recovery.
 
 **A durable comment reaches GitHub as composed.** Every durable comment body —
-claim, renewal, delegation update, return, `Done:`, review round, finding
-disposition, merge report, retrospective reply — must land byte for byte: line
-breaks intact, backticks and `$` literal. Write it into a file under the run's
-own scratch directory, `<scratch>` here, and post or patch from that file; any
-composition with that property is fine, and a quoted heredoc is one:
+including claims, renewals, withdrawals, takeovers, delegation updates,
+returns, `Done:` handoffs, review rounds, finding dispositions, merge reports
+and retrospective replies — must land byte for byte: line breaks intact,
+backticks and `$` literal. Write it into a file under the run's own scratch
+directory, `<scratch>` here, and post or patch from that file; any composition
+with that property is fine, and a quoted heredoc is one. Writing the file is
+only half: the posting or patching command must also read its bytes. For
+example, `-f body=@<path>` sends the literal `@<path>`; the `-F` form in the
+PATCH example below reads the file.
 
 ```sh
 rm -f <scratch>/done.md
 cat > <scratch>/done.md <<'EOF'
 Done: issue-preparer <run id>
-Outcome: correctable-findings — `readDecisions` already pins it; cost is $0.
+Grounding: <origin/main SHA>
+Preparation: trivial-self-check
+Outcome: ready
 EOF
 gh issue comment <N> --body-file <scratch>/done.md
 ```
