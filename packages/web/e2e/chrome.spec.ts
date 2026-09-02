@@ -914,11 +914,27 @@ for (const scheme of ["light", "dark"] as const) {
     // criterion's own construction and has no such number.
     if (scheme === "light") expect(floor).toBeGreaterThanOrEqual(0.04);
 
-    // A group, so the header's rule, its count pill and the two quiet actions
-    // are on screen. "+ group" makes one and opens its rename field, so the
-    // column is read once with the field and once with the header.
-    await page.getByRole("button", { name: "+ group" }).click();
+    // The workspace header paints the accent ground only while hovered, so the
+    // walk has to reach that state rather than proving its resting separator
+    // twice. Dark had 1.46:1 here before the light-only repair and must keep it.
+    const workspace = page.locator(".ub-workspace");
+    const resting = await paintedIn(workspace, "background-color");
+    await workspace.hover();
+    const workspaceGround = await paintedIn(workspace, "background-color");
+    expect(workspaceGround).not.toBe(resting);
+    const workspaceEdge = await paintedIn(workspace, "border-bottom-color");
+    if (scheme === "dark") {
+      expect(contrast(workspaceEdge, workspaceGround)).toBeGreaterThanOrEqual(
+        1.46,
+      );
+    }
     const readings = await surface(page, ".ub-list");
+
+    // A group, so its header rule, count pill and two quiet actions are on
+    // screen. "+ group" makes one and opens its rename field, so the column is
+    // read once with the field and once with the header at rest.
+    await page.getByRole("button", { name: "+ group" }).click();
+    readings.push(...(await surface(page, ".ub-list")));
     await page.getByLabel("Group name").press("Enter");
     // `.first()` because the sidebar is one workspace shared by this file's
     // tests, so the appearance before this one has already left a group here.
@@ -928,7 +944,7 @@ for (const scheme of ["light", "dark"] as const) {
     // Both anchored menus, each while it is open: they are portalled siblings
     // of the app, so nothing in the column reaches them and they carry their
     // own rules.
-    await page.locator(".ub-workspace").click();
+    await workspace.click();
     await expect(page.locator("[data-slot=dropdown-menu-content]")).toBeVisible();
     readings.push(...(await surface(page, "[data-slot=dropdown-menu-content]")));
     // And once more with the current workspace's row highlighted, which is where
