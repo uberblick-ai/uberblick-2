@@ -83,6 +83,7 @@ When the request does not fit one independently reviewable PR, finish with
 behavior goes to `needs-decision`. Remove `needs-preparation` from the source,
 leave it as a non-`ready` coordination parent, and create bite-sized children
 with `needs-preparation`, `Parent: #N`, and only real ordering dependencies.
+Create each child through `.github/ISSUE_SPEC.md`'s **Request source** path.
 
 When picking up an issue after its first top-level implementer return, start a
 fresh assignment but reuse the prior handoff, adversary verdict and return

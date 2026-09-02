@@ -95,7 +95,12 @@ neither shaping nor its adapters grant `ready` or choose Priority.
      shared checkout can change during review;
    - integrator validation against the issue's acceptance criteria;
    - **independent implementation challenge, proportionate to semantic risk.**
-     Two challenges are required when the diff changes schema meaning,
+     First the exemption: a test-only, docs-only or narrowly mechanical diff
+     that preserves production behavior owes **no** challenge when focused
+     validation directly proves the contract — the implementer writes
+     `Challenge: none owed (<reason>)` in its handoff and dispatches nothing,
+     and the integrator dispatches nothing either. Otherwise two challenges
+     are required when the diff changes schema meaning,
      persistence, synchronization, concurrency, auth, runtime dependencies, or
      decided architecture, or when the implementer or integrator names a
      concrete unresolved risk warranting both perspectives: first a fresh
@@ -109,9 +114,7 @@ neither shaping nor its adapters grant `ready` or choose Priority.
      the freeze; its corrected head re-establishes the required independent
      evidence before merge. One implementer-owned cross-runtime
      challenge is enough when an outside read is useful but those boundaries
-     do not fire. No challenge is required for test-only,
-     docs-only, or narrowly mechanical changes that preserve production
-     behavior when focused validation directly proves the contract. Every
+     do not fire. Every
      challenge actively hunts for counterexamples, missing failure paths,
      incorrect assumptions, overengineering and overtesting; integrator gate
      work and Copilot do not substitute for a required challenge;
@@ -122,6 +125,7 @@ neither shaping nor its adapters grant `ready` or choose Priority.
    Findings are triaged into an explicit disposition: fixed on the branch;
    deferred to a linked issue with the accepted risk recorded on the PR
    (never for data loss, auth/security exposure, or a violated invariant);
+   create that issue through `.github/ISSUE_SPEC.md`'s **Request source** path;
    accepted as debt on the PR when P3, or when a P2's claimed impact remains
    theoretical because no current supported-usage failure is established; or,
    under that theoretical condition, closed `wontfix` if already an issue. Both
@@ -222,8 +226,8 @@ the fallback, which is exactly why CI is high priority.
   filename — nothing two machines compare ever carries a slug. Tenancy lives in
   the room key from day one so a hosted hub never needs a room migration.
 - Doc layout is a closed set of four root types: `meta` (Y.Map: uuid, title,
-  description, tags, links-by-UUID, kind, status, and internal decision
-  remove/add levels), `blocks`
+  description, changelog suggestion, tags, links-by-UUID, kind, status, and
+  internal decision remove/add levels), `blocks`
   (Y.XmlFragment, one element per block with stable `id` attrs; types:
   paragraph, heading, code, mermaid, list-item, quote, table), `annotations`
   (Y.Map of one Y.Map per thread: anchor block, resolved flag, and the

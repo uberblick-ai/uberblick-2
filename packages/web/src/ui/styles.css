@@ -2909,9 +2909,13 @@ h3.ub-heading {
 
 /* Sized for the longest word the slot can hold, so nothing beside it moves when
    the reading changes. That word is now "update required" (#448) rather than
-   "syncing…": the refusal readings share this slot with the calm three. */
+   "syncing…": the refusal readings share this slot with the calm three. The
+   slot is blank until a room's reading settles (#707); an empty span has no
+   line box, so without the minimum the row collapses to the mark's height and
+   the prose below jumps down when the word arrives. */
 .ub-status-word {
   width: 15ch;
+  min-height: 1lh;
   flex: none;
   min-height: 1.2em;
   line-height: 1.2;

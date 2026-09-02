@@ -125,6 +125,7 @@ finding — severity does not decide the other two:
   disproportionate right now: create a linked issue and record the concrete
   accepted risk on the PR; never defer data loss, auth/security exposure, or a
   violated invariant. Queue an implementable deferral with `needs-preparation`.
+  Create it through `.github/ISSUE_SPEC.md`'s **Request source** path.
   If the finding already identifies a product or authority choice, create it at
   `needs-decision` with the focused question, options and recommendation instead
   of paying a preparation/adversary pass to rediscover the same boundary.

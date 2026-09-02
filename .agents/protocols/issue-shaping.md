@@ -73,12 +73,13 @@ when handing text to another coordinator; the GitHub form may render their
 headings with empty values.
 
 If the user confirms issue creation, create this intake with
-`needs-preparation`. Never infer or write Priority, `Depends-on`, `Touches`,
-`Parent`, architecture, implementation detail, acceptance criteria, Pointers,
-or `ready`. The issue-preparer derives the technical contract from the current
-repository and corpus under `.agents/protocols/issue-preparation.md`; an owner
-choice that remains unresolved may later take the existing `needs-decision`
-path.
+`needs-preparation` through `.github/ISSUE_SPEC.md`'s **Request source** path,
+recording `Human` for the person's request. Never infer or write Priority,
+`Depends-on`, `Touches`, `Parent`, architecture, implementation detail,
+acceptance criteria, Pointers, or `ready`. The issue-preparer derives the
+technical contract from the current repository and corpus under
+`.agents/protocols/issue-preparation.md`; an owner choice that remains
+unresolved may later take the existing `needs-decision` path.
 
 If creation is not available, return the confirmed four-part handoff to the
 coordinator. Do not present a handoff as a created issue or as preparation

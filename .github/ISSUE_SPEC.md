@@ -113,6 +113,23 @@ within the declared footprint. A diff that escapes it is a finding — either
 the issue was mis-scoped or the agent scope-crept. The resolution is explicit
 (fix the scope or re-declare), never silent.
 
+## Request source
+
+`Request Source` is statistical provenance, never a gate. It is `Human` when
+the requested outcome originated with a person — even when an assistant files
+it — and `Agent` for an agent-discovered follow-up, review finding, audit item,
+split or program child. Do not infer historical values from the GitHub author;
+backfill only where durable evidence states the origin.
+
+Create an issue with `node scripts/create-issue.mjs --source Human|Agent
+--title <title> --body-file <path> [--label <label>]`. The helper discovers the
+organization field by name, requires the single-select options to be exactly
+`Human` and `Agent`, sets the value in the create request, and reads it back. A
+missing, malformed or mismatched value is reported as `Request Source: failed`
+but does not block the created issue or any later preparation, claim, handoff or
+merge. Copy that failure into the durable outcome the creating run already
+posts; do not add a new lifecycle record or enforcement check.
+
 ## Labels — lifecycle
 
 | Label | Meaning | Set by |
