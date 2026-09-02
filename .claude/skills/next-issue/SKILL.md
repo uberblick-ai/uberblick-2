@@ -73,11 +73,10 @@ runtime's own configuration owns the rest.
      the log is never claim authority.
 
      On a normal ending the runner removes the worktree and leaves the log and
-     sentinels in scratch. On a loss it first reports while the worktree is
-     still registered. Once claim state is known it may perform the same
-     worktree cleanup; when claim state could not be determined it preserves
-     the registered worktree as well as the log. The launching session reports
-     the runner's classification before applying step 4; a lost run has no
+     sentinels in scratch. On a loss it preserves the registered worktree and
+     log in every claim state, so a post-claim recovery cannot discard local
+     commits or uncommitted evidence. The launching session reports the
+     runner's classification before applying step 4; a lost run has no
      trustworthy final line to repeat.
 
      For the `implementer` only, the runner uses
@@ -89,7 +88,7 @@ runtime's own configuration owns the rest.
      trust boundary is the machine the lane runs on — the remote runner with
      its repository-scoped write token, or the owner's own machine — and the
      lane is supported nowhere else. Reviewers and adversaries keep the
-     sandbox. Codex selects no `.codex/agents/*.toml` adapter, which
+     sandbox. `codex exec` selects no `.codex/agents/*.toml` adapter, which
      is why the assignment names the contract. Never start it from an empty
      scratch directory (Codex refuses an untrusted directory) and never in
      the foreground (a foreground shell call is killed at ten minutes). The

@@ -103,21 +103,19 @@ function removeWorktree() {
 	return false;
 }
 
+let unreadableSentinel = false;
 if (existsSync(statusFile)) {
 	const statusText = readFileSync(statusFile, "utf8").trim();
 	if (!/^(?:0|[1-9][0-9]{0,2})$/.test(statusText) || Number(statusText) > 255) {
+		unreadableSentinel = true;
+	} else {
+		const status = Number(statusText);
+		removeWorktree();
 		process.stdout.write(
-			`Lost Codex run ${runId} (${role}) after ${duration}s; completion sentinel was unreadable.\n` +
-				`Artifacts preserved: worktree ${worktree}; log ${log}.\n`,
+			`Codex run ${runId} (${role}) ended normally after ${duration}s with exit code ${status}.\n`,
 		);
-		process.exit(1);
+		process.exit(status);
 	}
-	const status = Number(statusText);
-	removeWorktree();
-	process.stdout.write(
-		`Codex run ${runId} (${role}) ended normally after ${duration}s with exit code ${status}.\n`,
-	);
-	process.exit(status);
 }
 
 function claimState() {
@@ -143,28 +141,23 @@ function claimState() {
 	);
 	if (commentsResult.status !== 0) return "could not be determined";
 
+	// These exact durable lines are owned by `.agents/roles/README.md` and
+	// `.github/ISSUE_SPEC.md`; keep this lookup aligned if their grammar moves.
 	const claimLine =
 		role === "implementer" ? `Implementer: codex ${runId}` : `Claim: ${role} ${runId}`;
 	return commentsResult.stdout.split(/\r?\n/).includes(claimLine) ? "found" : "not found";
 }
 
 const state = claimState();
+const sentinelDetail = unreadableSentinel ? "completion sentinel unreadable; " : "";
 await new Promise((resolve) =>
 	process.stdout.write(
-		`Lost Codex run ${runId} (${role}) after ${duration}s; durable claim: ${state}.\n` +
+		`Lost Codex run ${runId} (${role}) after ${duration}s; ${sentinelDetail}durable claim: ${state}.\n` +
 			`Log preserved at ${log}.\n`,
 		resolve,
 	),
 );
-if (state === "could not be determined") {
-	process.stdout.write(
-		`Worktree preserved and registered at ${worktree} because claim state is unknown.\n`,
-	);
-} else {
-	// The loss is now reported and its claim state is known. The log remains as
-	// evidence while the ordinary per-run worktree cleanup may proceed.
-	removeWorktree();
-}
+process.stdout.write(`Worktree preserved and registered at ${worktree} because the run was lost.\n`);
 
 if (completion.error) {
 	process.stderr.write(`Codex run ${runId}: supervisor observed ${completion.error.message}.\n`);

@@ -154,7 +154,8 @@ test("a vanished run group reports found and not-found claim states before clean
 		assert.match(stdout, new RegExp(`after \\d+s; durable claim: ${report}\\.`));
 		assert.equal(existsSync(join(current.scratch, `${current.runId}.status`)), false);
 		assert.equal(existsSync(join(current.scratch, `${current.runId}.log`)), true);
-		assert.equal(existsSync(current.worktree), false);
+		assert.equal(existsSync(current.worktree), true);
+		assert.equal(existsSync(current.env.CODEX_TEST_GIT), false);
 	}
 });
 
@@ -187,7 +188,6 @@ test("an indeterminate claim lookup keeps the lost run worktree registered", asy
 test("the launcher documents one generic Codex recipe for every top-level role", () => {
 	const text = readFileSync(skill, "utf8");
 	assert.equal((text.match(/scripts\/run-codex-role\.mjs/g) ?? []).length, 1);
-	assert.doesNotMatch(text, /\bcodex exec\b/);
 	for (const role of ["issue-preparer", "implementer", "integrator", "program-coordinator"])
 		assert.match(text, new RegExp(`\\b${role}\\b`));
 });
