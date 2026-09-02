@@ -34,6 +34,7 @@ import type {
   BlockType,
   CommentMark,
 } from "@uberblick/schema";
+import { formatTimestamp } from "./timestamps.js";
 
 /** Longest quoted excerpt a card shows before it is cut short. */
 const EXCERPT_MAX = 160;
@@ -473,34 +474,19 @@ export function focusThreadCard(threadId: string): void {
     ?.focus();
 }
 
-/** The reader's own locale: a byline is display data, not document data. */
-const TIMESTAMP_FORMAT = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
-
-/** What the byline renders: the visible label, and the `<time>` machine value. */
+/**
+ * A comment's timestamp for the card's byline. The shared formatter owns the
+ * visible time policy; this surface owns its honest invalid-value fallback.
+ */
 export interface CommentTimestamp {
   label: string;
-  /** Absent when `createdAt` is not a date — an invalid `dateTime` is worse than none. */
   dateTime?: string;
+  title?: string;
 }
 
-/**
- * A comment's timestamp for the card's byline: absolute, in the reader's locale.
- * Absolute and not "30 seconds ago", which is a label that goes stale on screen
- * in a document nobody is touching.
- *
- * A value this reader cannot parse is shown verbatim — an unparseable timestamp
- * is the writer's business, and hiding it would be the wrong kind of quiet — and
- * carries no `dateTime`, because a machine-readable attribute that is not a date
- * is a lie a parser will believe.
- */
-export function commentTimestamp(createdAt: string): CommentTimestamp {
-  const at = Date.parse(createdAt);
-  if (Number.isNaN(at)) return { label: createdAt };
-  return {
-    label: TIMESTAMP_FORMAT.format(at),
-    dateTime: new Date(at).toISOString(),
-  };
+export function commentTimestamp(
+  createdAt: string,
+  now: number = Date.now(),
+): CommentTimestamp {
+  return formatTimestamp(createdAt, now) ?? { label: createdAt };
 }

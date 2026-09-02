@@ -51,16 +51,25 @@ import {
   threadCardId,
 } from "./threads.js";
 import type { ThreadFocus, ThreadView } from "./threads.js";
+import { useTimestampClock } from "./timestamps.js";
 
-function Comment({ comment }: { comment: AnnotationComment }): ReactElement {
-  const { label, dateTime } = commentTimestamp(comment.createdAt);
+function Comment({
+  comment,
+  now,
+}: {
+  comment: AnnotationComment;
+  now: number;
+}): ReactElement {
+  const { label, dateTime, title } = commentTimestamp(comment.createdAt, now);
   return (
     <span className="ub-thread-comment">
       <span className="ub-thread-byline">
         <span className="ub-thread-author">{comment.author}</span>
         {/* No `dateTime` when the stored value is not a date: React drops the
             attribute, and the label still shows what the document holds. */}
-        <time dateTime={dateTime}>{label}</time>
+        <time dateTime={dateTime} title={title}>
+          {label}
+        </time>
       </span>
       <span className="ub-thread-text">{comment.text}</span>
     </span>
@@ -69,6 +78,7 @@ function Comment({ comment }: { comment: AnnotationComment }): ReactElement {
 
 function ThreadCard({
   thread,
+  now,
   focused,
   collapsed,
   replying,
@@ -81,6 +91,7 @@ function ThreadCard({
   onResolve,
 }: {
   thread: ThreadView;
+  now: number;
   focused: boolean;
   /** Resolved and not expanded: head and excerpt only. */
   collapsed: boolean;
@@ -128,7 +139,7 @@ function ThreadCard({
           </span>
         ) : (
           thread.comments.map((comment) => (
-            <Comment key={comment.key} comment={comment} />
+            <Comment key={comment.key} comment={comment} now={now} />
           ))
         )}
         {!collapsed && thread.replyCount > 0 && (
@@ -199,6 +210,7 @@ export function ThreadsPane({
   onFocus: (threadId: string) => void;
 }): ReactElement | null {
   const [replyTo, setReplyTo] = useState<string | null>(null);
+  const now = useTimestampClock();
   /**
    * The one resolved thread the reader has opened back up. One at a time: the
    * resolved list is an archive, and expanding a card there is a glance, not a
@@ -278,6 +290,7 @@ export function ThreadsPane({
     <ThreadCard
       key={thread.id}
       thread={thread}
+      now={now}
       focused={thread.id === focused?.id}
       collapsed={thread.resolved && expanded !== thread.id}
       // A resolved thread never shows the form, however `replyTo` got here: it

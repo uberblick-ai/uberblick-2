@@ -47,24 +47,19 @@
  * nobody has stamped is not the oldest document, it is the one with no answer.
  * In title order they sort by title like every other row — grouping them at the
  * bottom there would not be title order — and the row's own dash carries "no
- * answer" in both. A stamp is shown as an age rather than a date ("3 days ago"
- * is what a scan of a listing is asking), and the pane keeps its own clock so a
- * label goes stale by at most a minute even when nothing else re-renders. The
- * absolute date stays one hover away, and the machine value in `dateTime`.
+ * answer" in both. A recent stamp is shown as an age ("3 days ago" is what a
+ * scan of a listing is asking), while one at least 30 days old becomes an
+ * absolute date. The pane keeps its own clock so a relative label goes stale by
+ * at most a minute even when nothing else re-renders. Its exact date and time
+ * stay one hover away, and the machine value in `dateTime`.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useRoomStatus } from "../ui/hooks.js";
-
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
-const WEEK = 7 * DAY;
-const MONTH = 30 * DAY;
-const YEAR = 365 * DAY;
+import { formatTimestamp, useTimestampClock } from "../ui/timestamps.js";
 
 /**
  * The field's label, which is also the whole answer to *what does typing here
@@ -73,30 +68,6 @@ const YEAR = 365 * DAY;
  * every time the field is reached and in every listing of the form's controls.
  */
 const SEARCH_LABEL = "Find by title, not document text";
-
-/** `3 days ago`, at the coarseness a reader actually reads. */
-export function relativeAge(iso: string, now: number = Date.now()): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return "";
-  const ago = Math.max(0, now - then);
-  const [amount, unit] =
-    ago < HOUR
-      ? [Math.floor(ago / MINUTE), "minute"]
-      : ago < DAY
-        ? [Math.floor(ago / HOUR), "hour"]
-        : ago < WEEK
-          ? [Math.floor(ago / DAY), "day"]
-          : ago < MONTH
-            ? [Math.floor(ago / WEEK), "week"]
-            : ago < YEAR
-              ? [Math.floor(ago / MONTH), "month"]
-              : [Math.floor(ago / YEAR), "year"];
-  if (amount < 1) return "just now";
-  return `${amount} ${unit}${amount === 1 ? "" : "s"} ago`;
-}
-
-/** Absolute and in the reader's locale — the date behind the age. */
-const STAMP_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 
 /**
  * The stamp, if a `Date` can actually hold it.
@@ -187,11 +158,11 @@ function pinLabel(entry: DirectoryEntry, pinned: boolean): string {
 }
 
 /**
- * The changing stamp, in coarse clock language.
+ * The changing stamp, under the web UI's shared timestamp rule.
  *
- * "3 days ago" answers *is this fresh?* at a glance, which is the question a
- * listing is scanned for — and it is the only question it answers. The exact
- * date stays one hover away in `title`, and the machine value in `dateTime`.
+ * A relative label answers *is this fresh?* at a glance; once it no longer
+ * does, an absolute date is easier to place. The exact recent date and time
+ * stay one hover away, and the machine value in `dateTime`.
  */
 function ChangedStamp({
   at,
@@ -202,10 +173,17 @@ function ChangedStamp({
 }): ReactElement {
   const stamp = usableStamp(at);
   if (stamp === undefined) return <span className="ub-docs-age ub-muted">—</span>;
-  const iso = new Date(stamp).toISOString();
+  const formatted = formatTimestamp(stamp, now);
+  if (formatted === null) {
+    return <span className="ub-docs-age ub-muted">—</span>;
+  }
   return (
-    <time className="ub-docs-age" dateTime={iso} title={STAMP_FORMAT.format(stamp)}>
-      {relativeAge(iso, now)}
+    <time
+      className="ub-docs-age"
+      dateTime={formatted.dateTime}
+      title={formatted.title}
+    >
+      {formatted.label}
     </time>
   );
 }
@@ -252,11 +230,7 @@ export function DocumentList({
    * Mounted-pane state and nothing more — no storage, no preference mechanism.
    */
   const [order, setOrder] = useState<Order>("changed");
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
-    return () => window.clearInterval(timer);
-  }, []);
+  const now = useTimestampClock();
   /**
    * Which group each pinned document sits in — the `_sidebar` document as it
    * stands, not a breadcrumb derived from tags. First group wins, so a uuid
