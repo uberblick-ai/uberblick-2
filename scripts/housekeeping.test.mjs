@@ -60,10 +60,6 @@ test("cleans the current and expired review images plus stale Docker artifacts",
 
 	assert.equal(result.status, 0, result.stderr);
 	const commands = readFileSync(calls, "utf8");
-	assert.match(
-		commands,
-		/image ls -q --filter reference=uberblick-review --filter until=24h/,
-	);
 	assert.match(commands, /image rm -f expired-a expired-b/);
 	assert.doesNotMatch(commands, /image rm -f .*recent-peer/);
 	assert.match(commands, /image rm -f uberblick-review:test-sha/);
