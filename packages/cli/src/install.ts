@@ -484,7 +484,7 @@ export async function installCommand(
   const installed = presence(file, entry);
   if (installed === "ours") {
     let report = "already installed\n\n";
-    report += field("target", where);
+    report += field("client", where);
     report += field("file", file.path);
     report += field("command", commandLine(entry));
     report += pin.fields;
@@ -545,7 +545,7 @@ export async function installCommand(
 
     registered = true;
     let report = `uberblick registered with ${flags.target}\n\n`;
-    report += field("target", where);
+    report += field("client", where);
     report += field("file", file.path);
     report += field("command", commandLine(entry));
     report += pin.fields;

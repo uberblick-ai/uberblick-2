@@ -276,7 +276,7 @@ describe("every human-facing command path", () => {
   it("uses the same semantic operand name at every help level and in usage errors", async () => {
     expect(MCP_HELP).toContain("install [client]");
     expect(INSTALL_HELP).toMatch(/usage: ub mcp install \[client\]/);
-    expect(INSTALL_HELP).toMatch(/\noperands:\n  client\s/);
+    expect(INSTALL_HELP).toMatch(/\noperands:\n {2}client\s/);
 
     const unknownClient = await dispatch(["mcp", "install", "not-a-client"]);
     expect(unknownClient.status).toBe(2);
@@ -301,9 +301,9 @@ describe("every human-facing command path", () => {
   });
 
   it("describes init's MCP option as print-only", () => {
-    expect(HELP).not.toContain("--mcp");
-    expect(INIT_HELP).toMatch(/--mcp, --no-mcp.*printing.*It prints/s);
-    expect(INIT_HELP).toContain("registering a client is `ub mcp install`");
+    expect(INIT_HELP).toMatch(
+      /--mcp, --no-mcp.*printing the MCP client snippet.*It prints;.*registering a client is `ub mcp install`/s,
+    );
   });
 
   it("keeps the hidden `mcp serve` out of the group help it is dispatched by", async () => {

@@ -395,6 +395,7 @@ describe("ub mcp install, and what is registered already", () => {
     const run = runUb(["mcp", "install", "claude", "--project"], box, stub.env);
     expect(run.status).toBe(0);
     expect(run.stdout).toMatch(/already installed/);
+    expect(run.stdout).toMatch(/^client\s+claude \(project\)$/m);
     expect(read(path)).toBe(before);
     // Not "it exited 0": the vendor was never asked, so a duplicate add cannot
     // fail and a foreign entry cannot be clobbered by one.

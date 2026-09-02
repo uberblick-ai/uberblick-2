@@ -6,7 +6,7 @@
  * shared signing secret to the app, so "sharing" is handing somebody an address
  * and a secret, and a command named `invite` would imply an access model that
  * does not exist yet. `ub remote init` and `ub remote update` stand up and
- * deploy the host; `ub remote join <url>/<workspace-id>` binds this machine to a
+ * deploy the host; `ub remote join <url-with-workspace-id>` binds this machine to a
  * workspace that already lives on one, and hydrates it.
  *
  * There is no operator suite here: no verb that points the clients somewhere
@@ -84,12 +84,15 @@ export const REMOTE_HELP = `usage: ub remote [command]
 
 commands:
   (none)                        the endpoint in force and what sharing it buys
-  init <ssh-target>             stand up the remote hub + web stack on a tailnet host
+  init <ssh-target>             stand up the remote hub + web stack on a
+                                tailnet host
   update <ssh-target>           deploy origin/main onto that host now
-  join <url-with-workspace-id>  bind this machine to the remote workspace the URL names
+  join <url-with-workspace-id>  bind this machine to the remote workspace the
+                                URL names
 
 options:
-  -h, --help             show this help; after a command, that command's help
+  -h, --help                    show this help; after a command, show that
+                                command's help
 `;
 
 /**
