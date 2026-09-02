@@ -82,11 +82,8 @@ test("creates an issue with a name-discovered Request Source and reads it back",
 	const result = run(context);
 
 	assert.equal(result.status, 0, result.stderr);
-	assert.equal(
-		result.stdout,
-		"https://github.com/octo/repo/issues/901\nRequest Source: Agent\n",
-	);
-	assert.equal(result.stderr, "");
+	assert.equal(result.stdout, "https://github.com/octo/repo/issues/901\n");
+	assert.equal(result.stderr, "Request Source: Agent\n");
 	assert.deepEqual(JSON.parse(readFileSync(context.input, "utf8")), {
 		title: "A follow-up",
 		body: "A grounded issue body.\n",

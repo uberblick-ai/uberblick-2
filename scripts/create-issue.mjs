@@ -21,7 +21,10 @@ function parseArguments(argv) {
 			fail(
 				"usage: create-issue.mjs --source Human|Agent --title <title> --body-file <path> [--label <label>] [--repo <owner/repo>]",
 			);
-		if (flag === "--label") parsed.labels.push(value);
+		if (flag === "--label") {
+			if (value.includes(",")) fail("repeat --label instead of passing a comma-separated list");
+			parsed.labels.push(value);
+		}
 		else parsed[flag.slice(2).replace("-", "_")] = value;
 		index += 1;
 	}
@@ -124,4 +127,4 @@ if (provenanceFailure)
 	console.error(
 		`${FIELD_NAME}: failed — ${provenanceFailure}. Record this failure in the run's durable outcome; the issue was still created.`,
 	);
-else console.log(`${FIELD_NAME}: ${args.source}`);
+else console.error(`${FIELD_NAME}: ${args.source}`);

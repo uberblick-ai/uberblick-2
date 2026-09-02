@@ -106,6 +106,13 @@ gh api graphql -f query='query{repository(owner:"uberblick-ai",name:"uberblick-2
 
 Take the node whose `field.name` is `Priority`; its `name` is the value.
 
+### Gate check
+
+`Touches` is a declared claim, verified at review time: the PR diff must stay
+within the declared footprint. A diff that escapes it is a finding — either
+the issue was mis-scoped or the agent scope-crept. The resolution is explicit
+(fix the scope or re-declare), never silent.
+
 ## Request source
 
 `Request Source` is statistical provenance, never a gate. It is `Human` when
@@ -122,13 +129,6 @@ missing, malformed or mismatched value is reported as `Request Source: failed`
 but does not block the created issue or any later preparation, claim, handoff or
 merge. Copy that failure into the durable outcome the creating run already
 posts; do not add a new lifecycle record or enforcement check.
-
-### Gate check
-
-`Touches` is a declared claim, verified at review time: the PR diff must stay
-within the declared footprint. A diff that escapes it is a finding — either
-the issue was mis-scoped or the agent scope-crept. The resolution is explicit
-(fix the scope or re-declare), never silent.
 
 ## Labels — lifecycle
 
