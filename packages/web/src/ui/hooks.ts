@@ -430,9 +430,9 @@ const NOBODY: readonly RemotePresence[] = [];
 /**
  * Every remote session in the room, live.
  *
- * Read once by the shell and handed down: the sync panel's present-now list and
- * the chrome's activity pill (`activeSession`) are two views of this one
- * snapshot, so there is one subscription rather than one per reader.
+ * Read once by the shell and handed down: the document status line and sync
+ * panel are two views of this one snapshot, so there is one subscription
+ * rather than one per reader.
  *
  * Never returns a reading made in another room — `useRoom`'s guard, for the
  * same reason: the stored reading is state, so it lags `connection` by one

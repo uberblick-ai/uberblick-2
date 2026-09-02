@@ -8,7 +8,14 @@
  * with the URL.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactElement } from "react";
 import {
   appendBlock,
@@ -23,6 +30,7 @@ import {
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
 import { configuredWorkspaces, hubEndpoint } from "../config.js";
+import type { HubEndpoint } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
 import { watchDocumentStub } from "../collab/directory-stub.js";
 import { randomIdentity } from "../collab/identity.js";
@@ -30,7 +38,7 @@ import { createDocLinkContext } from "../editor/doc-links.js";
 import type { DocLinkContext } from "../editor/doc-links.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import type { RemotePresence } from "./doc-chrome.js";
-import { CopyLink, DocChrome } from "./DocChrome.js";
+import { CopyLink } from "./DocChrome.js";
 import { Sidebar, togglePin } from "./Sidebar.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
@@ -39,7 +47,7 @@ import { ThreadsPane } from "./ThreadsPane.js";
 import { WorkspaceSettings } from "./WorkspaceSettings.js";
 import { workspaceTags } from "./tags.js";
 import { focusThread } from "./threads.js";
-import type { SelectThread, ThreadFocus } from "./threads.js";
+import type { SelectThread, ThreadFocus, ThreadView } from "./threads.js";
 import { DocumentList } from "../shell/DocumentList.js";
 import {
   allPath,
@@ -63,7 +71,6 @@ import {
   usePresence,
   useRoom,
   useRoomStatus,
-  useSetting,
   useSidebar,
   useStoredFlag,
   useThreads,
@@ -85,6 +92,7 @@ export function RoutePane({
   configured = true,
   connection,
   presence,
+  endpoint = null,
   meta,
   author,
   knownTags,
@@ -98,6 +106,11 @@ export function RoutePane({
   onRestoreFocused,
   onRestore,
   onSelectThread,
+  threads = [],
+  threadsOpen = false,
+  onToggleThreads,
+  syncOpen = false,
+  onToggleSync,
 }: {
   route: Route;
   /**
@@ -121,6 +134,8 @@ export function RoutePane({
    * down to every reader of it — see {@link StatusLine}.
    */
   presence: readonly RemotePresence[];
+  /** The hub the document-local sync reading describes. */
+  endpoint?: HubEndpoint | null;
   /**
    * That room's metadata, or null while it has not been read yet. The
    * difference carries a decision: unread is silence, read-and-not-this-document
@@ -148,6 +163,13 @@ export function RoutePane({
   /** Lift that tombstone. The only action an archived document offers. */
   onRestore: () => void;
   onSelectThread: SelectThread;
+  /** The open document's conversations, for the narrow pane-edge trigger. */
+  threads?: readonly ThreadView[];
+  threadsOpen?: boolean;
+  onToggleThreads?: (() => void) | undefined;
+  /** The document-local sync reading opens the existing details panel. */
+  syncOpen?: boolean;
+  onToggleSync?: (() => void) | undefined;
 }): ReactElement {
   // Before the branches: a hook may not sit behind an early return. Only
   // `localReplicaLoaded` is read here — it is what tells the empty document a
@@ -213,6 +235,9 @@ export function RoutePane({
             <StatusLine
               connection={connection}
               presence={presence}
+              endpoint={endpoint}
+              syncOpen={syncOpen}
+              onToggleSync={onToggleSync}
               // This screen's whole subject: the document is not here. Saying
               // "local copy" over that sentence was two claims about one
               // document, one of them false (#601).
@@ -237,6 +262,7 @@ export function RoutePane({
       // what a copied link has to keep.
       segment={route.workspace.segment}
       presence={presence}
+      endpoint={endpoint}
       author={author}
       knownTags={knownTags}
       archived={archived}
@@ -249,6 +275,11 @@ export function RoutePane({
       onRestoreFocused={onRestoreFocused}
       onRestore={onRestore}
       onSelectThread={onSelectThread}
+      threads={threads}
+      threadsOpen={threadsOpen}
+      onToggleThreads={onToggleThreads}
+      syncOpen={syncOpen}
+      onToggleSync={onToggleSync}
     />
   );
 }
@@ -265,8 +296,8 @@ export function App(): ReactElement {
   const configured = hubReady ? configuredWorkspaces() : [];
   /**
    * Which hub every "synced" in this window is about (#362) — read once here
-   * and handed to both surfaces that assert sync state, so the pill's hover and
-   * the panel's rows can never name different hubs.
+   * and handed to the document-local reading and panel, so they cannot name
+   * different hubs.
    */
   const endpoint = hubReady ? hubEndpoint() : null;
   /** The one that answers `/`, the address that names no workspace. */
@@ -282,6 +313,18 @@ export function App(): ReactElement {
   // sidebar's entry for it is the current page at either one.
   const listing = route.kind === "all" || route.kind === "list";
   const [collapsed, setCollapsed] = useStoredFlag(SIDEBAR_COLLAPSED_KEY, false);
+  const hideSidebar = useRef<HTMLButtonElement | null>(null);
+  const restoreSidebar = useRef<HTMLButtonElement | null>(null);
+  const previousCollapsed = useRef(collapsed);
+
+  // Collapsing unmounts the control that received the gesture. Move focus to
+  // its visible counterpart after that commit, and do the inverse on restore.
+  // The initial stored preference is not a gesture, so it must not steal focus.
+  useLayoutEffect(() => {
+    if (previousCollapsed.current === collapsed) return;
+    previousCollapsed.current = collapsed;
+    (collapsed ? restoreSidebar : hideSidebar).current?.focus();
+  }, [collapsed]);
   /**
    * The thread the reader is looking at. It lives here because the two ends of
    * the link are in different panes: a highlight in the editor and a card in the
@@ -294,8 +337,11 @@ export function App(): ReactElement {
    * rail is a column and `.ub-rail-open` declares nothing.
    */
   const [threadsOpen, setThreadsOpen] = useState(false);
-  /** Whether the sync detail panel is open (#72) — the connection pill's state. */
+  /** Whether the sync detail panel is open (#72) — the status reading's state. */
   const [syncOpen, setSyncOpen] = useState(false);
+  useEffect(() => {
+    if (route.kind !== "doc" && syncOpen) setSyncOpen(false);
+  }, [route.kind, syncOpen]);
   /**
    * What opened the drawer, so closing it can hand focus back there. Closing
    * *hides* the rail below 1100px, and focus inside a hidden panel is focus
@@ -421,34 +467,26 @@ export function App(): ReactElement {
       : getDirectoryEntry(directory.ydoc, selected);
   /**
    * The open document's threads: the rail's content, read once here because two
-   * things depend on it — the handle in the topbar, and whether the drawer is
+   * things depend on it — the handle at the pane edge, and whether the drawer is
    * allowed to be open at all.
    */
   const threads = useThreads(doc);
   /**
-   * The room the connection pill reports on and the sync panel details: the
-   * selected document's when one is requested, or the directory's when the
-   * route names no document. A selected document whose connection is still
-   * opening stays null here; the directory must not answer in its place.
+   * The room the document-local sync reading and panel describe. A route with
+   * no open document has no global replacement control, so it has no room here.
    */
-  const chromeRoom = selected === null ? directory : doc;
+  const chromeRoom = selected === null ? null : doc;
   /**
    * Who else is in that room, read *here* and handed to every reader of it. The
-   * pill names one session, the status line's strip draws them all as circles,
-   * and the sync panel lists them in words; one subscription over the awareness
-   * map is what keeps those views of the same fact identical — and what stops a
-   * peer's keystroke costing three readings that all say the same thing.
+   * status line's strip draws them as circles and the sync panel lists them in
+   * words; one subscription over the awareness map keeps both views identical.
    */
   const presence = usePresence(chromeRoom);
   /**
-   * The agent sessions the user menu counts, and the colour this session is
-   * seen in. Both are workspace-wide facts about *this client*, so they are
-   * read here beside the rest of the shell's state: the directory is the room
-   * every session joins, and the colour is one setting with two readers (the
-   * menu's swatches, and the chip in the header).
+   * The agent sessions the user menu counts. It is a workspace-wide fact, so
+   * the directory is the room every session joins.
    */
   const agentSessions = useAgentSessions(directory);
-  const presenceColor = useSetting("presenceColor") ?? identity.color;
 
   /**
    * A drawer over an empty rail is a panel of nothing. The rail can empty out
@@ -668,43 +706,27 @@ export function App(): ReactElement {
 
   return (
     <main className="ub-app">
-      <header className="ub-header">
-        {/* Lives in the header so it stays visible while the sidebar is gone. */}
-        <button
-          type="button"
-          className="ub-sidebar-toggle"
-          aria-expanded={!collapsed}
-          aria-label={sidebarToggleLabel}
-          title={sidebarToggleLabel}
-          onClick={() => setCollapsed(!collapsed)}
-        >
-          {collapsed ? "»" : "«"}
-        </button>
-        <span className="ub-brand">uberblick</span>
-        {/* The open document's breadcrumb, and the activity and connection
-            pills. The document's room when there is one, the directory's when
-            there is not: one shared socket, so it is the same truth about the
-            same hub either way. */}
-        <DocChrome
-          connection={chromeRoom}
-          presence={presence}
-          endpoint={endpoint}
-          meta={meta}
-          threads={threads}
-          threadsOpen={threadsOpen}
-          onToggleThreads={onToggleThreads}
-          syncOpen={syncOpen}
-          onToggleSync={onToggleSync}
-        />
-        {/* The colour the picker chose, which is also the colour peers see this
-            session in — one reading of one setting (#74). */}
-        <span className="ub-me" style={{ borderColor: presenceColor }}>
-          {identity.name}
-        </span>
-      </header>
       <div className="ub-body">
+        {collapsed && (
+          /* Pane-local and out of flow: restoring the sidebar costs no global
+             row and leaves every route at the application's top edge. */
+          <button
+            ref={restoreSidebar}
+            type="button"
+            className="ub-sidebar-toggle ub-sidebar-restore"
+            aria-expanded="false"
+            aria-label={sidebarToggleLabel}
+            title={sidebarToggleLabel}
+            onClick={() => setCollapsed(false)}
+          >
+            »
+          </button>
+        )}
         {!collapsed && (
           <Sidebar
+            collapseButtonRef={hideSidebar}
+            collapseLabel={sidebarToggleLabel}
+            onCollapse={() => setCollapsed(true)}
             connection={directory}
             sidebar={sidebar}
             groups={sidebarGroups}
@@ -761,6 +783,7 @@ export function App(): ReactElement {
             configured={hubReady}
             connection={doc}
             presence={presence}
+            endpoint={endpoint}
             meta={meta}
             author={identity.name}
             knownTags={knownTags}
@@ -784,6 +807,11 @@ export function App(): ReactElement {
             onRestoreFocused={onRestoreFocused}
             onRestore={onRestore}
             onSelectThread={onFocusThread}
+            threads={threads}
+            threadsOpen={threadsOpen}
+            onToggleThreads={onToggleThreads}
+            syncOpen={syncOpen}
+            onToggleSync={onToggleSync}
           />
         )}
         {/* The outline and the threads rail stack in one right column. Both
@@ -805,11 +833,10 @@ export function App(): ReactElement {
           />
         </aside>
         {/* The sync detail panel (#72), over the panes rather than beside them:
-            it is opened to answer a question and closed again. The room the
-            pill reports on, the sessions the pill names one of, and the
-            display label for the endpoint that was resolved — the same one the
-            pill carries, null only in the moment before that read settles. */}
-        {syncOpen && (
+            it is opened to answer a question and closed again. The room and
+            sessions are the ones the document-local status line describes;
+            the endpoint is null only while its configuration read settles. */}
+        {syncOpen && route.kind === "doc" && (
           <SyncPanel
             connection={chromeRoom}
             presence={presence}

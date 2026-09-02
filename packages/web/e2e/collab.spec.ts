@@ -62,10 +62,6 @@ async function openApp(browser: Browser, path = "/"): Promise<Page> {
   return page;
 }
 
-function localCopyFact(page: Page) {
-  return page.locator('.ub-sync-fact:has(dt:text-is("Local copy")) dd');
-}
-
 /** Unique per run: every test in the file shares one workspace directory. */
 function docTitle(label: string): string {
   return `${label}-${Math.random().toString(36).slice(2, 8)}`;
@@ -185,8 +181,8 @@ test("a peer's cursor renders in the other context with its name and colour", as
   // has to be in the block for there to be anything to render.
   await caretTo(a, "end");
 
-  const identity = a.locator(".ub-me");
-  const name = (await identity.innerText()).trim();
+  const name = (await a.locator(".ub-user-name").innerText()).trim();
+  const identity = a.locator(".ub-user-tile");
   // Only the peer's cursor is ever decorated; a client never renders its own.
   const label = b.locator(".ub-editor .ProseMirror-yjs-cursor > div");
   await expect(label).toHaveText(name);
@@ -195,13 +191,13 @@ test("a peer's cursor renders in the other context with its name and colour", as
   // The colour travels in the same awareness payload as the name, and reaches
   // the label only through y-prosemirror's cursor builder.
   const color = await identity.evaluate(
-    (element) => getComputedStyle(element).borderTopColor,
+    (element) => getComputedStyle(element).backgroundColor,
   );
   await expect(label).toHaveCSS("background-color", color);
 
   // And when A picks a different presence colour (#74), B's copy of A's cursor
   // follows it live — the choice is an awareness republish, not something that
-  // waits for a reconnect. The colour is read back off A's own chip, so this
+  // waits for a reconnect. The colour is read back off A's own tile, so this
   // asserts the two ends agree rather than pinning a hex.
   await a.locator(".ub-user-card").click();
   // Anything but the one it was dealt, which is random per tab.
@@ -212,7 +208,7 @@ test("a peer's cursor renders in the other context with its name and colour", as
     .getByRole("button", { name: dealt === "teal" ? "violet" : "teal", exact: true })
     .click();
   const chosen = await identity.evaluate(
-    (element) => getComputedStyle(element).borderTopColor,
+    (element) => getComputedStyle(element).backgroundColor,
   );
   expect(chosen).not.toBe(color);
   // Back into the block: awareness only carries a cursor while the editor has
@@ -220,38 +216,6 @@ test("a peer's cursor renders in the other context with its name and colour", as
   await a.keyboard.press("Escape");
   await caretTo(a, "end");
   await expect(label).toHaveCSS("background-color", chosen);
-});
-
-test("the workspace claims a local copy only after a hub-confirmed checkpoint", async ({
-  browser,
-}) => {
-  await harness().stopHub();
-  try {
-    // A brand-new browser database opens and reads successfully, but this
-    // profile has never reached the hub and therefore holds no known workspace
-    // copy. The old open-means-cached flag reported this as available.
-    const fresh = await openApp(browser);
-    await fresh.locator(".ub-sync-toggle").click();
-    await expect(localCopyFact(fresh)).toHaveText("unavailable");
-
-    await harness().startHub();
-    await expect(localCopyFact(fresh)).toHaveText("available");
-
-    // The second configured workspace has no documents. Syncing it must still
-    // establish a checkpoint, because content cannot distinguish legitimately
-    // empty from never fetched.
-    const empty = await openApp(browser, `/${harness().secondWorkspace}`);
-    await empty.locator(".ub-sync-toggle").click();
-    await expect(localCopyFact(empty)).toHaveText("available");
-
-    await harness().stopHub();
-    await empty.reload();
-    await expect(empty.locator(".ub-list-head")).toBeVisible();
-    await empty.locator(".ub-sync-toggle").click();
-    await expect(localCopyFact(empty)).toHaveText("available");
-  } finally {
-    await harness().startHub();
-  }
 });
 
 test("a reload with the hub stopped renders from the local cache, and the offline edit converges on restart", async ({

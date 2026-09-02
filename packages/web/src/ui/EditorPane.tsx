@@ -20,6 +20,8 @@ import type { LinkConflict } from "../editor/palette.js";
 import { repairLinkConflict } from "../editor/link-repair.js";
 import type { LinkSurvivor } from "../editor/link-repair.js";
 import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
+import { endpointSourceLabel } from "../config.js";
+import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import {
   backlogLabel,
@@ -43,7 +45,7 @@ import { CommentComposer } from "./CommentComposer.js";
 import { PeerAvatar } from "./PeerAvatar.js";
 import { DocMetaLine } from "./DocChrome.js";
 import { threadIdFromActivation, threadIdFromTarget } from "./threads.js";
-import type { SelectThread } from "./threads.js";
+import type { SelectThread, ThreadView } from "./threads.js";
 
 /**
  * The pane frame with a message in it instead of a document.
@@ -124,11 +126,14 @@ export function StatusLine({
   connection,
   presence,
   docPresent,
+  endpoint = null,
+  syncOpen = false,
+  onToggleSync,
 }: {
   connection: RoomConnection;
   /**
    * Who else is in this room, read once by the shell and handed down — the same
-   * snapshot the activity pill and the sync panel draw from (`App.tsx`).
+   * snapshot the sync panel draws from (`App.tsx`).
    *
    * A prop rather than a `usePresence` of its own, because the shell already
    * holds this room's reading: a second subscription would add an awareness
@@ -142,6 +147,11 @@ export function StatusLine({
    * copy is not a fact this client has — see {@link localCopyState}.
    */
   docPresent: boolean;
+  /** The hub this reading describes, null while configuration is resolving. */
+  endpoint?: HubEndpoint | null;
+  /** The reading is the details-panel trigger when this callback is present. */
+  syncOpen?: boolean;
+  onToggleSync?: (() => void) | undefined;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const raw = rawSyncState(status);
@@ -173,56 +183,76 @@ export function StatusLine({
       ))}
     </span>
   );
-  if (state === null && reading.detail === null) {
-    return (
-      <div className="ub-status">
-        <span className="ub-status-mark" />
-        <span className="ub-status-word" />
-        {peerStrip}
-      </div>
-    );
-  }
-  if (reading.detail !== null) {
-    // A refusal replaces the line rather than decorating it: the backlog and
-    // the peer strip are about a connection that is working or coming back, and
-    // neither is what this reader has to act on. The local copy is the
-    // exception, and the reason is the same one: it is the only thing here that
-    // is still true while nothing will sync again until somebody acts.
-    return (
-      <div className="ub-status">
-        <span className="ub-status-mark" aria-hidden="true">
+  const blank = state === null && reading.detail === null;
+  const mark = (
+    <span className="ub-status-mark" aria-hidden="true">
+      {!blank &&
+        (reading.detail !== null ? (
           <span className="ub-dot ub-dot-off" />
-        </span>
-        <span className="ub-status-word">{reading.word}</span>
-        <span className="ub-muted">{reading.detail}</span>
-        {copyNote}
-      </div>
-    );
-  }
-  return (
-    <div className="ub-status">
-      {/* The word carries the meaning; the mark is decoration beside it. */}
-      <span className="ub-status-mark" aria-hidden="true">
-        {state === "syncing" ? (
+        ) : state === "syncing" ? (
           <span className="ub-spinner" />
         ) : (
           <span
             className={`ub-dot ${state === "synced" ? "ub-dot-live" : "ub-dot-off"}`}
           />
-        )}
-      </span>
-      <span className="ub-status-word">{reading.word}</span>
+        ))}
+    </span>
+  );
+  const word = <span className="ub-status-word">{blank ? null : reading.word}</span>;
+  const hub =
+    endpoint === null
+      ? null
+      : `${endpoint.url ?? "unknown"} (${endpointSourceLabel(endpoint.source)})`;
+  const syncReading =
+    onToggleSync === undefined ? (
+      <>
+        {mark}
+        {word}
+      </>
+    ) : (
+      <button
+        type="button"
+        className="ub-status-sync ub-sync-toggle"
+        aria-expanded={syncOpen}
+        aria-controls="ub-sync-panel"
+        aria-label={
+          blank
+            ? hub === null
+              ? "Sync details"
+              : `Sync details — hub ${hub}`
+            : hub === null
+              ? `Sync details — ${reading.word}`
+              : `Sync details — ${reading.word}, hub ${hub}`
+        }
+        title={hub === null ? "Sync details" : `Sync details — hub ${hub}`}
+        onClick={onToggleSync}
+      >
+        {mark}
+        {word}
+      </button>
+    );
+
+  // A refusal replaces the rest of the line rather than decorating it: the
+  // backlog and peer strip are about a connection that is working or returning.
+  return (
+    <div className="ub-status">
+      {syncReading}
+      {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
       {copyNote}
-      {state !== "synced" && status.unsyncedChanges > 0 && (
-        <span className="ub-pending">{backlogLabel(status.unsyncedChanges)}</span>
-      )}
+      {!blank &&
+        reading.detail === null &&
+        state !== "synced" &&
+        status.unsyncedChanges > 0 && (
+          <span className="ub-pending">
+            {backlogLabel(status.unsyncedChanges)}
+          </span>
+        )}
       {/* Circles, not name pills (#494): the strip is the constrained surface,
           and a row of words pushes the status line around as sessions come and
           go. The detail a name carried is on the avatar's hover instead — which
           is why this is the presence reading and not `usePeers`: the block a
-          caret sits in is resolved once, in `readPresence`, so the hover and
-          the activity pill cannot disagree about where a session is. */}
-      {peerStrip}
+          caret sits in is resolved once, in `readPresence`. */}
+      {reading.detail === null && peerStrip}
     </div>
   );
 }
@@ -586,6 +616,12 @@ export function EditorPane({
   docLinks,
   onRestore,
   onSelectThread,
+  endpoint = null,
+  threads = [],
+  threadsOpen = false,
+  onToggleThreads,
+  syncOpen = false,
+  onToggleSync,
 }: {
   connection: RoomConnection | null;
   /** The workspace as the address spells it — see {@link DocMetaLine}. */
@@ -626,9 +662,16 @@ export function EditorPane({
    * Also called with a thread this client has just started.
    */
   onSelectThread: SelectThread;
+  endpoint?: HubEndpoint | null;
+  threads?: readonly ThreadView[];
+  threadsOpen?: boolean;
+  onToggleThreads?: (() => void) | undefined;
+  syncOpen?: boolean;
+  onToggleSync?: (() => void) | undefined;
 }): ReactElement {
   const meta = useDocMeta(connection);
   const foreign = useForeignBlocks(connection);
+  const openThreads = threads.filter((thread) => !thread.resolved).length;
 
   if (connection === null) {
     return (
@@ -642,6 +685,17 @@ export function EditorPane({
   // reading measure lives on `ub-column`, centred inside it.
   return (
     <section className="ub-pane">
+      {threads.length > 0 && onToggleThreads !== undefined && (
+        <button
+          type="button"
+          className="ub-threads-toggle ub-pane-threads-toggle"
+          aria-expanded={threadsOpen}
+          aria-controls="ub-rail"
+          onClick={onToggleThreads}
+        >
+          Threads <span className="ub-muted">{openThreads}</span>
+        </button>
+      )}
       <div className="ub-column">
         {archived && (
           <ArchivedBanner
@@ -682,7 +736,14 @@ export function EditorPane({
         />
         {/* The editor draws only for a document that is here: `RoutePane` sends
             everything else to the waiting screen. */}
-        <StatusLine connection={connection} presence={presence} docPresent />
+        <StatusLine
+          connection={connection}
+          presence={presence}
+          docPresent
+          endpoint={endpoint}
+          syncOpen={syncOpen}
+          onToggleSync={onToggleSync}
+        />
         {foreign.length > 0 ? (
           <ForeignFallback
             connection={connection}

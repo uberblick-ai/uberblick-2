@@ -1,8 +1,8 @@
 /**
- * The sidebar's one claim jsdom cannot host (#115): a real drag, in a real
- * browser, seen by a *second* browser.
+ * The sidebar's browser-only claims: its real top-edge layout and collapse
+ * focus hand-off (#611), plus a real drag seen by a *second* browser (#115).
  *
- * `test/sidebar.test.tsx` pins everything else — stored order, where a drop
+ * `test/sidebar.test.tsx` pins the data mechanics — stored order, where a drop
  * lands, an agent's pin arriving live, the keyboard path — over shared Y.Docs
  * and dispatched drag events. What it cannot prove is that a pointer gesture on
  * a real page starts a native drag at all, and that the result travels the hub
@@ -59,6 +59,40 @@ function docTitle(label: string): string {
 function pinnedTitles(page: Page): Locator {
   return page.locator(".ub-group-body li button");
 }
+
+test("the sidebar and pane share the top edge, and collapse transfers focus", async ({
+  browser,
+}) => {
+  const page = await openApp(browser);
+  await expect(page).toHaveURL(new RegExp(`/${harness().workspace}$`));
+  const path = new URL(page.url()).pathname;
+
+  await expect(page.locator(".ub-header, .ub-brand, .ub-me")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "You" })).toBeVisible();
+  const origins = async (): Promise<[number, number]> => {
+    const sidebar = await page.locator(".ub-list").boundingBox();
+    const pane = await page.locator(".ub-pane").boundingBox();
+    if (sidebar === null || pane === null) throw new Error("e2e: shell is not laid out");
+    return [sidebar.y, pane.y];
+  };
+
+  expect(await origins()).toEqual([0, 0]);
+  await page.setViewportSize({ width: 420, height: 720 });
+  expect(await origins()).toEqual([0, 0]);
+
+  await page.getByRole("button", { name: "Hide document list" }).click();
+  await expect(page.locator(".ub-list")).toHaveCount(0);
+  const restore = page.getByRole("button", { name: "Show document list" });
+  await expect(restore).toBeFocused();
+  await expect(page.locator(".ub-pane")).toHaveCSS("padding-top", "12px");
+  expect(new URL(page.url()).pathname).toBe(path);
+
+  await restore.click();
+  await expect(page.getByRole("button", { name: "Hide document list" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "You" })).toBeVisible();
+  expect(await origins()).toEqual([0, 0]);
+  expect(new URL(page.url()).pathname).toBe(path);
+});
 
 /** Make a document and pin it — the sidebar lists what is pinned, and only that. */
 async function createPinnedDoc(page: Page, title: string): Promise<void> {

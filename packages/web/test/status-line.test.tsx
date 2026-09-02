@@ -15,6 +15,7 @@ import { StatusLine } from "../src/ui/EditorPane.js";
 import { TOKEN_MISSING } from "../src/ui/status-reading.js";
 import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
+import type { HubEndpoint } from "../src/config.js";
 import type { RemotePresence } from "../src/ui/doc-chrome.js";
 
 /** The workspace these stub room keys sit in. A workspace id is a uuid. */
@@ -338,6 +339,54 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
     act(() => void vi.advanceTimersByTime(5_000));
     expect(host.querySelector(".ub-status-word")?.textContent).toBe("synced");
     expect(host.querySelector(".ub-pending")).toBeNull();
+    act(() => root.unmount());
+    host.remove();
+  });
+});
+
+describe("the document's sole sync reading opens its details", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("is one named button carrying the settled state and hub", () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+    vi.useFakeTimers();
+    const endpoint: HubEndpoint = {
+      url: "wss://hub.example/ws",
+      source: "document",
+    };
+    const toggle = vi.fn();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() =>
+      root.render(
+        <StatusLine
+          connection={stubConnection(0, { connected: true, synced: true })}
+          presence={NOBODY}
+          docPresent
+          endpoint={endpoint}
+          syncOpen={false}
+          onToggleSync={toggle}
+        />,
+      ),
+    );
+    act(() => void vi.advanceTimersByTime(5_000));
+
+    const button = host.querySelector<HTMLButtonElement>(".ub-sync-toggle");
+    expect(button?.tagName).toBe("BUTTON");
+    expect(host.querySelectorAll(".ub-status-word")).toHaveLength(1);
+    expect(button?.textContent?.trim()).toBe("synced");
+    expect(button?.getAttribute("aria-expanded")).toBe("false");
+    expect(button?.getAttribute("aria-controls")).toBe("ub-sync-panel");
+    expect(button?.getAttribute("aria-label")).toBe(
+      "Sync details — synced, hub wss://hub.example/ws (served /uberblick-config.json)",
+    );
+    act(() => button?.click());
+    expect(toggle).toHaveBeenCalledOnce();
+
     act(() => root.unmount());
     host.remove();
   });

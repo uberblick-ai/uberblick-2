@@ -45,9 +45,8 @@ function Fact({ label, value }: { label: string; value: string }): ReactElement 
  * The panel. Rendered only while open — an overlay nobody asked for should not
  * be in the tree keeping observers on the document.
  *
- * `connection` is the room the topbar's pill reports on: the open document's,
- * or the directory's when no document is open. The socket is shared, so either
- * is the same truth about the same hub.
+ * `connection` is the room the open document's status line reports on. Routes
+ * without an open document have no sync-details surface.
  *
  * `endpoint` is passed rather than read here, because the address is resolved
  * once per session by an async read the shell already waits on (`hubUrl` throws
@@ -69,7 +68,7 @@ export function SyncPanel({
   onClose,
 }: {
   connection: RoomConnection | null;
-  /** Every remote session in that room, read once by the shell — see `DocChrome`. */
+  /** Every remote session in that room, read once by the shell. */
   presence: readonly RemotePresence[];
   /** The endpoint the provider was constructed with, or null until resolved. */
   endpoint: HubEndpoint | null;
