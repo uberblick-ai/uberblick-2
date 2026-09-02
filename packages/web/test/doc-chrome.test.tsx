@@ -184,6 +184,42 @@ describe("the doc chrome reads the document, the awareness and the status", () =
     vi.unstubAllGlobals();
   });
 
+  it("keeps an empty fixed status slot until the requested room exists", () => {
+    vi.useFakeTimers();
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() =>
+      root.render(
+        <DocChrome
+          connection={null}
+          presence={[]}
+          endpoint={ENDPOINT}
+          meta={null}
+          threads={[]}
+          threadsOpen={false}
+          onToggleThreads={() => {}}
+          syncOpen={false}
+          onToggleSync={() => {}}
+        />,
+      ),
+    );
+    try {
+      const slot = host.querySelector(".ub-sync-toggle");
+      expect(slot?.tagName).toBe("SPAN");
+      expect(slot?.textContent).toBe("");
+      expect(slot?.getAttribute("aria-hidden")).toBe("true");
+      expect(slot?.querySelector(".ub-status-mark")).not.toBeNull();
+      expect(slot?.querySelector(".ub-status-word")).not.toBeNull();
+      expect(host.querySelector("button.ub-sync-toggle")).toBeNull();
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
   it("makes archive unavailability reachable and non-activating", () => {
     vi.useFakeTimers();
     vi.stubGlobal(

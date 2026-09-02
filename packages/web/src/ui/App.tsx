@@ -429,7 +429,7 @@ export function App(): ReactElement {
    * open document's, or the directory's when none is open. The socket is
    * shared, so it is the same truth about the same hub either way.
    */
-  const chromeRoom = doc ?? directory;
+  const chromeRoom = selected === null ? directory : doc;
   /**
    * Who else is in that room, read *here* and handed to every reader of it. The
    * pill names one session, the status line's strip draws them all as circles,

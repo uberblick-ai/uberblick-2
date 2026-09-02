@@ -241,7 +241,10 @@ test("the workspace claims a local copy only after a hub-confirmed checkpoint", 
     // establish a checkpoint, because content cannot distinguish legitimately
     // empty from never fetched.
     const empty = await openApp(browser, `/${harness().secondWorkspace}`);
-    await empty.locator(".ub-sync-toggle").click();
+    // A newly selected room keeps this fixed slot empty until that room earns
+    // its first settled reading. Wait for the real control rather than
+    // clicking the placeholder that deliberately makes no status claim.
+    await empty.locator("button.ub-sync-toggle").click();
     await expect(localCopyFact(empty)).toHaveText("available");
 
     await harness().stopHub();

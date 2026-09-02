@@ -200,6 +200,39 @@ describe("the sync panel renders the state this client holds", () => {
     vi.useRealTimers();
   });
 
+  it("makes no room-status claim while the requested connection is absent", () => {
+    vi.useFakeTimers();
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() =>
+      root.render(
+        <SyncPanel
+          connection={null}
+          presence={[]}
+          endpoint={ENDPOINT}
+          docPresent={false}
+          onClose={() => {}}
+        />,
+      ),
+    );
+    try {
+      expect(facts(host)).toEqual({
+        Hub: ENDPOINT.url,
+        Source: "served /uberblick-config.json",
+        Room: "—",
+        State: "—",
+        Backlog: "—",
+        "Local copy": "—",
+      });
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
   it("names the endpoint, the room, the state and the backlog's unit", () => {
     vi.useFakeTimers();
     const fix = fixture({ connected: true, synced: true, unsyncedChanges: 4 });

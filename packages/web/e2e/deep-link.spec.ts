@@ -155,6 +155,51 @@ async function wasEverInserted(page: Page): Promise<boolean> {
   });
 }
 
+interface StatusClaim {
+  path: string;
+  words: string[];
+  localCopies: string[];
+}
+
+/** Record every sync word and local-copy note painted during a navigation. */
+async function watchStatusClaims(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as Record<string, unknown>;
+    const claims: StatusClaim[] = [];
+    const read = (): void => {
+      claims.push({
+        path: window.location.pathname,
+        words: [...document.querySelectorAll(".ub-status-word")].map(
+          (node) => node.textContent ?? "",
+        ),
+        localCopies: [...document.querySelectorAll(".ub-local-copy")].map(
+          (node) => node.textContent?.replace(/\s+/g, " ").trim() ?? "",
+        ),
+      });
+    };
+    read();
+    const observer = new MutationObserver(read);
+    observer.observe(document.body, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    w.__statusClaims = claims;
+    w.__statusClaimsStop = () => {
+      read();
+      observer.disconnect();
+    };
+  });
+}
+
+async function statusClaims(page: Page): Promise<StatusClaim[]> {
+  return page.evaluate(() => {
+    const w = window as unknown as Record<string, unknown>;
+    (w.__statusClaimsStop as (() => void) | undefined)?.();
+    return (w.__statusClaims as StatusClaim[] | undefined) ?? [];
+  });
+}
+
 /** Set on the window, and gone the moment anything reloads the page. */
 const KEEPALIVE = "__uberblickSameDocument";
 
@@ -217,13 +262,19 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
   await markSession(author);
   // Moving between two documents this replica already holds must be a quiet
   // swap. The connection is paired with its room one render after the address
-  // changes, and that render must not put "waiting for sync" on the screen.
+  // changes, and that render must not put "waiting for sync", a synthetic
+  // offline reading or a local-copy recovery step on the screen.
   await watchForInsertion(author, ".ub-notice");
+  await watchStatusClaims(author);
   await docButton(author, firstTitle).click();
   await expect(author).toHaveURL(new RegExp(`/${ws()}/${first}$`));
   await expect(author.locator(".ub-title")).toHaveValue(firstTitle);
+  await expect(author.locator(".ub-status .ub-status-word")).toHaveText("synced");
   expect(await sessionSurvived(author)).toBe(true);
   expect(await wasEverInserted(author)).toBe(false);
+  const claims = await statusClaims(author);
+  expect(claims.flatMap(({ words }) => words)).not.toContain("offline");
+  expect(claims.flatMap(({ localCopies }) => localCopies)).toEqual([]);
 
   // ---- Back and Forward re-open what was viewed ----
   await author.goBack();
@@ -337,7 +388,9 @@ test("the served configuration names the workspaces, and the build's define is o
   // from a served document through the shell to both surfaces. On a document
   // route, because that is where the status surfaces are (#424).
   await createDoc(page, docTitle("served"));
-  await page.locator(".ub-sync-toggle").click();
+  // The document room starts with an empty fixed slot. The button exists only
+  // once this room has produced the reading whose details it can open.
+  await page.locator("button.ub-sync-toggle").click();
   const source = page.locator('.ub-sync-fact:has(dt:text-is("Source")) dd');
   // "served …", not either of the two "… not used" answers: falling back to
   // the compiled value while still reading *synced* is the failure #362 exists

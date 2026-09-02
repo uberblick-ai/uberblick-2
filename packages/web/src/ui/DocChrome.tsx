@@ -144,10 +144,11 @@ export function DocChrome({
   // number follows the rail's head — including when that number is zero.
   const openThreads = threads.filter((thread) => !thread.resolved).length;
   const status = useRoomStatus(connection);
-  const state = useCalmSyncState(rawSyncState(status));
+  const raw = rawSyncState(status);
+  const state = useCalmSyncState(raw, connection);
   // The word only. A refusal's sentence never enters the header — it lives in
   // the sync panel this pill opens, where there is room to read it (#448).
-  const reading = statusReading(status, state);
+  const reading = statusReading(status, state ?? raw);
   /**
    * Which hub this state is about (#362) — the endpoint and how it was
    * resolved, or null while the read is still in flight.
@@ -204,38 +205,47 @@ export function DocChrome({
             when they wonder about sync is the thing to press for the detail.
             It stays a pill — same slots, same widths — so nothing beside it
             moves when it becomes operable. */}
-        <button
-          type="button"
-          className={`ub-pill ub-pill-${reading.tone} ub-sync-toggle`}
-          aria-expanded={syncOpen}
-          aria-controls="ub-sync-panel"
-          // The visible label is one word about the state, not about the
-          // action, and `title` is not reliably announced — so the accessible
-          // name carries both, keeping the visible word inside it. The hub
-          // rides along in both, so the endpoint is one hover away for a
-          // pointer and part of the name for everyone else.
-          aria-label={
-            hub === null
-              ? `Sync details — ${reading.word}`
-              : `Sync details — ${reading.word}, hub ${hub}`
-          }
-          title={hub === null ? "Sync details" : `Sync details — hub ${hub}`}
-          onClick={onToggleSync}
-        >
-          <span className="ub-status-mark" aria-hidden="true">
-            {reading.tone === "syncing" ? (
-              <span className="ub-spinner" />
-            ) : (
-              <span
-                className={`ub-dot ${reading.tone === "synced" ? "ub-dot-live" : "ub-dot-off"}`}
-              />
-            )}
+        {connection === null || (state === null && reading.detail === null) ? (
+          /* The requested document has no settled current reading yet. Keep
+              both fixed slots, but make no visible or accessible status claim
+              for the directory room or a synthetic fallback (#606). */
+          <span className="ub-pill ub-sync-toggle" aria-hidden="true">
+            <span className="ub-status-mark" />
+            <span className="ub-status-word" />
           </span>
-          {/* The same fixed-width slot the status line uses, sized for the
-              longest reading either can show, so the pill never changes size
-              and nothing beside it moves. */}
-          <span className="ub-status-word">{reading.word}</span>
-        </button>
+        ) : (
+          <button
+            type="button"
+            className={`ub-pill ub-pill-${reading.tone} ub-sync-toggle`}
+            aria-expanded={syncOpen}
+            aria-controls="ub-sync-panel"
+            // The visible label is one word about the state, not about the
+            // action, and `title` is not reliably announced — so the accessible
+            // name carries both, keeping the visible word inside it. The hub
+            // rides along in both, so the endpoint is one hover away for a
+            // pointer and part of the name for everyone else.
+            aria-label={
+              hub === null
+                ? `Sync details — ${reading.word}`
+                : `Sync details — ${reading.word}, hub ${hub}`
+            }
+            title={hub === null ? "Sync details" : `Sync details — hub ${hub}`}
+            onClick={onToggleSync}
+          >
+            <span className="ub-status-mark" aria-hidden="true">
+              {reading.tone === "syncing" ? (
+                <span className="ub-spinner" />
+              ) : (
+                <span
+                  className={`ub-dot ${reading.tone === "synced" ? "ub-dot-live" : "ub-dot-off"}`}
+                />
+              )}
+            </span>
+            {/* The same fixed-width slot the status line uses, sized for the
+                longest reading either can show, so nothing beside it moves. */}
+            <span className="ub-status-word">{reading.word}</span>
+          </button>
+        )}
       </span>
     </>
   );

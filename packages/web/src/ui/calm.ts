@@ -104,17 +104,45 @@ export function localCopyState(
  * whole debounce: a state that flickers away before its window is up is never
  * rendered, and a state that keeps flickering back and forth never accumulates
  * a window either — the indicator simply holds whatever it last settled on.
+ *
+ * `source` is the connection whose reading this is. A component can survive a
+ * room change, but the settled state must not: a new source begins with an
+ * empty slot and earns its first reading through the same settle window as
+ * every later change. This keeps a short initial catch-up calm without borrowing
+ * the preceding room's state. Callers without a source retain the original
+ * mount behaviour and begin from `raw`.
  */
-export function useCalmSyncState(raw: SyncState): SyncState {
-  const [shown, setShown] = useState(raw);
+export function useCalmSyncState(raw: SyncState): SyncState;
+export function useCalmSyncState(
+  raw: SyncState,
+  source: object | null,
+): SyncState | null;
+export function useCalmSyncState(
+  raw: SyncState,
+  source?: object | null,
+): SyncState | null {
+  const scoped = source !== undefined;
+  const key = source ?? null;
+  const [settled, setSettled] = useState<{
+    source: object | null;
+    state: SyncState | null;
+  }>(() => ({ source: key, state: scoped ? null : raw }));
+  const shown = settled.source === key ? settled.state : null;
   useEffect(() => {
-    if (raw === shown) return;
-    if (SETTLE_MS[raw] === 0) {
-      setShown(raw);
+    if (settled.source !== key) {
+      setSettled({ source: key, state: null });
       return;
     }
-    const timer = setTimeout(() => setShown(raw), SETTLE_MS[raw]);
+    if (raw === shown) return;
+    if (SETTLE_MS[raw] === 0) {
+      setSettled({ source: key, state: raw });
+      return;
+    }
+    const timer = setTimeout(
+      () => setSettled({ source: key, state: raw }),
+      SETTLE_MS[raw],
+    );
     return () => clearTimeout(timer);
-  }, [raw, shown]);
+  }, [key, raw, shown, settled.source]);
   return shown;
 }
