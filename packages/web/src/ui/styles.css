@@ -299,7 +299,7 @@
    Fonts publishes it in three cuts rather than one: all three are vendored,
    with the `unicode-range` each is served with, so the face covers everything
    Google publishes for it and a Polish or Turkish title is not half Georgia
-   (#579). The ranges overlap on a few combining marks and the last declaration
+   (#536). The ranges overlap on a few combining marks and the last declaration
    wins, so the order is Google's own. Fraunces has no Cyrillic upstream at
    all, so a Cyrillic title falls back to Georgia where Geist would have set it
    — a property of the typeface, not of this packaging.
