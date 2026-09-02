@@ -36,7 +36,7 @@ commands:
   doctor [--json]        check the local stack against its known failure modes
   workspace [command]    which workspace is in force, and how to change it
   remote [command]       the endpoint documents sync with, and the one-time bridge
-  mcp [command]          register uberblick with an MCP client
+  mcp <command>          register uberblick with an MCP client
   env -- <command...>    run a command with uberblick's configuration in its
                          environment
 
