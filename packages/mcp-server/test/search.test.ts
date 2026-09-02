@@ -50,6 +50,16 @@ describe("search", () => {
       description: "The peer list every client publishes.",
       blocks: [{ type: "paragraph", text: "Names and colors travel with it." }],
     });
+    await rig.ok("create_doc", {
+      title: "Adjacent",
+      description: "How to list docs from the directory.",
+      blocks: [],
+    });
+    await rig.ok("create_doc", {
+      title: "Separated",
+      description: "How to list all kinds of docs from the directory.",
+      blocks: [],
+    });
 
     // All-terms, not any-term: both words exist in the corpus, but no document
     // holds both, so the honest answer is empty. Under any-term matching this
@@ -64,6 +74,10 @@ describe("search", () => {
     expect(await hits(rig, "presence withdrawal")).toEqual([]);
     // And the documented way out of it.
     expect(await hits(rig, "presence withdraw*")).toEqual(["Presence"]);
+
+    // FTS5 tokenizes an underscore inside a quoted query token as an adjacent
+    // phrase: the separator need not appear, but another word cannot intervene.
+    expect(await hits(rig, "list_docs")).toEqual(["Adjacent"]);
 
     // A query with no searchable term is empty rather than an FTS5 syntax
     // error, so the description's "punctuation and emoji are not terms" holds
