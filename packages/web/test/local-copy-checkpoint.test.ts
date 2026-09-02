@@ -8,7 +8,8 @@ import { afterEach, expect, it, vi } from "vitest";
 
 const fakes = vi.hoisted(() => ({
   checkpoints: new Map<string, string>(),
-  events: [] as string[],
+  failStateWrite: false,
+  failedStateWrites: 0,
   persistences: new Map<string, { syncLocal: () => void }>(),
   providers: new Map<string, { syncHub: () => void }>(),
 }));
@@ -24,18 +25,46 @@ vi.mock("y-indexeddb", () => {
       this.name = name;
       const database = {
         transaction: () => {
+          let checkpoint: { key: string; value: string } | null = null;
+          let hasState = false;
+          let settlementQueued = false;
           const transaction = {
-            error: null,
+            error: null as DOMException | null,
             onabort: null as (() => void) | null,
             oncomplete: null as (() => void) | null,
             onerror: null as (() => void) | null,
-            objectStore: () => ({
-              count: () => {
-                fakes.events.push(`barrier:${name}`);
-                queueMicrotask(() => transaction.oncomplete?.());
+            objectStore: (store: string) => ({
+              add: () => {
+                if (store === "updates") hasState = true;
+                settle();
+              },
+              put: (value: string, key: string) => {
+                if (store === "custom") checkpoint = { key, value };
+                settle();
               },
             }),
           };
+
+          const settle = (): void => {
+            if (settlementQueued) return;
+            settlementQueued = true;
+            queueMicrotask(() => {
+              if (fakes.failStateWrite && hasState) {
+                fakes.failedStateWrites += 1;
+                transaction.error = new DOMException(
+                  "The room state was not stored",
+                  "QuotaExceededError",
+                );
+                transaction.onabort?.();
+                return;
+              }
+              if (checkpoint !== null) {
+                fakes.checkpoints.set(`${name}:${checkpoint.key}`, checkpoint.value);
+              }
+              transaction.oncomplete?.();
+            });
+          };
+
           return transaction;
         },
       } as unknown as IDBDatabase;
@@ -54,12 +83,6 @@ vi.mock("y-indexeddb", () => {
       return Promise.resolve(fakes.checkpoints.get(`${this.name}:${key}`));
     }
 
-    set(key: string, value: string): Promise<string> {
-      fakes.events.push(`checkpoint:${this.name}`);
-      fakes.checkpoints.set(`${this.name}:${key}`, value);
-      return Promise.resolve(value);
-    }
-
     destroy(): Promise<void> {
       return Promise.resolve();
     }
@@ -67,9 +90,6 @@ vi.mock("y-indexeddb", () => {
 
   return {
     IndexeddbPersistence: FakeIndexeddbPersistence,
-    storeState: async (persistence: FakeIndexeddbPersistence): Promise<void> => {
-      fakes.events.push(`flush:${persistence.name}`);
-    },
   };
 });
 
@@ -129,7 +149,8 @@ const ROOM = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4/_directory";
 
 afterEach(() => {
   fakes.checkpoints.clear();
-  fakes.events.length = 0;
+  fakes.failStateWrite = false;
+  fakes.failedStateWrites = 0;
   fakes.persistences.clear();
   fakes.providers.clear();
   Reflect.deleteProperty(globalThis, "indexedDB");
@@ -152,11 +173,6 @@ it("claims an empty local copy only after a hub-confirmed checkpoint survives re
 
     fakes.providers.get(ROOM)?.syncHub();
     await vi.waitFor(() => expect(first.connection.status.hasLocalCache).toBe(true));
-    expect(fakes.events).toEqual([
-      `flush:${ROOM}`,
-      `barrier:${ROOM}`,
-      `checkpoint:${ROOM}`,
-    ]);
   } finally {
     first.release();
   }
@@ -168,6 +184,32 @@ it("claims an empty local copy only after a hub-confirmed checkpoint survives re
     fakes.persistences.get(ROOM)?.syncLocal();
     await reopened.connection.whenLocalReplicaLoaded;
     expect(reopened.connection.status.hasLocalCache).toBe(true);
+  } finally {
+    reopened.release();
+  }
+});
+
+it("leaves no readable checkpoint when the room state write aborts", async () => {
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: {} });
+  fakes.failStateWrite = true;
+
+  const failed = acquireRoom(ROOM, { name: "tester", color: "#888888" });
+  try {
+    fakes.persistences.get(ROOM)?.syncLocal();
+    await failed.connection.whenLocalReplicaLoaded;
+    fakes.providers.get(ROOM)?.syncHub();
+    await vi.waitFor(() => expect(fakes.failedStateWrites).toBe(1));
+    expect(failed.connection.status.hasLocalCache).toBe(false);
+  } finally {
+    failed.release();
+  }
+
+  fakes.failStateWrite = false;
+  const reopened = acquireRoom(ROOM, { name: "tester", color: "#888888" });
+  try {
+    fakes.persistences.get(ROOM)?.syncLocal();
+    await reopened.connection.whenLocalReplicaLoaded;
+    expect(reopened.connection.status.hasLocalCache).toBe(false);
   } finally {
     reopened.release();
   }

@@ -32,7 +32,7 @@ import {
   HocuspocusProviderWebsocket,
   WebSocketStatus,
 } from "@hocuspocus/provider";
-import { IndexeddbPersistence, storeState } from "y-indexeddb";
+import { IndexeddbPersistence } from "y-indexeddb";
 import * as Y from "yjs";
 import { parseRoom } from "@uberblick/schema";
 import {
@@ -356,9 +356,11 @@ export interface RoomStatus {
    * hub down. Opening a new empty database is not enough.
    *
    * Split from `localReplicaLoaded` because that flag says only that the read
-   * ended. This is a last-confirmed reading: IndexedDB offers no notification
-   * when site data is externally deleted mid-session, so it stays true until a
-   * reload reopens the database and checks the checkpoint again.
+   * ended. A room authored offline and never synced can still reload from
+   * IndexedDB while this deliberately remains false. This is a last-confirmed
+   * reading: IndexedDB offers no notification when site data is externally
+   * deleted mid-session, so it stays true until a reload reopens the database
+   * and checks the checkpoint again.
    */
   hasLocalCache: boolean;
   /**
@@ -567,27 +569,27 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     emit();
   };
 
-  /**
-   * Wait behind every update-store transaction queued by `storeState`.
-   * `storeState` starts the final IndexedDB requests without returning their
-   * promises; an overlapping transaction is the browser-native commit barrier.
-   */
-  const updatesCommitted = (database: IDBDatabase): Promise<void> =>
+  /** Persist the room state and its checkpoint at one success boundary. */
+  const persistConfirmedLocalCopy = (database: IDBDatabase): Promise<void> =>
     new Promise((resolve, reject) => {
-      const transaction = database.transaction("updates", "readonly");
+      const transaction = database.transaction(["updates", "custom"], "readwrite");
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB"));
       transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB"));
-      transaction.objectStore("updates").count();
+      transaction.objectStore("updates").add(Y.encodeStateAsUpdate(ydoc));
+      transaction
+        .objectStore("custom")
+        .put(LOCAL_COPY_CHECKPOINT, LOCAL_COPY_CHECKPOINT);
     });
 
   /**
-   * A hub acknowledgement says the in-memory room is complete. Flush that
-   * state first, then persist the checkpoint: a crash between the two can lose
-   * only the claim, never leave a claim whose document state is absent.
+   * A hub acknowledgement says the in-memory room is complete. Persist its
+   * state and checkpoint atomically, so a failed state write cannot leave a
+   * durability claim behind.
    */
   const confirmLocalCopy = (): void => {
     if (
+      status.hasLocalCache ||
       persistence === null ||
       !localPersistenceReady ||
       !hubConfirmed ||
@@ -598,10 +600,8 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     const current = persistence;
     confirmingLocalCopy = (async () => {
       try {
-        await storeState(current);
         if (current.db === null) return;
-        await updatesCommitted(current.db);
-        await current.set(LOCAL_COPY_CHECKPOINT, LOCAL_COPY_CHECKPOINT);
+        await persistConfirmedLocalCopy(current.db);
         status.hasLocalCache = true;
         emit();
       } catch {
