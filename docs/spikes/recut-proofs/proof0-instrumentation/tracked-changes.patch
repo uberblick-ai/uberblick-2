@@ -1,0 +1,156 @@
+diff --git a/mise.toml b/mise.toml
+index 400dc69..544c8d4 100644
+--- a/mise.toml
++++ b/mise.toml
+@@ -336,3 +336,15 @@ docker build --file "$runner/Dockerfile.review" --tag "$review_tag" "$context"
+ docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges "$review_tag"
+ printf 'Review image retained for probes: %s\\n' "$review_tag"
+ """
++
++[tasks.proof0-daemon]
++description = "Proof 0: instrumented #704 daemon-authority harness (worktree-only)"
++run = "pnpm --filter @uberblick/web exec tsx e2e/proof0-daemon-spike.ts"
++
++[tasks.proof0-control]
++description = "Proof 0: production-path control (real hub, real web app, real ub mcp serve)"
++run = "pnpm --filter @uberblick/web exec tsx e2e/proof0-control.ts"
++
++[tasks.proof0-replay]
++description = "Proof 0: replay one room's update log from a MirrorStore database"
++run = "pnpm --filter @uberblick/mcp-server exec tsx spike/proof0-replay.ts"
+diff --git a/packages/mcp-server/spike/daemon-authority-daemon.ts b/packages/mcp-server/spike/daemon-authority-daemon.ts
+index 06b095e..55122fc 100644
+--- a/packages/mcp-server/spike/daemon-authority-daemon.ts
++++ b/packages/mcp-server/spike/daemon-authority-daemon.ts
+@@ -46,6 +46,7 @@ import type { Replica } from "../src/replica.js";
+ import { seedSidebarOnce } from "../src/sidebar-tools.js";
+ import { MirrorStore } from "../src/store.js";
+ import type { UpdateOrigin } from "../src/store.js";
++import { rawBlocks, trace } from "../src/proof0-trace.js";
+ import { registerTools } from "../src/tools.js";
+ 
+ const required = (name: string): string => {
+@@ -334,6 +335,24 @@ async function main(): Promise<void> {
+     port: LOCAL_PORT,
+     quiet: true,
+     stopOnSignals: false,
++    async onConnect({ documentName, socketId }) {
++      trace({ trace: "ingress", event: "connect", documentName, socketId });
++    },
++    async onDisconnect({ documentName, socketId }) {
++      trace({ trace: "ingress", event: "disconnect", documentName, socketId });
++    },
++    async afterLoadDocument({ documentName, document }) {
++      trace({
++        trace: "ingress",
++        event: "load",
++        documentName,
++        serverDocClientID: document.clientID,
++        blocks: rawBlocks(document),
++      });
++    },
++    async afterUnloadDocument({ documentName }) {
++      trace({ trace: "ingress", event: "unload", documentName });
++    },
+     async onUpgrade({ request, socket }) {
+       const origin = request.headers.origin;
+       // Node's internal bridge has no browser Origin. Every browser must come
+@@ -377,9 +396,16 @@ async function main(): Promise<void> {
+         awareness: replica.awareness,
+         websocketProvider: localSocket,
+         token: () => bridgeToken(rootKey),
++        onSynced: ({ state }) => {
++          trace({ trace: "bridge", event: "synced", room: replica.room, state, replicaClientID: replica.doc.clientID });
++        },
++        onClose: () => {
++          trace({ trace: "bridge", event: "close", room: replica.room });
++        },
+       });
+       provider.attach();
+       bridges.set(replica.room, provider);
++      trace({ trace: "bridge", event: "attach", room: replica.room, replicaClientID: replica.doc.clientID });
+     }
+   };
+   attachKnown();
+diff --git a/packages/mcp-server/src/replica.ts b/packages/mcp-server/src/replica.ts
+index 1517ba1..192a2f6 100644
+--- a/packages/mcp-server/src/replica.ts
++++ b/packages/mcp-server/src/replica.ts
+@@ -25,6 +25,7 @@
+ 
+ import * as Y from "yjs";
+ import { Awareness } from "y-protocols/awareness";
++import { describeOrigin, describeUpdate, rawBlocks, trace, traceEnabled } from "./proof0-trace.js";
+ import {
+   DIRECTORY_SUFFIX,
+   FEEDBACK_SUFFIX,
+@@ -456,6 +457,7 @@ export class Replicas {
+ 
+     const doc = new Y.Doc();
+     const awareness = new Awareness(doc);
++    trace({ trace: "replica", room, clientID: doc.clientID, pid: process.pid });
+     // Attaching is not working here. Hydration, sync, search indexing and the
+     // directory-driven attach loop all open rooms passively, so a document room
+     // publishes nothing until a tool call touches it ({@link touch}); the
+@@ -509,7 +511,18 @@ export class Replicas {
+       // one, reporting `applied: true` for writes nothing ever logged. Recorded
+       // here, it stops every tool through `assertHealthy`.
+       try {
+-        this.store.appendUpdate(room, payload, kind);
++        const seq = this.store.appendUpdate(room, payload, kind);
++        if (traceEnabled && !replica.isDirectory && !replica.isSidebar && !replica.isFeedback) {
++          trace({
++            trace: "update",
++            room,
++            seq,
++            kind,
++            origin: describeOrigin(origin, (candidate) => this.sync.isRemoteOrigin(candidate)),
++            update: describeUpdate(payload),
++            blocks: rawBlocks(doc),
++          });
++        }
+       } catch (error) {
+         this.persistenceFailure ??= { room, error };
+         log.error("failed to append to the update log", {
+@@ -573,6 +586,16 @@ export class Replicas {
+       replica.lastSeq = entry.seq;
+       applied = true;
+     }
++    if (applied && traceEnabled && !replica.isDirectory && !replica.isSidebar && !replica.isFeedback) {
++      trace({
++        trace: "replay",
++        room: replica.room,
++        snapshotThroughSeq: slice.snapshot?.throughSeq ?? null,
++        seqs: slice.updates.map((entry) => entry.seq),
++        lastSeq: replica.lastSeq,
++        blocks: rawBlocks(replica.doc),
++      });
++    }
+     if (applied) {
+       // A replay is this replica catching up on writes it did not make — its own
+       // from before a restart, or another instance's on the same database.
+@@ -845,12 +868,24 @@ export class Replicas {
+       return;
+     }
+     try {
++      const before = traceEnabled ? rawBlocks(replica.doc) : [];
++      const seqBefore = traceEnabled ? this.store.updateCount(replica.room) : 0;
+       const removed = repairDuplicateBlocks(replica.doc);
+       if (removed > 0) {
+         log.debug("deleted shadowed duplicate blocks", {
+           room: replica.room,
+           removed,
+         });
++        trace({
++          trace: "repair",
++          room: replica.room,
++          removed,
++          before,
++          after: rawBlocks(replica.doc),
++          lastSeq: replica.lastSeq,
++          updateRowsBefore: seqBefore,
++          updateRowsAfter: this.store.updateCount(replica.room),
++        });
+       }
+     } catch (error) {
+       log.warn("failed to repair duplicate blocks", error);

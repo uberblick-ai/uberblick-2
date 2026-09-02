@@ -1,0 +1,185 @@
+diff --git a/private/tmp/claude-501/-Users-ben-Projects-Uberblick-uberblick-crdt--claude-worktrees-open-issues-review-3ad97f/26d31aab-5516-4f34-bbb7-c5d8e86b57f2/scratchpad/proof0b-worktree/node_modules/.pnpm/y-prosemirror@1.3.7_prosemirror-model@1.25.11_prosemirror-state@1.4.4_prosemirror-view@_e74a5ace6441fb3e63df78b0bb4e8159/node_modules/y-prosemirror/src/plugins/sync-plugin.js.p0orig b/private/tmp/claude-501/-Users-ben-Projects-Uberblick-uberblick-crdt--claude-worktrees-open-issues-review-3ad97f/26d31aab-5516-4f34-bbb7-c5d8e86b57f2/scratchpad/proof0b-worktree/node_modules/.pnpm/y-prosemirror@1.3.7_prosemirror-model@1.25.11_prosemirror-state@1.4.4_prosemirror-view@_e74a5ace6441fb3e63df78b0bb4e8159/node_modules/y-prosemirror/src/plugins/sync-plugin.js
+index dccfb76..5c5b598 100644
+--- a/private/tmp/claude-501/-Users-ben-Projects-Uberblick-uberblick-crdt--claude-worktrees-open-issues-review-3ad97f/26d31aab-5516-4f34-bbb7-c5d8e86b57f2/scratchpad/proof0b-worktree/node_modules/.pnpm/y-prosemirror@1.3.7_prosemirror-model@1.25.11_prosemirror-state@1.4.4_prosemirror-view@_e74a5ace6441fb3e63df78b0bb4e8159/node_modules/y-prosemirror/src/plugins/sync-plugin.js.p0orig
++++ b/private/tmp/claude-501/-Users-ben-Projects-Uberblick-uberblick-crdt--claude-worktrees-open-issues-review-3ad97f/26d31aab-5516-4f34-bbb7-c5d8e86b57f2/scratchpad/proof0b-worktree/node_modules/.pnpm/y-prosemirror@1.3.7_prosemirror-model@1.25.11_prosemirror-state@1.4.4_prosemirror-view@_e74a5ace6441fb3e63df78b0bb4e8159/node_modules/y-prosemirror/src/plugins/sync-plugin.js
+@@ -23,6 +23,46 @@ import * as eventloop from 'lib0/eventloop'
+ import * as map from 'lib0/map'
+ import * as utils from '../utils.js'
+ 
++// ---- Proof 0b instrumentation (throwaway; see scratchpad/proof0b) ----
++const p0seq = () => (globalThis.__p0seq = (globalThis.__p0seq || 0) + 1)
++const p0 = (step, data = {}) => {
++  try {
++    const line = JSON.stringify({ bt: Date.now(), bseq: p0seq(), trace: 'yprosemirror', step, ...data })
++    console.log('P0B ' + line)
++  } catch (e) {
++    console.log('P0B ' + JSON.stringify({ trace: 'yprosemirror', step: 'log-failed', error: String(e) }))
++  }
++}
++const p0Text = (ytext) => {
++  try {
++    return ytext.toDelta().map((d) => (typeof d.insert === 'string' ? d.insert : '\u0000')).join('')
++  } catch (e) {
++    return '<err ' + String(e) + '>'
++  }
++}
++const p0YBlocks = (fragment) => {
++  try {
++    return fragment.toArray().map((el) =>
++      el instanceof Y.XmlElement
++        ? { id: el.getAttribute('id') ?? null, type: el.nodeName, text: el.toArray().map((c) => (c instanceof Y.XmlText ? p0Text(c) : '<' + c.constructor.name + '>')).join('') }
++        : { id: null, type: String(el.constructor.name), text: '' })
++  } catch (e) {
++    return String(e)
++  }
++}
++const p0PmBlocks = (doc) => {
++  try {
++    const out = []
++    doc.forEach((n) => out.push({ id: n.attrs.id ?? null, type: n.type.name, text: n.textContent }))
++    return out
++  } catch (e) {
++    return String(e)
++  }
++}
++const p0Origin = (o) => (o === null || o === undefined ? null : typeof o === 'object' ? (o.constructor && o.constructor.name) || 'object' : String(o))
++const p0Stack = () => (new Error().stack || '').split('\n').slice(2, 14).map((l) => l.trim()).join(' | ')
++// ---- end instrumentation helpers ----
++
+ /**
+  * @typedef {Object} BindingMetadata
+  * @property {ProsemirrorMapping} BindingMetadata.mapping
+@@ -188,11 +228,13 @@ export const ySyncPlugin = (yXmlFragment, {
+       }
+     },
+     view: (view) => {
++      p0('sync.view.create', { pmInitial: p0PmBlocks(view.state.doc), y: p0YBlocks(binding.type), stack: p0Stack() })
+       binding.initView(view)
+       if (mapping == null) {
+         // force rerender to update the bindings mapping
+         binding._forceRerender()
+       }
++      p0('sync.view.created', { pm: p0PmBlocks(view.state.doc) })
+       onFirstRender()
+       return {
+         update: () => {
+@@ -223,12 +265,17 @@ export const ySyncPlugin = (yXmlFragment, {
+                   um.stopCapturing()
+                 }
+               }
++              let p0entered = false
+               binding.mux(() => {
++                p0entered = true; // semicolon: the next line starts with "(" (ASI hazard)
+                 /** @type {Y.Doc} */ (pluginState.doc).transact((tr) => {
+                   tr.meta.set('addToHistory', pluginState.addToHistory)
+                   binding._prosemirrorChanged(view.state.doc)
+                 }, ySyncPluginKey)
+               })
++              p0('sync.update', { entered: p0entered, isChangeOrigin: pluginState.isChangeOrigin, addToHistory: pluginState.addToHistory, pm: p0PmBlocks(view.state.doc), y: p0YBlocks(binding.type) })
++            } else {
++              p0('sync.update.initialUnchanged', { pm: p0PmBlocks(view.state.doc) })
+             }
+           }
+         },
+@@ -431,6 +478,7 @@ export class ProsemirrorBinding {
+   }
+ 
+   _forceRerender () {
++    p0('sync.forceRerender', { pmBefore: p0PmBlocks(this.prosemirrorView.state.doc), y: p0YBlocks(this.type), stack: p0Stack() })
+     this.mapping.clear()
+     this.mux(() => {
+       // If this is a forced rerender, this might neither happen as a pm change nor within a Yjs
+@@ -590,8 +638,9 @@ export class ProsemirrorBinding {
+    * @param {Y.Transaction} transaction
+    */
+   _typeChanged (events, transaction) {
+-    if (this.prosemirrorView == null) return
++    if (this.prosemirrorView == null) { p0('sync.typeChanged.noView', { events: events.length, origin: p0Origin(transaction.origin) }); return }
+     const syncState = ySyncPluginKey.getState(this.prosemirrorView.state)
++    p0('sync.typeChanged', { events: events.length, origin: p0Origin(transaction.origin), local: transaction.local, changed: transaction.changed.size, deleted: transaction.deleteSet.clients.size, pmBefore: p0PmBlocks(this.prosemirrorView.state.doc), y: p0YBlocks(this.type), snapshot: syncState.snapshot != null || syncState.prevSnapshot != null })
+     if (
+       events.length === 0 || syncState.snapshot != null ||
+       syncState.prevSnapshot != null
+@@ -600,7 +649,9 @@ export class ProsemirrorBinding {
+       this.renderSnapshot(syncState.snapshot, syncState.prevSnapshot)
+       return
+     }
++    let p0entered = false
+     this.mux(() => {
++      p0entered = true
+       /**
+        * @param {any} _
+        * @param {Y.AbstractType<any>} type
+@@ -639,13 +690,16 @@ export class ProsemirrorBinding {
+         tr.scrollIntoView()
+       }
+       this.prosemirrorView.dispatch(tr)
++      p0('sync.typeChanged.rendered', { pmAfter: p0PmBlocks(this.prosemirrorView.state.doc) })
+     })
++    if (!p0entered) p0('sync.typeChanged.muxSkipped', { events: events.length, origin: p0Origin(transaction.origin), pm: p0PmBlocks(this.prosemirrorView.state.doc), y: p0YBlocks(this.type), stack: p0Stack() })
+   }
+ 
+   /**
+    * @param {import('prosemirror-model').Node} doc
+    */
+   _prosemirrorChanged (doc) {
++    const p0before = { pm: p0PmBlocks(doc), y: p0YBlocks(this.type), sameDocAsView: doc === this.prosemirrorView.state.doc, mappingSize: this.mapping.size }
+     this.doc.transact(() => {
+       updateYFragment(this.doc, this.type, doc, this)
+       this.beforeTransactionSelection = getRelativeSelection(
+@@ -653,6 +707,7 @@ export class ProsemirrorBinding {
+         this.prosemirrorView.state
+       )
+     }, ySyncPluginKey)
++    p0('sync.prosemirrorChanged', { before: p0before, yAfter: p0YBlocks(this.type) })
+   }
+ 
+   /**
+@@ -660,6 +715,7 @@ export class ProsemirrorBinding {
+    * @param {any} prosemirrorView
+    */
+   initView (prosemirrorView) {
++    p0('sync.initView', { hadView: this.prosemirrorView != null, stack: p0Stack() })
+     if (this.prosemirrorView != null) this.destroy()
+     this.prosemirrorView = prosemirrorView
+     this.doc.on('beforeAllTransactions', this.beforeAllTransactions)
+@@ -668,6 +724,7 @@ export class ProsemirrorBinding {
+   }
+ 
+   destroy () {
++    p0('sync.binding.destroy', { hadView: this.prosemirrorView != null, stack: p0Stack() })
+     if (this.prosemirrorView == null) return
+     this.prosemirrorView = null
+     this.type.unobserveDeep(this._observeFunction)
+@@ -802,6 +859,7 @@ export const createNodeFromYElement = (
+     meta.mapping.set(el, node)
+     return node
+   } catch (e) {
++    p0('sync.createNodeFromYElement.catch', { nodeName: el.nodeName, error: String(e) })
+     // an error occured while creating the node. This is probably a result of a concurrent action.
+     /** @type {Y.Doc} */ (el.doc).transact((transaction) => {
+       /** @type {Y.Item} */ (el._item).delete(transaction)
+@@ -837,6 +895,7 @@ const createTextNodesFromYText = (
+       nodes.push(schema.text(delta.insert, attributesToMarks(delta.attributes, schema)))
+     }
+   } catch (e) {
++    p0('sync.createTextNodesFromYText.catch', { error: String(e) })
+     // an error occured while creating the node. This is probably a result of a concurrent action.
+     /** @type {Y.Doc} */ (text.doc).transact((transaction) => {
+       /** @type {Y.Item} */ (text._item).delete(transaction)
+@@ -1083,6 +1142,7 @@ const updateYText = (ytext, ptexts, meta) => {
+     str,
+     content.map((c) => c.insert).join('')
+   )
++  p0('sync.updateYText', { str, next: content.map((c) => c.insert).join(''), index, remove, insert, stack: p0Stack() })
+   ytext.delete(index, remove)
+   ytext.insert(index, insert)
+   ytext.applyDelta(
+@@ -1150,6 +1210,7 @@ export const updateYFragment = (y, yDomFragment, pNode, meta) => {
+     throw new Error('node name mismatch!')
+   }
+   meta.mapping.set(yDomFragment, pNode)
++  if (yDomFragment instanceof Y.XmlElement) p0('sync.updateYFragment.el', { node: yDomFragment.nodeName, yAttrs: yDomFragment.getAttributes(), pAttrs: pNode.attrs, pText: pNode.textContent, yText: yDomFragment.toArray().map((c) => (c instanceof Y.XmlText ? p0Text(c) : '<' + c.constructor.name + '>')).join('') })
+   // update attributes
+   if (yDomFragment instanceof Y.XmlElement) {
+     const yDomAttrs = yDomFragment.getAttributes()

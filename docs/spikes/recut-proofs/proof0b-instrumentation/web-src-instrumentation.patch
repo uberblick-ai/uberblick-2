@@ -1,0 +1,270 @@
+diff --git a/mise.toml b/mise.toml
+index 400dc69..2d63665 100644
+--- a/mise.toml
++++ b/mise.toml
+@@ -336,3 +336,19 @@ docker build --file "$runner/Dockerfile.review" --tag "$review_tag" "$context"
+ docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges "$review_tag"
+ printf 'Review image retained for probes: %s\\n' "$review_tag"
+ """
++
++[tasks.proof0-daemon]
++description = "Proof 0: instrumented #704 daemon-authority harness (worktree-only)"
++run = "pnpm --filter @uberblick/web exec tsx e2e/proof0-daemon-spike.ts"
++
++[tasks.proof0-control]
++description = "Proof 0: production-path control (real hub, real web app, real ub mcp serve)"
++run = "pnpm --filter @uberblick/web exec tsx e2e/proof0-control.ts"
++
++[tasks.proof0-replay]
++description = "Proof 0: replay one room's update log from a MirrorStore database"
++run = "pnpm --filter @uberblick/mcp-server exec tsx spike/proof0-replay.ts"
++
++[tasks.proof0b-control]
++description = "Proof 0b: instrumented production-path control (browser-side tracing)"
++run = "pnpm --filter @uberblick/web exec tsx e2e/proof0b-control.ts"
+diff --git a/packages/web/src/collab/rooms.ts b/packages/web/src/collab/rooms.ts
+index 0001ee1..ffeff41 100644
+--- a/packages/web/src/collab/rooms.ts
++++ b/packages/web/src/collab/rooms.ts
+@@ -46,6 +46,55 @@ import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "./token
+ import { WEB_CLIENT } from "./identity.js";
+ import type { AwarenessUser } from "./identity.js";
+ 
++// ---- Proof 0b instrumentation (throwaway) -------------------------------
++const p0seq = (): number => {
++  const g = globalThis as { __p0seq?: number };
++  g.__p0seq = (g.__p0seq ?? 0) + 1;
++  return g.__p0seq;
++};
++function p0(step: string, data: Record<string, unknown> = {}): void {
++  try {
++    console.log(`P0B ${JSON.stringify({ bt: Date.now(), bseq: p0seq(), trace: "rooms", step, ...data })}`);
++  } catch (error) {
++    console.log(`P0B ${JSON.stringify({ trace: "rooms", step: "log-failed", error: String(error) })}`);
++  }
++}
++const p0Origin = (o: unknown): string | null =>
++  o === null || o === undefined
++    ? null
++    : typeof o === "object"
++      ? ((o as { constructor?: { name?: string } }).constructor?.name ?? "object")
++      : String(o);
++function p0Update(update: Uint8Array): Record<string, unknown> {
++  try {
++    const decoded = Y.decodeUpdate(update);
++    const structs: Record<string, string[]> = {};
++    for (const struct of decoded.structs) {
++      const key = String(struct.id.client);
++      const content = (struct as { content?: unknown }).content;
++      const label =
++        content instanceof Y.ContentString
++          ? JSON.stringify(content.str)
++          : content instanceof Y.ContentType
++            ? `<type ${content.type.constructor.name}>`
++            : content instanceof Y.ContentFormat
++              ? `<format ${content.key}>`
++              : content instanceof Y.ContentDeleted
++                ? `<deleted ${content.len}>`
++                : `<${content?.constructor?.name ?? struct.constructor.name}>`;
++      (structs[key] ??= []).push(`${struct.id.clock}:${label}`);
++    }
++    const deletes: Record<string, string[]> = {};
++    decoded.ds.clients.forEach((items, client) => {
++      deletes[String(client)] = items.map((item) => `${item.clock}+${item.len}`);
++    });
++    return { structs, deletes };
++  } catch (error) {
++    return { decodeError: String(error) };
++  }
++}
++// ---- end instrumentation ------------------------------------------------
++
+ /**
+  * The shared socket's reconnect band.
+  *
+@@ -184,7 +233,11 @@ function sharedSocket(): HocuspocusProviderWebsocket {
+     url: hubUrl(),
+     ...SOCKET_BACKOFF,
+   });
++  created.on("status", (e: { status: string }) => p0("socket.status", { status: e.status, shouldConnect: created.shouldConnect }));
++  created.on("open", () => p0("socket.open"));
++  created.on("close", (e: { event?: { code?: number; reason?: string } }) => p0("socket.close", { code: e?.event?.code ?? null, reason: e?.event?.reason ?? null }));
+   created.on("disconnect", () => {
++    p0("socket.disconnect", { redialAfterDrop });
+     if (!redialAfterDrop) return;
+     // `disconnect()` cleared `shouldConnect`, so nothing would dial again on its
+     // own. Doing it here rather than straight after `disconnect()` is the whole
+@@ -217,6 +270,7 @@ function dropSocket(): void {
+   // back into the same refusal. See {@link protocolMismatch}.
+   if (protocolMismatch !== null) return;
+   const current = sharedSocket();
++  p0("dropSocket", { socketStatus: current.status, sinceLastDrop: Date.now() - lastForcedDrop, windowMs: forcedDropWindowMs, pending: pendingDrop !== null });
+   // Only meaningful while the socket believes it is connected: a socket that
+   // already knows it is down is reconnecting on its own — and every attached
+   // provider re-syncs on that `open` — so dropping it here would fight the
+@@ -240,6 +294,7 @@ function dropSocket(): void {
+   lastForcedDrop = Date.now();
+   forcedDropWindowMs = forcedDropCooldownMs();
+   redialAfterDrop = true;
++  p0("dropSocket.disconnecting", {});
+   current.disconnect();
+ }
+ 
+@@ -528,6 +583,20 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
+   provider.on("status", refresh);
+   provider.on("unsyncedChanges", refresh);
+   provider.on("close", refresh);
++  // Proof 0b: every provider/document/awareness event on this room.
++  provider.on("status", (e: { status: string }) => p0("provider.status", { room, status: e.status, isSynced: provider.isSynced, isAuthenticated: provider.isAuthenticated }));
++  provider.on("close", (e: { event?: { code?: number; reason?: string } }) => p0("provider.close", { room, code: e?.event?.code ?? null, reason: e?.event?.reason ?? null }));
++  provider.on("disconnect", () => p0("provider.disconnect", { room }));
++  provider.on("open", () => p0("provider.open", { room }));
++  provider.on("synced", (e: { state: boolean }) => p0("provider.synced", { room, state: e.state }));
++  provider.on("authenticated", () => p0("provider.authenticated", { room }));
++  provider.on("authenticationFailed", (e: { reason: string }) => p0("provider.authenticationFailed", { room, reason: e.reason }));
++  provider.on("unsyncedChanges", (e: { number: number }) => p0("provider.unsyncedChanges", { room, number: e.number }));
++  ydoc.on("update", (update: Uint8Array, origin: unknown, _doc: Y.Doc, tr: Y.Transaction) =>
++    p0("y.update", { room, origin: p0Origin(origin), local: tr.local, ...p0Update(update) }));
++  provider.awareness?.on("change", (change: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) =>
++    p0("awareness.change", { room, added: change.added, updated: change.updated, removed: change.removed, origin: p0Origin(origin), states: Array.from(provider.awareness?.getStates().entries() ?? []).map(([id, s]) => ({ id, name: (s as { user?: { name?: string } }).user?.name ?? null, cursor: (s as { cursor?: unknown }).cursor != null })) }));
++  p0("room.open", { room, clientID: ydoc.clientID, socketStatus: socket.status });
+ 
+   provider.on("close", (event: { event?: { reason?: string } }) => {
+     // A close on a live socket is the hub closing this *document*:
+@@ -699,6 +768,7 @@ export function acquireRoom(
+       // `destroy` closes the database through the same open promise, so on a
+       // room whose database never opened it rejects. Nothing to repair — the
+       // thing being closed was never there.
++      p0("room.release", { room });
+       held.persistence?.destroy().catch(() => {});
+       held.connection.provider.destroy();
+       held.connection.ydoc.destroy();
+diff --git a/packages/web/src/editor/guarded-binding.ts b/packages/web/src/editor/guarded-binding.ts
+index 7abda0b..c182391 100644
+--- a/packages/web/src/editor/guarded-binding.ts
++++ b/packages/web/src/editor/guarded-binding.ts
+@@ -51,6 +51,93 @@ import { createUberblickEditor } from "./create-editor.js";
+ import type { CreateEditorOptions } from "./create-editor.js";
+ import { findForeignBlocks } from "./palette.js";
+ 
++// ---- Proof 0b instrumentation (throwaway) -------------------------------
++type P0Block = { id: string | null; type: string; text: string };
++const p0seq = (): number => {
++  const g = globalThis as { __p0seq?: number };
++  g.__p0seq = (g.__p0seq ?? 0) + 1;
++  return g.__p0seq;
++};
++function p0(step: string, data: Record<string, unknown> = {}): void {
++  try {
++    console.log(`P0B ${JSON.stringify({ bt: Date.now(), bseq: p0seq(), trace: "binding", step, ...data })}`);
++  } catch (error) {
++    console.log(`P0B ${JSON.stringify({ trace: "binding", step: "log-failed", error: String(error) })}`);
++  }
++}
++const p0Stack = (): string =>
++  (new Error().stack ?? "").split("\n").slice(2, 14).map((l) => l.trim()).join(" | ");
++function p0PmBlocks(doc: { forEach: (f: (n: { attrs: Record<string, unknown>; type: { name: string }; textContent: string }) => void) => void }): P0Block[] {
++  const out: P0Block[] = [];
++  doc.forEach((n) => out.push({ id: (n.attrs.id as string | null) ?? null, type: n.type.name, text: n.textContent }));
++  return out;
++}
++function p0DomBlocks(dom: Element): P0Block[] {
++  const out: P0Block[] = [];
++  for (const block of Array.from(dom.children)) {
++    const clone = block.cloneNode(true) as HTMLElement;
++    clone.querySelectorAll(".ProseMirror-yjs-cursor").forEach((c) => c.remove());
++    out.push({ id: block.getAttribute("id"), type: block.tagName, text: clone.textContent ?? "" });
++  }
++  return out;
++}
++const p0Editors = new Set<Editor>();
++(globalThis as { __p0editors?: Set<Editor> }).__p0editors = p0Editors;
++(globalThis as { __p0state?: () => unknown }).__p0state = () =>
++  Array.from(p0Editors).map((editor) => {
++    try {
++      const view = editor.view;
++      return {
++        destroyed: editor.isDestroyed,
++        pm: p0PmBlocks(editor.state.doc),
++        dom: p0DomBlocks(view.dom),
++        domAttached: view.dom.isConnected,
++        hasFocus: view.hasFocus(),
++        sel: { from: editor.state.selection.from, to: editor.state.selection.to },
++        editable: editor.isEditable,
++      };
++    } catch (error) {
++      return { error: String(error) };
++    }
++  });
++type P0LastClick = { time: number; x: number; y: number; type: string } | null;
++const p0LastClick = (editor: Editor): P0LastClick =>
++  ((editor.view as unknown as { input?: { lastClick?: P0LastClick } }).input?.lastClick ?? null);
++function p0Instrument(editor: Editor): void {
++  p0Editors.add(editor);
++  // ProseMirror classifies a mousedown as single/double/triple by its own
++  // `input.lastClick` (<500ms, <10px), not by the event's native `detail`.
++  // Capture phase runs before PM's handler (shows the previous click); the
++  // bubble listener is registered after PM's and shows this click's verdict.
++  editor.view.dom.addEventListener("mousedown", (event) => {
++    p0("dom.mousedown.before", { detail: event.detail, x: event.clientX, y: event.clientY, lastClick: p0LastClick(editor), now: Date.now() });
++  }, true);
++  editor.view.dom.addEventListener("mousedown", (event) => {
++    p0("dom.mousedown.after", { detail: event.detail, x: event.clientX, y: event.clientY, lastClick: p0LastClick(editor), sel: { from: editor.state.selection.from, to: editor.state.selection.to } });
++  });
++  editor.on("transaction", ({ editor: e, transaction }) => {
++    const tr = transaction as unknown as { meta: Record<string, unknown>; steps: Array<{ toJSON: () => unknown }>; docChanged: boolean; selectionSet: boolean; getMeta: (k: string) => unknown };
++    p0("pm.transaction", {
++      docChanged: tr.docChanged,
++      selectionSet: tr.selectionSet,
++      metaKeys: Object.keys(tr.meta),
++      uiEvent: tr.getMeta("uiEvent") ?? null,
++      pointer: tr.getMeta("pointer") ?? null,
++      lastClick: tr.getMeta("pointer") ? p0LastClick(e) : undefined,
++      steps: tr.steps.map((s) => JSON.stringify(s.toJSON()).slice(0, 400)),
++      pm: p0PmBlocks(e.state.doc),
++      dom: p0DomBlocks(e.view.dom),
++      sel: { from: e.state.selection.from, to: e.state.selection.to },
++      focus: e.view.hasFocus(),
++    });
++  });
++  editor.on("destroy", () => {
++    p0Editors.delete(editor);
++    p0("pm.editor.destroy", { stack: p0Stack() });
++  });
++}
++// ---- end instrumentation ------------------------------------------------
++
+ export interface GuardedBinding {
+   /** The editor, or null when the gate refused to bind. */
+   editor: Editor | null;
+@@ -76,6 +163,7 @@ export function bindGuardedEditor(
+   }
+ 
+   if (findForeignBlocks(fragment).length > 0) {
++    p0("binding.refused", { stack: p0Stack() });
+     return { editor: null, refused: true, destroy: () => {} };
+   }
+ 
+@@ -85,18 +173,22 @@ export function bindGuardedEditor(
+     if (findForeignBlocks(fragment).length === 0) return;
+     const doomed = instance;
+     instance = null;
++    p0("binding.guardUnbind", { stack: p0Stack() });
+     doomed.destroy();
+     onUnbind?.(fragment);
+   };
+   // Before the binding, so the teardown can outrun y-prosemirror's observer.
+   ydoc.on("beforeObserverCalls", guard);
+ 
++  p0("binding.bind", { editable: rest.editable ?? true, stack: p0Stack() });
+   instance = createUberblickEditor({ ...rest, fragment });
++  p0Instrument(instance);
+ 
+   return {
+     editor: instance,
+     refused: false,
+     destroy: () => {
++      p0("binding.destroy", { hadInstance: instance !== null, stack: p0Stack() });
+       ydoc.off("beforeObserverCalls", guard);
+       const doomed = instance;
+       instance = null;
