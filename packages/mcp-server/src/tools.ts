@@ -1162,8 +1162,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Plain text, both ways: `old_text` and `new_text` are the block's text with no markdown in it, the text " +
         "get_doc returns. Spliced-in text inherits the formatting of the character to its left, and `rev` " +
         "ignores marks, so formatting a range never makes a prepared edit stale.\n\n" +
-        "Pass `old_text` (and the `rev` from get_doc) to assert what you are editing. If either is stale the edit is " +
-        "refused and the error carries `currentText` and `currentRev` to re-diff against.\n\n" +
+        "Pass `old_text` (and the `rev` from get_doc) to assert what you are editing. A mismatched asserted rev " +
+        "refuses with `stale_block`. When the rev is current but `old_text` is wrong, the refusal is " +
+        "`old_text_mismatch`; without a rev, a text mismatch remains `stale_block` because the server cannot tell " +
+        "a bad argument from a stale read. Both errors carry `currentText` and `currentRev` to re-diff against.\n\n" +
         "Scope of that guarantee, stated plainly: it is a check against THIS replica at the moment of the call. " +
         "There is no cross-replica compare-and-swap — an edit made elsewhere that has not reached this replica yet " +
         "cannot be detected, and the window widens the longer this server stays offline.\n\n" +

@@ -35,6 +35,7 @@ import {
   InlineLinkRangeError,
   InvalidDocLinkTargetError,
   MarksNotAllowedError,
+  OldTextMismatchError,
   StaleBlockError,
 } from "./errors.js";
 import {
@@ -616,8 +617,11 @@ export interface EditBlockOptions {
  *
  * @throws BlockNotFoundError when the block does not exist, or when a
  * concurrent delete detached it — never a silent no-op.
- * @throws StaleBlockError when the text or the asserted rev is stale. The error
- * carries `currentText` and `currentRev` so the caller can re-read and retry.
+ * @throws StaleBlockError when the asserted rev is stale, or when `oldText`
+ * mismatches and no rev was supplied to distinguish a bad argument from a
+ * stale read.
+ * @throws OldTextMismatchError when the asserted rev is current but `oldText`
+ * is wrong. Both errors carry `currentText` and `currentRev` for the retry.
  */
 export function editBlock(
   ydoc: Y.Doc,
@@ -631,7 +635,7 @@ export function editBlock(
     if (element === null) throw new BlockNotFoundError(blockId);
 
     const current = toBlock(element);
-    if (current.text !== oldText || (options.rev !== undefined && options.rev !== current.rev)) {
+    if (options.rev !== undefined && options.rev !== current.rev) {
       throw new StaleBlockError({
         blockId,
         expectedText: oldText,
@@ -639,6 +643,19 @@ export function editBlock(
         currentText: current.text,
         currentRev: current.rev,
       });
+    }
+    if (current.text !== oldText) {
+      const details = {
+        blockId,
+        expectedText: oldText,
+        expectedRev: options.rev,
+        currentText: current.text,
+        currentRev: current.rev,
+      };
+      if (options.rev !== undefined) {
+        throw new OldTextMismatchError({ ...details, expectedRev: options.rev });
+      }
+      throw new StaleBlockError(details);
     }
     if (oldText === newText) return;
 
