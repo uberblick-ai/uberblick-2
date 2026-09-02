@@ -375,8 +375,10 @@ export function getDirectoryEntry(
 }
 
 /**
- * List directory entries, sorted by title then uuid so every replica produces
- * the same order.
+ * List entries in replica-stable code-unit order: title, then uuid.
+ *
+ * Deliberately `<` / `>`, not locale collation: this order is mirrored by the
+ * web pane so it and `list_docs` produce the same sequence on every replica.
  */
 export function listDirectory(
   dirDoc: Y.Doc,

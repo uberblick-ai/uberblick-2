@@ -86,7 +86,12 @@ function usableStamp(at: number | undefined): number | undefined {
   return Number.isFinite(new Date(at).getTime()) ? at : undefined;
 }
 
-/** The stored order of every replica's `listDirectory`: title, then uuid. */
+/**
+ * The replica-stable code-unit order of `listDirectory`: title, then uuid.
+ *
+ * Deliberately `<` / `>`, not locale collation: the web pane and `list_docs`
+ * must produce the same sequence on every replica.
+ */
 function byTitle(a: DirectoryEntry, b: DirectoryEntry): number {
   if (a.title !== b.title) return a.title < b.title ? -1 : 1;
   return a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0;
