@@ -905,6 +905,7 @@ body {
 }
 
 .ub-workspace:hover {
+  border-bottom-color: light-dark(var(--sidebar), var(--sidebar-border));
   background: var(--sidebar-accent);
   color: var(--accent-foreground);
 }
