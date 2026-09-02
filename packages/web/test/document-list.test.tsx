@@ -35,6 +35,7 @@ import {
   directoryRoom,
   getDirectoryMap,
   initDoc,
+  listDirectory,
   pinDoc,
   readSidebar,
   roomForDoc,
@@ -336,27 +337,28 @@ describe("the order", () => {
    * the unstamped into a wall at the bottom would not be title order, and the
    * "no answer" the stamps are missing is carried by the row's dash in either.
    */
-  it("in title order sorts every row by its title, stamped or not", () => {
-    const titles = sortDirectory(
-      [
-        entry({ uuid: ONE, title: "Beta", updatedAt: 100 }),
-        entry({ uuid: GONE, title: "Zeta", updatedAt: 300 }),
-        entry({ uuid: "aaaa1111-2222-4333-8444-555566667777", title: "Aardvark" }),
-      ],
-      "title",
-    ).map((row) => row.title);
-    expect(titles).toEqual(["Aardvark", "Beta", "Zeta"]);
-  });
-
-  it("breaks a shared title by uuid, so title order is total too", () => {
-    const same = [
-      entry({ uuid: ONE, title: "Notes" }),
-      entry({ uuid: TWO, title: "Notes" }),
+  it("uses the schema's replica-stable code-unit order for every row", () => {
+    const entries = [
+      entry({ uuid: ONE, title: "Same", updatedAt: 100 }),
+      entry({ uuid: TWO, title: "Same" }),
+      entry({ uuid: THREE, title: "Zebra", updatedAt: 300 }),
+      entry({ uuid: GONE, title: "" }),
+      entry({ uuid: "aaaa1111-2222-4333-8444-555566667777", title: "alpha" }),
+      entry({ uuid: "bbbb2222-3333-4444-8555-666677778888", title: "Éclair" }),
     ];
-    expect(sortDirectory(same, "title").map((row) => row.uuid)).toEqual([
+    const directory = new Y.Doc();
+    for (const row of entries) upsertDirectoryEntry(directory, row);
+
+    const ordered = sortDirectory(entries, "title");
+    expect(ordered.map((row) => row.uuid)).toEqual([
+      GONE,
       TWO,
       ONE,
+      THREE,
+      "aaaa1111-2222-4333-8444-555566667777",
+      "bbbb2222-3333-4444-8555-666677778888",
     ]);
+    expect(ordered).toEqual(listDirectory(directory));
   });
 });
 
