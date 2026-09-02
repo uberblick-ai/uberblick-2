@@ -44,7 +44,10 @@ vi.mock("y-indexeddb", () => {
       return this._db.then(() => undefined);
     }
   }
-  return { IndexeddbPersistence: FakeIndexeddbPersistence };
+  return {
+    IndexeddbPersistence: FakeIndexeddbPersistence,
+    storeState: async (): Promise<void> => {},
+  };
 });
 
 vi.mock("@hocuspocus/provider", () => {

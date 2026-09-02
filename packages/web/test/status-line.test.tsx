@@ -218,11 +218,10 @@ describe("the line says whether a durable local copy is here", () => {
   });
 
   it("claims nothing for a document that has not reached this replica", () => {
-    // The waiting screen's line, and the state that made this a falsehood
-    // rather than a nicety: `hasLocalCache` goes true when IndexedDB opens —
-    // a database this tab may have just created empty — so the strongest
-    // possible local read still says nothing over "has not reached this
-    // replica yet" (#601).
+    // The waiting screen's line. Even a durable room checkpoint cannot identify
+    // a deep-linked document whose metadata has not reached this replica, so
+    // the strongest possible local read still says nothing over "has not
+    // reached this replica yet" (#601).
     expect(
       localCopyNote({ localReplicaLoaded: true, hasLocalCache: true }, false),
     ).toBeNull();

@@ -53,13 +53,17 @@ test.afterAll(async () => {
 });
 
 /** A fresh context: its own IndexedDB, its own awareness identity, its own tab. */
-async function openApp(browser: Browser): Promise<Page> {
+async function openApp(browser: Browser, path = "/"): Promise<Page> {
   const context = await browser.newContext();
   contexts.push(context);
   const page = await context.newPage();
-  await page.goto(harness().appUrl);
+  await page.goto(new URL(path, harness().appUrl).href);
   await expect(page.locator(".ub-list-head")).toBeVisible();
   return page;
+}
+
+function localCopyFact(page: Page) {
+  return page.locator('.ub-sync-fact:has(dt:text-is("Local copy")) dd');
 }
 
 /** Unique per run: every test in the file shares one workspace directory. */
@@ -215,6 +219,38 @@ test("a peer's cursor renders in the other context with its name and colour", as
   await a.keyboard.press("Escape");
   await caretTo(a, "end");
   await expect(label).toHaveCSS("background-color", chosen);
+});
+
+test("the workspace claims a local copy only after a hub-confirmed checkpoint", async ({
+  browser,
+}) => {
+  await harness().stopHub();
+  try {
+    // A brand-new browser database opens and reads successfully, but this
+    // profile has never reached the hub and therefore holds no known workspace
+    // copy. The old open-means-cached flag reported this as available.
+    const fresh = await openApp(browser);
+    await fresh.locator(".ub-sync-toggle").click();
+    await expect(localCopyFact(fresh)).toHaveText("unavailable");
+
+    await harness().startHub();
+    await expect(localCopyFact(fresh)).toHaveText("available");
+
+    // The second configured workspace has no documents. Syncing it must still
+    // establish a checkpoint, because content cannot distinguish legitimately
+    // empty from never fetched.
+    const empty = await openApp(browser, `/${harness().secondWorkspace}`);
+    await empty.locator(".ub-sync-toggle").click();
+    await expect(localCopyFact(empty)).toHaveText("available");
+
+    await harness().stopHub();
+    await empty.reload();
+    await expect(empty.locator(".ub-list-head")).toBeVisible();
+    await empty.locator(".ub-sync-toggle").click();
+    await expect(localCopyFact(empty)).toHaveText("available");
+  } finally {
+    await harness().startHub();
+  }
 });
 
 test("a reload with the hub stopped renders from the local cache, and the offline edit converges on restart", async ({

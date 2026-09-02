@@ -32,7 +32,7 @@ import {
   HocuspocusProviderWebsocket,
   WebSocketStatus,
 } from "@hocuspocus/provider";
-import { IndexeddbPersistence } from "y-indexeddb";
+import { IndexeddbPersistence, storeState } from "y-indexeddb";
 import * as Y from "yjs";
 import { parseRoom } from "@uberblick/schema";
 import {
@@ -126,6 +126,14 @@ let lastForcedDrop = 0;
  * band's maximum is a safe standing value until then.
  */
 let forcedDropWindowMs: number = FORCED_DROP_COOLDOWN.maxMs;
+
+/**
+ * Stored beside a room's Yjs updates once a hub round-trip has proved that the
+ * local database contains this room's complete state. Presence, rather than
+ * the value, is the fact: a newly opened empty database has no checkpoint,
+ * while a legitimately empty room that has synced does.
+ */
+const LOCAL_COPY_CHECKPOINT = "uberblick:local-copy-confirmed";
 
 /** A drop asked for during the cooldown, waiting for the window to end. */
 let pendingDrop: ReturnType<typeof setTimeout> | null = null;
@@ -343,14 +351,14 @@ export interface RoomStatus {
    */
   localReplicaLoaded: boolean;
   /**
-   * True only where IndexedDB actually opened and applied its replica — the
-   * document survives a reload of this browser with the hub down.
+   * True only where IndexedDB has applied a replica previously confirmed by a
+   * hub round-trip — the document survives a reload of this browser with the
+   * hub down. Opening a new empty database is not enough.
    *
-   * Split from `localReplicaLoaded` because the status line says the words
-   * "local cache" to the reader, and a browser with no IndexedDB (or one that
-   * refused to open it) reaches the end of its local read with no cache at all.
-   * Sharing one flag between the two would put that promise on screen in
-   * exactly the environments that cannot keep it.
+   * Split from `localReplicaLoaded` because that flag says only that the read
+   * ended. This is a last-confirmed reading: IndexedDB offers no notification
+   * when site data is externally deleted mid-session, so it stays true until a
+   * reload reopens the database and checks the checkpoint again.
    */
   hasLocalCache: boolean;
   /**
@@ -516,7 +524,6 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   });
 
   provider.on("status", refresh);
-  provider.on("synced", refresh);
   provider.on("unsyncedChanges", refresh);
   provider.on("close", refresh);
 
@@ -539,6 +546,9 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // reopens a document offline still has it. `hasIndexedDB` is false in jsdom
   // and in private-mode Safari; the app still works, it just has no cache.
   let persistence: IndexeddbPersistence | null = null;
+  let localPersistenceReady = false;
+  let hubConfirmed = provider.isSynced;
+  let confirmingLocalCopy: Promise<void> | null = null;
   let resolveLocal: () => void = () => {};
   const whenLocalReplicaLoaded = new Promise<void>((resolve) => {
     resolveLocal = resolve;
@@ -556,13 +566,73 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     resolveLocal();
     emit();
   };
+
+  /**
+   * Wait behind every update-store transaction queued by `storeState`.
+   * `storeState` starts the final IndexedDB requests without returning their
+   * promises; an overlapping transaction is the browser-native commit barrier.
+   */
+  const updatesCommitted = (database: IDBDatabase): Promise<void> =>
+    new Promise((resolve, reject) => {
+      const transaction = database.transaction("updates", "readonly");
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB"));
+      transaction.objectStore("updates").count();
+    });
+
+  /**
+   * A hub acknowledgement says the in-memory room is complete. Flush that
+   * state first, then persist the checkpoint: a crash between the two can lose
+   * only the claim, never leave a claim whose document state is absent.
+   */
+  const confirmLocalCopy = (): void => {
+    if (
+      persistence === null ||
+      !localPersistenceReady ||
+      !hubConfirmed ||
+      confirmingLocalCopy !== null
+    ) {
+      return;
+    }
+    const current = persistence;
+    confirmingLocalCopy = (async () => {
+      try {
+        await storeState(current);
+        if (current.db === null) return;
+        await updatesCommitted(current.db);
+        await current.set(LOCAL_COPY_CHECKPOINT, LOCAL_COPY_CHECKPOINT);
+        status.hasLocalCache = true;
+        emit();
+      } catch {
+        // The database did not durably accept the room. Keep the honest false
+        // reading; a later hub sync can retry the checkpoint.
+      }
+    })().finally(() => {
+      confirmingLocalCopy = null;
+    });
+  };
+
+  provider.on("synced", () => {
+    refresh();
+    hubConfirmed = provider.isSynced;
+    confirmLocalCopy();
+  });
+
   if (typeof indexedDB !== "undefined") {
     persistence = new IndexeddbPersistence(room, ydoc);
     persistence.once("synced", () => {
-      // The only path where a cache genuinely exists: the database opened and
-      // its updates are in the Y.Doc.
-      status.hasLocalCache = true;
-      localReadDone();
+      const current = persistence;
+      if (current === null) return;
+      void current
+        .get(LOCAL_COPY_CHECKPOINT)
+        .then((checkpoint) => {
+          status.hasLocalCache = checkpoint === LOCAL_COPY_CHECKPOINT;
+          localPersistenceReady = true;
+          localReadDone();
+          confirmLocalCopy();
+        })
+        .catch(localReadDone);
     });
     // Opening the database can fail outright: a private window, a browser told
     // to block site data, a quota refusal. `y-indexeddb` has no error event and
