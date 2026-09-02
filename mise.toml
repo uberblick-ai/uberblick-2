@@ -185,10 +185,7 @@ description = "Run the browser end-to-end proof points (Playwright, Chromium onl
 # `playwright install` runs first because the browser is a download, not a
 # dependency pnpm can fetch: it is a no-op once the pinned Chromium is in the
 # local cache, and the alternative is a first run that fails with instructions.
-run = """
-pnpm --filter @uberblick/web exec playwright install chromium
-fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web run e2e
-"""
+run = 'sh "{{config_root}}/scripts/run-e2e.sh"'
 
 [tasks.fue]
 description = "First-user experience: run the documented install path on a clean machine, then assert what it promised"
