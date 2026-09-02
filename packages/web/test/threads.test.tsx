@@ -17,7 +17,7 @@
  *    is no highlight left to flash.
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import type { ComponentProps, ReactElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -344,6 +344,50 @@ describe("the rail renders its cards", () => {
     view.unmount();
   });
 
+  it("ages comment and reply bylines with the rail's clock", async () => {
+    vi.useFakeTimers();
+    const now = Date.UTC(2026, 7, 27, 12);
+    try {
+      vi.setSystemTime(now - 60_000);
+      const { ydoc, blocks } = annotatedDoc();
+      const thread = createAnnotation(
+        ydoc,
+        blocks[1]!,
+        4,
+        15,
+        "ben",
+        "why quick?",
+      );
+      vi.setSystemTime(now);
+      addComment(ydoc, thread.id, "agent-a", "no idea");
+
+      const rail = renderRail(ydoc);
+      try {
+        const labels = (): string[] =>
+          [...rail.host.querySelectorAll(".ub-thread-byline time")].map(
+            (time) => time.textContent ?? "",
+          );
+        expect(labels()).toEqual(["1 minute ago", "just now"]);
+        expect(
+          [...rail.host.querySelectorAll(".ub-thread-byline time")].every(
+            (time) =>
+              time.getAttribute("dateTime") !== null &&
+              time.getAttribute("title") !== null,
+          ),
+        ).toBe(true);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(60_000);
+        });
+        expect(labels()).toEqual(["2 minutes ago", "1 minute ago"]);
+      } finally {
+        rail.unmount();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   /**
    * The reply arrives inside the thread's own nested array, which a shallow
    * observer on the annotations map does not see — so a card open on screen
@@ -556,16 +600,18 @@ describe("a highlight and its card focus each other", () => {
   });
 });
 
-describe("a comment's timestamp", () => {
+describe("a comment's timestamp fallback", () => {
   /**
    * The contract, and not the formatting: the wording is `Intl`'s and the
    * reader's locale's, so the expectation is built the same way rather than
    * hard-coding a locale's punctuation.
    */
-  it("formats a date, and shows anything else verbatim with no machine value", () => {
+  it("uses the shared rule, and shows anything else verbatim with no machine value", () => {
+    const now = Date.UTC(2026, 7, 27, 12);
     const iso = "2026-08-21T12:00:00.000Z";
-    expect(commentTimestamp(iso)).toEqual({
-      label: new Intl.DateTimeFormat(undefined, {
+    expect(commentTimestamp(iso, now)).toEqual({
+      label: "6 days ago",
+      title: new Intl.DateTimeFormat(undefined, {
         dateStyle: "medium",
         timeStyle: "short",
       }).format(Date.parse(iso)),
@@ -574,6 +620,6 @@ describe("a comment's timestamp", () => {
     // Not a timestamp this reader understands: show what the document holds
     // rather than inventing a date or hiding the comment's byline — and emit no
     // `dateTime`, which an absent key is exactly how React drops the attribute.
-    expect(commentTimestamp("whenever")).toEqual({ label: "whenever" });
+    expect(commentTimestamp("whenever", now)).toEqual({ label: "whenever" });
   });
 });

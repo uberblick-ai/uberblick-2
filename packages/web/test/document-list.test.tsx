@@ -18,9 +18,9 @@
  * harness): a room is a plain Y.Doc, because the transport is not what is
  * under test.
  *
- * Timestamps are asserted through each row's `<time dateTime>` rather than its
- * rendered label: the label is `Intl`'s, in whatever locale the machine
- * running the tests has.
+ * Timestamp structure is asserted through each row's `<time dateTime>`; where
+ * a label comes from `Intl`, the expectation uses the same locale-sensitive
+ * formatter rather than hard-coding one locale's punctuation.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -43,12 +43,9 @@ import {
 } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { allPath, canonicalPath, parseRoute } from "../src/ui/route.js";
-import {
-  DocumentList,
-  relativeAge,
-  sortDirectory,
-} from "../src/shell/DocumentList.js";
+import { DocumentList, sortDirectory } from "../src/shell/DocumentList.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
+import { formatTimestamp } from "../src/ui/timestamps.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 /** A second corpus on the same hub — where the switcher goes. */
@@ -205,8 +202,9 @@ function entry(over: Partial<DirectoryEntry> & { uuid: string }): DirectoryEntry
   return { title: "", tags: [], ...over };
 }
 
-describe("relative changed time", () => {
+describe("the shared timestamp rule", () => {
   const NOW = Date.UTC(2026, 7, 27, 12);
+  const DAY = 24 * 60 * 60_000;
   const ago = (milliseconds: number): string =>
     new Date(NOW - milliseconds).toISOString();
 
@@ -217,14 +215,32 @@ describe("relative changed time", () => {
     ["1 day ago", ago(24 * 60 * 60_000)],
     ["2 days ago", ago(2 * 24 * 60 * 60_000)],
     ["1 week ago", ago(7 * 24 * 60 * 60_000)],
-    ["2 months ago", ago(60 * 24 * 60 * 60_000)],
-    ["1 year ago", ago(365 * 24 * 60 * 60_000)],
+    ["4 weeks ago", ago(30 * DAY - 60_000)],
   ])("formats %s", (expected, iso) => {
-    expect(relativeAge(iso, NOW)).toBe(expected);
+    expect(formatTimestamp(iso, NOW)?.label).toBe(expected);
   });
 
-  it("refuses an unusable value", () => {
-    expect(relativeAge("not-a-date", NOW)).toBe("");
+  it("switches to a localized date at exactly 30 days", () => {
+    const format = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+    for (const iso of [ago(30 * DAY), ago(90 * DAY)]) {
+      expect(formatTimestamp(iso, NOW)).toEqual({
+        label: format.format(Date.parse(iso)),
+        dateTime: iso,
+      });
+    }
+  });
+
+  it("keeps a recent absolute value on hover and refuses an unusable value", () => {
+    const iso = ago(20 * 60_000);
+    expect(formatTimestamp(iso, NOW)).toEqual({
+      label: "20 minutes ago",
+      dateTime: iso,
+      title: new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(Date.parse(iso)),
+    });
+    expect(formatTimestamp("not-a-date", NOW)).toBeNull();
   });
 
   /**
@@ -249,6 +265,15 @@ describe("relative changed time", () => {
       const changed = (): string | undefined =>
         host.querySelector(".ub-docs-row time")?.textContent ?? undefined;
       expect(changed()).toBe("just now");
+      expect(host.querySelector(".ub-docs-row time")?.getAttribute("dateTime")).toBe(
+        new Date(NOW).toISOString(),
+      );
+      expect(host.querySelector(".ub-docs-row time")?.getAttribute("title")).toBe(
+        new Intl.DateTimeFormat(undefined, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }).format(NOW),
+      );
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(60_000);
