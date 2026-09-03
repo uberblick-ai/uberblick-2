@@ -180,6 +180,10 @@ CREATE TABLE IF NOT EXISTS doc_index (
   title       TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS doc_index_seq (
+  uuid                TEXT PRIMARY KEY,
+  indexed_through_seq INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS doc_tags (
   uuid TEXT NOT NULL,
   tag  TEXT NOT NULL,
@@ -248,8 +252,11 @@ interface Prepared<P extends SQLInputValue[]> {
  * better-sqlite3's `.transaction()` wrapper, in the lines `node:sqlite` leaves
  * to the caller: run `body` between BEGIN and COMMIT, roll back if it throws.
  *
- * A deferred `BEGIN`, which is what the old binding issued — a body that only
- * reads takes a read snapshot and never blocks the other instance's writer.
+ * The default is a deferred `BEGIN`, which is what the old binding issued — a
+ * body that only reads takes a read snapshot and never blocks the other
+ * instance's writer. A caller whose first read guards later writes can instead
+ * supply `BEGIN IMMEDIATE`, taking its place in the writer queue before it
+ * evaluates that guard.
  *
  * Nesting is unsupported and does not occur: none of the wrapped bodies calls
  * another (the one that spans two reads calls plain statement methods). A
@@ -260,9 +267,10 @@ interface Prepared<P extends SQLInputValue[]> {
 function transactional<A extends unknown[], R>(
   db: DatabaseSync,
   body: (...args: A) => R,
+  begin = "BEGIN",
 ): (...args: A) => R {
   return (...args: A): R => {
-    db.exec("BEGIN");
+    db.exec(begin);
     try {
       const result = body(...args);
       db.exec("COMMIT");
@@ -294,9 +302,11 @@ export class MirrorStore {
     markPending: Prepared<[string, number]>;
     clearPending: Prepared<[string, number]>;
     listPending: Prepared<[]>;
+    advanceIndex: Prepared<[string, number]>;
     putDoc: Prepared<[string, string, string]>;
     hasDoc: Prepared<[string]>;
     dropDoc: Prepared<[string]>;
+    dropIndexSeq: Prepared<[string]>;
     dropTags: Prepared<[string]>;
     putTag: Prepared<[string, string]>;
     dropLinks: Prepared<[string]>;
@@ -321,7 +331,7 @@ export class MirrorStore {
 
   private readonly readSinceTx: (room: string, seq: number) => LogSlice;
 
-  private readonly indexTx: (doc: IndexedDoc) => void;
+  private readonly indexTx: (doc: IndexedDoc, throughSeq: number) => void;
 
   private readonly unindexTx: (uuid: string) => void;
 
@@ -405,6 +415,12 @@ export class MirrorStore {
         "DELETE FROM pending_rooms WHERE room = ? AND seq <= ?",
       ),
       listPending: prepare("SELECT room, seq FROM pending_rooms ORDER BY room"),
+      advanceIndex: prepare(
+        "INSERT INTO doc_index_seq (uuid, indexed_through_seq) VALUES (?, ?) " +
+          "ON CONFLICT (uuid) DO UPDATE SET " +
+          "indexed_through_seq = excluded.indexed_through_seq " +
+          "WHERE doc_index_seq.indexed_through_seq < excluded.indexed_through_seq",
+      ),
       putDoc: prepare(
         "INSERT INTO doc_index (uuid, title, description) VALUES (?, ?, ?) " +
           "ON CONFLICT (uuid) DO UPDATE SET title = excluded.title, " +
@@ -412,6 +428,7 @@ export class MirrorStore {
       ),
       hasDoc: prepare("SELECT 1 AS present FROM doc_index WHERE uuid = ?"),
       dropDoc: prepare("DELETE FROM doc_index WHERE uuid = ?"),
+      dropIndexSeq: prepare("DELETE FROM doc_index_seq WHERE uuid = ?"),
       dropTags: prepare("DELETE FROM doc_tags WHERE uuid = ?"),
       putTag: prepare(
         "INSERT INTO doc_tags (uuid, tag) VALUES (?, ?) ON CONFLICT DO NOTHING",
@@ -497,7 +514,15 @@ export class MirrorStore {
       },
     );
 
-    this.indexTx = transactional(this.db, (doc: IndexedDoc) => {
+    this.indexTx = transactional(this.db, (doc: IndexedDoc, throughSeq: number) => {
+      // The guarded row is both the directory metadata and the generation
+      // marker for every dependent row below. A stale derivation loses before
+      // it can delete anything; the winner and all of its rows commit together.
+      const written =
+        this.statements.advanceIndex.run(doc.uuid, throughSeq).changes > 0;
+      if (!written) {
+        return;
+      }
       this.statements.putDoc.run(doc.uuid, doc.title, doc.description);
       this.statements.dropTags.run(doc.uuid);
       for (const tag of new Set(doc.tags)) {
@@ -516,13 +541,14 @@ export class MirrorStore {
         doc.title,
         doc.description === "" ? doc.body : `${doc.description}\n${doc.body}`,
       );
-    });
+    }, "BEGIN IMMEDIATE");
 
     this.unindexTx = transactional(this.db, (uuid: string) => {
       this.statements.dropFts.run(uuid);
       this.statements.dropTags.run(uuid);
       this.statements.dropLinks.run(uuid);
       this.statements.dropDoc.run(uuid);
+      this.statements.dropIndexSeq.run(uuid);
     });
   }
 
@@ -619,9 +645,16 @@ export class MirrorStore {
     return rows.map((row) => ({ room: row.room, seq: row.seq }));
   }
 
-  /** Upsert one document's derived rows. Idempotent. */
-  indexDoc(doc: IndexedDoc): void {
-    this.indexTx(doc);
+  /**
+   * Upsert one document's derived rows when they came from a newer log cut.
+   *
+   * `throughSeq` is the highest room-log sequence the deriving Y.Doc has
+   * applied contiguously. The metadata row, that cut and every dependent row
+   * land in one immediate transaction, so a slower older derivation cannot
+   * replace a newer one.
+   */
+  indexDoc(doc: IndexedDoc, throughSeq: number): void {
+    this.indexTx(doc, throughSeq);
   }
 
   /**
@@ -652,7 +685,8 @@ export class MirrorStore {
    */
   clearDerived(): void {
     this.db.exec(
-      "DELETE FROM doc_index; DELETE FROM doc_tags; DELETE FROM doc_links; DELETE FROM docs_fts;",
+      "DELETE FROM doc_index; DELETE FROM doc_index_seq; DELETE FROM doc_tags; " +
+        "DELETE FROM doc_links; DELETE FROM docs_fts;",
     );
   }
 
