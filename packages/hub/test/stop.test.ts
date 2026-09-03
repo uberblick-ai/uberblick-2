@@ -9,7 +9,14 @@
  * the wire; `shutdown.test.ts` covers the signal path around it.
  */
 
-import { afterEach, expect, it } from "vitest";
+import {
+  HocuspocusProvider,
+  HocuspocusProviderWebsocket,
+  type onCloseParameters,
+} from "@hocuspocus/provider";
+import { afterEach, expect, it, vi } from "vitest";
+import * as Y from "yjs";
+import { wrapToken } from "../src/protocol.js";
 import type { Hub } from "../src/server.js";
 import {
   createClient,
@@ -78,4 +85,103 @@ it("closes every client websocket when it stops", async () => {
     SHUTDOWN_GRACE_MS,
   );
   expect([...disconnected].sort()).toEqual(subs);
+});
+
+it("closes a multiplexed socket before its rooms can provoke the pending guard", async () => {
+  const started = await startHub({ maxPendingDocuments: 1 });
+  hubs.push(started);
+
+  const warnings: string[] = [];
+  const warning = vi.spyOn(console, "warn").mockImplementation((...args) => {
+    const line = args.map(String).join(" ");
+    if (line.includes("too many pending unauthenticated documents")) {
+      warnings.push(line);
+    }
+  });
+  const websocket = new HocuspocusProviderWebsocket({
+    url: `ws://127.0.0.1:${started.port}`,
+    autoConnect: false,
+    delay: OUT_OF_REACH_MS,
+    minDelay: OUT_OF_REACH_MS,
+  });
+  const providers: HocuspocusProvider[] = [];
+  let releaseStore!: () => void;
+  const storeReleased = new Promise<void>((resolve) => {
+    releaseStore = resolve;
+  });
+  let storeStarted = false;
+  let stopping: Promise<void> | undefined;
+
+  try {
+    let closed: { code: number; reason: string } | undefined;
+    websocket.on("close", ({ event }: onCloseParameters) => {
+      closed = { code: event.code, reason: event.reason };
+    });
+
+    const wireToken = wrapToken(await token());
+    const docs: Y.Doc[] = [];
+    for (let index = 0; index < 2; index += 1) {
+      const doc = new Y.Doc();
+      docs.push(doc);
+      const provider = new HocuspocusProvider({
+        websocketProvider: websocket,
+        name: testRoom(),
+        token: wireToken,
+        document: doc,
+        onClose: () => {
+          // A per-room Close while the socket remains open provokes one frame
+          // from that room. A websocket close queues it for the next handshake.
+          doc.getText("reply").insert(0, String(index));
+        },
+      });
+      providers.push(provider);
+
+      const synced = new Promise<void>((resolve) => {
+        provider.on("synced", () => resolve());
+      });
+      provider.attach();
+      if (index === 0) {
+        await websocket.connect();
+      }
+      await synced;
+    }
+
+    docs[0]?.getText("stored").insert(0, "hold the final flush");
+    await waitUntil(
+      "the update to reach the hub",
+      () =>
+        [...started.hocuspocus.documents.values()].some(
+          (doc) => doc.getText("stored").toString() === "hold the final flush",
+        ),
+    );
+
+    const storeDocumentHooks = started.hocuspocus.storeDocumentHooks.bind(
+      started.hocuspocus,
+    );
+    vi.spyOn(started.hocuspocus, "storeDocumentHooks").mockImplementation(
+      async (...args) => {
+        storeStarted = true;
+        await storeReleased;
+        return storeDocumentHooks(...args);
+      },
+    );
+
+    stopping = started.stop();
+    await waitUntil("the final store to start", () => storeStarted);
+    await waitUntil("the websocket close to land", () => closed !== undefined);
+
+    expect(closed).toEqual({ code: 1001, reason: "hub shutting down" });
+    expect(warnings).toEqual([]);
+
+    releaseStore();
+    await stopping;
+  } finally {
+    releaseStore();
+    await stopping?.catch(() => {});
+    for (const provider of providers) {
+      provider.destroy();
+    }
+    websocket.destroy();
+    warning.mockRestore();
+  }
 });

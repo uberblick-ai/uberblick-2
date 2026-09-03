@@ -4,11 +4,10 @@
  * The offline-first suites cover a hub that was never up and then comes up.
  * This one covers the other order, which is the one a deploy produces: two
  * servers already syncing when the hub they are on stops, and a hub on the same
- * port, database and secret a moment later. A hub closes each room it is
- * unloading without closing the socket underneath, and it can refuse a room it
- * is in the middle of dropping — so a client that treats either as final keeps
- * a socket to a process that is gone, reports itself connected or `auth-failed`
- * and never syncs again.
+ * port, database and secret a moment later. The stop closes the shared socket,
+ * while other server paths can close or refuse one room without closing it — so
+ * a client that treats either event as final can keep a socket to a process that
+ * is gone, report itself connected or `auth-failed` and never sync again.
  *
  * What the tests defend, then, is that the restart is invisible except in
  * timing — and that the retry which makes that true does not turn a wrong
@@ -226,8 +225,9 @@ describe("a hub that restarts under connected servers", () => {
       ).length;
 
     // MAX_REBUILDS in ../src/sync.ts. Written out rather than imported: the
-    // bound is what this test is about, so a change to it should read here.
-    const bound = 3;
+    // bound is what this test is about, so a change to it should read here. It
+    // counts rebuilds after the restarted hub's first refused connection.
+    const bound = 1 + 3;
     await waitUntil(
       "the refused room to spend every rebuild its connection had",
       () => connections() >= bound,
