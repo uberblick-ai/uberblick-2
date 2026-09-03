@@ -97,11 +97,7 @@ export type RecoveryClass = "retry" | "reread" | "manual";
  * failures say what happened to the write.
  *
  * The split is about what the CALLER asked for, which is what a failure has to
- * report on. A read-only tool may still write something of its own — `get_doc`
- * appends a usage event to the workspace's `_feedback` document, after the read
- * has succeeded and with its own errors swallowed, so it can neither fail the
- * call nor be the write a failure would be describing. Telemetry a caller did
- * not ask for is not part of the contract it reads.
+ * report on.
  *
  * A hand-kept list on purpose: "does this tool write" is a fact about the tool,
  * not something to infer at runtime. {@link READ_ONLY_TOOLS} holds the other
@@ -125,7 +121,6 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "pin_doc",
   "unpin_doc",
   "sidebar_group",
-  "rate_doc",
 ]);
 
 /**
@@ -141,7 +136,6 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "export_markdown",
   "sync_status",
   "get_sidebar",
-  "feedback_report",
 ]);
 
 interface Recovery {

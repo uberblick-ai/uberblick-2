@@ -71,10 +71,10 @@ decision ordering, archive behavior, and every documented loss boundary.
 ### Discovery and derived state
 
 Follow document creation and metadata edits through the document, directory
-stub, sidebar, FTS/tags/links index, backlinks, reconciliation, tombstones, and
-feedback compaction. Challenge partial multi-room writes, concurrent whole-entry
-updates, rebuildability, duplicate repair, and whether an unreachable document
-can become permanent.
+stub, sidebar, FTS/tags/links index, backlinks, reconciliation, and tombstones.
+Challenge partial multi-room writes, concurrent whole-entry updates,
+rebuildability, duplicate repair, and whether an unreachable document can
+become permanent.
 
 ### Process and deployment lifecycle
 

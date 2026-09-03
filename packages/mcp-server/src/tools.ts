@@ -1,14 +1,13 @@
 /**
  * The v0 MCP tool set.
  *
- * Twenty-five tools and no more: create_doc, get_doc, list_docs, search,
+ * Twenty-three tools and no more: create_doc, get_doc, list_docs, search,
  * backlinks, edit_block, insert_block, delete_block, set_tags, set_links,
  * set_title, set_description, set_changelog_suggestion, archive_doc,
  * restore_doc, annotate, link_range,
  * export_markdown, sync_status, the four sidebar tools registered from
- * ./sidebar-tools.ts — get_sidebar, pin_doc, unpin_doc, sidebar_group — and
- * the two feedback tools registered from ./feedback-tools.ts, rate_doc and
- * feedback_report. There is deliberately no whole-document write — every
+ * ./sidebar-tools.ts — get_sidebar, pin_doc, unpin_doc, sidebar_group. There is
+ * deliberately no whole-document write — every
  * content change names one block — no markdown-import tool, because markdown
  * is an export format, and no hard delete: archive_doc tombstones the
  * directory stub and leaves every byte of the document where it was. An
@@ -77,7 +76,6 @@ import type {
   InlineRun,
 } from "@uberblick/schema";
 import { z } from "zod";
-import { registerFeedbackTools, recordDocUsage } from "./feedback-tools.js";
 import {
   ToolError,
   failureContract,
@@ -706,12 +704,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
    *
    * Sitting in {@link durability} rather than in each handler is deliberate:
    * every mutator that touches a document goes through it, including ones
-   * written later. The workspace's own rooms are skipped — the directory, the
-   * sidebar and the feedback doc are not documents and have no description to
-   * miss.
+   * written later. The workspace's own rooms are skipped — the directory and
+   * the sidebar are not documents and have no description to miss.
    */
   const descriptionGap = (replica: Replica): Record<string, unknown> => {
-    if (replica.isDirectory || replica.isSidebar || replica.isFeedback) {
+    if (replica.isDirectory || replica.isSidebar) {
       return {};
     }
     if (getMeta(replica.doc).description !== null) {
@@ -1022,12 +1019,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
         "`text` is plain and mark-free, as it has always been. A block that carries inline references to other " +
         "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
-        "link_range speak in, and absent where there are none. Only prose blocks can hold them.\n\n" +
-        "Reading a document records it as used by this session in the workspace's `_feedback` document — once per " +
-        "document per session, however often you read it, so re-reading costs nothing. The first read of a " +
-        "document you have not rated also answers with a one-line `feedback` reminder that rate_doc exists; it is " +
-        "advisory, never a failure, and never required. (The dedupe is the stored events, so after heavy " +
-        "compaction a very long-lived session may be counted and nudged once more for a document it read long ago.)" +
+        "link_range speak in, and absent where there are none. Only prose blocks can hold them." +
         failureContract("get_doc"),
       inputSchema: strictInput({ uuid: uuidArg }),
     },
@@ -1035,9 +1027,6 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       await replicas.settle();
       const replica = requireDoc(uuid);
       const meta = getMeta(replica.doc);
-      // After the read succeeded, and best-effort: telemetry must never cost an
-      // agent the document it asked for. See ./feedback-tools.ts.
-      const nudge = recordDocUsage(replicas, uuid);
       return json({
         ...meta,
         room: replica.room,
@@ -1045,7 +1034,6 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         annotations: listAnnotations(replica.doc).map((annotation) =>
           annotationJson(replica, annotation),
         ),
-        ...(nudge === null ? {} : { feedback: nudge }),
       });
     }),
   );
@@ -1716,13 +1704,4 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     json,
   });
 
-  // Usage and helpfulness telemetry, on the same terms: ./feedback-tools.ts
-  // borrows the identity check so a verdict names a document that exists, and
-  // the durability responder so rate_doc reports `{applied, synced}` like every
-  // other write.
-  registerFeedbackTools(server, replicas, {
-    requireStub,
-    durability,
-    json,
-  });
 }
