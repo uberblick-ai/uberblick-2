@@ -511,9 +511,10 @@ yours there, the rooms being keyed by a different id. Carrying it in the URL is
 what makes that one string, and one paste, rather than two.
 
 `join` binds this machine to the workspace the URL names **whatever is here
-already**, pulls the whole remote directory and every live document into the
-local update log for it, verifies that by the same read-back, and only then
-persists the endpoint and the binding. It seeds nothing into a joined workspace:
+already**, pulls the whole remote directory and every live and archived document
+room into the local update log for it, then has a fresh client verify the full
+directory, every archived room and one sampled live room. Only then does it
+persist the endpoint and the binding. It seeds nothing into a joined workspace:
 the documents come off the wire. An unreachable or auth-rejecting remote writes
 nothing at all.
 
@@ -589,7 +590,7 @@ or a `credentials.json` carrying it. Without the flag, the secret already
 configured is tried first and a terminal is prompted with the input hidden.
 Nothing here prints the secret or a token signed with it.
 
-Archived documents replicate as directory state and stay archived; their content
-is not moved. Merging two independently populated workspaces is not supported:
-the URL says which workspace `join` is about — that one's two replicas reconcile
-as CRDTs, and the others on the machine are left alone.
+Archived documents move with their content and stay archived until restored.
+Merging two independently populated workspaces is not supported: the URL says
+which workspace `join` is about — that one's two replicas reconcile as CRDTs,
+and the others on the machine are left alone.

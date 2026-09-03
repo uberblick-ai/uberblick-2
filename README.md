@@ -435,16 +435,17 @@ one paste instead of two.
 
 `join` binds this machine to the workspace the URL names **regardless of local
 state** — no prior `ub init` is needed, and one that has run is not in the way.
-It hydrates the full remote directory and every live document into that
-workspace's replica, verifies it by the same read-back, and only then persists
-the endpoint and the binding. A replica this machine already holds for that id
-is attached rather than replaced: the two reconcile as CRDTs — what the local
-log holds goes up, what the hub holds comes down, and nothing on either side is
-discarded — which is how the machine that ran `ub remote init` joins its own
-populated workspace. An unreachable or auth-rejecting remote leaves your
-configuration exactly as it was, and a URL missing its workspace id, or carrying
-something that is not one, is refused before anything is written, with the
-expected form in the message.
+It hydrates the full remote directory and every live and archived document room
+into that workspace's replica. A fresh client then verifies the full directory,
+every archived room, and one sampled live room before the endpoint and binding
+are persisted. A replica this machine already holds for that id is attached
+rather than replaced: the two reconcile as CRDTs — what the local log holds goes
+up, what the hub holds comes down, and nothing on either side is discarded —
+which is how the machine that ran `ub remote init` joins its own populated
+workspace. An unreachable or auth-rejecting remote leaves your configuration
+exactly as it was, and a URL missing its workspace id, or carrying something
+that is not one, is refused before anything is written, with the expected form
+in the message.
 
 A workspace on this machine under a *different* id stays. It is never merged
 into the joined one and never moved: `ub workspace list` shows both, and
@@ -473,9 +474,8 @@ so when it is.
 A deployed web client does not read any of these: it resolves its endpoint — and
 its workspaces — at runtime from the served `/uberblick-config.json`.
 
-Archived documents travel as directory state — a tombstone replicates and stays
-a tombstone — but their content is not moved: "every live document" is what a
-bridge is for.
+Archived documents travel with their content. Their tombstones replicate too,
+so they stay archived until restored on the destination.
 
 The remote's signing secret comes from `--secret-file <path>` (a file only you
 can read, mode 0600 — a `credentials.json` works, or the bare secret) or from a

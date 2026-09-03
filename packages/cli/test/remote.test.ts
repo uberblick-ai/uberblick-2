@@ -626,6 +626,7 @@ describe("ub remote join", () => {
     );
     expect(moved.status).toBe(0);
     expect(moved.stdout).toContain("1 archived document moved and verified");
+    expect(moved.stdout).not.toContain("joined 0 documents");
     expect(moved.stdout).not.toContain("content is not moved");
 
     // A different sandbox has no access to the first machine's update log. Its
@@ -724,7 +725,14 @@ describe("ub remote join", () => {
   it("refuses an archive whose content neither side can produce", async () => {
     const title = "Lost archive";
     const archived = randomUUID();
-    const local = sandbox();
+    const source = await startHub();
+    await webDoc(source, title, SECRET, {
+      uuid: archived,
+      body: "Recoverable on the old endpoint.",
+    });
+    await webTombstone(source, archived, title);
+    const local = sandbox({ credentials: { signingSecret: SECRET } });
+    pointAt(local, url(source));
     await seedLocalTombstone(local, archived, title);
     const remote = await startHub(OTHER_SECRET);
     await webTombstone(remote, archived, title, OTHER_SECRET);
@@ -740,10 +748,40 @@ describe("ub remote join", () => {
       local,
     );
     expect(run.status).toBe(1);
-    expect(run.stderr).toContain("cannot recreate the missing content");
-    expect(run.stderr).toContain("retry from a machine that still holds it");
+    expect(run.stderr).toContain(`ub remote join ${url(source)}/${WORKSPACE}`);
+    expect(run.stderr).toContain("another replica that still holds the content");
     expect(run.stderr).not.toContain("Rerun to finish");
     expect(run.stdout).not.toContain("moved and verified");
+    expect(readConfigFile(local, "config.json")).toEqual({ hubUrl: url(source) });
+  });
+
+  it("offers a local retry when the hub stops after preflight", async () => {
+    const local = sandbox();
+    const remote = await startHub(OTHER_SECRET);
+    let stopping: Promise<void> | undefined;
+
+    const run = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(local, OTHER_SECRET),
+      ],
+      local,
+      {},
+      25_000,
+      (stderr) => {
+        if (stopping === undefined && stderr.includes("hydrating 0 documents")) {
+          stopping = remote.stop();
+        }
+      },
+    );
+    if (stopping !== undefined) await stopping;
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("Rerun this command on this machine");
+    expect(run.stderr).not.toContain("missing content");
     expect(existsSync(join(local.configHome, "uberblick", "config.json"))).toBe(
       false,
     );

@@ -602,7 +602,7 @@ function report(
   const live = liveDocs(corpus);
   const tombstones = corpus.entries.length - live.length;
   let text =
-    `${verb} ${plural(live.length, "document")} — directory verified on ` +
+    `${verb} ${plural(corpus.entries.length, "document")} — directory verified on ` +
     `${target}\n\n`;
   text += listDocs(live);
   if (tombstones > 0) {
@@ -930,11 +930,29 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   const joined = await syncWorkspace(remoteConfig(bridge));
   const joinProblem = corpusProblem(bridge.target, joined);
   if (joinProblem !== null) {
+    const contentMissing =
+      joined.hub.status === "connected" &&
+      joined.complete &&
+      joined.unsettled.length === 0 &&
+      joined.missing.length > 0;
+    let recovery =
+      `Rerun this command on this machine once ${bridge.target} can finish the sync.`;
+    if (contentMissing) {
+      const sourceEndpoint = resolveMcpConfig({
+        ...resolved.env,
+        WORKSPACE_ID: flags.workspace,
+      }).hubUrl;
+      recovery =
+        sourceEndpoint === bridge.target
+          ? "Retry from another replica that still holds the content."
+          : `Rerun \`ub remote join ${sourceEndpoint}/${flags.workspace}\` against ` +
+            "the endpoint this machine was using before this command, or retry " +
+            "from another replica that still holds the content.";
+    }
     io.err(
       `ub remote join: ${joinProblem}This machine's configuration is ` +
-        "unchanged — no endpoint and no workspace were persisted. A rerun on " +
-        "this machine cannot recreate the missing content; retry from a machine " +
-        "that still holds it. What did arrive is in the local update log already.\n",
+        `unchanged — no endpoint and no workspace were persisted. ${recovery} ` +
+        "What did arrive is in the local update log already.\n",
     );
     return 1;
   }
