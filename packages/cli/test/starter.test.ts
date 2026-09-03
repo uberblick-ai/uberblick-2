@@ -34,6 +34,8 @@ import {
   readSidebar,
   roomForDoc,
   sidebarRoom,
+  tombstoneDirectoryEntry,
+  upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { SidebarGroup } from "@uberblick/schema";
 import * as Y from "yjs";
@@ -82,6 +84,9 @@ const HALF_WORKSPACE = "5f2b7c48-9d31-4a6e-8c05-3e7a1b9d4f62";
 
 /** And one for a workspace that is already somebody's. */
 const OWNED_WORKSPACE = "b7e9c130-6a48-4f21-9d3c-8e05a2b6f741";
+
+/** A non-starter document known only by its archived directory stub. */
+const OWNED_ARCHIVE = "a98a269e-749c-402e-8776-648b78154d79";
 
 /** One for a workspace whose documents landed but whose sidebar did not. */
 const UNPINNED_WORKSPACE = "c4a1e582-70b3-4d9f-8a26-1fb3d0c95e84";
@@ -460,6 +465,43 @@ it("adds nothing to a workspace that already holds other documents", async () =>
     const { docs } = await call("list_docs");
     expect(docs.map((doc: { title: string }) => doc.title)).toEqual(["Real work"]);
   }, owned);
+});
+
+it("adds nothing when an archived stub has no document room", async () => {
+  // A different replica can deliver a tombstone without ever having attached
+  // the archived room. The stub is still evidence that this workspace belongs
+  // to somebody, so `ub init` must not seed starter documents into it.
+  const owned = sandbox({ userConfig: { workspace: OWNED_WORKSPACE } });
+  const config = resolveMcpConfig({
+    WORKSPACE_ID: OWNED_WORKSPACE,
+    XDG_DATA_HOME: owned.dataHome,
+  });
+  const instance = createMcpServer(config);
+  const directory = new Y.Doc();
+  try {
+    upsertDirectoryEntry(directory, {
+      uuid: OWNED_ARCHIVE,
+      title: "Archived elsewhere",
+      tags: [],
+    });
+    tombstoneDirectoryEntry(directory, OWNED_ARCHIVE);
+    instance.store.appendUpdate(
+      directoryRoom(OWNED_WORKSPACE),
+      Y.encodeStateAsUpdate(directory),
+      "local",
+    );
+  } finally {
+    directory.destroy();
+    await instance.close();
+  }
+
+  const run = init(owned);
+
+  expect(run.output).not.toContain("starter documents");
+  expect(sidebarFromLog(owned)).toEqual({ groups: [], seeded: false });
+  expect(getDirectoryEntry(replayRoom(directoryRoom, owned), OWNED_ARCHIVE)).toMatchObject(
+    { deleted: true, title: "Archived elsewhere" },
+  );
 });
 
 it("leaves an archived starter document archived, and re-pins nothing", async () => {

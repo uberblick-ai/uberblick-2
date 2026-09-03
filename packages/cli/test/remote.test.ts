@@ -41,6 +41,7 @@ import {
   directoryRoom,
   initDoc,
   roomForDoc,
+  tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import * as Y from "yjs";
@@ -186,6 +187,19 @@ async function webDoc(
   return uuid;
 }
 
+/** Put a tombstone in a hub's directory without ever creating its document room. */
+async function webTombstone(
+  hub: Hub,
+  uuid: string,
+  title: string,
+  secret: string = SECRET,
+): Promise<void> {
+  const directory = await openRoom(hub, directoryRoom(WORKSPACE), secret);
+  upsertDirectoryEntry(directory.doc, { uuid, title, tags: [] });
+  tombstoneDirectoryEntry(directory.doc, uuid);
+  await directory.done();
+}
+
 /** Run one MCP session against a sandbox's mirror and return its client. */
 async function withMcp<T>(
   box: Sandbox,
@@ -230,6 +244,60 @@ async function readMirror(
     }
     return found;
   });
+}
+
+/** Seed a large local replica without paying one MCP round trip per document. */
+async function seedLocalCorpus(box: Sandbox, count: number): Promise<void> {
+  const config = resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE });
+  const instance = createMcpServer(config);
+  const directory = new Y.Doc();
+  try {
+    for (let index = 0; index < count; index += 1) {
+      const uuid = randomUUID();
+      const title = `Small note ${index}`;
+      const doc = new Y.Doc();
+      initDoc(doc, { uuid, title });
+      appendBlock(doc, { type: "paragraph", text: `body ${index}` });
+      instance.store.appendUpdate(
+        roomForDoc(WORKSPACE, uuid),
+        Y.encodeStateAsUpdate(doc),
+        "local",
+      );
+      upsertDirectoryEntry(directory, { uuid, title, tags: [] });
+      doc.destroy();
+    }
+    instance.store.appendUpdate(
+      directoryRoom(WORKSPACE),
+      Y.encodeStateAsUpdate(directory),
+      "local",
+    );
+  } finally {
+    directory.destroy();
+    await instance.close();
+  }
+}
+
+/** Put the same directory-only archive shape in a local update log. */
+async function seedLocalTombstone(
+  box: Sandbox,
+  uuid: string,
+  title: string,
+): Promise<void> {
+  const config = resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE });
+  const instance = createMcpServer(config);
+  const directory = new Y.Doc();
+  try {
+    upsertDirectoryEntry(directory, { uuid, title, tags: [] });
+    tombstoneDirectoryEntry(directory, uuid);
+    instance.store.appendUpdate(
+      directoryRoom(WORKSPACE),
+      Y.encodeStateAsUpdate(directory),
+      "local",
+    );
+  } finally {
+    directory.destroy();
+    await instance.close();
+  }
 }
 
 function readConfigFile(box: Sandbox, name: string): Record<string, unknown> {
@@ -520,6 +588,234 @@ describe("ub remote join", () => {
     expect(run.output).not.toContain(OTHER_SECRET);
     expect(run.output).not.toMatch(TOKEN_SHAPE);
   });
+
+  it("moves an archived document room and restores it from a fresh replica", async () => {
+    const local = sandbox();
+    const archived = await withMcp(
+      local,
+      { WORKSPACE_ID: WORKSPACE },
+      async (call) => {
+        const created = await call("create_doc", {
+          title: "Archived field notes",
+          description: "A bridge fixture whose hidden room must remain restorable.",
+          blocks: [{ type: "paragraph", text: "Keep the hidden history." }],
+        });
+        const read = await call("get_doc", { uuid: created.uuid });
+        await call("annotate", {
+          uuid: created.uuid,
+          block_id: read.blocks[0].id,
+          start: 0,
+          end: 4,
+          text: "This annotation must travel too.",
+        });
+        await call("archive_doc", { uuid: created.uuid });
+        return created.uuid as string;
+      },
+    );
+
+    const remote = await startHub(OTHER_SECRET);
+    const moved = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(local, OTHER_SECRET),
+      ],
+      local,
+    );
+    expect(moved.status).toBe(0);
+    expect(moved.stdout).toContain("1 archived document moved and verified");
+    expect(moved.stdout).not.toContain("joined 0 documents");
+    expect(moved.stdout).not.toContain("content is not moved");
+
+    // A different sandbox has no access to the first machine's update log. Its
+    // join and restore therefore read the archived room back from the hub.
+    const fresh = sandbox();
+    const joined = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(fresh, OTHER_SECRET),
+      ],
+      fresh,
+    );
+    expect(joined.status).toBe(0);
+    expect(joined.stderr).toContain("hydrating 1 document");
+    expect(joined.stderr).not.toContain("hydrating 0 documents");
+    expect(joined.stdout).toContain("1 archived document moved and verified");
+    expect(joined.stdout).not.toContain("holds nothing yet");
+
+    const restored = await withMcp(
+      fresh,
+      { WORKSPACE_ID: WORKSPACE },
+      async (call) => {
+        await call("restore_doc", { uuid: archived });
+        return await call("get_doc", { uuid: archived });
+      },
+    );
+    expect(restored.blocks.map((block: { text: string }) => block.text)).toEqual([
+      "Keep the hidden history.",
+    ]);
+    expect(restored.annotations).toHaveLength(1);
+    expect(restored.annotations[0].comments[0].text).toBe(
+      "This annotation must travel too.",
+    );
+  });
+
+  it("repairs a remote directory-only tombstone from a local archived room", async () => {
+    const title = "Archive from the old hub";
+    const local = sandbox();
+    const archived = await withMcp(
+      local,
+      { WORKSPACE_ID: WORKSPACE },
+      async (call) => {
+        const created = await call("create_doc", {
+          title,
+          description: "An archived room that can repair an old remote.",
+          blocks: [{ type: "paragraph", text: "Recoverable content." }],
+        });
+        await call("archive_doc", { uuid: created.uuid });
+        return created.uuid as string;
+      },
+    );
+    const remote = await startHub(OTHER_SECRET);
+    await webTombstone(remote, archived, title, OTHER_SECRET);
+
+    const moved = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(local, OTHER_SECRET),
+      ],
+      local,
+    );
+    expect(moved.status).toBe(0);
+    expect(moved.stdout).toContain("1 archived document moved and verified");
+
+    const fresh = sandbox();
+    const joined = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(fresh, OTHER_SECRET),
+      ],
+      fresh,
+    );
+    expect(joined.status).toBe(0);
+    const restored = await withMcp(
+      fresh,
+      { WORKSPACE_ID: WORKSPACE },
+      async (call) => {
+        await call("restore_doc", { uuid: archived });
+        return await call("get_doc", { uuid: archived });
+      },
+    );
+    expect(restored.blocks.map((block: { text: string }) => block.text)).toEqual([
+      "Recoverable content.",
+    ]);
+  });
+
+  it("refuses an archive whose content neither side can produce", async () => {
+    const title = "Lost archive";
+    const archived = randomUUID();
+    const source = await startHub();
+    await webDoc(source, title, SECRET, {
+      uuid: archived,
+      body: "Recoverable on the old endpoint.",
+    });
+    await webTombstone(source, archived, title);
+    const local = sandbox({ credentials: { signingSecret: SECRET } });
+    pointAt(local, url(source));
+    await seedLocalTombstone(local, archived, title);
+    const remote = await startHub(OTHER_SECRET);
+    await webTombstone(remote, archived, title, OTHER_SECRET);
+
+    const run = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(local, OTHER_SECRET),
+      ],
+      local,
+    );
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain(`ub remote join ${url(source)}/${WORKSPACE}`);
+    expect(run.stderr).toContain("another replica that still holds the content");
+    expect(run.stderr).not.toContain("Rerun to finish");
+    expect(run.stdout).not.toContain("moved and verified");
+    expect(readConfigFile(local, "config.json")).toEqual({ hubUrl: url(source) });
+  });
+
+  it("offers a local retry when the hub stops after preflight", async () => {
+    const local = sandbox();
+    const remote = await startHub(OTHER_SECRET);
+    let stopping: Promise<void> | undefined;
+
+    const run = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(local, OTHER_SECRET),
+      ],
+      local,
+      {},
+      25_000,
+      (stderr) => {
+        if (stopping === undefined && stderr.includes("hydrating 0 documents")) {
+          stopping = remote.stop();
+        }
+      },
+    );
+    if (stopping !== undefined) await stopping;
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("Rerun this command on this machine");
+    expect(run.stderr).not.toContain("missing content");
+    expect(existsSync(join(local.configHome, "uberblick", "config.json"))).toBe(
+      false,
+    );
+  });
+
+  it(
+    "joins 5,000 local documents and persists the verified binding",
+    async () => {
+      const remote = await startHub(OTHER_SECRET);
+      const local = sandbox();
+      await seedLocalCorpus(local, 5_000);
+
+      const run = await runUbAsync(
+        [
+          "remote",
+          "join",
+          joinUrl(remote),
+          "--secret-file",
+          secretFile(local, OTHER_SECRET),
+        ],
+        local,
+        { UB_TEST_MAX_WAIT_MS: "15000" },
+        60_000,
+      );
+
+      expect(run.status).toBe(0);
+      expect(run.stdout).toContain("joined 5000 documents — directory verified");
+      expect(run.stdout).toContain("one live document's content");
+      expect(run.stdout).not.toContain("a fresh client read\nthem back");
+      expect(persistedHubUrl(local)).toBe(url(remote));
+      expect(readConfigFile(local, "config.json").workspace).toBe(WORKSPACE);
+    },
+    90_000,
+  );
 
   it("adds the remote as a second workspace, leaving the seeded one intact", async () => {
     const remote = await startHub(OTHER_SECRET);
