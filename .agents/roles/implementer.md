@@ -28,7 +28,12 @@ work-in-flight rules; claim it and complete only it.
 Top-level assignment: one GitHub-only shallow pass, in this order.
 
 1. **Fix-up** — an open PR whose latest integrator ruling at its current head
-   names fix-now findings, with no live implementer claim; oldest PR first.
+   names fix-now findings, with no live implementer claim; oldest PR first. A
+   PR carrying `needs-human` is not fix-up work: it becomes eligible again
+   only when the owner has swapped in `human-approved`, unless that ruling
+   states in so many words that the fix-up wave goes first. A parked tier-3
+   PR otherwise draws one launch per idle cycle and burns the lane on runs
+   that cannot move its head (owner decision, 2026-09-03, after PR #740).
 2. **Recovery** — a `ready` issue whose implementation claim is stale under
    `AGENTS.md`; oldest claim first.
 3. **New issue** — `ready`, every `Depends-on` closed, not `in-progress`, not
