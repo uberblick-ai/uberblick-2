@@ -34,7 +34,11 @@
  *   connection, not only the first.
  */
 
-import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
+import {
+  HocuspocusProvider,
+  HocuspocusProviderWebsocket,
+  MessageType,
+} from "@hocuspocus/provider";
 import {
   MAX_TOKEN_LIFETIME_SECONDS,
   importRootSecret,
@@ -206,6 +210,88 @@ export interface AttachOptions {
   awareness: Awareness;
 }
 
+/** Drop closing-window frames; the next sync handshake reconciles their state. */
+class UnqueuedHocuspocusProviderWebsocket extends HocuspocusProviderWebsocket {
+  override send(
+    message: Parameters<HocuspocusProviderWebsocket["send"]>[0],
+  ): void {
+    const socket = this.webSocket;
+    if (socket === null || socket.readyState !== socket.OPEN) {
+      return;
+    }
+    super.send(message);
+  }
+}
+
+/**
+ * A provider whose room sends no update or presence before its admitted token.
+ *
+ * Hocuspocus installs the document and awareness listeners in its constructor,
+ * while its ordinary `send()` gate asks only whether the provider is attached.
+ * A newly attached room can therefore publish an update or presence before the
+ * async token callable has passed {@link HubSync.admission}; each such first
+ * frame makes the hub count another unauthenticated document and defeats the
+ * bound this module owns.
+ *
+ * The authentication message opens the gate. Once its synchronous send returns,
+ * the normal sync handshake reconciles every update suppressed while the room
+ * waited. Frames produced while the socket is not open are dropped rather than
+ * queued, for the same handshake to reconcile on the next connection. A CLOSE
+ * sent by an explicit detach while the socket is still open remains outside the
+ * pre-token gate.
+ */
+class AdmittedHocuspocusProvider extends HocuspocusProvider {
+  private admittedGeneration: number | null = null;
+
+  private tokenSent = false;
+
+  private currentGeneration: () => number | null = () => null;
+
+  useGeneration(source: () => number | null): void {
+    this.currentGeneration = source;
+  }
+
+  admitToken(generation: number): void {
+    this.admittedGeneration = generation;
+  }
+
+  hasCurrentAdmission(): boolean {
+    const generation = this.currentGeneration();
+    return generation !== null && this.admittedGeneration === generation;
+  }
+
+  blockUntilToken(): void {
+    this.admittedGeneration = null;
+    this.tokenSent = false;
+  }
+
+  override send(
+    Message: Parameters<HocuspocusProvider["send"]>[0],
+    args: Parameters<HocuspocusProvider["send"]>[1],
+  ): void {
+    if (args.token === "") {
+      return;
+    }
+    if (this.tokenSent) {
+      super.send(Message, args);
+      return;
+    }
+
+    // Construct only while the gate is closed. Once admitted, ordinary updates
+    // pay no extra allocation; here the type is the public, pinned seam that
+    // distinguishes the one frame allowed to open the room.
+    if (new Message().type !== MessageType.Auth) {
+      return;
+    }
+    const generation = this.admittedGeneration;
+    if (generation === null || this.currentGeneration() !== generation) {
+      return;
+    }
+    super.send(Message, args);
+    this.tokenSent = true;
+  }
+}
+
 export interface HubSyncOptions {
   /**
    * Override {@link MAX_CONCURRENT_ROOM_ATTACHES}. A test seam: proving the
@@ -252,7 +338,7 @@ export class HubSync {
 
   private readonly socket: HocuspocusProviderWebsocket | null = null;
 
-  private readonly providers = new Map<string, HocuspocusProvider>();
+  private readonly providers = new Map<string, AdmittedHocuspocusProvider>();
 
   private socketStatus: "connecting" | "connected" | "disconnected" =
     "connecting";
@@ -351,14 +437,16 @@ export class HubSync {
    * One entry per room, never one per attempt: a socket that re-opens while a
    * room is still queued runs that provider's `onOpen` again, and handing the
    * second one the ticket the first is already waiting on is what keeps a
-   * flapping socket from queueing the same room twice. Both then send when the
-   * ticket clears — one extra auth and sync-step-1 for a single document, which
-   * the hub answers idempotently and which cannot move its pending count,
-   * because the count is per document and not per message.
+   * flapping socket from queueing the same room twice. Once a room is in flight,
+   * another continuation is refused with `null`: the hub answers a room once,
+   * so a duplicate admission after that answer would never release its slot.
    */
   private readonly waiting = new Map<
     string,
-    { promise: Promise<number>; admit: (generation: number) => void }
+    {
+      promise: Promise<number | null>;
+      admit: (generation: number | null) => void;
+    }
   >();
 
   /** Rebuilt connections since the last durable one. See {@link MAX_REBUILDS}. */
@@ -432,7 +520,7 @@ export class HubSync {
       return;
     }
 
-    this.socket = new HocuspocusProviderWebsocket({
+    this.socket = new UnqueuedHocuspocusProviderWebsocket({
       url: config.hubUrl,
       ...backoff,
       onStatus: ({ status }) => {
@@ -447,6 +535,9 @@ export class HubSync {
           // need again on the next connection.
           this.socketGeneration += 1;
           this.attaching.clear();
+          for (const provider of this.providers.values()) {
+            provider.blockUntilToken();
+          }
         }
         if (status === "connected") {
           this.sawFailure = false;
@@ -503,9 +594,10 @@ export class HubSync {
    * for a token again.
    *
    * Resolves with the {@link socketGeneration} the slot was granted on, which
-   * is what the caller checks before it lets anything leave.
+   * is what the caller checks before it lets anything leave, or `null` when
+   * another continuation already holds that room's slot.
    */
-  private admission(room: string): Promise<number> {
+  private admission(room: string): Promise<number | null> {
     if (this.stopped) {
       // Terminal: every provider is inert and no connection will be opened
       // again, so a queue entry made here would never be admitted, its caller
@@ -517,8 +609,8 @@ export class HubSync {
     if (queued !== undefined) {
       return queued.promise;
     }
-    let admit!: (generation: number) => void;
-    const promise = new Promise<number>((resolve) => {
+    let admit!: (generation: number | null) => void;
+    const promise = new Promise<number | null>((resolve) => {
       admit = resolve;
     });
     this.waiting.set(room, { promise, admit });
@@ -530,12 +622,15 @@ export class HubSync {
   private pumpAdmissions(): void {
     if (this.socketStatus === "connected") {
       for (const [room, ticket] of this.waiting) {
-        // A room already counted is not a second document to the hub, so
-        // letting it through costs no slot — see {@link waiting}.
-        if (
-          this.attaching.size >= this.maxConcurrentAttaches &&
-          !this.attaching.has(room)
-        ) {
+        // A second `onOpen` continuation for the room already in flight is not
+        // another handshake. End it here: admitting it again after the first
+        // answer would strand a slot because the hub answers a room only once.
+        if (this.attaching.has(room)) {
+          this.waiting.delete(room);
+          ticket.admit(null);
+          continue;
+        }
+        if (this.attaching.size >= this.maxConcurrentAttaches) {
           break;
         }
         this.waiting.delete(room);
@@ -693,7 +788,7 @@ export class HubSync {
       return;
     }
 
-    const provider = new HocuspocusProvider({
+    const provider = new AdmittedHocuspocusProvider({
       name: room,
       document: doc,
       awareness,
@@ -703,21 +798,37 @@ export class HubSync {
       // told about. See {@link admission}.
       token: async () => {
         for (;;) {
+          if (provider.hasCurrentAdmission()) {
+            return "";
+          }
           const generation = await this.admission(room);
-          if (this.stopped) {
-            // Stopped while this call was suspended. Every
-            // provider is detached by then and `send()` on a detached provider
-            // is inert, so this token travels nowhere; ending the call is what
-            // matters, because looping would queue for a connection that is
-            // never opened again and leave the entry behind with it.
+          if (this.stopped || generation === null) {
+            // Stopped while this call was suspended, or another continuation
+            // owns this room's slot. In both cases this token travels nowhere;
+            // ending the call avoids queueing for a connection that will never
+            // open or taking a second ticket the hub will never answer.
+            return "";
+          }
+          if (provider.hasCurrentAdmission()) {
+            // This continuation queued while the room's first ticket was in
+            // flight, then reached the front only after that ticket answered.
+            // Give its now-unneeded slot straight back.
+            this.roomAnswered(room);
             return "";
           }
           const token = await this.token();
+          // Two `onOpen` continuations can share one ticket across a flap. The
+          // first to finish owns the room on this generation; the other ends
+          // here instead of taking a second slot after that room has answered.
+          if (provider.hasCurrentAdmission()) {
+            return "";
+          }
           if (generation === this.socketGeneration) {
             // Wrapped on the way out, with no `await` between the check and the
             // return: the envelope is a string operation, so the slot this room
             // is holding is not widened by it. The `return ""` above stays
             // unwrapped — it is the "send nothing" path, not a token.
+            provider.admitToken(generation);
             return wrapToken(token);
           }
           // The connection this slot was granted on ended while the token was
@@ -737,6 +848,7 @@ export class HubSync {
         }
       },
       onAuthenticationFailed: ({ reason }: { reason: string }) => {
+        provider.blockUntilToken();
         // The one string the hub gets to say, read by strict match and never
         // rendered: a mismatch yields a validated integer, and everything else
         // — including a sentinel naming our own version — falls through to the
@@ -764,6 +876,7 @@ export class HubSync {
         this.hubDisownedRoom();
       },
       onClose: () => {
+        provider.blockUntilToken();
         // A room the hub closed is a room it is no longer deciding about, so
         // its slot goes back even though no answer ever came.
         this.roomAnswered(room);
@@ -773,6 +886,9 @@ export class HubSync {
         this.hubDisownedRoom();
       },
     });
+    provider.useGeneration(() =>
+      this.socketStatus === "connected" ? this.socketGeneration : null,
+    );
     // A provider given a shared socket does not attach itself — it only
     // self-attaches when it owns the socket. Without this it never subscribes
     // to `open`, never sends its token, and silently never syncs.
