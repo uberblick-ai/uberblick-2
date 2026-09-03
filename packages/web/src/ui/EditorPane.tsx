@@ -694,10 +694,10 @@ export function EditorPane({
     );
   }
 
-  // `ub-pane` is the scroll container and takes whatever width is left; the
-  // reading measure lives on `ub-column`, centred inside it.
+  // `ub-pane` is the scroll container; `ub-document-pane` keeps this column
+  // and the sibling rail in one left-anchored composition.
   return (
-    <section className="ub-pane" ref={pane}>
+    <section className="ub-pane ub-document-pane" ref={pane}>
       {threads.length > 0 && onToggleThreads !== undefined && (
         <button
           type="button"

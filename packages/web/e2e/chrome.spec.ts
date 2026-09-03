@@ -36,6 +36,9 @@
  *   held to its own strokes and to WCAG AA by walking what the column and its
  *   two menus actually paint — which needs a cascade, a `light-dark()` and a
  *   layout, and is what a list of rules checked one at a time missed (#515).
+ * - **The document and rail are one composition.** Their fixed insets and
+ *   overlay breakpoint are geometry, so only a laid-out browser can prove that
+ *   viewport surplus follows them without shifting the prose.
  */
 
 import { randomUUID } from "node:crypto";
@@ -386,6 +389,182 @@ test("the open document owns the remaining chrome and its sole sync reading", as
   await page.keyboard.press("Escape");
   await expect(sync).toBeFocused();
   expect(new URL(page.url()).pathname).toBe(path);
+});
+
+test("the document and comments rail stay left-anchored as the viewport changes", async ({
+  browser,
+}) => {
+  const page = await openApp(browser, "light");
+  await page.setViewportSize({ width: 1400, height: 800 });
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+
+  type Layout = {
+    body: { left: number; right: number };
+    sidebar: { right: number } | null;
+    pane: { left: number; right: number; width: number };
+    column: { left: number; right: number; width: number };
+    editor: { left: number };
+    rail: { left: number; right: number } | null;
+    paneClientWidth: number;
+    paneScrollWidth: number;
+    bodyClientWidth: number;
+    bodyScrollWidth: number;
+  };
+  const layout = (): Promise<Layout> =>
+    page.evaluate(() => {
+      const body = document.querySelector<HTMLElement>(".ub-body");
+      const sidebar = document.querySelector<HTMLElement>(".ub-list");
+      const pane = document.querySelector<HTMLElement>(".ub-document-pane");
+      const rail = document.querySelector<HTMLElement>(".ub-rail");
+      if (body === null || pane === null) {
+        throw new Error("e2e: document composition is incomplete");
+      }
+      const column = pane.querySelector<HTMLElement>(":scope > .ub-column");
+      const editor = pane.querySelector<HTMLElement>(".ub-editor");
+      if (column === null || editor === null) {
+        throw new Error("e2e: document composition is incomplete");
+      }
+      const bodyBox = body.getBoundingClientRect();
+      const paneBox = pane.getBoundingClientRect();
+      const columnBox = column.getBoundingClientRect();
+      const editorBox = editor.getBoundingClientRect();
+      const sidebarBox = sidebar?.getBoundingClientRect() ?? null;
+      const railBox =
+        rail === null || getComputedStyle(rail).display === "none"
+          ? null
+          : rail.getBoundingClientRect();
+      return {
+        body: { left: bodyBox.left, right: bodyBox.right },
+        sidebar: sidebarBox === null ? null : { right: sidebarBox.right },
+        pane: { left: paneBox.left, right: paneBox.right, width: paneBox.width },
+        column: {
+          left: columnBox.left,
+          right: columnBox.right,
+          width: columnBox.width,
+        },
+        editor: { left: editorBox.left },
+        rail:
+          railBox === null ? null : { left: railBox.left, right: railBox.right },
+        paneClientWidth: pane.clientWidth,
+        paneScrollWidth: pane.scrollWidth,
+        bodyClientWidth: body.clientWidth,
+        bodyScrollWidth: body.scrollWidth,
+      };
+    });
+  const atWidths = async (widths: number[]): Promise<Layout[]> => {
+    const readings: Layout[] = [];
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: 800 });
+      readings.push(await layout());
+    }
+    return readings;
+  };
+  const firstTwo = (readings: Layout[]): [Layout, Layout] => {
+    const [first, second] = readings;
+    if (first === undefined || second === undefined) {
+      throw new Error("e2e: two viewport readings required");
+    }
+    return [first, second];
+  };
+  const shownRail = (reading: Layout): { left: number; right: number } => {
+    if (reading.rail === null) throw new Error("e2e: comments rail is hidden");
+    return reading.rail;
+  };
+  const expectFixedOrigins = (
+    readings: Layout[],
+    edge: (reading: Layout) => number,
+  ): void => {
+    const [first, second] = firstTwo(readings);
+    expect(first.column.left - edge(first)).toBeCloseTo(
+      second.column.left - edge(second),
+      1,
+    );
+    expect(first.column.width).toBeCloseTo(second.column.width, 1);
+  };
+
+  // With no heading or thread the rail is genuinely absent, but the document
+  // origin is already fixed and does not spend a wider viewport on centring.
+  const expandedEmpty = await atWidths([1400, 1600]);
+  expect(expandedEmpty.every((reading) => reading.rail === null)).toBe(true);
+  expectFixedOrigins(expandedEmpty, (reading) => reading.sidebar?.right ?? 0);
+
+  await page.getByRole("button", { name: "Hide document list" }).click();
+  await expect(page.locator(".ub-list")).toHaveCount(0);
+  const collapsedEmpty = await atWidths([1400, 1600]);
+  expectFixedOrigins(collapsedEmpty, (reading) => reading.body.left);
+
+  await page.getByRole("button", { name: "Show document list" }).click();
+  await expect(page.locator(".ub-list")).toBeVisible();
+  await page.setViewportSize({ width: 1400, height: 800 });
+  await placeCaret(page);
+  await page.keyboard.type("annotate me", { delay: 15 });
+  await page.keyboard.press("Shift+Home");
+  await page.locator(".ub-composer-open").click();
+  await page.keyboard.type("keep this beside the prose", { delay: 15 });
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".ub-thread")).toBeVisible();
+
+  const expandedPopulated = await atWidths([1400, 1600]);
+  expectFixedOrigins(expandedPopulated, (reading) => reading.sidebar?.right ?? 0);
+  for (let index = 0; index < expandedPopulated.length; index += 1) {
+    const reading = expandedPopulated[index];
+    const empty = expandedEmpty[index];
+    if (reading === undefined || empty === undefined) {
+      throw new Error("e2e: viewport readings do not line up");
+    }
+    expect(reading.column.left).toBeCloseTo(empty.column.left, 1);
+    expect(reading.rail).not.toBeNull();
+  }
+  const [firstPopulated, secondPopulated] = firstTwo(expandedPopulated);
+  const firstGap = shownRail(firstPopulated).left - firstPopulated.column.right;
+  const secondGap = shownRail(secondPopulated).left - secondPopulated.column.right;
+  expect(firstGap).toBeGreaterThan(0);
+  expect(firstGap).toBeCloseTo(secondGap, 1);
+  const firstTail = firstPopulated.body.right - shownRail(firstPopulated).right;
+  const secondTail = secondPopulated.body.right - shownRail(secondPopulated).right;
+  expect(secondTail - firstTail).toBeCloseTo(200, 1);
+
+  const highlight = page.locator("[data-comment-thread]").first();
+  await highlight.click();
+  await expect(page.locator('.ub-thread[aria-current="true"]')).toBeVisible();
+
+  await page.getByRole("button", { name: "Hide document list" }).click();
+  const collapsedPopulated = await atWidths([1400, 1600]);
+  expectFixedOrigins(collapsedPopulated, (reading) => reading.body.left);
+  for (let index = 0; index < collapsedPopulated.length; index += 1) {
+    const reading = collapsedPopulated[index];
+    const empty = collapsedEmpty[index];
+    if (reading === undefined || empty === undefined) {
+      throw new Error("e2e: viewport readings do not line up");
+    }
+    expect(reading.column.left).toBeCloseTo(empty.column.left, 1);
+  }
+
+  // At the existing breakpoint the same pane shrinks without horizontal
+  // overflow. The drawer overlays it, and a keyboard activation still opens
+  // and targets the right card without changing document geometry.
+  await page.getByRole("button", { name: "Show document list" }).click();
+  await page.setViewportSize({ width: 768, height: 720 });
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".ub-rail")).not.toBeVisible();
+  const narrow = await layout();
+  expect(narrow.column.width).toBeLessThan(firstPopulated.column.width);
+  expect(narrow.column.left).toBeGreaterThanOrEqual(narrow.pane.left);
+  expect(narrow.column.right).toBeLessThanOrEqual(narrow.pane.right);
+  expect(narrow.editor.left - narrow.column.left).toBeGreaterThan(20);
+  expect(narrow.paneScrollWidth).toBe(narrow.paneClientWidth);
+  expect(narrow.bodyScrollWidth).toBe(narrow.bodyClientWidth);
+
+  await highlight.focus();
+  await page.keyboard.press("Enter");
+  const selected = page.locator('.ub-thread[aria-current="true"]');
+  await expect(page.locator(".ub-rail")).toBeVisible();
+  await expect(selected).toBeFocused();
+  const withDrawer = await layout();
+  expect(withDrawer.column.left).toBeCloseTo(narrow.column.left, 1);
+  expect(withDrawer.column.right).toBeCloseTo(narrow.column.right, 1);
+  expect(shownRail(withDrawer).right).toBeCloseTo(withDrawer.body.right, 1);
 });
 
 test("document actions stay reachable, close with the route, and archive into Restore", async ({
