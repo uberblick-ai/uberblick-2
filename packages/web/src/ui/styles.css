@@ -494,7 +494,7 @@ body {
   padding: 0.1rem 0.55rem;
   background: var(--card-accent);
   color: var(--secondary-foreground);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -2104,9 +2104,23 @@ body {
   margin-left: -6px;
 }
 
+/* Each badge overhangs to the right, so earlier circles paint above the later
+   sibling that overlaps them. Hover and focus still lift any active control. */
+.ub-peers > .ub-peer-control:nth-child(1) {
+  z-index: 3;
+}
+
+.ub-peers > .ub-peer-control:nth-child(2) {
+  z-index: 2;
+}
+
+.ub-peers > .ub-peer-control:nth-child(3) {
+  z-index: 1;
+}
+
 .ub-peer-control:hover,
 .ub-peer-control:focus-visible {
-  z-index: 2;
+  z-index: 4;
 }
 
 .ub-peer-control:focus-visible,
@@ -2130,7 +2144,7 @@ body {
   box-shadow: 0 4px 12px rgb(0 0 0 / 0.16);
   font-family: var(--font-sans);
   font-size: 0.75rem;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   opacity: 0;
   pointer-events: none;
 }

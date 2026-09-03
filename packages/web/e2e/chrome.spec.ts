@@ -534,7 +534,9 @@ test("the document collaborator cluster stays compact and jumps once without mov
   browser,
 }) => {
   const page = await openApp(browser, "light");
-  await page.setViewportSize({ width: 360, height: 640 });
+  // The fixed 18rem sidebar leaves a roughly 400px document pane: narrow, but
+  // still inside the app's supported side-by-side shell.
+  await page.setViewportSize({ width: 720, height: 640 });
   await page.getByRole("button", { name: "+ new doc" }).click();
   await page.locator(".ub-title").fill("Live collaborators");
   const firstBlock = page.locator(".ub-editor .ProseMirror > *").first();
@@ -593,7 +595,7 @@ test("the document collaborator cluster stays compact and jumps once without mov
   };
 
   try {
-    const ada = await openPeer("Ada", "human", "#0c853d");
+    const ada = await openPeer("Ada", "agent", "#0c853d");
     for (let index = 1; index <= 28; index += 1) {
       appendBlock(ada.doc, {
         type: "paragraph",
@@ -602,8 +604,8 @@ test("the document collaborator cluster stays compact and jumps once without mov
     }
     await expect(page.locator(".ub-editor .ProseMirror > *")).toHaveCount(29);
 
-    const bert = await openPeer("Bert", "human", "#0675c9");
-    const cleo = await openPeer("Cleo", "human", "#cb26b4");
+    const bert = await openPeer("Bert", "agent", "#0675c9");
+    const cleo = await openPeer("Cleo", "agent", "#cb26b4");
     const dora = await openPeer("Dora", "agent", "#7b5ec7");
     const eli = await openPeer("Eli", "human", "#ac6008");
     for (const peer of [ada, bert, cleo, dora]) {
@@ -617,7 +619,28 @@ test("the document collaborator cluster stays compact and jumps once without mov
     const more = page.locator(".ub-peer-more");
     await expect(visible).toHaveCount(3);
     await expect(more).toHaveText("+2");
-    await expect(more).toBeVisible();
+    await expect(more).toBeInViewport();
+    // Four of the five peers are agents, so sorted client ids still guarantee
+    // an agent before the last visible position: the overlap is real here.
+    const visibleAgent = visible
+      .filter({ has: page.locator(".ub-avatar-agent-badge") })
+      .first();
+    await expect(visibleAgent.locator(".ub-avatar-agent-badge")).toHaveText("🤖");
+    const agentBadgePaint = await visibleAgent.evaluate((control) => {
+        const badge = control.querySelector(".ub-avatar-agent-badge");
+        if (!(badge instanceof HTMLElement)) return { owned: false };
+        const box = badge.getBoundingClientRect();
+        const top = document.elementFromPoint(
+          box.left + box.width / 2,
+          box.top + box.height / 2,
+        );
+        return {
+          owned: top !== null && control.contains(top),
+          top: top?.className ?? top?.nodeName ?? null,
+          controlZ: getComputedStyle(control).zIndex,
+        };
+      });
+    expect(agentBadgePaint.owned, JSON.stringify(agentBadgePaint)).toBe(true);
     const titleAfter = await page.locator(".ub-title").boundingBox();
     const editorAfter = await page.locator(".ub-editor").boundingBox();
     expect(titleAfter?.x).toBe(titleBefore?.x);

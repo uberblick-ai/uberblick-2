@@ -75,19 +75,28 @@ export function PeerCluster({
     focusFallback(focusedPeer.current);
   });
 
-  // Escape is the overflow surface's ordinary dismissal. The trigger is still
-  // mounted whenever the surface is, so focus has a deterministic way home.
+  // Escape is the keyboard dismissal and returns to the trigger. A pointer
+  // outside dismisses too, while the browser remains free to focus its target.
   useEffect(() => {
     if (!open) return;
-    const dismiss = (event: KeyboardEvent): void => {
+    const dismissByKey = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
       event.stopPropagation();
       setOpen(false);
       overflowTrigger.current?.focus({ preventScroll: true });
     };
-    window.addEventListener("keydown", dismiss, true);
-    return () => window.removeEventListener("keydown", dismiss, true);
+    const dismissOutside = (event: MouseEvent): void => {
+      const target = event.target;
+      if (target instanceof Node && cluster.current?.contains(target) === true) return;
+      setOpen(false);
+    };
+    window.addEventListener("keydown", dismissByKey, true);
+    document.addEventListener("mousedown", dismissOutside);
+    return () => {
+      window.removeEventListener("keydown", dismissByKey, true);
+      document.removeEventListener("mousedown", dismissOutside);
+    };
   }, [open]);
 
   const activate = (session: RemotePresence, dismiss = false): void => {
@@ -108,7 +117,6 @@ export function PeerCluster({
             className="ub-peer-control"
             data-peer-id={peerKey(session.clientId)}
             aria-label={label}
-            title={label}
             onFocus={() => {
               focusWasInside.current = true;
               focusedPeer.current = session.clientId;
@@ -116,7 +124,7 @@ export function PeerCluster({
             onBlur={leaveCluster}
             onClick={() => activate(session)}
           >
-            <PeerAvatar session={session} decorative />
+            <PeerAvatar session={session} />
             <span className="ub-peer-tooltip" role="tooltip">
               {session.name} · {session.kind === "agent" ? "agent" : "person"}
             </span>
@@ -165,7 +173,7 @@ export function PeerCluster({
               onBlur={leaveCluster}
               onClick={() => activate(session, true)}
             >
-              <PeerAvatar session={session} decorative />
+              <PeerAvatar session={session} />
               <span className="ub-peer-overflow-name">{session.name}</span>
               <span className="ub-muted">
                 {session.kind === "agent" ? "agent" : "person"}

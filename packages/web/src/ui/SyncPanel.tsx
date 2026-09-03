@@ -188,7 +188,7 @@ export function SyncPanel({
                   is a list, so the name stays in words and is the row's
                   accessible name. A labelled avatar would announce every
                   session twice. */}
-              <PeerAvatar session={session} decorative />
+              <PeerAvatar session={session} />
               <span className="ub-presence-name">{session.name}</span>
               {/* Only where the caret resolves to a block a reader can see.
                   Silence beats a number the document disagrees with. */}

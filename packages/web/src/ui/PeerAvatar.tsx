@@ -9,7 +9,6 @@
  */
 
 import type { ReactElement } from "react";
-import { presenceLabel } from "./doc-chrome.js";
 import type { RemotePresence } from "./doc-chrome.js";
 
 /** The badge every agent session adds to the shared initial. */
@@ -32,31 +31,16 @@ export function initialOf(name: string): string {
   return first === undefined ? NO_INITIAL : first.toUpperCase();
 }
 
-/**
- * `decorative` is the difference between the two surfaces, and it is an
- * accessibility rule rather than a style. On its own the avatar *is* the
- * session, so it is an image with a label. Beside a visible name it is a
- * repetition, so it is hidden and the name is the row's accessible name — a
- * screen reader announces each session once, not twice.
- */
-export function PeerAvatar({
-  session,
-  decorative = false,
-}: {
-  session: RemotePresence;
-  decorative?: boolean;
-}): ReactElement {
-  const label = presenceLabel(session);
+/** The labelled control or row owns the session's accessible name. */
+export function PeerAvatar({ session }: { session: RemotePresence }): ReactElement {
   return (
     <span
       className={`ub-avatar ub-avatar-${session.kind}`}
+      aria-hidden="true"
       // The awareness palette is `#rrggbb` literals rather than theme tokens
       // (see src/collab/identity.ts), so both are written inline. The letter
       // takes the colour as well as the ring; the robot brings its own.
       style={{ borderColor: session.color, color: session.color }}
-      {...(decorative
-        ? { "aria-hidden": true }
-        : { role: "img", "aria-label": label, title: label })}
     >
       <span className="ub-avatar-initial">{initialOf(session.name)}</span>
       {session.kind === "agent" && (

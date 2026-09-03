@@ -180,6 +180,15 @@ describe("the compact collaborator cluster", () => {
       act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
       expect(document.activeElement).toBe(more);
 
+      act(() => more?.click());
+      expect(host.querySelector(".ub-peer-overflow")).not.toBeNull();
+      act(() =>
+        host
+          .querySelector(".ub-status-sync")
+          ?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })),
+      );
+      expect(host.querySelector(".ub-peer-overflow")).toBeNull();
+
       render(peers(3));
       expect(document.activeElement).toBe(
         host.querySelector('[data-peer-id="1"]'),
@@ -323,14 +332,17 @@ describe("the strip follows a marker that arrives late", () => {
     act(() => void vi.advanceTimersByTime(5_000));
     try {
       expect(avatar()?.textContent).toBe("C");
-      expect(control()?.getAttribute("title")).toBe("Claude Code · person");
+      expect(control()?.getAttribute("aria-label")).toBe("Claude Code · person");
 
-      // The marker alone, with no session id yet: the circle, its ring and both
-      // accessible names follow the `kind` comparison and nothing else.
+      // The marker alone, with no session id yet: the circle, its ring, its
+      // hover text and its accessible name follow the `kind` comparison.
       publish({ user: { name: "Claude Code", color: "#7b5ec7" }, client: AGENT_CLIENT });
       expect(avatar()?.textContent).toBe("C🤖");
       expect(avatar()?.style.borderColor).toBe("rgb(123, 94, 199)");
-      expect(control()?.getAttribute("title")).toBe("Claude Code · agent");
+      expect(control()?.getAttribute("aria-label")).toBe("Claude Code · agent");
+      expect(control()?.querySelector(".ub-peer-tooltip")?.textContent).toBe(
+        "Claude Code · agent",
+      );
 
       // Then the session id, with the marker unchanged. Two updates rather than
       // one because `sameSession` compares the two new fields independently: a
@@ -341,9 +353,6 @@ describe("the strip follows a marker that arrives late", () => {
         client: AGENT_CLIENT,
         session: SESSION,
       });
-      expect(control()?.getAttribute("title")).toBe(
-        `Claude Code · agent · ${SESSION}`,
-      );
       expect(control()?.getAttribute("aria-label")).toBe(
         `Claude Code · agent · ${SESSION}`,
       );
@@ -383,7 +392,7 @@ describe("the strip's first frame after a document opens", () => {
       frames.push(
         Array.from(
           host.querySelectorAll<HTMLElement>(".ub-peers .ub-peer-control"),
-          (control) => control.getAttribute("title") ?? "",
+          (control) => control.getAttribute("aria-label") ?? "",
         ),
       );
     };
