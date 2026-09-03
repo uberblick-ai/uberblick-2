@@ -3291,76 +3291,84 @@ h3.ub-heading {
   font: inherit;
 }
 
-/* The order chooser, in the shape the appearance choice already uses: a
-   caption over its options, quiet enough to stay a setting rather than compete
-   with the heading above it. The options sit in their own row because a
-   `legend` is laid out by the fieldset, not by its display. */
-.ub-docs-order {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  min-inline-size: 0;
-}
-
-.ub-docs-order-label {
-  padding: 0;
-  margin-bottom: 0.25rem;
-  color: var(--muted-foreground);
-  font-size: 0.8rem;
-}
-
-.ub-docs-order-options {
-  display: flex;
-  gap: 0.25rem;
-}
-
-.ub-docs-order-option {
-  padding: 0.2rem 0.45rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
-.ub-docs-order-option:hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-
-/* Which order this is, without touching anything. */
-.ub-docs-order-option[aria-pressed="true"] {
-  background: var(--brand-subtle);
-  border-color: var(--brand);
-}
-
 /* Its own class rather than the sidebar's `.ub-empty`: two components on one
    screen now, and a page with two elements of the same name is a page whose
    selectors are ambiguous — for a stylesheet and for a test alike. */
 .ub-docs-empty {
+  margin: 0;
   padding: 0.4rem;
 }
 
-.ub-docs-rows {
-  list-style: none;
-  margin: 0;
+.ub-docs-empty-cell {
   padding: 0;
 }
 
-/* The pin sits beside the row rather than inside it, so the whole of the row
-   is the open target and the pin is still its own control. */
-.ub-docs-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--docs-pin);
-  align-items: start;
-  gap: 0.25rem;
+.ub-docs-table {
+  width: 100%;
+  margin: 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.ub-docs-age-column {
+  width: 10rem;
+}
+
+.ub-docs-pin-column {
+  width: var(--docs-pin);
+}
+
+.ub-docs-heading-cell {
+  padding: 0 0 0.25rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-align: left;
+}
+
+.ub-docs-sort {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.4rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ub-docs-heading-cell--changed .ub-docs-sort {
+  justify-content: flex-end;
+}
+
+.ub-docs-sort:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.ub-docs-sort-arrow {
+  color: var(--foreground);
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.ub-docs-title-cell {
+  min-width: 0;
+  padding: 0;
+  font-weight: inherit;
+  text-align: left;
 }
 
 .ub-docs-open {
-  display: grid;
+  display: flex;
   width: 100%;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.5rem;
   text-align: left;
   padding: 0.4rem;
   border: 0;
@@ -3376,17 +3384,11 @@ h3.ub-heading {
   color: var(--accent-foreground);
 }
 
-/* Title, group and age on one baseline, with the age pushed to the end. */
-.ub-docs-line {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  min-width: 0;
-}
-
 /* A long title is cut, never wrapped: a row that grew taller would move every
    row below it the moment a document is renamed somewhere else. */
 .ub-docs-title {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3402,17 +3404,26 @@ h3.ub-heading {
 
 /* Machine facts in the machine face, like the room keys and the sync detail. */
 .ub-docs-age {
-  margin-left: auto;
-  flex: none;
   font-family: var(--font-mono);
   font-size: 0.78rem;
   color: var(--muted-foreground);
 }
 
+.ub-docs-age-cell {
+  padding: 0.4rem;
+  text-align: right;
+  vertical-align: middle;
+}
+
+.ub-docs-pin-cell {
+  padding: 0;
+  text-align: right;
+  vertical-align: middle;
+}
+
 /* Quiet until the row is hovered or something in it has focus — the same
    restraint the group actions in the sidebar show. */
 .ub-docs-pin {
-  margin-top: 0.3rem;
   padding: 0.25rem;
   border: 0;
   border-radius: var(--radius-sm);

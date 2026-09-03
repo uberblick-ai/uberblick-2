@@ -97,14 +97,20 @@ function byTitle(a: DirectoryEntry, b: DirectoryEntry): number {
   return a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0;
 }
 
-/** The two orders the list offers, first the one it opens on. */
-const ORDERS = ["changed", "title"] as const;
+/** The two sortable columns, in their visual order. */
+const ORDERS = ["title", "changed"] as const;
 
 type Order = (typeof ORDERS)[number];
+type Direction = "ascending" | "descending";
 
 const ORDER_LABELS: Record<Order, string> = {
   changed: "Last changed",
   title: "Title",
+};
+
+const INITIAL_DIRECTION: Record<Order, Direction> = {
+  changed: "descending",
+  title: "ascending",
 };
 
 /**
@@ -126,8 +132,13 @@ const ORDER_LABELS: Record<Order, string> = {
 export function sortDirectory(
   entries: readonly DirectoryEntry[],
   order: Order,
+  direction: Direction = INITIAL_DIRECTION[order],
 ): DirectoryEntry[] {
-  if (order === "title") return [...entries].sort(byTitle);
+  if (order === "title") {
+    return [...entries].sort((a, b) =>
+      direction === "ascending" ? byTitle(a, b) : byTitle(b, a),
+    );
+  }
   return [...entries].sort((a, b) => {
     const left = usableStamp(a.updatedAt);
     const right = usableStamp(b.updatedAt);
@@ -135,7 +146,8 @@ export function sortDirectory(
       if (left === right) return byTitle(a, b);
       return left === undefined ? 1 : -1;
     }
-    return left === right ? byTitle(a, b) : right - left;
+    if (left === right) return byTitle(a, b);
+    return direction === "ascending" ? left - right : right - left;
   });
 }
 
@@ -233,7 +245,10 @@ export function DocumentList({
    * two are independent, so switching one leaves the other exactly as it was.
    * Mounted-pane state and nothing more — no storage, no preference mechanism.
    */
-  const [order, setOrder] = useState<Order>("changed");
+  const [sort, setSort] = useState<{ order: Order; direction: Direction }>({
+    order: "changed",
+    direction: "descending",
+  });
   const now = useTimestampClock();
   /**
    * Which group each pinned document sits in — the `_sidebar` document as it
@@ -249,8 +264,13 @@ export function DocumentList({
   }, [groups]);
   const needle = query.trim().toLowerCase();
   const rows = useMemo(
-    () => sortDirectory(entries.filter((entry) => matches(entry, needle)), order),
-    [entries, needle, order],
+    () =>
+      sortDirectory(
+        entries.filter((entry) => matches(entry, needle)),
+        sort.order,
+        sort.direction,
+      ),
+    [entries, needle, sort],
   );
 
   return (
@@ -271,82 +291,118 @@ export function DocumentList({
             onChange={(event) => setQuery(event.currentTarget.value)}
           />
         </label>
-        {/* A caption over a set of related controls is what a fieldset is —
-            the same shape the appearance choice in the user menu takes. The
-            pressed option is the answer to "which order is this?", so it is
-            readable without touching anything. */}
-        <fieldset className="ub-docs-order">
-          <legend className="ub-docs-order-label">Order</legend>
-          <div className="ub-docs-order-options">
-            {ORDERS.map((option) => (
-              <button
-                key={option}
-                type="button"
-                className="ub-docs-order-option"
-                aria-pressed={option === order}
-                onClick={() => setOrder(option)}
-              >
-                {ORDER_LABELS[option]}
-              </button>
-            ))}
-          </div>
-        </fieldset>
-        {rows.length === 0 ? (
-          /* Four silences, and only two of them are answers. A client that has
-             not heard from the directory yet knows neither that the workspace
-             is empty nor that nothing in it matches — so it says what it does
-             know instead of reporting a zero it cannot stand behind. */
-          <p className="ub-muted ub-docs-empty">
-            {needle !== ""
-              ? status.synced
-                ? "No documents match your search."
-                : "No matches among the documents synced so far."
-              : status.synced
-                ? "No documents in this workspace yet."
-                : "Nothing here yet — the directory has not synced on this client."}
-          </p>
-        ) : (
-          <ul className="ub-docs-rows">
-            {rows.map((entry) => (
-              <li key={entry.uuid} className="ub-docs-row">
-                <button
-                  type="button"
-                  className="ub-docs-open"
-                  onClick={() => onSelect(entry.uuid)}
-                  title={entry.uuid}
+        <table className="ub-docs-table ub-docs-rows">
+          <colgroup>
+            <col />
+            <col className="ub-docs-age-column" />
+            <col className="ub-docs-pin-column" />
+          </colgroup>
+          <thead>
+            <tr>
+              {ORDERS.map((option) => (
+                <th
+                  key={option}
+                  scope="col"
+                  className={`ub-docs-heading-cell ub-docs-heading-cell--${option}`}
+                  aria-sort={option === sort.order ? sort.direction : undefined}
                 >
-                  <span className="ub-docs-line">
-                    <span className="ub-docs-title">
-                      {entry.title === "" ? <em>Untitled</em> : entry.title}
-                    </span>
-                    {/* Where the sidebar carries this document, when it does.
-                        Blank is the honest answer for the long tail. */}
-                    {groupOf.has(entry.uuid) && (
-                      <span className="ub-docs-group">{groupOf.get(entry.uuid)}</span>
-                    )}
-                    <ChangedStamp at={entry.updatedAt} now={now} />
-                  </span>
-                </button>
-                {/* Curation from the one screen that shows every document —
-                    the sidebar lists what is already pinned, so this is where
-                    the long tail gets pinned from. The mark carries the state
-                    and the row never changes width. */}
-                {onTogglePin !== null && (
                   <button
                     type="button"
-                    className="ub-docs-pin"
-                    aria-pressed={groupOf.has(entry.uuid)}
-                    aria-label={pinLabel(entry, groupOf.has(entry.uuid))}
-                    title={pinLabel(entry, groupOf.has(entry.uuid))}
-                    onClick={() => onTogglePin(entry.uuid)}
+                    className="ub-docs-sort"
+                    onClick={() =>
+                      setSort((current) =>
+                        current.order === option
+                          ? {
+                              order: option,
+                              direction:
+                                current.direction === "ascending"
+                                  ? "descending"
+                                  : "ascending",
+                            }
+                          : { order: option, direction: INITIAL_DIRECTION[option] },
+                      )
+                    }
                   >
-                    <PinIcon active={groupOf.has(entry.uuid)} />
+                    {ORDER_LABELS[option]}
+                    {option === sort.order && (
+                      <span className="ub-docs-sort-arrow" aria-hidden="true">
+                        {sort.direction === "ascending" ? "↑" : "↓"}
+                      </span>
+                    )}
                   </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+                </th>
+              ))}
+              <th scope="col" className="ub-docs-heading-cell ub-docs-pin-heading">
+                <span className="ub-sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="ub-docs-empty-cell">
+                  {/* Four silences, and only two of them are answers. A client
+                      that has not heard from the directory yet knows neither
+                      that the workspace is empty nor that nothing in it
+                      matches — so it says what it does know instead of
+                      reporting a zero it cannot stand behind. */}
+                  <p className="ub-muted ub-docs-empty">
+                    {needle !== ""
+                      ? status.synced
+                        ? "No documents match your search."
+                        : "No matches among the documents synced so far."
+                      : status.synced
+                        ? "No documents in this workspace yet."
+                        : "Nothing here yet — the directory has not synced on this client."}
+                  </p>
+                </td>
+              </tr>
+            ) : (
+              rows.map((entry) => (
+                <tr key={entry.uuid} className="ub-docs-row">
+                  <th scope="row" className="ub-docs-title-cell">
+                    <button
+                      type="button"
+                      className="ub-docs-open"
+                      onClick={() => onSelect(entry.uuid)}
+                      title={entry.uuid}
+                    >
+                      <span className="ub-docs-title">
+                        {entry.title === "" ? <em>Untitled</em> : entry.title}
+                      </span>
+                      {/* Where the sidebar carries this document, when it does.
+                          Blank is the honest answer for the long tail. */}
+                      {groupOf.has(entry.uuid) && (
+                        <span className="ub-docs-group">{groupOf.get(entry.uuid)}</span>
+                      )}
+                    </button>
+                  </th>
+                  <td className="ub-docs-age-cell">
+                    <ChangedStamp at={entry.updatedAt} now={now} />
+                  </td>
+                  {/* Curation from the one screen that shows every document —
+                      the sidebar lists what is already pinned, so this is where
+                      the long tail gets pinned from. The mark carries the state
+                      and the row never changes width. */}
+                  <td className="ub-docs-pin-cell">
+                    {onTogglePin !== null && (
+                      <button
+                        type="button"
+                        className="ub-docs-pin"
+                        aria-pressed={groupOf.has(entry.uuid)}
+                        aria-label={pinLabel(entry, groupOf.has(entry.uuid))}
+                        title={pinLabel(entry, groupOf.has(entry.uuid))}
+                        onClick={() => onTogglePin(entry.uuid)}
+                      >
+                        <PinIcon active={groupOf.has(entry.uuid)} />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
     </section>
   );
