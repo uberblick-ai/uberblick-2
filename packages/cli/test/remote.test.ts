@@ -41,6 +41,7 @@ import {
   directoryRoom,
   initDoc,
   roomForDoc,
+  tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import * as Y from "yjs";
@@ -186,6 +187,19 @@ async function webDoc(
   return uuid;
 }
 
+/** Put a tombstone in a hub's directory without ever creating its document room. */
+async function webTombstone(
+  hub: Hub,
+  uuid: string,
+  title: string,
+  secret: string = SECRET,
+): Promise<void> {
+  const directory = await openRoom(hub, directoryRoom(WORKSPACE), secret);
+  upsertDirectoryEntry(directory.doc, { uuid, title, tags: [] });
+  tombstoneDirectoryEntry(directory.doc, uuid);
+  await directory.done();
+}
+
 /** Run one MCP session against a sandbox's mirror and return its client. */
 async function withMcp<T>(
   box: Sandbox,
@@ -252,6 +266,29 @@ async function seedLocalCorpus(box: Sandbox, count: number): Promise<void> {
       upsertDirectoryEntry(directory, { uuid, title, tags: [] });
       doc.destroy();
     }
+    instance.store.appendUpdate(
+      directoryRoom(WORKSPACE),
+      Y.encodeStateAsUpdate(directory),
+      "local",
+    );
+  } finally {
+    directory.destroy();
+    await instance.close();
+  }
+}
+
+/** Put the same directory-only archive shape in a local update log. */
+async function seedLocalTombstone(
+  box: Sandbox,
+  uuid: string,
+  title: string,
+): Promise<void> {
+  const config = resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE });
+  const instance = createMcpServer(config);
+  const directory = new Y.Doc();
+  try {
+    upsertDirectoryEntry(directory, { uuid, title, tags: [] });
+    tombstoneDirectoryEntry(directory, uuid);
     instance.store.appendUpdate(
       directoryRoom(WORKSPACE),
       Y.encodeStateAsUpdate(directory),
@@ -605,6 +642,10 @@ describe("ub remote join", () => {
       fresh,
     );
     expect(joined.status).toBe(0);
+    expect(joined.stderr).toContain("hydrating 1 document");
+    expect(joined.stderr).not.toContain("hydrating 0 documents");
+    expect(joined.stdout).toContain("1 archived document moved and verified");
+    expect(joined.stdout).not.toContain("holds nothing yet");
 
     const restored = await withMcp(
       fresh,
@@ -620,6 +661,91 @@ describe("ub remote join", () => {
     expect(restored.annotations).toHaveLength(1);
     expect(restored.annotations[0].comments[0].text).toBe(
       "This annotation must travel too.",
+    );
+  });
+
+  it("repairs a remote directory-only tombstone from a local archived room", async () => {
+    const title = "Archive from the old hub";
+    const local = sandbox();
+    const archived = await withMcp(
+      local,
+      { WORKSPACE_ID: WORKSPACE },
+      async (call) => {
+        const created = await call("create_doc", {
+          title,
+          description: "An archived room that can repair an old remote.",
+          blocks: [{ type: "paragraph", text: "Recoverable content." }],
+        });
+        await call("archive_doc", { uuid: created.uuid });
+        return created.uuid as string;
+      },
+    );
+    const remote = await startHub(OTHER_SECRET);
+    await webTombstone(remote, archived, title, OTHER_SECRET);
+
+    const moved = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(local, OTHER_SECRET),
+      ],
+      local,
+    );
+    expect(moved.status).toBe(0);
+    expect(moved.stdout).toContain("1 archived document moved and verified");
+
+    const fresh = sandbox();
+    const joined = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(fresh, OTHER_SECRET),
+      ],
+      fresh,
+    );
+    expect(joined.status).toBe(0);
+    const restored = await withMcp(
+      fresh,
+      { WORKSPACE_ID: WORKSPACE },
+      async (call) => {
+        await call("restore_doc", { uuid: archived });
+        return await call("get_doc", { uuid: archived });
+      },
+    );
+    expect(restored.blocks.map((block: { text: string }) => block.text)).toEqual([
+      "Recoverable content.",
+    ]);
+  });
+
+  it("refuses an archive whose content neither side can produce", async () => {
+    const title = "Lost archive";
+    const archived = randomUUID();
+    const local = sandbox();
+    await seedLocalTombstone(local, archived, title);
+    const remote = await startHub(OTHER_SECRET);
+    await webTombstone(remote, archived, title, OTHER_SECRET);
+
+    const run = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(local, OTHER_SECRET),
+      ],
+      local,
+    );
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("cannot recreate the missing content");
+    expect(run.stderr).toContain("retry from a machine that still holds it");
+    expect(run.stderr).not.toContain("Rerun to finish");
+    expect(run.stdout).not.toContain("moved and verified");
+    expect(existsSync(join(local.configHome, "uberblick", "config.json"))).toBe(
+      false,
     );
   });
 
@@ -644,7 +770,9 @@ describe("ub remote join", () => {
       );
 
       expect(run.status).toBe(0);
-      expect(run.stdout).toContain("joined 5000 documents");
+      expect(run.stdout).toContain("joined 5000 documents — directory verified");
+      expect(run.stdout).toContain("one live document's content");
+      expect(run.stdout).not.toContain("a fresh client read\nthem back");
       expect(persistedHubUrl(local)).toBe(url(remote));
       expect(readConfigFile(local, "config.json").workspace).toBe(WORKSPACE);
     },

@@ -25,11 +25,12 @@
  * are on a machine that has never seen them. So completion is established by
  * asking the far side, and by three separate facts, all of which must hold:
  *
- * 1. Every room is *quiet* — {@link Corpus.unsettled} is empty. A bounded wait
- *    that expired is a failure, not a result.
- * 2. Every document the directory names actually arrived — {@link
- *    Corpus.missing} is empty.
- * 3. The two corpora agree in **both directions**, tombstones included. Not
+ * 1. Every room opened for this reading is *quiet* — {@link Corpus.unsettled}
+ *    is empty. A bounded wait that expired is a failure, not a result.
+ * 2. The full directory and every room selected for content verification
+ *    arrived — {@link Corpus.missing} is empty.
+ * 3. The directories agree in **both directions**, tombstones included, and
+ *    content agrees for every archived document plus one live document. Not
  *    "the far side has everything we have": also "the far side has nothing we
  *    do not", because a document that appeared over there mid-bridge means the
  *    snapshot this was verified against is already stale.
@@ -348,7 +349,10 @@ function directoryOnly(entry: {
  * @param options.documents `true` opens every document the directory names and
  * fingerprints it. `"sample"` opens every archived document plus one live
  * document, which keeps large-corpus join verification bounded without ever
- * claiming an archived room moved from its tombstone alone. Off where the
+ * claiming an archived room moved from its tombstone alone. `"preflight"`
+ * opens every room but keeps an absent archived room as directory-only: the
+ * acting replica may hold the content needed to repair it, and the later
+ * strict reading still refuses if neither side can produce it. Off where the
  * caller needs only the directory entries.
  *
  * @param options.silent Keep this probe's hub reading off stderr, for a caller
@@ -359,7 +363,7 @@ function directoryOnly(entry: {
  */
 export async function inspectRemote(
   config: McpConfig,
-  options: { documents?: boolean | "sample"; silent?: boolean } = {},
+  options: { documents?: boolean | "sample" | "preflight"; silent?: boolean } = {},
 ): Promise<Corpus> {
   const sync = new HubSync(config, () => {}, { silent: options.silent === true });
   const opened = new Map<string, { doc: Y.Doc; awareness: Awareness }>();
@@ -404,7 +408,11 @@ export async function inspectRemote(
     const live = all.filter((entry) => entry.deleted !== true);
     const dead = all.filter((entry) => entry.deleted === true);
 
-    if (options.documents !== true && options.documents !== "sample") {
+    if (
+      options.documents !== true &&
+      options.documents !== "sample" &&
+      options.documents !== "preflight"
+    ) {
       return {
         hub: sync.state(),
         entries: all.map(directoryOnly),
@@ -415,9 +423,9 @@ export async function inspectRemote(
     }
 
     const selected = new Set(
-      (options.documents === true
-        ? all
-        : [...dead, ...(live[0] === undefined ? [] : [live[0]])]
+      (options.documents === "sample"
+        ? [...dead, ...(live[0] === undefined ? [] : [live[0]])]
+        : all
       ).map((entry) => entry.uuid),
     );
     for (const entry of all) {
@@ -445,7 +453,11 @@ export async function inspectRemote(
       // An empty `meta.uuid` is the one reliable "this document has not
       // arrived": the room is named after the uuid, so its name proves nothing.
       if (held === undefined || getMeta(held.doc).uuid === "") {
-        missing.push({ uuid: entry.uuid, title: entry.title });
+        if (options.documents === "preflight" && entry.deleted === true) {
+          entries.push(directoryOnly(entry));
+        } else {
+          missing.push({ uuid: entry.uuid, title: entry.title });
+        }
         continue;
       }
       entries.push({
@@ -494,6 +506,12 @@ function readCorpus(replicas: Replicas): Corpus {
   for (const entry of all) {
     const replica = attached.get(entry.uuid);
     if (replica === undefined || getMeta(replica.doc).uuid === "") {
+      // The stub is still evidence that this workspace has been used, even
+      // when nobody can produce its archived room. Callers such as the starter
+      // guard need that evidence; `missing` still makes a bridge fail closed.
+      if (entry.deleted === true) {
+        entries.push(directoryOnly(entry));
+      }
       missing.push({ uuid: entry.uuid, title: entry.title });
       continue;
     }

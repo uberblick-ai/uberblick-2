@@ -548,11 +548,10 @@ function remoteConfig(bridge: Bridge): McpConfig {
  * Read the remote, asking for a credential once if the first attempt says one
  * would help. Read-only: nothing on either side is written by this.
  *
- * Always with documents. Counting what a hub holds would be cheaper, but every
- * decision made from this reading — is it empty, is it a subset of ours, is
- * that subset *the same* subset — needs contents, and a probe that answered
- * only the first question would let a divergent overlap through as an
- * interrupted run.
+ * Always with documents. An absent archived room is allowed through this
+ * read-only preflight because this machine may hold the content that repairs
+ * it during reconciliation. The acting and verification readings remain
+ * strict, so a room neither side can produce never becomes a successful join.
  *
  * The first read is `silent`: it happens before the prompt, and both readings
  * that reach the prompt log themselves otherwise — a machine that ran `ub init`
@@ -564,7 +563,7 @@ function remoteConfig(bridge: Bridge): McpConfig {
  */
 async function openRemote(bridge: Bridge, secretFileGiven: boolean): Promise<Corpus> {
   const first = await inspectRemote(remoteConfig(bridge), {
-    documents: true,
+    documents: "preflight",
     silent: true,
   });
   if (!credentialCouldFix(first.hub) || secretFileGiven) {
@@ -575,7 +574,7 @@ async function openRemote(bridge: Bridge, secretFileGiven: boolean): Promise<Cor
     return first;
   }
   bridge.credential = { secret: typed, persist: true };
-  return await inspectRemote(remoteConfig(bridge), { documents: true });
+  return await inspectRemote(remoteConfig(bridge), { documents: "preflight" });
 }
 
 function listDocs(docs: readonly { uuid: string; title: string }[], limit = 10): string {
@@ -602,7 +601,9 @@ function report(
 ): string {
   const live = liveDocs(corpus);
   const tombstones = corpus.entries.length - live.length;
-  let text = `${verb} ${plural(live.length, "document")} — verified on ${target}\n\n`;
+  let text =
+    `${verb} ${plural(live.length, "document")} — directory verified on ` +
+    `${target}\n\n`;
   text += listDocs(live);
   if (tombstones > 0) {
     text +=
@@ -626,10 +627,13 @@ function report(
     "config.json. A deployed web client reads its own from the served\n" +
     "/uberblick-config.json.\n";
   text +=
-    "\nVerified here means the hub acknowledged the writes and a fresh client read\n" +
-    `them back — not that the hub has flushed them to disk. The snapshot this\n` +
-    `verified was taken at ${takenAt}; anything written to the old hub after\n` +
-    "that is not part of it, so close the other clients before relying on this.\n";
+    "\nVerified here means the hub acknowledged the writes. A fresh client read the\n" +
+    "full directory back and compared every document's directory entry. Every\n" +
+    "archived document's content was read back, plus one live document's content\n" +
+    "when the workspace has any. This does not mean the hub flushed them to disk.\n" +
+    `The snapshot this verified was taken at ${takenAt}; anything written to the\n` +
+    "old hub after that is not part of it, so close the other clients before\n" +
+    "relying on this.\n";
   text += `\n${SHARING_BOUNDARY}`;
   return text;
 }
@@ -904,9 +908,9 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
 
   // Read as a fresh client, which writes nothing on either side — so every
   // refusal below leaves both this machine and the remote exactly as they were.
-  // `join` uploads nothing, so a document the remote's directory names and
-  // cannot produce is simply missing, and hydrating from a remote that cannot
-  // serve its own corpus is not a join.
+  // An archived room may be absent here: this machine's replica can still hold
+  // and upload it. The strict reading after reconciliation decides whether
+  // either side could actually produce the content.
   const remote = await openRemote(bridge, flags.secretFile !== undefined);
   const remoteProblem = corpusProblem(bridge.target, remote);
   if (remoteProblem !== null) {
@@ -921,15 +925,16 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   }
 
   io.err(
-    `ub remote: hydrating ${plural(liveDocs(remote).length, "document")} from ${bridge.target}…\n`,
+    `ub remote: hydrating ${plural(remote.entries.length, "document")} from ${bridge.target}…\n`,
   );
   const joined = await syncWorkspace(remoteConfig(bridge));
   const joinProblem = corpusProblem(bridge.target, joined);
   if (joinProblem !== null) {
     io.err(
       `ub remote join: ${joinProblem}This machine's configuration is ` +
-        "unchanged — no endpoint and no workspace were persisted. Rerun to " +
-        "finish; what did arrive is in the local update log already.\n",
+        "unchanged — no endpoint and no workspace were persisted. A rerun on " +
+        "this machine cannot recreate the missing content; retry from a machine " +
+        "that still holds it. What did arrive is in the local update log already.\n",
     );
     return 1;
   }
@@ -987,7 +992,7 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   warn(io, persistence.warnings);
 
   let note = "";
-  if (liveDocs(checked.corpus).length === 0) {
+  if (checked.corpus.entries.length === 0) {
     note +=
       "\nThat workspace holds nothing yet. If you expected documents, check the " +
       "workspace id\nin the URL against `ub status` on the machine that has " +
