@@ -6,10 +6,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import { MirrorStore } from "../src/store.js";
 
-const databasePath = process.argv[2] as string;
-const workspaceId = process.argv[3] as string;
+const workspaceId = process.argv[2] as string;
 
-function open(): void {
+function open(databasePath: string): void {
   const store = new MirrorStore(databasePath, workspaceId);
   try {
     // These are connection-local except for WAL. Reading the store's own
@@ -28,10 +27,10 @@ function open(): void {
   }
 }
 
-process.on("message", (message: { type?: string }) => {
+process.on("message", (message: { type?: string; databasePath?: string }) => {
   if (message.type === "open") {
     try {
-      open();
+      open(message.databasePath as string);
     } catch (error) {
       process.send?.({
         type: "failed",

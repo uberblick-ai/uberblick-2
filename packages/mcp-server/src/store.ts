@@ -50,6 +50,39 @@ import type {
 } from "node:sqlite";
 import { log } from "./log.js";
 
+const BUSY_TIMEOUT_MS = 5_000;
+const WAL_RETRY_MS = 10;
+const walRetryWaiter = new Int32Array(new SharedArrayBuffer(4));
+
+/** SQLite's primary busy result, including extended codes such as BUSY_RECOVERY. */
+function isBusy(error: unknown): boolean {
+  const errcode = (error as { errcode?: unknown } | null)?.errcode;
+  return typeof errcode === "number" && (errcode & 0xff) === 5;
+}
+
+/**
+ * Enable WAL within the same bound as the connection's busy handler.
+ *
+ * SQLite does not consult that handler while the first connection converts a
+ * new file from rollback journalling to WAL, so simultaneous creators have to
+ * retry this pragma itself. Nothing after initialization is retried here.
+ */
+function enableWal(db: DatabaseSync): void {
+  const deadline = Date.now() + BUSY_TIMEOUT_MS;
+  for (;;) {
+    try {
+      db.exec("PRAGMA journal_mode = WAL");
+      return;
+    } catch (error) {
+      const remaining = deadline - Date.now();
+      if (!isBusy(error) || remaining <= 0) {
+        throw error;
+      }
+      Atomics.wait(walRetryWaiter, 0, 0, Math.min(WAL_RETRY_MS, remaining));
+    }
+  }
+}
+
 /** Where an update came from. Both are logged; the distinction is diagnostic. */
 export type UpdateOrigin = "local" | "remote";
 
@@ -354,8 +387,8 @@ export class MirrorStore {
     }
     // WAL so a reader never blocks the writer, and a busy timeout so a second
     // MCP server instance waits its turn instead of failing the tool call.
-    this.db.exec("PRAGMA busy_timeout = 5000");
-    this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+    enableWal(this.db);
     this.db.exec("PRAGMA foreign_keys = ON");
     // Whether this file already held a corpus, asked before anything creates
     // the table it asks about: it is what tells adopting an existing database
