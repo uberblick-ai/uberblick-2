@@ -50,7 +50,7 @@ import {
 import { wrapToken } from "@uberblick/hub/protocol";
 import { directoryRoom } from "@uberblick/schema";
 import * as Y from "yjs";
-import { startHarness } from "./harness.js";
+import { placeCaret, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 
 test.describe.configure({ mode: "serial" });
@@ -659,7 +659,7 @@ for (const scheme of ["light", "dark"] as const) {
     // carries the highlight from the moment it opens.
     await page.getByRole("button", { name: "+ new doc" }).click();
     await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
-    await page.locator(".ub-editor .ProseMirror").click();
+    await placeCaret(page);
     await page.keyboard.type("/", { delay: 15 });
     await expect(page.locator(".ub-blockmenu")).toBeVisible();
     const card = await painted(page, ".ub-blockmenu", "background-color");
@@ -1087,7 +1087,7 @@ for (const scheme of ["light", "dark"] as const) {
     // external link stays on the page's own ground, the reference ends up on
     // `--brand-subtle`, and neither ground is named below.
     const label = "reference";
-    await page.locator(".ub-editor .ProseMirror").click();
+    await placeCaret(page);
     await page.keyboard.type(`[a page](https://example.com/) and [${label}](${uuid})`);
     const reference = page.locator(".ub-editor a.ub-doclink");
     // An unresolved reference is painted `--muted-foreground` instead, so the
@@ -1235,7 +1235,7 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
 
   // Prose enough that the pane really scrolls: the defect this replaced was
   // invisible in a document short enough to sit still.
-  await page.locator(".ub-editor .ProseMirror").click();
+  await placeCaret(page);
   await page.keyboard.type("a line of prose\n".repeat(24));
 
   // A long tag strip, because that is what pushes this row around.

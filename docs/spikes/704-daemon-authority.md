@@ -9,12 +9,16 @@ and two real `ub mcp serve` processes while it alone owns the local SQLite log
 and the upstream hub connection. Content, three distinct awareness identities,
 cursors, and per-session departure all crossed that boundary.
 
-It also hit a predeclared lifecycle hard stop in both complete runs: stopping
-the upstream hub erased the pre-outage block content from the still-running
-local authority. A forced local log refusal exposed a second race in one of the
-two runs: the tool returned `applied: false`, but the rejected in-memory update
-had already propagated upstream and reappeared after restart. Cold start also
-missed its provisional bar in both runs.
+Correction, 2026-09-03: the reported pre-outage content loss was a harness
+artifact, not a topology failure. The driver placed the caret with three clicks
+at the same coordinate inside ProseMirror's 500 ms multi-click window; the
+third selected the whole paragraph, and the next keystroke replaced it. The
+root-cause report and keyboard-placement control are in `proof-0b-report.md` on
+`spike/recut-proofs` at `7e27d4d`. A forced local log refusal did expose a
+separate race in one of the two runs: the tool returned `applied: false`, but
+the rejected in-memory update had already propagated upstream and reappeared
+after restart. That finding stands. Cold start also missed its provisional bar
+in both runs.
 
 This is evidence about the tested topology, not a language, packaging, or
 service-manager recommendation.
@@ -88,20 +92,21 @@ not overcome the lifecycle failures below.
 | Graceful daemon restart | Changed to `syncing…`, then reconnected | Existing real `ub mcp serve` exited; a newly started process read the current value | Local log reopened with the current post-outage value; restart took 478 ms / 566 ms | Dependency boundary was visible and current logged state recovered |
 | Crash after append, before reply | Reconnected after the daemon returned | Caller lost the reply when its proxy ended | Daemon died by `SIGKILL`; the edit ending in `-crash-durable` was present after restart | `applied` remained tied to the synchronous daemon log, but the caller correctly had an ambiguous outcome |
 | Daemon down at client start | Not applicable | Real `ub mcp serve` exited 1 with `daemon unavailable` and the Unix-socket `ENOENT` | No fallback database or hub owner started | Clear refused start |
-| Upstream hub outage and reconnect | Reported `syncing…`, not `synced` | `sync_status` reported `hub-down` with two pending rooms | Expected `agent-middle-web-alpha-beta-offline-web-hub-down`; local and upstream state instead became `-hub-down` in both runs | **Hard stop: pre-outage content loss** |
+| Upstream hub outage and reconnect | Reported `syncing…`, not `synced` | `sync_status` reported `hub-down` with two pending rooms | Expected `agent-middle-web-alpha-beta-offline-web-hub-down`; local and upstream state instead became `-hub-down` in both runs | **Corrected 2026-09-03: the driver's third caret-placement click selected the paragraph; keyboard placement retained the full value** |
 | Concurrent same-block edit | Read the converged merged value | Read the same merged value with the agent prefix and offline web suffix | Same value reached the authority before failure injection | Passed |
 | Forced daemon-log refusal | Continued through the shared in-memory document | Tool returned `applied: false`, `synced: false`, `persistence_failed` | Rejected text was absent after restart in one run but had propagated and returned in the other | **Hard stop: nondeterministic false-negative application** |
 
-The daemon restart probe happened after the upstream-outage probe. It therefore
-shows that the daemon preserves its then-current log, not that it recovered the
-content already lost during the hub outage.
+The daemon restart probe happened after the upstream-outage probe. The original
+report therefore could not separate daemon behavior from the content the
+browser had already replaced. The later keyboard-placement control retained
+the full pre-outage value through five hub-stop runs.
 
 The browser's observed `syncing…` state avoids a false `synced` claim in these
 two schedules. It does not prove the current end-to-end meaning of `synced` for
 the topology: the unchanged browser protocol has only the local Hocuspocus
 acknowledgement and receives no durable upstream watermark from the daemon.
 That missing composite acknowledgement remains an unproven requirement even
-without the observed content-loss hard stop.
+without the now-withdrawn content-loss hard stop.
 
 ## Provisional bars
 
@@ -139,8 +144,7 @@ Proven by the harness:
 
 Not proven, or disproven by this candidate:
 
-- upstream disconnect safety is disproven by repeatable pre-outage content
-  loss;
+- upstream disconnect content loss was a harness triple-click and is withdrawn;
 - strict log-before-publish ordering is disproven by one refusal run and is
   nondeterministic under the candidate's Yjs observer ordering;
 - cold start misses the provisional bar;
@@ -155,12 +159,13 @@ Not proven, or disproven by this candidate:
 
 ## Hard stop and remaining design work
 
-The topology should not advance from this spike. A future, separately shaped
+The topology should not advance from this spike alone. The content-loss hard
+stop is withdrawn, but the refused append reaching the hub through an ungated
+ingress remains a daemon-specific hard stop. A future, separately shaped
 candidate would first need to make the daemon's durable local append the only
-publication point, prevent an upstream provider lifecycle event from replacing
-or clearing locally authoritative state, and expose a durable upstream
-watermark/composite status to every client. It would then need to repeat this
-same failure matrix before service lifecycle or distribution work is useful.
+publication point and expose a durable upstream watermark/composite status to
+every client. It would then need to repeat this same failure matrix before
+service lifecycle or distribution work is useful.
 
 This report intentionally makes no language, packaging, distribution, or
 service-manager recommendation.

@@ -22,7 +22,7 @@
 
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { startHarness } from "./harness.js";
+import { placeCaret, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 
 test.describe.configure({ mode: "serial" });
@@ -48,10 +48,7 @@ async function openDoc(page: Page, seed: string): Promise<void> {
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
   await page.locator(".ub-title").fill("block menu");
 
-  const block = page.locator(".ub-editor .ProseMirror > *").first();
-  const box = await block.boundingBox();
-  if (box === null) throw new Error("e2e: the first block has no box to click");
-  await page.mouse.click(box.x + box.width - 1, box.y + box.height / 2);
+  await placeCaret(page);
   await page.keyboard.type(seed, { delay: 15 });
 }
 
