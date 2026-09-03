@@ -344,8 +344,8 @@ export class MirrorStore {
     }
     // WAL so a reader never blocks the writer, and a busy timeout so a second
     // MCP server instance waits its turn instead of failing the tool call.
-    this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA busy_timeout = 5000");
+    this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA foreign_keys = ON");
     // Whether this file already held a corpus, asked before anything creates
     // the table it asks about: it is what tells adopting an existing database
