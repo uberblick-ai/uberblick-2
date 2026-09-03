@@ -32,6 +32,7 @@ const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 
 /** The one version the decision names. */
 const PINNED = "4.6.0";
+const SERVER_PATCH = `patches/@hocuspocus__server@${PINNED}.patch`;
 
 /** The packages the decision covers. */
 const PINNED_PACKAGES = [
@@ -94,6 +95,45 @@ describe("@hocuspocus/* is pinned to an exact version", () => {
     ).toMatch(
       new RegExp(`^\\s*['"]?@hocuspocus/common['"]?:\\s*${PINNED}\\s*$`, "m"),
     );
+  });
+
+  it("pins the server patch to the exact version and both runtime builds", () => {
+    const workspace = read("pnpm-workspace.yaml");
+    const lock = read("pnpm-lock.yaml");
+    const patch = read(SERVER_PATCH);
+    const declaration = `@hocuspocus/server@${PINNED}`;
+
+    expect(workspace).toContain(`"${declaration}": ${SERVER_PATCH}`);
+    expect(lock).toMatch(
+      new RegExp(
+        `^  '${declaration}':\\n    hash: [0-9a-f]{64}\\n    path: ${SERVER_PATCH}$`,
+        "m",
+      ),
+    );
+
+    for (const path of [
+      "src/ClientConnection.ts",
+      "dist/hocuspocus-server.esm.js",
+      "dist/hocuspocus-server.cjs",
+    ]) {
+      expect(patch).toContain(`diff --git a/${path} b/${path}`);
+    }
+
+    const added = patch
+      .split("\n")
+      .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+      .join("\n");
+    expect(added).toContain("return this.pendingDocumentCount;");
+    expect(added).not.toContain("Object.keys(this.hookPayloads)");
+  });
+
+  it("copies the patch into the hub image before its frozen install", () => {
+    const dockerfile = read("Dockerfile");
+    const patchCopy = dockerfile.indexOf("COPY patches patches");
+    const frozenInstall = dockerfile.indexOf("pnpm install --frozen-lockfile");
+
+    expect(patchCopy).toBeGreaterThan(-1);
+    expect(patchCopy).toBeLessThan(frozenInstall);
   });
 
   it("resolves to exactly that version everywhere in the lockfile", () => {

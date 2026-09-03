@@ -10,6 +10,7 @@ COPY package.json ./
 RUN npm install --global "$(node -p "require('./package.json').packageManager")"
 
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches patches
 COPY packages/hub/package.json packages/hub/package.json
 COPY packages/mcp-server/package.json packages/mcp-server/package.json
 COPY packages/schema/package.json packages/schema/package.json
