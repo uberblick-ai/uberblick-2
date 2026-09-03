@@ -815,9 +815,13 @@ export function App(): ReactElement {
           />
         )}
         {/* The outline follows the document independently of the comments rail:
-            its compact sticky trigger remains while the document pane scrolls,
-            and no eligible heading means this renders no flex item at all. */}
-        <OutlinePane key={doc?.room ?? "no-document"} connection={doc} />
+            its compact trigger remains while the document pane scrolls, and no
+            eligible heading means this renders no flex item at all. */}
+        <OutlinePane
+          key={doc?.room ?? "no-document"}
+          connection={doc}
+          obscured={threadsOpen}
+        />
         {/* The comments rail renders nothing when there are no threads, so the
             rail hides itself when empty instead of leaving a blank gutter. */}
         <aside

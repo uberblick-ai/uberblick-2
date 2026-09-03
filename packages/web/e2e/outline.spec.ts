@@ -2,7 +2,7 @@
  * The floating document outline in a real browser.
  *
  * Its derived H1/H2 data stays in the unit suite. This file owns the behavior
- * only a layout and input model can prove: sticky geometry, the pointer path
+ * only a layout and input model can prove: stable geometry, the pointer path
  * across a portalled popover, keyboard focus and restoration, touch toggling,
  * long-list containment, and the smooth scroll call into the rendered block.
  */
@@ -47,6 +47,15 @@ async function typeHeading(page: Page, level: 1 | 2 | 3, text: string): Promise<
   await page.keyboard.press("Enter");
 }
 
+/** Reach a control through the browser's real sequential focus order. */
+async function tabTo(page: Page, target: ReturnType<Page["locator"]>): Promise<void> {
+  for (let attempts = 0; attempts < 30; attempts += 1) {
+    await page.keyboard.press("Tab");
+    if (await target.evaluate((node) => node === document.activeElement)) return;
+  }
+  throw new Error("e2e: target was not reachable within 30 real Tab presses");
+}
+
 /** Add enough eligible headings to make the panel itself scroll. */
 async function typeLongOutline(page: Page): Promise<string[]> {
   const shown = ["Overview", "Install"];
@@ -61,7 +70,7 @@ async function typeLongOutline(page: Page): Promise<string[]> {
   return shown;
 }
 
-test("pointer and keyboard share one contained, sticky outline", async ({ page }) => {
+test("pointer and keyboard share one contained, stable outline", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 360 });
   await openDocument(page);
 
@@ -72,11 +81,22 @@ test("pointer and keyboard share one contained, sticky outline", async ({ page }
   const trigger = page.getByRole("button", { name: `Contents ${expected.length}` });
   await expect(trigger).toBeVisible();
 
-  const top = (await trigger.boundingBox())?.y;
-  expect(top).toBeDefined();
-  await page.locator(".ub-document-pane").evaluate((pane) => {
-    pane.scrollTop = pane.scrollHeight;
+  const pane = page.locator(".ub-document-pane");
+  await pane.evaluate((element) => {
+    element.scrollTop = 0;
   });
+  const firstHeading = page.locator(".ub-editor h1", { hasText: "Overview" });
+  const top = (await trigger.boundingBox())?.y;
+  const headingTop = (await firstHeading.boundingBox())?.y;
+  expect(top).toBeDefined();
+  expect(headingTop).toBeDefined();
+  await pane.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await expect
+    .poll(async () => (await firstHeading.boundingBox())?.y ?? 0)
+    .toBeLessThan(headingTop ?? 0);
   await expect
     .poll(async () => (await trigger.boundingBox())?.y)
     .toBeCloseTo(top ?? 0, 1);
@@ -85,6 +105,8 @@ test("pointer and keyboard share one contained, sticky outline", async ({ page }
   // pointer crossing away; entering it before the grace expires keeps it open.
   await trigger.hover();
   const panel = page.getByRole("dialog", { name: "On this page" });
+  await expect(panel).toBeVisible();
+  await trigger.click();
   await expect(panel).toBeVisible();
   expect(
     await panel.evaluate((node) => !node.contains(document.activeElement)),
@@ -124,17 +146,31 @@ test("pointer and keyboard share one contained, sticky outline", async ({ page }
   await page.mouse.move(0, 0);
   await expect(panel).toBeHidden();
 
-  // Establish keyboard modality, then focus the trigger. It opens in place;
-  // Tab enters the rows in document order and Escape returns home.
-  await page.keyboard.press("Tab");
-  await trigger.focus();
+  // A real Tab reaches the trigger without being pulled into the portal. The
+  // next Tabs visit every heading in order and then leave the panel normally.
+  await page.locator(".ub-body").evaluate((body) => {
+    const afterOutline = document.createElement("button");
+    afterOutline.id = "outline-after";
+    afterOutline.textContent = "After outline";
+    body.append(afterOutline);
+  });
+  const afterOutline = page.locator("#outline-after");
+  await tabTo(page, trigger);
   await expect(panel).toBeVisible();
   await expect(trigger).toBeFocused();
+  for (let index = 0; index < expected.length; index += 1) {
+    await page.keyboard.press("Tab");
+    await expect(rows.nth(index)).toBeFocused();
+    if (index === 0) await expect(first).toHaveCSS("outline-width", "2px");
+  }
   await page.keyboard.press("Tab");
-  await expect(first).toBeFocused();
-  await expect(first).toHaveCSS("outline-width", "2px");
+  await expect(afterOutline).toBeFocused();
+  await expect(panel).toBeHidden();
+
+  await page.keyboard.press("Shift+Tab");
+  await expect(trigger).toBeFocused();
+  await expect(panel).toBeVisible();
   await page.keyboard.press("Tab");
-  await expect(second).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
   await expect(trigger).toBeFocused();
@@ -153,16 +189,30 @@ test("pointer and keyboard share one contained, sticky outline", async ({ page }
       original.call(this, options);
     };
   });
-  await trigger.click();
-  await panel.getByRole("button", { name: "Install" }).click();
-  await expect(panel).toBeHidden();
+  for (const key of ["Enter", "Space"]) {
+    await page.keyboard.press("Shift+Tab");
+    await tabTo(page, trigger);
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await expect(second).toBeFocused();
+    if (key === "Enter") {
+      await panel.hover();
+      await expect(second).toBeFocused();
+    }
+    await page.keyboard.press(key);
+    await expect(panel).toBeHidden();
+    await expect(trigger).toBeFocused();
+  }
   expect(
     await page.evaluate(
       () => (window as unknown as { outlineScroll: unknown[] }).outlineScroll,
     ),
-  ).toEqual([
-    { id: targetId, options: { behavior: "smooth", block: "start" } },
-  ]);
+  ).toEqual(
+    ["Enter", "Space"].map(() => ({
+      id: targetId,
+      options: { behavior: "smooth", block: "start" },
+    })),
+  );
 });
 
 test("a non-hover pointer toggles the panel and dismisses it outside", async ({
@@ -190,6 +240,23 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     await page.locator(".ub-title").tap();
     await expect(panel).toBeHidden();
     await expect(page.locator(".ub-title")).toBeFocused();
+
+    // An open threads drawer owns this edge: the covered outline is removed
+    // from both rendering and keyboard navigation, and its portal closes.
+    await page.locator(".ub-editor .ub-paragraph").last().click();
+    await page.keyboard.type("annotate me");
+    await page.keyboard.press("Shift+Home");
+    await page.locator(".ub-composer-open").click();
+    await page.getByPlaceholder(/Comment as/).fill("a thread");
+    await page.keyboard.press("Enter");
+    const threads = page.locator(".ub-threads-toggle");
+    await expect(threads).toBeVisible();
+    await trigger.tap();
+    await expect(panel).toBeVisible();
+    await threads.tap();
+    await expect(page.locator(".ub-rail-open")).toBeVisible();
+    await expect(trigger).toBeHidden();
+    await expect(panel).toBeHidden();
   } finally {
     await context.close();
   }

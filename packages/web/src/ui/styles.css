@@ -1367,9 +1367,6 @@ body {
    It reserves only its own button width, and nothing when the derived outline
    is empty. */
 .ub-outline {
-  position: sticky;
-  top: 0.75rem;
-  z-index: 4;
   align-self: flex-start;
   flex: none;
   margin-block-start: 0.75rem;
@@ -1502,6 +1499,12 @@ body {
   }
 
   .ub-rail {
+    display: none;
+  }
+
+  /* The drawer occupies this edge. Do not leave a covered trigger in the Tab
+     order, and OutlinePane closes its portal when the same state turns on. */
+  .ub-outline-obscured {
     display: none;
   }
 
