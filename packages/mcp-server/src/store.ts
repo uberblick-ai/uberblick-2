@@ -680,7 +680,7 @@ export class MirrorStore {
    *
    * `throughSeq` is the highest room-log sequence the deriving Y.Doc has
    * applied contiguously. The metadata row, that cut and every dependent row
-   * land in one immediate transaction, so a slower older derivation cannot
+   * land in one transaction, so a slower older derivation cannot
    * replace a newer one.
    */
   indexDoc(doc: IndexedDoc, throughSeq: number): void {

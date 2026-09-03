@@ -104,7 +104,6 @@ describe("the index derivation cut", () => {
     });
 
     const second = await server(databasePath);
-    await second.ok("get_doc", { uuid: created.uuid });
     const replica = first.instance.replicas.replica(created.uuid);
     const cut = replica.indexedThroughSeq;
     const firstDb = (first.instance.store as unknown as { db: DatabaseSync })
@@ -113,7 +112,7 @@ describe("the index derivation cut", () => {
       .db;
     secondDb.exec("PRAGMA busy_timeout = 0");
 
-    // Pause the clear after its marker delete has been prepared, at the exact
+    // Pause the clear after its marker delete has executed, at the exact
     // boundary where the old autocommit script admitted another writer. Under
     // one transaction that writer is refused until the clear commits; the
     // rebuild then writes the same cut as one complete generation.
@@ -139,10 +138,7 @@ describe("the index derivation cut", () => {
           );
         } catch (error) {
           const errcode = (error as { errcode?: unknown } | null)?.errcode;
-          if (
-            typeof errcode !== "number" ||
-            (errcode & 0xff) !== SQLITE_BUSY
-          ) {
+          if (errcode !== SQLITE_BUSY) {
             throw error;
           }
         }
