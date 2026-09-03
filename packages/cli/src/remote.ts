@@ -606,8 +606,8 @@ function report(
   text += listDocs(live);
   if (tombstones > 0) {
     text +=
-      `\n${plural(tombstones, "archived directory entry")} travelled with the ` +
-      "directory. Archived documents stay archived; their content is not moved.\n";
+      `\n${plural(tombstones, "archived document")} moved and verified. ` +
+      "They stay archived until restored.\n";
   }
   text += note;
   text += "\nconfiguration\n";
@@ -799,7 +799,13 @@ async function verify(
   expected: readonly CorpusDoc[],
 ): Promise<{ corpus: Corpus; problem: string | null }> {
   bridge.io.err(`ub remote: verifying ${bridge.target} as a fresh client…\n`);
-  const corpus = await inspectRemote(remoteConfig(bridge), { documents: true });
+  // The directory proves the complete identity/tombstone set. Reading one live
+  // room proves the fresh-client path without making the command's fixed
+  // network budget grow with the corpus; archived rooms are all read because a
+  // tombstone alone cannot prove their restorable content moved.
+  const corpus = await inspectRemote(remoteConfig(bridge), {
+    documents: "sample",
+  });
   const unusable = corpusProblem(bridge.target, corpus);
   if (unusable !== null) {
     return { corpus, problem: unusable };

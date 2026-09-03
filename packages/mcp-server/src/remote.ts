@@ -48,12 +48,10 @@
  * differently and a byte comparison would fail a promotion that worked. State
  * vectors and schema-level content are both representation-independent.
  *
- * Neither function moves a tombstoned document. The directory doc travels
- * wholesale, so tombstones replicate as directory state and an archived
- * document stays archived on the far side; its *room* is not uploaded, because
- * "every live document" is what a bridge is for. A tombstone is still content
- * for every *decision* here: a hub holding nothing but tombstones is a hub
- * somebody has used, not an empty one.
+ * Tombstoned documents travel too. The directory doc carries the tombstone and
+ * the document room carries the content it hides, so a later restore on a fresh
+ * replica can recover the same blocks and annotations rather than an empty
+ * room.
  */
 
 import { createHash } from "node:crypto";
@@ -114,19 +112,18 @@ export interface CorpusDoc {
   /**
    * The directory stub's title and tags — not the document's own meta.
    *
-   * The stub is the only thing a tombstone retains: its room is never opened
-   * and never moved, so if these are not compared, an archived document whose
-   * title or tags differ between the two hubs passes verification with nothing
-   * left to catch it. For a live document {@link docFingerprint} covers `meta`
-   * as well, and the two agreeing is itself worth knowing.
+   * The stub remains the discovery authority for an archived document. Its
+   * room is opened when a bridge moves or verifies it, but its document meta
+   * may have changed on a replica that had not seen the tombstone, so the stub
+   * is still compared independently.
    */
   title: string;
   tags: string[];
-  /** Tombstoned in the directory. Its room is never opened, and never moved. */
+  /** Tombstoned in the directory. The room and its content remain intact. */
   deleted: boolean;
   /**
-   * Content hash of the whole document, or null when it was not opened — a
-   * tombstoned entry, or a reading that took the directory alone.
+   * Content hash of the whole document, or null when this reading did not open
+   * the room.
    */
   fingerprint: string | null;
   /** The document's Yjs state vector, or null as above. */
@@ -136,12 +133,12 @@ export interface CorpusDoc {
 export interface Corpus {
   /** Where this reading came from, and whether it can be believed. */
   hub: HubState;
-  /** Every directory entry, live and tombstoned alike, in directory order. */
+  /** Every directory entry, live and tombstoned alike. */
   entries: CorpusDoc[];
   /**
-   * Live directory entries whose document did not arrive. Never empty-and-fine:
-   * a directory naming a document nothing can produce is an incomplete sync,
-   * and every caller here treats it as a failure.
+   * Inspected directory entries whose document did not arrive. Never
+   * empty-and-fine: a directory naming a document nothing can produce is an
+   * incomplete sync, and every caller here treats it as a failure.
    */
   missing: { uuid: string; title: string }[];
   /**
@@ -166,7 +163,7 @@ export interface Corpus {
   complete: boolean;
 }
 
-/** The live documents of a corpus — what a bridge actually moves. */
+/** The untombstoned documents of a corpus. */
 export function liveDocs(corpus: Corpus): CorpusDoc[] {
   return corpus.entries.filter((entry) => !entry.deleted);
 }
@@ -295,8 +292,8 @@ function sameDoc(a: CorpusDoc, b: CorpusDoc): boolean {
   if (a.deleted !== b.deleted) {
     return false;
   }
-  // The directory stub, compared semantically: it is all a tombstone keeps, and
-  // tag order is not meaningful.
+  // The directory stub, compared semantically: it remains discovery truth for
+  // a tombstone, and tag order is not meaningful.
   if (a.title !== b.title || !sameTags(a.tags, b.tags)) {
     return false;
   }
@@ -324,16 +321,17 @@ function emptyCorpus(hub: HubState): Corpus {
   return { hub, entries: [], missing: [], unsettled: [], complete: false };
 }
 
-function tombstone(entry: {
+function directoryOnly(entry: {
   uuid: string;
   title: string;
   tags: string[];
+  deleted?: boolean;
 }): CorpusDoc {
   return {
     uuid: entry.uuid,
     title: entry.title,
     tags: entry.tags,
-    deleted: true,
+    deleted: entry.deleted === true,
     fingerprint: null,
     stateVector: null,
   };
@@ -347,10 +345,11 @@ function tombstone(entry: {
  * awareness state is left unset as well — a probe must not appear in the web
  * UI as a ghost collaborator.
  *
- * @param options.documents Open every live document the directory names and
- * fingerprint it. Off where the caller needs nothing but the set of uuids — a
- * refusal is decided on those alone. On for read-back, where the question is
- * whether what this machine holds actually arrived.
+ * @param options.documents `true` opens every document the directory names and
+ * fingerprints it. `"sample"` opens every archived document plus one live
+ * document, which keeps large-corpus join verification bounded without ever
+ * claiming an archived room moved from its tombstone alone. Off where the
+ * caller needs only the directory entries.
  *
  * @param options.silent Keep this probe's hub reading off stderr, for a caller
  * that renders `hub` itself. Off by default, because most callers here are the
@@ -360,7 +359,7 @@ function tombstone(entry: {
  */
 export async function inspectRemote(
   config: McpConfig,
-  options: { documents?: boolean; silent?: boolean } = {},
+  options: { documents?: boolean | "sample"; silent?: boolean } = {},
 ): Promise<Corpus> {
   const sync = new HubSync(config, () => {}, { silent: options.silent === true });
   const opened = new Map<string, { doc: Y.Doc; awareness: Awareness }>();
@@ -403,29 +402,26 @@ export async function inspectRemote(
 
     const all = listDirectory(dirDoc, { includeDeleted: true });
     const live = all.filter((entry) => entry.deleted !== true);
-    const dead = all.filter((entry) => entry.deleted === true).map(tombstone);
+    const dead = all.filter((entry) => entry.deleted === true);
 
-    if (options.documents !== true) {
+    if (options.documents !== true && options.documents !== "sample") {
       return {
         hub: sync.state(),
-        entries: [
-          ...live.map((entry) => ({
-            uuid: entry.uuid,
-            title: entry.title,
-            tags: entry.tags,
-            deleted: false,
-            fingerprint: null,
-            stateVector: null,
-          })),
-          ...dead,
-        ],
+        entries: all.map(directoryOnly),
         missing: [],
         unsettled: [],
         complete: true,
       };
     }
 
-    for (const entry of live) {
+    const selected = new Set(
+      (options.documents === true
+        ? all
+        : [...dead, ...(live[0] === undefined ? [] : [live[0]])]
+      ).map((entry) => entry.uuid),
+    );
+    for (const entry of all) {
+      if (!selected.has(entry.uuid)) continue;
       open(roomForDoc(config.workspaceId, entry.uuid));
     }
     await sync.waitForQuiet();
@@ -436,7 +432,11 @@ export async function inspectRemote(
     const entries: CorpusDoc[] = [];
     const missing: { uuid: string; title: string }[] = [];
     const unsettled: string[] = [];
-    for (const entry of live) {
+    for (const entry of all) {
+      if (!selected.has(entry.uuid)) {
+        entries.push(directoryOnly(entry));
+        continue;
+      }
       const room = roomForDoc(config.workspaceId, entry.uuid);
       const held = opened.get(room);
       if (!sync.isRoomQuiet(room)) {
@@ -452,17 +452,17 @@ export async function inspectRemote(
         uuid: entry.uuid,
         title: entry.title,
         tags: entry.tags,
-        deleted: false,
+        deleted: entry.deleted === true,
         fingerprint: docFingerprint(held.doc),
         stateVector: Y.encodeStateVector(held.doc),
       });
     }
-    // Complete: the directory was read in full. An individual document that did
+    // Complete: the directory was read in full. An inspected document that did
     // not arrive lands in `missing`, which every caller already refuses on —
     // only the directory read can fail in a way that looks like emptiness.
     return {
       hub: sync.state(),
-      entries: [...entries, ...dead],
+      entries,
       missing,
       unsettled,
       complete: true,
@@ -492,10 +492,6 @@ function readCorpus(replicas: Replicas): Corpus {
     }
   }
   for (const entry of all) {
-    if (entry.deleted === true) {
-      entries.push(tombstone(entry));
-      continue;
-    }
     const replica = attached.get(entry.uuid);
     if (replica === undefined || getMeta(replica.doc).uuid === "") {
       missing.push({ uuid: entry.uuid, title: entry.title });
@@ -505,7 +501,7 @@ function readCorpus(replicas: Replicas): Corpus {
       uuid: entry.uuid,
       title: entry.title,
       tags: entry.tags,
-      deleted: false,
+      deleted: entry.deleted === true,
       fingerprint: docFingerprint(replica.doc),
       stateVector: Y.encodeStateVector(replica.doc),
     });
@@ -540,6 +536,15 @@ export async function syncWorkspace(config: McpConfig): Promise<Corpus> {
   const replicas = new Replicas(config, store);
   try {
     await replicas.settle();
+    // Ordinary MCP sessions leave tombstoned rooms detached: discovery and
+    // search need only the directory stub. A bridge is different — the hidden
+    // room is what makes restore meaningful on another machine, so attach every
+    // directory entry before waiting for the corpus to arrive.
+    for (const entry of listDirectory(replicas.directory().doc, {
+      includeDeleted: true,
+    })) {
+      replicas.replica(entry.uuid);
+    }
     await replicas.sync.waitForQuiet();
     // The log is the replica: a failed append means what follows would be read
     // out of a document the log does not back.
