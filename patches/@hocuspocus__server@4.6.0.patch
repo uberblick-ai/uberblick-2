@@ -137,7 +137,7 @@ index 9ac688ae4c7038639cfd0ce6044e56cf926d2d7a..54eabff7636dad53413a2e3cc80fafdf
  		this.documentConnectionsEstablished.clear();
  	}
  
-@@ -225,20 +228,10 @@ export class ClientConnection<Context = any> {
+@@ -225,20 +228,16 @@ export class ClientConnection<Context = any> {
  	}
  
  	// Number of distinct documents on this connection that have not yet finished
@@ -147,7 +147,13 @@ index 9ac688ae4c7038639cfd0ce6044e56cf926d2d7a..54eabff7636dad53413a2e3cc80fafdf
 -	// Auth frame has been seen) so that sending an Auth frame first — which marks
 -	// the document as "establishing" but keeps its hook payload alive while a slow
 -	// `onAuthenticate` runs — cannot be used to bypass the limit.
-+	// authenticating. Kept incrementally so admitting one document remains O(1)
++	// authenticating. Each holds its own queue and hook payload, so this is capped
++	// to prevent a single connection from amplifying memory usage by fanning out
++	// across many document names. We count by `isAuthenticated` (not by whether an
++	// Auth frame has been seen) so that sending an Auth frame first — which marks
++	// the document as "establishing" but keeps its hook payload alive while a slow
++	// `onAuthenticate` runs — cannot be used to bypass the limit.
++	// Kept incrementally so admitting one document remains O(1)
 +	// no matter how many authenticated documents the socket already holds.
  	private getPendingDocumentCount(): number {
 -		let total = 0;

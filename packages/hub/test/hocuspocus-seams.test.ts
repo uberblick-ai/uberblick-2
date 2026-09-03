@@ -254,7 +254,7 @@ type FrameSink = { handleMessage: (data: Uint8Array) => void };
  * Resolve once `count` frames have reached the server on this connection.
  *
  * `handleMessage` is the library's own entry point for an incoming frame —
- * `ClientConnection.ts:573` before a connection is established,
+ * `ClientConnection.ts:579` before a connection is established,
  * `Connection.ts:245` after — and both queue the frame synchronously, so a
  * wrapper that delegates first and counts second reports arrival exactly. That
  * arrival is the only observable a test holding the server mid-flight has: a
@@ -288,13 +288,13 @@ function frameBarrierForNextClient(
   });
 }
 
-describe("ClientConnection.ts:420 — the pre-auth queue drains before `connected`", () => {
+describe("ClientConnection.ts:426 — the pre-auth queue drains before `connected`", () => {
   /**
    * A provider sends its token and then its first sync message without waiting
    * to be told it was authenticated (`HocuspocusProvider.ts:537-543`), so those
    * frames sit in `incomingMessageQueue` while `onAuthenticate` runs. They are
-   * handed to the `Connection` at `ClientConnection.ts:420-422` — *before* the
-   * `connected` hook at `:426`.
+   * handed to the `Connection` at `ClientConnection.ts:426-428` — *before* the
+   * `connected` hook at `:432`.
    *
    * The hub registers its per-room close logger inside `connected`
    * (`packages/hub/src/server.ts`), so anything that queued frame does — up to
@@ -348,10 +348,10 @@ describe("ClientConnection.ts:420 — the pre-auth queue drains before `connecte
   });
 });
 
-describe("ClientConnection.ts:510-540 — a refused token sets up no connection", () => {
+describe("ClientConnection.ts:516-546 — a refused token sets up no connection", () => {
   /**
    * `onAuthenticate` throwing takes the branch that answers `writePermissionDenied`
-   * and closes (`:510-560`); `setUpNewConnection` at `:540` never runs, so the
+   * and closes (`:516-566`); `setUpNewConnection` at `:546` never runs, so the
    * frames the provider queued behind its token — the sync step it sent without
    * waiting to be authenticated — are dropped with the connection rather than
    * handed to a `Connection` afterwards.
@@ -466,22 +466,29 @@ describe("ClientConnection pending-document counter", () => {
     await heldAuthenticationStarted.opened;
 
     const warnings: string[] = [];
-    vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+    const logged = vi.spyOn(console, "warn").mockImplementation((...args) => {
       warnings.push(args.map(String).join(" "));
     });
-    connect({
-      port,
-      room: "one-past-the-pending-ceiling",
-      awareness: null,
-      websocketProvider: websocket,
-    });
 
-    await waitUntil("the second pending document to terminate its socket", () =>
-      warnings.some((line) =>
-        line.includes("too many pending unauthenticated documents"),
-      ),
-    );
-    releaseHeldAuthentication.open();
+    try {
+      connect({
+        port,
+        room: "one-past-the-pending-ceiling",
+        awareness: null,
+        websocketProvider: websocket,
+      });
+
+      await waitUntil(
+        "the second pending document to terminate its socket",
+        () =>
+          warnings.some((line) =>
+            line.includes("too many pending unauthenticated documents"),
+          ),
+      );
+    } finally {
+      logged.mockRestore();
+      releaseHeldAuthentication.open();
+    }
   });
 });
 
@@ -845,12 +852,12 @@ describe("Connection.ts:208 — close() clears neither the queue nor the in-flig
   });
 });
 
-describe("ClientConnection.ts:499-540 — onAuthenticate runs once, refreshes go to onTokenSync", () => {
+describe("ClientConnection.ts:505-546 — onAuthenticate runs once, refreshes go to onTokenSync", () => {
   /**
-   * `onConnect` then `onAuthenticate` (`:499` and `:510`) run on the first auth
-   * message for a document, and only then is the connection set up (`:540`).
-   * A later auth message finds the connection established (`:449-453`,
-   * `:482`) and is routed to `onTokenSync` instead — the wiring at `:386-409`.
+   * `onConnect` then `onAuthenticate` (`:505` and `:516`) run on the first auth
+   * message for a document, and only then is the connection set up (`:546`).
+   * A later auth message finds the connection established (`:448-453`,
+   * `:481`) and is routed to `onTokenSync` instead — the wiring at `:385-408`.
    *
    * The hub's whole auth boundary is that shape: `onAuthenticate` is the one
    * place a token is checked before a room opens, and it never runs again on a
