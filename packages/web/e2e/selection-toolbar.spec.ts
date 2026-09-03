@@ -193,13 +193,7 @@ test("touch activation preserves the range and IME composition suspends the chro
   const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
   expect(selected).not.toBe("");
 
-  const bold = page.getByRole("button", { name: "Bold" });
-  const boldBox = await bold.boundingBox();
-  if (boldBox === null) throw new Error("e2e: Bold has no touch target");
-  await page.touchscreen.tap(
-    boldBox.x + boldBox.width / 2,
-    boldBox.y + boldBox.height / 2,
-  );
+  await page.getByRole("button", { name: "Bold" }).tap();
   await expect(page.locator(".ub-paragraph strong")).toContainText(selected);
 
   await editor.dispatchEvent("compositionstart", { data: "へ" });

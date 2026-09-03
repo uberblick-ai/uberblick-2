@@ -33,6 +33,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { createHub, silentLogger } from "@uberblick/hub";
 import type { Hub, HubConfig } from "@uberblick/hub";
@@ -104,16 +105,48 @@ export interface Harness {
  * driver issues each click separately. Reusing a coordinate to place a caret
  * can therefore select the whole block and make the next keystroke replace it.
  * Keyboard placement avoids that gesture state entirely.
+ * Home and End cover different scopes on macOS and Linux, but every caller has
+ * one single-line block, where the line, block and document edges coincide.
  */
 export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Promise<void> {
   const editor = page.locator(".ub-editor .ProseMirror");
-  await editor.focus();
-  await page.keyboard.press(edge === "start" ? "Home" : "End");
-  const isCaret = await editor.evaluate((element) => {
-    const selection = element.ownerDocument.getSelection();
-    return selection?.isCollapsed && element.contains(selection.anchorNode);
-  });
-  if (!isCaret) throw new Error("e2e: keyboard placement did not leave a caret in the editor");
+  await expect
+    .poll(async () => {
+      await editor.focus();
+      await page.keyboard.press(edge === "start" ? "Home" : "End");
+      await page.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+      );
+      return editor.evaluate((element, expectedEdge) => {
+        const selection = element.ownerDocument.getSelection();
+        const anchor = selection?.anchorNode;
+        const block = element.firstElementChild;
+        if (
+          !selection?.isCollapsed ||
+          anchor === undefined ||
+          anchor === null ||
+          block === null ||
+          !block.contains(anchor) ||
+          !element.contains(element.ownerDocument.activeElement)
+        ) {
+          return false;
+        }
+
+        const outside = element.ownerDocument.createRange();
+        outside.selectNodeContents(block);
+        if (expectedEdge === "start") {
+          outside.setEnd(anchor, selection.anchorOffset);
+        } else {
+          outside.setStart(anchor, selection.anchorOffset);
+        }
+        const copy = outside.cloneContents();
+        for (const cursor of copy.querySelectorAll(".ProseMirror-yjs-cursor")) {
+          cursor.remove();
+        }
+        return copy.textContent === "";
+      }, edge);
+    })
+    .toBe(true);
 }
 
 export async function startHarness(): Promise<Harness> {
