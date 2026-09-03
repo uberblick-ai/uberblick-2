@@ -41,6 +41,12 @@ export interface RemotePresence {
    * rather than naming a block it cannot resolve.
    */
   block: number | null;
+  /**
+   * Stable id of that same visible block, or null when the caret has no
+   * resolvable target. The number is for reading; the id is for a one-shot
+   * jump that survives blocks being inserted above the caret.
+   */
+  blockId: string | null;
 }
 
 /**
@@ -77,7 +83,7 @@ function blockOf(
   ydoc: Y.Doc,
   blocks: readonly Y.XmlElement[],
   anchor: unknown,
-): number | null {
+): { block: number; blockId: string | null } | null {
   let absolute: { type: Y.AbstractType<unknown> } | null = null;
   try {
     absolute = Y.createAbsolutePositionFromRelativePosition(
@@ -98,7 +104,9 @@ function blockOf(
   // block, or inside a shadowed duplicate. Both earn silence rather than a
   // number that disagrees with the document on screen.
   const index = blocks.indexOf(element);
-  return index === -1 ? null : index + 1;
+  if (index === -1) return null;
+  const id = element.getAttribute("id") ?? "";
+  return { block: index + 1, blockId: id === "" ? null : id };
 }
 
 /**
@@ -128,6 +136,10 @@ export function readPresence(ydoc: Y.Doc, awareness: Awareness): RemotePresence[
     if (fields.user === undefined && (anchor === undefined || anchor === null)) {
       return;
     }
+    const location =
+      anchor === undefined || anchor === null
+        ? null
+        : blockOf(ydoc, blocks, anchor);
     found.push({
       clientId,
       name:
@@ -140,10 +152,8 @@ export function readPresence(ydoc: Y.Doc, awareness: Awareness): RemotePresence[
           : AWARENESS_FALLBACK_COLOR,
       kind: fields.client === AGENT_CLIENT ? "agent" : "human",
       session: typeof fields.session === "string" ? fields.session : null,
-      block:
-        anchor === undefined || anchor === null
-          ? null
-          : blockOf(ydoc, blocks, anchor),
+      block: location?.block ?? null,
+      blockId: location?.blockId ?? null,
     });
   });
   found.sort((a, b) => a.clientId - b.clientId);
@@ -164,6 +174,7 @@ function sameSession(a: RemotePresence | null, b: RemotePresence | null): boolea
   return (
     a.clientId === b.clientId &&
     a.block === b.block &&
+    a.blockId === b.blockId &&
     a.name === b.name &&
     a.color === b.color &&
     a.kind === b.kind &&
@@ -174,15 +185,12 @@ function sameSession(a: RemotePresence | null, b: RemotePresence | null): boolea
 /**
  * What a peer's avatar says on hover, and to a screen reader.
  *
- * A human is named and nothing else — the name is all a reader asked for. An
- * agent gets what a person cannot tell from a robot glyph: which session it is,
- * and where it is working while its caret is anchored. Both tail parts drop out
- * when there is nothing to say, so the label never trails a separator into an
- * absent value.
+ * Every control names the complete session and whether it is a person or an
+ * agent. An agent also names its published session id, and either kind names a
+ * resolved caret location. Optional tail parts drop out cleanly.
  */
 export function presenceLabel(session: RemotePresence): string {
-  if (session.kind === "human") return session.name;
-  const parts = [session.name];
+  const parts = [session.name, session.kind === "agent" ? "agent" : "person"];
   if (session.session !== null) parts.push(session.session);
   if (session.block !== null) parts.push(`editing block ${session.block}`);
   return parts.join(" · ");

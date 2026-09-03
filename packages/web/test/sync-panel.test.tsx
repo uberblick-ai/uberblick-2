@@ -437,7 +437,7 @@ describe("the sync panel renders the state this client holds", () => {
       expect(
         avatars.map((avatar) => [avatar.textContent, avatar.style.borderColor]),
       ).toEqual([
-        ["🤖", "rgb(123, 94, 199)"],
+        ["C🤖", "rgb(123, 94, 199)"],
         ["L", "rgb(12, 133, 61)"],
       ]);
       // Announced once: the visible name is the row's accessible name, and the
