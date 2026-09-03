@@ -347,6 +347,8 @@ export interface HubOptions {
   log?: HubLogger;
   /** A hub from another release, for the tests about protocol skew. */
   protocolVersion?: number;
+  /** A deliberately tiny pending-room ceiling for admission-bound tests. */
+  maxPendingDocuments?: number;
 }
 
 export function startHub(options: HubOptions = {}): Promise<Hub> {
@@ -358,6 +360,9 @@ export function startHub(options: HubOptions = {}): Promise<Hub> {
     ...(options.protocolVersion === undefined
       ? {}
       : { protocolVersion: options.protocolVersion }),
+    ...(options.maxPendingDocuments === undefined
+      ? {}
+      : { maxPendingDocuments: options.maxPendingDocuments }),
     debounce: 20,
     maxDebounce: 200,
     shutdownTimeoutMs: 5_000,

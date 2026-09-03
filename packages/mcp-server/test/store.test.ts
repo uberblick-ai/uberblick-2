@@ -122,14 +122,17 @@ describe("a transaction body that throws", () => {
   it("leaves none of its earlier statements behind", () => {
     const databasePath = tempDatabasePath();
     const opened = store(databasePath);
-    opened.indexDoc({
-      uuid: LEGACY.uuid,
-      title: "before",
-      tags: ["kept"],
-      description: "",
-      links: [],
-      body: "the indexed body",
-    });
+    opened.indexDoc(
+      {
+        uuid: LEGACY.uuid,
+        title: "before",
+        tags: ["kept"],
+        description: "",
+        links: [],
+        body: "the indexed body",
+      },
+      1,
+    );
 
     // Abort `indexDoc` from inside SQLite, at its link statement — by which
     // point the title row and the tag rows have already been rewritten.
@@ -141,14 +144,17 @@ describe("a transaction body that throws", () => {
     saboteur.close();
 
     expect(() =>
-      opened.indexDoc({
-        uuid: LEGACY.uuid,
-        title: "after",
-        tags: ["replaced"],
-        description: "",
-        links: [LEGACY.linked],
-        body: "a different body",
-      }),
+      opened.indexDoc(
+        {
+          uuid: LEGACY.uuid,
+          title: "after",
+          tags: ["replaced"],
+          description: "",
+          links: [LEGACY.linked],
+          body: "a different body",
+        },
+        2,
+      ),
     ).toThrow(/no reindexing today/);
 
     // Nothing from the failed attempt survives — not the title, not the tags,
@@ -164,5 +170,53 @@ describe("a transaction body that throws", () => {
     ]);
     expect(opened.search("different", 10)).toEqual([]);
     expect(opened.backlinks(LEGACY.linked)).toEqual([]);
+  });
+});
+
+describe("derived index sequencing", () => {
+  it("refuses an older derivation that commits after a newer one", () => {
+    const databasePath = tempDatabasePath();
+    const slow = store(databasePath);
+    const fast = store(databasePath);
+    const older = {
+      uuid: LEGACY.uuid,
+      title: "Older derivation",
+      tags: ["old"],
+      description: "",
+      links: [],
+      body: "stateBravo",
+    };
+
+    // `slow` derived these rows first. It offers them only after the other
+    // connection has committed a derivation from the newer log cut — the store
+    // boundary of the two-process interleaving, with no timing guess in the
+    // test.
+    fast.indexDoc(
+      {
+        uuid: LEGACY.uuid,
+        title: "Newer derivation",
+        tags: ["new"],
+        description: "",
+        links: [LEGACY.linked],
+        body: "stateCharlie",
+      },
+      2,
+    );
+    slow.indexDoc(older, 1);
+
+    expect(slow.search("stateBravo", 10)).toEqual([]);
+    expect(slow.search("stateCharlie", 10)).toEqual([
+      expect.objectContaining({
+        title: "Newer derivation",
+        tags: ["new"],
+      }),
+    ]);
+    expect(slow.backlinks(LEGACY.linked)).toEqual([
+      {
+        uuid: LEGACY.uuid,
+        title: "Newer derivation",
+        description: null,
+      },
+    ]);
   });
 });
