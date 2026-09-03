@@ -32,6 +32,7 @@ import { spawn } from "node:child_process";
 import {
   HocuspocusProvider,
   HocuspocusProviderWebsocket,
+  type onAuthenticationFailedParameters,
   type onCloseParameters,
 } from "@hocuspocus/provider";
 import type { Hocuspocus, ServerConfiguration } from "@hocuspocus/server";
@@ -131,7 +132,10 @@ function connect(options: {
     });
   });
   const authenticationFailed = new Promise<string>((resolve) => {
-    provider.on("authenticationFailed", ({ reason }) => resolve(reason));
+    provider.on(
+      "authenticationFailed",
+      ({ reason }: onAuthenticationFailedParameters) => resolve(reason),
+    );
   });
 
   if (options.websocketProvider !== undefined) {
