@@ -1,6 +1,12 @@
 packages:
   - "packages/*"
 
+# Patch the pinned server without changing its resolution. The counter removes
+# a quadratic scan from full-corpus attachment; its invariant is pinned beside
+# the dependency's other characterized seams.
+patchedDependencies:
+  "@hocuspocus/server@4.6.0": patches/@hocuspocus__server@4.6.0.patch
+
 # Postinstall builds we explicitly trust (pnpm 10 blocks these by default).
 # Nothing here compiles a native addon any more: SQLite comes from `node:sqlite`
 # in both the hub and the MCP server.

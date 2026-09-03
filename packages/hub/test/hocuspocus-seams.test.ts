@@ -31,6 +31,8 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import {
   HocuspocusProvider,
+  HocuspocusProviderWebsocket,
+  type onAuthenticationFailedParameters,
   type onCloseParameters,
 } from "@hocuspocus/provider";
 import type { Hocuspocus, ServerConfiguration } from "@hocuspocus/server";
@@ -45,6 +47,7 @@ type Context = { name: string };
 
 const servers: Server<Context>[] = [];
 const providers: HocuspocusProvider[] = [];
+const websockets: HocuspocusProviderWebsocket[] = [];
 const childProcesses: ReturnType<typeof spawn>[] = [];
 
 // Providers before servers: a live provider reconnects on close and would
@@ -52,6 +55,9 @@ const childProcesses: ReturnType<typeof spawn>[] = [];
 afterEach(async () => {
   for (const provider of providers.splice(0)) {
     provider.destroy();
+  }
+  for (const websocket of websockets.splice(0)) {
+    websocket.destroy();
   }
   for (const server of servers.splice(0)) {
     await server.destroy();
@@ -97,10 +103,14 @@ function connect(options: {
   reconnectDelayMs?: number;
   /** A pre-populated document exercises the reconnect SyncStep2 path. */
   document?: Y.Doc;
+  /** Share one multiplexed socket across several document providers. */
+  websocketProvider?: HocuspocusProviderWebsocket;
 }) {
   const doc = options.document ?? new Y.Doc();
   const provider = new HocuspocusProvider({
-    url: `ws://127.0.0.1:${options.port}`,
+    ...(options.websocketProvider === undefined
+      ? { url: `ws://127.0.0.1:${options.port}` }
+      : { websocketProvider: options.websocketProvider }),
     name: options.room,
     token: options.token ?? "test-token",
     document: doc,
@@ -121,8 +131,35 @@ function connect(options: {
       resolve();
     });
   });
+  const authenticationFailed = new Promise<string>((resolve) => {
+    provider.on(
+      "authenticationFailed",
+      ({ reason }: onAuthenticationFailedParameters) => resolve(reason),
+    );
+  });
 
-  return { provider, doc, text: doc.getText(TEXT_KEY), synced };
+  if (options.websocketProvider !== undefined) {
+    provider.attach();
+  }
+
+  return {
+    provider,
+    doc,
+    text: doc.getText(TEXT_KEY),
+    synced,
+    authenticationFailed,
+  };
+}
+
+function sharedWebsocket(port: number) {
+  const websocket = new HocuspocusProviderWebsocket({
+    url: `ws://127.0.0.1:${port}`,
+    autoConnect: false,
+    delay: 60_000,
+    minDelay: 60_000,
+  });
+  websockets.push(websocket);
+  return websocket;
 }
 
 /** A deferred a hook can block on, so a test can hold the server mid-flight. */
@@ -217,7 +254,7 @@ type FrameSink = { handleMessage: (data: Uint8Array) => void };
  * Resolve once `count` frames have reached the server on this connection.
  *
  * `handleMessage` is the library's own entry point for an incoming frame —
- * `ClientConnection.ts:571` before a connection is established,
+ * `ClientConnection.ts:579` before a connection is established,
  * `Connection.ts:245` after — and both queue the frame synchronously, so a
  * wrapper that delegates first and counts second reports arrival exactly. That
  * arrival is the only observable a test holding the server mid-flight has: a
@@ -251,13 +288,13 @@ function frameBarrierForNextClient(
   });
 }
 
-describe("ClientConnection.ts:427 — the pre-auth queue drains before `connected`", () => {
+describe("ClientConnection.ts:426 — the pre-auth queue drains before `connected`", () => {
   /**
    * A provider sends its token and then its first sync message without waiting
    * to be told it was authenticated (`HocuspocusProvider.ts:537-543`), so those
    * frames sit in `incomingMessageQueue` while `onAuthenticate` runs. They are
-   * handed to the `Connection` at `ClientConnection.ts:427-429` — *before* the
-   * `connected` hook at `:433`.
+   * handed to the `Connection` at `ClientConnection.ts:426-428` — *before* the
+   * `connected` hook at `:432`.
    *
    * The hub registers its per-room close logger inside `connected`
    * (`packages/hub/src/server.ts`), so anything that queued frame does — up to
@@ -311,10 +348,10 @@ describe("ClientConnection.ts:427 — the pre-auth queue drains before `connecte
   });
 });
 
-describe("ClientConnection.ts:517-543 — a refused token sets up no connection", () => {
+describe("ClientConnection.ts:516-546 — a refused token sets up no connection", () => {
   /**
    * `onAuthenticate` throwing takes the branch that answers `writePermissionDenied`
-   * and closes (`:520-531`); `setUpNewConnection` at `:543` never runs, so the
+   * and closes (`:516-566`); `setUpNewConnection` at `:546` never runs, so the
    * frames the provider queued behind its token — the sync step it sent without
    * waiting to be authenticated — are dropped with the connection rather than
    * handed to a `Connection` afterwards.
@@ -364,6 +401,94 @@ describe("ClientConnection.ts:517-543 — a refused token sets up no connection"
     );
     expect(refused.text.toString()).toBe("");
     expect(refused.provider.isSynced).toBe(false);
+  });
+});
+
+describe("ClientConnection pending-document counter", () => {
+  it("counts only documents whose authentication has not completed", async () => {
+    const heldAuthenticationStarted = gate();
+    const releaseHeldAuthentication = gate();
+    const failedAfterAuthentication = "failed after authentication";
+
+    const { port } = await startServer({
+      maxPendingDocuments: 1,
+      onAuthenticate: async ({ documentName }) => {
+        if (documentName === "refused-before-authentication") {
+          throw { reason: "refused before authentication" };
+        }
+        if (documentName === "held-during-authentication") {
+          heldAuthenticationStarted.open();
+          await releaseHeldAuthentication.opened;
+        }
+      },
+      onLoadDocument: async ({ documentName }) => {
+        if (documentName === "failed-after-authentication") {
+          throw { reason: failedAfterAuthentication };
+        }
+      },
+    });
+    const websocket = sharedWebsocket(port);
+
+    const refused = connect({
+      port,
+      room: "refused-before-authentication",
+      awareness: null,
+      websocketProvider: websocket,
+    });
+    await websocket.connect();
+    await refused.authenticationFailed;
+
+    const failed = connect({
+      port,
+      room: "failed-after-authentication",
+      awareness: null,
+      websocketProvider: websocket,
+    });
+    expect(await failed.authenticationFailed).toBe(failedAfterAuthentication);
+
+    // Authenticated documents stay on this socket, but no longer consume its
+    // one pending slot. Crossing the ceiling cumulatively must stay healthy.
+    for (let index = 0; index < 3; index += 1) {
+      await connect({
+        port,
+        room: `authenticated-${index}`,
+        awareness: null,
+        websocketProvider: websocket,
+      }).synced;
+    }
+
+    connect({
+      port,
+      room: "held-during-authentication",
+      awareness: null,
+      websocketProvider: websocket,
+    });
+    await heldAuthenticationStarted.opened;
+
+    const warnings: string[] = [];
+    const logged = vi.spyOn(console, "warn").mockImplementation((...args) => {
+      warnings.push(args.map(String).join(" "));
+    });
+
+    try {
+      connect({
+        port,
+        room: "one-past-the-pending-ceiling",
+        awareness: null,
+        websocketProvider: websocket,
+      });
+
+      await waitUntil(
+        "the second pending document to terminate its socket",
+        () =>
+          warnings.some((line) =>
+            line.includes("too many pending unauthenticated documents"),
+          ),
+      );
+    } finally {
+      logged.mockRestore();
+      releaseHeldAuthentication.open();
+    }
   });
 });
 
@@ -727,12 +852,12 @@ describe("Connection.ts:208 — close() clears neither the queue nor the in-flig
   });
 });
 
-describe("ClientConnection.ts:506-543 — onAuthenticate runs once, refreshes go to onTokenSync", () => {
+describe("ClientConnection.ts:505-546 — onAuthenticate runs once, refreshes go to onTokenSync", () => {
   /**
-   * `onConnect` then `onAuthenticate` (`:506` and `:517`) run on the first auth
-   * message for a document, and only then is the connection set up (`:543`).
-   * A later auth message finds the connection established (`:449-453`,
-   * `:482`) and is routed to `onTokenSync` instead — the wiring at `:386-409`.
+   * `onConnect` then `onAuthenticate` (`:505` and `:516`) run on the first auth
+   * message for a document, and only then is the connection set up (`:546`).
+   * A later auth message finds the connection established (`:448-453`,
+   * `:481`) and is routed to `onTokenSync` instead — the wiring at `:385-408`.
    *
    * The hub's whole auth boundary is that shape: `onAuthenticate` is the one
    * place a token is checked before a room opens, and it never runs again on a
