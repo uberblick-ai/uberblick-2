@@ -3,7 +3,7 @@
  * loud read-only fallback when the palette gate is closed.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import {
   getAnnotation,
@@ -42,7 +42,7 @@ import {
 } from "./hooks.js";
 import type { RemotePresence } from "./doc-chrome.js";
 import { CommentComposer } from "./CommentComposer.js";
-import { PeerAvatar } from "./PeerAvatar.js";
+import { PeerCluster } from "./PeerCluster.js";
 import { DocMetaLine } from "./DocChrome.js";
 import { threadIdFromActivation, threadIdFromTarget } from "./threads.js";
 import type { SelectThread, ThreadView } from "./threads.js";
@@ -129,6 +129,7 @@ export function StatusLine({
   endpoint = null,
   syncOpen = false,
   onToggleSync,
+  onActivatePresence,
 }: {
   connection: RoomConnection;
   /**
@@ -152,6 +153,8 @@ export function StatusLine({
   /** The reading is the details-panel trigger when this callback is present. */
   syncOpen?: boolean;
   onToggleSync?: (() => void) | undefined;
+  /** Reveal one currently resolvable remote caret without following it. */
+  onActivatePresence?: ((session: RemotePresence) => void) | undefined;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const raw = rawSyncState(status);
@@ -177,11 +180,7 @@ export function StatusLine({
   // current room's roster in its ordinary slot while that word is blank; the
   // directory's roster is already excluded by App's room pairing (#606).
   const peerStrip = (
-    <span className="ub-peers">
-      {presence.map((peer) => (
-        <PeerAvatar key={peer.clientId} session={peer} />
-      ))}
-    </span>
+    <PeerCluster presence={presence} onActivate={onActivatePresence} />
   );
   const blank = state === null && reading.detail === null;
   const mark = (
@@ -669,6 +668,20 @@ export function EditorPane({
   syncOpen?: boolean;
   onToggleSync?: (() => void) | undefined;
 }): ReactElement {
+  const pane = useRef<HTMLElement | null>(null);
+  const revealPresence = useCallback((session: RemotePresence): void => {
+    if (session.blockId === null) return;
+    const target = document.getElementById(session.blockId);
+    if (
+      target === null ||
+      pane.current === null ||
+      !pane.current.contains(target) ||
+      target.closest(".ub-editor") === null
+    ) {
+      return;
+    }
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
   const meta = useDocMeta(connection);
   const foreign = useForeignBlocks(connection);
   const openThreads = threads.filter((thread) => !thread.resolved).length;
@@ -684,7 +697,7 @@ export function EditorPane({
   // `ub-pane` is the scroll container and takes whatever width is left; the
   // reading measure lives on `ub-column`, centred inside it.
   return (
-    <section className="ub-pane">
+    <section className="ub-pane" ref={pane}>
       {threads.length > 0 && onToggleThreads !== undefined && (
         <button
           type="button"
@@ -743,6 +756,7 @@ export function EditorPane({
           endpoint={endpoint}
           syncOpen={syncOpen}
           onToggleSync={onToggleSync}
+          onActivatePresence={revealPresence}
         />
         {foreign.length > 0 ? (
           <ForeignFallback

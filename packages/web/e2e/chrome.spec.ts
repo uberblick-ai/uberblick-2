@@ -48,7 +48,7 @@ import {
   mintToken,
 } from "@uberblick/hub";
 import { wrapToken } from "@uberblick/hub/protocol";
-import { directoryRoom } from "@uberblick/schema";
+import { appendBlock, directoryRoom, getBlocksFragment } from "@uberblick/schema";
 import * as Y from "yjs";
 import { placeCaret, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
@@ -528,6 +528,270 @@ test("MCP connections counts a connected agent session, and stops when it goes",
     agent.destroy();
   }
   await expect(connections).toContainText("0");
+});
+
+test("the document collaborator cluster stays compact and jumps once without moving selection", async ({
+  browser,
+}) => {
+  const page = await openApp(browser, "light");
+  // The fixed 18rem sidebar leaves a roughly 400px document pane: narrow, but
+  // still inside the app's supported side-by-side shell.
+  await page.setViewportSize({ width: 720, height: 640 });
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.locator(".ub-title").fill("Live collaborators");
+  const firstBlock = page.locator(".ub-editor .ProseMirror > *").first();
+  await firstBlock.click();
+  await page.keyboard.type("start");
+  const titleBefore = await page.locator(".ub-title").boundingBox();
+  const editorBefore = await page.locator(".ub-editor").boundingBox();
+
+  const uuid = new URL(page.url()).pathname.split("/").filter(Boolean).at(-1);
+  if (uuid === undefined) throw new Error("e2e: the document route has no uuid");
+  const room = `${harness().workspaceUuid}/${uuid}`;
+  const rootSecret = await importRootSecret(harness().authSecret);
+  const providers: HocuspocusProvider[] = [];
+  const documents: Y.Doc[] = [];
+
+  const openPeer = async (
+    name: string,
+    kind: "agent" | "human",
+    color: string,
+  ): Promise<{ provider: HocuspocusProvider; doc: Y.Doc }> => {
+    const doc = new Y.Doc();
+    const provider = new HocuspocusProvider({
+      url: harness().hubUrl,
+      name: room,
+      document: doc,
+      token: async () =>
+        wrapToken(
+          await mintToken(rootSecret, {
+            typ: "room",
+            sub: `${kind}-${randomUUID()}`,
+            workspace: harness().workspaceUuid,
+            scope: "read-write",
+            kid: null,
+            lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+          }),
+        ),
+    });
+    providers.push(provider);
+    documents.push(doc);
+    await new Promise<void>((resolve) => provider.on("synced", resolve));
+    provider.setAwarenessField("user", { name, color });
+    provider.setAwarenessField("client", kind === "agent" ? "agent" : "web");
+    if (kind === "agent") provider.setAwarenessField("session", `agent-${uuid}`);
+    return { provider, doc };
+  };
+
+  const caretAt = (doc: Y.Doc, index: number): { anchor: unknown; head: unknown } => {
+    const block = getBlocksFragment(doc).get(index);
+    if (!(block instanceof Y.XmlElement) || !(block.firstChild instanceof Y.XmlText)) {
+      throw new Error(`e2e: block ${index + 1} has no text`);
+    }
+    const anchor = Y.relativePositionToJSON(
+      Y.createRelativePositionFromTypeIndex(block.firstChild, 1),
+    );
+    return { anchor, head: anchor };
+  };
+
+  try {
+    const ada = await openPeer("Ada", "agent", "#0c853d");
+    for (let index = 1; index <= 28; index += 1) {
+      appendBlock(ada.doc, {
+        type: "paragraph",
+        text: `collaboration block ${index}`,
+      });
+    }
+    await expect(page.locator(".ub-editor .ProseMirror > *")).toHaveCount(29);
+
+    const bert = await openPeer("Bert", "agent", "#0675c9");
+    const cleo = await openPeer("Cleo", "agent", "#cb26b4");
+    const dora = await openPeer("Dora", "agent", "#7b5ec7");
+    const eli = await openPeer("Eli", "human", "#ac6008");
+    for (const peer of [ada, bert, cleo, dora]) {
+      peer.provider.setAwarenessField("cursor", caretAt(peer.doc, 28));
+    }
+    // Eli deliberately publishes no cursor: identity without a location is
+    // still a useful presence fact and must not invent a jump.
+    eli.provider.setAwarenessField("cursor", null);
+
+    const visible = page.locator(".ub-peers > .ub-peer-control[data-peer-id]");
+    const more = page.locator(".ub-peer-more");
+    await expect(visible).toHaveCount(3);
+    await expect(more).toHaveText("+2");
+    await expect(more).toBeInViewport();
+    // Four of the five peers are agents, so sorted client ids still guarantee
+    // an agent before the last visible position: the overlap is real here.
+    const visibleAgent = visible
+      .filter({ has: page.locator(".ub-avatar-agent-badge") })
+      .first();
+    await expect(visibleAgent.locator(".ub-avatar-agent-badge")).toHaveText("🤖");
+    const agentBadgePaint = await visibleAgent.evaluate((control) => {
+        const badge = control.querySelector(".ub-avatar-agent-badge");
+        if (!(badge instanceof HTMLElement)) return { owned: false };
+        const box = badge.getBoundingClientRect();
+        const top = document.elementFromPoint(
+          box.left + box.width / 2,
+          box.top + box.height / 2,
+        );
+        return {
+          owned: top !== null && control.contains(top),
+          top: top?.className ?? top?.nodeName ?? null,
+          controlZ: getComputedStyle(control).zIndex,
+        };
+      });
+    expect(agentBadgePaint.owned, JSON.stringify(agentBadgePaint)).toBe(true);
+    const titleAfter = await page.locator(".ub-title").boundingBox();
+    const editorAfter = await page.locator(".ub-editor").boundingBox();
+    expect(titleAfter?.x).toBe(titleBefore?.x);
+    expect(titleAfter?.width).toBe(titleBefore?.width);
+    expect(editorAfter?.x).toBe(editorBefore?.x);
+    expect(editorAfter?.width).toBe(editorBefore?.width);
+
+    const circles = await visible.evaluateAll((controls) =>
+      controls.map((control) => {
+        const avatar = control.querySelector<HTMLElement>(".ub-avatar");
+        const box = control.getBoundingClientRect();
+        return {
+          width: box.width,
+          height: box.height,
+          left: box.left,
+          right: box.right,
+          avatarWidth: avatar?.getBoundingClientRect().width,
+        };
+      }),
+    );
+    expect(circles.map(({ width, height, avatarWidth }) => [width, height, avatarWidth]))
+      .toEqual([
+        [28, 28, 28],
+        [28, 28, 28],
+        [28, 28, 28],
+      ]);
+    const [firstCircle, secondCircle] = circles;
+    if (firstCircle === undefined || secondCircle === undefined) {
+      throw new Error("e2e: the collaborator cluster did not draw three circles");
+    }
+    expect(secondCircle.left).toBeLessThan(firstCircle.right);
+    await visible.first().focus();
+    await expect(visible.first().locator(".ub-peer-tooltip")).toHaveCSS(
+      "opacity",
+      "1",
+    );
+    await expect(visible.first()).toHaveCSS("outline-width", "2px");
+
+    const orderBefore = await visible.evaluateAll((controls) =>
+      controls.map((control) => (control as HTMLElement).dataset.peerId),
+    );
+    dora.provider.setAwarenessField("user", { name: "Delta", color: "#e30c4e" });
+    dora.provider.setAwarenessField("client", "web");
+    dora.provider.setAwarenessField("cursor", caretAt(dora.doc, 0));
+    await more.focus();
+    await page.keyboard.press("Enter");
+    const deltaPerson = page.getByRole("button", {
+      name: /^Delta · person · .*editing block 1$/,
+    });
+    await expect(deltaPerson).toBeVisible();
+    await expect(deltaPerson.locator(".ub-avatar-agent-badge")).toHaveCount(0);
+    dora.provider.setAwarenessField("client", "agent");
+    dora.provider.setAwarenessField("cursor", caretAt(dora.doc, 28));
+    const deltaAgent = page.getByRole("button", {
+      name: /^Delta · agent · .*editing block 29$/,
+    });
+    await expect(deltaAgent).toBeVisible();
+    await expect(deltaAgent.locator(".ub-avatar-agent-badge")).toHaveText("🤖");
+    expect(await visible.evaluateAll((controls) =>
+      controls.map((control) => (control as HTMLElement).dataset.peerId),
+    )).toEqual(orderBefore);
+
+    const deltaCursor = page.locator(".ProseMirror-yjs-cursor > div", {
+      hasText: "Delta",
+    });
+    await expect(deltaCursor).toBeVisible();
+    expect(await paintedIn(deltaAgent.locator(".ub-avatar"), "border-color")).toBe(
+      await paintedIn(deltaCursor, "background-color"),
+    );
+    await page.keyboard.press("Escape");
+    await expect(more).toBeFocused();
+
+    await page.evaluate(() => {
+      const first = document.querySelector(".ub-editor .ProseMirror > *")?.firstChild;
+      if (first === undefined || first === null) throw new Error("no first block text");
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.setStart(first, 0);
+      range.setEnd(first, 5);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      const original = Element.prototype.scrollIntoView;
+      (window as unknown as { peerScrollCalls: number }).peerScrollCalls = 0;
+      Element.prototype.scrollIntoView = function scrollIntoView(options) {
+        if (this.closest(".ub-editor") !== null) {
+          (window as unknown as { peerScrollCalls: number }).peerScrollCalls += 1;
+        }
+        original.call(this, options);
+      };
+    });
+    await page.locator(".ub-pane").evaluate((pane) => {
+      pane.scrollTop = 0;
+    });
+
+    const visibleJump = page.locator(
+      '.ub-peers > .ub-peer-control[aria-label*="editing block 29"]',
+    ).first();
+    await visibleJump.click();
+    await expect.poll(() => page.locator(".ub-pane").evaluate((pane) => pane.scrollTop))
+      .toBeGreaterThan(0);
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("start");
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { peerScrollCalls: number }).peerScrollCalls,
+      ),
+    ).toBe(1);
+
+    await page.locator(".ub-pane").evaluate((pane) => {
+      pane.scrollTop = 0;
+    });
+    await more.focus();
+    await page.keyboard.press("Enter");
+    // Keyboard activation in the overflow reaches the same current stable
+    // block once and leaves the local range untouched.
+    const jumpRow = page.locator(
+      '.ub-peer-overflow-row[aria-label*="editing block 29"]',
+    ).first();
+    await expect(jumpRow).toBeVisible();
+    await jumpRow.focus();
+    await expect(jumpRow).toHaveCSS("outline-width", "2px");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => page.locator(".ub-pane").evaluate((pane) => pane.scrollTop))
+      .toBeGreaterThan(0);
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("start");
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { peerScrollCalls: number }).peerScrollCalls,
+      ),
+    ).toBe(2);
+    await expect(more).toBeFocused();
+
+    await page.locator(".ub-pane").evaluate((pane) => {
+      pane.scrollTop = 0;
+    });
+    await more.click();
+    const noLocation = page.getByRole("button", { name: "Eli · person" });
+    await expect(noLocation).toBeVisible();
+    await noLocation.click();
+    expect(await page.locator(".ub-pane").evaluate((pane) => pane.scrollTop)).toBe(0);
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { peerScrollCalls: number }).peerScrollCalls,
+      ),
+    ).toBe(2);
+
+    eli.provider.destroy();
+    await expect(more).toHaveText("+1");
+  } finally {
+    for (const provider of providers) provider.destroy();
+    for (const doc of documents) doc.destroy();
+  }
 });
 
 /**

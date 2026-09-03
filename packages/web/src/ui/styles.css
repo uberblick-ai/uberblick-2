@@ -428,8 +428,9 @@ body {
   font-family: var(--font-mono);
 }
 
-/* A session as a circle (#494): a robot for an agent, an initial for a person.
-   The ring — and, for a person, the letter — is the session's own presence
+/* A session as a circle (#494, #616): every session's name initial, with a
+   small robot badge added for an agent. The ring and the letter are the session's
+   own presence
    colour, written inline by the component because that palette is `#rrggbb`
    literals rather than theme tokens (src/collab/identity.ts).
 
@@ -441,9 +442,10 @@ body {
    it sits on — the status line sits on the page, the sync panel's rows sit on a
    card, and a token would be wrong on one of them. */
 .ub-avatar {
+  position: relative;
   box-sizing: border-box;
-  width: 1.35rem;
-  height: 1.35rem;
+  width: 28px;
+  height: 28px;
   flex: none;
   align-self: center;
   border: 2px solid var(--border);
@@ -461,12 +463,20 @@ body {
   user-select: none;
 }
 
-/* The robot needs no weight, and it is set smaller than the letter rather than
-   larger: an emoji is drawn to its own em box edge to edge, so at the letter's
-   size it touches the ring on both sides. */
-.ub-avatar-agent {
-  font-size: 0.62rem;
-  font-weight: 400;
+.ub-avatar-agent-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -3px;
+  width: 13px;
+  height: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--card);
+  border-radius: 50%;
+  background: var(--card);
+  font-size: 8px;
+  line-height: 1;
 }
 
 /* The threads drawer's handle (#101). `display: none` here and `inline-flex`
@@ -1931,6 +1941,7 @@ body {
   padding: 0.35rem 0;
   border-bottom: 1px solid var(--border);
   margin-bottom: 0.75rem;
+  min-width: 0;
 }
 
 /* The document's one sync reading is also the details-panel handle. It stays
@@ -2066,9 +2077,136 @@ body {
 }
 
 .ub-peers {
+  position: relative;
   display: flex;
-  gap: 0.3rem;
+  align-items: center;
+  flex: none;
   margin-left: auto;
+}
+
+.ub-peer-control {
+  position: relative;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ub-peer-control + .ub-peer-control {
+  margin-left: -6px;
+}
+
+/* Each badge overhangs to the right, so earlier circles paint above the later
+   sibling that overlaps them. Hover and focus still lift any active control. */
+.ub-peers > .ub-peer-control:nth-child(1) {
+  z-index: 3;
+}
+
+.ub-peers > .ub-peer-control:nth-child(2) {
+  z-index: 2;
+}
+
+.ub-peers > .ub-peer-control:nth-child(3) {
+  z-index: 1;
+}
+
+.ub-peer-control:hover,
+.ub-peer-control:focus-visible {
+  z-index: 4;
+}
+
+.ub-peer-control:focus-visible,
+.ub-peer-overflow-row:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.ub-peer-tooltip {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.4rem);
+  z-index: 4;
+  width: max-content;
+  max-width: min(18rem, 80vw);
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.16);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ub-peer-control:hover .ub-peer-tooltip,
+.ub-peer-control:focus-visible .ub-peer-tooltip {
+  opacity: 1;
+}
+
+.ub-peer-more {
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.ub-peer-overflow {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 5;
+  width: min(18rem, calc(100vw - 2rem));
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+}
+
+.ub-peer-overflow-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.35rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ub-peer-overflow-row:hover {
+  background: var(--card-accent);
+}
+
+.ub-peer-overflow-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ub-peer-overflow-row .ub-muted {
+  margin-left: auto;
+  flex: none;
 }
 
 /* ---- the document's identity line, above the prose (#69) ---- */
