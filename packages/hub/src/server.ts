@@ -94,7 +94,7 @@ export interface Hub {
    */
   flush(): Promise<void>;
   /**
-   * Quiesce connections, flush, close every client websocket, unload documents,
+   * Quiesce every client websocket and its rooms, flush, unload documents, and
    * close the database. Rejects unless the hub's state is known to be on disk
    * when it returns — a failed store, before or during teardown, or a teardown
    * that did not finish inside the shutdown timeout. The resources are released
@@ -712,12 +712,15 @@ export async function createHub(config: HubConfig): Promise<Hub> {
     // connection that names its socket. See openSockets.
     const sockets = openSockets(hocuspocus);
 
-    // Quiesce first. Closing the socket and the open connections is what makes
-    // the flush below final: while clients can still send updates — or connect —
-    // a document can go dirty again after it was stored, and the write that
-    // would have caught up happens during the teardown, where a failure is
+    // Quiesce first. Begin the websocket close before closing its rooms, so
+    // Hocuspocus' per-room Close messages cannot provoke replies or another
+    // admission wave on the socket being stopped. Closing the rooms then makes
+    // the flush final: while clients can still send updates — or connect — a
+    // document can go dirty again after it was stored, and the write that would
+    // have caught up happens during the teardown, where a failure is
     // Hocuspocus' to swallow.
     server.httpServer.close();
+    closeSockets(sockets, log);
     hocuspocus.closeConnections();
 
     // A failed flush must not skip the teardown — the socket and the handle are
@@ -728,11 +731,6 @@ export async function createHub(config: HubConfig): Promise<Hub> {
     } catch (error) {
       failure = error;
     }
-
-    // The rooms are closed and what they held is on disk: tell the clients.
-    // Before the teardown rather than after it, so a shutdown that stalls
-    // unloading documents still does not leave anyone on a dead socket.
-    closeSockets(sockets, log);
 
     // destroy() closes every connection and waits for the documents to unload.
     // It can only wait forever if a document refuses to unload — which is

@@ -349,27 +349,21 @@ describe("bounded room attach", () => {
     // fails if the gate is ever one room wider than it says it is.
     await heldMintsSettleAt("the first attach wave", CLIENT_BOUND);
 
-    mints.releaseAll();
-    await waitUntil("every room to sync on the first connection", () =>
-      rooms.every((room) => sync.isRoomQuiet(room)),
+    // Stop in the middle of that held wave: rooms above the ceiling are still
+    // waiting for admission, but closing the established room must not release
+    // them onto the socket the hub is stopping.
+    await hubs.shift()?.stop();
+    await waitUntil("the socket to lose the hub that went away", () =>
+      sync.state().status !== "connected",
     );
-
-    expect(sync.isDraining()).toBe(false);
-    // The whole point: an unbounded client would have named all 12 documents
-    // before any of them authenticated, and the hub would have closed the
-    // socket under every one of them.
     expect(terminations()).toEqual([]);
 
-    // The stampede this exists for: the hub goes away and comes back, and
-    // every provider re-sends its token at once on the new connection. Held
-    // again, because a re-authenticating corpus is the same burst and has to
-    // be paced to the same width — a bound that only held on a first attach
-    // would leave the reconnect breaching the ceiling.
-    mints.hold();
-    await hubs.shift()?.stop();
-    await waitUntil("the rooms to lose sync with the hub that went away", () =>
-      rooms.some((room) => !sync.isRoomQuiet(room)),
-    );
+    // Finish the old connection's already-admitted token calls. Generation
+    // scoping puts them back behind the gate rather than sending them on the
+    // next connection without a fresh slot.
+    for (let index = 0; index < CLIENT_BOUND; index += 1) {
+      await mints.release();
+    }
 
     await startHub({ port, databasePath: database });
     await heldMintsSettleAt("the reconnect wave", CLIENT_BOUND);
