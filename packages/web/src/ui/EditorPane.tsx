@@ -55,9 +55,16 @@ import type { SelectThread, ThreadView } from "./threads.js";
  * document has not synced yet. One frame for all of them means resolving a link
  * swaps the words inside the column rather than moving the column.
  */
-export function PaneNotice({ children }: { children: ReactNode }): ReactElement {
+export function PaneNotice({
+  children,
+  documentLayout = false,
+}: {
+  children: ReactNode;
+  /** Keep document-route loading states at the document's eventual origin. */
+  documentLayout?: boolean;
+}): ReactElement {
   return (
-    <section className="ub-pane">
+    <section className={`ub-pane${documentLayout ? " ub-document-pane" : ""}`}>
       <div className="ub-column">{children}</div>
     </section>
   );

@@ -1372,6 +1372,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  /* A minimum breath follows the fixed-width rail. Any extra viewport width
+     follows it too because the document pane above does not grow. */
+  margin-inline-end: var(--pane-trailing-space);
 }
 
 /* Both sections render nothing when they have nothing to show, which leaves the
@@ -1380,14 +1383,6 @@ body {
    whitespace text nodes between the two nulls. */
 .ub-rail:empty {
   display: none;
-}
-
-/* A minimum breath follows the fixed-width rail. Any extra viewport width
-   follows it too because the document pane above does not grow. */
-@media (min-width: 1101px) {
-  .ub-rail {
-    margin-inline-end: var(--pane-trailing-space);
-  }
 }
 
 /* Below this the three panes stop fitting; the rail is the one that goes — and
@@ -1431,6 +1426,7 @@ body {
     background: var(--card);
     color: var(--card-foreground);
     box-shadow: -8px 0 24px rgb(0 0 0 / 0.18);
+    margin-inline-end: 0;
   }
 
   /* The drawer is the threads. The outline stays hidden: it is the section the
