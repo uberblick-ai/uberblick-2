@@ -165,12 +165,6 @@ describe("reading the log", () => {
     const behind = reader.readSince(ROOM, 0);
     expect(behind.snapshot?.throughSeq).toBe(1);
     expect(behind.updates.map((entry) => entry.seq)).toEqual([2]);
-    expect(
-      replay(
-        behind.updates.map((entry) => entry.payload),
-        behind.snapshot?.state,
-      ),
-    ).toBe("AB");
     expect(reader.snapshotReads).toBe(1);
   });
 

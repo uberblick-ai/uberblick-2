@@ -292,7 +292,7 @@ interface Prepared<P extends SQLInputValue[]> {
  * evaluates that guard.
  *
  * Nesting is unsupported and does not occur: none of the wrapped bodies calls
- * another (the one that spans two reads calls plain statement methods). A
+ * another (the one that spans three reads calls plain statement methods). A
  * nested call would fail loudly on SQLite's own "cannot start a transaction
  * within a transaction", raised by `BEGIN` before the `try`, leaving the outer
  * transaction intact for its own rollback.
