@@ -9,10 +9,10 @@
  *    update — local *and* remote origin — is appended synchronously before the
  *    call that produced it returns, which is what makes `kill -9` after a write
  *    lose nothing.
- * 2. **The derived index** (`doc_index`, `docs_fts`, `doc_tags`, `doc_links`)
- *    is a cache of what the Y.Docs say, rebuildable at any time from the log —
- *    see {@link MirrorStore.clearDerived}. It is never authoritative, and no
- *    document state exists only here.
+ * 2. **The derived index** (`doc_index`, `doc_index_seq`, `docs_fts`,
+ *    `doc_tags`, `doc_links`) is a cache of what the Y.Docs say, rebuildable at
+ *    any time from the log — see {@link MirrorStore.clearDerived}. It is never
+ *    authoritative, and no document state exists only here.
  *
  * Alongside both, one row of `meta` records which workspace this replica
  * holds. Nothing derives from it: it exists so that a file opened against a
@@ -285,11 +285,9 @@ interface Prepared<P extends SQLInputValue[]> {
  * better-sqlite3's `.transaction()` wrapper, in the lines `node:sqlite` leaves
  * to the caller: run `body` between BEGIN and COMMIT, roll back if it throws.
  *
- * The default is a deferred `BEGIN`, which is what the old binding issued — a
- * body that only reads takes a read snapshot and never blocks the other
- * instance's writer. A caller whose first read guards later writes can instead
- * supply `BEGIN IMMEDIATE`, taking its place in the writer queue before it
- * evaluates that guard.
+ * The deferred `BEGIN` is what the old binding issued. The read-only body takes
+ * a consistent snapshot without blocking another instance's writer; write
+ * bodies acquire their place in the writer queue at their first statement.
  *
  * Nesting is unsupported and does not occur: none of the wrapped bodies calls
  * another (the one that spans two reads calls plain statement methods). A
@@ -300,10 +298,9 @@ interface Prepared<P extends SQLInputValue[]> {
 function transactional<A extends unknown[], R>(
   db: DatabaseSync,
   body: (...args: A) => R,
-  begin = "BEGIN",
 ): (...args: A) => R {
   return (...args: A): R => {
-    db.exec(begin);
+    db.exec("BEGIN");
     try {
       const result = body(...args);
       db.exec("COMMIT");
@@ -574,7 +571,7 @@ export class MirrorStore {
         doc.title,
         doc.description === "" ? doc.body : `${doc.description}\n${doc.body}`,
       );
-    }, "BEGIN IMMEDIATE");
+    });
 
     this.unindexTx = transactional(this.db, (uuid: string) => {
       this.statements.dropFts.run(uuid);
@@ -717,10 +714,12 @@ export class MirrorStore {
    * why nothing here has to be authoritative.
    */
   clearDerived(): void {
-    this.db.exec(
-      "DELETE FROM doc_index; DELETE FROM doc_index_seq; DELETE FROM doc_tags; " +
-        "DELETE FROM doc_links; DELETE FROM docs_fts;",
-    );
+    transactional(this.db, () => {
+      this.db.exec(
+        "DELETE FROM doc_index; DELETE FROM doc_index_seq; DELETE FROM doc_tags; " +
+          "DELETE FROM doc_links; DELETE FROM docs_fts;",
+      );
+    })();
   }
 
   search(query: string, limit: number): SearchHit[] {

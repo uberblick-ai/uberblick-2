@@ -1,9 +1,6 @@
-/**
- * A local write after another process's unseen write must not certify an
- * incomplete document as the newest index derivation.
- */
+/** Derived-index generations stay monotone and atomic across processes. */
 
-import { DatabaseSync } from "node:sqlite";
+import { constants, DatabaseSync } from "node:sqlite";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getMeta, setDescription, setTitle } from "@uberblick/schema";
 import {
@@ -15,6 +12,7 @@ import {
 import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
+const SQLITE_BUSY = 5;
 
 async function server(databasePath: string): Promise<Rig> {
   const rig = await startServer(testConfig({ databasePath }));
@@ -83,6 +81,112 @@ describe("the index derivation cut", () => {
       expect.objectContaining({
         uuid: created.uuid,
         title: "Merged title",
+      }),
+    ]);
+  });
+
+  it("rebuilds a complete index when another process derives at the same cut", async () => {
+    const databasePath = tempDatabasePath();
+    const first = await server(databasePath);
+    const target = await first.ok("create_doc", {
+      title: "Target",
+      description: "A test document.",
+    });
+    const created = await first.ok("create_doc", {
+      title: "Race winner",
+      description: "A test document.",
+      tags: ["complete"],
+      blocks: [{ type: "paragraph", text: "searchable pangolin" }],
+    });
+    await first.ok("set_links", {
+      uuid: created.uuid,
+      links: [target.uuid],
+    });
+
+    const second = await server(databasePath);
+    await second.ok("get_doc", { uuid: created.uuid });
+    const replica = first.instance.replicas.replica(created.uuid);
+    const cut = replica.indexedThroughSeq;
+    const firstDb = (first.instance.store as unknown as { db: DatabaseSync })
+      .db;
+    const secondDb = (second.instance.store as unknown as { db: DatabaseSync })
+      .db;
+    secondDb.exec("PRAGMA busy_timeout = 0");
+
+    // Pause the clear after its marker delete has been prepared, at the exact
+    // boundary where the old autocommit script admitted another writer. Under
+    // one transaction that writer is refused until the clear commits; the
+    // rebuild then writes the same cut as one complete generation.
+    let attempted = false;
+    firstDb.setAuthorizer((action, table) => {
+      if (
+        !attempted &&
+        action === constants.SQLITE_DELETE &&
+        table === "doc_tags"
+      ) {
+        attempted = true;
+        try {
+          second.instance.store.indexDoc(
+            {
+              uuid: created.uuid,
+              title: "Race winner",
+              description: "A test document.",
+              tags: ["complete"],
+              links: [target.uuid],
+              body: "searchable pangolin",
+            },
+            cut,
+          );
+        } catch (error) {
+          const errcode = (error as { errcode?: unknown } | null)?.errcode;
+          if (
+            typeof errcode !== "number" ||
+            (errcode & 0xff) !== SQLITE_BUSY
+          ) {
+            throw error;
+          }
+        }
+      }
+      return constants.SQLITE_OK;
+    });
+
+    try {
+      first.instance.replicas.rebuildIndex();
+    } finally {
+      firstDb.setAuthorizer(null);
+    }
+    expect(attempted).toBe(true);
+
+    const db = new DatabaseSync(databasePath, { readOnly: true });
+    const count = (table: string, column = "uuid"): number =>
+      Number(
+        (
+          db
+            .prepare(
+              `SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = ?`,
+            )
+            .get(created.uuid) as { n: number }
+        ).n,
+      );
+    expect({
+      doc_index: count("doc_index"),
+      doc_index_seq: count("doc_index_seq"),
+      doc_tags: count("doc_tags"),
+      doc_links: count("doc_links", "source"),
+      docs_fts: count("docs_fts"),
+    }).toEqual({
+      doc_index: 1,
+      doc_index_seq: 1,
+      doc_tags: 1,
+      doc_links: 1,
+      docs_fts: 1,
+    });
+    db.close();
+
+    expect(first.instance.store.search("pangolin", 10)).toEqual([
+      expect.objectContaining({
+        uuid: created.uuid,
+        tags: ["complete"],
       }),
     ]);
   });
