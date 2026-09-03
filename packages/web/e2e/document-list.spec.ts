@@ -8,10 +8,12 @@
  * a directory which travelled the hub: the documents were created in another
  * browser context, and nothing told this one about them.
  *
- * Everything else — the order and its missing-stamp rule, tag and description
- * matching, the pinned group, the empty-state wording — is pinned in
- * `test/document-list.test.tsx` over shared Y.Docs, and is not repeated here.
- * The one filter exercised is the one a second browser can predict.
+ * The semantic table and keyboard-sort contract need the browser's own
+ * accessibility and activation behavior. Everything else — missing-stamp
+ * ordering, tag and description matching, the pinned group, the empty-state
+ * wording — is pinned in `test/document-list.test.tsx` over shared Y.Docs and
+ * is not repeated here. The one filter exercised is the one a second browser
+ * can predict.
  */
 
 import { expect, test } from "@playwright/test";
@@ -86,6 +88,27 @@ test("the workspace address is the list, and it holds what another browser creat
   // which is where a session starts.
   await expect(reader).toHaveURL(new RegExp(`/${harness().workspace}$`));
   // Most recently changed first — the second document was created last.
+  await expect(listedTitles(reader)).toHaveText([second, first]);
+  const table = reader.getByRole("table");
+  const titleHeading = table.getByRole("columnheader", { name: /^Title/ });
+  const changedHeading = table.getByRole("columnheader", { name: /^Last changed/ });
+  await expect(changedHeading).toHaveAttribute("aria-sort", "descending");
+  await expect(titleHeading).not.toHaveAttribute("aria-sort");
+
+  // Native buttons give the two headers the same keyboard and pointer path.
+  const titleSort = titleHeading.getByRole("button", { name: "Title" });
+  await titleSort.focus();
+  await reader.keyboard.press("Enter");
+  await expect(titleHeading).toHaveAttribute("aria-sort", "ascending");
+  await expect(titleHeading.locator(".ub-docs-sort-arrow")).toHaveText("↑");
+  await expect(changedHeading).not.toHaveAttribute("aria-sort");
+
+  await reader.keyboard.press("Space");
+  await expect(titleHeading).toHaveAttribute("aria-sort", "descending");
+  await expect(listedTitles(reader)).toHaveText([first, second]);
+
+  await changedHeading.getByRole("button", { name: "Last changed" }).click();
+  await expect(changedHeading).toHaveAttribute("aria-sort", "descending");
   await expect(listedTitles(reader)).toHaveText([second, first]);
   // The scope is the field's accessible name in a real browser, not a sentence
   // beside it: this filters titles alone, not bodies.

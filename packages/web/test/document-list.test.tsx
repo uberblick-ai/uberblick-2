@@ -300,7 +300,7 @@ describe("the order", () => {
     expect(titles).toEqual(["Alpha", "Gamma", "Beta"]);
   });
 
-  it("puts documents with no usable stamp last, in title order", () => {
+  it("puts documents with no usable stamp last in either changed direction", () => {
     // The stamps are optional by construction: a stub written before they
     // existed carries none, and "no answer" is not "very old". A stamp no
     // `Date` can hold is the same kind of no-answer — the stubs are written by
@@ -319,6 +319,17 @@ describe("the order", () => {
       "changed",
     ).map((row) => row.title);
     expect(titles).toEqual(["Beta", "Aardvark", "Skewed", "Zeta"]);
+
+    const ascending = sortDirectory(
+      [
+        entry({ uuid: ONE, title: "Beta", updatedAt: 200 }),
+        entry({ uuid: TWO, title: "Alpha", updatedAt: 100 }),
+        entry({ uuid: THREE, title: "Gamma" }),
+      ],
+      "changed",
+      "ascending",
+    ).map((row) => row.title);
+    expect(ascending).toEqual(["Alpha", "Beta", "Gamma"]);
   });
 
   it("breaks ties by title, so a re-render never reshuffles the rows", () => {
@@ -359,6 +370,9 @@ describe("the order", () => {
       "bbbb2222-3333-4444-8555-666677778888",
     ]);
     expect(ordered).toEqual(listDirectory(directory));
+    expect(sortDirectory(entries, "title", "descending").map((row) => row.uuid)).toEqual(
+      [...ordered].reverse().map((row) => row.uuid),
+    );
   });
 });
 
@@ -370,17 +384,24 @@ describe("the order", () => {
 describe("choosing the order", () => {
   /** The order option that is on, read the way the screen shows it. */
   function activeOrder(host: HTMLElement): string | undefined {
-    return [...host.querySelectorAll(".ub-docs-order-option")].find(
-      (option) => option.getAttribute("aria-pressed") === "true",
-    )?.textContent ?? undefined;
+    const button = host.querySelector<HTMLElement>("th[aria-sort] .ub-docs-sort");
+    return button?.firstChild?.textContent ?? undefined;
   }
 
   function chooseOrder(host: HTMLElement, label: string): HTMLButtonElement {
-    const option = [
-      ...host.querySelectorAll<HTMLButtonElement>(".ub-docs-order-option"),
-    ].find((button) => button.textContent === label);
+    const option = [...host.querySelectorAll<HTMLButtonElement>(".ub-docs-sort")].find(
+      (button) => button.firstChild?.textContent === label,
+    );
     if (option === undefined) throw new Error(`no order option "${label}"`);
     return option;
+  }
+
+  function heading(host: HTMLElement, label: string): HTMLTableCellElement {
+    const cell = [...host.querySelectorAll<HTMLTableCellElement>("thead th")].find(
+      (candidate) => candidate.querySelector("button")?.firstChild?.textContent === label,
+    );
+    if (cell === undefined) throw new Error(`no heading "${label}"`);
+    return cell;
   }
 
   async function seeded(): Promise<{ host: HTMLElement; peer: Y.Doc }> {
@@ -393,23 +414,49 @@ describe("choosing the order", () => {
     return { host: await openApp(`/${WORKSPACE}`), peer };
   }
 
-  it("opens on last changed and puts the list in title order when asked", async () => {
+  it("is one sorted table and toggles either column without a second chooser", async () => {
     const { host } = await seeded();
+    const table = host.querySelector("table.ub-docs-table");
+    expect(table).not.toBeNull();
+    expect(table?.querySelectorAll("thead th")).toHaveLength(3);
+    expect(table?.querySelectorAll('tbody th[scope="row"]')).toHaveLength(3);
+    expect(host.querySelector(".ub-docs-order")).toBeNull();
+
+    const title = heading(host, "Title");
+    const changed = heading(host, "Last changed");
     expect(rowTitles(host)).toEqual(["Zebra", "Alpha", "Middle"]);
     expect(activeOrder(host)).toBe("Last changed");
+    expect(changed.getAttribute("aria-sort")).toBe("descending");
+    expect(changed.querySelector(".ub-docs-sort-arrow")?.textContent).toBe("↓");
+    expect(title.hasAttribute("aria-sort")).toBe(false);
+    expect(host.querySelectorAll("th[aria-sort]")).toHaveLength(1);
 
     await act(async () => chooseOrder(host, "Title").click());
     expect(rowTitles(host)).toEqual(["Alpha", "Middle", "Zebra"]);
     expect(activeOrder(host)).toBe("Title");
+    expect(title.getAttribute("aria-sort")).toBe("ascending");
+    expect(title.querySelector(".ub-docs-sort-arrow")?.textContent).toBe("↑");
+    expect(changed.hasAttribute("aria-sort")).toBe(false);
 
     // The unstamped row still says "no answer" rather than reading as a date.
     const middle = [...host.querySelectorAll(".ub-docs-row")][1];
     expect(middle?.querySelectorAll("time")).toHaveLength(0);
     expect(middle?.textContent).toContain("—");
 
+    await act(async () => chooseOrder(host, "Title").click());
+    expect(rowTitles(host)).toEqual(["Zebra", "Middle", "Alpha"]);
+    expect(title.getAttribute("aria-sort")).toBe("descending");
+    expect(title.querySelector(".ub-docs-sort-arrow")?.textContent).toBe("↓");
+
     await act(async () => chooseOrder(host, "Last changed").click());
     expect(rowTitles(host)).toEqual(["Zebra", "Alpha", "Middle"]);
     expect(activeOrder(host)).toBe("Last changed");
+    expect(changed.getAttribute("aria-sort")).toBe("descending");
+
+    await act(async () => chooseOrder(host, "Last changed").click());
+    expect(rowTitles(host)).toEqual(["Alpha", "Zebra", "Middle"]);
+    expect(changed.getAttribute("aria-sort")).toBe("ascending");
+    expect(changed.querySelector(".ub-docs-sort-arrow")?.textContent).toBe("↑");
   });
 
   it("leaves the filter alone, and neither a query nor a remote change resets it", async () => {
@@ -722,6 +769,7 @@ describe("an empty list", () => {
     // Nothing heard yet is not an answer: a workspace full of documents would
     // otherwise be told it has none.
     const waiting = await open(false, []);
+    expect(waiting.querySelector("table.ub-docs-table")).not.toBeNull();
     expect(waiting.querySelector(".ub-docs-empty")?.textContent).toContain(
       "has not synced",
     );
