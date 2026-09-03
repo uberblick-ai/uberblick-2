@@ -132,4 +132,7 @@ run that finds this handoff only finishes a missing transition and stops.
 After that durable transition, post one separate run self-assessment as a
 top-level reply to the `Agent Feedback` discussion
 (https://github.com/uberblick-ai/uberblick-2/discussions/506), following its
-prompt. Feedback is non-blocking telemetry; then stop.
+prompt, with `sh scripts/post-retrospective.sh preparation <body-file>` — never
+with a hand-written `addDiscussionComment` call, because a guessed discussion
+id posts to a stranger's repository. Feedback is non-blocking telemetry; then
+stop.

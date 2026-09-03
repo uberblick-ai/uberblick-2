@@ -127,7 +127,10 @@ one ruling; the finding ledger is edited, not appended.
 
 After that durable outcome, post one concise
 self-assessment to [Implementation and integration run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/522),
-following its prompt. Say whether the latest findings were a new defect class
+following its prompt, with
+`sh scripts/post-retrospective.sh implementation <body-file>` — never with a
+hand-written `addDiscussionComment` call, because a guessed discussion id posts
+to a stranger's repository. Say whether the latest findings were a new defect class
 or a recurrence in the same area, and whether the current representation still
 appears capable of converging. The retrospective is non-blocking telemetry.
 Last, run the host housekeeping `integration.md` names for Docker review

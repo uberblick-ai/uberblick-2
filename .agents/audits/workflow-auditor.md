@@ -10,7 +10,10 @@ no work, reviews no diff authoritatively, and gates no issue, PR, or merge.
 Use the launcher's run identity verbatim. If none was supplied, create one as
 `workflow-audit-<UTC timestamp>-<short random suffix>` before any external side
 effect and keep it unchanged. Reports live only in [Workflow audit
-reports](https://github.com/uberblick-ai/uberblick-2/discussions/540).
+reports](https://github.com/uberblick-ai/uberblick-2/discussions/540), posted
+with `sh scripts/post-retrospective.sh workflow-audit <body-file>` — never with
+a hand-written `addDiscussionComment` call, because a guessed discussion id
+posts to a stranger's repository.
 
 A valid prior report is a top-level reply there that begins `Workflow audit` or
 the legacy `Weekly workflow audit`, carries `Run: workflow-auditor`, and has a
