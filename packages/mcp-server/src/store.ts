@@ -290,7 +290,7 @@ interface Prepared<P extends SQLInputValue[]> {
  * bodies acquire their place in the writer queue at their first statement.
  *
  * Nesting is unsupported and does not occur: none of the wrapped bodies calls
- * another (the one that spans two reads calls plain statement methods). A
+ * another (the one that spans three reads calls plain statement methods). A
  * nested call would fail loudly on SQLite's own "cannot start a transaction
  * within a transaction", raised by `BEGIN` before the `try`, leaving the outer
  * transaction intact for its own rollback.
@@ -326,6 +326,7 @@ export class MirrorStore {
     after: Prepared<[string, number]>;
     countRoom: Prepared<[string]>;
     countAll: Prepared<[]>;
+    snapshotSeq: Prepared<[string]>;
     snapshot: Prepared<[string]>;
     putSnapshot: Prepared<[string, Uint8Array, number, number]>;
     pruneUpdates: Prepared<[string, number]>;
@@ -420,6 +421,9 @@ export class MirrorStore {
         "SELECT COUNT(*) AS n FROM updates WHERE room = ?",
       ),
       countAll: prepare("SELECT COUNT(*) AS n FROM updates"),
+      snapshotSeq: prepare(
+        "SELECT through_seq FROM snapshots WHERE room = ?",
+      ),
       snapshot: prepare(
         "SELECT state, through_seq FROM snapshots WHERE room = ?",
       ),
@@ -534,11 +538,12 @@ export class MirrorStore {
     this.readSinceTx = transactional(
       this.db,
       (room: string, seq: number): LogSlice => {
-        const stored = this.snapshot(room);
-        const ahead = stored !== null && stored.throughSeq > seq;
-        const from = ahead && stored !== null ? stored.throughSeq : seq;
+        const snapshotSeq = this.snapshotThroughSeq(room);
+        const ahead = snapshotSeq !== null && snapshotSeq > seq;
+        const stored = ahead ? this.snapshot(room) : null;
+        const from = stored?.throughSeq ?? seq;
         return {
-          snapshot: ahead ? stored : null,
+          snapshot: stored,
           updates: this.updatesAfter(room, from),
         };
       },
@@ -632,6 +637,14 @@ export class MirrorStore {
     return row === undefined
       ? null
       : { state: row.state, throughSeq: row.through_seq };
+  }
+
+  /** Read the snapshot cut without loading its state BLOB. */
+  protected snapshotThroughSeq(room: string): number | null {
+    const row = this.statements.snapshotSeq.get(room) as
+      | { through_seq: number }
+      | undefined;
+    return row?.through_seq ?? null;
   }
 
   /**
