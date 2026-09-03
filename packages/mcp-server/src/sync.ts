@@ -92,23 +92,22 @@ export interface HubState {
  * How many times a connection the hub has disowned is rebuilt before the
  * answer is that the hub, not the socket, is the problem.
  *
- * A hub closes a room — its shutdown does exactly that, once per room per
- * client, with `4205 Reset Connection` — without closing the websocket
- * underneath it. Nothing on that socket ever offers a token again, so the room
- * is left unauthenticated and unsynced while {@link HubSync.state} still calls
- * the socket connected, and a hub that restarts on the same address is a
- * different process the old socket cannot reach at all. Only a new connection
- * re-handshakes every room, so a disowned one is dropped and dialled again.
+ * A hub can close or refuse one room without closing the websocket underneath
+ * it — an unloadable document or a per-document reset, for example. Nothing on
+ * that socket ever offers a token for the room again, so it is left
+ * unauthenticated and unsynced while {@link HubSync.state} still calls the
+ * socket connected. Only a new connection re-handshakes every room, so a
+ * disowned one is dropped and dialled again.
  *
  * Bounded, and bounded per *durable* connection — see
- * {@link HubSync.hubDisownedRoom}. Three rebuilds cover a restart, whose first
- * one lands as soon as the hub is back; once they are spent this stops
- * re-dialling and leaves recovery to the provider's own dead-connection
- * timeout, because a hub that goes on disowning a room is not something a
- * fourth socket fixes. The budget matters most where the hub is *not* uniformly
- * broken: a document the hub cannot load is refused after the token has been
- * accepted, so the rooms beside it keep working, and without a bound this would
- * tear a healthy connection down several times a second forever.
+ * {@link HubSync.hubDisownedRoom}. Three rebuilds give a transient room failure
+ * time to clear; once they are spent this stops re-dialling and leaves recovery
+ * to the provider's own dead-connection timeout, because a hub that goes on
+ * disowning a room is not something a fourth socket fixes. The budget matters
+ * most where the hub is *not* uniformly broken: a document the hub cannot load
+ * is refused after the token has been accepted, so the rooms beside it keep
+ * working, and without a bound this would tear a healthy connection down
+ * several times a second forever.
  */
 const MAX_REBUILDS = 3;
 
@@ -188,10 +187,10 @@ export function socketBackoff(maxDelayMs: number): SocketBackoff {
  *
  * A uniform draw from `[ceiling / 2, ceiling]`, where the ceiling is the
  * doubling ladder this used to walk exactly: `base * 2^n`, capped. Same reason
- * as {@link socketBackoff} — a hub shutdown disowns every room on every client
- * at once, so three clients on a fixed ladder rebuild in lockstep. The source is
- * a parameter rather than a bare `Math.random` so a test can state the band's
- * ends instead of sampling it.
+ * as {@link socketBackoff} — a per-document reset can disown the same room on
+ * every client at once, so three clients on a fixed ladder rebuild in lockstep.
+ * The source is a parameter rather than a bare `Math.random` so a test can state
+ * the band's ends instead of sampling it.
  */
 export function rebuildDelayMs(
   rebuilds: number,
@@ -708,13 +707,13 @@ export class HubSync {
    *
    * The decision can only be made here, because it is about the connection this
    * room has just been dropped from: if it had every attached room in sync
-   * before that, it was a working connection that something ended — a hub
-   * shutting down, most often — and the rebuild that follows is the first of a
-   * fresh budget. If it did not, this is the same connection failing the same
-   * way again, and the budget it is spending is the one that stops it.
+   * before that, it was a working connection that something ended — a
+   * per-document reset, for example — and the rebuild that follows is the first
+   * of a fresh budget. If it did not, this is the same connection failing the
+   * same way again, and the budget it is spending is the one that stops it.
    *
-   * Only the first disowned room of a connection judges it. A shutdown closes
-   * every room, and the second close says nothing the first did not.
+   * Only the first disowned room of a connection judges it. If several rooms
+   * are dropped in one wave, the second close says nothing the first did not.
    */
   private hubDisownedRoom(): void {
     // The socket itself going away is not this: it already retries on its own,
@@ -746,8 +745,8 @@ export class HubSync {
    * recovers a room the hub has disowned, and where this stops; and
    * {@link rebuildDelayMs} for the band each one waits out.
    *
-   * One rebuild per backoff window, because a hub shutdown closes every room:
-   * the first close schedules it and the rest are already covered.
+   * One rebuild per backoff window, because several rooms can be disowned in
+   * one wave: the first close schedules it and the rest are already covered.
    */
   private rebuild(): void {
     if (
