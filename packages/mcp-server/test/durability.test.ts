@@ -57,21 +57,31 @@ async function hub(): Promise<Hub> {
   return started;
 }
 
-/** A store that lets a test run something between the two halves of a read. */
+/** A store that lets a test run something after the snapshot cut is read. */
 class InterleavingStore extends MirrorStore {
   private hook: (() => void) | null = null;
 
-  /** Run `hook` once, immediately after the next snapshot read. */
+  /** Run `hook` once, immediately after the next snapshot-cut read. */
   interleaveOnce(hook: () => void): void {
     this.hook = hook;
   }
 
-  override snapshot(room: string) {
-    const result = super.snapshot(room);
+  protected override snapshotThroughSeq(room: string) {
+    const result = super.snapshotThroughSeq(room);
     const hook = this.hook;
     this.hook = null;
     hook?.();
     return result;
+  }
+}
+
+/** A store that observes when readSince loads a snapshot's state BLOB. */
+class SnapshotReadingStore extends MirrorStore {
+  snapshotReads = 0;
+
+  override snapshot(room: string) {
+    this.snapshotReads += 1;
+    return super.snapshot(room);
   }
 }
 
@@ -127,6 +137,43 @@ afterEach(async () => {
 });
 
 describe("reading the log", () => {
+  it("loads snapshot state only when the snapshot is ahead", () => {
+    const databasePath = tempDatabasePath();
+    const writer = store(databasePath);
+    const { doc, updates } = recordingDoc();
+    const text = doc.getText(TEXT);
+
+    text.insert(0, "A");
+    writer.appendUpdate(ROOM, updates[0]!, "remote");
+    writer.compact(ROOM, Y.encodeStateAsUpdate(doc), 1);
+    text.insert(1, "B");
+    writer.appendUpdate(ROOM, updates[1]!, "remote");
+
+    const reader = new SnapshotReadingStore(databasePath, WORKSPACE);
+    stores.push(reader);
+
+    expect(reader.readSince(`${WORKSPACE}/missing`, 0)).toEqual({
+      snapshot: null,
+      updates: [],
+    });
+    expect(reader.readSince(ROOM, 1).updates.map((entry) => entry.seq)).toEqual([
+      2,
+    ]);
+    expect(reader.readSince(ROOM, 2)).toEqual({ snapshot: null, updates: [] });
+    expect(reader.snapshotReads).toBe(0);
+
+    const behind = reader.readSince(ROOM, 0);
+    expect(behind.snapshot?.throughSeq).toBe(1);
+    expect(behind.updates.map((entry) => entry.seq)).toEqual([2]);
+    expect(
+      replay(
+        behind.updates.map((entry) => entry.payload),
+        behind.snapshot?.state,
+      ),
+    ).toBe("AB");
+    expect(reader.snapshotReads).toBe(1);
+  });
+
   it("never returns a tail that skips the snapshot bridging it", async () => {
     const databasePath = tempDatabasePath();
     const writer = store(databasePath);
