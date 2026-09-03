@@ -220,12 +220,12 @@ export function RoutePane({
     // "waiting for sync" from ignorance would flash those words across the pane
     // every time a reader moves between two documents they already have.
     if (connection === null || !replicaHasAnswered(meta, localReplicaLoaded)) {
-      return <PaneNotice>{null}</PaneNotice>;
+      return <PaneNotice documentLayout>{null}</PaneNotice>;
     }
 
     if (!docIsHydrated(route.uuid, meta)) {
       return (
-        <PaneNotice>
+        <PaneNotice documentLayout>
           {/* The live sync state, so a link that is waiting says what it is
               waiting on rather than looking stuck — and the copy control, which
               this screen carried before the identity line existed and still

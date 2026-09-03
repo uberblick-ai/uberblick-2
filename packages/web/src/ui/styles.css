@@ -231,12 +231,15 @@
      here".*/
   --shadow-float: 0 8px 24px oklch(0 0 0 / 25%);
 
-  /* The reading measure. Prose wider than ~75ch is hard to track back to the
-     next line, so the content column is capped here and centred in whatever
-     space the sidebars leave. */
+  /* The reading composition. Prose wider than ~75ch is hard to track back to
+     the next line; the other three values keep its origin, the comments rail
+     and a minimum trailing breath independent of viewport surplus. */
   --measure: 72ch;
   --sidebar-width: 18rem;
   --outline-width: 15rem;
+  --pane-document-inset: 2rem;
+  --document-rail-gap: 2rem;
+  --pane-trailing-space: 1rem;
   /* Reserved down the left of the content column for the block gutter's `+`.
      Permanent, so hovering a block reveals the button without moving a pixel
      of prose. */
@@ -1259,6 +1262,24 @@ body {
   overflow-y: auto;
 }
 
+/* A document and its rail are one left-anchored composition. The pane stops
+   growing once it holds the inset, the capped column and their fixed gap, so
+   wider windows add room after the rail instead of before the prose. It may
+   still shrink all the way down at the rail breakpoint. */
+.ub-document-pane {
+  flex: 0 1 calc(
+    var(--pane-document-inset) + var(--measure) + var(--document-rail-gap)
+  );
+  padding-inline: var(--pane-document-inset) var(--document-rail-gap);
+}
+
+/* The restore control floats at the page edge. Give the sidebar-less document
+   a deliberate outer inset that clears its complete target rather than
+   centring the document in the newly available width. */
+.ub-sidebar-restore ~ .ub-document-pane {
+  --pane-document-inset: 4rem;
+}
+
 /* ---- workspace settings ---- */
 
 .ub-settings-column {
@@ -1321,8 +1342,8 @@ body {
   font-family: var(--font-sans);
 }
 
-/* The reading column: capped at the measure and centred, so collapsing the
-   sidebar or hiding the outline re-centres the prose instead of stretching it.
+/* The reading column is capped at the measure. A document pane anchors it at
+   the pane's fixed inset; non-document panes retain their centred column.
 
    The left padding is the block gutter, reserved for good — see
    `--block-gutter` and the "block insertion menu" section below. */
@@ -1333,6 +1354,10 @@ body {
   padding-left: var(--block-gutter);
   display: flex;
   flex-direction: column;
+}
+
+.ub-document-pane > .ub-column {
+  margin-inline: 0;
 }
 
 /* ---- right rail: the outline and the threads, stacked ---- */
@@ -1347,6 +1372,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  /* A minimum breath follows the fixed-width rail. Any extra viewport width
+     follows it too because the document pane above does not grow. */
+  margin-inline-end: var(--pane-trailing-space);
 }
 
 /* Both sections render nothing when they have nothing to show, which leaves the
@@ -1362,6 +1390,15 @@ body {
    The toggle appears, and opening it brings the rail back *over* the prose
    instead of taking a column the window does not have. */
 @media (max-width: 1100px) {
+  /* The rail is an overlay here, so its reserved gap is released. With the
+     sidebar still open, keep the pane's original compact edge inset; the
+     deliberate 4rem page inset above remains the more specific collapsed
+     state. */
+  .ub-document-pane {
+    --pane-document-inset: 1rem;
+    --document-rail-gap: 1rem;
+  }
+
   .ub-rail {
     display: none;
   }
@@ -1389,6 +1426,7 @@ body {
     background: var(--card);
     color: var(--card-foreground);
     box-shadow: -8px 0 24px rgb(0 0 0 / 0.18);
+    margin-inline-end: 0;
   }
 
   /* The drawer is the threads. The outline stays hidden: it is the section the
