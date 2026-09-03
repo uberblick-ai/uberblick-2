@@ -28,10 +28,15 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { HocuspocusProvider } from "@hocuspocus/provider";
+import { spawn } from "node:child_process";
+import {
+  HocuspocusProvider,
+  type onCloseParameters,
+} from "@hocuspocus/provider";
 import type { Hocuspocus, ServerConfiguration } from "@hocuspocus/server";
 import { Server } from "@hocuspocus/server";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { messageYjsSyncStep2, messageYjsUpdate } from "y-protocols/sync";
 import * as Y from "yjs";
 import { TEXT_KEY, waitUntil } from "./helpers.js";
 
@@ -40,6 +45,7 @@ type Context = { name: string };
 
 const servers: Server<Context>[] = [];
 const providers: HocuspocusProvider[] = [];
+const childProcesses: ReturnType<typeof spawn>[] = [];
 
 // Providers before servers: a live provider reconnects on close and would
 // otherwise race the server it is being torn down with.
@@ -49,6 +55,15 @@ afterEach(async () => {
   }
   for (const server of servers.splice(0)) {
     await server.destroy();
+  }
+  for (const child of childProcesses.splice(0)) {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise<void>((resolve) => {
+        child.once("exit", () => resolve());
+      });
+      child.kill();
+      await exited;
+    }
   }
 });
 
@@ -80,8 +95,10 @@ function connect(options: {
    * explained by the client having come back.
    */
   reconnectDelayMs?: number;
+  /** A pre-populated document exercises the reconnect SyncStep2 path. */
+  document?: Y.Doc;
 }) {
-  const doc = new Y.Doc();
+  const doc = options.document ?? new Y.Doc();
   const provider = new HocuspocusProvider({
     url: `ws://127.0.0.1:${options.port}`,
     name: options.room,
@@ -115,6 +132,82 @@ function gate() {
     open = resolve;
   });
   return { opened, open };
+}
+
+/** Resolve with the first complete child-process stdout line with this prefix. */
+function childLine(child: ReturnType<typeof spawn>, prefix: string) {
+  let buffered = "";
+  return new Promise<string>((resolve, reject) => {
+    const cleanup = () => {
+      child.stdout?.off("data", onData);
+      child.off("exit", onExit);
+    };
+    const onData = (chunk: Buffer) => {
+      buffered += chunk.toString();
+      const line = buffered.split("\n").find((item) => item.startsWith(prefix));
+      if (line !== undefined) {
+        cleanup();
+        resolve(line);
+      }
+    };
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      cleanup();
+      reject(
+        new Error(
+          `upgrade probe exited before ${prefix}: code=${String(code)} signal=${String(signal)}`,
+        ),
+      );
+    };
+    child.stdout?.on("data", onData);
+    child.once("exit", onExit);
+  });
+}
+
+/** Run the upgrade hook in a disposable process: the throwing case must exit. */
+async function startUpgradeProbe(mode: "throw" | "reject-empty") {
+  const child = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `
+        import { Server } from "@hocuspocus/server";
+
+        const mode = process.argv[1];
+        const server = new Server({
+          port: 0,
+          address: "127.0.0.1",
+          quiet: true,
+          stopOnSignals: false,
+          onUpgrade: async ({ socket }) => {
+            socket.destroy();
+            if (mode === "reject-empty") {
+              setImmediate(() => process.stdout.write("survived\\n"));
+              return Promise.reject();
+            }
+            throw new Error("throwing onUpgrade escapes the listener");
+          },
+        });
+        await server.listen();
+        process.stdout.write("listening:" + server.address.port + "\\n");
+        setInterval(() => {}, 60_000);
+      `,
+      mode,
+    ],
+    {
+      cwd: new URL("../", import.meta.url),
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  childProcesses.push(child);
+  const listening = await childLine(child, "listening:");
+  return { child, port: Number(listening.slice("listening:".length)) };
+}
+
+/** Trigger the HTTP upgrade path and absorb the expected client-side error. */
+function requestUpgrade(port: number) {
+  const socket = new WebSocket(`ws://127.0.0.1:${port}`);
+  socket.addEventListener("error", () => {});
 }
 
 /** Anything the server hands an incoming websocket frame to. */
@@ -327,6 +420,239 @@ describe("MessageReceiver.ts:157 — the token dispatch is fire-and-forget", () 
     } finally {
       held.open();
     }
+  });
+});
+
+describe("MessageReceiver.ts:189-280 — beforeSync gates apply and acknowledgement", () => {
+  /**
+   * `beforeSync` runs after the sync subtype and payload have been decoded, but
+   * before either mutating branch. Both branches send their positive sync
+   * status only after the apply returns. The hub can therefore hold a write at
+   * this hook without the server, a peer, or the sender observing success.
+   */
+  it("awaits beforeSync before applying or acknowledging messageYjsUpdate", async () => {
+    const room = randomUUID();
+    const held = gate();
+    let armed = false;
+    let entered = false;
+
+    const { port, hocuspocus } = await startServer({
+      beforeSync: async ({ type }) => {
+        if (!armed || type !== messageYjsUpdate) return;
+        entered = true;
+        await held.opened;
+      },
+    });
+    const sender = connect({ port, room });
+    const observer = connect({ port, room });
+    await Promise.all([sender.synced, observer.synced]);
+
+    try {
+      armed = true;
+      sender.text.insert(0, "held update");
+      await waitUntil("the update to enter beforeSync", () => entered);
+
+      expect(hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString()).toBe(
+        "",
+      );
+      expect(observer.text.toString()).toBe("");
+      expect(sender.provider.hasUnsyncedChanges).toBe(true);
+
+      held.open();
+      await waitUntil(
+        "the released update to be applied and acknowledged",
+        () =>
+          observer.text.toString() === "held update" &&
+          !sender.provider.hasUnsyncedChanges,
+      );
+    } finally {
+      held.open();
+    }
+  });
+
+  it("awaits beforeSync before applying or acknowledging a reconnect messageYjsSyncStep2 diff", async () => {
+    const room = randomUUID();
+    const held = gate();
+    let armed = false;
+    let entered = false;
+
+    const { port, hocuspocus } = await startServer({
+      beforeSync: async ({ type }) => {
+        if (!armed || type !== messageYjsSyncStep2) return;
+        entered = true;
+        await held.opened;
+      },
+    });
+    const observer = connect({ port, room });
+    const firstConnection = connect({ port, room, awareness: null });
+    await Promise.all([observer.synced, firstConnection.synced]);
+
+    // Detach before editing, then attach a fresh provider to the same Y.Doc:
+    // the edit can reach the server only as the reconnect handshake's Step2
+    // diff, rather than as an ordinary live messageYjsUpdate.
+    firstConnection.provider.destroy();
+    firstConnection.text.insert(0, "offline reconnect diff");
+    armed = true;
+    const reconnect = connect({
+      port,
+      room,
+      awareness: null,
+      document: firstConnection.doc,
+    });
+
+    try {
+      await waitUntil("the reconnect diff to enter beforeSync", () => entered);
+
+      expect(hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString()).toBe(
+        "",
+      );
+      expect(observer.text.toString()).toBe("");
+      expect(reconnect.provider.hasUnsyncedChanges).toBe(true);
+
+      held.open();
+      await waitUntil(
+        "the released reconnect diff to be applied and acknowledged",
+        () =>
+          observer.text.toString() === "offline reconnect diff" &&
+          !reconnect.provider.hasUnsyncedChanges,
+      );
+    } finally {
+      held.open();
+    }
+  });
+
+  it("closes with the thrown beforeSync reason before applying the update", async () => {
+    const room = randomUUID();
+    const refusal = "the append was refused verbatim";
+    let armed = false;
+
+    const { port, hocuspocus } = await startServer({
+      beforeSync: async ({ type }) => {
+        if (armed && type === messageYjsUpdate) {
+          throw { reason: refusal };
+        }
+      },
+    });
+    const sender = connect({
+      port,
+      room,
+      awareness: null,
+      reconnectDelayMs: 60_000,
+    });
+    const observer = connect({ port, room });
+    await Promise.all([sender.synced, observer.synced]);
+
+    let closed: { code: number; reason: string } | undefined;
+    sender.provider.on("close", ({ event }: onCloseParameters) => {
+      closed = { code: event.code, reason: event.reason };
+    });
+    armed = true;
+    sender.text.insert(0, "must not land");
+    await waitUntil("the refusal to reach the sender", () => closed !== undefined);
+
+    expect(closed).toEqual({ code: 1000, reason: refusal });
+    expect(hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString()).toBe(
+      "",
+    );
+    expect(observer.text.toString()).toBe("");
+    expect(sender.provider.hasUnsyncedChanges).toBe(true);
+  });
+});
+
+describe("y-protocols sync.js:82-89 — update observer errors are not an apply gate", () => {
+  it("acknowledges an update whose document observer throws after apply", async () => {
+    const room = randomUUID();
+    let armed = false;
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const { port, hocuspocus } = await startServer({
+        afterLoadDocument: async ({ document }) => {
+          document.on("update", () => {
+            if (armed) throw new Error("an observer cannot refuse an update");
+          });
+        },
+      });
+      const sender = connect({ port, room });
+      await sender.synced;
+
+      armed = true;
+      sender.text.insert(0, "already applied");
+      await waitUntil(
+        "the applied update to be positively acknowledged",
+        () =>
+          hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString() ===
+            "already applied" && !sender.provider.hasUnsyncedChanges,
+      );
+
+      expect(logged).toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("positively acknowledges an ungated malformed update", async () => {
+    const room = randomUUID();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const { port, hocuspocus } = await startServer({});
+      const sender = connect({ port, room });
+      await sender.synced;
+
+      // Drive the provider's public update handler so it owns both the wire
+      // framing and the outstanding-change count. This byte is not a valid Yjs
+      // update, but the sync reader catches the decoder error and returns.
+      sender.provider.documentUpdateHandler(Uint8Array.of(0xff), null);
+      expect(sender.provider.hasUnsyncedChanges).toBe(true);
+      await waitUntil("the malformed update to be positively acknowledged", () =>
+        !sender.provider.hasUnsyncedChanges,
+      );
+
+      expect(hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString()).toBe(
+        "",
+      );
+      expect(logged).toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+    }
+  });
+});
+
+describe("Server.ts:87-105 — onUpgrade refusal distinguishes empty rejection from an error", () => {
+  /**
+   * The HTTP server's async upgrade listener rethrows a truthy hook error. An
+   * uncaught throw from that listener terminates Node, so a refusal cannot use
+   * the usual `throw new Error(...)` form.
+   */
+  it("lets a throwing onUpgrade terminate its process", async () => {
+    const { child, port } = await startUpgradeProbe("throw");
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    const exited = new Promise<{ code: number | null; signal: string | null }>(
+      (resolve) => {
+        child.once("exit", (code, signal) => resolve({ code, signal }));
+      },
+    );
+
+    requestUpgrade(port);
+    const result = await exited;
+
+    expect(result).toEqual({ code: 1, signal: null });
+    expect(stderr).toContain("throwing onUpgrade escapes the listener");
+  });
+
+  /** Destroy the socket, then reject with no value so the listener returns. */
+  it("keeps the process alive for destroy-then-empty-reject", async () => {
+    const { child, port } = await startUpgradeProbe("reject-empty");
+    const survived = childLine(child, "survived");
+
+    requestUpgrade(port);
+    await survived;
+
+    expect(child.exitCode).toBeNull();
   });
 });
 
