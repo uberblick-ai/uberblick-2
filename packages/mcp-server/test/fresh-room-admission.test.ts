@@ -59,12 +59,22 @@ async function server(port: number, syncTimeoutMs = 10_000): Promise<Rig> {
   return rig;
 }
 
-function watchForPendingRoomTermination(): () => readonly string[] {
+/**
+ * Hocuspocus reports this guard through process-wide `console.warn`. Match a
+ * room owned by this test so a previous rig finishing teardown cannot make the
+ * next test claim that its own socket was terminated.
+ */
+function watchForPendingRoomTermination(
+  rooms: readonly string[],
+): () => readonly string[] {
   const seen: string[] = [];
   const warn = console.warn;
   vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
     const line = args.map(String).join(" ");
-    if (line.includes("too many pending unauthenticated documents")) {
+    if (
+      line.includes("too many pending unauthenticated documents") &&
+      rooms.some((room) => line.includes(room))
+    ) {
       seen.push(line);
       return;
     }
@@ -86,7 +96,8 @@ function endsWithin<T>(label: string, promise: Promise<T>): Promise<T> {
 
 describe("fresh-room admission", () => {
   it("syncs a 300-document create burst without breaching the default hub ceiling", async () => {
-    const terminations = watchForPendingRoomTermination();
+    const rooms: string[] = [];
+    const terminations = watchForPendingRoomTermination(rooms);
     const running = await hub();
     expect(running.server.configuration.maxPendingDocuments).toBe(
       MAX_PENDING_DOCUMENTS,
@@ -103,8 +114,10 @@ describe("fresh-room admission", () => {
         }),
       ),
     );
-    const rooms = created.map(
-      ({ uuid }: { uuid: string }) => `${WORKSPACE}/${uuid}`,
+    rooms.push(
+      ...created.map(
+        ({ uuid }: { uuid: string }) => `${WORKSPACE}/${uuid}`,
+      ),
     );
     const sync = rig.instance.replicas.sync;
 
@@ -122,7 +135,8 @@ describe("fresh-room admission", () => {
   });
 
   it("drops closing-window updates before they can replay ahead of admission", async () => {
-    const terminations = watchForPendingRoomTermination();
+    const rooms: string[] = [];
+    const terminations = watchForPendingRoomTermination(rooms);
     const running = await hub();
     const rig = await server(running.port, 3_000);
     const created = await Promise.all(
@@ -133,8 +147,10 @@ describe("fresh-room admission", () => {
         }),
       ),
     );
-    const rooms = created.map(
-      ({ uuid }: { uuid: string }) => `${WORKSPACE}/${uuid}`,
+    rooms.push(
+      ...created.map(
+        ({ uuid }: { uuid: string }) => `${WORKSPACE}/${uuid}`,
+      ),
     );
     const sync = rig.instance.replicas.sync;
     await waitUntil("the reconnect corpus to sync", () =>
@@ -169,7 +185,8 @@ describe("fresh-room admission", () => {
   });
 
   it("releases every admission after a hub-initiated socket termination", async () => {
-    const terminations = watchForPendingRoomTermination();
+    const rooms = [`${WORKSPACE}/_directory`, `${WORKSPACE}/_sidebar`];
+    const terminations = watchForPendingRoomTermination(rooms);
     const databasePath = tempDatabasePath();
     const first = await hub({ databasePath, maxPendingDocuments: 1 });
     const port = first.port;
@@ -192,7 +209,6 @@ describe("fresh-room admission", () => {
     expect(recovered.port).toBe(port);
 
     const sync = rig.instance.replicas.sync;
-    const rooms = [`${WORKSPACE}/_directory`, `${WORKSPACE}/_sidebar`];
     await waitUntil(
       "the reconnected rooms to become quiet",
       () =>
