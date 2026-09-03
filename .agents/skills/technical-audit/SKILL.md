@@ -13,7 +13,10 @@ description: >-
 Find a few consequential, evidence-backed risks without turning broad static
 analysis into hypothetical work. Write no code, corpus document, issue, label,
 branch, or PR. The only permitted external write is one report to [Technical
-audit reports](https://github.com/uberblick-ai/uberblick-2/discussions/541).
+audit reports](https://github.com/uberblick-ai/uberblick-2/discussions/541),
+posted with `sh scripts/post-retrospective.sh technical-audit <body-file>` —
+never with a hand-written `addDiscussionComment` call, because a guessed
+discussion id posts to a stranger's repository.
 
 ## Assignment and mode
 

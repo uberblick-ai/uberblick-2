@@ -148,8 +148,10 @@ Link logs instead of pasting counts. Then post the two-line handoff
 
 Last, a top-level run posts one retrospective to
 [Implementation run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/522)
-in this shape. It is telemetry for the workflow audit, never a gate, and a
-failed post blocks nothing. Then stop; a fix-up is a new pickup.
+in this shape, with `sh scripts/post-retrospective.sh implementation <body-file>`
+— never with a hand-written `addDiscussionComment` call, because a guessed
+discussion id posts to a stranger's repository. It is telemetry for the
+workflow audit, never a gate, and a failed post blocks nothing. Then stop; a fix-up is a new pickup.
 
 ```text
 Retrospective: implementer <run id> — PR #N
