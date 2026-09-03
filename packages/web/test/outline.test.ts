@@ -3,8 +3,9 @@
  *
  * The outline is a derivation of the document, not a second copy of it, and that
  * is the property worth pinning: the same headings in the same order as the
- * blocks fragment, levels 1-3 only, refreshed from an observer so a remote
- * client's edit reaches the reader with no extra plumbing.
+ * blocks fragment, levels 1-2 only, refreshed from an observer so a remote
+ * client's edit reaches the reader with no extra plumbing. Level three and
+ * deeper headings stay in the document without crowding this navigation.
  *
  * The click target is pinned too: an entry's id is the block id, and the editor
  * renders that id onto the heading element — which is the whole mechanism behind
@@ -53,13 +54,15 @@ describe("the outline derives from the document's heading blocks", () => {
     expect(outlineFromDoc(ydoc)).toEqual([
       { id: expect.any(String), level: 1, text: "Install" },
       { id: expect.any(String), level: 2, text: "Homebrew" },
-      { id: expect.any(String), level: 3, text: "Flags" },
     ]);
 
     // The ids are the block ids from the fragment, in the fragment's order —
     // which is what makes an entry a click target.
     const headingIds = getBlocks(ydoc)
-      .filter((block) => block.type === "heading")
+      .filter(
+        (block) =>
+          block.type === "heading" && (block.level ?? 1) <= 2,
+      )
       .map((block) => block.id);
     expect(outlineFromDoc(ydoc).map((entry) => entry.id)).toEqual(headingIds);
 
@@ -70,17 +73,13 @@ describe("the outline derives from the document's heading blocks", () => {
     expect(outlineFromDoc(flat)).toEqual([]);
   });
 
-  it("stops at level 3 — deeper headings are structure, not navigation", () => {
+  it("stops at level 2 — deeper headings are structure, not navigation", () => {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: "deep", title: "Deep" });
     for (const level of [1, 2, 3, 4, 5, 6] as const) {
       appendBlock(ydoc, { type: "heading", text: `h${level}`, level });
     }
-    expect(outlineFromDoc(ydoc).map((entry) => entry.text)).toEqual([
-      "h1",
-      "h2",
-      "h3",
-    ]);
+    expect(outlineFromDoc(ydoc).map((entry) => entry.text)).toEqual(["h1", "h2"]);
   });
 });
 
@@ -103,7 +102,6 @@ describe("the outline updates live", () => {
     expect(watcher.latest().map((entry) => entry.text)).toEqual([
       "Install",
       "Homebrew",
-      "Flags",
     ]);
     watcher.stop();
   });
@@ -123,7 +121,6 @@ describe("the outline updates live", () => {
     expect(watcher.latest().map((entry) => entry.text)).toEqual([
       "Install",
       "Homebrew",
-      "Flags",
       "Upgrade",
     ]);
 
@@ -138,18 +135,18 @@ describe("the outline updates live", () => {
     expect(watcher.latest().map((entry) => entry.text)).toEqual([
       "Install",
       "Homebrew (macOS)",
-      "Flags",
       "Upgrade",
     ]);
 
-    // Re-levelled past 3, a heading leaves the outline.
-    const flags = outlineFromDoc(remote).find((entry) => entry.text === "Flags");
-    expect(flags).toBeDefined();
-    setBlockLevel(remote, flags!.id, 4);
+    // Re-levelled past 2, a heading leaves the outline.
+    const upgrade = outlineFromDoc(remote).find(
+      (entry) => entry.text === "Upgrade",
+    );
+    expect(upgrade).toBeDefined();
+    setBlockLevel(remote, upgrade!.id, 3);
     expect(watcher.latest().map((entry) => entry.text)).toEqual([
       "Install",
       "Homebrew (macOS)",
-      "Upgrade",
     ]);
 
     watcher.stop();
@@ -163,7 +160,6 @@ describe("the outline updates live", () => {
     expect(watcher.latest().map((entry) => entry.text)).toEqual([
       "Install",
       "Homebrew",
-      "Flags",
     ]);
   });
 });

@@ -3,7 +3,7 @@
  * blocks, plus its subscription.
  *
  * Nothing is stored for the outline. It is `getBlocks()` filtered to headings of
- * level 1-3, in document order, which is why a remote edit needs no extra
+ * level 1-2, in document order, which is why a remote edit needs no extra
  * plumbing to show up — the document is the model.
  */
 
@@ -12,7 +12,7 @@ import { getBlocks, getBlocksFragment } from "@uberblick/schema";
 import type { HeadingLevel } from "@uberblick/schema";
 
 /** Deepest heading level the outline shows. Below this the outline is noise. */
-export const OUTLINE_MAX_LEVEL = 3;
+export const OUTLINE_MAX_LEVEL = 2;
 
 export interface OutlineEntry {
   /** The block id — also the heading element's DOM id, which is how clicks scroll. */
@@ -21,7 +21,7 @@ export interface OutlineEntry {
   text: string;
 }
 
-/** Heading blocks of level 1-3, in document order. */
+/** Heading blocks of level 1-2, in document order. */
 export function outlineFromDoc(ydoc: Y.Doc): OutlineEntry[] {
   const out: OutlineEntry[] = [];
   for (const block of getBlocks(ydoc)) {

@@ -1360,7 +1360,110 @@ body {
   margin-inline: 0;
 }
 
-/* ---- right rail: the outline and the threads, stacked ---- */
+/* ---- document contents and the independent threads rail ---- */
+
+/* A compact sibling of the scrolling document pane: the body itself does not
+   scroll, so the trigger keeps this inset while the document moves beside it.
+   It reserves only its own button width, and nothing when the derived outline
+   is empty. */
+.ub-outline {
+  position: sticky;
+  top: 0.75rem;
+  z-index: 4;
+  align-self: flex-start;
+  flex: none;
+  margin-block-start: 0.75rem;
+  margin-inline-end: 0.75rem;
+}
+
+.ub-outline-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  background: var(--card-accent);
+  color: var(--secondary-foreground);
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ub-outline-trigger span {
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+}
+
+.ub-outline-trigger:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.ub-outline-trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.ub-outline-panel {
+  width: min(20rem, calc(100vw - 2rem));
+  max-height: min(
+    calc(100vh - 2rem),
+    var(--radix-popover-content-available-height)
+  );
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.ub-outline-panel-body {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem;
+}
+
+.ub-outline-panel ul {
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ub-outline-panel li button {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.5rem;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ub-outline-panel li button:hover,
+.ub-outline-panel li button:focus-visible {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.ub-outline-panel li button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.ub-outline-panel .ub-outline-l2 button {
+  padding-inline-start: 1.25rem;
+}
 
 .ub-rail {
   width: var(--outline-width);
@@ -1377,10 +1480,9 @@ body {
   margin-inline-end: var(--pane-trailing-space);
 }
 
-/* Both sections render nothing when they have nothing to show, which leaves the
-   rail element childless — and a 15rem bordered gutter with nothing in it is
-   worse than no gutter. `:empty` is exact here because React renders no
-   whitespace text nodes between the two nulls. */
+/* The section renders nothing when it has no thread, which leaves the rail
+   childless — and a 15rem bordered gutter with nothing in it is worse than no
+   gutter. `:empty` is exact because React renders no whitespace text nodes. */
 .ub-rail:empty {
   display: none;
 }
@@ -1427,13 +1529,6 @@ body {
     color: var(--card-foreground);
     box-shadow: -8px 0 24px rgb(0 0 0 / 0.18);
     margin-inline-end: 0;
-  }
-
-  /* The drawer is the threads. The outline stays hidden: it is the section the
-     narrow layout gave up first, and a reader who opened "Threads" asked for
-     one thing. */
-  .ub-rail-open .ub-outline {
-    display: none;
   }
 }
 
@@ -1528,39 +1623,6 @@ body {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted-foreground);
-}
-
-.ub-outline ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.ub-outline li button {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: 0;
-  border-left: 2px solid var(--border);
-  border-radius: 0;
-  padding: 0.2rem 0.4rem;
-  cursor: pointer;
-  font: inherit;
-  color: var(--muted-foreground);
-}
-
-.ub-outline li button:hover {
-  color: var(--foreground);
-  border-left-color: var(--brand);
-}
-
-.ub-outline-l2 button {
-  padding-left: 1rem;
-}
-
-.ub-outline-l3 button {
-  padding-left: 1.6rem;
 }
 
 /* ---- threads rail ---- */
