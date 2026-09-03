@@ -240,6 +240,21 @@ function watchTokenGate(): () => string[] {
   return () => [...opened];
 }
 
+/** Authentication frames that actually reached the shared socket. */
+function watchTokenSends(): () => string[] {
+  const sent: string[] = [];
+  const send = HocuspocusProvider.prototype.send;
+  vi.spyOn(HocuspocusProvider.prototype, "send").mockImplementation(
+    function (this: HocuspocusProvider, Message, args) {
+      if (typeof args.token === "string" && args.token !== "") {
+        sent.push(this.configuration.name);
+      }
+      send.call(this, Message, args);
+    },
+  );
+  return () => [...sent];
+}
+
 /**
  * Wait for a held wave to reach the mint, and assert the gate let exactly
  * `bound` rooms through while the rest stayed queued.
@@ -371,7 +386,7 @@ describe("bounded room attach", () => {
   it("keeps a token minted on a dead connection from sending on the next one", async () => {
     const rooms: string[] = [];
     const terminations = watchForTermination(rooms);
-    const gateOpened = watchTokenGate();
+    const tokensSent = watchTokenSends();
     const database = tempDatabasePath();
     const port = (await startHub({ databasePath: database })).port;
 
@@ -432,7 +447,7 @@ describe("bounded room attach", () => {
     // the room admitted on it, and the stale call has to be re-admitted here
     // before anything of its leaves — which is what keeps a flapping socket
     // from carrying one connection's wave into the next one's count.
-    expect(gateOpened()).not.toContain(stale);
+    expect(tokensSent()).not.toContain(stale);
 
     // The positive half, so the assertion above is not passing on a call that
     // has simply not got there yet: the room admitted on *this* connection is
@@ -441,9 +456,9 @@ describe("bounded room attach", () => {
     // one began, so without the generation scoping it would be through first.
     await mints.release();
     await waitUntil("the room admitted on the new connection to send", () =>
-      gateOpened().includes(next),
+      tokensSent().includes(next),
     );
-    expect(gateOpened()).not.toContain(stale);
+    expect(tokensSent()).not.toContain(stale);
 
     mints.releaseAll();
     await waitUntil("every room to converge", () =>
@@ -451,8 +466,14 @@ describe("bounded room attach", () => {
     );
 
     // Re-admitted, and behind the room that held the slot on this connection.
-    expect(gateOpened()).toContain(stale);
-    expect(gateOpened().indexOf(next)).toBeLessThan(gateOpened().indexOf(stale));
+    expect(tokensSent().filter((room) => room === stale)).toHaveLength(1);
+    expect(tokensSent().indexOf(next)).toBeLessThan(tokensSent().indexOf(stale));
+    expect(sync.isDraining()).toBe(false);
+
+    const later = attach(sync, "after the stale continuation");
+    await waitUntil("a later room to use the released admission", () =>
+      sync.isRoomQuiet(later),
+    );
     expect(terminations()).toEqual([]);
   });
 

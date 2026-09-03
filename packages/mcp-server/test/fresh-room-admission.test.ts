@@ -121,6 +121,53 @@ describe("fresh-room admission", () => {
     expect(sync.isDraining()).toBe(false);
   });
 
+  it("drops closing-window updates before they can replay ahead of admission", async () => {
+    const terminations = watchForPendingRoomTermination();
+    const running = await hub();
+    const rig = await server(running.port, 3_000);
+    const created = await Promise.all(
+      Array.from({ length: 150 }, (_, index) =>
+        rig.ok("create_doc", {
+          title: `Reconnect ${index}`,
+          description: "A closing-window admission test document.",
+        }),
+      ),
+    );
+    const rooms = created.map(
+      ({ uuid }: { uuid: string }) => `${WORKSPACE}/${uuid}`,
+    );
+    const sync = rig.instance.replicas.sync;
+    await waitUntil("the reconnect corpus to sync", () =>
+      rooms.every((room) => sync.isRoomQuiet(room)),
+    );
+
+    // Drive rebuild's production ordering: disconnect first, then mutate while
+    // the close event is still pending. The provider must drop those frames;
+    // the new connection's handshakes recover every update from Yjs state.
+    const internals = sync as unknown as {
+      rebuilding: boolean;
+      socket: { disconnect(): void };
+    };
+    internals.rebuilding = true;
+    internals.socket.disconnect();
+    const writes = created.map(({ uuid }: { uuid: string }, index: number) =>
+      rig.ok("set_title", { uuid, title: `Reconnected ${index}` }),
+    );
+
+    await Promise.all(writes);
+    await waitUntil(
+      "every closing-window update to converge after reconnect",
+      () =>
+        sync.state().status === "connected" &&
+        rooms.every((room) => sync.isRoomQuiet(room)) &&
+        !sync.isDraining(),
+      60_000,
+    );
+
+    expect(terminations()).toEqual([]);
+    expect(sync.isDraining()).toBe(false);
+  });
+
   it("releases every admission after a hub-initiated socket termination", async () => {
     const terminations = watchForPendingRoomTermination();
     const databasePath = tempDatabasePath();
