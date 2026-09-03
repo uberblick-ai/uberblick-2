@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { resolveStorage } from "@uberblick/hub";
-import { startHarness } from "./harness.js";
+import { placeCaret, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 
 test.describe.configure({ mode: "serial" });
@@ -153,10 +153,7 @@ async function createDoc(page: Page, text: string): Promise<string> {
   await page
     .locator(".ub-title")
     .fill(`attribution-${Math.random().toString(36).slice(2, 8)}`);
-  const block = page.locator(".ub-editor .ProseMirror > *").first();
-  const box = await block.boundingBox();
-  if (box === null) throw new Error("e2e: the first block has no box to click");
-  await page.mouse.click(box.x + box.width - 1, box.y + box.height / 2);
+  await placeCaret(page);
   await page.keyboard.type(text, { delay: 15 });
   return uuid;
 }

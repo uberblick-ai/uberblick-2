@@ -9,7 +9,7 @@
 
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
-import { startHarness } from "./harness.js";
+import { placeCaret, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 
 test.describe.configure({ mode: "serial" });
@@ -38,7 +38,7 @@ async function openDoc(page: Page, text: string): Promise<void> {
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
   await page.locator(".ub-title").fill("Selection toolbar");
-  await page.locator(".ub-editor .ProseMirror").click();
+  await placeCaret(page);
   await page.keyboard.insertText(text);
 }
 
@@ -186,7 +186,7 @@ test("touch activation preserves the range and IME composition suspends the chro
   const page = await context.newPage();
   await openDoc(page, "touch keeps this range");
   const editor = page.locator(".ub-editor .ProseMirror");
-  await editor.click();
+  await placeCaret(page);
   for (let character = 0; character < 10; character += 1) {
     await page.keyboard.press("Shift+ArrowLeft");
   }

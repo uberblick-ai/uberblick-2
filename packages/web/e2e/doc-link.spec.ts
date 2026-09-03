@@ -23,7 +23,7 @@
 
 import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
-import { startHarness } from "./harness.js";
+import { placeCaret, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 
 test.describe.configure({ mode: "serial" });
@@ -104,7 +104,7 @@ test("a typed reference is a link to the document it names, and Back comes home"
   const source = await createDoc(page, sourceTitle);
 
   // ---- typed, as a person types it ----
-  await editor(page).click();
+  await placeCaret(page);
   await page.keyboard.type(`see [the target](${target}) today`);
 
   const link = page.locator(".ub-editor a.ub-doclink");
@@ -145,7 +145,7 @@ test("the @ picker offers a synced document and writes the same reference", asyn
   const [, wanted] = [first, second].sort();
   await createDoc(page, docTitle("writing"));
 
-  await editor(page).click();
+  await placeCaret(page);
   await page.keyboard.type("see @pick");
 
   const picker = page.locator(".ub-mentionmenu");
