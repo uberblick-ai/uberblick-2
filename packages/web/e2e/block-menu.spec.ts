@@ -231,67 +231,36 @@ test("the gutter + inserts the chosen block below, with the caret in it", async 
 });
 
 /**
- * #628's throwaway evidence prototype hangs off this one test and nothing else.
- *
- * - The `@scenario` tag puts this test — and only this test — in the
- *   `scenario` project of playwright.config.ts, which is the one project that
- *   records video. Playwright's `video` option is worker-scoped, so it cannot
- *   be set per test or even per describe block; a project is the narrowest
- *   thing that can carry it. The suite's other 33 tests still run with no
- *   video, no trace and no HTML report.
- * - The `annotation` is the machine end of the link to
- *   `e2e/scenarios/slash-menu-heading.md`. `test/scenario-link.test.ts` is the
- *   only thing that notices when either end is renamed — within the limits its
- *   own header records.
- *
- * The assertions below are unchanged, and no assertion was added: the journey
- * was already covered, which is the point.
+ * The annotation is the machine end of the link to the human-readable scenario.
+ * The assertions were already the behavior proof; the unit-suite link check
+ * asks Playwright whether this test is still registered and still names it.
  */
-test.describe("scenario: slash-menu-heading", () => {
-  // A reporter cannot ask a closed browser what it was, so the run says so
-  // itself. An attachment rather than a log line, because that is where the
-  // reporter already finds the video.
-  test.afterEach(async ({ page }, testInfo) => {
-    await testInfo.attach("scenario-runtime.json", {
-      contentType: "application/json",
-      body: JSON.stringify({
-        browserName: page.context().browser()?.browserType().name() ?? "unknown",
-        browserVersion: page.context().browser()?.version() ?? "unknown",
-        viewport: page.viewportSize(),
-      }),
-    });
-  });
+test(
+  "typing / on an empty block filters, and Enter converts it",
+  { annotation: { type: "scenario", description: "slash-menu-heading" } },
+  async ({ page }) => {
+    await openDoc(page, "first");
 
-  test(
-    "typing / on an empty block filters, and Enter converts it",
-    {
-      tag: "@scenario",
-      annotation: { type: "scenario", description: "slash-menu-heading" },
-    },
-    async ({ page }) => {
-      await openDoc(page, "first");
+    // A second block, empty, the way a reader gets one.
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("/he", { delay: 15 });
+    // Scoped to the menu: the sidebar's workspace switcher is a `<select>`,
+    // and its options carry the same role.
+    await expect(page.locator(".ub-blockmenu").getByRole("option")).toHaveCount(3);
 
-      // A second block, empty, the way a reader gets one.
-      await page.keyboard.press("Enter");
-      await page.keyboard.type("/he", { delay: 15 });
-      // Scoped to the menu: the sidebar's workspace switcher is a `<select>`,
-      // and its options carry the same role.
-      await expect(page.locator(".ub-blockmenu").getByRole("option")).toHaveCount(3);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
 
-      await page.keyboard.press("ArrowDown");
-      await page.keyboard.press("Enter");
+    await expect(page.locator(".ub-blockmenu")).toHaveCount(0);
+    await expect(blocks(page)).toHaveCount(2);
+    expect(await blocks(page).nth(1).evaluate((node) => node.tagName)).toBe("H2");
+    // The slash was consumed, not saved.
+    await expect(blocks(page).nth(1)).toHaveText("");
 
-      await expect(page.locator(".ub-blockmenu")).toHaveCount(0);
-      await expect(blocks(page)).toHaveCount(2);
-      expect(await blocks(page).nth(1).evaluate((node) => node.tagName)).toBe("H2");
-      // The slash was consumed, not saved.
-      await expect(blocks(page).nth(1)).toHaveText("");
-
-      await page.keyboard.type("a heading", { delay: 15 });
-      await expect(blocks(page).nth(1)).toHaveText("a heading");
-    },
-  );
-});
+    await page.keyboard.type("a heading", { delay: 15 });
+    await expect(blocks(page).nth(1)).toHaveText("a heading");
+  },
+);
 
 /** The list's viewport and every entry in it, measured in one pass. */
 async function listGeometry(page: Page) {

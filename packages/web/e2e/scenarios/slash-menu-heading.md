@@ -3,7 +3,7 @@
 Scenario: slash-menu-heading
 Test: e2e/block-menu.spec.ts › typing / on an empty block filters, and Enter converts it
 
-A throwaway prototype for #628. This file is the human half of one behavior;
+A repository scenario retained by #668. This file is the human half of one behavior;
 the `Test:` line above is its only link to the machine half, and
 `packages/web/test/scenario-link.test.ts` is the only thing that checks the link
 still resolves. Nothing here is executed: the Playwright test is the assertion,
@@ -29,8 +29,5 @@ this page is the claim a person makes about the product.
 - `/he` filters the menu to the heading levels and nothing else, so the count in
   step 4 is three. A new block type whose name matches `he` would break the
   scenario without breaking the product.
-- The evidence comes from `mise run e2e`, whose harness starts a throwaway hub
-  and dev server on ephemeral ports. Everything on the recording is synthetic:
-  no real workspace, no real document, nobody's prose.
 - Chromium only, at Playwright's `Desktop Chrome` viewport. The scenario says
-  nothing about other browsers, and no run of it is evidence about them.
+  nothing about other browsers.

@@ -22,35 +22,17 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   forbidOnly: process.env.CI !== undefined,
-  // `list` is still the suite's reporter. The second one is #628's throwaway
-  // spike: it files evidence for tests that carry a `scenario` annotation and
-  // ignores every other test, so nothing here switches recording on suite-wide
-  // — the video comes from the `scenario` project below, paired with
-  // `chromium`'s `grepInvert`. The two filters are one mechanism: removing the
-  // scenario project without the inverse filter drops that test entirely, and
-  // an explicit `--project=chromium` run omits it (33 of 34 tests).
-  reporter: [["list"], ["./e2e/scenarios/evidence-reporter.ts"]],
+  reporter: [["list"]],
   // Generous per test, not per run: the whole file is meant to finish in well
   // under 90s, and a stuck test should fail rather than hang the suite.
   timeout: 60_000,
   // Convergence over a websocket is not instant, and the first navigation waits
   // for vite to pre-bundle the app's dependencies.
   expect: { timeout: 20_000 },
-  // Two projects, one browser. `video` is a worker-scoped option — Playwright
-  // refuses it in a `test.use` inside a describe block — so a project is the
-  // narrowest thing that can turn recording on for one scenario and nothing
-  // else. #628's `@scenario` test runs only in the second; everything else runs
-  // only in the first, unrecorded, exactly as before.
   projects: [
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      grepInvert: /@scenario/,
-    },
-    {
-      name: "scenario",
-      use: { ...devices["Desktop Chrome"], video: "on" },
-      grep: /@scenario/,
     },
   ],
 });
