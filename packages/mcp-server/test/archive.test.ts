@@ -44,14 +44,14 @@ class CountingStore extends MirrorStore {
 
   indexAttempts = 0;
 
-  override indexDoc(doc: IndexedDoc): void {
+  override indexDoc(doc: IndexedDoc, throughSeq: number): void {
     this.indexAttempts += 1;
     if (this.failEveryIndex || this.failNextIndex) {
       this.failNextIndex = false;
       throw new Error("simulated index failure");
     }
     this.indexed.push(doc.uuid);
-    super.indexDoc(doc);
+    super.indexDoc(doc, throughSeq);
   }
 
   unindexAttempts = 0;
@@ -411,7 +411,10 @@ describe("restore_doc", () => {
     // Rows for tombstoned documents, with nothing queued — what a rebuilt
     // mirror looks like before anything has noticed.
     for (const uuid of uuids) {
-      store.indexDoc({ uuid, title: "stale", tags: [], description: "", links: [], body: "" });
+      store.indexDoc(
+        { uuid, title: "stale", tags: [], description: "", links: [], body: "" },
+        0,
+      );
       expect(store.isIndexed(uuid)).toBe(true);
     }
     const before = store.unindexAttempts;
@@ -444,14 +447,17 @@ describe("restore_doc", () => {
     // the rows, and the read guard means a tombstone with no rows is never
     // deleted at all — so without this the refusal below would never be reached
     // and this test would pass no matter what escaped.
-    store.indexDoc({
-      uuid: doc.uuid,
-      title: "stale",
-      tags: [],
-      description: "",
-      links: [],
-      body: "",
-    });
+    store.indexDoc(
+      {
+        uuid: doc.uuid,
+        title: "stale",
+        tags: [],
+        description: "",
+        links: [],
+        body: "",
+      },
+      0,
+    );
     store.failUnindex = true;
 
     const before = store.unindexAttempts;

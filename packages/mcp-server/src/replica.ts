@@ -76,6 +76,8 @@ export interface Replica {
   readonly awareness: Awareness;
   /** The highest log sequence applied to this replica. */
   lastSeq: number;
+  /** The highest log cut applied before deriving this replica's index rows. */
+  indexedThroughSeq: number;
 }
 
 /**
@@ -445,6 +447,7 @@ export class Replicas {
       doc,
       awareness,
       lastSeq: 0,
+      indexedThroughSeq: 0,
     };
 
     // Which stubs changed is knowable only here: the update payload says a
@@ -477,8 +480,9 @@ export class Replicas {
       // emit later updates — which would turn a broken replica into a silent
       // one, reporting `applied: true` for writes nothing ever logged. Recorded
       // here, it stops every tool through `assertHealthy`.
+      let appendedSeq: number;
       try {
-        this.store.appendUpdate(room, payload, kind);
+        appendedSeq = this.store.appendUpdate(room, payload, kind);
       } catch (error) {
         this.persistenceFailure ??= { room, error };
         log.error("failed to append to the update log", {
@@ -491,6 +495,19 @@ export class Replicas {
         // mutation the log just refused would be broadcast to every other
         // client, while this tool call reported `applied: false`.
         this.sync.quarantine();
+        return;
+      }
+      // Another process can append to this room after our last settle and
+      // before this append. Replaying from the last cut used for indexing
+      // folds those rows in, plus this already-applied update as a no-op,
+      // before any derived row certifies itself through `appendedSeq`.
+      try {
+        this.catchUpForIndex(replica, appendedSeq);
+      } catch (error) {
+        // The update is durable and the Y.Doc has it, so this is an index-cache
+        // failure rather than a persistence failure. A later settle replays
+        // from `lastSeq` and derives the rows again.
+        log.warn("failed to catch up before indexing a document change", error);
         return;
       }
       this.afterChange(replica, kind === "local");
@@ -530,24 +547,59 @@ export class Replicas {
    * exactly what replaced them.
    */
   private poll(replica: Replica): boolean {
-    const slice = this.store.readSince(replica.room, replica.lastSeq);
-    let applied = false;
-    if (slice.snapshot !== null) {
-      Y.applyUpdate(replica.doc, slice.snapshot.state, LOG_ORIGIN);
-      replica.lastSeq = slice.snapshot.throughSeq;
-      applied = true;
-    }
-    for (const entry of slice.updates) {
-      Y.applyUpdate(replica.doc, entry.payload, LOG_ORIGIN);
-      replica.lastSeq = entry.seq;
-      applied = true;
-    }
+    const replayed = this.replayLog(replica, replica.lastSeq);
+    replica.lastSeq = replayed.throughSeq;
+    replica.indexedThroughSeq = Math.max(
+      replica.indexedThroughSeq,
+      replayed.throughSeq,
+    );
+    const applied = replayed.applied;
     if (applied) {
       // A replay is this replica catching up on writes it did not make — its own
       // from before a restart, or another instance's on the same database.
       this.afterChange(replica, false);
     }
     return applied;
+  }
+
+  /**
+   * Apply the room log after `fromSeq` without changing the settle watermark.
+   *
+   * Local appends deliberately do not advance `lastSeq`: pending-room release
+   * and compaction still use the existing poll-owned watermark. Indexing has a
+   * narrower need — prove which contiguous cut the current Y.Doc includes — so
+   * it tracks that cut separately and a later settle may harmlessly replay the
+   * same idempotent Yjs rows.
+   */
+  private replayLog(
+    replica: Replica,
+    fromSeq: number,
+  ): { applied: boolean; throughSeq: number } {
+    const slice = this.store.readSince(replica.room, fromSeq);
+    let applied = false;
+    let throughSeq = fromSeq;
+    if (slice.snapshot !== null) {
+      Y.applyUpdate(replica.doc, slice.snapshot.state, LOG_ORIGIN);
+      throughSeq = slice.snapshot.throughSeq;
+      applied = true;
+    }
+    for (const entry of slice.updates) {
+      Y.applyUpdate(replica.doc, entry.payload, LOG_ORIGIN);
+      throughSeq = entry.seq;
+      applied = true;
+    }
+    return { applied, throughSeq };
+  }
+
+  /** Bring the index derivation to at least the update this process appended. */
+  private catchUpForIndex(replica: Replica, appendedSeq: number): void {
+    const replayed = this.replayLog(replica, replica.indexedThroughSeq);
+    if (replayed.throughSeq < appendedSeq) {
+      throw new Error(
+        `the committed update ${appendedSeq} for ${replica.room} was absent from its log replay`,
+      );
+    }
+    replica.indexedThroughSeq = replayed.throughSeq;
   }
 
   private pollAll(): void {
@@ -619,19 +671,22 @@ export class Replicas {
    */
   private indexRows(replica: Replica, meta: DocMeta): void {
     const blocks = getBlocksWithInline(replica.doc);
-    this.store.indexDoc({
-      uuid: meta.uuid,
-      title: meta.title,
-      tags: meta.tags,
-      description: meta.description ?? "",
-      links: [
-        ...meta.links,
-        ...blocks.flatMap(({ block, inline }) =>
-          docLinkRanges(block, inline).map((range) => range.docId),
-        ),
-      ],
-      body: blocks.map(({ block }) => block.text).join("\n"),
-    });
+    this.store.indexDoc(
+      {
+        uuid: meta.uuid,
+        title: meta.title,
+        tags: meta.tags,
+        description: meta.description ?? "",
+        links: [
+          ...meta.links,
+          ...blocks.flatMap(({ block, inline }) =>
+            docLinkRanges(block, inline).map((range) => range.docId),
+          ),
+        ],
+        body: blocks.map(({ block }) => block.text).join("\n"),
+      },
+      replica.indexedThroughSeq,
+    );
   }
 
   /**

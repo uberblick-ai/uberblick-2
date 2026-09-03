@@ -14,6 +14,7 @@ import {
   getBlocksFragment,
   getDirectoryEntry,
   setBlockType,
+  setTags,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -514,14 +515,7 @@ describe("the derived index", () => {
 
     // And an empty tag — which only a foreign writer can produce, since the
     // tool rejects one — must not vanish from the row.
-    rig.instance.store.indexDoc({
-      uuid: doc.uuid,
-      title: "Awkward tags",
-      tags: ["", "after"],
-      description: "",
-      links: [],
-      body: "bilby",
-    });
+    setTags(rig.instance.replicas.replica(doc.uuid).doc, ["", "after"]);
     expect(rig.instance.store.search("bilby", 10)[0]?.tags).toEqual([
       "",
       "after",

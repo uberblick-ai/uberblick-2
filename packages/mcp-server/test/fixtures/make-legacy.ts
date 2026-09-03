@@ -56,13 +56,16 @@ for (const update of updates) {
   store.appendUpdate(ROOM, update, "local");
 }
 
-store.indexDoc({
-  uuid: UUID,
-  title: "Written by better-sqlite3",
-  tags: ["legacy"],
-  description: "",
-  links: [OTHER],
-  body: "seeded by the old binding\nappended after the snapshot",
-});
+store.indexDoc(
+  {
+    uuid: UUID,
+    title: "Written by better-sqlite3",
+    tags: ["legacy"],
+    description: "",
+    links: [OTHER],
+    body: "seeded by the old binding\nappended after the snapshot",
+  },
+  2,
+);
 
 store.close();
