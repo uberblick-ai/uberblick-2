@@ -704,8 +704,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
    *
    * Sitting in {@link durability} rather than in each handler is deliberate:
    * every mutator that touches a document goes through it, including ones
-   * written later. The workspace's own rooms are skipped — the directory, the
-   * sidebar are not documents and have no description to miss.
+   * written later. The workspace's own rooms are skipped — the directory and
+   * the sidebar are not documents and have no description to miss.
    */
   const descriptionGap = (replica: Replica): Record<string, unknown> => {
     if (replica.isDirectory || replica.isSidebar) {

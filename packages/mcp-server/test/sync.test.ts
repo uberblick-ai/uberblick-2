@@ -92,7 +92,7 @@ describe("hub sync", () => {
   it("drains a pending legacy feedback room, then leaves its residue inert", async () => {
     const running = await hub();
     const databasePath = tempDatabasePath();
-    const legacyRoom = `${WORKSPACE}/${["_feed", "back"].join("")}`;
+    const legacyRoom = `${WORKSPACE}/_feedback`;
     const legacy = new Y.Doc();
     legacy.getArray("events").push([{ legacy: true }]);
     const seeded = new MirrorStore(databasePath, WORKSPACE);

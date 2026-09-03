@@ -158,7 +158,7 @@ describe("the canonical room grammar", () => {
       ["a reserved-looking name nobody reserved", `${WORKSPACE}/_admin`],
       [
         "the retired feedback room",
-        `${WORKSPACE}/${["_feed", "back"].join("")}`,
+        `${WORKSPACE}/_feedback`,
       ],
       ["a path with an extra segment", `${WORKSPACE}/${DOC}/extra`],
       ["an empty document segment", `${WORKSPACE}/`],
