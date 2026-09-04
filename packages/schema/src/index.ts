@@ -252,5 +252,7 @@ export type {
   ProseBlockType,
   RequirementStatus,
   SidebarGroup,
+  TagAssignment,
   TagCatalogEntry,
+  UnresolvedTagAssignment,
 } from "./types.js";

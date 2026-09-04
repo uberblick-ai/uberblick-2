@@ -162,4 +162,27 @@ describe("workspace tag catalog", () => {
     );
     expect(getMeta(doc).tags).toEqual([AUTH]);
   });
+
+  it("preserves an assigned UUID while the local catalog cannot resolve it", () => {
+    const completeCatalog = new Y.Doc();
+    createTagCatalogEntry(completeCatalog, "auth", AUTH);
+    createTagCatalogEntry(completeCatalog, "billing", BILLING);
+    const partialCatalog = new Y.Doc();
+    createTagCatalogEntry(partialCatalog, "auth", AUTH);
+    const doc = document();
+    assignDocumentTags(doc, completeCatalog, [AUTH, BILLING]);
+
+    const assignments = readDocumentTags(doc, partialCatalog);
+    expect(assignments).toEqual([
+      { id: AUTH, name: "auth", state: "active" },
+      { id: BILLING, name: null, state: "unresolved" },
+    ]);
+
+    assignDocumentTags(
+      doc,
+      partialCatalog,
+      assignments.map((entry) => entry.id),
+    );
+    expect(getMeta(doc).tags).toEqual([AUTH, BILLING]);
+  });
 });

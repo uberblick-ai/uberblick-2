@@ -390,6 +390,17 @@ export interface TagCatalogEntry {
   state: "active" | "retired";
 }
 
+/** A stored catalog UUID this replica cannot resolve from its current catalog. */
+export interface UnresolvedTagAssignment {
+  id: string;
+  /** No display name is available until the catalog entry hydrates. */
+  name: null;
+  state: "unresolved";
+}
+
+/** One stored tag assignment as the current catalog replica can read it. */
+export type TagAssignment = TagCatalogEntry | UnresolvedTagAssignment;
+
 /** One group in the sidebar doc: a stable id, a name, and what it pins. */
 export interface SidebarGroup {
   id: string;

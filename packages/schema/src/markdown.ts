@@ -775,8 +775,8 @@ export function exportMarkdown(
     const tags =
       options.tagCatalog === undefined
         ? meta.tags
-        : resolveTagAssignments(options.tagCatalog, meta.tags).map(
-            (entry) => entry.name,
+        : resolveTagAssignments(options.tagCatalog, meta.tags).flatMap(
+            (entry) => entry.name === null ? [] : [entry.name],
           );
     const lines = [
       "---",

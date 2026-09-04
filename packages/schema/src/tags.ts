@@ -23,7 +23,11 @@ import {
   InvalidTagNameError,
 } from "./errors.js";
 import { canonicalDocumentUuid } from "./rooms.js";
-import type { DirectoryEntry, TagCatalogEntry } from "./types.js";
+import type {
+  DirectoryEntry,
+  TagAssignment,
+  TagCatalogEntry,
+} from "./types.js";
 
 /** UUID -> immutable display name. */
 export const TAG_CATALOG_IDENTITIES_KEY = "tag-identities";
@@ -231,23 +235,25 @@ export function seedTagCatalog(catalogDoc: Y.Doc): void {
 }
 
 /**
- * Resolve stored identities in their document order. Unknown identities and
- * provisional name strings are omitted; aliases converge on one canonical ID.
+ * Resolve stored identities in their document order. A UUID absent from this
+ * replica's catalog remains visible as unresolved, while provisional name
+ * strings are omitted; aliases converge on one canonical ID.
  */
 export function resolveTagAssignments(
   catalogDoc: Y.Doc,
   identities: readonly unknown[],
-): TagCatalogEntry[] {
+): TagAssignment[] {
   const index = catalogIndex(catalogDoc);
   const seen = new Set<string>();
-  const resolved: TagCatalogEntry[] = [];
+  const resolved: TagAssignment[] = [];
   for (const identity of identities) {
     const canonical = canonicalDocumentUuid(identity);
     if (canonical === null) continue;
     const entry = index.byIdentity.get(canonical);
-    if (entry === undefined || seen.has(entry.id)) continue;
-    seen.add(entry.id);
-    resolved.push(entry);
+    const id = entry?.id ?? canonical;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    resolved.push(entry ?? { id, name: null, state: "unresolved" });
   }
   return resolved;
 }
@@ -259,7 +265,7 @@ function storedTags(value: unknown): unknown[] {
 export function readDocumentTags(
   document: Y.Doc,
   catalogDoc: Y.Doc,
-): TagCatalogEntry[] {
+): TagAssignment[] {
   return resolveTagAssignments(
     catalogDoc,
     storedTags(getMetaMap(document).get("tags")),
@@ -269,14 +275,15 @@ export function readDocumentTags(
 export function readDirectoryTags(
   entry: Pick<DirectoryEntry, "tags">,
   catalogDoc: Y.Doc,
-): TagCatalogEntry[] {
+): TagAssignment[] {
   return resolveTagAssignments(catalogDoc, entry.tags);
 }
 
 /**
  * Atomically replace a document's tag identities after validating the complete
- * request. An already-assigned retired tag may remain; a retired tag may not be
- * added. The first successful call naturally replaces every provisional value.
+ * request. An already-assigned retired tag or unresolved UUID may remain;
+ * neither may be newly added. The first successful call naturally replaces
+ * every provisional value.
  */
 export function assignDocumentTags(
   document: Y.Doc,
@@ -300,6 +307,13 @@ export function assignDocumentTags(
     const entry =
       canonical === null ? undefined : index.byIdentity.get(canonical);
     if (entry === undefined) {
+      if (canonical !== null && existing.has(canonical)) {
+        if (!seen.has(canonical)) {
+          seen.add(canonical);
+          next.push(canonical);
+        }
+        continue;
+      }
       unknown.push(requested);
       continue;
     }
