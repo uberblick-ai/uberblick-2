@@ -20,7 +20,7 @@ import { directoryRoom } from "@uberblick/schema";
 const acquireRoom = vi.hoisted(() => vi.fn());
 vi.mock("../src/collab/rooms.js", () => ({ acquireRoom }));
 
-const { App } = await import("../src/ui/App.js");
+const { App, ReboundNotice } = await import("../src/ui/App.js");
 
 /**
  * The address names the workspace, so the test opens one. `/` would render the
@@ -60,6 +60,38 @@ afterEach(() => {
   acquireRoom.mockReset();
 });
 
+it("shows the restart state only for a rebound local-serving document", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const serving = {
+    workspace: WORKSPACE,
+    remoteHubUrl: "wss://remote.example/ws",
+    rebound: false,
+  };
+
+  await act(async () => {
+    root.render(<ReboundNotice serving={serving} />);
+  });
+  expect(container.querySelector(".ub-rebound-notice")).toBeNull();
+
+  await act(async () => {
+    root.render(<ReboundNotice serving={null} />);
+  });
+  expect(container.querySelector(".ub-rebound-notice")).toBeNull();
+
+  await act(async () => {
+    root.render(<ReboundNotice serving={{ ...serving, rebound: true }} />);
+  });
+  const notice = container.querySelector(".ub-rebound-notice");
+  expect(notice?.textContent).toContain(WORKSPACE);
+  expect(notice?.textContent).toContain("wss://remote.example/ws");
+  expect(notice?.querySelector("button")).toBeNull();
+
+  await act(async () => root.unmount());
+  container.remove();
+});
+
 it("holds the first connect until the endpoint resolves, without holding the render", async () => {
   let answer: (response: Response) => void = () => {};
   vi.spyOn(globalThis, "fetch").mockImplementation(
@@ -80,12 +112,37 @@ it("holds the first connect until the endpoint resolves, without holding the ren
   expect(acquireRoom).not.toHaveBeenCalled();
 
   await act(async () => {
-    answer(new Response('{"hubUrl":"wss://hub.example/ws"}', { status: 200 }));
+    answer(
+      new Response(
+        JSON.stringify({
+          hubUrl: "ws://127.0.0.1:4321",
+          workspaces: [WORKSPACE],
+          remoteHubUrl: "wss://remote.example/ws",
+          rebound: true,
+        }),
+        { status: 200 },
+      ),
+    );
   });
 
   expect(acquireRoom).toHaveBeenCalledWith(
     directoryRoom(WORKSPACE),
     expect.anything(),
+  );
+  const notice = container.querySelector(".ub-rebound-notice");
+  expect(notice?.getAttribute("role")).toBe("status");
+  expect(notice?.textContent).toContain(`workspace ${WORKSPACE}`);
+  expect(container.querySelector(".ub-docs-heading")?.textContent).toBe("Documents");
+
+  await act(async () => {
+    window.history.pushState(null, "", `/${WORKSPACE}/not-a-document`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  expect(container.querySelector(".ub-notice")?.textContent).toContain(
+    "Not a document link",
+  );
+  expect(container.querySelector(".ub-rebound-notice")?.textContent).toContain(
+    "Restart ub open",
   );
 
   await act(async () => {

@@ -29,8 +29,13 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
-import { configuredWorkspaces, hubEndpoint } from "../config.js";
-import type { HubEndpoint } from "../config.js";
+import {
+  configuredWorkspaces,
+  endpointLabel,
+  hubEndpoint,
+  localServing,
+} from "../config.js";
+import type { HubEndpoint, LocalServing } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
 import { watchDocumentStub } from "../collab/directory-stub.js";
 import { randomIdentity } from "../collab/identity.js";
@@ -78,6 +83,32 @@ import {
 
 /** Sidebar preference, persisted per browser. */
 const SIDEBAR_COLLAPSED_KEY = "uberblick.sidebar.collapsed";
+
+/** The frozen serving process is still useful; this notice only names its binding. */
+export function ReboundNotice({
+  serving,
+}: {
+  serving: LocalServing | null;
+}): ReactElement | null {
+  if (serving?.rebound !== true) return null;
+  const remoteHub = endpointLabel(serving.remoteHubUrl);
+  if (remoteHub === null) return null;
+  return (
+    <p className="ub-rebound-notice" role="status">
+      <strong>This machine’s binding changed.</strong> <code>ub open</code> is still
+      serving{" "}
+      {serving.workspace === null ? (
+        <>without a workspace</>
+      ) : (
+        <>
+          workspace <code>{serving.workspace}</code>
+        </>
+      )}{" "}
+      and is bound to sync with <code>{remoteHub}</code>. Restart <code>ub open</code>{" "}
+      to pick up the change.
+    </p>
+  );
+}
 
 /**
  * What the address resolves to on screen.
@@ -298,6 +329,12 @@ export function App(): ReactElement {
   // re-renders this component with them.
   const hubReady = useHubEndpoint();
   const configured = hubReady ? configuredWorkspaces() : [];
+  // A re-bind after this load must not retarget or clear this page's diagnosis:
+  // `ub open` keeps the startup binding until the process is restarted.
+  const servingAtLoad = useRef<LocalServing | null | undefined>(undefined);
+  if (hubReady && servingAtLoad.current === undefined) {
+    servingAtLoad.current = localServing();
+  }
   /**
    * Which hub every "synced" in this window is about (#362) — read once here
    * and handed to the document-local reading and panel, so they cannot name
@@ -712,6 +749,7 @@ export function App(): ReactElement {
 
   return (
     <main className="ub-app">
+      <ReboundNotice serving={servingAtLoad.current ?? null} />
       <div className="ub-body">
         {collapsed && (
           /* Pane-local and out of flow: restoring the sidebar costs no global

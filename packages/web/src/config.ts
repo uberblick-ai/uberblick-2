@@ -21,8 +21,9 @@
  * `hubUrl` then names its loopback websocket, `remoteHubUrl` names the hub its
  * replica half points at, and `rebound: true` says the machine's configured
  * binding has changed since this `ub open` started and it must be restarted.
- * This client does not consume those two diagnostics yet (#744, #759), so they
- * are ignored like every other additive key. `hubUrl` must be a bare `ws://` or
+ * This client reads the pair as one local-serving diagnostic: #759 presents a
+ * true `rebound`, while #744 will use the same upstream fact for search mode.
+ * `hubUrl` must be a bare `ws://` or
  * `wss://` address: no userinfo, no query, no fragment. `workspaces` is the
  * menu, in order, and its first entry is what `/` — the one address that names
  * no workspace — redirects to. It may also be written as one comma-separated
@@ -110,6 +111,20 @@ export interface ClientConfig {
    * rather than a state it hides — see `RoomStatus.tokenMissing`.
    */
   hubAuthToken: string;
+  /**
+   * The frozen workspace/upstream pair served by `ub open`, or null when this
+   * page talks directly to a hub. The pair comes from the same configuration
+   * document, so a fallback workspace can never be presented as the one this
+   * `ub open` process serves.
+   */
+  localServing: LocalServing | null;
+}
+
+/** The startup binding `ub open` keeps serving until it is restarted. */
+export interface LocalServing {
+  workspace: string | null;
+  remoteHubUrl: string;
+  rebound: boolean;
 }
 
 /**
@@ -222,6 +237,7 @@ const BUILT_IN: ClientConfig = {
   // Nothing to fall back to: no build injects a secret any more (#426), so a
   // client whose document did not arrive has none.
   hubAuthToken: "",
+  localServing: null,
 };
 
 /**
@@ -233,15 +249,18 @@ const BUILT_IN: ClientConfig = {
  * gets into a URL — which this document must never carry, and which would then
  * be transmitted and printed in every diagnostic that named the endpoint.
  */
-function usableEndpoint(value: string): { url: string } | { rejected: string } {
+function usableEndpoint(
+  value: string,
+  key: "hubUrl" | "remoteHubUrl" = "hubUrl",
+): { url: string } | { rejected: string } {
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
-    return { rejected: "hubUrl is not an absolute URL" };
+    return { rejected: `${key} is not an absolute URL` };
   }
   if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
-    return { rejected: "hubUrl is not a ws:// or wss:// URL" };
+    return { rejected: `${key} is not a ws:// or wss:// URL` };
   }
   if (
     parsed.username !== "" ||
@@ -249,7 +268,7 @@ function usableEndpoint(value: string): { url: string } | { rejected: string } {
     parsed.search !== "" ||
     parsed.hash !== ""
   ) {
-    return { rejected: "hubUrl carries credentials (userinfo, query or fragment)" };
+    return { rejected: `${key} carries credentials (userinfo, query or fragment)` };
   }
   // The parsed form, not the raw string: `new URL` accepts surrounding
   // whitespace that the websocket constructor would then choke on.
@@ -312,6 +331,7 @@ interface DocumentConfig {
   workspaces: { list: string[]; dropped: number } | { rejected: string };
   /** Empty when the document named no usable secret. */
   hubAuthToken: string;
+  localServing: LocalServing | { rejected: string } | null;
 }
 
 /**
@@ -379,7 +399,13 @@ function readDocument(
   // spelling out `,"hubUrl":` is not either: the body parsed as JSON above, so
   // a quote inside a string is written `\"`, while a real key's opening quote
   // can only follow `{` or `,`.
-  const twice = ["hubUrl", "workspaces", "hubAuthToken"].find(
+  const twice = [
+    "hubUrl",
+    "workspaces",
+    "hubAuthToken",
+    "remoteHubUrl",
+    "rebound",
+  ].find(
     (key) => (body.match(new RegExp(`(^|[^\\\\])"${key}"\\s*:`, "g")) ?? []).length > 1,
   );
   if (twice !== undefined) {
@@ -388,18 +414,34 @@ function readDocument(
   const document = parsed as Record<string, unknown>;
   const url = document.hubUrl;
   const secret = document.hubAuthToken;
+  const workspaces = usableWorkspaces(document.workspaces);
+  const remote = document.remoteHubUrl;
+  const remoteHubUrl =
+    remote === undefined
+      ? null
+      : typeof remote === "string" && remote !== ""
+        ? usableEndpoint(remote, "remoteHubUrl")
+        : { rejected: "remoteHubUrl is not a non-empty string" };
   return {
     hubUrl:
       typeof url === "string" && url !== ""
         ? usableEndpoint(url)
         : { rejected: "it has no string hubUrl" },
-    workspaces: usableWorkspaces(document.workspaces),
+    workspaces,
     // A non-string is refused rather than coerced, and without a reason: an
     // unusable secret leaves the client in exactly the state an absent one
     // does, and this is the one value whose shape must never reach a
     // diagnostic. What a reader is told is the state, not the document — see
     // `RoomStatus.tokenMissing`.
     hubAuthToken: typeof secret === "string" ? secret.trim() : "",
+    localServing:
+      remoteHubUrl === null || "rejected" in remoteHubUrl
+        ? remoteHubUrl
+        : {
+            remoteHubUrl: remoteHubUrl.url,
+            workspace: "rejected" in workspaces ? null : (workspaces.list[0] ?? null),
+            rebound: document.rebound === true,
+          },
   };
 }
 
@@ -469,6 +511,9 @@ export async function readClientConfig(
       `${dropped} of its workspaces ${dropped === 1 ? "is not a workspace id" : "are not workspace ids"}`,
     );
   }
+  if (outcome.localServing !== null && "rejected" in outcome.localServing) {
+    notes.push(outcome.localServing.rejected);
+  }
 
   return {
     ...("rejected" in outcome.hubUrl
@@ -478,6 +523,10 @@ export async function readClientConfig(
       ? { workspaces: BUILT_IN_WORKSPACES, workspacesSource: "define" as const }
       : { workspaces: outcome.workspaces.list, workspacesSource: "document" as const }),
     hubAuthToken: outcome.hubAuthToken,
+    localServing:
+      outcome.localServing === null || "rejected" in outcome.localServing
+        ? null
+        : outcome.localServing,
     ...(notes.length === 0 ? {} : { rejected: notes.join("; ") }),
   };
 }
@@ -569,6 +618,11 @@ function settled(): ClientConfig {
 export function hubEndpoint(): HubEndpoint {
   const config = settled();
   return { url: endpointLabel(config.hubUrl), source: config.hubUrlSource };
+}
+
+/** The `ub open` startup binding this page was served with, when there is one. */
+export function localServing(): LocalServing | null {
+  return settled().localServing;
 }
 
 /**
