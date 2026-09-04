@@ -281,6 +281,41 @@ function setTokenMissing(missing: boolean): void {
   }
 }
 
+async function signedAuthMessage(
+  secret: string,
+  workspace: string,
+  subject: string,
+): Promise<string> {
+  signingKey ??= importRootSecret(secret);
+  return wrapToken(
+    await mintToken(await signingKey, {
+      typ: "room",
+      sub: subject,
+      workspace,
+      scope: "read-write",
+      // Root-signed: what this client was handed is the root secret itself —
+      // served to it at runtime (#426) — and not a credential minted for it.
+      kid: null,
+      lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+    }),
+  );
+}
+
+/** Mint the protocol auth message shared by room and same-origin API requests. */
+export async function mintHubAuthMessage(
+  workspace: string,
+  subject: string,
+): Promise<string> {
+  await resolveClientConfig();
+  const secret = hubAuthToken();
+  if (secret === "") {
+    throw new Error(
+      `uberblick web: ${HUB_CONFIG_PATH} carries no hubAuthToken, so this client cannot authenticate`,
+    );
+  }
+  return await signedAuthMessage(secret, workspace, subject);
+}
+
 /**
  * Mint a fresh hub token for one room. Called by Hocuspocus before every
  * connect.
@@ -313,23 +348,10 @@ async function hubToken(room: string, identity: AwarenessUser): Promise<string> 
       `uberblick web: ${HUB_CONFIG_PATH} carries no hubAuthToken, so this client cannot authenticate`,
     );
   }
-  signingKey ??= importRootSecret(secret);
-  // Wrapped for the wire: the hub reads the protocol version out of the auth
-  // message before it reads the token. The token itself is unchanged.
-  return wrapToken(
-    await mintToken(await signingKey, {
-    typ: "room",
-    sub: identity.name,
-    workspace: parseRoom(room).workspaceId,
-    scope: "read-write",
-    // Root-signed: what this client was handed is the root secret itself —
-    // served to it at runtime (#426) — and not a credential minted for it.
-    kid: null,
-      // The ceiling itself. Hocuspocus calls this before every connect, so each
-      // reconnect mints a fresh token rather than replaying an expired one.
-      lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-    }),
-  );
+  // The ceiling is inside signedAuthMessage. Hocuspocus calls this before every
+  // connect, so each reconnect mints a fresh token rather than replaying an
+  // expired one.
+  return await signedAuthMessage(secret, parseRoom(room).workspaceId, identity.name);
 }
 
 export interface RoomStatus {

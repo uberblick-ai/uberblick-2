@@ -54,6 +54,7 @@ import { workspaceTags } from "./tags.js";
 import { focusThread } from "./threads.js";
 import type { SelectThread, ThreadFocus, ThreadView } from "./threads.js";
 import { DocumentList } from "../shell/DocumentList.js";
+import { createDocumentSearchClient } from "../shell/document-search.js";
 import {
   allPath,
   canonicalPath,
@@ -338,6 +339,16 @@ export function App(): ReactElement {
   // cannot enumerate them. Null only where the address named none it could use,
   // and then there are no rooms to join at all.
   const workspace = route.kind === "no-workspace" ? null : route.workspace;
+  const workspaceUuid = workspace?.uuid ?? null;
+  const documentSearch = useMemo(
+    () =>
+      !hubReady
+        ? undefined
+        : serving === null || workspaceUuid === null
+          ? null
+          : createDocumentSearchClient(workspaceUuid, identity.name),
+    [hubReady, identity.name, serving, workspaceUuid],
+  );
   const selected = route.kind === "doc" ? route.uuid : null;
   const settings = route.kind === "settings";
   // Both addresses that name the workspace render the document list, so the
@@ -896,6 +907,7 @@ export function App(): ReactElement {
             connection={directory}
             entries={entries}
             groups={sidebarGroups}
+            searchClient={documentSearch}
             onSelect={onSelect}
             onTogglePin={sidebarStatus.writable ? onTogglePinDoc : null}
           />
