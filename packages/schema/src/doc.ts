@@ -520,7 +520,12 @@ export function reorderDecisions(
   });
 }
 
-/** Replace the tag set. Tags are a plain array; last write wins. */
+/**
+ * Replace the raw tag field; last write wins.
+ *
+ * This is the provisional free-form boundary. Catalog-aware clients use
+ * `assignDocumentTags`, which validates identities and replaces this array.
+ */
 export function setTags(ydoc: Y.Doc, tags: string[]): void {
   const meta = getMetaMap(ydoc);
   ydoc.transact(() => {
