@@ -14,7 +14,6 @@ import {
 /** Long enough to cross the trigger/content gap, short enough to feel direct. */
 const HOVER_CLOSE_DELAY_MS = 120;
 
-type OpenReason = "activation" | "focus" | "hover";
 type CloseFocus = "none" | "trigger";
 
 const TABBABLE_SELECTOR = [
@@ -61,7 +60,6 @@ export function OutlinePane({
   const entries = useOutline(connection);
   const [open, setOpen] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const openReason = useRef<OpenReason>("activation");
   const closeFocus = useRef<CloseFocus | null>(null);
   const suppressFocusOpen = useRef(false);
   const lastPointerType = useRef<string | null>(null);
@@ -79,7 +77,6 @@ export function OutlinePane({
     cancelClose();
     if (open) return;
     closeFocus.current = null;
-    openReason.current = "hover";
     setOpen(true);
   };
 
@@ -120,11 +117,17 @@ export function OutlinePane({
   useEffect(() => {
     // The state is meaningful only where CSS turns the rail into an overlay;
     // on a wide screen the same rail state must not dismiss this sibling.
-    if (!obscured || trigger.current?.getClientRects().length !== 0) return;
-    if (closeTimer.current !== null) clearTimeout(closeTimer.current);
-    closeTimer.current = null;
-    closeFocus.current = "none";
-    setOpen(false);
+    if (!obscured) return;
+    const closeWhenCovered = (): void => {
+      if (trigger.current?.getClientRects().length !== 0) return;
+      if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+      closeFocus.current = "none";
+      setOpen(false);
+    };
+    closeWhenCovered();
+    window.addEventListener("resize", closeWhenCovered);
+    return () => window.removeEventListener("resize", closeWhenCovered);
   }, [obscured]);
 
   if (entries.length === 0) return null;
@@ -136,7 +139,6 @@ export function OutlinePane({
         cancelClose();
         if (shown) {
           closeFocus.current = null;
-          openReason.current = "activation";
         }
         setOpen(shown);
       }}
@@ -159,7 +161,6 @@ export function OutlinePane({
               if (!event.currentTarget.matches(":focus-visible")) return;
               cancelClose();
               closeFocus.current = null;
-              openReason.current = "focus";
               setOpen(true);
             }}
             onKeyDown={(event) => {
@@ -200,6 +201,7 @@ export function OutlinePane({
         onPointerEnter={(event) => {
           if (event.pointerType === "mouse") cancelClose();
         }}
+        onPointerLeave={closeAfterHover}
         onOpenAutoFocus={(event) => {
           // Opening on focus must leave the trigger in the page's Tab order.
           // Its Tab handler enters the rows deliberately; Radix's automatic
@@ -213,14 +215,16 @@ export function OutlinePane({
           if (closeFocus.current === "trigger") {
             event.preventDefault();
             closeFocus.current = null;
-            suppressFocusOpen.current = true;
-            trigger.current?.focus({ preventScroll: true });
+            if (
+              trigger.current !== null &&
+              trigger.current !== document.activeElement
+            ) {
+              suppressFocusOpen.current = true;
+              trigger.current.focus({ preventScroll: true });
+            }
             return;
           }
-          if (
-            closeFocus.current === "none" ||
-            openReason.current === "hover"
-          ) {
+          if (closeFocus.current === "none") {
             event.preventDefault();
             closeFocus.current = null;
           }
@@ -258,7 +262,6 @@ export function OutlinePane({
           onPointerEnter={(event) => {
             if (event.pointerType === "mouse") cancelClose();
           }}
-          onPointerLeave={closeAfterHover}
         >
           <p className="ub-rail-head">On this page</p>
           <ul>

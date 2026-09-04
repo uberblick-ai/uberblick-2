@@ -175,6 +175,19 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
   await expect(panel).toBeHidden();
   await expect(trigger).toBeFocused();
 
+  // Escape while focus never left the trigger must not suppress the next
+  // keyboard arrival at that trigger.
+  await page.keyboard.press("Enter");
+  await expect(panel).toBeVisible();
+  await expect(trigger).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+  await page.keyboard.press("Tab");
+  await expect(afterOutline).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(trigger).toBeFocused();
+  await expect(panel).toBeVisible();
+
   const target = page.locator(".ub-editor h2", { hasText: "Install" });
   const targetId = await target.getAttribute("id");
   expect(targetId).not.toBeNull();
@@ -255,6 +268,16 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     await expect(panel).toBeVisible();
     await threads.tap();
     await expect(page.locator(".ub-rail-open")).toBeVisible();
+    await expect(trigger).toBeHidden();
+    await expect(panel).toBeHidden();
+
+    // The drawer stays open across the breakpoint. If Contents opens while
+    // wide, narrowing again must close its portal when CSS hides the trigger.
+    await page.setViewportSize({ width: 1400, height: 540 });
+    await expect(trigger).toBeVisible();
+    await trigger.tap();
+    await expect(panel).toBeVisible();
+    await page.setViewportSize({ width: 720, height: 540 });
     await expect(trigger).toBeHidden();
     await expect(panel).toBeHidden();
   } finally {
