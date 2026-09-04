@@ -243,6 +243,12 @@ const RECOVERIES: Record<string, Recovery> = {
       "The document's stored kind is fixed through MCP. Choose a status in that kind's lifecycle; if the kind " +
       "itself is wrong, retrying cannot change or clear it through this interface.",
   },
+  governs_not_requirement: {
+    recoveryClass: "reread",
+    guidance:
+      "Choose a live requirement UUID from list_docs with `kind: requirement`, then call create_doc again. " +
+      "Nothing was created by this refused call.",
+  },
 };
 
 /**

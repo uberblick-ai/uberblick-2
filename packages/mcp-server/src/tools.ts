@@ -43,6 +43,7 @@ import {
   InvalidDocumentLifecycleError,
   MAX_DESCRIPTION_LENGTH,
   REQUIREMENT_STATUSES,
+  addDecision,
   addComment,
   appendBlock,
   canonicalDocumentUuid,
@@ -61,6 +62,7 @@ import {
   isProseBlockType,
   listAnnotations,
   listDirectory,
+  readDecisions,
   resolveAnnotationRange,
   restoreDirectoryEntry,
   setChangelogSuggestion,
@@ -282,19 +284,30 @@ const documentStatusArg = z
 
 const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
-    title: "A document with a lifecycle (`kind`)",
-    when: { field: "kind", present: true },
+    title: "A decision document (`kind: decision`)",
+    when: { field: "kind", is: "decision" },
+  },
+  {
+    title: "A requirement document (`kind: requirement`)",
+    when: { field: "kind", is: "requirement" },
+    forbids: ["governs"],
   },
   {
     title: "An ordinary document",
     when: { field: "kind", present: false },
-    forbids: ["status"],
+    forbids: ["status", "governs"],
   },
 ];
 
 const LIFECYCLE_RECORDS_STATE =
   "`kind` and `status` record what sort of document this is and where it stands. They do not authorize " +
   "execution: that authority comes from the owner's recorded GitHub decision.";
+
+const DECISION_EDGES =
+  "A document's `decisions` are an ordered log resolved from its decision slot. Their UUIDs are also derived " +
+  "outbound edges in `links`. `set_links` still replaces only the curated link array with exactly what it is " +
+  "given, so passing get_doc's effective `links` back to it stores any decision UUIDs there too; get_doc " +
+  "deduplicates the resulting edge.";
 
 function firstStatus(kind: DocumentKind): DocumentStatus {
   return kind === "requirement"
@@ -495,15 +508,15 @@ const CREATE_DOC_PLACEMENT =
   "resolves one by name, and never guesses a default — pin_doc is what brings a group into being. The answer " +
   "echoes the placement it made as `sidebar: {group: {id, name}, position}`.";
 
-/** What `create_doc` says about touching three rooms, in the words an agent reads. */
+/** What `create_doc` says about touching its rooms, in the words an agent reads. */
 const CREATE_DOC_DURABILITY =
-  "This call writes up to three independently persisted rooms — the document, the directory, and the sidebar when " +
-  "you place it — so it reports them one by one. `rooms` lists every room it touched with its own `applied` and " +
-  "`synced`; the top-level `synced` is the AND over all of them and is never true while one is still pending. It " +
-  "is NOT transactional: there is no rollback and no remote atomicity. If the local update log refuses a write " +
-  "part-way, the call fails with `persistence_failed` carrying the `uuid`, the rooms already `completed`, the " +
-  "`failed` room, `rolledBack: false`, and a `recovery` line — the earlier rooms stay durable, and after the " +
-  "restart that failure requires, pin_doc finishes a placement whose document survived.";
+  "This call writes up to four independently persisted rooms — the document, the directory, the governed " +
+  "requirement when `governs` is present, and the sidebar when you place it — so it reports them one by one. " +
+  "`rooms` lists every room it touched with its own `applied` and `synced`; the top-level `synced` is the AND over " +
+  "all of them and is never true while one is still pending. It is NOT transactional: there is no rollback and " +
+  "no remote atomicity. If the local update log refuses a write part-way, the call fails with `persistence_failed` " +
+  "carrying the `uuid`, the rooms already `completed`, the `failed` room, `rolledBack: false`, and a stage-aware " +
+  "`recovery` line — the earlier rooms stay durable, and recovery never risks creating the decision twice.";
 
 /** What to do after a partial create, by the room whose write the log refused. */
 const RECOVERY: Record<string, string> & { other: string } = {
@@ -518,10 +531,20 @@ const RECOVERY: Record<string, string> & { other: string } = {
   sidebar:
     "The document and its directory stub are durable; only the sidebar placement is missing. Restart the MCP " +
     "server, then pin_doc with this uuid and the same group id to finish it.",
+  requirement:
+    "The decision and its directory stub are durable, but the requirement it governs does not reference it. " +
+    "Restart the MCP server, then read both with get_doc. If the requirement still has no such decision, use " +
+    "archive_doc on this uuid to retire the orphan; do NOT call create_doc again as recovery for this call.",
   other:
     "The log refused a write to a room this call does not own — another document syncing while it ran. Restart " +
     "the MCP server, then check with list_docs and get_sidebar what the rooms in `completed` left behind.",
 };
+
+const REQUIREMENT_DIRECTORY_RECOVERY =
+  "The decision, its directory stub and the governed requirement update are durable; a later directory append " +
+  "was refused, usually the requirement's follow-up stub repair. Restart the MCP server, then read the requirement " +
+  "and this uuid with get_doc. When `decisions` contains this uuid, the create succeeded — do NOT call create_doc " +
+  "again.";
 
 /**
  * `annotate`'s two shapes, stated once for the boundary and for `tools/list`.
@@ -837,6 +860,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Pass `kind` to create a lifecycle document. Its `status` defaults to that kind's first state; `status` " +
         "without `kind`, or a status owned by the other kind, is refused before a document is created. " +
         LIFECYCLE_RECORDS_STATE +
+        " A decision may pass `governs`, the UUID of a live, hydrated requirement in this replica. The decision " +
+        "is made durable before its UUID is appended to that requirement's ordered decision log; any other use " +
+        "of `governs` is refused before a UUID is allocated or a room is written. " +
         "\n\n" +
         CREATE_DOC_PLACEMENT +
         "\n\n" +
@@ -854,6 +880,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           tags: z.array(z.string().min(1)).optional(),
           kind: documentKindArg.optional(),
           status: documentStatusArg.optional(),
+          governs: uuidArg
+            .optional()
+            .describe(
+              "Requirement UUID whose ordered decision log receives this new decision. Accepted only with `kind: decision`.",
+            ),
           blocks: z
             .array(blockInputSchema)
             .optional()
@@ -863,7 +894,16 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         CREATE_DOC_LIFECYCLE_MODES,
       ),
     },
-    guarded("create_doc", async ({ title, description, tags, kind, status, blocks, sidebar }) => {
+    guarded("create_doc", async ({
+      title,
+      description,
+      tags,
+      kind,
+      status,
+      governs,
+      blocks,
+      sidebar,
+    }) => {
       await replicas.settle();
 
       const lifecycle =
@@ -886,9 +926,21 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         });
       }
 
+      const requirement =
+        governs === undefined ? null : requireWritableDoc(governs);
+      const requirementKind =
+        requirement === null ? null : (getMeta(requirement.doc).kind ?? null);
+      if (requirement !== null && requirementKind !== "requirement") {
+        throw new ToolError(
+          "governs_not_requirement",
+          `Document ${governs} is not a requirement, so this decision cannot govern it`,
+          { governs, kind: requirementKind },
+        );
+      }
+
       // Resolved before a uuid exists, because this is the one part of the call
       // that can still be all-or-nothing: an unknown group must fail having
-      // created nothing. Everything after it is three independently persisted
+      // created nothing. Everything after it is four independently persisted
       // rooms, reported one by one.
       const group =
         sidebar === undefined
@@ -912,6 +964,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const purposeOf = (room: string): string => {
         if (room === replica.room) return "document";
         if (room === directory.room) return "directory";
+        if (requirement !== null && room === requirement.room) {
+          return "requirement";
+        }
         if (room === sidebarReplica.room) return "sidebar";
         return "other";
       };
@@ -991,7 +1046,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
             "Nothing was rolled back: the rooms in `completed` are durable and the rooms after " +
             `the failure were never written. Cause: ${failure.message}`,
           { purpose: failedAt, room: failure.room },
-          RECOVERY[failedAt] ?? RECOVERY.other,
+          purpose === "requirement" && failedAt === "directory"
+            ? REQUIREMENT_DIRECTORY_RECOVERY
+            : (RECOVERY[failedAt] ?? RECOVERY.other),
         );
       };
 
@@ -1035,6 +1092,12 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           updatedAt: now,
         });
       });
+
+      if (requirement !== null) {
+        stage("requirement", requirement, () => {
+          addDecision(requirement.doc, uuid);
+        });
+      }
 
       let placement: SidebarPlacement | null = null;
       if (group !== null && sidebar !== undefined) {
@@ -1082,6 +1145,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         description,
         tags: tags ?? [],
         ...(lifecycle === null ? {} : lifecycle),
+        ...(governs === undefined ? {} : { governs }),
         blocks: blocksJson(replica),
         ...(placement === null ? {} : { sidebar: placement }),
         ...durabilityAcross(replica, completed),
@@ -1099,6 +1163,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "documents omit both. " +
         LIFECYCLE_RECORDS_STATE +
         "\n\n" +
+        DECISION_EDGES +
+        "\n\n" +
         "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
         "`text` is plain and mark-free, as it has always been. A block that carries inline references to other " +
         "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
@@ -1113,6 +1179,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       return json({
         ...meta,
         room: replica.room,
+        decisions: readDecisions(replica.doc, replicas.directory().doc),
         blocks: blocksJson(replica),
         annotations: listAnnotations(replica.doc).map((annotation) =>
           annotationJson(replica, annotation),
@@ -1372,7 +1439,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     {
       title: "Set a document's outbound links",
       description:
-        "Replace the document's outbound link set. Values are target document UUIDs — never paths, never titles. " +
+        "Replace the document's curated outbound link set. Values are target document UUIDs — never paths, never titles. " +
+        DECISION_EDGES +
+        " " +
         "The backlinks index follows immediately.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
