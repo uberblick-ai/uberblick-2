@@ -101,6 +101,11 @@ import {
 } from "@uberblick/hub/protocol";
 import { clampToken } from "@uberblick/hub/token";
 import {
+  DIRECTORY_SUFFIX,
+  SIDEBAR_SUFFIX,
+  parseRoom,
+} from "@uberblick/schema";
+import {
   DEFAULT_HUB_URL,
   ServingReplicaHeldError,
   createMcpEngine,
@@ -1586,6 +1591,12 @@ export async function openCommand(
             throw new Error(`local replica refresh failed: ${refresh.message}`);
           }
           engine.store.appendUpdate(room, payload, "local");
+        },
+        awarenessForRoom: (room) => {
+          const { uuid } = parseRoom(room);
+          if (uuid === DIRECTORY_SUFFIX) return engine.replicas.directory().awareness;
+          if (uuid === SIDEBAR_SUFFIX) return engine.replicas.sidebar().awareness;
+          return engine.replicas.replica(uuid).awareness;
         },
         onRequest: (request, response) => {
           serveBoundRequest(

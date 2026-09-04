@@ -833,6 +833,113 @@ describe("ub open", () => {
     }
   });
 
+  it("relays presence across reconnect and lets a served tab expire upstream", async () => {
+    const { box, env } = configured();
+    const hub = await startHub(box);
+    const hubUrl = `ws://127.0.0.1:${hub.port}`;
+    pointAt(box, hubUrl);
+    const app = await open(box, ["--port", String(await freePort())], env);
+    const room = roomForDoc(WORKSPACE, "671ed55d-36de-42a9-bd85-701eff199942");
+    const token = wrapToken(
+      await mintToken(await importRootSecret(SECRET), {
+        typ: "room",
+        sub: "open-presence-test",
+        workspace: WORKSPACE,
+        scope: "read-write",
+        kid: null,
+        lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+      }),
+    );
+    const browserDoc = new Y.Doc();
+    const agentDoc = new Y.Doc();
+    const browser = new HocuspocusProvider({
+      url: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
+      name: room,
+      document: browserDoc,
+      token,
+      ...{
+        WebSocketPolyfill: class extends WebSocket {
+          constructor(url: string | URL) {
+            super(url, {
+              headers: { Origin: app.url.slice(0, -1) },
+            } as unknown as string[]);
+          }
+        },
+      },
+    });
+    const agent = new HocuspocusProvider({
+      url: hubUrl,
+      name: room,
+      document: agentDoc,
+      token,
+    });
+
+    try {
+      await waitUntil("both presence peers to sync", () =>
+        [browser, agent].every((provider) => provider.isSynced),
+      );
+      browser.setAwarenessField("client", "web");
+      browser.setAwarenessField("user", {
+        name: "browser tab",
+        color: "#112233",
+      });
+      agent.setAwarenessField("client", "agent");
+      agent.setAwarenessField("user", {
+        name: "coding agent",
+        color: "#abcdef",
+      });
+      agent.setAwarenessField("cursor", {
+        blockId: "block-1",
+        anchor: 1,
+        head: 1,
+      });
+
+      const browserId = browser.awareness?.clientID;
+      const agentId = agent.awareness?.clientID;
+      if (browserId === undefined || agentId === undefined) {
+        throw new Error("the presence peers have no awareness");
+      }
+      await waitUntil("presence to cross the local/upstream seam", () =>
+        browser.awareness?.getStates().has(agentId) === true &&
+        agent.awareness?.getStates().has(browserId) === true,
+      );
+      expect(browser.awareness?.getStates().get(agentId)).toMatchObject({
+        client: "agent",
+        cursor: { blockId: "block-1", anchor: 1, head: 1 },
+      });
+      expect(agent.awareness?.getStates().get(browserId)).toMatchObject({
+        client: "web",
+        user: { name: "browser tab", color: "#112233" },
+      });
+
+      await hub.stop();
+      await waitUntil("the disconnected agent to leave the served browser", () =>
+        browser.awareness?.getStates().has(agentId) === false,
+      );
+      expect(browser.awareness?.getStates().has(browserId)).toBe(true);
+
+      await startHub(box, hub.port);
+      // These ordinary awareness updates stand in for each peer's periodic
+      // renewal. Neither document nor provider is recreated across the loss.
+      browser.setAwarenessField("renewal", 1);
+      agent.setAwarenessField("renewal", 1);
+      await waitUntil("presence to return after the upstream reconnects", () =>
+        browser.awareness?.getStates().has(agentId) === true &&
+        agent.awareness?.getStates().has(browserId) === true,
+      );
+
+      browser.destroy();
+      await sleep(1_000);
+      expect(agent.awareness?.getStates().has(browserId)).toBe(true);
+    } finally {
+      browser.destroy();
+      agent.destroy();
+      browserDoc.destroy();
+      agentDoc.destroy();
+      expect((await app.interrupt()).status).toBe(0);
+    }
+  });
+
   it("searches the shared store while the hub is unreachable and discloses its cap", async () => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
