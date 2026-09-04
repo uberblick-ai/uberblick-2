@@ -821,15 +821,20 @@ export function App(): ReactElement {
             onToggleSync={onToggleSync}
           />
         )}
-        {/* The outline and the threads rail stack in one right column. Both
-            sections render nothing when they have nothing to show, so the rail
-            hides itself when it is empty (`.ub-rail:empty`) rather than leaving
-            a blank gutter. */}
+        {/* The outline follows the document independently of the comments rail:
+            its compact trigger remains while the document pane scrolls, and no
+            eligible heading means this renders no flex item at all. */}
+        <OutlinePane
+          key={doc?.room ?? "no-document"}
+          connection={doc}
+          obscured={threadsOpen}
+        />
+        {/* The comments rail renders nothing when there are no threads, so the
+            rail hides itself when empty instead of leaving a blank gutter. */}
         <aside
           id="ub-rail"
           className={threadsOpen ? "ub-rail ub-rail-open" : "ub-rail"}
         >
-          <OutlinePane connection={doc} />
           <ThreadsPane
             connection={doc}
             threads={threads}

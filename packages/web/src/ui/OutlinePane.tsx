@@ -1,35 +1,206 @@
-/**
- * "On this page": the open document's headings, in document order.
- *
- * A derived view, never a stored one — see outline.ts. Two hide rules: no
- * headings hides it here, a narrow viewport hides the whole right rail in CSS
- * (`.ub-rail`), which this is the top section of.
- */
+/** A floating view of the open document's first two heading levels. */
 
-import type { ReactElement } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { PointerEvent, ReactElement } from "react";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useOutline } from "./hooks.js";
 import { scrollBlockIntoView } from "./outline.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "./shadcn/dropdown-menu.js";
+
+/** Long enough to cross the trigger/content gap, short enough to feel direct. */
+const HOVER_CLOSE_DELAY_MS = 120;
 
 export function OutlinePane({
   connection,
+  obscured = false,
 }: {
   connection: RoomConnection | null;
+  /** A narrow-screen threads drawer currently covers this control. */
+  obscured?: boolean;
 }): ReactElement | null {
   const entries = useOutline(connection);
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openedFromHover = useRef(false);
+  const closingFromHover = useRef(false);
+  const closingFromTab = useRef(false);
+  const focusBeforeHover = useRef<HTMLElement | null>(null);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+
+  const cancelClose = (): void => {
+    if (closeTimer.current === null) return;
+    clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  };
+
+  const openFromHover = (event: PointerEvent): void => {
+    if (event.pointerType !== "mouse") return;
+    cancelClose();
+    if (open) return;
+    openedFromHover.current = true;
+    focusBeforeHover.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setOpen(true);
+  };
+
+  const closeAfterHover = (event: PointerEvent): void => {
+    if (event.pointerType !== "mouse") return;
+    cancelClose();
+    closeTimer.current = setTimeout(() => {
+      closeTimer.current = null;
+      const focused = document.activeElement;
+      if (
+        !openedFromHover.current &&
+        (
+          trigger.current?.matches(":hover") ||
+          trigger.current?.matches(":focus-visible") ||
+          document.querySelector(".ub-outline-panel")?.contains(focused)
+        )
+      ) {
+        return;
+      }
+      closingFromHover.current = true;
+      setOpen(false);
+    }, HOVER_CLOSE_DELAY_MS);
+  };
+
+  useEffect(
+    () => () => {
+      if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+    },
+    [],
+  );
+
+  // A live edit can remove the last eligible heading without unmounting this
+  // component. Do not remember an open surface for a later heading.
+  useEffect(() => {
+    if (entries.length !== 0) return;
+    if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+    if (open) closingFromHover.current = true;
+    setOpen(false);
+  }, [entries.length, open]);
+
+  useEffect(() => {
+    // The state is meaningful only where CSS turns the rail into an overlay;
+    // on a wide screen the same rail state must not dismiss this sibling.
+    if (!obscured) return;
+    const closeWhenCovered = (): void => {
+      if (trigger.current?.getClientRects().length !== 0) return;
+      if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+      if (open) closingFromHover.current = true;
+      setOpen(false);
+    };
+    closeWhenCovered();
+    window.addEventListener("resize", closeWhenCovered);
+    return () => window.removeEventListener("resize", closeWhenCovered);
+  }, [obscured, open]);
+
   if (entries.length === 0) return null;
+
   return (
-    <section className="ub-outline" aria-label="On this page">
-      <p className="ub-rail-head">On this page</p>
-      <ul>
-        {entries.map((entry) => (
-          <li key={entry.id} className={`ub-outline-l${entry.level}`}>
-            <button type="button" onClick={() => scrollBlockIntoView(entry.id)}>
-              {entry.text.trim() === "" ? <em>Untitled heading</em> : entry.text}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <DropdownMenu
+      modal={false}
+      open={open}
+      onOpenChange={(shown) => {
+        cancelClose();
+        if (shown) {
+          closingFromHover.current = false;
+        } else {
+          openedFromHover.current = false;
+        }
+        setOpen(shown);
+      }}
+    >
+      <div
+        className={obscured ? "ub-outline ub-outline-obscured" : "ub-outline"}
+        onPointerEnter={openFromHover}
+        onPointerLeave={closeAfterHover}
+      >
+        <DropdownMenuTrigger asChild>
+          <button
+            ref={trigger}
+            type="button"
+            className="ub-outline-trigger"
+            onPointerDown={() => {
+              openedFromHover.current = false;
+            }}
+          >
+            Contents <span>{entries.length}</span>
+          </button>
+        </DropdownMenuTrigger>
+      </div>
+      <DropdownMenuContent
+        align="end"
+        side="bottom"
+        collisionPadding={8}
+        className="ub-outline-panel"
+        onPointerEnter={(event) => {
+          if (event.pointerType === "mouse") cancelClose();
+        }}
+        onPointerLeave={closeAfterHover}
+        onOpenAutoFocus={(event) => {
+          if (!openedFromHover.current) return;
+          event.preventDefault();
+        }}
+        onCloseAutoFocus={(event) => {
+          if (closingFromTab.current) {
+            closingFromTab.current = false;
+            event.preventDefault();
+            return;
+          }
+          if (!closingFromHover.current) return;
+          closingFromHover.current = false;
+          openedFromHover.current = false;
+          event.preventDefault();
+          if (focusBeforeHover.current?.isConnected) {
+            focusBeforeHover.current.focus({ preventScroll: true });
+          }
+          focusBeforeHover.current = null;
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Tab") return;
+          event.preventDefault();
+          closingFromTab.current = true;
+          setOpen(false);
+          trigger.current?.focus({ preventScroll: true });
+        }}
+      >
+        <div className="ub-outline-panel-body">
+          <DropdownMenuLabel className="ub-rail-head">On this page</DropdownMenuLabel>
+          <ul>
+            {entries.map((entry) => (
+              <li
+                key={entry.id}
+                role="none"
+                className={`ub-outline-l${entry.level}`}
+              >
+                <DropdownMenuItem asChild>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      scrollBlockIntoView(entry.id);
+                    }}
+                  >
+                    {entry.text.trim() === "" ? (
+                      <em>Untitled heading</em>
+                    ) : (
+                      entry.text
+                    )}
+                  </button>
+                </DropdownMenuItem>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
