@@ -111,13 +111,14 @@ function ws(): string {
  * Both waits before the title is typed are load-bearing when a document is
  * already open, because then the editor is *already* visible and waiting for it
  * proves nothing: the address has to have changed, and the title field has to
- * have emptied, or the title lands on the document that was open a moment ago.
+ * hold the new document's initial title, or the edit lands on the document that
+ * was open a moment ago.
  */
 async function createDoc(page: Page, title: string): Promise<string> {
   const before = openPath(page);
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect.poll(() => openPath(page)).not.toBe(before);
-  await expect(page.locator(".ub-title")).toHaveValue("");
+  await expect(page.locator(".ub-title")).toHaveValue("Untitled");
   await expect(editor(page)).toBeVisible();
 
   const uuid = openPath(page).split("/")[2];

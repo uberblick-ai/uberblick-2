@@ -83,7 +83,7 @@ async function createDoc(page: Page, title: string): Promise<string> {
   const before = openPath(page);
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect.poll(() => openPath(page)).not.toBe(before);
-  await expect(page.locator(".ub-title")).toHaveValue("");
+  await expect(page.locator(".ub-title")).toHaveValue("Untitled");
   await expect(editor(page)).toBeVisible();
 
   const uuid = openPath(page).split("/")[2];

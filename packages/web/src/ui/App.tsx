@@ -669,7 +669,7 @@ export function App(): ReactElement {
     const uuid = crypto.randomUUID();
     const room = roomForDoc(workspace.uuid, uuid);
     const handle = acquireRoom(room, identity);
-    initDoc(handle.connection.ydoc, { uuid, title: "" });
+    initDoc(handle.connection.ydoc, { uuid, title: "Untitled" });
     // A document with no blocks has nowhere to put the caret, so seed one.
     appendBlock(handle.connection.ydoc, { type: "paragraph", text: "" });
     // Stamped here, because this is the moment the document is created and
@@ -681,7 +681,7 @@ export function App(): ReactElement {
     const createdAt = Date.now();
     upsertDirectoryEntry(directory.ydoc, {
       uuid,
-      title: "",
+      title: "Untitled",
       createdAt,
       updatedAt: createdAt,
     });
