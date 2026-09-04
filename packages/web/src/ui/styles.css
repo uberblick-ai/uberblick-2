@@ -2250,7 +2250,7 @@ body {
 }
 
 /* Each badge overhangs to the right, so earlier circles paint above the later
-   sibling that overlaps them. Hover and focus still lift any active control. */
+   sibling that overlaps them. Hover and focus lift a control above all three. */
 .ub-peers > .ub-peer-control:nth-child(1) {
   z-index: 3;
 }
@@ -2263,15 +2263,15 @@ body {
   z-index: 1;
 }
 
-.ub-peer-control:hover,
-.ub-peer-control:focus-visible {
-  z-index: 4;
-}
-
 .ub-peer-control:focus-visible,
 .ub-peer-overflow-row:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+
+.ub-peers > .ub-peer-control:hover,
+.ub-peers > .ub-peer-control:focus-visible {
+  z-index: 4;
 }
 
 .ub-peer-tooltip {
@@ -2309,10 +2309,6 @@ body {
 }
 
 .ub-peer-overflow {
-  position: absolute;
-  top: calc(100% + 0.45rem);
-  right: 0;
-  z-index: 5;
   width: min(18rem, calc(100vw - 2rem));
   padding: 0.3rem;
   border: 1px solid var(--border);

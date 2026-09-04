@@ -953,6 +953,11 @@ test("the document collaborator cluster stays compact and jumps once without mov
     dora.provider.setAwarenessField("cursor", caretAt(dora.doc, 0));
     await more.focus();
     await page.keyboard.press("Enter");
+    const overflow = page.getByRole("dialog", { name: "More active collaborators" });
+    await expect(overflow).toBeVisible();
+    await expect(overflow.getByRole("button").first()).toBeFocused();
+    expect(await more.getAttribute("aria-controls")).toBe(await overflow.getAttribute("id"));
+    await expect(more).toHaveAttribute("aria-expanded", "true");
     const deltaPerson = page.getByRole("button", {
       name: /^Delta · person · .*editing block 1$/,
     });
@@ -978,6 +983,11 @@ test("the document collaborator cluster stays compact and jumps once without mov
     );
     await page.keyboard.press("Escape");
     await expect(more).toBeFocused();
+    await more.click();
+    await expect(overflow).toBeVisible();
+    await page.locator(".ub-title").click();
+    await expect(overflow).toHaveCount(0);
+    await expect(page.locator(".ub-title")).toBeFocused();
 
     await page.evaluate(() => {
       const first = document.querySelector(".ub-editor .ProseMirror > *")?.firstChild;

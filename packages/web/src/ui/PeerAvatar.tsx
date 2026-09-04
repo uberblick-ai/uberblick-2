@@ -35,14 +35,14 @@ export function initialOf(name: string): string {
 export function PeerAvatar({ session }: { session: RemotePresence }): ReactElement {
   return (
     <span
-      className={`ub-avatar ub-avatar-${session.kind}`}
+      className="ub-avatar"
       aria-hidden="true"
       // The awareness palette is `#rrggbb` literals rather than theme tokens
       // (see src/collab/identity.ts), so both are written inline. The letter
       // takes the colour as well as the ring; the robot brings its own.
       style={{ borderColor: session.color, color: session.color }}
     >
-      <span className="ub-avatar-initial">{initialOf(session.name)}</span>
+      {initialOf(session.name)}
       {session.kind === "agent" && (
         <span className="ub-avatar-agent-badge" aria-hidden="true">
           {AGENT_GLYPH}
