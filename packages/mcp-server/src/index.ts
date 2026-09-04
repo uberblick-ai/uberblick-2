@@ -16,6 +16,13 @@ export {
   resolveMcpConfig,
 } from "./config.js";
 export type { McpConfig } from "./config.js";
+export { createMcpEngine } from "./engine.js";
+export type {
+  EngineHealth,
+  EngineRefreshStatus,
+  McpEngineOptions,
+  UberblickMcpEngine,
+} from "./engine.js";
 export {
   BRIDGE_CONNECT_TIMEOUT_MS,
   BRIDGE_SYNC_TIMEOUT_MS,
