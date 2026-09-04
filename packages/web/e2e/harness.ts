@@ -34,7 +34,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { createHub, silentLogger } from "@uberblick/hub";
 import type { Hub, HubConfig } from "@uberblick/hub";
 import { build } from "vite";
@@ -202,6 +202,35 @@ export interface Harness {
   stopHub(): Promise<void>;
   /** Tear everything down: hub, dev server, temp database. */
   stop(): Promise<void>;
+}
+
+/** Open the served bundle against the harness's upstream hub. */
+export async function openUpstreamApp(
+  browser: Browser,
+  running: Pick<Harness, "appUrl" | "hubUrl" | "workspace" | "authSecret">,
+  path = "/",
+): Promise<{ context: BrowserContext; page: Page }> {
+  const context = await browser.newContext();
+  try {
+    await context.route("**/uberblick-config.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          hubUrl: running.hubUrl,
+          workspaces: [running.workspace],
+          hubAuthToken: running.authSecret,
+        }),
+      });
+    });
+    const page = await context.newPage();
+    await page.goto(new URL(path, running.appUrl).href);
+    await expect(page.locator(".ub-list-head")).toBeVisible();
+    return { context, page };
+  } catch (error) {
+    await context.close();
+    throw error;
+  }
 }
 
 /**

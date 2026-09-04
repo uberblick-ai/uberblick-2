@@ -2385,6 +2385,11 @@ body {
   color: var(--brand-ink);
 }
 
+.ub-lifecycle-badge {
+  flex: none;
+  white-space: nowrap;
+}
+
 /* The document's tags, in the row's flexible middle (#122). The scroll is the
    promise the row makes to the title: a workspace that tags heavily gets a
    sideways overflow, never a second line. The scrollbar is hidden because the
@@ -3539,7 +3544,7 @@ h3.ub-heading {
   padding: 0.4rem;
 }
 
-/* ---- the document list (#118, #406) ---------------------------------------
+/* ---- the document list (#118, #406, #441) ---------------------------------
    The corpus listing and the sidebar's fixed entry into it. Self-contained:
    nothing here touches the tokens or the rules above, and nothing above knows
    about it. */
@@ -3552,6 +3557,48 @@ h3.ub-heading {
 .ub-docs-heading {
   font-size: 1.4rem;
   margin: 0;
+}
+
+.ub-docs-mode-fieldset {
+  width: min(24rem, 100%);
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ub-docs-modes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.ub-docs-mode {
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--border);
+  border-right: 0;
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ub-docs-mode:first-child {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.ub-docs-mode:last-child {
+  border-right: 1px solid var(--border);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.ub-docs-mode:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.ub-docs-mode[aria-pressed="true"] {
+  background: var(--brand-subtle);
+  color: var(--brand-ink);
 }
 
 .ub-docs-search-label {

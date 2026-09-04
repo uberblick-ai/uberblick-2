@@ -10,20 +10,22 @@
  *
  * The semantic table and keyboard-sort contract need the browser's own
  * accessibility and activation behavior. Everything else — missing-stamp
- * ordering, tag and description matching, the pinned group, the empty-state
- * wording — is pinned in `test/document-list.test.tsx` over shared Y.Docs and
- * is not repeated here. The one filter exercised is the one a second browser
- * can predict.
+ * ordering, filter edge cases, the pinned group, the empty-state wording — is
+ * pinned in `test/document-list.test.tsx` over shared Y.Docs and is not
+ * repeated here. The lifecycle scenario is the browser-only seam: an external
+ * writer moves the open header and the directory-backed row without a reload.
  */
 
 import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
-import { startHarness } from "./harness.js";
+import { openUpstreamApp, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
+import { McpAgent } from "./mcp-agent.js";
 
 test.describe.configure({ mode: "serial" });
 
 let started: Harness | null = null;
+let mcpAgent: McpAgent | null = null;
 const contexts: BrowserContext[] = [];
 
 function harness(): Harness {
@@ -33,17 +35,33 @@ function harness(): Harness {
   return started;
 }
 
+function agent(): McpAgent {
+  if (mcpAgent === null) {
+    throw new Error("e2e: the MCP agent is not configured");
+  }
+  return mcpAgent;
+}
+
 test.beforeAll(async () => {
   started = await startHarness();
+  mcpAgent = new McpAgent({
+    workspace: harness().workspace,
+    hubUrl: harness().hubUrl,
+    authSecret: harness().authSecret,
+    statePrefix: "uberblick-e2e-document-list-",
+  });
 });
 
 test.afterEach(async () => {
+  await mcpAgent?.closeSessions();
   for (const context of contexts.splice(0)) await context.close();
 });
 
 test.afterAll(async () => {
   const running = started;
   started = null;
+  await mcpAgent?.close();
+  mcpAgent = null;
   await running?.stop();
 });
 
@@ -151,4 +169,43 @@ test("a new document stores the title shown by the list", async ({ browser }) =>
   await page.getByRole("button", { name: "All docs" }).click();
   await page.locator(".ub-docs-search").fill("untitled");
   await expect(listedTitles(page)).toHaveText(["Untitled"]);
+});
+
+test("a lifecycle update outside the browser moves the row and both badges", async ({
+  browser,
+}) => {
+  const title = docTitle("roadmap");
+  // The local/upstream store replay is #752. This criterion concerns #441's
+  // lifecycle UI, so keep its browser on the same upstream as its MCP writer.
+  const { context, page } = await openUpstreamApp(browser, harness());
+  contexts.push(context);
+  const session = agent().open({ name: "document-list-e2e" });
+  const created = await session.call<{ uuid: string }>("create_doc", {
+    title,
+    description: "A roadmap item created outside the browser.",
+    kind: "requirement",
+    status: "planned",
+  });
+  await page.getByRole("button", { name: "Product", exact: true }).click();
+  const row = page.locator(".ub-docs-row", { hasText: title });
+  await expect(row.locator(".ub-lifecycle-badge")).toHaveText(
+    "Product · planned",
+  );
+
+  await row.locator(".ub-docs-open").click();
+  await expect(page.locator(".ub-lifecycle-badge")).toHaveText(
+    "Product · planned",
+  );
+  await session.call("set_status", {
+    uuid: created.uuid,
+    status: "implementing",
+  });
+  await expect(page.locator(".ub-lifecycle-badge")).toHaveText(
+    "Product · implementing",
+  );
+  await page.getByRole("button", { name: "All docs" }).click();
+  await page.getByRole("button", { name: "Product", exact: true }).click();
+  await expect(
+    page.locator(".ub-docs-row", { hasText: title }).locator(".ub-lifecycle-badge"),
+  ).toHaveText("Product · implementing");
 });

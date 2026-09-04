@@ -8,11 +8,11 @@
  * peer. A listing that agreed with local history but not with the directory
  * would be a second corpus, which is the one thing discovery cannot be.
  *
- * The second claim the filter makes is structural rather than cosmetic: it is a
- * derivation over stubs that are already in memory, so typing opens no room.
- * That is asserted at the seam the shell actually has — `acquireRoom` is mocked
- * here, so every room this app joins is a key in `rooms`, and the whole corpus
- * plus a query must add none.
+ * The second claim the filters make is structural rather than cosmetic: both
+ * lifecycle mode and title query derive from stubs already in memory, so using
+ * either opens no room. That is asserted at the seam the shell actually has —
+ * `acquireRoom` is mocked here, so every room this app joins is a key in
+ * `rooms`, and the whole corpus plus either filter must add none.
  *
  * The app is mounted whole over shared Y.Docs (the `sidebar.test.tsx`
  * harness): a room is a plain Y.Doc, because the transport is not what is
@@ -56,6 +56,7 @@ const ONE = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
 const TWO = "1f77c0d9-6b42-4a18-9e35-2c8d0f6a1b73";
 const THREE = "7c2e5a11-3f80-4d66-b1a9-8e4d2c6f0a55";
 const GONE = "0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d";
+const FOUR = "3b8a52d4-12c7-4c8f-9a61-9f18e35d7c2a";
 
 const OFFLINE: RoomStatus = {
   connected: false,
@@ -658,6 +659,71 @@ describe("the list", () => {
 });
 
 describe("the filter", () => {
+  it("opens on Working and combines the type mode with the title query", async () => {
+    const peer = peerOf(directoryDoc());
+    upsertDirectoryEntry(peer, {
+      uuid: ONE,
+      title: "Roadmap",
+      kind: "requirement",
+      status: "planned",
+    });
+    upsertDirectoryEntry(peer, {
+      uuid: TWO,
+      title: "Cache choice",
+      kind: "decision",
+      status: "open",
+    });
+    upsertDirectoryEntry(peer, { uuid: THREE, title: "Working note" });
+    // The kind remains readable when a merged status belongs to the other
+    // lifecycle; only the mismatched status is dropped.
+    upsertDirectoryEntry(peer, {
+      uuid: FOUR,
+      title: "Status drift",
+      kind: "requirement",
+      status: "open",
+    });
+    // A foreign kind is unreadable at the schema boundary and therefore joins
+    // ordinary working documents instead of disappearing from every mode.
+    getDirectoryMap(peer).set(GONE, {
+      title: "Foreign shape",
+      tags: [],
+      kind: "memo",
+      status: "draft",
+    });
+
+    const host = await openApp(`/${WORKSPACE}`);
+    const mode = (name: string): HTMLButtonElement | undefined =>
+      [...host.querySelectorAll<HTMLButtonElement>(".ub-docs-mode")].find(
+        (button) => button.textContent === name,
+      );
+    expect(mode("Working")?.getAttribute("aria-pressed")).toBe("true");
+    expect(rowTitles(host)).toEqual(["Foreign shape", "Working note"]);
+    expect(host.querySelectorAll(".ub-lifecycle-badge")).toHaveLength(0);
+    expect([...rooms.keys()].sort()).toEqual(
+      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE)].sort(),
+    );
+
+    await act(async () => mode("Product")?.click());
+    expect(rowTitles(host)).toEqual(["Roadmap", "Status drift"]);
+    expect(
+      [...host.querySelectorAll(".ub-lifecycle-badge")].map(
+        (badge) => badge.textContent,
+      ),
+    ).toEqual(["Product · planned", "Product"]);
+    await act(async () => typeInto(search(host), "cache"));
+    expect(rowTitles(host)).toEqual([]);
+    await act(async () => typeInto(search(host), "road"));
+    expect(rowTitles(host)).toEqual(["Roadmap"]);
+
+    await act(async () => mode("Decisions")?.click());
+    expect(rowTitles(host)).toEqual([]);
+    await act(async () => typeInto(search(host), ""));
+    expect(rowTitles(host)).toEqual(["Cache choice"]);
+    expect(host.querySelector(".ub-lifecycle-badge")?.textContent).toBe(
+      "Decision · open",
+    );
+  });
+
   it("matches the title alone over the stubs, and opens no room", async () => {
     const peer = peerOf(directoryDoc());
     upsertDirectoryEntry(peer, {

@@ -12,11 +12,12 @@
  *
  * The rule, in the order it matters:
  *
- * - **A change this replica made stamps `updatedAt`.** Title or tags stamp
- *   immediately — that write is happening anyway, because the stub caches both.
- *   A content change stamps at most once per {@link UPDATED_AT_COARSENESS_MS},
- *   because the directory is broadcast to every client in the workspace and a
- *   stamp per keystroke would turn one person typing into traffic for everyone.
+ * - **A change this replica made stamps `updatedAt`.** Title, tags or lifecycle
+ *   metadata stamp immediately — that write is happening anyway, because the
+ *   stub caches them. A content change stamps at most once per
+ *   {@link UPDATED_AT_COARSENESS_MS}, because the directory is broadcast to
+ *   every client in the workspace and a stamp per keystroke would turn one
+ *   person typing into traffic for everyone.
  * - **An update that merely arrived stamps nothing.** Opening a document
  *   hydrates it — from IndexedDB, from the hub — and hydration is not a change;
  *   neither is a peer's edit, which that peer stamps for itself. Those still
@@ -83,7 +84,11 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changed: boolean): void {
 
   const now = Date.now();
   const metaChanged =
-    stub === null || stub.title !== meta.title || !sameSet(stub.tags, meta.tags);
+    stub === null ||
+    stub.title !== meta.title ||
+    stub.kind !== meta.kind ||
+    stub.status !== meta.status ||
+    !sameSet(stub.tags, meta.tags);
   const staleStamp =
     stub?.updatedAt === undefined ||
     now - stub.updatedAt >= UPDATED_AT_COARSENESS_MS;
@@ -94,6 +99,13 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changed: boolean): void {
     uuid: meta.uuid,
     title: meta.title,
     tags: meta.tags,
+    // State every optional field owned by the document, so repairing lifecycle
+    // metadata cannot carry an unrelated stale description through the stub.
+    // Like title, this replica's copy can itself be stale until document sync
+    // arrives; the next observed document update repairs the cache again.
+    description: meta.description ?? "",
+    kind: meta.kind ?? "",
+    status: meta.status ?? "",
     ...(stamp ? { updatedAt: now } : {}),
   });
 }

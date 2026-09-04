@@ -14,9 +14,14 @@
  * whole corpus opens no document room. The one other room it reads is
  * `_sidebar`, for the group a row is pinned in — the shell already holds both.
  *
- * **Filtering is that same derivation, narrowed.** The title, folded to lower
- * case, over stubs that are already in memory: synchronous, no request, no
- * room, and correct offline. The title alone, because the title is all a row
+ * **Both filters are that same derivation, narrowed.** The mode reads the
+ * lifecycle shape already cached on each stub: ordinary or unreadable kinds
+ * are Working, requirements are Product and decisions are Decisions. It opens
+ * on Working and classifies no row by opening its document room.
+ *
+ * The title query folds to lower case over those same in-memory stubs:
+ * synchronous, no request, no room, and correct offline. The title alone,
+ * because the title is all a row
  * shows — matching on a description the row does not print looks like a row
  * that matched on nothing. That is also its whole scope, so the field's own
  * label says it rather than letting a reader assume the words in their
@@ -60,6 +65,7 @@ import type { ReactElement } from "react";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useRoomStatus } from "../ui/hooks.js";
+import { LifecycleBadge } from "../ui/LifecycleBadge.js";
 import { formatTimestamp, useTimestampClock } from "../ui/timestamps.js";
 
 /**
@@ -112,6 +118,25 @@ const INITIAL_DIRECTION: Record<Order, Direction> = {
   changed: "descending",
   title: "ascending",
 };
+
+const MODES = ["working", "requirement", "decision"] as const;
+type Mode = (typeof MODES)[number];
+
+const MODE_LABELS: Record<Mode, string> = {
+  working: "Working",
+  requirement: "Product",
+  decision: "Decisions",
+};
+
+const MODE_EMPTY_LABELS: Record<Mode, string> = {
+  working: "working documents",
+  requirement: "product documents",
+  decision: "decision records",
+};
+
+function inMode(entry: DirectoryEntry, mode: Mode): boolean {
+  return mode === "working" ? entry.kind === undefined : entry.kind === mode;
+}
 
 /**
  * The entries as the list shows them, in the order the reader chose.
@@ -240,6 +265,7 @@ export function DocumentList({
 }): ReactElement {
   const status = useRoomStatus(connection);
   const [query, setQuery] = useState("");
+  const [mode, setMode] = useState<Mode>("working");
   /**
    * The chosen order, held beside the query rather than derived from it: the
    * two are independent, so switching one leaves the other exactly as it was.
@@ -266,17 +292,33 @@ export function DocumentList({
   const rows = useMemo(
     () =>
       sortDirectory(
-        entries.filter((entry) => matches(entry, needle)),
+        entries.filter((entry) => inMode(entry, mode) && matches(entry, needle)),
         sort.order,
         sort.direction,
       ),
-    [entries, needle, sort],
+    [entries, mode, needle, sort],
   );
 
   return (
     <section className="ub-pane">
       <div className="ub-column ub-docs">
         <h1 className="ub-docs-heading">Documents</h1>
+        <fieldset className="ub-docs-mode-fieldset">
+          <legend className="ub-sr-only">Document type</legend>
+          <div className="ub-docs-modes">
+            {MODES.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className="ub-docs-mode"
+                aria-pressed={option === mode}
+                onClick={() => setMode(option)}
+              >
+                {MODE_LABELS[option]}
+              </button>
+            ))}
+          </div>
+        </fieldset>
         {/* The scope is the label, not a sentence beside it. A filter that
             quietly skipped the words inside documents would be read as a search
             that found nothing in them, so what it does and does not look at is
@@ -351,6 +393,10 @@ export function DocumentList({
                       ? status.synced
                         ? "No documents match your search."
                         : "No matches among the documents synced so far."
+                      : entries.length !== 0
+                        ? status.synced
+                          ? `No ${MODE_EMPTY_LABELS[mode]} in this workspace.`
+                          : `No ${MODE_EMPTY_LABELS[mode]} among the documents synced so far.`
                       : status.synced
                         ? "No documents in this workspace yet."
                         : "Nothing here yet — the directory has not synced on this client."}
@@ -370,6 +416,7 @@ export function DocumentList({
                       <span className="ub-docs-title">
                         {entry.title === "" ? <em>Untitled</em> : entry.title}
                       </span>
+                      <LifecycleBadge kind={entry.kind} status={entry.status} />
                       {/* Where the sidebar carries this document, when it does.
                           Blank is the honest answer for the long tail. */}
                       {groupOf.has(entry.uuid) && (
