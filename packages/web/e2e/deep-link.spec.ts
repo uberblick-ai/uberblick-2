@@ -426,3 +426,43 @@ test("the served configuration names the workspaces, and the build's define is o
   await page.getByRole("menuitem", { name: served[1] as string }).click();
   await expect(page).toHaveURL(new RegExp(`/${served[1]}$`));
 });
+
+test("a rebound local-serving document stays visible without blocking the page", async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  contexts.push(context);
+  await context.route("**/uberblick-config.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        hubUrl: harness().appUrl.replace(/^http:/, "ws:").replace(/\/$/, ""),
+        workspaces: [ws()],
+        hubAuthToken: harness().authSecret,
+        remoteHubUrl: harness().hubUrl,
+        rebound: true,
+      }),
+    });
+  });
+  const page = await context.newPage();
+  await page.goto(new URL(`/${ws()}`, harness().appUrl).href);
+
+  const notice = page.locator(".ub-rebound-notice");
+  await expect(notice).toContainText(`workspace ${ws()}`);
+  await expect(notice).toContainText(harness().hubUrl);
+  await expect(notice.getByRole("button")).toHaveCount(0);
+
+  // The state is information, not an interlock: an ordinary write still takes
+  // the same path to the local serving process underneath it.
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await expect(page.locator(".ub-title")).toHaveValue("Untitled");
+  await expect(notice).toBeVisible();
+
+  await page.evaluate((path) => {
+    window.history.pushState(null, "", path);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, `/${ws()}/not-a-document`);
+  await expect(page.getByText("Not a document link.", { exact: false })).toBeVisible();
+  await expect(notice).toBeVisible();
+});
