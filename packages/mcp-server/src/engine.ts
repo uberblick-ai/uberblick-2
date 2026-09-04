@@ -80,7 +80,7 @@ export async function createMcpEngine(
   const store =
     options.store ?? new MirrorStore(config.databasePath, config.workspaceId);
   let servingRole: ServingReplicaRole | null = null;
-  let replicas: Replicas;
+  let replicas: Replicas | null = null;
   try {
     if (options.serving === true) {
       servingRole = acquireServingReplicaRole(store.databasePath, {
@@ -93,6 +93,7 @@ export async function createMcpEngine(
     });
     await seedSidebarOnce(replicas);
   } catch (error) {
+    replicas?.destroy();
     servingRole?.close();
     store.close();
     throw error;

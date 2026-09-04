@@ -6,6 +6,8 @@
  * in the store because the exclusive sidecar cannot be read by a contender.
  * A short store write transaction serializes the two, so a loser can only read
  * the record committed by the process whose sidecar transaction is still live.
+ * Deleting or replacing the sidecar under a live holder is unsupported: no
+ * file-based lock can defend against removing its file.
  */
 
 import { chmodSync, existsSync } from "node:fs";
@@ -91,7 +93,14 @@ export function acquireServingReplicaRole(
 
   try {
     coordination.exec(`PRAGMA busy_timeout = ${COORDINATION_TIMEOUT_MS}`);
-    coordination.exec("BEGIN IMMEDIATE");
+    try {
+      coordination.exec("BEGIN IMMEDIATE");
+    } catch (error) {
+      if (!isBusy(error)) throw error;
+      throw new Error(
+        `The store at ${databasePath} is busy; retry starting its serving replica.`,
+      );
+    }
     coordinating = true;
 
     lock = new DatabaseSync(lockPath);
@@ -107,16 +116,24 @@ export function acquireServingReplicaRole(
         .prepare("SELECT value FROM meta WHERE key = ?")
         .get(HOLDER_KEY) as { value?: unknown } | undefined;
       const current = parseHolder(row?.value);
-      coordination.exec("ROLLBACK");
-      coordinating = false;
-      lock.close();
-      lock = null;
-      if (current === null) {
-        throw new Error(
-          `The serving role for ${databasePath} is locked, but its holder record is missing or invalid.`,
-        );
+      try {
+        lock.exec("BEGIN EXCLUSIVE");
+        lockHeld = true;
+      } catch (recheckError) {
+        if (!isBusy(recheckError)) throw recheckError;
+        // The holder can still exit between this contemporaneous check and the
+        // refusal; no report of a process-held lock can eliminate that window.
+        coordination.exec("ROLLBACK");
+        coordinating = false;
+        lock.close();
+        lock = null;
+        if (current === null) {
+          throw new Error(
+            `The serving role for ${databasePath} is locked, but its holder record is missing or invalid.`,
+          );
+        }
+        throw new ServingReplicaHeldError(databasePath, current);
       }
-      throw new ServingReplicaHeldError(databasePath, current);
     }
 
     coordination

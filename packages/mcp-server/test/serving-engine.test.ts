@@ -7,6 +7,7 @@ import { fork } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { appendBlock, getBlocks, initDoc, roomForDoc } from "@uberblick/schema";
@@ -16,6 +17,7 @@ import {
   type UberblickMcpEngine,
 } from "../src/engine.js";
 import {
+  acquireServingReplicaRole,
   ServingReplicaHeldError,
   type ServingReplicaHolder,
 } from "../src/serving-role.js";
@@ -289,5 +291,43 @@ describe("serving MCP engine", () => {
     expect(
       (await refusedServingBoot(databasePath, "post-crash-contender")).holder,
     ).toEqual({ pid: process.pid, sessionId: "recovered-holder" });
+  });
+
+  it("acquires when the holder exits between the first refusal and its recheck", async () => {
+    const databasePath = tempDatabasePath();
+    const holder = spawnWorker(databasePath, "departing-holder");
+    expect(await startWorker(holder)).toMatchObject({ type: "acquired" });
+
+    const originalPrepare = DatabaseSync.prototype.prepare;
+    let intercepted = false;
+    const exited = once(holder.child, "exit");
+    DatabaseSync.prototype.prepare = function prepare(sql) {
+      if (!intercepted && sql === "SELECT value FROM meta WHERE key = ?") {
+        intercepted = true;
+        holder.child.kill("SIGKILL");
+        const released = new DatabaseSync(`${databasePath}.serving-lock`);
+        try {
+          released.exec("PRAGMA busy_timeout = 5000");
+          released.exec("BEGIN EXCLUSIVE");
+          released.exec("ROLLBACK");
+        } finally {
+          released.close();
+        }
+      }
+      return originalPrepare.call(this, sql);
+    };
+
+    try {
+      const contender = acquireServingReplicaRole(databasePath, {
+        pid: process.pid,
+        sessionId: "surviving-contender",
+      });
+      contender.close();
+    } finally {
+      DatabaseSync.prototype.prepare = originalPrepare;
+      await exited;
+      children.splice(children.indexOf(holder.child), 1);
+    }
+    expect(intercepted).toBe(true);
   });
 });
