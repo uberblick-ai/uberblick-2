@@ -8,6 +8,12 @@ import {
   HocuspocusProviderWebsocket,
 } from "@hocuspocus/provider";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  Awareness,
+  applyAwarenessUpdate,
+  encodeAwarenessUpdate,
+  removeAwarenessStates,
+} from "y-protocols/awareness";
 import * as Y from "yjs";
 import {
   createLocalBrowserServer,
@@ -31,12 +37,17 @@ const servers: LocalBrowserServer[] = [];
 const clients: TestClient[] = [];
 const providers: HocuspocusProvider[] = [];
 const websockets: HocuspocusProviderWebsocket[] = [];
+const replicaAwareness: { awareness: Awareness; doc: Y.Doc }[] = [];
 
 afterEach(async () => {
   for (const client of clients.splice(0)) client.destroy();
   for (const provider of providers.splice(0)) provider.destroy();
   for (const websocket of websockets.splice(0)) websocket.destroy();
   for (const server of servers.splice(0)) await server.stop();
+  for (const replica of replicaAwareness.splice(0)) {
+    replica.awareness.destroy();
+    replica.doc.destroy();
+  }
 });
 
 async function freePort(): Promise<number> {
@@ -67,6 +78,16 @@ async function fixture() {
   let failure: unknown = null;
   let readFailure: unknown = null;
   let readAttempts = 0;
+  const awarenessByRoom = new Map<string, Awareness>();
+  const awarenessForRoom = (room: string): Awareness => {
+    const existing = awarenessByRoom.get(room);
+    if (existing !== undefined) return existing;
+    const doc = new Y.Doc();
+    const awareness = new Awareness(doc);
+    replicaAwareness.push({ awareness, doc });
+    awarenessByRoom.set(room, awareness);
+    return awareness;
+  };
   const server = await createLocalBrowserServer({
     port,
     workspaceId: WORKSPACE,
@@ -90,6 +111,7 @@ async function fixture() {
       stored.push(payload);
       updates.set(room, stored);
     },
+    awarenessForRoom,
     onRequest: (_request, response) => {
       response.writeHead(200, { "content-type": "text/plain" });
       response.end("still serving\n");
@@ -117,6 +139,7 @@ async function fixture() {
     port,
     origin,
     updates,
+    awarenessForRoom,
     connect,
     failWith: (error: unknown) => {
       failure = error;
@@ -156,6 +179,103 @@ describe("the ub open browser server", () => {
     const reload = await box.connect(room);
     await reload.synced;
     expect(reload.text.toString()).toBe("durable before ack");
+  });
+
+  it("relays room awareness both ways without echoing served clients", async () => {
+    const box = await fixture();
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const first = await box.connect(room);
+    const second = await box.connect(room);
+    await Promise.all([first.synced, second.synced]);
+
+    first.provider.setAwarenessField("user", {
+      name: "first tab",
+      color: "#112233",
+    });
+    first.provider.setAwarenessField("client", "web");
+    second.provider.setAwarenessField("user", {
+      name: "second tab",
+      color: "#445566",
+    });
+    second.provider.setAwarenessField("client", "web");
+
+    const replica = box.awarenessForRoom(room);
+    const firstId = first.provider.awareness?.clientID;
+    const secondId = second.provider.awareness?.clientID;
+    if (firstId === undefined || secondId === undefined) {
+      throw new Error("the served providers have no awareness");
+    }
+    await waitUntil("both tab states to reach the replica", () =>
+      [firstId, secondId].every((client) => replica.getStates().has(client)),
+    );
+
+    const agentDoc = new Y.Doc();
+    const agent = new Awareness(agentDoc);
+    replicaAwareness.push({ awareness: agent, doc: agentDoc });
+    agent.setLocalState({
+      user: { name: "agent", color: "#abcdef" },
+      client: "agent",
+      cursor: { blockId: "block-1", anchor: 1, head: 1 },
+    });
+    applyAwarenessUpdate(
+      replica,
+      encodeAwarenessUpdate(agent, [agent.clientID]),
+      "hub-relay",
+    );
+
+    await waitUntil("the relayed agent to reach both tabs", () =>
+      [first, second].every(
+        (client) =>
+          [...(client.provider.awareness?.getStates().values() ?? [])].filter(
+            (state) => state.client === "agent",
+          ).length === 1,
+      ),
+    );
+    expect(
+      [...replica.getStates().values()].filter((state) => state.client === "web"),
+    ).toHaveLength(2);
+
+    // An upstream close clears remote states from the replica. A served tab is
+    // one of those states, but must not be played back into its own room as a
+    // removal: the other local tab keeps seeing it without a cursor flicker.
+    removeAwarenessStates(replica, [firstId], "upstream-close");
+    expect(second.provider.awareness?.getStates().has(firstId)).toBe(true);
+    first.provider.setAwarenessField("heartbeat", 1);
+    await waitUntil("the tab's renewal to return to the replica", () =>
+      replica.getStates().has(firstId),
+    );
+
+    removeAwarenessStates(replica, [agent.clientID], "hub-ended");
+    await waitUntil("the ended agent to leave both tabs", () =>
+      [first, second].every(
+        (client) => !client.provider.awareness?.getStates().has(agent.clientID),
+      ),
+    );
+    expect(first.provider.awareness?.getStates().has(secondId)).toBe(true);
+    expect(second.provider.awareness?.getStates().has(firstId)).toBe(true);
+
+    agent.setLocalStateField("cursor", null);
+    agent.setLocalStateField("cursor", {
+      blockId: "block-2",
+      anchor: 2,
+      head: 2,
+    });
+    applyAwarenessUpdate(
+      replica,
+      encodeAwarenessUpdate(agent, [agent.clientID]),
+      "hub-returned",
+    );
+    await waitUntil("the returned agent to reach both tabs", () =>
+      [first, second].every(
+        (client) => client.provider.awareness?.getStates().has(agent.clientID) === true,
+      ),
+    );
+
+    first.destroy();
+    await waitUntil("the departed tab to leave the local room and replica", () =>
+      !replica.getStates().has(firstId) &&
+      second.provider.awareness?.getStates().has(firstId) === false,
+    );
   });
 
   it("names busy and failed appends, stores no refused update, and recovers per room", async () => {

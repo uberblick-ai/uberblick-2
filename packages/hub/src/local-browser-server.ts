@@ -3,8 +3,9 @@
  *
  * The browser-facing server owns protocol mechanics; its caller owns the
  * store. The only bridge between this server and the full upstream replica is
- * therefore the two callbacks below: hydrate a room from the update log, and
- * append a browser update to that log before Hocuspocus may apply or ack it.
+ * therefore the callbacks below: hydrate a room from the update log, append a
+ * browser update before Hocuspocus may apply or ack it, and pair the room's
+ * awareness with its full upstream replica.
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -16,6 +17,11 @@ import {
   messageYjsSyncStep2,
   messageYjsUpdate,
 } from "y-protocols/sync";
+import {
+  applyAwarenessUpdate,
+  encodeAwarenessUpdate,
+  type Awareness,
+} from "y-protocols/awareness";
 import * as Y from "yjs";
 import { MAX_PENDING_DOCUMENTS } from "./config.js";
 import { stderrLogger } from "./log.js";
@@ -40,6 +46,66 @@ const LOAD_ORIGIN = Object.freeze({
   uberblick: "store-load",
 });
 
+/** Awareness copied across the local browser/replica seam, never echoed back. */
+const AWARENESS_BRIDGE = Symbol("uberblick/awareness-bridge");
+
+interface AwarenessChange {
+  added: number[];
+  updated: number[];
+  removed: number[];
+}
+
+/**
+ * Relay presence between one served room and the full replica of that room.
+ *
+ * The served client ids stay owned for the bridge's lifetime, even after a
+ * removal. The upstream provider clears every remote awareness state when its
+ * socket closes; replaying those removals into the served room would otherwise
+ * erase a live tab's own state and make its cursor flicker. The tab's periodic
+ * awareness renewal re-adds it to the replica once the hub is reachable again.
+ */
+function bridgeAwareness(served: Awareness, replica: Awareness): () => void {
+  const servedClients = new Set<number>();
+
+  const relay = (
+    source: Awareness,
+    target: Awareness,
+    clients: number[],
+  ): void => {
+    if (clients.length === 0) return;
+    applyAwarenessUpdate(
+      target,
+      encodeAwarenessUpdate(source, clients),
+      AWARENESS_BRIDGE,
+    );
+  };
+
+  const fromServed = (change: AwarenessChange, origin: unknown): void => {
+    if (origin === AWARENESS_BRIDGE) return;
+    const clients = [...change.added, ...change.updated, ...change.removed];
+    for (const client of clients) servedClients.add(client);
+    relay(served, replica, clients);
+  };
+  const fromReplica = (change: AwarenessChange, origin: unknown): void => {
+    if (origin === AWARENESS_BRIDGE) return;
+    const clients = [...change.added, ...change.updated, ...change.removed].filter(
+      (client) => !servedClients.has(client),
+    );
+    relay(replica, served, clients);
+  };
+
+  served.on("update", fromServed);
+  replica.on("update", fromReplica);
+
+  // A room's first tab receives what the hub already relayed into the replica.
+  relay(replica, served, [...replica.getStates().keys()]);
+
+  return () => {
+    served.off("update", fromServed);
+    replica.off("update", fromReplica);
+  };
+}
+
 export interface LocalRoomSlice {
   snapshot: { state: Uint8Array; throughSeq: number } | null;
   updates: readonly { seq: number; payload: Uint8Array }[];
@@ -54,6 +120,7 @@ export interface LocalBrowserServerConfig {
   log?: HubLogger;
   readRoom(room: string): LocalRoomSlice;
   appendUpdate(room: string, payload: Uint8Array): void;
+  awarenessForRoom(room: string): Awareness;
   onRequest(request: IncomingMessage, response: ServerResponse): void;
 }
 
@@ -123,6 +190,7 @@ export async function createLocalBrowserServer(
     servedWorkspace: config.workspaceId,
   });
   const upgradedSockets = new Set<Duplex>();
+  const awarenessBridges = new Map<string, () => void>();
 
   const server = new Server<HubContext>({
     port: config.port,
@@ -176,6 +244,16 @@ export async function createLocalBrowserServer(
         // fail plainly; accepted raw sockets remain owned for shutdown below.
         throw error;
       }
+
+      awarenessBridges.set(
+        documentName,
+        bridgeAwareness(document.awareness, config.awarenessForRoom(documentName)),
+      );
+    },
+
+    async afterUnloadDocument({ documentName }) {
+      awarenessBridges.get(documentName)?.();
+      awarenessBridges.delete(documentName);
     },
 
     async beforeSync({ connection, documentName, type, payload }) {
@@ -236,6 +314,8 @@ export async function createLocalBrowserServer(
         }
         server.httpServer.closeAllConnections();
         await server.destroy();
+        for (const detach of awarenessBridges.values()) detach();
+        awarenessBridges.clear();
 
         // Node's HTTP close helpers deliberately exclude upgraded sockets, and
         // Hocuspocus only enumerates sockets that already own a loaded room.

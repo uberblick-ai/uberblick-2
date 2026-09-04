@@ -94,6 +94,11 @@ import {
 } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION, isProtocolVersion } from "@uberblick/hub/protocol";
 import {
+  DIRECTORY_SUFFIX,
+  SIDEBAR_SUFFIX,
+  parseRoom,
+} from "@uberblick/schema";
+import {
   DEFAULT_HUB_URL,
   ServingReplicaHeldError,
   createMcpEngine,
@@ -1431,6 +1436,12 @@ export async function openCommand(
             throw new Error(`local replica refresh failed: ${refresh.message}`);
           }
           engine.store.appendUpdate(room, payload, "local");
+        },
+        awarenessForRoom: (room) => {
+          const { uuid } = parseRoom(room);
+          if (uuid === DIRECTORY_SUFFIX) return engine.replicas.directory().awareness;
+          if (uuid === SIDEBAR_SUFFIX) return engine.replicas.sidebar().awareness;
+          return engine.replicas.replica(uuid).awareness;
         },
         onRequest: (request, response) => {
           serveBundleRequest(plan.dir, document, request, response);
