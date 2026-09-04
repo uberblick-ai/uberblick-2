@@ -19,9 +19,10 @@
  *   `ub init` writes and removes inherited configuration pins before spawning
  *   it, so no developer machine state can steer the run.
  *
- * The hub is startable and stoppable on its own: the offline proof point needs
- * the hub gone while the browser stays up, and back on the same port and
- * database afterwards — a restart, not a fresh hub.
+ * The upstream hub is startable and stoppable on its own: the local-first
+ * proof point needs it gone while `ub open` and the browser stay up, then back
+ * on the same port and database so the silent replica can converge to a
+ * restarted upstream rather than a fresh one.
  */
 
 import { randomUUID } from "node:crypto";
@@ -195,9 +196,9 @@ export interface Harness {
   readonly workspaceUuid: string;
   /** The other workspace on the switcher's menu. Empty until something writes. */
   readonly secondWorkspace: string;
-  /** Start the hub again — same port, same database. */
+  /** Start the upstream hub again — same port, same database. */
   startHub(): Promise<void>;
-  /** Flush and stop the hub, leaving the dev server and the browser alone. */
+  /** Flush and stop upstream, leaving `ub open` and the browser alone. */
   stopHub(): Promise<void>;
   /** Tear everything down: hub, dev server, temp database. */
   stop(): Promise<void>;

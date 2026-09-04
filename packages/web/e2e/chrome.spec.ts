@@ -97,6 +97,20 @@ async function openApp(
 ): Promise<Page> {
   const context = await browser.newContext({ colorScheme, hasTouch });
   contexts.push(context);
+  // This file's synthetic peers exercise direct hub presence. Relaying that
+  // presence through `ub open` is #753, so preserve the existing proof by
+  // keeping the browser on the same upstream as those peers.
+  await context.route("**/uberblick-config.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        hubUrl: harness().hubUrl,
+        workspaces: [harness().workspace],
+        hubAuthToken: harness().authSecret,
+      }),
+    });
+  });
   const page = await context.newPage();
   await page.goto(new URL(path, harness().appUrl).href);
   await expect(page.locator(".ub-workspace")).toBeVisible();

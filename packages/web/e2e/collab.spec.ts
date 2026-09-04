@@ -62,6 +62,27 @@ async function openApp(browser: Browser, path = "/"): Promise<Page> {
   return page;
 }
 
+/** Read through the upstream hub, bypassing `ub open`'s loopback server. */
+async function openUpstream(browser: Browser, path: string): Promise<Page> {
+  const context = await browser.newContext();
+  contexts.push(context);
+  await context.route("**/uberblick-config.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        hubUrl: harness().hubUrl,
+        workspaces: [harness().workspace],
+        hubAuthToken: harness().authSecret,
+      }),
+    });
+  });
+  const page = await context.newPage();
+  await page.goto(new URL(path, harness().appUrl).href);
+  await expect(page.locator(".ub-list-head")).toBeVisible();
+  return page;
+}
+
 function localCopyFact(page: Page) {
   return page.locator('.ub-sync-fact:has(dt:text-is("Local copy")) dd');
 }
@@ -251,7 +272,11 @@ test("the open document's last-updated reading follows its stub through status a
 
   await harness().stopHub();
   try {
-    await expect(page.locator(".ub-status")).toContainText("offline");
+    // The browser remains connected to `ub open`; only its silent upstream
+    // replica is offline, so the local durability boundary stays synced.
+    await expect
+      .poll(() => page.locator(".ub-status").textContent())
+      .toContain("synced");
     await expect(reading).toContainText("last updated just now");
     await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
     expect(await reading.boundingBox()).toEqual(stablePosition);
@@ -266,7 +291,7 @@ test("the open document's last-updated reading follows its stub through status a
   expect(await reading.boundingBox()).toEqual(stablePosition);
 });
 
-test("a document claims a local copy only after a hub-confirmed checkpoint", async ({
+test("a fresh browser hydrates from the ub open store while the upstream is offline", async ({
   browser,
 }) => {
   const seeded = await openApp(browser);
@@ -275,31 +300,25 @@ test("a document claims a local copy only after a hub-confirmed checkpoint", asy
 
   await harness().stopHub();
   try {
-    // A fresh browser has neither this document nor its checkpoint. The
-    // waiting pane must not turn an empty IndexedDB read into availability.
+    // A fresh browser has no IndexedDB. The document and directory therefore
+    // come from `ub open`'s store-backed rooms, not from browser cache or the
+    // unavailable upstream.
     const fresh = await openApp(browser, path);
-    await expect(fresh.locator(".ub-notice")).toContainText("Waiting for sync");
-    await fresh.locator(".ub-sync-toggle").click();
-    await expect(localCopyFact(fresh)).toHaveText("—");
-
-    // Only a completed hub sync writes the checkpoint beside the room state.
-    await harness().startHub();
     await expect(editor(fresh)).toBeVisible();
+    await expect(fresh.locator(".ub-status")).toContainText("synced");
+    await fresh.locator(".ub-sync-toggle").click();
     await expect(localCopyFact(fresh)).toHaveText("available");
 
-    // The proof is the real browser database: the document and checkpoint
-    // survive a reload while the hub is unavailable.
-    await harness().stopHub();
+    // Reload is another store hydration while upstream remains unavailable.
     await fresh.reload();
     await expect(editor(fresh)).toBeVisible();
-    await fresh.locator(".ub-sync-toggle").click();
-    await expect(localCopyFact(fresh)).toHaveText("available");
+    await expect(fresh.locator(".ub-status")).toContainText("synced");
   } finally {
     await harness().startHub();
   }
 });
 
-test("a multi-author block survives a hub stop, reload, offline edit, and restart", async ({
+test("a multi-author block survives upstream loss and converges back without duplication", async ({
   browser,
 }) => {
   const title = docTitle("offline");
@@ -322,30 +341,25 @@ test("a multi-author block survives a hub stop, reload, offline edit, and restar
   await expect(a.locator(".ub-status .ub-local-copy")).toHaveCount(0);
 
   await harness().stopHub();
-  await expect(a.locator(".ub-status")).toContainText("offline");
+  await expect(a.locator(".ub-status")).toContainText("synced");
 
-  // Reload with nowhere to sync from. Both the document list and the document
-  // can only be coming out of IndexedDB.
+  // Reload with no upstream. Both rooms hydrate from the process-local store,
+  // and the browser still has a real durability boundary to acknowledge it.
   await a.reload();
   await openDoc(a, title);
   await expect.poll(() => blockText(a)).toBe("before-peer");
-  await expect(a.locator(".ub-status")).toContainText("offline");
-  // Offline is where the fact earns its place — and this reload proves it is
-  // true, because the document on screen can only have come out of IndexedDB.
-  await expect(a.locator(".ub-status .ub-local-copy")).toHaveText("local copy");
+  await expect(a.locator(".ub-status")).toContainText("synced");
 
   await placeCaret(a);
   await type(a, "-offline");
+  await expect.poll(() => blockText(b)).toBe("before-peer-offline");
 
   await harness().startHub();
+  // A browser connected directly to the restarted upstream sees the update
+  // once the silent replica drains its pending row. Exact text rules out a
+  // duplicate replay as well as a missing write.
+  const upstream = await openUpstream(browser, new URL(a.url()).pathname);
   await expect
-    .poll(() => blockText(b), { timeout: 40_000 })
+    .poll(() => blockText(upstream), { timeout: 40_000 })
     .toBe("before-peer-offline");
-  // And A says so about itself. Convergence on B proves the update travelled;
-  // what the writer needs to see is its *own* reading coming back off
-  // "offline" — a status that stuck there after the hub returned would leave
-  // the one person holding an unsynced edit unable to tell that it landed.
-  await expect(a.locator(".ub-status")).toContainText("synced", {
-    timeout: 40_000,
-  });
 });

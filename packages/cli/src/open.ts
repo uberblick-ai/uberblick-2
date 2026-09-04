@@ -27,16 +27,15 @@
  *    both, never a silent bind of a socket nobody will connect to.
  *
  * 3. **It serves #91's configuration document** at {@link CONFIG_PATH}, with
- *    the resolved endpoint, workspace and signing secret in it and
+ *    the local browser endpoint, frozen startup workspace/signing secret, and
+ *    upstream endpoint in it and
  *    `Cache-Control: no-store` on it, matched *ahead* of the SPA fallback. That
  *    document is what lets one prebuilt bundle target any hub; the fallback
  *    answering it with the app's own HTML is precisely the production failure
- *    #91 exists to remove. It is resolved **per request**, not once at startup
- *    (#449): after `ub remote join` or `ub workspace use` changes this machine's
- *    binding, a reload sees the change instead of the values this process
- *    happened to start with. An already-open page is not retargeted — nothing
- *    here reaches into a running client — so the freshness this buys is a
- *    reload's, which is the step that used to require restarting `ub open`.
+ *    #91 exists to remove. A serving run freezes its binding at startup so the
+ *    browser and silent replica cannot split identities; later binding changes
+ *    add `rebound: true` until restart. Unbound/no-credential serving retains
+ *    #449's per-request resolution because it owns no replica identity.
  *
  * 4. **It never serves a blank page.** With no bundle and no toolchain it exits
  *    non-zero naming what is missing, rather than opening a browser onto 404s.
@@ -87,10 +86,19 @@ import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import type { Hub } from "@uberblick/hub";
-import { createHub, resolveHubConfig } from "@uberblick/hub";
+import type { Hub, LocalBrowserServer } from "@uberblick/hub";
+import {
+  createHub,
+  createLocalBrowserServer,
+  resolveHubConfig,
+} from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION, isProtocolVersion } from "@uberblick/hub/protocol";
-import { DEFAULT_HUB_URL } from "@uberblick/mcp-server";
+import {
+  DEFAULT_HUB_URL,
+  ServingReplicaHeldError,
+  createMcpEngine,
+  type UberblickMcpEngine,
+} from "@uberblick/mcp-server";
 import { budget, resolveMcpConfig } from "./budget.js";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
@@ -671,20 +679,50 @@ function fileFor(root: string, pathname: string): string {
  * decoration and all — the client parses the uuid out of it, and the slug is
  * what makes the switcher readable.
  *
- * Serialization only. What goes *into* it is resolved per request by
- * {@link configSource}. Empty secret when there is none — the client then says
- * it cannot authenticate rather than pretending it can.
+ * Serialization only. {@link configSource} supplies live direct-serving
+ * values; {@link servingConfigSource} supplies a frozen local/upstream pair and
+ * the live `rebound` diagnostic. Empty secret when there is none — the client
+ * then says it cannot authenticate rather than pretending it can.
  */
 export function configDocument(
   hubUrl: string,
   workspace: string | null,
   hubAuthToken: string,
+  serving?: { remoteHubUrl: string; rebound: boolean },
 ): string {
   return JSON.stringify({
     hubUrl,
     workspaces: workspace === null ? [] : [workspace],
     hubAuthToken,
+    ...(serving === undefined
+      ? {}
+      : {
+          remoteHubUrl: serving.remoteHubUrl,
+          ...(serving.rebound ? { rebound: true } : {}),
+        }),
   });
+}
+
+interface Binding {
+  hubUrl: string;
+  workspace: string | null;
+  hubAuthToken: string;
+}
+
+function bindingOf(resolved: ReturnType<typeof resolveConfig>): Binding {
+  return {
+    hubUrl: trimmed(resolved.env.HUB_URL) ?? DEFAULT_HUB_URL,
+    workspace: trimmed(resolved.env.WORKSPACE_ID),
+    hubAuthToken: trimmed(resolved.env.HUB_AUTH_TOKEN) ?? "",
+  };
+}
+
+function sameBinding(left: Binding, right: Binding): boolean {
+  return (
+    left.hubUrl === right.hubUrl &&
+    left.workspace === right.workspace &&
+    left.hubAuthToken === right.hubAuthToken
+  );
 }
 
 /**
@@ -706,11 +744,8 @@ function currentConfigDocument(env: NodeJS.ProcessEnv): string {
 }
 
 function resolvedConfigDocument(resolved: ReturnType<typeof resolveConfig>): string {
-  return configDocument(
-    trimmed(resolved.env.HUB_URL) ?? DEFAULT_HUB_URL,
-    trimmed(resolved.env.WORKSPACE_ID),
-    trimmed(resolved.env.HUB_AUTH_TOKEN) ?? "",
-  );
+  const binding = bindingOf(resolved);
+  return configDocument(binding.hubUrl, binding.workspace, binding.hubAuthToken);
 }
 
 /**
@@ -750,6 +785,40 @@ function configSource(env: NodeJS.ProcessEnv, initial: string): () => string {
   };
 }
 
+/**
+ * The frozen local-serving document, plus one live fact: whether this machine
+ * has since been rebound and `ub open` must be restarted.
+ */
+function servingConfigSource(
+  env: NodeJS.ProcessEnv,
+  startup: ReturnType<typeof resolveConfig>,
+  localHubUrl: string,
+): () => string {
+  const binding = bindingOf(startup);
+  let accepted = configDocument(
+    localHubUrl,
+    binding.workspace,
+    binding.hubAuthToken,
+    { remoteHubUrl: binding.hubUrl, rebound: false },
+  );
+  return () => {
+    const lock = tryAcquireInitLock(env);
+    if (lock === null) return accepted;
+    try {
+      const current = bindingOf(resolveConfig({ env }));
+      accepted = configDocument(
+        localHubUrl,
+        binding.workspace,
+        binding.hubAuthToken,
+        { remoteHubUrl: binding.hubUrl, rebound: !sameBinding(binding, current) },
+      );
+      return accepted;
+    } finally {
+      lock.release();
+    }
+  };
+}
+
 /** Resolve the startup binding and its first served document as one snapshot. */
 async function initialConfig(env: NodeJS.ProcessEnv): Promise<{
   resolved: ReturnType<typeof resolveConfig>;
@@ -775,8 +844,12 @@ function respond(
   response.end(request.method === "HEAD" ? undefined : body);
 }
 
-function serveBundle(root: string, document: () => string): Server {
-  return createServer((request, response) => {
+function serveBundleRequest(
+  root: string,
+  document: () => string,
+  request: IncomingMessage,
+  response: ServerResponse,
+): void {
     if (request.method !== "GET" && request.method !== "HEAD") {
       respond(request, response, 405, { allow: "GET, HEAD" }, "");
       return;
@@ -819,6 +892,11 @@ function serveBundle(root: string, document: () => string): Server {
       response.writeHead(200, headers);
       stream.pipe(response);
     });
+}
+
+function serveBundle(root: string, document: () => string): Server {
+  return createServer((request, response) => {
+    serveBundleRequest(root, document, request, response);
   });
 }
 
@@ -1126,6 +1204,40 @@ function parseOptions(argv: string[]): Options {
 interface Owned {
   hub: Hub | null;
   server: Server | null;
+  localServer: LocalBrowserServer | null;
+  engine: UberblickMcpEngine | null;
+  engineMonitor: EngineMonitor | null;
+}
+
+interface EngineMonitor {
+  readonly failed: Promise<string>;
+  failure(): string | null;
+  stop(): void;
+}
+
+function monitorEngine(engine: UberblickMcpEngine): EngineMonitor {
+  let failure: string | null = null;
+  let wake!: (message: string) => void;
+  const failed = new Promise<string>((resolve) => {
+    wake = resolve;
+  });
+  const inspect = (): void => {
+    if (failure !== null) return;
+    const health = engine.health;
+    const refresh = engine.refreshStatus;
+    if (health.status === "quarantined") {
+      failure = `local replica quarantined in ${health.room}: ${health.message}`;
+    } else if (refresh.status === "failed") {
+      failure = `local replica refresh failed: ${refresh.message}`;
+    }
+    if (failure !== null) wake(failure);
+  };
+  const timer = setInterval(inspect, 25);
+  return {
+    failed,
+    failure: () => failure,
+    stop: () => clearInterval(timer),
+  };
 }
 
 interface Foreground extends Stop {
@@ -1161,6 +1273,18 @@ function takeForeground(owned: Owned, io: Io): Foreground {
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
 
+    owned.engineMonitor?.stop();
+    let result = code;
+
+    if (owned.localServer !== null) {
+      try {
+        await owned.localServer.stop();
+      } catch (error) {
+        io.err(`ub open: the browser server did not shut down cleanly: ${message(error)}\n`);
+        result = 1;
+      }
+    }
+
     const server = owned.server;
     if (server !== null) {
       // `close()` refuses new connections and drops idle ones;
@@ -1172,6 +1296,14 @@ function takeForeground(owned: Owned, io: Io): Foreground {
         server.closeAllConnections();
       });
     }
+    if (owned.engine !== null) {
+      try {
+        await owned.engine.close();
+      } catch (error) {
+        io.err(`ub open: the local replica did not shut down cleanly: ${message(error)}\n`);
+        result = 1;
+      }
+    }
     if (owned.hub !== null) {
       try {
         // Flushes before it closes — the hub's own durability contract, which
@@ -1179,10 +1311,10 @@ function takeForeground(owned: Owned, io: Io): Foreground {
         await owned.hub.stop();
       } catch (error) {
         io.err(`ub open: the hub did not shut down cleanly: ${message(error)}\n`);
-        return 1;
+        result = 1;
       }
     }
-    return code;
+    return result;
   };
 
   return { interrupted: () => seen, signalled, shutdown };
@@ -1202,10 +1334,9 @@ export async function openCommand(
     return 2;
   }
 
-  // Kept, not just used: the configuration document is re-resolved from this
-  // same environment on every request, and resolving from anything downstream of
-  // a resolution would turn file values into permanent pins — see
-  // {@link currentConfigDocument}.
+  // Kept, not just used: rebound detection (and the direct-serving fallback)
+  // re-resolves from this original environment. Resolving from the output of a
+  // prior resolution would turn file values into permanent pins.
   const startupEnv: NodeJS.ProcessEnv = { ...process.env };
   const initial = await initialConfig(startupEnv);
   const resolved = initial.resolved;
@@ -1219,7 +1350,13 @@ export async function openCommand(
   const hubUrl = trimmed(resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
   const env: NodeJS.ProcessEnv = { ...resolved.env, HUB_URL: hubUrl };
 
-  const owned: Owned = { hub: null, server: null };
+  const owned: Owned = {
+    hub: null,
+    server: null,
+    localServer: null,
+    engine: null,
+    engineMonitor: null,
+  };
   const foreground = takeForeground(owned, io);
   let hubNote = "";
 
@@ -1262,15 +1399,58 @@ export async function openCommand(
   }
 
   const workspace = trimmed(env.WORKSPACE_ID);
-  // `workspace` is for the banner, which reports what this command started
-  // with; the document is resolved afresh for whoever asks for it.
-  const server = serveBundle(plan.dir, configSource(startupEnv, initial.document));
+  const localHubUrl = `ws://${WEB_HOST}:${options.port}`;
   try {
-    await listen(server, WEB_HOST, options.port);
-    owned.server = server;
+    const mcpConfig = workspace === null ? null : resolveMcpConfig(env);
+    if (mcpConfig !== null && mcpConfig.authSecret !== null) {
+      const engine = await createMcpEngine(mcpConfig, { serving: true });
+      owned.engine = engine;
+      owned.engineMonitor = monitorEngine(engine);
+      const document = servingConfigSource(
+        startupEnv,
+        initial.resolved,
+        localHubUrl,
+      );
+      owned.localServer = await createLocalBrowserServer({
+        port: options.port,
+        workspaceId: mcpConfig.workspaceId,
+        authSecret: mcpConfig.authSecret,
+        expectedOrigin: `http://${WEB_HOST}:${options.port}`,
+        readRoom: (room) => engine.store.readSince(room, 0),
+        appendUpdate: (room, payload) => {
+          const health = engine.health;
+          if (health.status === "quarantined") {
+            throw new Error(
+              `local replica quarantined in ${health.room}: ${health.message}`,
+            );
+          }
+          const refresh = engine.refreshStatus;
+          if (refresh.status === "failed") {
+            throw new Error(`local replica refresh failed: ${refresh.message}`);
+          }
+          engine.store.appendUpdate(room, payload, "local");
+        },
+        onRequest: (request, response) => {
+          serveBundleRequest(plan.dir, document, request, response);
+        },
+      });
+    } else {
+      // The unbound and no-credential paths keep serving the bundle directly;
+      // there is no workspace-local server a browser could authenticate to.
+      const server = serveBundle(
+        plan.dir,
+        configSource(startupEnv, initial.document),
+      );
+      await listen(server, WEB_HOST, options.port);
+      owned.server = server;
+    }
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === "EADDRINUSE") {
+    if (error instanceof ServingReplicaHeldError) {
+      io.err(
+        `ub open: another \`ub open\` is already serving this store: ${message(error)}\n`,
+      );
+    } else if (code === "EADDRINUSE") {
       const holder = await whoHoldsPort(options.port);
       io.err(
         holder === "ub-open"
@@ -1282,6 +1462,12 @@ export async function openCommand(
     } else {
       io.err(`ub open: could not serve on port ${options.port}: ${message(error)}\n`);
     }
+    return await foreground.shutdown(1);
+  }
+
+  const earlyFailure = owned.engineMonitor?.failure() ?? null;
+  if (earlyFailure !== null) {
+    io.err(`ub open: ${earlyFailure}\n`);
     return await foreground.shutdown(1);
   }
 
@@ -1297,9 +1483,21 @@ export async function openCommand(
     openBrowser(url, env, io);
   }
 
-  await foreground.signalled;
+  let exitCode = 0;
+  if (owned.engineMonitor === null) {
+    await foreground.signalled;
+  } else {
+    const failure = await Promise.race([
+      foreground.signalled.then(() => null),
+      owned.engineMonitor.failed,
+    ]);
+    if (failure !== null) {
+      io.err(`ub open: ${failure}\n`);
+      exitCode = 1;
+    }
+  }
 
   // Ctrl-C stops what this command started, and only that: a hub somebody else
   // was already running was never registered as owned, so it is still there.
-  return await foreground.shutdown(0);
+  return await foreground.shutdown(exitCode);
 }
