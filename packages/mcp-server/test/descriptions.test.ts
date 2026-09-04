@@ -401,7 +401,7 @@ describe("lifecycle metadata reaches discovery", () => {
     expect(stub(rig, ordinary.uuid)).not.toHaveProperty("kind");
   });
 
-  it("filters lifecycle stubs by kind and status, combined with tag", async () => {
+  it("omits decisions by default and includes them under exact predicates", async () => {
     const rig = await localRig();
     const planned = await rig.ok("create_doc", {
       title: "Planned",
@@ -417,26 +417,43 @@ describe("lifecycle metadata reaches discovery", () => {
       tags: ["shared"],
       kind: "decision",
     });
+    const archivedDecision = await rig.ok("create_doc", {
+      title: "Archived decision",
+      description: "A decided record kept outside ordinary orientation.",
+      tags: ["retired"],
+      kind: "decision",
+      status: "decided",
+    });
+    await rig.ok("archive_doc", { uuid: archivedDecision.uuid });
+
+    const listedUuids = async (args: Record<string, unknown> = {}) =>
+      (await rig.ok("list_docs", args)).docs
+        .map((doc: any) => doc.uuid)
+        .sort();
+
+    expect(await listedUuids()).toEqual([planned.uuid, draft.uuid].sort());
+    expect(await listedUuids({ include_deleted: true })).toEqual(
+      [planned.uuid, draft.uuid].sort(),
+    );
+    expect(await listedUuids({ kind: "decision" })).toEqual([decision.uuid]);
+    expect(await listedUuids({ kind: "decision", status: "open" })).toEqual([
+      decision.uuid,
+    ]);
+    expect(await listedUuids({ status: "open" })).toEqual([decision.uuid]);
+    expect(await listedUuids({ tag: "shared" })).toEqual(
+      [planned.uuid, decision.uuid].sort(),
+    );
 
     expect(
-      (await rig.ok("list_docs", { kind: "requirement" })).docs
-        .map((doc: any) => doc.uuid)
-        .sort(),
-    ).toEqual([planned.uuid, draft.uuid].sort());
-    expect(
-      (await rig.ok("list_docs", { status: "open" })).docs.map(
-        (doc: any) => doc.uuid,
-      ),
-    ).toEqual([decision.uuid]);
-    expect(
-      (
-        await rig.ok("list_docs", {
-          tag: "shared",
-          kind: "requirement",
-          status: "planned",
-        })
-      ).docs.map((doc: any) => doc.uuid),
+      await listedUuids({
+        tag: "shared",
+        kind: "requirement",
+        status: "planned",
+      }),
     ).toEqual([planned.uuid]);
+    expect(
+      await listedUuids({ include_deleted: true, kind: "decision" }),
+    ).toEqual([archivedDecision.uuid, decision.uuid].sort());
   });
 
   it("repairs a stale lifecycle in either direction on the next document write", async () => {
@@ -564,6 +581,27 @@ describe("lifecycle tool text", () => {
     expect(frontmatter.description).toContain("kind");
     expect(frontmatter.description).toContain("status");
     expect(frontmatter.description).toContain("do not authorize");
+  });
+
+  it("states the decision-listing default wherever archive discovery is described", async () => {
+    const rig = await localRig();
+    const { tools } = await rig.client.listTools();
+    const description = (name: string) =>
+      tools.find((tool) => tool.name === name)?.description ?? "";
+
+    expect(description("list_docs")).toContain(
+      'unfiltered orientation listing omits `kind: "decision"`',
+    );
+    expect(description("list_docs")).toContain(
+      '`kind: "decision"` lists decision records',
+    );
+    expect(description("list_docs")).toContain(
+      "`include_deleted` admits tombstones but is not a predicate",
+    );
+    for (const name of ["archive_doc", "restore_doc", "set_title"]) {
+      expect(description(name), name).toContain("decision");
+      expect(description(name), name).toContain("predicate");
+    }
   });
 });
 
