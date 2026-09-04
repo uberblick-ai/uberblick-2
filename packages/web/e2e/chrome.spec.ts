@@ -237,24 +237,35 @@ for (const scheme of ["light", "dark"] as const) {
         return [style.backgroundColor, style.borderColor, style.color];
       });
     const cue = async (option: Locator): Promise<string> => {
-      await expect(option).toHaveCSS("outline-style", "solid");
-      await expect(option).toHaveCSS("outline-width", "2px");
-      return paintedIn(option, "outline-color");
+      expect(
+        Number.parseFloat(await paintedIn(option, "border-top-width")),
+      ).toBeGreaterThan(0);
+      const colour = await paintedIn(option, "border-top-color");
+      expect(
+        contrast(colour, await paintedIn(option, "background-color")),
+      ).toBeGreaterThanOrEqual(3);
+      return colour;
     };
 
-    const ground = await paintedIn(panel, "background-color");
     const before = await boxes();
     await expect(system).toHaveAttribute("aria-pressed", "true");
-    expect(contrast(await cue(system), ground)).toBeGreaterThanOrEqual(3);
+    const selectedCue = await cue(system);
+
+    // The state cue and keyboard-focus cue are independent: tabbing onto the
+    // selected option must still add the browser's own focus outline.
+    await options.nth(1).focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(system).toBeFocused();
+    expect(await paintedIn(system, "outline-style")).not.toBe("none");
 
     const rest = await treatment(untouched);
     await untouched.hover();
     const hover = await treatment(untouched);
     await matching.click();
 
-    await expect(system).toHaveCSS("outline-style", "none");
     await expect(matching).toHaveAttribute("aria-pressed", "true");
-    expect(contrast(await cue(matching), ground)).toBeGreaterThanOrEqual(3);
+    expect(await cue(matching)).toBe(selectedCue);
+    expect(await paintedIn(system, "border-top-color")).not.toBe(selectedCue);
     expect(await boxes()).toEqual(before);
     expect(await treatment(untouched)).toEqual(rest);
     await untouched.hover();
