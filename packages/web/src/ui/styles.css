@@ -1650,6 +1650,14 @@ body {
   color: var(--foreground);
 }
 
+/* The subtle warning fill disappears on a focused card's amber ground. Its
+   full warning partner stays status-coloured there, with the shared dark ink
+   used on light amber fills in both appearances. */
+.ub-thread-focused .ub-chip-orphaned {
+  background: var(--status-warning);
+  color: var(--brand-foreground);
+}
+
 /* The quote marks are chrome, so they are CSS rather than characters in the
    excerpt — the excerpt itself is the document's own text, verbatim. */
 .ub-thread-excerpt {
