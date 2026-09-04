@@ -29,15 +29,20 @@ export const blockIdPluginKey = new PluginKey("uberblick/block-ids");
 export interface BlockIdOptions {
   /** Id source. Injectable so tests can assert exact values. */
   newId: () => string;
+  /** Whether this replica may repair the shared document right now. */
+  canWrite: () => boolean;
 }
 
 const defaultNewId = (): string => crypto.randomUUID();
+const defaultCanWrite = (): boolean => true;
 
 export function blockIdPlugin(options: Partial<BlockIdOptions> = {}): Plugin {
   const newId = options.newId ?? defaultNewId;
+  const canWrite = options.canWrite ?? defaultCanWrite;
   return new Plugin({
     key: blockIdPluginKey,
     appendTransaction(_transactions, _oldState, newState) {
+      if (!canWrite()) return null;
       const seen = new Set<string>();
       let tr: Transaction | null = null;
       newState.doc.forEach((node, offset) => {
@@ -62,9 +67,14 @@ export function blockIdPlugin(options: Partial<BlockIdOptions> = {}): Plugin {
 export const BlockIds = Extension.create<BlockIdOptions>({
   name: "uberblickBlockIds",
   addOptions() {
-    return { newId: defaultNewId };
+    return { newId: defaultNewId, canWrite: defaultCanWrite };
   },
   addProseMirrorPlugins() {
-    return [blockIdPlugin({ newId: this.options.newId })];
+    return [
+      blockIdPlugin({
+        newId: this.options.newId,
+        canWrite: this.options.canWrite,
+      }),
+    ];
   },
 });

@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { StatusLine } from "../src/ui/EditorPane.js";
-import { TOKEN_MISSING } from "../src/ui/status-reading.js";
+import { STORE_REFUSED, TOKEN_MISSING } from "../src/ui/status-reading.js";
 import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { HubEndpoint } from "../src/config.js";
@@ -32,6 +32,8 @@ function stubConnection(
   const status: RoomStatus = {
     connected: false,
     synced: false,
+    writable: true,
+    storeRefused: false,
     unsyncedChanges,
     localReplicaLoaded: false,
     hasLocalCache: false,
@@ -85,6 +87,18 @@ describe("the status line names the unit of its backlog count", () => {
     expect(label(0)).toBeNull();
   });
 
+});
+
+describe("an unwritable document", () => {
+  it("says browser changes are not saved while the live link is gone", () => {
+    expect(line({ writable: false })).toContain("not saved");
+  });
+
+  it("names a sticky store refusal and its recovery", () => {
+    const refused = line({ writable: false, storeRefused: true });
+    expect(refused).toContain("edit refused");
+    expect(refused).toContain(STORE_REFUSED);
+  });
 });
 
 /** The whole line, for a room in the given state. */

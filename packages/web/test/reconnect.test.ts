@@ -32,6 +32,8 @@ import {
   MAX_TOKEN_LIFETIME_SECONDS,
   mintToken,
   silentLogger,
+  STORE_BUSY_REASON,
+  STORE_REFUSED_REASON,
 } from "@uberblick/hub";
 import type { Hub } from "@uberblick/hub";
 import { wrapToken } from "@uberblick/hub/protocol";
@@ -235,13 +237,22 @@ function sharedSocket(connection: RoomConnection) {
 }
 
 async function seedDocument(tab: Tab, uuid: string): Promise<void> {
-  await waitFor("the first sync", () => tab.latest().synced);
+  await waitFor("the room to become writable", () => tab.latest().writable);
   initDoc(tab.connection.ydoc, { uuid, title: "Reconnect" });
   insertBlock(tab.connection.ydoc, null, { type: "paragraph", text: "before" });
   await waitFor(
     "the document to reach the hub",
     () => tab.latest().unsyncedChanges === 0,
   );
+}
+
+/** Send the same room-local close reason the local browser bridge sends. */
+function closeRoom(hub: Hub, room: string, reason: string): void {
+  const document = hub.hocuspocus.documents.get(room);
+  if (document === undefined) throw new Error(`hub has no document ${room}`);
+  for (const connection of document.getConnections()) {
+    connection.close({ code: 1000, reason });
+  }
 }
 
 /** Write a block from a second client and wait for the tab to see it live. */
@@ -281,6 +292,7 @@ it("resumes live sync after a hub restart, and never claims to be synced while i
     "the status to stop claiming 'synced'",
     () => !(tab.latest().connected && tab.latest().synced),
   );
+  expect(tab.latest().writable).toBe(false);
 
   // The hub comes back on the same address, with the same database. Nothing
   // rebinds or reloads on this side: same connection, same Y.Doc, same
@@ -291,8 +303,59 @@ it("resumes live sync after a hub restart, and never claims to be synced while i
   await expectLiveWrite(tab, port, room, "after the restart");
   await waitFor(
     "the status to read synced again",
-    () => tab.latest().connected && tab.latest().synced,
+    () => tab.latest().connected && tab.latest().synced && tab.latest().writable,
   );
+}, TEST_TIMEOUT_MS);
+
+it("redials after a busy store close and republishes the last local write", async () => {
+  const hub = await startHub(0, databasePath());
+  const uuid = randomUUID();
+  const room = `${WORKSPACE}/${uuid}`;
+  const tab = await openTab(room, hub.port);
+  teardown.push(() => sharedSocket(tab.connection).destroy());
+  await seedDocument(tab, uuid);
+
+  insertBlock(tab.connection.ydoc, null, {
+    type: "paragraph",
+    text: "before the busy close",
+  });
+  const beforeClose = tab.history.length;
+  closeRoom(hub, room, STORE_BUSY_REASON);
+  await waitFor("the busy room to become read-only", () =>
+    tab.history.slice(beforeClose).some((status) => !status.writable),
+  );
+  await waitFor("the busy room to be admitted again", () => tab.latest().writable);
+
+  const observer = peer(hub.port, room);
+  teardown.push(() => observer.destroy());
+  await waitFor("the pre-close write to reach the hub", () =>
+    getBlocks(observer.doc).some((block) => block.text === "before the busy close"),
+  );
+}, TEST_TIMEOUT_MS);
+
+it("keeps a store-refused room read-only across reacquire without dropping peers", async () => {
+  const hub = await startHub(0, databasePath());
+  const refusedUuid = randomUUID();
+  const otherUuid = randomUUID();
+  const refusedRoom = `${WORKSPACE}/${refusedUuid}`;
+  const otherRoom = `${WORKSPACE}/${otherUuid}`;
+  const refused = await openTab(refusedRoom, hub.port);
+  const other = await openTab(otherRoom, hub.port);
+  teardown.push(() => sharedSocket(refused.connection).destroy());
+  await seedDocument(refused, refusedUuid);
+  await seedDocument(other, otherUuid);
+
+  closeRoom(hub, refusedRoom, STORE_REFUSED_REASON);
+  await waitFor("the refusal reading", () => refused.latest().storeRefused);
+  expect(refused.latest().writable).toBe(false);
+  expect(other.latest().writable).toBe(true);
+  await expectLiveWrite(other, hub.port, otherRoom, "the other room stays live");
+
+  refused.release();
+  const reopened = await openTab(refusedRoom, hub.port);
+  expect(reopened.latest().storeRefused).toBe(true);
+  expect(reopened.latest().writable).toBe(false);
+  expect(other.latest().writable).toBe(true);
 }, TEST_TIMEOUT_MS);
 
 it("repairs a document close that arrives during the forced-drop cooldown", async () => {

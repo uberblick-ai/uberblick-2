@@ -61,6 +61,8 @@ const FOUR = "3b8a52d4-12c7-4c8f-9a61-9f18e35d7c2a";
 const OFFLINE: RoomStatus = {
   connected: false,
   synced: false,
+  writable: true,
+  storeRefused: false,
   unsyncedChanges: 0,
   localReplicaLoaded: false,
   hasLocalCache: false,

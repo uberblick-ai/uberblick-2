@@ -39,6 +39,9 @@ export const TOKEN_MISSING =
   "this app was served without a hub token, so it cannot authenticate — the " +
   "deployment serving it is incomplete";
 
+export const STORE_REFUSED =
+  "the server refused this edit; this document is not saved — reload to reconnect";
+
 export interface StatusReading {
   /** The one word for the surface's status slot. */
   word: string;
@@ -78,6 +81,9 @@ export function statusReading(status: RoomStatus, settled: SyncState): StatusRea
         ` (app ${mismatch.client}, hub ${mismatch.hub})`,
       tone: "offline",
     };
+  }
+  if (status.storeRefused) {
+    return { word: "edit refused", detail: STORE_REFUSED, tone: "offline" };
   }
   if (status.tokenMissing) {
     // Unlike the reading above, not terminal: `collab/rooms.ts` re-reads the

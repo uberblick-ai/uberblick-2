@@ -83,7 +83,11 @@ function syncDocs(a: Y.Doc, b: Y.Doc): void {
 
 /** The rail reads the Y.Doc and nothing else. */
 function stubConnection(ydoc: Y.Doc): RoomConnection {
-  return { room: `${WORKSPACE}/doc-1`, ydoc } as unknown as RoomConnection;
+  return {
+    room: `${WORKSPACE}/doc-1`,
+    ydoc,
+    status: { writable: true },
+  } as unknown as RoomConnection;
 }
 
 /** The document position of `offset` characters into block `index`. */

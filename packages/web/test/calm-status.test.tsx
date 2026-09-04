@@ -31,6 +31,8 @@ function room(patch: Partial<RoomStatus> = {}): RoomStatus {
   return {
     connected: true,
     synced: true,
+    writable: true,
+    storeRefused: false,
     unsyncedChanges: 0,
     localReplicaLoaded: true,
     hasLocalCache: false,

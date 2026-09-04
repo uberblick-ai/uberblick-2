@@ -38,6 +38,8 @@ export interface CreateEditorOptions {
   editable?: boolean;
   /** Block-id source; injectable for deterministic tests. */
   newBlockId?: () => string;
+  /** Gate for editor-side CRDT repairs while the room is not writable. */
+  canWrite?: () => boolean;
   /**
    * The workspace half of a document reference — its address, the directory
    * that names it, and where a click goes (`doc-links.ts`). Null in an editor
@@ -50,9 +52,10 @@ export interface CreateEditorOptions {
 export function createUberblickEditor(options: CreateEditorOptions): Editor {
   const extensions: Extensions = [
     ...paletteExtensions,
-    BlockIds.configure(
-      options.newBlockId === undefined ? {} : { newId: options.newBlockId },
-    ),
+    BlockIds.configure({
+      ...(options.newBlockId === undefined ? {} : { newId: options.newBlockId }),
+      ...(options.canWrite === undefined ? {} : { canWrite: options.canWrite }),
+    }),
     // Behaviour, not schema — which is why the markdown input rules are here
     // and not in `paletteExtensions`: `uberblickSchema` above has to stay the
     // node and mark set alone. After `BlockIds`, because a rule names the block

@@ -43,6 +43,8 @@ const PROTOCOL = "7c2e5a11-3f80-4d66-b1a9-8e4d2c6f0a55";
 const OFFLINE: RoomStatus = {
   connected: false,
   synced: false,
+  writable: true,
+  storeRefused: false,
   unsyncedChanges: 0,
   localReplicaLoaded: false,
   hasLocalCache: false,

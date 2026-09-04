@@ -22,6 +22,8 @@ const ENDPOINT: HubEndpoint = {
 const SYNCED: RoomStatus = {
   connected: true,
   synced: true,
+  writable: true,
+  storeRefused: false,
   unsyncedChanges: 0,
   localReplicaLoaded: true,
   hasLocalCache: true,

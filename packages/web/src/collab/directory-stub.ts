@@ -117,14 +117,34 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changed: boolean): void {
  * Repairs once up front, for the case where the document is already hydrated
  * when this attaches, and then on every update the document takes.
  */
-export function watchDocumentStub(docDoc: Y.Doc, dirDoc: Y.Doc): () => void {
+export interface StubWriteGate {
+  writable(): boolean;
+  subscribe(listener: () => void): () => void;
+}
+
+export function watchDocumentStub(
+  docDoc: Y.Doc,
+  dirDoc: Y.Doc,
+  gate?: StubWriteGate,
+): () => void {
+  let pendingChanged = false;
+  const attempt = (changed: boolean): void => {
+    pendingChanged ||= changed;
+    if (gate !== undefined && !gate.writable()) return;
+    repairStub(docDoc, dirDoc, pendingChanged);
+    pendingChanged = false;
+  };
   const onUpdate = (
     _update: Uint8Array,
     _origin: unknown,
     _doc: Y.Doc,
     transaction: Y.Transaction,
-  ): void => repairStub(docDoc, dirDoc, transaction.local);
-  repairStub(docDoc, dirDoc, false);
+  ): void => attempt(transaction.local);
+  attempt(false);
   docDoc.on("update", onUpdate);
-  return () => docDoc.off("update", onUpdate);
+  const stopGate = gate?.subscribe(() => attempt(false));
+  return () => {
+    docDoc.off("update", onUpdate);
+    stopGate?.();
+  };
 }

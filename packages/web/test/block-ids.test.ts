@@ -17,6 +17,7 @@ import { mountEditor, sequentialIds } from "./helpers.js";
 function stateWith(
   blocks: Array<{ type: string; attrs?: Record<string, unknown>; text?: string }>,
   newId: () => string,
+  canWrite: () => boolean = () => true,
 ): EditorState {
   const nodes: PMNode[] = blocks.map((block) =>
     uberblickSchema.node(
@@ -29,7 +30,7 @@ function stateWith(
   );
   return EditorState.create({
     doc: uberblickSchema.node("doc", null, nodes),
-    plugins: [blockIdPlugin({ newId })],
+    plugins: [blockIdPlugin({ newId, canWrite })],
   });
 }
 
@@ -101,6 +102,22 @@ describe("blockIdPlugin", () => {
     expect(idsOf(split)).toEqual(["original", "fresh-1"]);
     expect(split.doc.child(0).textContent).toBe("abc");
     expect(split.doc.child(1).textContent).toBe("def");
+  });
+
+  it("defers derived id repair until the room is writable", () => {
+    let writable = false;
+    let state = settle(
+      stateWith(
+        [{ type: "paragraph", text: "arrived while offline" }],
+        sequentialIds(),
+        () => writable,
+      ),
+    );
+    expect(idsOf(state)).toEqual([null]);
+
+    writable = true;
+    state = settle(state);
+    expect(idsOf(state)).toEqual(["fresh-1"]);
   });
 
 });

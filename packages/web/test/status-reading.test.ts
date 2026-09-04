@@ -13,12 +13,18 @@ import { describe, expect, it } from "vitest";
 import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import type { RoomStatus } from "../src/collab/rooms.js";
 import type { SyncState } from "../src/ui/calm.js";
-import { TOKEN_MISSING, statusReading } from "../src/ui/status-reading.js";
+import {
+  STORE_REFUSED,
+  TOKEN_MISSING,
+  statusReading,
+} from "../src/ui/status-reading.js";
 
 /** A room that is connected, synced and refused by nothing. */
 const CALM: RoomStatus = {
   connected: true,
   synced: true,
+  writable: true,
+  storeRefused: false,
   unsyncedChanges: 0,
   localReplicaLoaded: true,
   hasLocalCache: false,
@@ -51,11 +57,18 @@ describe("a refusal is read before the connection is", () => {
         connected: false,
         synced: false,
         protocolMismatch: { hub: 2, client: 1 },
+        storeRefused: true,
         tokenMissing: true,
         authFailed: true,
       },
       word: "update required",
       detail: "this app is older than the hub — update it and reload (app 1, hub 2)",
+    },
+    {
+      name: "a store refusal outranks reconnectable token failures",
+      status: { storeRefused: true, tokenMissing: true, authFailed: true },
+      word: "edit refused",
+      detail: STORE_REFUSED,
     },
     {
       name: "the other direction names the hub as what to update",

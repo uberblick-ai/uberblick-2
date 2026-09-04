@@ -59,6 +59,8 @@ const PROSE = "see the hub and more";
 const OFFLINE: RoomStatus = {
   connected: false,
   synced: false,
+  writable: true,
+  storeRefused: false,
   unsyncedChanges: 0,
   localReplicaLoaded: false,
   hasLocalCache: false,

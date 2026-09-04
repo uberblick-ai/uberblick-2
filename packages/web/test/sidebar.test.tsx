@@ -47,6 +47,8 @@ const THREE = "7c2e5a11-3f80-4d66-b1a9-8e4d2c6f0a55";
 const OFFLINE: RoomStatus = {
   connected: false,
   synced: false,
+  writable: true,
+  storeRefused: false,
   unsyncedChanges: 0,
   localReplicaLoaded: false,
   hasLocalCache: false,
@@ -781,6 +783,9 @@ describe("the sidebar's directory line reads a refusal", () => {
     ).toBe("update required");
     expect(await directoryLine({ ...live, tokenMissing: true })).toBe("no hub token");
     expect(await directoryLine({ ...live, authFailed: true })).toBe("not authorized");
+    expect(await directoryLine({ ...live, storeRefused: true })).toBe(
+      "edit refused",
+    );
   });
 
   it("keeps its own three readings when nothing is refused", async () => {
@@ -789,5 +794,31 @@ describe("the sidebar's directory line reads a refusal", () => {
     );
     expect(await directoryLine({ connected: true, synced: false })).toBe("syncing…");
     expect(await directoryLine({})).toBe("offline");
+  });
+});
+
+describe("unwritable workspace rooms", () => {
+  it("makes directory creation and sidebar curation unavailable", async () => {
+    roomStatus = { ...OFFLINE, writable: false };
+    seedDirectory();
+    createGroup(sidebarDoc(), "Reading");
+    const before = rooms.size;
+    const host = await openApp(`/${WORKSPACE}`);
+
+    const create = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent?.includes("new doc"),
+    );
+    expect(create?.disabled).toBe(true);
+    expect(create?.title).toContain("directory is offline");
+    expect(host.querySelector(".ub-sidebar-unwritable")?.textContent).toContain(
+      "Sidebar changes unavailable",
+    );
+    expect(host.querySelectorAll(".ub-group-act")).toHaveLength(0);
+    expect(host.querySelector<HTMLButtonElement>(".ub-group-add")?.disabled).toBe(
+      true,
+    );
+
+    act(() => create?.click());
+    expect(rooms.size).toBe(before);
   });
 });
