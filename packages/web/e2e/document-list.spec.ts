@@ -141,3 +141,14 @@ test("the workspace address is the list, and it holds what another browser creat
   await listedTitles(linked).first().click();
   await expect(linked.locator(".ub-title")).toHaveValue(second);
 });
+
+test("a new document stores the title shown by the list", async ({ browser }) => {
+  const page = await openApp(browser);
+
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await expect(page.locator(".ub-title")).toHaveValue("Untitled");
+
+  await page.getByRole("button", { name: "All docs" }).click();
+  await page.locator(".ub-docs-search").fill("untitled");
+  await expect(listedTitles(page)).toHaveText(["Untitled"]);
+});
