@@ -1232,6 +1232,7 @@ function monitorEngine(engine: UberblickMcpEngine): EngineMonitor {
     }
     if (failure !== null) wake(failure);
   };
+  // Prime the pre-banner failure check; the interval has not fired yet.
   inspect();
   const timer = setInterval(inspect, 1_000);
   return {
