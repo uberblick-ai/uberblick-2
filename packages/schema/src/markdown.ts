@@ -56,6 +56,7 @@ import {
 import { canonicalDocumentUuid } from "./rooms.js";
 import { listNumbers } from "./lists.js";
 import { parseGfmTable } from "./table.js";
+import { resolveTagAssignments } from "./tags.js";
 import { MAX_LIST_INDENT } from "./types.js";
 import type {
   Block,
@@ -79,6 +80,12 @@ export interface ExportMarkdownOptions {
    * per thread directly after its block; `"drop"` (default) omits them.
    */
   annotations?: "html-comments" | "drop";
+  /**
+   * The workspace settings doc. When present, frontmatter renders current tag
+   * names (including retired assignments) rather than stored UUIDs. Unknown
+   * identities and provisional pre-catalog strings are omitted.
+   */
+  tagCatalog?: Y.Doc;
   /**
    * The workspace's directory doc, used to name and state the documents the
    * decision log references. Without it the log still exports — the references
@@ -765,6 +772,12 @@ export function exportMarkdown(
 
   if (withFrontmatter) {
     const meta = getMeta(ydoc);
+    const tags =
+      options.tagCatalog === undefined
+        ? meta.tags
+        : resolveTagAssignments(options.tagCatalog, meta.tags).map(
+            (entry) => entry.name,
+          );
     const lines = [
       "---",
       `uuid: ${emitScalar(meta.uuid)}`,
@@ -778,7 +791,7 @@ export function exportMarkdown(
       ...(meta.status === undefined
         ? []
         : [`status: ${emitScalar(meta.status)}`]),
-      `tags: [${meta.tags.map(emitScalar).join(", ")}]`,
+      `tags: [${tags.map(emitScalar).join(", ")}]`,
       "---",
     ];
     push(lines.join("\n"));

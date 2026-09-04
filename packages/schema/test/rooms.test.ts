@@ -3,6 +3,7 @@ import {
   DIRECTORY_SUFFIX,
   InvalidRoomError,
   InvalidWorkspaceIdError,
+  SETTINGS_SUFFIX,
   SIDEBAR_SUFFIX,
   assertCanonicalRoom,
   directoryRoom,
@@ -10,6 +11,7 @@ import {
   parseRoom,
   parseWorkspaceId,
   roomForDoc,
+  settingsRoom,
   sidebarRoom,
 } from "../src/index.js";
 
@@ -59,16 +61,19 @@ describe("workspace ids", () => {
 });
 
 describe("room names", () => {
-  it("builds document and directory rooms under a workspace", () => {
+  it("builds document and well-known workspace rooms", () => {
     expect(roomForDoc(WORKSPACE, UUID)).toBe(`${WORKSPACE}/${UUID}`);
     expect(directoryRoom(WORKSPACE)).toBe(`${WORKSPACE}/${DIRECTORY_SUFFIX}`);
     expect(SIDEBAR_SUFFIX).toBe("_sidebar");
     expect(sidebarRoom(WORKSPACE)).toBe(`${WORKSPACE}/${SIDEBAR_SUFFIX}`);
+    expect(SETTINGS_SUFFIX).toBe("_settings");
+    expect(settingsRoom(WORKSPACE)).toBe(`${WORKSPACE}/${SETTINGS_SUFFIX}`);
   });
 
   it("keeps the slug out of the room name, so both spellings name one room", () => {
     expect(roomForDoc(DECORATED, UUID)).toBe(roomForDoc(WORKSPACE, UUID));
     expect(directoryRoom(DECORATED)).toBe(directoryRoom(WORKSPACE));
+    expect(settingsRoom(DECORATED)).toBe(settingsRoom(WORKSPACE));
   });
 
   it("round-trips through parseRoom", () => {
@@ -141,10 +146,7 @@ describe("the canonical room grammar", () => {
       ["a document uuid", `${WORKSPACE}/${DOC}`],
       ["the directory", `${WORKSPACE}/${DIRECTORY_SUFFIX}`],
       ["the sidebar", `${WORKSPACE}/${SIDEBAR_SUFFIX}`],
-      // Reserved, and deliberately not built: nothing creates a `_settings`
-      // document (#177). It is in the grammar so that building it later is not
-      // a change to the grammar the hub authenticates against.
-      ["the reserved settings slot", `${WORKSPACE}/_settings`],
+      ["the settings doc", `${WORKSPACE}/${SETTINGS_SUFFIX}`],
     ];
     for (const [label, room] of accepted) {
       expect(isCanonicalRoom(room), label).toBe(true);

@@ -3,8 +3,9 @@
  *
  * A room name is `<workspaceId>/<docUuid>`. A workspace's well-known docs take
  * reserved document-id slots: the directory at `<workspaceId>/_directory`, the
- * sidebar at `<workspaceId>/_sidebar`. Tenancy sits in the room key from day
- * one so a hosted hub never needs a room migration.
+ * sidebar at `<workspaceId>/_sidebar`, and settings (including the tag catalog)
+ * at `<workspaceId>/_settings`. Tenancy sits in the room key from day one so a
+ * hosted hub never needs a room migration.
  *
  * The workspace segment is always the **bare uuid** (see `workspace.ts`): a
  * decorated `<slug>-<uuid>` is parsed here and only its uuid reaches the name,
@@ -21,6 +22,9 @@ export const DIRECTORY_SUFFIX = "_directory";
 
 /** The document-id slot the sidebar doc occupies inside a workspace. */
 export const SIDEBAR_SUFFIX = "_sidebar";
+
+/** The document-id slot for synced workspace settings such as the tag catalog. */
+export const SETTINGS_SUFFIX = "_settings";
 
 const SEPARATOR = "/";
 
@@ -58,10 +62,15 @@ export function sidebarRoom(workspaceId: string): string {
   return roomForDoc(workspaceId, SIDEBAR_SUFFIX);
 }
 
+/** The room name of a workspace's settings doc. */
+export function settingsRoom(workspaceId: string): string {
+  return roomForDoc(workspaceId, SETTINGS_SUFFIX);
+}
+
 export interface ParsedRoom {
   /** The workspace's uuid, never a decorated spelling of it. */
   workspaceId: string;
-  /** The document uuid, or `"_directory"` for a workspace's directory doc. */
+  /** The document uuid or one of the workspace's well-known document ids. */
   uuid: string;
   isDirectory: boolean;
 }
@@ -104,19 +113,13 @@ export function parseRoom(room: string): ParsedRoom {
 /**
  * The document ids a canonical room may name besides a uuid.
  *
- * `_directory` and `_sidebar` are real: {@link directoryRoom} and
- * {@link sidebarRoom} build them, and the MCP and web clients open both.
- *
- * `_settings` is a **reservation only** — no code creates it, nothing opens
- * it, and there is deliberately no `settingsRoom` to call (#177). It is named
- * here so that building it later is not a change to the room grammar, because
- * the grammar sits on the hub's authentication path and that is not where a
- * new well-known document should have to be introduced.
+ * `_directory`, `_sidebar`, and `_settings` are real: their room helpers build
+ * them, while application runtimes decide when to attach and hydrate them.
  */
 const CANONICAL_DOCUMENT_IDS: ReadonlySet<string> = new Set([
   DIRECTORY_SUFFIX,
   SIDEBAR_SUFFIX,
-  "_settings",
+  SETTINGS_SUFFIX,
 ]);
 
 /**

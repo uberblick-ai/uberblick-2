@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   appendBlock,
+  assignDocumentTags,
+  createTagCatalogEntry,
   createAnnotation,
   exportMarkdown,
   getBlocks,
@@ -220,6 +222,20 @@ describe("markdown round-trip", () => {
       blocks: [],
     });
     expect(exportMarkdown(empty, { frontmatter: false })).toBe("");
+  });
+
+  it("resolves catalog identities to current names in frontmatter", () => {
+    const catalog = new Y.Doc();
+    const identity = "11111111-2222-4333-8444-555555555555";
+    createTagCatalogEntry(catalog, "protocol", identity);
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Protocol" });
+    assignDocumentTags(doc, catalog, [identity]);
+
+    expect(exportMarkdown(doc, { tagCatalog: catalog })).toContain(
+      "tags: [protocol]",
+    );
+    expect(exportMarkdown(doc, { tagCatalog: catalog })).not.toContain(identity);
   });
 
   // A description is required on create, so an export that dropped it made the

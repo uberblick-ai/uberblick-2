@@ -266,6 +266,56 @@ export class InvalidDocumentLifecycleError extends Error {
   }
 }
 
+export class InvalidTagNameError extends Error {
+  readonly tagName: string;
+
+  constructor(tagName: string) {
+    super(
+      `Invalid tag name ${JSON.stringify(tagName)}: use lowercase letters and ` +
+        `numbers separated by hyphens, at most 30 characters`,
+    );
+    this.name = "InvalidTagNameError";
+    this.tagName = tagName;
+  }
+}
+
+export type InvalidTagIdentityReason = "not-a-uuid" | "unknown" | "in-use";
+
+export class InvalidTagIdentityError extends Error {
+  readonly reason: InvalidTagIdentityReason;
+  readonly identity: string;
+
+  constructor(reason: InvalidTagIdentityReason, identity: string) {
+    super(
+      reason === "not-a-uuid"
+        ? `Invalid tag identity ${JSON.stringify(identity)}: tag identities are canonical UUIDs`
+        : reason === "in-use"
+          ? `Tag identity ${identity} already names another catalog entry`
+          : `Unknown tag identity ${JSON.stringify(identity)}`,
+    );
+    this.name = "InvalidTagIdentityError";
+    this.reason = reason;
+    this.identity = identity;
+  }
+}
+
+/** A whole-request refusal from the catalog-aware document assignment boundary. */
+export class InvalidTagAssignmentError extends Error {
+  readonly unknown: string[];
+  readonly retired: string[];
+
+  constructor(unknown: string[], retired: string[]) {
+    const details = [
+      ...(unknown.length === 0 ? [] : [`unknown: ${unknown.join(", ")}`]),
+      ...(retired.length === 0 ? [] : [`retired: ${retired.join(", ")}`]),
+    ].join("; ");
+    super(`Invalid tag assignment (${details})`);
+    this.name = "InvalidTagAssignmentError";
+    this.unknown = [...unknown];
+    this.retired = [...retired];
+  }
+}
+
 export type DecisionReferenceErrorReason = "not-a-document" | "duplicate";
 
 /**
