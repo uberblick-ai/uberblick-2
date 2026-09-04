@@ -450,9 +450,8 @@ function readDocument(
  *
  * Not a nicety. Room acquisition waits on this read, and a request that hangs
  * — a proxy holding the connection open, a captive portal — never rejects on
- * its own, so without a deadline the app would sit with no rooms at all, not
- * even the IndexedDB-backed ones it could serve offline. A few seconds is long
- * enough for a same-origin file and short enough to be a blink.
+ * its own, so without a deadline the app would sit with no rooms at all. A few
+ * seconds is long enough for a same-origin file and short enough to be a blink.
  */
 export const HUB_CONFIG_TIMEOUT_MS = 3_000;
 

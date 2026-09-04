@@ -19,8 +19,8 @@
  *    observed, so it clears itself when the content merges: no poll, no reload.
  *
  * Deliberately not here: that Vite serves index.html for a deep URL, and that a
- * fresh browser with an empty IndexedDB lands on the right document. Both are
- * claims about a real server and a real browser profile — `e2e/deep-link.spec.ts`.
+ * fresh browser lands on the right document. Both are claims about a real
+ * server and a real browser profile — `e2e/deep-link.spec.ts`.
  */
 
 import { afterEach, describe, expect, it, beforeEach } from "vitest";
@@ -371,13 +371,13 @@ describe("a fresh deep link does not open a writable empty replica", () => {
 });
 
 /**
- * A room that has just been opened: an empty Y.Doc, and an IndexedDB replica
- * that has not been read yet. `load` is that read arriving — content first,
- * then the announcement, which is the order `IndexeddbPersistence` uses.
+ * A room that has just been opened: an empty Y.Doc, before its server has
+ * answered. `answer` is that response arriving — content first, then the
+ * status announcement, like the real provider's sync event.
  */
 function openingConnection(room: string): {
   connection: RoomConnection;
-  load: (from?: Y.Doc) => void;
+  answer: (from?: Y.Doc) => void;
 } {
   const ydoc = new Y.Doc();
   const status: RoomStatus = {
@@ -386,19 +386,12 @@ function openingConnection(room: string): {
     writable: true,
     storeRefused: false,
     unsyncedChanges: 0,
-    localReplicaLoaded: false,
-    hasLocalCache: false,
+    hasAnswered: false,
     protocolMismatch: null,
     authFailed: false,
     tokenMissing: false,
   };
   const listeners = new Set<(next: RoomStatus) => void>();
-  // Deferred, so the promise and the flag say the same thing: both are the
-  // local read, and `load` is the only thing that completes it.
-  let localReplicaLoaded: () => void = () => {};
-  const whenLocalReplicaLoaded = new Promise<void>((resolve) => {
-    localReplicaLoaded = resolve;
-  });
   const connection = {
     room,
     ydoc,
@@ -409,19 +402,14 @@ function openingConnection(room: string): {
       listener({ ...status });
       return () => listeners.delete(listener);
     },
-    whenLocalReplicaLoaded,
   } as unknown as RoomConnection;
   return {
     connection,
-    load: (from?: Y.Doc) => {
-      // Content means there was a cache to read; `load()` with none means the
-      // read finished and found nothing. Both end the read.
+    answer: (from?: Y.Doc) => {
       if (from !== undefined) {
         Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(from));
-        status.hasLocalCache = true;
       }
-      status.localReplicaLoaded = true;
-      localReplicaLoaded();
+      status.hasAnswered = true;
       for (const listener of listeners) listener({ ...status });
     },
   };
@@ -447,39 +435,38 @@ function mountLinked(
   };
 }
 
-describe("an unread replica is not a different document (#161)", () => {
-  it("says nothing while the room it just re-opened is still reading its replica", () => {
-    // Navigating away releases the room: the provider, the IndexedDB
-    // persistence and the Y.Doc are all destroyed. Navigating back re-opens
-    // from nothing, so `getMeta` answers `uuid: ""` for a document this replica
-    // fully holds — and reading that as "answered, and not this document" is
-    // what flashed the waiting screen across the pane for a frame.
-    const { connection, load } = openingConnection(`${WS}/${UUID}`);
+describe("a room that has not answered is not a different document (#161)", () => {
+  it("says nothing while the room it just re-opened is awaiting the server", () => {
+    // Navigating away releases the room and its Y.Doc. Navigating back re-opens
+    // from nothing, so `getMeta` answers `uuid: ""` for a document the server
+    // holds — and reading that as "answered, and not this document" flashes the
+    // waiting screen across the pane for a frame.
+    const { connection, answer } = openingConnection(`${WS}/${UUID}`);
     const { host, done } = mountLinked(connection, UUID);
 
     expect(host.querySelector(".ub-notice")).toBeNull();
     expect(host.querySelector(".ub-editor")).toBeNull();
 
-    // IndexedDB answers with the document that was there all along.
+    // The server answers with the document that was there all along.
     const stored = new Y.Doc();
     initDoc(stored, { uuid: UUID, title: "Annotations" });
-    act(() => load(stored));
+    act(() => answer(stored));
 
     expect(host.querySelector(".ub-notice")).toBeNull();
     expect(host.querySelector(".ub-editor")).not.toBeNull();
     done();
   });
 
-  it("still waits once the replica has answered and the document is not in it", () => {
-    // The other half, and the reason the gate is `localReplicaLoaded` rather
-    // than "empty means unknown": a deep link to a uuid this replica does not
-    // hold must keep its waiting screen.
-    const { connection, load } = openingConnection(`${WS}/${UUID}`);
+  it("waits once the server has answered and the document is not in the room", () => {
+    // The other half, and the reason the gate is `hasAnswered` rather than
+    // "empty means unknown": a deep link whose room is empty must keep its
+    // waiting screen.
+    const { connection, answer } = openingConnection(`${WS}/${UUID}`);
     const { host, done } = mountLinked(connection, UUID);
 
     expect(host.querySelector(".ub-notice")).toBeNull();
 
-    act(() => load());
+    act(() => answer());
 
     expect(host.querySelector(".ub-notice")?.textContent).toContain(
       "Waiting for sync",
@@ -490,14 +477,14 @@ describe("an unread replica is not a different document (#161)", () => {
 });
 
 /**
- * An offline connection to an empty document, whose local replica has already
- * been read. A real Y.Doc, because the resolved branch mounts the editor against
- * it — the point of that assertion is that the waiting screen gets out of the
- * way, which is only worth checking if what replaces it actually renders.
+ * An offline connection to an empty document whose server has already answered.
+ * A real Y.Doc, because the resolved branch mounts the editor against it — the
+ * point of that assertion is that the waiting screen gets out of the way, which
+ * is only worth checking if what replaces it actually renders.
  *
- * `localReplicaLoaded: true` is the load-bearing half: it is what makes the
- * empty document an *answer*. A room still reading its replica says nothing —
- * see the re-opened-room tests below.
+ * `hasAnswered: true` is the load-bearing half: it makes the empty document an
+ * *answer*. A room still awaiting its server says nothing — see the re-opened
+ * room tests above.
  */
 function stubConnection(room: string): RoomConnection {
   const status: RoomStatus = {
@@ -506,8 +493,7 @@ function stubConnection(room: string): RoomConnection {
     writable: true,
     storeRefused: false,
     unsyncedChanges: 0,
-    localReplicaLoaded: true,
-    hasLocalCache: false,
+    hasAnswered: true,
     protocolMismatch: null,
     authFailed: false,
     tokenMissing: false,
@@ -521,7 +507,6 @@ function stubConnection(room: string): RoomConnection {
       listener(status);
       return () => {};
     },
-    whenLocalReplicaLoaded: Promise.resolve(),
   } as unknown as RoomConnection;
 }
 

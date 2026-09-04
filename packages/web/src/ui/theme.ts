@@ -47,7 +47,7 @@ export function applyStoredAppearance(): void {
  * The setting is the state — `useSetting` re-renders every reader when it is
  * written, and the effect below is what puts the choice on the document. So a
  * second tab that has not been told anything still starts from what was stored,
- * and this tab needs no local copy to keep honest.
+ * without this tab inventing a separate synchronized setting.
  */
 export function useAppearance(): [Appearance, (next: Appearance) => void] {
   const appearance = useSetting("appearance") ?? "system";

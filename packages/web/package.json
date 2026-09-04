@@ -25,7 +25,6 @@
     "@uberblick/schema": "workspace:*",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "y-indexeddb": "^9.0.12",
     "y-prosemirror": "catalog:",
     "y-protocols": "catalog:",
     "yjs": "catalog:"

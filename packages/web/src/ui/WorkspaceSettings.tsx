@@ -9,7 +9,6 @@ import { rawSyncState, useCalmSyncState } from "./calm.js";
 import { useRoomStatus } from "./hooks.js";
 import type { Workspace } from "./route.js";
 import { statusReading } from "./status-reading.js";
-import { formatBytes, useLocalCacheSize } from "./UserMenu.js";
 
 /** What a SyncPanel-style fact reads as before this client knows it. */
 const UNKNOWN = "—";
@@ -42,11 +41,10 @@ export function WorkspaceSettings({
   const status = useRoomStatus(connection);
   const state = useCalmSyncState(rawSyncState(status));
   const reading = statusReading(status, state);
-  const cache = useLocalCacheSize(true);
   const directoryAnswered =
     connection !== null &&
     connection.room === directoryRoom(workspace.uuid) &&
-    connection.status.localReplicaLoaded;
+    status.hasAnswered;
   const documents = directoryAnswered ? listDirectory(connection.ydoc).length : null;
 
   return (
@@ -68,9 +66,6 @@ export function WorkspaceSettings({
                 <span className="ub-settings-fact-detail"> {reading.detail}</span>
               )}
             </Fact>
-            {cache !== null && (
-              <Fact label="Local cache (all workspaces)">{formatBytes(cache)}</Fact>
-            )}
             <Fact label="MCP connections">{agentSessions}</Fact>
           </dl>
         </div>

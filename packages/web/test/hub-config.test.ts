@@ -206,9 +206,8 @@ describe("the served configuration", () => {
   });
 
   it("gives the read a deadline, so a hung request cannot wedge every room", async () => {
-    // Nothing acquires a room until this settles — not even the IndexedDB-backed
-    // rooms that need no hub at all — so "never settles" is the worst outcome
-    // available, worse than dialling a stale address.
+    // Nothing acquires a room until this settles, so "never settles" is the
+    // worst outcome available, worse than dialling a stale address.
     const { hubUrl: url, hubUrlSource, workspaces, rejected } = await readClientConfig(
       stalling(),
       20,

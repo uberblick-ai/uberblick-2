@@ -224,9 +224,6 @@ for (const scheme of ["light", "dark"] as const) {
     await page.locator(".ub-user-card").click();
     const panel = page.locator("[data-slot=popover-content]");
     await expect(panel).toBeVisible();
-    // The production bundle can paint before the asynchronous storage estimate
-    // arrives. Geometry belongs to the settled panel, with that fact present.
-    await expect(panel.getByText("Local cache", { exact: true })).toBeVisible();
     await page.evaluate(
       () =>
         new Promise<void>((resolve) =>

@@ -4,7 +4,7 @@
  * One spec, because only two of this feature's claims are out of jsdom's reach
  * and both are in the same story:
  *
- * - **A fresh browser opens a link.** Empty IndexedDB, no prior visit, straight
+ * - **A fresh browser opens a link.** No prior visit, straight
  *   to `/<workspace>/<uuid>`. That exercises the server's SPA fallback (a deep path has
  *   no file behind it, so something has to answer with index.html), the
  *   hydration of a replica that starts with nothing, and the waiting state
@@ -12,6 +12,9 @@
  * - **Back and Forward are the browser's, not ours.** jsdom queues `popstate`
  *   and the unit test drives it directly; whether a real session history holds
  *   the entries the sidebar pushed is a claim about a browser.
+ * - **An unreachable routed room reveals nothing.** Reloading a document after
+ *   its server stops leaves an offline waiting screen, never the content this
+ *   browser rendered before the reload.
  *
  * Everything else the feature does — what an address parses to, an unknown
  * workspace, a malformed link, the waiting-state copy — is pinned in
@@ -61,7 +64,7 @@ test.afterAll(async () => {
   await running?.stop();
 });
 
-/** A fresh context: its own IndexedDB, its own history, its own tab. */
+/** A fresh context: its own history and its own tab. */
 async function openApp(browser: Browser, path = "/", workspaces?: string[]): Promise<Page> {
   const context = await browser.newContext();
   contexts.push(context);
@@ -172,10 +175,9 @@ async function wasEverInserted(page: Page): Promise<boolean> {
 interface StatusClaim {
   path: string;
   words: string[];
-  localCopies: string[];
 }
 
-/** Record every sync word and local-copy note painted during a navigation. */
+/** Record every sync word painted during a navigation. */
 async function watchStatusClaims(page: Page): Promise<void> {
   await page.evaluate(() => {
     const w = window as unknown as Record<string, unknown>;
@@ -185,9 +187,6 @@ async function watchStatusClaims(page: Page): Promise<void> {
         path: window.location.pathname,
         words: [...document.querySelectorAll(".ub-status-word")].map(
           (node) => node.textContent ?? "",
-        ),
-        localCopies: [...document.querySelectorAll(".ub-local-copy")].map(
-          (node) => node.textContent?.replace(/\s+/g, " ").trim() ?? "",
         ),
       });
     };
@@ -277,7 +276,7 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
   // Moving between two documents this replica already holds must be a quiet
   // swap. The connection is paired with its room one render after the address
   // changes, and that render must not put "waiting for sync", a synthetic
-  // offline reading or a local-copy recovery step on the screen.
+  // offline reading on the screen.
   await watchForInsertion(author, ".ub-notice");
   await watchStatusClaims(author);
   await docButton(author, firstTitle).click();
@@ -288,7 +287,6 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
   expect(await wasEverInserted(author)).toBe(false);
   const claims = await statusClaims(author);
   expect(claims.flatMap(({ words }) => words)).not.toContain("offline");
-  expect(claims.flatMap(({ localCopies }) => localCopies)).toEqual([]);
 
   // ---- Back and Forward re-open what was viewed ----
   await author.goBack();
@@ -309,15 +307,40 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
   const shareable = new URL(`/${ws()}/${first}`, harness().appUrl).href;
 
   // ---- a fresh browser session opens the link, with no navigation of its own ----
-  // Its own context, so: empty IndexedDB, no history, nothing cached. The
-  // server has no file at this path — only the SPA fallback answers it — and
-  // the replica knows no documents until the directory and the room sync in.
+  // Its own context has no history. The server has no file at this path — only
+  // the SPA fallback answers it — and the room starts empty until it syncs.
   const reader = await openApp(browser, `/${ws()}/${first}`);
   await expect(reader.locator(".ub-title")).toHaveValue(firstTitle);
   await expect(editor(reader)).toBeVisible();
   expect(openPath(reader)).toBe(`/${ws()}/${first}`);
   // The link the author would have copied is the one that just worked.
   expect(reader.url()).toBe(shareable);
+});
+
+test("a reloaded document whose server is unreachable shows no prior content", async ({
+  browser,
+}) => {
+  // Bypass `ub open` for this case: its local store is itself a reachable
+  // server when the upstream stops, while this contract needs the routed room
+  // to have no server answering at all.
+  const page = await openApp(browser, "/", [ws()]);
+  const title = docTitle("unreachable");
+  await createDoc(page, title);
+  await expect(page.locator(".ub-title")).toHaveValue(title);
+  await expect(editor(page)).toBeVisible();
+
+  await harness().stopHub();
+  try {
+    await page.reload();
+
+    await expect(page.locator(".ub-status-word")).toHaveText("offline");
+    await expect(page.locator(".ub-notice")).toContainText("Waiting for sync");
+    await expect(page.locator(".ub-title")).toHaveCount(0);
+    await expect(editor(page)).toHaveCount(0);
+    await expect(page.getByText(title, { exact: true })).toHaveCount(0);
+  } finally {
+    await harness().startHub();
+  }
 });
 
 test("the switcher moves between two workspaces, and their corpora do not mix", async ({

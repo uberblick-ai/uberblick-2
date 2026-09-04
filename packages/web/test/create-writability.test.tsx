@@ -22,8 +22,7 @@ const LIVE: RoomStatus = {
   writable: true,
   storeRefused: false,
   unsyncedChanges: 0,
-  localReplicaLoaded: true,
-  hasLocalCache: false,
+  hasAnswered: true,
   protocolMismatch: null,
   authFailed: false,
   tokenMissing: false,
@@ -53,7 +52,6 @@ function room(name: string): Record {
       listener(connection.status);
       return () => listeners.delete(listener);
     },
-    whenLocalReplicaLoaded: Promise.resolve(),
   } as unknown as RoomConnection;
   const created = { connection, listeners };
   rooms.set(name, created);

@@ -18,12 +18,7 @@ import type { ReactElement } from "react";
 import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
-import {
-  backlogLabel,
-  localCopyState,
-  rawSyncState,
-  useCalmSyncState,
-} from "./calm.js";
+import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
 import type { RemotePresence } from "./doc-chrome.js";
 import { useRoomStatus } from "./hooks.js";
@@ -64,7 +59,6 @@ export function SyncPanel({
   connection,
   presence,
   endpoint,
-  docPresent,
   onClose,
 }: {
   connection: RoomConnection | null;
@@ -72,12 +66,6 @@ export function SyncPanel({
   presence: readonly RemotePresence[];
   /** The endpoint the provider was constructed with, or null until resolved. */
   endpoint: HubEndpoint | null;
-  /**
-   * Whether the document this room is about has reached this replica — false
-   * only while the address names one that has not. See {@link localCopyState}:
-   * the local-copy fact is unknown rather than `available` there.
-   */
-  docPresent: boolean;
   onClose: () => void;
 }): ReactElement {
   const status = useRoomStatus(connection);
@@ -87,7 +75,6 @@ export function SyncPanel({
   // cadence, never a quieter version of the truth (see calm.ts) — and two
   // different words in one corner of the screen would be worse than either.
   const reading = statusReading(status, state ?? raw);
-  const localCopy = localCopyState(status, docPresent);
   const hasReading =
     connection !== null && (state !== null || reading.detail !== null);
 
@@ -159,21 +146,6 @@ export function SyncPanel({
           label="Backlog"
           value={
             connection === null ? UNKNOWN : backlogLabel(status.unsyncedChanges)
-          }
-        />
-        {/* Same rule, and the reason the status line above no longer says this
-            while everything is healthy (#535): the promise that this browser
-            holds a durable copy belongs where somebody went looking for it.
-            Drawn in every state, `—` until the local read settles — before then
-            "unavailable" would be this panel guessing at a read still running. */}
-        <Fact
-          label="Local copy"
-          value={
-            connection === null || localCopy === null
-              ? UNKNOWN
-              : localCopy
-                ? "available"
-                : "unavailable"
           }
         />
       </dl>

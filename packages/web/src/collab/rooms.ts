@@ -1,6 +1,5 @@
 /**
- * Room connections: one Y.Doc per room, a Hocuspocus provider, and an
- * IndexedDB replica alongside it.
+ * Room connections: one Y.Doc and one Hocuspocus provider per room.
  *
  * Two things worth knowing:
  *
@@ -32,7 +31,6 @@ import {
   HocuspocusProviderWebsocket,
   WebSocketStatus,
 } from "@hocuspocus/provider";
-import { IndexeddbPersistence } from "y-indexeddb";
 import * as Y from "yjs";
 import { parseRoom } from "@uberblick/schema";
 import {
@@ -131,14 +129,6 @@ let lastForcedDrop = 0;
 let forcedDropWindowMs: number = FORCED_DROP_COOLDOWN.maxMs;
 
 /**
- * Stored beside a room's Yjs updates once a hub round-trip has proved that the
- * local database contains this room's complete state. Presence, rather than
- * the value, is the fact: a newly opened empty database has no checkpoint,
- * while a legitimately empty room that has synced does.
- */
-const LOCAL_COPY_CHECKPOINT = "uberblick:local-copy-confirmed";
-
-/**
  * The store's terminal refusal. `uberblick:store-busy` is deliberately an
  * ordinary drop so the existing reconnect backoff handles it.
  */
@@ -171,6 +161,7 @@ function haltForProtocolMismatch(hub: number): void {
   for (const entry of entries.values()) {
     const status = entry.connection.status;
     status.protocolMismatch = protocolMismatch;
+    status.hasAnswered = true;
     // Said here rather than left to the socket's close event, which lands a
     // tick or more later: `disconnect()` above only *asks*, so `socket.status`
     // still reads connected right now and a reader told "refused, and
@@ -280,7 +271,10 @@ function setTokenMissing(missing: boolean): void {
   for (const entry of entries.values()) {
     const status = entry.connection.status;
     status.tokenMissing = missing;
-    if (missing) status.writable = false;
+    if (missing) {
+      status.writable = false;
+      status.hasAnswered = true;
+    }
     for (const listener of entry.listeners) {
       listener({ ...status });
     }
@@ -342,6 +336,12 @@ export interface RoomStatus {
   connected: boolean;
   synced: boolean;
   /**
+   * True once this room has completed a sync or its connection has failed or
+   * been refused. Until then an empty Y.Doc is silence rather than evidence
+   * that a deep-linked document is absent.
+   */
+  hasAnswered: boolean;
+  /**
    * True only after this room's live connection has admitted the client.
    * Authentication is the observable admission boundary, not a per-write
    * acknowledgement: during #402's rare same-tick re-acquire race, the
@@ -358,32 +358,6 @@ export interface RoomStatus {
    * where the number is labelled.
    */
   unsyncedChanges: number;
-  /**
-   * True once the local read is done: the IndexedDB replica has been applied to
-   * the Y.Doc — or there is no IndexedDB, or it refused to open, so there was
-   * never anything to apply. Either way the Y.Doc now holds everything this
-   * replica has offline, so an empty document is an answer rather than a
-   * not-yet.
-   *
-   * A question about *time*, not about storage: it says the read is over, never
-   * that anything was read. For "is this document actually cached here",
-   * which is a different claim and the one worth showing a reader, see
-   * {@link RoomStatus.hasLocalCache}.
-   */
-  localReplicaLoaded: boolean;
-  /**
-   * True only where IndexedDB has applied a replica previously confirmed by a
-   * hub round-trip — the document survives a reload of this browser with the
-   * hub down. Opening a new empty database is not enough.
-   *
-   * Split from `localReplicaLoaded` because that flag says only that the read
-   * ended. A room authored offline and never synced can still reload from
-   * IndexedDB while this deliberately remains false. This is a last-confirmed
-   * reading: IndexedDB offers no notification when site data is externally
-   * deleted mid-session, so it stays true until a reload reopens the database
-   * and checks the checkpoint again.
-   */
-  hasLocalCache: boolean;
   /**
    * Set when the hub refused this page for speaking a different sync protocol
    * version: `hub` is the hub's, `client` is ours. `null` while it has not.
@@ -425,16 +399,10 @@ export interface RoomConnection {
   status: RoomStatus;
   /** Subscribe to status changes. Returns an unsubscribe function. */
   onStatusChange(listener: (status: RoomStatus) => void): () => void;
-  /**
-   * Resolves once the local read is over: the replica applied, or nothing to
-   * apply. Always settles — see `localReplicaLoaded`, which it moves with.
-   */
-  whenLocalReplicaLoaded: Promise<void>;
 }
 
 interface Entry {
   connection: RoomConnection;
-  persistence: IndexeddbPersistence | null;
   listeners: Set<(status: RoomStatus) => void>;
   /** Stop republishing this room's awareness colour — see `publishUser`. */
   stopPreference: () => void;
@@ -462,8 +430,8 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // alone. This is silent when you get it wrong: the UI just reads "offline".
   // Not on a page the hub has already refused: attaching is what subscribes the
   // provider to the socket and sends its token, and there is nothing to send an
-  // envelope this hub will not read. The room still opens — its local replica
-  // loads and the status line says why it is not syncing.
+  // envelope this hub will not read. The room still opens and the status line
+  // says why it is not syncing.
   const storeRefused = storeRefusedRooms.has(room);
   if (protocolMismatch === null && !storeRefused) {
     provider.attach();
@@ -501,11 +469,11 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
       !storeRefused &&
       socket.status === WebSocketStatus.Connected,
     synced: protocolMismatch === null && !storeRefused && provider.isSynced,
+    hasAnswered:
+      provider.isSynced || protocolMismatch !== null || storeRefused || tokenMissing,
     writable: false,
     storeRefused,
     unsyncedChanges: provider.unsyncedChanges,
-    localReplicaLoaded: false,
-    hasLocalCache: false,
     // A room opened after the refusal reads the same terminal state as the
     // rooms that were open when it arrived.
     protocolMismatch,
@@ -553,6 +521,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
       return;
     }
     status.authFailed = true;
+    status.hasAnswered = true;
     status.writable = false;
     emit();
   });
@@ -561,7 +530,10 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     refresh();
   });
 
-  provider.on("status", refresh);
+  provider.on("status", ({ status: next }: { status: WebSocketStatus }) => {
+    if (next === WebSocketStatus.Disconnected) status.hasAnswered = true;
+    refresh();
+  });
   provider.on("unsyncedChanges", refresh);
   provider.on("close", refresh);
 
@@ -578,6 +550,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     // that works by itself, so dropping the socket there would be pure churn.
     const reason = event?.event?.reason;
     if (reason === "provider_initiated") return;
+    status.hasAnswered = true;
     if (reason === STORE_REFUSED_REASON) {
       storeRefusedRooms.add(room);
       status.storeRefused = true;
@@ -590,118 +563,14 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
       provider.detach();
       return;
     }
+    emit();
     dropSocket();
   });
 
-  // Local-first: the IndexedDB replica is keyed by the room name, so a tab that
-  // reopens a document offline still has it. `hasIndexedDB` is false in jsdom
-  // and in private-mode Safari; the app still works, it just has no cache.
-  let persistence: IndexeddbPersistence | null = null;
-  let localPersistenceReady = false;
-  let hubConfirmed = provider.isSynced;
-  let confirmingLocalCopy: Promise<void> | null = null;
-  let resolveLocal: () => void = () => {};
-  const whenLocalReplicaLoaded = new Promise<void>((resolve) => {
-    resolveLocal = resolve;
-  });
-  /**
-   * The local read is over — with content, or with nothing. Terminal and
-   * idempotent, because every reader of `localReplicaLoaded` treats false as
-   * "still reading": a read that can never finish must not be spelled the same
-   * way as one that has not finished yet, or the pane waits on it in silence
-   * instead of showing the waiting screen (`replicaHasAnswered`).
-   */
-  const localReadDone = (): void => {
-    if (status.localReplicaLoaded) return;
-    status.localReplicaLoaded = true;
-    resolveLocal();
-    emit();
-  };
-
-  /** Persist the room state and its checkpoint at one success boundary. */
-  const persistConfirmedLocalCopy = (database: IDBDatabase): Promise<void> =>
-    new Promise((resolve, reject) => {
-      const transaction = database.transaction(["updates", "custom"], "readwrite");
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB"));
-      transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB"));
-      transaction.objectStore("updates").add(Y.encodeStateAsUpdate(ydoc));
-      transaction
-        .objectStore("custom")
-        .put(LOCAL_COPY_CHECKPOINT, LOCAL_COPY_CHECKPOINT);
-    });
-
-  /**
-   * A hub acknowledgement says the in-memory room is complete. Persist its
-   * state and checkpoint atomically, so a failed state write cannot leave a
-   * durability claim behind.
-   */
-  const confirmLocalCopy = (): void => {
-    if (
-      status.hasLocalCache ||
-      persistence === null ||
-      !localPersistenceReady ||
-      !hubConfirmed ||
-      confirmingLocalCopy !== null
-    ) {
-      return;
-    }
-    const current = persistence;
-    confirmingLocalCopy = (async () => {
-      try {
-        if (current.db === null) return;
-        await persistConfirmedLocalCopy(current.db);
-        status.hasLocalCache = true;
-        emit();
-      } catch {
-        // The database did not durably accept the room. Keep the honest false
-        // reading; a later hub sync can retry the checkpoint.
-      }
-    })().finally(() => {
-      confirmingLocalCopy = null;
-    });
-  };
-
   provider.on("synced", () => {
+    status.hasAnswered = true;
     refresh();
-    hubConfirmed = provider.isSynced;
-    confirmLocalCopy();
   });
-
-  if (typeof indexedDB !== "undefined") {
-    persistence = new IndexeddbPersistence(room, ydoc);
-    persistence.once("synced", () => {
-      const current = persistence;
-      if (current === null) return;
-      void current
-        .get(LOCAL_COPY_CHECKPOINT)
-        .then((checkpoint) => {
-          status.hasLocalCache = checkpoint === LOCAL_COPY_CHECKPOINT;
-          localPersistenceReady = true;
-          localReadDone();
-          confirmLocalCopy();
-        })
-        .catch(localReadDone);
-    });
-    // Opening the database can fail outright: a private window, a browser told
-    // to block site data, a quota refusal. `y-indexeddb` has no error event and
-    // never emits `synced` after that — the rejection of its open promise is
-    // the only signal, and leaving it unhandled is also an unhandled rejection.
-    // There is no cache to read, so the honest terminal answer is "read, found
-    // nothing", and the room runs on live sync alone.
-    //
-    // Read defensively, because `_db` is the library's own field and not part
-    // of what it promises to keep: a version that renames it should cost us
-    // this one signal, not every room. Without it a blocked database falls back
-    // to the pre-existing behaviour — the read never finishes — rather than
-    // throwing where the room is opened.
-    const opening = (persistence as { _db?: Promise<IDBDatabase> })._db;
-    opening?.catch(localReadDone);
-  } else {
-    // No IndexedDB at all (jsdom, some embedded webviews): the same terminal
-    // state, reached without an attempt.
-    localReadDone();
-  }
 
   const connection: RoomConnection = {
     room,
@@ -713,10 +582,9 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
       listener({ ...status });
       return () => listeners.delete(listener);
     },
-    whenLocalReplicaLoaded,
   };
 
-  return { connection, persistence, listeners, stopPreference, refs: 0 };
+  return { connection, listeners, stopPreference, refs: 0 };
 }
 
 /**
@@ -745,10 +613,6 @@ export function acquireRoom(
       entries.delete(room);
       held.listeners.clear();
       held.stopPreference();
-      // `destroy` closes the database through the same open promise, so on a
-      // room whose database never opened it rejects. Nothing to repair — the
-      // thing being closed was never there.
-      held.persistence?.destroy().catch(() => {});
       held.connection.provider.destroy();
       held.connection.ydoc.destroy();
       // Nothing left to repair: a deferred drop would reconnect a socket no

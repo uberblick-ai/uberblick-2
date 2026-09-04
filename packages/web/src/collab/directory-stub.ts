@@ -19,14 +19,14 @@
  *   every client in the workspace and a stamp per keystroke would turn one
  *   person typing into traffic for everyone.
  * - **An update that merely arrived stamps nothing.** Opening a document
- *   hydrates it — from IndexedDB, from the hub — and hydration is not a change;
+ *   hydrates it from its server, and hydration is not a change;
  *   neither is a peer's edit, which that peer stamps for itself. Those still
  *   *repair* a stub that disagrees with the document ("repaired on connect"),
  *   they just never claim the document changed now.
  *
  * Local and arrived are told apart by `transaction.local`, which Yjs sets false
- * for everything applied through `applyUpdate` — the Hocuspocus provider and
- * the IndexedDB replica both — and true for every write made through
+ * for everything applied through `applyUpdate` — including the Hocuspocus
+ * provider — and true for every write made through
  * `doc.transact`, which is every edit made here: the editor's, this app's own
  * schema calls, a repair this app performs after receiving state, and an undo.
  * The repair is a document write this replica actually made; receiving the

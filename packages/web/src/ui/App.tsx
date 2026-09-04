@@ -172,7 +172,7 @@ export function RoutePane({
    * That room's metadata, or null while it has not been read yet. The
    * difference carries a decision: unread is silence, read-and-not-this-document
    * is the waiting screen — and an *empty* meta is only the second of those once
-   * the room's local replica has been applied. See {@link replicaHasAnswered}.
+   * the room has answered. See {@link replicaHasAnswered}.
    */
   meta: DocMeta | null;
   author: string;
@@ -205,10 +205,9 @@ export function RoutePane({
   syncOpen?: boolean;
   onToggleSync?: (() => void) | undefined;
 }): ReactElement {
-  // Before the branches: a hook may not sit behind an early return. Only
-  // `localReplicaLoaded` is read here — it is what tells the empty document a
-  // freshly opened room holds apart from an answer that the document is absent.
-  const { localReplicaLoaded } = useRoomStatus(connection);
+  // Before the branches: a hook may not sit behind an early return. The answer
+  // flag tells a freshly opened empty room apart from an empty server answer.
+  const { hasAnswered } = useRoomStatus(connection);
 
   if (route.kind === "no-workspace") {
     // Nothing is known yet — keep the frame, say nothing, as everywhere else
@@ -249,11 +248,11 @@ export function RoutePane({
   if (route.kind === "doc") {
     // Nothing is known about this address yet: the room has not been joined, or
     // it has but nothing has been read out of it — no metadata at all, or the
-    // empty metadata of a replica that is still being loaded. All of those last
+    // empty metadata of a room that is still joining. All of those last
     // a render or two, and all keep the frame while saying nothing. Drawing
     // "waiting for sync" from ignorance would flash those words across the pane
     // every time a reader moves between two documents they already have.
-    if (connection === null || !replicaHasAnswered(meta, localReplicaLoaded)) {
+    if (connection === null || !replicaHasAnswered(meta, hasAnswered)) {
       return <PaneNotice documentLayout>{null}</PaneNotice>;
     }
 
@@ -272,10 +271,6 @@ export function RoutePane({
               endpoint={endpoint}
               syncOpen={syncOpen}
               onToggleSync={onToggleSync}
-              // This screen's whole subject: the document is not here. Saying
-              // "local copy" over that sentence was two claims about one
-              // document, one of them false (#601).
-              docPresent={false}
             />
             <CopyLink room={connection.room} segment={route.workspace.segment} />
           </div>
@@ -977,9 +972,6 @@ export function App(): ReactElement {
             connection={chromeRoom}
             presence={presence}
             endpoint={endpoint}
-            // The panel is open over the waiting screen as readily as over a
-            // document, and there the local-copy fact is not known (#601).
-            docPresent={route.kind !== "doc" || docIsHydrated(route.uuid, meta)}
             onClose={closeSync}
           />
         )}
