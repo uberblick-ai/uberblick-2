@@ -15,6 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
+  addDecision,
   getDirectoryEntry,
   getMeta,
   getMetaMap,
@@ -563,5 +564,178 @@ describe("lifecycle tool text", () => {
     expect(frontmatter.description).toContain("kind");
     expect(frontmatter.description).toContain("status");
     expect(frontmatter.description).toContain("do not authorize");
+  });
+});
+
+describe("decision log tools", () => {
+  it("raises a decision into its requirement and reads the ordered log", async () => {
+    const rig = await localRig();
+    const requirement = await lifecycleDoc(rig, "Requirement", {
+      kind: "requirement",
+      status: "planned",
+    });
+
+    const decision = await rig.ok("create_doc", {
+      title: "Choose the durable path",
+      description: "Records which path the requirement takes.",
+      kind: "decision",
+      governs: requirement.uuid,
+    });
+
+    expect(decision).toMatchObject({
+      kind: "decision",
+      status: "open",
+      governs: requirement.uuid,
+    });
+    expect(decision.rooms.map((room: any) => room.purpose)).toEqual([
+      "document",
+      "directory",
+      "requirement",
+    ]);
+    expect(decision.rooms.every((room: any) => room.applied)).toBe(true);
+    expect(decision.rooms.every((room: any) => room.synced === false)).toBe(true);
+
+    const governed = await rig.ok("get_doc", { uuid: requirement.uuid });
+    expect(governed.decisions).toEqual([
+      {
+        uuid: decision.uuid,
+        title: "Choose the durable path",
+        status: "open",
+        available: true,
+      },
+    ]);
+    expect(governed.links).toEqual([decision.uuid]);
+    expect((await rig.ok("get_doc", { uuid: decision.uuid })).decisions).toEqual(
+      [],
+    );
+
+    // `links` is the effective graph edge list. Passing it back stores the
+    // decision in the curated array as well, while the read stays deduplicated.
+    await rig.ok("set_links", { uuid: requirement.uuid, links: governed.links });
+    expect(
+      getMetaMap(rig.instance.replicas.replica(requirement.uuid).doc).get(
+        "links",
+      ),
+    ).toEqual([decision.uuid]);
+    expect((await rig.ok("get_doc", { uuid: requirement.uuid })).links).toEqual([
+      decision.uuid,
+    ]);
+  });
+
+  it("keeps archived and missing decision references visible in stored order", async () => {
+    const rig = await localRig();
+    const requirement = await lifecycleDoc(rig, "Requirement", {
+      kind: "requirement",
+    });
+    const decision = await rig.ok("create_doc", {
+      title: "An archived decision",
+      description: "Remains in the requirement's history.",
+      kind: "decision",
+      governs: requirement.uuid,
+    });
+    const missing = randomUUID();
+    addDecision(
+      rig.instance.replicas.replica(requirement.uuid).doc,
+      missing,
+    );
+    await rig.ok("archive_doc", { uuid: decision.uuid });
+
+    expect(
+      (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions,
+    ).toEqual([
+      {
+        uuid: decision.uuid,
+        title: "An archived decision",
+        status: "open",
+        available: false,
+      },
+      { uuid: missing, title: null, status: null, available: false },
+    ]);
+  });
+
+  it("refuses every invalid governing target before creating a document", async () => {
+    const rig = await localRig();
+    const requirement = await lifecycleDoc(rig, "Requirement", {
+      kind: "requirement",
+    });
+
+    const refuseWithoutCreation = async (
+      args: Record<string, unknown>,
+      code?: string,
+    ): Promise<any> => {
+      const before = (await rig.ok("list_docs")).docs.map(
+        (doc: any) => doc.uuid,
+      );
+      const refused = await rig.call("create_doc", {
+        title: "Refused decision",
+        description: "Must never reach a room.",
+        ...args,
+      });
+      expect(refused.isError).toBe(true);
+      if (code !== undefined) expect(refused.payload.error).toBe(code);
+      expect((await rig.ok("list_docs")).docs.map((doc: any) => doc.uuid)).toEqual(
+        before,
+      );
+      return refused;
+    };
+
+    await refuseWithoutCreation({ governs: requirement.uuid });
+    await refuseWithoutCreation({
+      kind: "requirement",
+      governs: requirement.uuid,
+    });
+    await refuseWithoutCreation(
+      { kind: "decision", governs: randomUUID() },
+      "doc_not_found",
+    );
+
+    const unhydrated = randomUUID();
+    upsertDirectoryEntry(rig.instance.replicas.directory().doc, {
+      uuid: unhydrated,
+      title: "Known elsewhere",
+      kind: "requirement",
+      status: "planned",
+    });
+    await refuseWithoutCreation(
+      { kind: "decision", governs: unhydrated },
+      "doc_not_hydrated",
+    );
+
+    const archived = await lifecycleDoc(rig, "Archived requirement", {
+      kind: "requirement",
+    });
+    await rig.ok("archive_doc", { uuid: archived.uuid });
+    await refuseWithoutCreation(
+      { kind: "decision", governs: archived.uuid },
+      "doc_archived",
+    );
+
+    const ordinary = await lifecycleDoc(rig, "Ordinary target");
+    const wrongKind = await refuseWithoutCreation(
+      { kind: "decision", governs: ordinary.uuid },
+      "governs_not_requirement",
+    );
+    expect(wrongKind.payload).toMatchObject({
+      governs: ordinary.uuid,
+      kind: null,
+      applied: false,
+      partial: false,
+      synced: false,
+    });
+  });
+
+  it("describes decision edges and the curated-link round trip", async () => {
+    const rig = await localRig();
+    const { tools } = await rig.client.listTools();
+    const create = tools.find((tool) => tool.name === "create_doc");
+    const get = tools.find((tool) => tool.name === "get_doc");
+    const setLinks = tools.find((tool) => tool.name === "set_links");
+
+    expect(create?.description).toContain("`governs`");
+    expect(create?.description).toContain("governed requirement");
+    expect(get?.description).toContain("ordered log");
+    expect(get?.description).toContain("derived outbound edges");
+    expect(setLinks?.description).toContain("curated link array");
+    expect(setLinks?.description).toContain("passing get_doc's effective `links`");
   });
 });

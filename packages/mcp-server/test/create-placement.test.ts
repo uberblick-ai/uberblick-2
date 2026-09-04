@@ -1,5 +1,5 @@
 /**
- * `create_doc`'s optional sidebar placement: one call, up to three rooms, and
+ * `create_doc`'s optional sidebar placement: one call, up to four rooms, and
  * no claim the rooms cannot back.
  *
  * The contract this suite defends is the honest one the issue chose over
@@ -532,6 +532,108 @@ describe("a create that gets part-way", () => {
     await restarted.ok("pin_doc", { uuid, group });
     expect(shape(await restarted.ok("get_sidebar"))).toEqual([
       ["Start here", ["Anchor", "Created but unpinned"]],
+    ]);
+  });
+
+  it("leaves a recoverable orphan when the requirement room refuses", async () => {
+    const databasePath = tempDatabasePath();
+    const store = failingStore(databasePath);
+    const rig = await server(databasePath, store);
+    const requirement = await rig.ok("create_doc", {
+      title: "Requirement",
+      description: "Receives a decision when every room accepts it.",
+      kind: "requirement",
+    });
+
+    store.failRoom = (room) => room === `${WORKSPACE}/${requirement.uuid}`;
+    store.failing = true;
+    const refused = await rig.call("create_doc", {
+      title: "Orphaned decision",
+      description: "The requirement write will be refused.",
+      kind: "decision",
+      governs: requirement.uuid,
+    });
+
+    expect(refused.payload.error).toBe("persistence_failed");
+    expect(refused.payload.completed.map((room: any) => room.purpose)).toEqual([
+      "document",
+      "directory",
+    ]);
+    expect(refused.payload.failed).toEqual({
+      purpose: "requirement",
+      room: `${WORKSPACE}/${requirement.uuid}`,
+    });
+    expect(refused.payload.recovery).toContain("archive_doc");
+    expect(refused.payload.recovery).toContain("do NOT call create_doc again");
+
+    await rig.close();
+    rigs.length = 0;
+    store.failing = false;
+    const restarted = await server(databasePath);
+    expect(
+      (await restarted.ok("get_doc", { uuid: requirement.uuid })).decisions,
+    ).toEqual([]);
+    expect(
+      (await restarted.ok("get_doc", { uuid: refused.payload.uuid })).title,
+    ).toBe("Orphaned decision");
+    await restarted.ok("archive_doc", { uuid: refused.payload.uuid });
+  });
+
+  it("reports a refused requirement-stub repair without losing the relationship", async () => {
+    const databasePath = tempDatabasePath();
+    const store = failingStore(databasePath);
+    const rig = await startServer(
+      testConfig({ databasePath, updatedAtCoarsenessMs: 0 }),
+      store,
+    );
+    rigs.push(rig);
+    const requirement = await rig.ok("create_doc", {
+      title: "Requirement",
+      description: "Its stale stub is repaired after a decision is appended.",
+      kind: "requirement",
+    });
+    const directoryRoom = `${WORKSPACE}/_directory`;
+    const before = store.appends.get(directoryRoom) ?? 0;
+
+    // Let the new decision's stub land, then refuse the directory write caused
+    // by appending the decision to the requirement.
+    store.failRoom = (room) =>
+      room === directoryRoom &&
+      (store.appends.get(directoryRoom) ?? 0) >= before + 1;
+    store.failing = true;
+    const refused = await rig.call("create_doc", {
+      title: "Durable relationship",
+      description: "Survives its follow-up stub repair failing.",
+      kind: "decision",
+      governs: requirement.uuid,
+    });
+
+    expect(refused.payload.error).toBe("persistence_failed");
+    expect(refused.payload.completed.map((room: any) => room.purpose)).toEqual([
+      "document",
+      "directory",
+      "requirement",
+    ]);
+    expect(refused.payload.failed).toEqual({
+      purpose: "directory",
+      room: directoryRoom,
+    });
+    expect(refused.payload.recovery).toContain("create succeeded");
+    expect(refused.payload.recovery).toContain("do NOT call create_doc again");
+
+    await rig.close();
+    rigs.length = 0;
+    store.failing = false;
+    const restarted = await server(databasePath);
+    expect(
+      (await restarted.ok("get_doc", { uuid: requirement.uuid })).decisions,
+    ).toEqual([
+      {
+        uuid: refused.payload.uuid,
+        title: "Durable relationship",
+        status: "open",
+        available: true,
+      },
     ]);
   });
 });

@@ -1,7 +1,7 @@
 /**
  * What a tool accepts — and what it refuses before it has done anything.
  *
- * Three claims are defended here, all of them about the boundary rather than
+ * Four claims are defended here, all of them about the boundary rather than
  * about any handler:
  *
  * - **A field nobody declared is refused, not dropped.** A stripped key is an
@@ -9,6 +9,8 @@
  *   `pinned: true` created an unpinned document, and a misspelled mutation
  *   field wrote the document with the mistake silently discarded. The proof
  *   that a rejection is free is the durable one — the update log does not grow.
+ * - **`create_doc` lifecycle shapes select exactly one branch.** An omitted
+ *   kind is ordinary; an explicit kind selects only its matching record shape.
  * - **`annotate` is two shapes, never a mixture.** Opening a thread names a
  *   block and a range; a reply names a thread. Both at once was accepted and
  *   the range quietly ignored.
@@ -126,6 +128,23 @@ describe("create_doc lifecycle arguments", () => {
   it("refuses a status without a kind and a cross-kind pair before creation", async () => {
     const rig = await localRig();
 
+    expect((await inputSchema(rig, "create_doc")).oneOf).toEqual([
+      {
+        title: "A decision document (`kind: decision`)",
+        required: ["kind"],
+        properties: { kind: { const: "decision" } },
+      },
+      {
+        title: "A requirement document (`kind: requirement`)",
+        required: ["kind"],
+        properties: { kind: { const: "requirement" }, governs: false },
+      },
+      {
+        title: "An ordinary document",
+        properties: { kind: false, status: false, governs: false },
+      },
+    ]);
+
     const withoutKind = await rig.call("create_doc", {
       title: "No kind",
       description: "A request that must not create a document.",
@@ -224,15 +243,17 @@ describe("sidebar_group", () => {
     expect((await inputSchema(rig, "sidebar_group")).oneOf).toEqual([
       {
         title: "rename",
-        required: ["name"],
+        required: ["action", "name"],
         properties: { action: { const: "rename" }, index: false },
       },
       {
         title: "move",
+        required: ["action"],
         properties: { action: { const: "move" }, name: false },
       },
       {
         title: "delete",
+        required: ["action"],
         properties: { action: { const: "delete" }, name: false, index: false },
       },
     ]);
