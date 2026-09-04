@@ -149,6 +149,20 @@ export interface LogSlice {
   updates: LoggedUpdate[];
 }
 
+/** One replica's contiguous position in the authoritative room log. */
+export interface RoomLogPosition {
+  room: string;
+  throughSeq: number;
+}
+
+/** Store facts sampled together for a sync-status reading. */
+export interface StoreSyncSnapshot {
+  /** Rooms whose local-origin watermark has not been released. */
+  pendingRooms: PendingRoom[];
+  /** Rooms with a snapshot or update beyond the supplied replica position. */
+  unappliedRooms: Set<string>;
+}
+
 /**
  * Read a search row's packed tags. `json_group_array` gives back a JSON array,
  * which survives tags containing anything at all — separators, quotes, nothing.
@@ -339,7 +353,9 @@ export class MirrorStore {
     countRoom: Prepared<[string]>;
     countAll: Prepared<[]>;
     snapshotSeq: Prepared<[string]>;
+    snapshotAfter: Prepared<[string, number]>;
     snapshot: Prepared<[string]>;
+    updateAfter: Prepared<[string, number]>;
     putSnapshot: Prepared<[string, Uint8Array, number, number]>;
     pruneUpdates: Prepared<[string, number]>;
     markPending: Prepared<[string, number]>;
@@ -373,6 +389,10 @@ export class MirrorStore {
   ) => boolean;
 
   private readonly readSinceTx: (room: string, seq: number) => LogSlice;
+
+  private readonly syncSnapshotTx: (
+    positions: readonly RoomLogPosition[],
+  ) => StoreSyncSnapshot;
 
   private readonly indexTx: (doc: IndexedDoc, throughSeq: number) => void;
 
@@ -437,8 +457,14 @@ export class MirrorStore {
       snapshotSeq: prepare(
         "SELECT through_seq FROM snapshots WHERE room = ?",
       ),
+      snapshotAfter: prepare(
+        "SELECT 1 AS present FROM snapshots WHERE room = ? AND through_seq > ?",
+      ),
       snapshot: prepare(
         "SELECT state, through_seq FROM snapshots WHERE room = ?",
+      ),
+      updateAfter: prepare(
+        "SELECT 1 AS present FROM updates WHERE room = ? AND seq > ? LIMIT 1",
       ),
       // Monotonic: a compactor holding an older view of the document must never
       // replace a newer snapshot, whose rows the newer transaction has already
@@ -559,6 +585,25 @@ export class MirrorStore {
           snapshot: stored,
           updates: this.updatesAfter(room, from),
         };
+      },
+    );
+
+    // Pending watermarks and replica positions are one SQLite snapshot. Read
+    // separately, another process could append and release a room between the
+    // two reads, leaving neither half able to prove this replica is behind.
+    this.syncSnapshotTx = transactional(
+      this.db,
+      (positions: readonly RoomLogPosition[]): StoreSyncSnapshot => {
+        const unappliedRooms = new Set<string>();
+        for (const { room, throughSeq } of positions) {
+          if (
+            this.statements.snapshotAfter.get(room, throughSeq) !== undefined ||
+            this.statements.updateAfter.get(room, throughSeq) !== undefined
+          ) {
+            unappliedRooms.add(room);
+          }
+        }
+        return { pendingRooms: this.pendingRooms(), unappliedRooms };
       },
     );
 
@@ -732,6 +777,19 @@ export class MirrorStore {
       seq: number;
     }[];
     return rows.map((row) => ({ room: row.room, seq: row.seq }));
+  }
+
+  /**
+   * Sample the store half of hub acknowledgement without loading update BLOBs.
+   *
+   * The batch is one read transaction so a peer cannot release the shared
+   * pending marker between that read and the check that this replica has
+   * applied the store's current cut.
+   */
+  syncSnapshot(
+    positions: readonly RoomLogPosition[],
+  ): StoreSyncSnapshot {
+    return this.syncSnapshotTx(positions);
   }
 
   /**

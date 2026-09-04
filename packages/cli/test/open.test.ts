@@ -1031,6 +1031,82 @@ describe("ub open", () => {
     }
   });
 
+  it("reports loaded rooms and the full replica's upstream acknowledgement", async () => {
+    const { box, env } = configured();
+    const hubPort = await freePort();
+    const hub = await startHub(box, hubPort);
+    const hubUrl = `ws://127.0.0.1:${hubPort}`;
+    pointAt(box, hubUrl);
+    const app = await open(box, ["--port", String(await freePort())], env);
+    const room = directoryRoom(WORKSPACE);
+    const doc = new Y.Doc();
+    const provider = new HocuspocusProvider({
+      url: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
+      name: room,
+      document: doc,
+      token: await authMessage(),
+      ...{
+        WebSocketPolyfill: class extends WebSocket {
+          constructor(url: string | URL) {
+            super(url, {
+              headers: { Origin: app.url.slice(0, -1) },
+            } as unknown as string[]);
+          }
+        },
+      },
+    });
+    const auth = await authMessage();
+    const readStatus = async (): Promise<{
+      response: Response;
+      body: { caughtUp: boolean; rooms: Record<string, { hubAcked: boolean }> };
+    }> => {
+      const response = await fetch(`${app.url}api/status`, {
+        headers: bearer(auth),
+      });
+      return {
+        response,
+        body: (await response.json()) as {
+          caughtUp: boolean;
+          rooms: Record<string, { hubAcked: boolean }>;
+        },
+      };
+    };
+
+    try {
+      await waitUntil("the browser directory to load locally", () =>
+        provider.isSynced,
+      );
+      await waitUntil("the serving replica to be caught up", async () => {
+        const { body } = await readStatus();
+        return body.caughtUp && body.rooms[room]?.hubAcked === true;
+      });
+      const current = await readStatus();
+      expect(current.response.status).toBe(200);
+      expect(current.response.headers.get("cache-control")).toBe("no-store");
+      expect(current.response.headers.get("access-control-allow-origin")).toBeNull();
+      expect(current.body).toEqual({
+        caughtUp: true,
+        rooms: { [room]: { hubAcked: true } },
+      });
+
+      await hub.stop();
+      await waitUntil("the status reading to notice the lost hub", async () => {
+        const { body } = await readStatus();
+        return !body.caughtUp && body.rooms[room]?.hubAcked === false;
+      });
+
+      await startHub(box, hubPort);
+      await waitUntil("the serving replica to catch up after reconnect", async () => {
+        const { body } = await readStatus();
+        return body.caughtUp && body.rooms[room]?.hubAcked === true;
+      });
+    } finally {
+      provider.destroy();
+      doc.destroy();
+      expect((await app.interrupt()).status).toBe(0);
+    }
+  });
+
   it("admits API requests exactly through the served workspace token boundary", async () => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
@@ -1072,16 +1148,25 @@ describe("ub open", () => {
 
     try {
       for (const sample of refused) {
-        const response = await fetch(
-          `${app.url}api/search?q=nothing${sample.suffix ?? ""}`,
-          sample.auth === undefined ? undefined : { headers: bearer(sample.auth) },
-        );
-        expect(response.status, sample.name).toBe(401);
-        expect(response.headers.get("cache-control"), sample.name).toBe("no-store");
-        expect(
-          response.headers.get("access-control-allow-origin"),
-          sample.name,
-        ).toBeNull();
+        const paths = [
+          `api/search?q=nothing${sample.suffix ?? ""}`,
+          `api/status${sample.suffix?.replace(/^&/, "?") ?? ""}`,
+        ];
+        for (const path of paths) {
+          const response = await fetch(
+            `${app.url}${path}`,
+            sample.auth === undefined
+              ? undefined
+              : { headers: bearer(sample.auth) },
+          );
+          expect(response.status, `${sample.name}: ${path}`).toBe(401);
+          expect(response.headers.get("cache-control"), `${sample.name}: ${path}`)
+            .toBe("no-store");
+          expect(
+            response.headers.get("access-control-allow-origin"),
+            `${sample.name}: ${path}`,
+          ).toBeNull();
+        }
       }
 
       const unknown = await fetch(`${app.url}api/unknown`, {

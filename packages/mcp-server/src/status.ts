@@ -1,12 +1,13 @@
 /**
- * What this replica holds and what the hub has acknowledged, in one shape.
+ * Status readings derived from one full local replica.
  *
- * Two surfaces report it — the `sync_status` MCP tool and `ub status` — and they
- * must not drift: an agent and a human looking at the same replica should see
- * the same numbers under the same names. The tool's description carries the
- * wording that explains the units; this module owns the fields.
+ * The `sync_status` MCP tool and `ub status` share {@link SyncStatus}; `ub open`
+ * exposes the smaller {@link ServingSyncStatus} its browser consumers need.
+ * Neither shape turns a hub acknowledgement into a claim that the hub owns the
+ * document.
  */
 
+import type { UberblickMcpEngine } from "./engine.js";
 import type { Replicas } from "./replica.js";
 import type { PendingRoom } from "./store.js";
 import type { HubState } from "./sync.js";
@@ -37,6 +38,89 @@ export interface SyncStatus {
   logEntries: number;
   /** Non-null only when an update failed to reach the log. */
   persistence: { room: string; message: string } | null;
+}
+
+export interface ServedRoomSyncStatus {
+  hubAcked: boolean;
+}
+
+export interface ServingSyncStatus {
+  /** The full replica completed this hub handshake and its attach drain. */
+  caughtUp: boolean;
+  /** Only rooms currently loaded by the in-process browser server. */
+  rooms: Record<string, ServedRoomSyncStatus>;
+}
+
+function unavailableServingStatus(
+  servedRooms: readonly string[],
+): ServingSyncStatus {
+  return {
+    caughtUp: false,
+    rooms: Object.fromEntries(
+      servedRooms.map((room) => [room, { hubAcked: false }]),
+    ),
+  };
+}
+
+/**
+ * Read the two sync facts served to the browser, without waiting on the hub.
+ *
+ * A provider's quiet flag is necessary but not sufficient: another process
+ * can append, apply and acknowledge a change, then release the one shared
+ * pending marker while this replica is still behind. A true reading therefore
+ * also requires this replica to cover the store cut sampled with that marker.
+ */
+export function collectServingSyncStatus(
+  engine: UberblickMcpEngine,
+  rooms: Iterable<string>,
+): ServingSyncStatus {
+  const servedRooms = [...new Set(rooms)].sort();
+  if (
+    engine.health.status !== "healthy" ||
+    engine.refreshStatus.status !== "running"
+  ) {
+    return unavailableServingStatus(servedRooms);
+  }
+
+  try {
+    // Hub-free and synchronous: a request made after another process's write
+    // first applies that store tail, but never pays settle's network wait.
+    engine.replicas.refresh();
+  } catch {
+    return unavailableServingStatus(servedRooms);
+  }
+
+  const attached = engine.replicas.attachedReplicas();
+  const store = engine.store.syncSnapshot(
+    attached.map(({ room, lastSeq }) => ({ room, throughSeq: lastSeq })),
+  );
+  const pending = new Set(store.pendingRooms.map(({ room }) => room));
+  const connected = engine.replicas.sync.state().status === "connected";
+  const acknowledged = new Map(
+    attached.map((replica) => [
+      replica.room,
+      connected &&
+        !pending.has(replica.room) &&
+        !store.unappliedRooms.has(replica.room) &&
+        engine.replicas.isRoomQuiet(replica.room),
+    ]),
+  );
+  const served = Object.fromEntries(
+    servedRooms.map((room) => [
+      room,
+      { hubAcked: acknowledged.get(room) === true },
+    ]),
+  );
+
+  return {
+    caughtUp:
+      connected &&
+      !engine.replicas.sync.isDraining() &&
+      store.pendingRooms.length === 0 &&
+      attached.every((replica) => acknowledged.get(replica.room) === true) &&
+      servedRooms.every((room) => acknowledged.get(room) === true),
+    rooms: served,
+  };
 }
 
 /**
