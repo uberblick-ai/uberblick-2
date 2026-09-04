@@ -718,7 +718,7 @@ describe("ub open", () => {
     }
   });
 
-  it("relays browser and agent presence through the upstream across a reconnect", async () => {
+  it("relays presence across reconnect and lets a served tab expire upstream", async () => {
     const { box, env } = configured();
     const hub = await startHub(box);
     const hubUrl = `ws://127.0.0.1:${hub.port}`;
@@ -811,6 +811,15 @@ describe("ub open", () => {
       await waitUntil("presence to return after the upstream reconnects", () =>
         browser.awareness?.getStates().has(agentId) === true &&
         agent.awareness?.getStates().has(browserId) === true,
+      );
+
+      browser.destroy();
+      await sleep(1_000);
+      expect(agent.awareness?.getStates().has(browserId)).toBe(true);
+      await waitUntil(
+        "the departed browser to leave its hub peer by normal awareness expiry",
+        () => agent.awareness?.getStates().has(browserId) === false,
+        45_000,
       );
     } finally {
       browser.destroy();
