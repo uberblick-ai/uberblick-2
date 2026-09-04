@@ -62,7 +62,9 @@ describe("a refusal is read before the connection is", () => {
         authFailed: true,
       },
       word: "update required",
-      detail: "this app is older than the hub — update it and reload (app 1, hub 2)",
+      detail:
+        "this app is older than the hub — update it and reload (app 1, hub 2); " +
+        "this document is not saved",
     },
     {
       name: "a store refusal outranks reconnectable token failures",
@@ -74,7 +76,9 @@ describe("a refusal is read before the connection is", () => {
       name: "the other direction names the hub as what to update",
       status: { connected: false, protocolMismatch: { hub: 1, client: 2 } },
       word: "update required",
-      detail: "the hub is older than this app — update the hub (app 2, hub 1)",
+      detail:
+        "the hub is older than this app — update the hub (app 2, hub 1); " +
+        "this document is not saved",
     },
     {
       name: "a missing token outranks a refusal left over from before it went missing",
@@ -86,7 +90,7 @@ describe("a refusal is read before the connection is", () => {
       name: "a refusal names both causes, in the hub's stead",
       status: { authFailed: true },
       word: "not authorized",
-      detail: AUTH_REJECTED,
+      detail: `${AUTH_REJECTED}; this document is not saved`,
     },
   ];
 

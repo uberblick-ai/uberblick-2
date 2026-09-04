@@ -37,7 +37,7 @@ import type { SyncState } from "./calm.js";
  */
 export const TOKEN_MISSING =
   "this app was served without a hub token, so it cannot authenticate — the " +
-  "deployment serving it is incomplete";
+  "deployment serving it is incomplete; this document is not saved";
 
 export const STORE_REFUSED =
   "the server refused this edit; this document is not saved — reload to reconnect";
@@ -78,7 +78,7 @@ export function statusReading(status: RoomStatus, settled: SyncState): StatusRea
         (mismatch.hub > mismatch.client
           ? "this app is older than the hub — update it and reload"
           : "the hub is older than this app — update the hub") +
-        ` (app ${mismatch.client}, hub ${mismatch.hub})`,
+        ` (app ${mismatch.client}, hub ${mismatch.hub}); this document is not saved`,
       tone: "offline",
     };
   }
@@ -95,7 +95,11 @@ export function statusReading(status: RoomStatus, settled: SyncState): StatusRea
     // Composed locally, never the hub's words — see AUTH_REJECTED. Not
     // terminal either: the socket keeps retrying and an accepted token clears
     // the flag, so the reading goes back to the ordinary three on its own.
-    return { word: "not authorized", detail: AUTH_REJECTED, tone: "offline" };
+    return {
+      word: "not authorized",
+      detail: `${AUTH_REJECTED}; this document is not saved`,
+      tone: "offline",
+    };
   }
   return {
     word: settled === "syncing" ? "syncing…" : settled,

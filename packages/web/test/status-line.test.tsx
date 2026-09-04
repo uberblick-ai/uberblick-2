@@ -204,7 +204,7 @@ describe("a hub that refuses this page", () => {
     expect(older).toContain("update required");
     expect(older).toContain("this app is older than the hub");
     expect(older).toContain("(app 1, hub 2)");
-    expect(older).not.toContain("not saved");
+    expect(older).toContain("not saved");
 
     const newer = line({ protocolMismatch: { hub: 1, client: 2 } });
     expect(newer).toContain("the hub is older than this app");
@@ -223,7 +223,7 @@ describe("a hub that refuses this page", () => {
     // names both causes rather than guessing, and it is composed locally —
     // the hub's own words never reach the line.
     expect(line({ authFailed: true })).toContain(AUTH_REJECTED);
-    expect(line({ authFailed: true })).not.toContain("not saved");
+    expect(line({ authFailed: true })).toContain("not saved");
   });
 });
 
@@ -239,7 +239,7 @@ describe("an app served without a token", () => {
     expect(missing).toContain("no hub token");
     expect(missing).toContain(TOKEN_MISSING);
     expect(missing).not.toContain(AUTH_REJECTED);
-    expect(missing).not.toContain("not saved");
+    expect(missing).toContain("not saved");
 
     // It outranks a refusal left over from before the secret went missing, and
     // it never appears without one.

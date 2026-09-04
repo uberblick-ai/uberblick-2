@@ -138,7 +138,10 @@ let forcedDropWindowMs: number = FORCED_DROP_COOLDOWN.maxMs;
  */
 const LOCAL_COPY_CHECKPOINT = "uberblick:local-copy-confirmed";
 
-/** The two room-close reasons introduced by the local store bridge (#758). */
+/**
+ * The store's terminal refusal. `uberblick:store-busy` is deliberately an
+ * ordinary drop so the existing reconnect backoff handles it.
+ */
 const STORE_REFUSED_REASON = "uberblick:store-refused";
 
 /** A drop asked for during the cooldown, waiting for the window to end. */
