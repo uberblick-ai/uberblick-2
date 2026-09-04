@@ -65,12 +65,10 @@
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
-  /* Both vendored surfaces belong to the sidebar, and to nothing else: the
-     workspace switcher and the user panel are the only consumers of
-     `shadcn/dropdown-menu` and `shadcn/popover` in the app. So a popover here is
-     the sidebar that floats, not a card that floats (#480) — it is anchored to
-     that column, opens over it, and reading `--card` would now paint it a
-     surface it is nowhere near. */
+  /* The workspace switcher and user panel use these vendored surfaces as the
+     sidebar that floats (#480), so their framework defaults stay on sidebar
+     tokens. The document collaborator popover is the other consumer; its
+     product class overrides the surface with card tokens where it is used. */
   --color-popover: var(--sidebar);
   --color-popover-foreground: var(--sidebar-foreground);
   --color-primary: var(--primary);

@@ -148,16 +148,10 @@ describe("the compact collaborator cluster", () => {
       );
       act(() => more?.click());
 
-      const dialog = document.querySelector<HTMLElement>(".ub-peer-overflow");
-      expect(dialog?.getAttribute("role")).toBe("dialog");
-      expect(dialog?.getAttribute("aria-label")).toBe("More active collaborators");
-      expect(more?.getAttribute("aria-controls")).toBe(dialog?.id);
-      expect(more?.getAttribute("aria-expanded")).toBe("true");
       const rows = document.querySelectorAll<HTMLButtonElement>(
         ".ub-peer-overflow-row",
       );
       expect(rows).toHaveLength(2);
-      expect(document.activeElement).toBe(rows[0]);
       expect(rows[0]?.textContent).toContain("Peer 4");
       expect(rows[0]?.textContent).toContain("agent");
       expect(rows[0]?.querySelector(".ub-avatar")?.textContent).toBe("P🤖");

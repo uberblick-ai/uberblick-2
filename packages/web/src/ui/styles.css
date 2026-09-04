@@ -2316,6 +2316,7 @@ body {
   background: var(--card);
   color: var(--card-foreground);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  font: 0.8rem/1.2 var(--font-mono);
 }
 
 .ub-peer-overflow-row {

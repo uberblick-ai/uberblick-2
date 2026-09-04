@@ -153,6 +153,9 @@ export function PeerCluster({
             interactedOutside.current = true;
           }}
           onCloseAutoFocus={(event) => {
+            // Radix owns the close policy; this local override changes only its
+            // trigger focus to preventScroll. Plain focus would undo #616's
+            // editor jump by scrolling the pane back to this status row.
             if (interactedOutside.current) return;
             event.preventDefault();
             overflowTrigger.current?.focus({ preventScroll: true });
