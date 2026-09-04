@@ -3621,6 +3621,11 @@ h3.ub-heading {
   font: inherit;
 }
 
+.ub-docs-search-state {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
 /* Its own class rather than the sidebar's `.ub-empty`: two components on one
    screen now, and a page with two elements of the same name is a page whose
    selectors are ambiguous — for a stylesheet and for a test alike. */

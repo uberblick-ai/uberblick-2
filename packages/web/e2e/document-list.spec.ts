@@ -9,11 +9,12 @@
  * browser context, and nothing told this one about them.
  *
  * The semantic table and keyboard-sort contract need the browser's own
- * accessibility and activation behavior. Everything else — missing-stamp
- * ordering, filter edge cases, the pinned group, the empty-state wording — is
- * pinned in `test/document-list.test.tsx` over shared Y.Docs and is not
- * repeated here. The lifecycle scenario is the browser-only seam: an external
- * writer moves the open header and the directory-backed row without a reload.
+ * accessibility and activation behavior. The same production path proves that
+ * a body-only query crosses `ub open`'s authenticated search seam, while a page
+ * connected directly to a hub names the unavailable state. Request races and
+ * empty/failure wording stay in the focused unit suite. The lifecycle scenario
+ * is the other browser-only seam: an external writer moves the open header and
+ * the directory-backed row without a reload.
  */
 
 import { expect, test } from "@playwright/test";
@@ -100,6 +101,7 @@ test("the workspace address is the list, and it holds what another browser creat
   const [author, reader] = await Promise.all([openApp(browser), openApp(browser)]);
   await createDoc(author, first);
   await createDoc(author, second);
+  await author.locator(".ub-editor .ProseMirror").fill("bodyonly quasartrail");
 
   // The second browser was told nothing: the directory is a synced document,
   // and the list is that document. `/` resolves to the workspace's own address,
@@ -128,16 +130,19 @@ test("the workspace address is the list, and it holds what another browser creat
   await changedHeading.getByRole("button", { name: "Last changed" }).click();
   await expect(changedHeading).toHaveAttribute("aria-sort", "descending");
   await expect(listedTitles(reader)).toHaveText([second, first]);
-  // The scope is the field's accessible name in a real browser, not a sentence
-  // beside it: this filters titles alone, not bodies.
-  await expect(
-    reader.getByRole("searchbox", { name: /title.*not document text/i }),
-  ).toBeVisible();
+  // The field calls the store-backed search endpoint through the same real
+  // `ub open`. Both terms occur only in the body, and the second is a prefix.
+  const search = reader.getByRole("searchbox", { name: "Search document text" });
+  await expect(search).toBeEnabled();
+  await search.fill("bodyonly quasartr*");
+  await expect(listedTitles(reader)).toHaveText([second]);
 
-  // Typing filters what is already here — no request, no room.
-  await reader.locator(".ub-docs-search").fill(first);
+  // Titles are part of the same index, and clearing restores the whole list
+  // locally rather than issuing an empty search.
+  await search.fill(first);
   await expect(listedTitles(reader)).toHaveText([first]);
-  await reader.locator(".ub-docs-search").fill("");
+  await search.fill("");
+  await expect(listedTitles(reader)).toHaveText([second, first]);
 
   // The sidebar's fixed entry is the same list at its own address.
   const entry = reader.getByRole("button", { name: "All docs" });
@@ -179,6 +184,13 @@ test("a lifecycle update outside the browser moves the row and both badges", asy
   // lifecycle UI, so keep its browser on the same upstream as its MCP writer.
   const { context, page } = await openUpstreamApp(browser, harness());
   contexts.push(context);
+  const unavailable = page.getByRole("searchbox", {
+    name: "Search unavailable without ub open",
+  });
+  await expect(unavailable).toBeDisabled();
+  await expect(page.locator(".ub-docs-search-state")).toContainText(
+    "connected directly to a remote hub",
+  );
   const session = agent().open({ name: "document-list-e2e" });
   const created = await session.call<{ uuid: string }>("create_doc", {
     title,
