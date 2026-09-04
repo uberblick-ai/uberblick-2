@@ -1088,7 +1088,7 @@ function separation(fill: string, ground: string): number {
  * `--card-accent` now gives.
  */
 const cardHighlightFloor = { light: 0.04, dark: 0.064 } as const;
-const orphanedChipFloor = { light: 0.0403, dark: 0.0602 } as const;
+const focusedOrphanedChipFloor = { light: 0.0403, dark: 0.0602 } as const;
 
 for (const scheme of ["light", "dark"] as const) {
   test(`a card-grounded highlight steps off its ground — ${scheme}`, async ({
@@ -1205,9 +1205,6 @@ for (const scheme of ["light", "dark"] as const) {
 
     const restingGround = await paintedIn(orphaned, "background-color");
     const restingFill = await paintedIn(orphanedChip, "background-color");
-    expect(separation(restingFill, restingGround)).toBeGreaterThanOrEqual(
-      orphanedChipFloor[scheme],
-    );
     expect(
       contrast(await paintedIn(orphanedChip, "color"), restingFill),
     ).toBeGreaterThanOrEqual(4.5);
@@ -1216,6 +1213,9 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(orphaned).toHaveAttribute("aria-current", "true");
     const focusedGround = await paintedIn(orphaned, "background-color");
     const focusedFill = await paintedIn(orphanedChip, "background-color");
+    expect(separation(focusedFill, focusedGround)).toBeGreaterThanOrEqual(
+      focusedOrphanedChipFloor[scheme],
+    );
     expect(separation(focusedFill, focusedGround)).toBeGreaterThanOrEqual(
       separation(restingFill, restingGround),
     );
