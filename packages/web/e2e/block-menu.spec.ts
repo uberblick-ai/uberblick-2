@@ -21,7 +21,7 @@
  */
 
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { placeCaret, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 
@@ -56,6 +56,24 @@ function blocks(page: Page) {
   return page.locator(".ub-editor .ProseMirror > *");
 }
 
+/** An element's box inside the positioned frame that owns the block menu. */
+async function frameGeometry(locator: Locator) {
+  return locator.evaluate((element) => {
+    const frame = element.closest(".ub-editor-frame");
+    if (!(frame instanceof HTMLElement)) {
+      throw new Error("e2e: block-menu geometry has no editor frame");
+    }
+    const box = element.getBoundingClientRect();
+    const origin = frame.getBoundingClientRect();
+    return {
+      x: box.x - origin.x,
+      y: box.y - origin.y,
+      width: box.width,
+      height: box.height,
+    };
+  });
+}
+
 test("hovering a block reveals the gutter + without moving the prose", async ({
   page,
 }) => {
@@ -68,10 +86,10 @@ test("hovering a block reveals the gutter + without moving the prose", async ({
   await page.mouse.move(0, 0);
   await expect(button).toHaveCSS("opacity", "0");
 
-  const before = await block.boundingBox();
+  const before = await frameGeometry(block);
   await block.hover();
   await expect(button).toHaveCSS("opacity", "1");
-  const after = await block.boundingBox();
+  const after = await frameGeometry(block);
 
   // The gutter is reserved for good, so revealing the button is a change of
   // opacity and nothing else: the prose does not move by a pixel.
@@ -316,8 +334,8 @@ test("arrow keys keep the highlighted block type in view, and move nothing else"
   expect(start.scrollTop).toBe(0);
 
   const card = page.locator(".ub-blockmenu");
-  const cardBefore = await card.boundingBox();
-  const proseBefore = await blocks(page).first().boundingBox();
+  const cardBefore = await frameGeometry(card);
+  const proseBefore = await frameGeometry(blocks(page).first());
   const focusBefore = await page.evaluate(() => document.activeElement?.className ?? "");
   const shown = start.entries.filter((entry) => entry.bottom <= start.bottom + 1).length;
 
@@ -355,8 +373,8 @@ test("arrow keys keep the highlighted block type in view, and move nothing else"
   // Revealing an entry moves the list and nothing else: the menu keeps its
   // place at the caret, the prose under it has not moved, and the keys are
   // still the editor's.
-  expect(await card.boundingBox()).toEqual(cardBefore);
-  expect(await blocks(page).first().boundingBox()).toEqual(proseBefore);
+  expect(await frameGeometry(card)).toEqual(cardBefore);
+  expect(await frameGeometry(blocks(page).first())).toEqual(proseBefore);
   expect(await page.evaluate(() => document.activeElement?.className ?? "")).toBe(
     focusBefore,
   );
