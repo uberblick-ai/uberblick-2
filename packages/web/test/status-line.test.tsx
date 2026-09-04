@@ -109,6 +109,73 @@ function line(patch: Partial<RoomStatus>): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function updatedReading(
+  lastUpdated: number | undefined,
+  patch: Partial<RoomStatus> = {},
+): {
+  text: string | null;
+  line: string;
+  dateTime: string | null;
+  title: string | null;
+} {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+    true;
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  act(() =>
+    root.render(
+      <StatusLine
+        connection={stubConnection(0, patch)}
+        presence={NOBODY}
+        docPresent
+        lastUpdated={lastUpdated}
+      />,
+    ),
+  );
+  const time = host.querySelector<HTMLTimeElement>(".ub-last-updated time");
+  const reading = {
+    text: host.querySelector(".ub-last-updated")?.textContent ?? null,
+    line: host.querySelector(".ub-status")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+    dateTime: time?.getAttribute("dateTime") ?? null,
+    title: time?.getAttribute("title") ?? null,
+  };
+  act(() => root.unmount());
+  host.remove();
+  return reading;
+}
+
+describe("the selected document's edit freshness", () => {
+  it("uses the shared semantic timestamp and omits unusable values", () => {
+    const stamp = Date.now() - 2 * 60 * 60_000;
+    const reading = updatedReading(stamp);
+    expect(reading.text?.replace(/\s+/g, " ").trim()).toBe(
+      "· last updated 2 hours ago",
+    );
+    expect(reading.dateTime).toBe(new Date(stamp).toISOString());
+    expect(reading.title).not.toBeNull();
+
+    for (const unusable of [undefined, Number.NaN, Infinity, Number.MAX_VALUE]) {
+      expect(
+        updatedReading(unusable, { connected: true, synced: true }),
+      ).toEqual({
+        text: null,
+        line: "",
+        dateTime: null,
+        title: null,
+      });
+    }
+  });
+
+  it("waits for the sync word and follows a refusal's explanation", () => {
+    const stamp = Date.now();
+    expect(updatedReading(stamp, { connected: true, synced: true }).line).toBe("");
+    expect(updatedReading(stamp, { authFailed: true }).line).toMatch(
+      /^not authorized.*hub rejected.*secret is wrong.*hub is older.*· last updated just now$/,
+    );
+  });
+});
+
 describe("a hub that refuses this page", () => {
   it("says an update is needed, and which side needs it", () => {
     // A reading of its own, not a fourth sync state: the other three describe a

@@ -1982,6 +1982,13 @@ body {
   min-width: 0;
 }
 
+.ub-last-updated {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The document's one sync reading is also the details-panel handle. It stays
    inside the status line, so making it operable adds no second status surface. */
 .ub-status-sync {

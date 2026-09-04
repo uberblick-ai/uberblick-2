@@ -1,5 +1,5 @@
 /**
- * The three proof points of issue #46, in a real browser against a real hub.
+ * The collaboration proof points, in a real browser against a real hub.
  *
  * Each one is here because jsdom structurally cannot host it: two live clients
  * on one document, cursor decorations rendered by a browser, and an IndexedDB
@@ -202,6 +202,68 @@ test("a peer's cursor renders in the other context with its name and colour", as
   await a.keyboard.press("Escape");
   await placeCaret(a);
   await expect(label).toHaveCSS("background-color", chosen);
+});
+
+test("the open document's last-updated reading follows its stub through status and archive changes", async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  contexts.push(context);
+  const page = await context.newPage();
+  const title = docTitle("freshness");
+  const realNow = Date.now();
+
+  // Install at the real time before loading, so every room authenticates with a
+  // valid token. One minute is enough to prove the shared clock repaints this
+  // surface without pushing a freshly minted token outside its valid window.
+  await page.clock.install({ time: realNow });
+  await page.goto(harness().appUrl);
+  await expect(page.locator(".ub-list-head")).toBeVisible();
+  await createDoc(page, title);
+
+  const reading = page.locator(".ub-last-updated");
+  const time = reading.locator("time");
+  await page.clock.fastForward(60_000);
+  await expect(reading).toContainText("last updated 1 minute ago");
+  const firstDateTime = await time.getAttribute("dateTime");
+  expect(firstDateTime).not.toBeNull();
+  expect(Number.isFinite(Date.parse(firstDateTime ?? ""))).toBe(true);
+  await expect(time).toHaveAttribute("title", /.+/);
+
+  const renamed = `${title} fresh`;
+  await page.locator(".ub-title").fill(renamed);
+  await expect(reading).toContainText("last updated just now");
+  await expect(time).not.toHaveAttribute("dateTime", firstDateTime ?? "");
+  const currentDateTime = await time.getAttribute("dateTime");
+  expect(currentDateTime).not.toBeNull();
+
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("menuitem", { name: "Archive document" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Archive document" })
+    .click();
+  await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
+  await expect(reading).toContainText("last updated just now");
+  await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
+  const stablePosition = await reading.boundingBox();
+  expect(stablePosition).not.toBeNull();
+
+  await harness().stopHub();
+  try {
+    await expect(page.locator(".ub-status")).toContainText("offline");
+    await expect(reading).toContainText("last updated just now");
+    await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
+    expect(await reading.boundingBox()).toEqual(stablePosition);
+  } finally {
+    await harness().startHub();
+  }
+  await expect(page.locator(".ub-status")).toContainText("synced", {
+    timeout: 40_000,
+  });
+  await expect(reading).toContainText("last updated just now");
+  await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
+  expect(await reading.boundingBox()).toEqual(stablePosition);
 });
 
 test("a document claims a local copy only after a hub-confirmed checkpoint", async ({
