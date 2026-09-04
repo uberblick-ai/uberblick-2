@@ -44,6 +44,7 @@
 import type {
   Hocuspocus,
   WebSocketLike,
+  onAuthenticatePayload,
   onStoreDocumentPayload,
 } from "@hocuspocus/server";
 import { Server } from "@hocuspocus/server";
@@ -252,6 +253,143 @@ class AuthError extends Error {
   }
 }
 
+export type RoomAuthenticator = (
+  payload: onAuthenticatePayload<HubContext>,
+) => Promise<HubContext>;
+
+/**
+ * Build the hub's room-authentication boundary for any Hocuspocus server.
+ *
+ * `ub open` serves rooms from one workspace-local store, so it supplies
+ * `servedWorkspace`; the ordinary hub omits it and may admit any workspace
+ * whose room and signed claim agree. Everything else — query-token refusal,
+ * protocol envelope, signature and lifetime checks, read-only scope and log
+ * vocabulary — is deliberately one implementation.
+ */
+export async function createRoomAuthenticator(options: {
+  authSecret: string;
+  protocolVersion: number;
+  log: HubLogger;
+  servedWorkspace?: string;
+}): Promise<RoomAuthenticator> {
+  const rootKey = await importRootSecret(options.authSecret);
+
+  return async ({
+    token,
+    documentName,
+    requestHeaders,
+    requestParameters,
+    connectionConfig,
+  }) => {
+    // Every rejection names the peer. A rejection nobody can attribute is
+    // the operational problem this event exists to solve: several machines,
+    // browser tabs and long-lived agent sessions present tokens to one server.
+    const peer = resolvePeer(requestHeaders);
+    const rejected = (
+      cause: RejectionCause,
+      fields: Record<string, unknown> = {},
+    ) => ({
+      event: "hub.auth.rejected",
+      room: documentName,
+      peer: peer.address,
+      proxied: peer.proxied,
+      ...fields,
+      cause,
+    });
+
+    const queried = TOKEN_QUERY_PARAMS.find((name) =>
+      requestParameters.has(name),
+    );
+    if (queried !== undefined) {
+      // No token identity here: the connection is refused on the URL, before
+      // any token has been read, and the parameter is the whole finding.
+      options.log(rejected("token-in-query", { parameter: queried }));
+      throw new AuthError(
+        "token-in-query",
+        `token must be sent in the auth message, not the "${queried}" query parameter`,
+      );
+    }
+
+    // The version exchange comes before anything about the token is believed,
+    // and before JSON parsing, which keeps MAX_TOKEN_LENGTH's promise that an
+    // unauthenticated caller cannot choose how much work the server does. A
+    // bare token is a flag-day mismatch too.
+    const envelope = readAuthEnvelope(token);
+    if (
+      envelope === null ||
+      envelope.protocolVersion !== options.protocolVersion
+    ) {
+      options.log(
+        rejected("protocol-mismatch", {
+          // Integers or absence only: never log the token or its envelope.
+          clientProtocol: envelope?.protocolVersion ?? null,
+          hubProtocol: options.protocolVersion,
+        }),
+      );
+      throw new AuthError(
+        protocolMismatchReason(options.protocolVersion),
+        `this hub speaks sync protocol ${options.protocolVersion}`,
+      );
+    }
+
+    const inspected = await inspectToken(rootKey, envelope.token);
+    if ("failure" in inspected) {
+      options.log(rejected(inspected.failure, tokenFields(inspected.identity)));
+      throw new AuthError(
+        "invalid-token",
+        "token is missing, malformed or badly signed",
+      );
+    }
+    const claims = inspected;
+
+    // Every client mints locally, so the hub applies the lifetime ceiling.
+    // Log the specific cause, but expose the same wire refusal for an expired
+    // token as for a forged one.
+    const clamped = clampToken(claims, Math.floor(Date.now() / 1000));
+    if (clamped !== null) {
+      options.log(rejected(clamped, { typ: claims.typ, sub: claims.sub }));
+      throw new AuthError(
+        "invalid-token",
+        "token is missing, malformed or badly signed",
+      );
+    }
+
+    const workspace = roomWorkspace(documentName);
+    if (
+      workspace === null ||
+      workspace !== claims.workspace ||
+      (options.servedWorkspace !== undefined &&
+        workspace !== options.servedWorkspace)
+    ) {
+      options.log(
+        rejected("workspace-mismatch", {
+          typ: claims.typ,
+          sub: claims.sub,
+          workspace: claims.workspace,
+        }),
+      );
+      throw new AuthError(
+        "workspace-mismatch",
+        `token for workspace "${claims.workspace}" may not open room "${documentName}"`,
+      );
+    }
+
+    if (claims.scope === "read-only") {
+      connectionConfig.readOnly = true;
+    }
+
+    options.log({
+      event: "hub.auth.accepted",
+      room: documentName,
+      sub: claims.sub,
+      workspace: claims.workspace,
+      scope: claims.scope,
+    });
+
+    return claims;
+  };
+}
+
 /**
  * The workspace a room belongs to, or `null` when the name is not a room.
  *
@@ -433,9 +571,6 @@ export async function createHub(config: HubConfig): Promise<Hub> {
   }
 
   const log = config.log ?? stderrLogger;
-  // Imported once, here: the root secret never changes for the life of a hub,
-  // and `onAuthenticate` wants a key rather than a string.
-  const rootKey = await importRootSecret(config.authSecret);
   // The build's, unless a test moved one end to observe a skew. See HubConfig.
   const protocolVersion = config.protocolVersion ?? SYNC_PROTOCOL_VERSION;
   // Held to the range the wire can carry: the refusal sentinel is the only way
@@ -446,6 +581,11 @@ export async function createHub(config: HubConfig): Promise<Hub> {
       `createHub: protocolVersion must be an integer between 1 and 999999, got ${protocolVersion}`,
     );
   }
+  const authenticate = await createRoomAuthenticator({
+    authSecret: config.authSecret,
+    protocolVersion,
+    log,
+  });
   const databasePath = config.databasePath ?? defaultDatabasePath();
   const address = config.address ?? DEFAULT_HOST;
   const shutdownTimeoutMs = config.shutdownTimeoutMs ?? 10_000;
@@ -519,117 +659,7 @@ export async function createHub(config: HubConfig): Promise<Hub> {
       request.headers[PEER_ADDRESS_HEADER] = request.socket?.remoteAddress ?? "";
     },
 
-    async onAuthenticate({
-      token,
-      documentName,
-      requestHeaders,
-      requestParameters,
-      connectionConfig,
-    }) {
-      // Every rejection names the peer. A rejection nobody can attribute is
-      // the operational problem this event exists to solve: several machines,
-      // browser tabs and long-lived agent sessions present tokens to the same
-      // hub, and only one of them is the one that has to be restarted.
-      const peer = resolvePeer(requestHeaders);
-      const rejected = (
-        cause: RejectionCause,
-        fields: Record<string, unknown> = {},
-      ) => ({
-        event: "hub.auth.rejected",
-        room: documentName,
-        peer: peer.address,
-        proxied: peer.proxied,
-        ...fields,
-        cause,
-      });
-
-      const queried = TOKEN_QUERY_PARAMS.find((name) =>
-        requestParameters.has(name),
-      );
-      if (queried !== undefined) {
-        // No token identity here: the connection is refused on the URL, before
-        // any token has been read, and the parameter is the whole finding.
-        log(rejected("token-in-query", { parameter: queried }));
-        throw new AuthError(
-          "token-in-query",
-          `token must be sent in the auth message, not the "${queried}" query parameter`,
-        );
-      }
-
-      // The version exchange, before anything about the token is believed —
-      // and before `JSON.parse` sees the string, which is what keeps
-      // `MAX_TOKEN_LENGTH`'s promise that an unauthenticated caller cannot
-      // choose how much work the hub does. A bare token is a mismatch too:
-      // it is what every not-yet-updated client looks like on the flag day.
-      const envelope = readAuthEnvelope(token);
-      if (envelope === null || envelope.protocolVersion !== protocolVersion) {
-        log(
-          rejected("protocol-mismatch", {
-            // The client's is absent when there was no readable envelope. Both
-            // integers and nothing else: never the token, never the envelope.
-            clientProtocol: envelope?.protocolVersion ?? null,
-            hubProtocol: protocolVersion,
-          }),
-        );
-        throw new AuthError(
-          protocolMismatchReason(protocolVersion),
-          `this hub speaks sync protocol ${protocolVersion}`,
-        );
-      }
-
-      const inspected = await inspectToken(rootKey, envelope.token);
-      if ("failure" in inspected) {
-        log(rejected(inspected.failure, tokenFields(inspected.identity)));
-        throw new AuthError(
-          "invalid-token",
-          "token is missing, malformed or badly signed",
-        );
-      }
-      const claims = inspected;
-
-      // The lifetime ceiling, applied whatever the token claimed. Every MCP
-      // server and every `ub` mints locally, so this is the only place a
-      // decade-long token gets refused. The cause is logged and the wire
-      // reason is not: an expired token and a forged one are the same refusal
-      // to whoever sent it.
-      const clamped = clampToken(claims, Math.floor(Date.now() / 1000));
-      if (clamped !== null) {
-        log(rejected(clamped, { typ: claims.typ, sub: claims.sub }));
-        throw new AuthError(
-          "invalid-token",
-          "token is missing, malformed or badly signed",
-        );
-      }
-
-      const workspace = roomWorkspace(documentName);
-      if (workspace === null || workspace !== claims.workspace) {
-        log(
-          rejected("workspace-mismatch", {
-            typ: claims.typ,
-            sub: claims.sub,
-            workspace: claims.workspace,
-          }),
-        );
-        throw new AuthError(
-          "workspace-mismatch",
-          `token for workspace "${claims.workspace}" may not open room "${documentName}"`,
-        );
-      }
-
-      if (claims.scope === "read-only") {
-        connectionConfig.readOnly = true;
-      }
-
-      log({
-        event: "hub.auth.accepted",
-        room: documentName,
-        sub: claims.sub,
-        workspace: claims.workspace,
-        scope: claims.scope,
-      });
-
-      return claims;
-    },
+    onAuthenticate: authenticate,
 
     /**
      * Connection lifecycle, per room and not per socket: Hocuspocus runs these

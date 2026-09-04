@@ -23,6 +23,16 @@
 export { createHub } from "./server.js";
 export type { Hub, HubContext } from "./server.js";
 export {
+  createLocalBrowserServer,
+  STORE_BUSY_REASON,
+  STORE_REFUSED_REASON,
+} from "./local-browser-server.js";
+export type {
+  LocalBrowserServer,
+  LocalBrowserServerConfig,
+  LocalRoomSlice,
+} from "./local-browser-server.js";
+export {
   DEFAULT_HOST,
   DEFAULT_PORT,
   MAX_PENDING_DOCUMENTS,

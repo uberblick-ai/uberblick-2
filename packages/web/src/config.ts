@@ -14,9 +14,15 @@
  * `ub open` (#97) all have to agree on them. The document is
  *
  *     {"hubUrl": "wss://host/ws", "workspaces": ["uberblick-<uuid>", "<uuid>"],
- *      "hubAuthToken": "<the hub's signing secret>"}
+ *      "hubAuthToken": "<the hub's signing secret>",
+ *      "remoteHubUrl": "wss://team-host/ws", "rebound": true}
  *
- * — three keys, anything else ignored. `hubUrl` must be a bare `ws://` or
+ * The final two keys are present only when `ub open` is the serving process:
+ * `hubUrl` then names its loopback websocket, `remoteHubUrl` names the hub its
+ * replica half points at, and `rebound: true` says the machine's configured
+ * binding has changed since this `ub open` started and it must be restarted.
+ * This client does not consume those two diagnostics yet (#744, #759), so they
+ * are ignored like every other additive key. `hubUrl` must be a bare `ws://` or
  * `wss://` address: no userinfo, no query, no fragment. `workspaces` is the
  * menu, in order, and its first entry is what `/` — the one address that names
  * no workspace — redirects to. It may also be written as one comma-separated

@@ -74,6 +74,8 @@ describe("token minting sites", () => {
    * lifetime and `kid` its call site passes reviewed alongside it.
    */
   const EXPECTED = [
+    // Browser-shaped integration token: maximum lifetime, no credential kid.
+    "packages/cli/test/open.test.ts",
     "packages/cli/test/remote.test.ts",
     "packages/hub/test/credential.test.ts",
     "packages/hub/test/helpers.ts",

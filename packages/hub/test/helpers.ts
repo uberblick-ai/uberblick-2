@@ -161,6 +161,10 @@ export interface ClientOptions {
    * sits in front of the deployed hub.
    */
   headers?: Record<string, string>;
+  /** Browser Origin header required by `ub open`'s loopback server. */
+  origin?: string;
+  /** Keep a refused client from reconnecting inside the assertion window. */
+  reconnectDelayMs?: number;
   /**
    * The provider's dead-connection timer, 30s by default: with no message for
    * that long it closes the socket itself and reconnects. A test about what the
@@ -181,7 +185,13 @@ export interface ClientOptions {
 
 export function createClient(options: ClientOptions): TestClient {
   const doc = options.doc ?? new Y.Doc();
-  const headers = options.headers;
+  const headers =
+    options.headers === undefined && options.origin === undefined
+      ? undefined
+      : {
+          ...options.headers,
+          ...(options.origin === undefined ? {} : { Origin: options.origin }),
+        };
   const claimed = options.protocolVersion;
 
   const provider = new HocuspocusProvider({
@@ -198,6 +208,9 @@ export function createClient(options: ClientOptions): TestClient {
     ...(options.messageReconnectTimeout === undefined
       ? {}
       : { messageReconnectTimeout: options.messageReconnectTimeout }),
+    ...(options.reconnectDelayMs === undefined
+      ? {}
+      : { delay: options.reconnectDelayMs, minDelay: options.reconnectDelayMs }),
     ...(headers === undefined
       ? {}
       : {
