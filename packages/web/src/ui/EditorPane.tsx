@@ -120,10 +120,8 @@ function ArchivedBanner({
  *    redraw cadence is.
  * 2. The mark and the word each sit in a fixed-width slot, so swapping the dot
  *    for the spinner and "synced" for "syncing…" moves nothing to their right.
- * 3. Everything after the word is drawn only while the reading is *not*
- *    `synced` — the local-copy note and the backlog badge alike — so the
- *    settled healthy line is the word and the peers, and nothing between them
- *    can move.
+ * 3. The fixed sync slots keep the stable freshness and peer readings still
+ *    while transient local-copy and backlog facts appear only when relevant.
  *
  * The suppression in (3) is safe only because a non-empty backlog is itself
  * part of what makes the state busy (`rawSyncState`). A backlog that outlives
@@ -262,8 +260,8 @@ export function StatusLine({
   return (
     <div className="ub-status">
       {syncReading}
-      {updatedReading}
       {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
+      {!blank && updatedReading}
       {!blank && copyNote}
       {!blank &&
         reading.detail === null &&

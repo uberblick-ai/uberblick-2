@@ -112,7 +112,12 @@ function line(patch: Partial<RoomStatus>): string {
 function updatedReading(
   lastUpdated: number | undefined,
   patch: Partial<RoomStatus> = {},
-): { text: string | null; dateTime: string | null; title: string | null } {
+): {
+  text: string | null;
+  line: string;
+  dateTime: string | null;
+  title: string | null;
+} {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   const host = document.createElement("div");
@@ -131,6 +136,7 @@ function updatedReading(
   const time = host.querySelector<HTMLTimeElement>(".ub-last-updated time");
   const reading = {
     text: host.querySelector(".ub-last-updated")?.textContent ?? null,
+    line: host.querySelector(".ub-status")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
     dateTime: time?.getAttribute("dateTime") ?? null,
     title: time?.getAttribute("title") ?? null,
   };
@@ -150,24 +156,23 @@ describe("the selected document's edit freshness", () => {
     expect(reading.title).not.toBeNull();
 
     for (const unusable of [undefined, Number.NaN, Infinity, Number.MAX_VALUE]) {
-      expect(updatedReading(unusable)).toEqual({
+      expect(
+        updatedReading(unusable, { connected: true, synced: true }),
+      ).toEqual({
         text: null,
+        line: "",
         dateTime: null,
         title: null,
       });
     }
   });
 
-  it("stays beside syncing, synced, offline, and refusal readings", () => {
+  it("waits for the sync word and follows a refusal's explanation", () => {
     const stamp = Date.now();
-    for (const status of [
-      { connected: true, synced: false },
-      { connected: true, synced: true },
-      { connected: false, synced: false },
-      { authFailed: true },
-    ]) {
-      expect(updatedReading(stamp, status).text).toContain("last updated just now");
-    }
+    expect(updatedReading(stamp, { connected: true, synced: true }).line).toBe("");
+    expect(updatedReading(stamp, { authFailed: true }).line).toMatch(
+      /^not authorized.*hub rejected.*secret is wrong.*hub is older.*· last updated just now$/,
+    );
   });
 });
 

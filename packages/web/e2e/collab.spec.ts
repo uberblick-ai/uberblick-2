@@ -211,12 +211,11 @@ test("the open document's last-updated reading follows its stub through status a
   contexts.push(context);
   const page = await context.newPage();
   const title = docTitle("freshness");
-  const twoHours = 2 * 60 * 60_000;
   const realNow = Date.now();
 
   // Install at the real time before loading, so every room authenticates with a
-  // valid token. Advancing later drives the shared minute clock without a
-  // wall-clock wait; restoring system time before reconnect keeps auth honest.
+  // valid token. One minute is enough to prove the shared clock repaints this
+  // surface without pushing a freshly minted token outside its valid window.
   await page.clock.install({ time: realNow });
   await page.goto(harness().appUrl);
   await expect(page.locator(".ub-list-head")).toBeVisible();
@@ -224,9 +223,8 @@ test("the open document's last-updated reading follows its stub through status a
 
   const reading = page.locator(".ub-last-updated");
   const time = reading.locator("time");
-  await page.clock.setSystemTime(realNow + twoHours);
   await page.clock.fastForward(60_000);
-  await expect(reading).toContainText("last updated 2 hours ago");
+  await expect(reading).toContainText("last updated 1 minute ago");
   const firstDateTime = await time.getAttribute("dateTime");
   expect(firstDateTime).not.toBeNull();
   expect(Number.isFinite(Date.parse(firstDateTime ?? ""))).toBe(true);
@@ -236,7 +234,8 @@ test("the open document's last-updated reading follows its stub through status a
   await page.locator(".ub-title").fill(renamed);
   await expect(reading).toContainText("last updated just now");
   await expect(time).not.toHaveAttribute("dateTime", firstDateTime ?? "");
-  await page.clock.setSystemTime(Date.now());
+  const currentDateTime = await time.getAttribute("dateTime");
+  expect(currentDateTime).not.toBeNull();
 
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
@@ -246,11 +245,16 @@ test("the open document's last-updated reading follows its stub through status a
     .click();
   await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
   await expect(reading).toContainText("last updated just now");
+  await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
+  const stablePosition = await reading.boundingBox();
+  expect(stablePosition).not.toBeNull();
 
   await harness().stopHub();
   try {
     await expect(page.locator(".ub-status")).toContainText("offline");
     await expect(reading).toContainText("last updated just now");
+    await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
+    expect(await reading.boundingBox()).toEqual(stablePosition);
   } finally {
     await harness().startHub();
   }
@@ -258,6 +262,8 @@ test("the open document's last-updated reading follows its stub through status a
     timeout: 40_000,
   });
   await expect(reading).toContainText("last updated just now");
+  await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
+  expect(await reading.boundingBox()).toEqual(stablePosition);
 });
 
 test("a document claims a local copy only after a hub-confirmed checkpoint", async ({
