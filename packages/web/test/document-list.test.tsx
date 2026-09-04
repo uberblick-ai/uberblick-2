@@ -744,7 +744,12 @@ describe("the search", () => {
         connection={null}
         entries={[
           entry({ uuid: ONE, title: "Overview" }),
-          entry({ uuid: TWO, title: "Editing" }),
+          entry({
+            uuid: TWO,
+            title: "Editing",
+            kind: "requirement",
+            status: "planned",
+          }),
           entry({ uuid: THREE, title: "Roadmap" }),
         ]}
         groups={[]}
@@ -766,7 +771,8 @@ describe("the search", () => {
 
     const requests = vi.mocked(api.search).mock.calls.length;
     await act(async () => typeInto(field, ""));
-    expect(rowTitles(host)).toEqual(["Editing", "Overview", "Roadmap"]);
+    // Full-text search spans types; clearing restores the full active mode.
+    expect(rowTitles(host)).toEqual(["Overview", "Roadmap"]);
     expect(api.search).toHaveBeenCalledTimes(requests);
   });
 
@@ -805,14 +811,22 @@ describe("the search", () => {
     vi.useFakeTimers();
     try {
       const readings = [false, true];
+      let searches = 0;
       const api = searchClient(
-        async () => ({ hits: [ONE], limit: 100, capped: true }),
+        async () => ({
+          hits: [searches++ === 0 ? ONE : TWO],
+          limit: 100,
+          capped: true,
+        }),
         async () => readings.shift() ?? true,
       );
       const host = await mount(
         <DocumentList
           connection={null}
-          entries={[entry({ uuid: ONE, title: "Overview" })]}
+          entries={[
+            entry({ uuid: ONE, title: "Before catch-up" }),
+            entry({ uuid: TWO, title: "After catch-up" }),
+          ]}
           groups={[]}
           searchClient={api}
           onSelect={() => {}}
@@ -827,6 +841,7 @@ describe("the search", () => {
       expect(host.querySelector(".ub-docs-search-state")?.textContent).toContain(
         "first 100 matches",
       );
+      expect(rowTitles(host)).toEqual(["Before catch-up"]);
       await act(async () => vi.advanceTimersByTimeAsync(SEARCH_STATUS_POLL_MS));
       expect(host.querySelector(".ub-docs-search-state")?.textContent).not.toContain(
         "may lag the hub",
@@ -834,6 +849,8 @@ describe("the search", () => {
       expect(host.querySelector(".ub-docs-search-state")?.textContent).toContain(
         "first 100 matches",
       );
+      expect(rowTitles(host)).toEqual(["After catch-up"]);
+      expect(api.search).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
@@ -856,7 +873,7 @@ describe("the search", () => {
     expect(host.querySelector(".ub-docs-empty")?.textContent).toContain("Searching");
     await act(async () => pending.reject(new Error("refused")));
     expect(host.querySelector(".ub-docs-empty")?.textContent).toBe(
-      "Search failed. Try again.",
+      "Search failed.",
     );
 
     const answered = searchClient(async () => ({ hits: [], limit: 100, capped: false }));
@@ -875,6 +892,31 @@ describe("the search", () => {
     await flushSearch();
     expect(empty.querySelector(".ub-docs-empty")?.textContent).toBe(
       "No documents match your search.",
+    );
+  });
+
+  it("keeps a successful local answer when the catch-up reading fails", async () => {
+    const api: DocumentSearchClient = {
+      search: vi.fn(async () => ({ hits: [ONE], limit: 100, capped: false })),
+      status: vi.fn(async () => {
+        throw new Error("status unavailable");
+      }),
+    };
+    const host = await mount(
+      <DocumentList
+        connection={null}
+        entries={[entry({ uuid: ONE, title: "Overview" })]}
+        groups={[]}
+        searchClient={api}
+        onSelect={() => {}}
+        onTogglePin={null}
+      />,
+    );
+    await act(async () => typeInto(search(host), "overview"));
+    await flushSearch();
+    expect(rowTitles(host)).toEqual(["Overview"]);
+    expect(host.querySelector(".ub-docs-search-state")?.textContent).toContain(
+      "may lag the hub",
     );
   });
 

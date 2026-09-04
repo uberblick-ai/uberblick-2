@@ -293,7 +293,10 @@ export function DocumentList({
     setSearch({ kind: "loading", query: needle });
     void Promise.all([
       searchClient.search(needle, controller.signal),
-      searchClient.status(controller.signal),
+      // Search is still a valid local answer when the hub-status reading is
+      // unavailable. Keep it, conservatively caveated, instead of turning a
+      // status failure into a false search failure.
+      searchClient.status(controller.signal).catch(() => ({ caughtUp: false })),
     ]).then(
       ([result, next]) => {
         if (active) setSearch({ kind: "ready", query: needle, ...result, ...next });
@@ -318,9 +321,14 @@ export function DocumentList({
         const next = await searchClient.status(controller.signal);
         if (controller.signal.aborted) return;
         if (next.caughtUp) {
+          // The old answer was computed while the local store could still be
+          // behind. Refresh it before removing that caveat: otherwise a stale
+          // empty answer silently becomes an asserted caught-up empty answer.
+          const result = await searchClient.search(needle, controller.signal);
+          if (controller.signal.aborted) return;
           setSearch((current) =>
             current.kind === "ready" && current.query === needle
-              ? { ...current, caughtUp: true }
+              ? { kind: "ready", query: needle, ...result, caughtUp: true }
               : current,
           );
           return;
@@ -342,14 +350,14 @@ export function DocumentList({
     () =>
       sortDirectory(
         entries.filter(
-          (entry) =>
-            inMode(entry, mode) && (needle === "" || hitIds.has(entry.uuid)),
+          (entry) => (needle === "" ? inMode(entry, mode) : hitIds.has(entry.uuid)),
         ),
         sort.order,
         sort.direction,
       ),
     [entries, hitIds, mode, needle, sort],
   );
+  const hasHiddenHits = ready !== null && rows.length < ready.hits.length;
 
   return (
     <section className="ub-pane">
@@ -391,11 +399,14 @@ export function DocumentList({
         {searchClient === undefined && (
           <p className="ub-muted ub-docs-search-state">Loading search…</p>
         )}
-        {ready !== null && (!ready.caughtUp || ready.capped) && (
+        {ready !== null && (!ready.caughtUp || ready.capped || hasHiddenHits) && (
           <p className="ub-muted ub-docs-search-state" role="status">
             {!ready.caughtUp && "Results are from this machine and may lag the hub."}
-            {!ready.caughtUp && ready.capped && " "}
+            {!ready.caughtUp && (ready.capped || hasHiddenHits) && " "}
             {ready.capped && `Showing the first ${ready.limit} matches.`}
+            {ready.capped && hasHiddenHits && " "}
+            {hasHiddenHits &&
+              "Some matching documents have not reached this list yet."}
           </p>
         )}
         <table className="ub-docs-table">
@@ -451,14 +462,12 @@ export function DocumentList({
                   <p className="ub-muted ub-docs-empty">
                     {needle !== "" && searchClient !== null
                       ? search.kind === "failed" && search.query === needle
-                        ? "Search failed. Try again."
+                        ? "Search failed."
                         : ready === null
                           ? "Searching document text…"
                           : ready.hits.length === 0
                             ? "No documents match your search."
-                            : status.synced
-                              ? `The matching documents are outside the ${MODE_LABELS[mode]} view.`
-                              : "Matching documents are still arriving."
+                            : "Matching documents have not reached this list yet."
                       : entries.length !== 0
                         ? status.synced
                           ? `No ${MODE_EMPTY_LABELS[mode]} in this workspace.`
