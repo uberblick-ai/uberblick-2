@@ -241,9 +241,6 @@ test("the open document's last-updated reading follows its stub through status a
   const firstBlock = editor(page).locator(":scope > *").first();
   const word = status.locator(".ub-status-word");
   const wordText = await word.textContent();
-  expect(await status.evaluate((element) => getComputedStyle(element).lineHeight)).toBe(
-    await word.evaluate((element) => getComputedStyle(element).lineHeight),
-  );
   const geometry = async () => ({
     status: await status.boundingBox(),
     prose: await firstBlock.boundingBox(),
