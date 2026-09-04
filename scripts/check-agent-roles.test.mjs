@@ -95,7 +95,7 @@ test("only the two owner-approved high effort pins are permitted", { skip: claud
 		setClaudeKey(fixture, slug, "effort", "high");
 	}
 
-	for (const slug of ["issue-adversary", "implementation-reviewer", "integrator", "program-coordinator"]) {
+	for (const slug of ["issue-adversary", "implementation-reviewer", "integrator"]) {
 		setClaudeKey(fixture, slug, "effort", "high");
 		const result = run(fixture);
 		assert.equal(result.status, 1);

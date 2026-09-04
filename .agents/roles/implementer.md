@@ -10,22 +10,12 @@ The runtime shows only in the run id and the claim.
 
 ## Assignment
 
-One of two complete shapes; refuse before any side effect when it is incomplete:
-
-- a top-level assignment: the implementation queue, your role and your run
-  identity, nothing else;
-- a program coordinator's internal assignment: your role and run identity, one
-  exact issue key, and the parent role and run identity — and the program issue
-  must carry the parent's live claim and the README's delegation record.
+The implementation queue, plus your role and your run identity, nothing else;
+refuse before any side effect when either is missing.
 
 ## Pickup
 
-Internal assignment: never inspect the queue. Validate that the exact issue is
-open, `ready`, dependency-complete, reserved to the claiming program by its
-`Parent: #N` header, and admissible under `.github/ISSUE_SPEC.md`'s overlap and
-work-in-flight rules; claim it and complete only it.
-
-Top-level assignment: one GitHub-only shallow pass, in this order.
+One GitHub-only shallow pass, in this order.
 
 1. **Fix-up** — an open PR whose latest integrator ruling at its current head
    names fix-now findings, with no live implementer claim; oldest PR first. A
@@ -36,9 +26,8 @@ Top-level assignment: one GitHub-only shallow pass, in this order.
    that cannot move its head (owner decision, 2026-09-03, after PR #740).
 2. **Recovery** — a `ready` issue whose implementation claim is stale under
    `AGENTS.md`; oldest claim first.
-3. **New issue** — `ready`, every `Depends-on` closed, not `in-progress`, not
-   reserved by an open `Parent: #N`, in `.github/ISSUE_SPEC.md`'s order and
-   under its cap of 6 work units. `ready` is the preparation verdict; do not
+3. **New issue** — `ready`, every `Depends-on` closed, not `in-progress`, in
+   `.github/ISSUE_SPEC.md`'s order and under its cap of 6 work units. `ready` is the preparation verdict; do not
    prepare again.
 
 With nothing eligible, or at the cap, end with exactly

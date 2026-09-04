@@ -49,8 +49,10 @@ endpoint. Rule: no hardcoded hub addresses anywhere except that in-code default.
 
 `AGENTS.md` is the canonical agent-neutral workflow for every implementer lane,
 and `.agents/roles/` defines three continuous entry roles (`issue-preparer`,
-`implementer`, `integrator`), two exact-key internal roles, and the explicitly
-invoked program role. Every contract is runtime-neutral: a role runs as a Codex
+`implementer`, `integrator`) and two exact-key internal roles; there is no
+coordinator role — a program is a milestone plus `umbrella` parents, ordered
+by `Depends-on` and dispatched by the ordinary queues (owner decision,
+2026-09-04). Every contract is runtime-neutral: a role runs as a Codex
 session or a Claude session, started by the launcher (`/next-issue <role>
 --codex|--claude` today, `ub launch` once #489 lands), and its runtime shows
 only in the run id and the claim. The implementer's default runtime is Codex.

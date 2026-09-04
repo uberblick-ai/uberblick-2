@@ -2,9 +2,11 @@
 
 The delivery workflow has three continuous entry roles: `issue-preparer`,
 `implementer` and `integrator`. They delegate the exact-key internal roles
-`issue-adversary` and `implementation-reviewer`; `program-coordinator` is called
-directly only for explicit program work. Each file beside this one is one
-role's contract, with thin runtime adapters pointing back at it.
+`issue-adversary` and `implementation-reviewer`. Each file beside this one is one
+role's contract, with thin runtime adapters pointing back at it. There is no
+coordinator role: a multi-issue program is a milestone plus `umbrella` parents,
+ordered by `Depends-on` and dispatched by the ordinary queues (owner decision,
+2026-09-04).
 
 This file states what every role obeys, so no contract repeats it. Repository
 policy — `AGENTS.md`, `CLAUDE.md`, `.github/ISSUE_SPEC.md` — wins on conflicts,
@@ -30,7 +32,7 @@ before side effects.
 
 **An internal subagent is the one exception, and it is the same exception for
 every delegating role** — issue-preparer to issue-adversary, implementer or
-integrator to implementation-reviewer, program coordinator to implementer. The
+integrator to implementation-reviewer. The
 parent supplies the child's role and run identity, the exact GitHub issue or PR
 key, and its own run identity as parent; nothing else. The child reconstructs
 from GitHub, never searches a queue and never acts on another item, and writes
@@ -97,7 +99,7 @@ grammar: `Claimed: <branch>` / `Implementer: <claude|codex> <id>`. Every
 top-level role other than the implementer posts `Claim: <role> <session-or-run
 id>`, plus the grounding SHA when its outcome is tied to one. A delegated
 implementation also posts `Parent: <parent role> <run id>` — a comment record,
-distinct from the `Parent: #N` reservation header `.github/ISSUE_SPEC.md`
+distinct from the `Parent: #N` split header `.github/ISSUE_SPEC.md`
 defines for an issue body. A top-level handoff, and a delegated implementation
 handoff, opens `Done: <role> <session-or-run id>` with that grounding and parent
 where applicable. Non-implementation children use the single mutable

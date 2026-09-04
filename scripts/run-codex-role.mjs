@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const usage = "usage: run-codex-role.mjs <role> <run-id> <worktree> <scratch>";
-const roles = new Set(["issue-preparer", "implementer", "integrator", "program-coordinator"]);
+const roles = new Set(["issue-preparer", "implementer", "integrator"]);
 const [role, runId, worktree, scratch] = process.argv.slice(2);
 
 function failUsage() {

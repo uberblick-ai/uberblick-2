@@ -30,9 +30,8 @@ the role contracts in `.agents/roles/`; this file does not restate them.
 
 A claim is the *end* of a pickup, not the start of it: before writing one, the
 implementer grounds the issue against a recorded `origin/main` commit and
-rechecks eligibility — including `.github/ISSUE_SPEC.md`'s reservation and
-work-in-flight rules, whose recount can still turn a posted claim into a
-withdrawal. Challenging the issue is not part of this lane; it happened in the
+rechecks eligibility — including `.github/ISSUE_SPEC.md`'s work-in-flight
+rule, whose recount can still turn a posted claim into a withdrawal. Challenging the issue is not part of this lane; it happened in the
 issue-preparer's own run, and `ready` is that verdict. Two consequences are
 agent-neutral, because reclaimers and reviewers depend on them: a pickup that
 stops before any repository edit never leaves an `in-progress` label behind, and

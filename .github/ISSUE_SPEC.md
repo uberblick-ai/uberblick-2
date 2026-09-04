@@ -34,26 +34,26 @@ Parent: #486
   this sentence is not), plus `repo` (root config, CI, top-level docs).
   Grammar: `^Touches: [a-z0-9-]+(, [a-z0-9-]+)*$`, every name from that list.
 - **`Parent`** — optional, at most one line, directly after `Touches`. Grammar:
-  `^Parent: #[0-9]+$`. It is the reservation relation, and the only one: while
-  the named issue is open, this child belongs to that program — only that
-  program dispatches it, and global implementer pickup excludes it. Closing the
-  parent releases the child; reopening it reserves the child again. A parent
-  body's list of children is reading order for a human, never the authority; the
-  headers on the children are. No line at all means unreserved, which is the
-  ordinary case.
+  `^Parent: #[0-9]+$`. It records the split relation and nothing else: this
+  issue is one child of that coordination parent. It never affects eligibility
+  or order — a child is picked exactly like any other issue (owner decision,
+  2026-09-04: a header that reserved children for a dispatcher nobody ran held
+  the re-cut's chain heads `ready` for a day while lower-priority work was
+  picked, and five more dependency-complete issues for up to five days). A
+  parent body's list of children is reading order for a human; the headers on
+  the children are the relation's authority.
 
-  Anything else **fails closed**: more than one `Parent` line, one naming an
-  issue that does not exist or cannot be read, a self-reference, or a cycle
-  through parents makes the child dispatchable by *no* role until a human fixes
-  the header. That is a header defect — say so in a comment and move to the next
-  candidate; never guess which parent was meant. (A delegated subagent's
+  A malformed header is still a defect: more than one `Parent` line, one naming
+  an issue that does not exist or cannot be read, a self-reference, or a cycle
+  through parents fails the lint below — say so in a comment and move to the
+  next candidate; never guess which parent was meant. (A delegated subagent's
   `Parent: <role> <run id>` claim comment is a different record in a different
   place, and is not this header.)
 
 ### Scheduling semantics
 
 - **Eligible** = labeled `ready` AND every `Depends-on` issue is closed AND
-  not claimed AND not reserved by an open `Parent`.
+  not claimed.
 - **Work in flight** is counted in **distinct work units**, reconstructed from
   GitHub: one unit per item, whether that item is a live claim, an unmerged PR,
   or both at once — an unmerged PR and the claim that produced it are one piece
@@ -140,6 +140,7 @@ posts; do not add a new lifecycle record or enforcement check.
 | `in-progress` | Claimed; branch named in a comment | Loop |
 | `needs-decision` | Parked on a question only a human can answer | Loop |
 | `wontfix` | Low-impact theoretical work closed as not planned | Human or issue-preparer after grounding |
+| `umbrella` | Coordination-only parent of a split; outside both queues; closes after its children | Issue-preparer on `split`, or human |
 
 There is deliberately **no `blocked` label**: blocked is derived from
 `Depends-on` plus issue closed-state, and stored copies of derivable state
@@ -168,9 +169,11 @@ together when a proposed child only enables its sibling. Technical decomposition
 is preparer judgment; choosing product behavior is an owner decision. Several
 independent interaction or lifecycle boundaries, or thousands of hand-written
 changed lines, are a strong presumption to split. The source
-becomes a coordination-only parent: remove `needs-preparation`, never add
-`ready`, and close it after its independently reviewable children. Give each
-child `needs-preparation`, `Parent: #N`, and only real ordering dependencies.
+becomes a coordination-only parent: remove `needs-preparation`, add
+`umbrella`, never add `ready`, set its `Depends-on` to its children, and close
+it after its independently reviewable children. Give each child
+`needs-preparation`, `Parent: #N`, the parent's milestone, and only real
+ordering dependencies.
 
 `needs-decision` exit path: the preparer asks one focused question as an issue
 comment, with concrete options and its recommendation, and replaces
@@ -284,8 +287,13 @@ doesn't answer? Then the issue is not `ready`.**
 A human request may become a coordination-only parent with several bite-sized
 children. One `ready` implementation child describes at most one independently
 reviewable PR; each PR closes its child, and the parent closes after its required
-children. Parents live outside the preparation and implementation queues — only
-their children carry `needs-preparation` or `ready`.
+children. Parents carry `umbrella`, live outside the preparation and
+implementation queues — only their children carry `needs-preparation` or
+`ready` — and name their children in `Depends-on`: the edge is true, because
+the parent closes after them, and the effective-Priority rule above then
+carries the parent's Priority to every child without anyone writing the field.
+A program is a milestone plus its umbrellas; nothing dispatches it but the
+ordinary queues, and its owner decisions live on the umbrella's thread.
 
 The exception runs the other way: individually-trivial issues declaring the
 same `Touches` set may be implemented by one agent as one PR closing several
@@ -312,7 +320,8 @@ at one to five atomic outcomes; prose density is not a workaround for the cap.
   unreachable and a design lands in an issue body instead, that is a recorded
   debt to repay, not a precedent — see CLAUDE.md's dogfooding contract.
 
-Close a parent when its final child closes.
+Close a parent when its final child closes — the integrator whose merge closes
+that child does it in the post-merge pass.
 
 ## Lint — the exact checks
 

@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Implementer role for one uberblick implementation item — a queue item it picks and claims itself, or one issue a program coordinator assigns; acts only when given a role and a session or run identity.
+description: Implementer role for one uberblick implementation item — picks and claims its own item, and acts only when given a role and a session or run identity.
 isolation: worktree
 effort: high
 ---
@@ -8,11 +8,7 @@ effort: high
 Read `.agents/roles/implementer.md` in full before any side effect; if that file
 cannot be read, stop and report that instead of acting. Require your role and
 your session or run identity, and refuse before any side effect when either is
-missing. That contract's `Assignment` section owns the rest, in two complete
-shapes: given the implementation queue and nothing else, pick and claim one
-eligible item under `Pickup`; given one exact issue key and a program
-coordinator's role and run identity as parent, validate that delegation against
-GitHub and work only on that issue — never inspect the queue, and never fall
-back to it when the assignment or its parent record does not check out.
-Complete that one item, then stop after the durable handoff the contract names;
+missing. Your assignment is that role's queue: pick and claim one eligible item
+under its `Pickup` section, and complete only that one — no preselected target
+is supplied or needed. Then stop after the durable handoff the contract names;
 the next assignment starts a fresh session.

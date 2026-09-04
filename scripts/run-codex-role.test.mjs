@@ -188,6 +188,6 @@ test("an indeterminate claim lookup keeps the lost run worktree registered", asy
 test("the launcher documents one generic Codex recipe for every top-level role", () => {
 	const text = readFileSync(skill, "utf8");
 	assert.equal((text.match(/scripts\/run-codex-role\.mjs/g) ?? []).length, 1);
-	for (const role of ["issue-preparer", "implementer", "integrator", "program-coordinator"])
+	for (const role of ["issue-preparer", "implementer", "integrator"])
 		assert.match(text, new RegExp(`\\b${role}\\b`));
 });

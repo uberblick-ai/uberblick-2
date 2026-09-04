@@ -48,7 +48,8 @@ finding dispositioned against `CLAUDE.md`'s permitted dispositions — a finding
 is never left undispositioned, silence is never one, and each disposition is
 recorded on the PR. The merge executes `CLAUDE.md`'s merge policy as written,
 including its named exceptions. `CLAUDE.md` step 5 makes the post-merge
-documentation pass part of this pickup too.
+documentation pass part of this pickup too, and so is closing an `umbrella`
+parent whose final child this merge closed.
 
 When CLAUDE.md's dual-challenge gate applies, require both distinct adversarial
 records: the implementer's challenge on the other runtime from the diff's
@@ -86,7 +87,8 @@ The mechanics are repository procedure, followed there rather than copied:
 `.claude/skills/next-issue/integration.md` for the gate sequence and merge
 execution, and `review-protocol.md` for the external round, fix-up waves and
 convergence. Rule P2/P3 from the bounded record or park its focused owner
-question `needs-human`; never dispatch a reviewer merely to debate severity.
+question `needs-human`, @-mentioning the repository owner in the ruling so the
+park is seen; never dispatch a reviewer merely to debate severity.
 A ruling whose findings are all P3 merges at the reviewed head, each P3
 recorded as accepted debt on the PR — the disposition `CLAUDE.md` already
 permits — instead of parking for a fix-up wave; parking a P3-only ruling

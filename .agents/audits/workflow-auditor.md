@@ -41,7 +41,7 @@ claims to verify, not ground truth.
 ## Grounding and sample
 
 Record fresh `origin/main` and read the current versions of `AGENTS.md`,
-`CLAUDE.md`, `.github/ISSUE_SPEC.md`, the six role contracts, and only the
+`CLAUDE.md`, `.github/ISSUE_SPEC.md`, the five role contracts, and only the
 procedures implicated by the audit window.
 
 Record workflow-rule commits since the prior report's grounding. Judge a
@@ -73,8 +73,8 @@ The sample is deterministic:
   thread when that scan indicates repeated correction, diminishing finding
   value, or review effort disproportionate to the change;
 - a shallow machine-state scan of every open issue and PR, followed by full
-  thread reads only for detected lifecycle, claim, dependency, reservation, or
-  handoff anomalies; and
+  thread reads only for detected lifecycle, claim, dependency, or handoff
+  anomalies; and
 - current Uberblick product documents when a finding depends on product intent
   or corpus availability.
 
