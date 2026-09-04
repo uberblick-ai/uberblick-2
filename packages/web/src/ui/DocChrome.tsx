@@ -438,7 +438,11 @@ function DocumentActions({
               className={pinned ? "ub-action-pinned" : ""}
               onSelect={() => onTogglePin?.()}
             >
-              {pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+              {onTogglePin === null
+                ? `${pinned ? "Unpin" : "Pin"} unavailable — sidebar is read-only`
+                : pinned
+                  ? "Unpin from sidebar"
+                  : "Pin to sidebar"}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem

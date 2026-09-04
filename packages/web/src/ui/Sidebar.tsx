@@ -341,10 +341,10 @@ export function Sidebar({
               title={
                 status.writable
                   ? undefined
-                  : "New document unavailable while the directory is offline"
+                  : "New document unavailable while the directory is read-only"
               }
             >
-              + new doc
+              {status.writable ? "+ new doc" : "new doc unavailable"}
             </button>
             {/* A refusal takes this line's word, because the three readings below
                 all describe a connection that is working or coming back and none of

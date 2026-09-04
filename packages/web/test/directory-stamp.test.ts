@@ -143,6 +143,7 @@ describe("directory stamps from the web", () => {
     setTitle(doc, "After");
     expect(getDirectoryEntry(directory, UUID)?.title).toBe("Stale");
 
+    vi.setSystemTime(T0 + 5_000);
     writable = true;
     for (const listener of listeners) listener();
     expect(getDirectoryEntry(directory, UUID)).toMatchObject({

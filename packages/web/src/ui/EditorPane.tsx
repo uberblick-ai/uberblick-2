@@ -197,7 +197,7 @@ export function StatusLine({
       </span>
     );
   const saveNote =
-    !status.writable && !reading.detail?.includes("not saved") ? (
+    !status.writable && reading.detail === null ? (
       <span className="ub-muted ub-not-saved">not saved</span>
     ) : null;
   // Presence is independent of the connection's settled status word. Keep the
@@ -276,7 +276,7 @@ export function StatusLine({
     <div className="ub-status">
       {syncReading}
       {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
-      {saveNote}
+      {!blank && saveNote}
       {!blank && updatedReading}
       {!blank && copyNote}
       {!blank &&

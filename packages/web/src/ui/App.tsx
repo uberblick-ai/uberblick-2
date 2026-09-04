@@ -719,7 +719,14 @@ export function App(): ReactElement {
 
   useEffect(() => {
     const held = pending.current;
-    if (held === null || doc === null || doc.room !== held.room) return;
+    if (held === null) return;
+    if (doc === null || doc.room !== held.room) {
+      if (!held.mounted || held.created) return;
+      pending.current = null;
+      held.stop();
+      held.release();
+      return;
+    }
     held.mounted = true;
     if (!held.created) return;
     pending.current = null;
@@ -764,6 +771,7 @@ export function App(): ReactElement {
           pending.current = null;
           held.stop();
           held.release();
+          onBackToWorkspace();
           return;
         }
         if (!status.writable || !directory.status.writable) return;
@@ -797,7 +805,7 @@ export function App(): ReactElement {
     // waiting/read-only state, so a second create cannot keep editing the old
     // document while the new connection is still handshaking.
     onSelect(uuid);
-  }, [directory, identity, onSelect, workspace]);
+  }, [directory, identity, onBackToWorkspace, onSelect, workspace]);
 
   /**
    * The directory stub is a cache; `meta.title` in the document is

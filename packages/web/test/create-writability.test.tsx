@@ -133,3 +133,73 @@ it("writes neither room until the new room is admitted", async () => {
   expect(getMeta(pending.connection.ydoc).uuid).toBe(uuid);
   expect(getDirectoryEntry(directory.ydoc, uuid)?.title).toBe("Untitled");
 });
+
+it("cancels a deferred create when the reader leaves its room", async () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+    true;
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  mounted = { root, host };
+  await act(async () => root.render(<App />));
+
+  const create = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent?.includes("new doc"),
+  );
+  await act(async () => create?.click());
+  const pending = [...rooms.values()].find(
+    ({ connection }) =>
+      connection.room !== directoryRoom(WORKSPACE) &&
+      connection.room !== sidebarRoom(WORKSPACE),
+  );
+  if (pending === undefined) throw new Error("new room was not acquired");
+  const uuid = parseRoom(pending.connection.room).uuid;
+
+  await act(async () =>
+    host.querySelector<HTMLButtonElement>(".ub-all-open-entry")?.click(),
+  );
+  await act(async () => {
+    update(pending, { connected: true, synced: true, writable: true });
+    await Promise.resolve();
+  });
+
+  expect(window.location.pathname).toBe(`/${WORKSPACE}/all`);
+  expect(getMeta(pending.connection.ydoc).uuid).toBe("");
+  expect(
+    getDirectoryEntry(room(directoryRoom(WORKSPACE)).connection.ydoc, uuid),
+  ).toBeNull();
+});
+
+it.each(["document", "directory"] as const)(
+  "leaves a generated route when the %s room terminally refuses creation",
+  async (refused) => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    mounted = { root, host };
+    await act(async () => root.render(<App />));
+
+    const create = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent?.includes("new doc"),
+    );
+    await act(async () => create?.click());
+    const directory = room(directoryRoom(WORKSPACE));
+    const pending = [...rooms.values()].find(
+      ({ connection }) =>
+        connection.room !== directoryRoom(WORKSPACE) &&
+        connection.room !== sidebarRoom(WORKSPACE),
+    );
+    if (pending === undefined) throw new Error("new room was not acquired");
+    await act(async () => {
+      update(refused === "document" ? pending : directory, {
+        storeRefused: true,
+        writable: false,
+      });
+      await Promise.resolve();
+    });
+
+    expect(window.location.pathname).toBe(`/${WORKSPACE}`);
+  },
+);

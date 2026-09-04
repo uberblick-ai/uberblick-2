@@ -432,18 +432,25 @@ export function DocumentList({
                       the long tail gets pinned from. The mark carries the state
                       and the row never changes width. */}
                   <td className="ub-docs-pin-cell">
-                    {onTogglePin !== null && (
-                      <button
-                        type="button"
-                        className="ub-docs-pin"
-                        aria-pressed={groupOf.has(entry.uuid)}
-                        aria-label={pinLabel(entry, groupOf.has(entry.uuid))}
-                        title={pinLabel(entry, groupOf.has(entry.uuid))}
-                        onClick={() => onTogglePin(entry.uuid)}
-                      >
-                        <PinIcon active={groupOf.has(entry.uuid)} />
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="ub-docs-pin"
+                      disabled={onTogglePin === null}
+                      aria-pressed={groupOf.has(entry.uuid)}
+                      aria-label={
+                        onTogglePin === null
+                          ? `${pinLabel(entry, groupOf.has(entry.uuid))} unavailable while sidebar is read-only`
+                          : pinLabel(entry, groupOf.has(entry.uuid))
+                      }
+                      title={
+                        onTogglePin === null
+                          ? "Pin unavailable while the sidebar is read-only"
+                          : pinLabel(entry, groupOf.has(entry.uuid))
+                      }
+                      onClick={() => onTogglePin?.(entry.uuid)}
+                    >
+                      <PinIcon active={groupOf.has(entry.uuid)} />
+                    </button>
                   </td>
                 </tr>
               ))

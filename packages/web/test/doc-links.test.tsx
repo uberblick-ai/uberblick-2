@@ -385,9 +385,9 @@ describe("what a reference says about its target", () => {
   });
 });
 
-const OFFLINE: RoomStatus = {
-  connected: false,
-  synced: false,
+const LIVE: RoomStatus = {
+  connected: true,
+  synced: true,
   writable: true,
   storeRefused: false,
   unsyncedChanges: 0,
@@ -400,7 +400,7 @@ const OFFLINE: RoomStatus = {
 
 function connectionFor(
   ydoc: Y.Doc,
-  status: RoomStatus = OFFLINE,
+  status: RoomStatus = LIVE,
 ): RoomConnection {
   return {
     room: `${WORKSPACE}/${DOC}`,
@@ -419,7 +419,9 @@ describe("an unwritable document room", () => {
   it("keeps every document-local editor surface read-only and says not saved", async () => {
     const ydoc = emptyDoc();
     const connection = connectionFor(ydoc, {
-      ...OFFLINE,
+      ...LIVE,
+      connected: false,
+      synced: false,
       writable: false,
     });
     const host = document.createElement("div");

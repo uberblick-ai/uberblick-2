@@ -246,6 +246,20 @@ async function seedDocument(tab: Tab, uuid: string): Promise<void> {
   );
 }
 
+it("keeps a room on a live socket read-only until its token is admitted", async () => {
+  const hub = await startHub(0, databasePath());
+  const firstUuid = randomUUID();
+  const first = await openTab(`${WORKSPACE}/${firstUuid}`, hub.port);
+  teardown.push(() => sharedSocket(first.connection).destroy());
+  await seedDocument(first, firstUuid);
+
+  const second = await openTab(`${WORKSPACE}/${randomUUID()}`, hub.port);
+  expect(second.history[0]).toMatchObject({ connected: true, writable: false });
+  await waitFor("the second room's token to be admitted", () =>
+    second.latest().writable,
+  );
+}, TEST_TIMEOUT_MS);
+
 /** Send the same room-local close reason the local browser bridge sends. */
 function closeRoom(hub: Hub, room: string, reason: string): void {
   const document = hub.hocuspocus.documents.get(room);
@@ -355,6 +369,7 @@ it("keeps a store-refused room read-only across reacquire without dropping peers
   const reopened = await openTab(refusedRoom, hub.port);
   expect(reopened.latest().storeRefused).toBe(true);
   expect(reopened.latest().writable).toBe(false);
+  expect(reopened.connection.provider.isAttached).toBe(false);
   expect(other.latest().writable).toBe(true);
 }, TEST_TIMEOUT_MS);
 

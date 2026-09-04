@@ -139,7 +139,6 @@ let forcedDropWindowMs: number = FORCED_DROP_COOLDOWN.maxMs;
 const LOCAL_COPY_CHECKPOINT = "uberblick:local-copy-confirmed";
 
 /** The two room-close reasons introduced by the local store bridge (#758). */
-const STORE_BUSY_REASON = "uberblick:store-busy";
 const STORE_REFUSED_REASON = "uberblick:store-refused";
 
 /** A drop asked for during the cooldown, waiting for the window to end. */
@@ -339,7 +338,13 @@ async function hubToken(room: string, identity: AwarenessUser): Promise<string> 
 export interface RoomStatus {
   connected: boolean;
   synced: boolean;
-  /** True only after this room's live connection has admitted the client. */
+  /**
+   * True only after this room's live connection has admitted the client.
+   * Authentication is the observable admission boundary, not a per-write
+   * acknowledgement: during #402's rare same-tick re-acquire race, the
+   * accepted in-flight loss window widens until the room repairs itself if the
+   * tab also dies before then.
+   */
   writable: boolean;
   /** The local store refused this room; terminal until a page reload. */
   storeRefused: boolean;
@@ -580,10 +585,6 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
       // Refusal is room-local. Detach this provider without disrupting the
       // shared socket, so other rooms remain live and this one cannot rejoin.
       provider.detach();
-      return;
-    }
-    if (reason === STORE_BUSY_REASON) {
-      dropSocket();
       return;
     }
     dropSocket();
