@@ -12,6 +12,10 @@ import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
 import { Replicas } from "./replica.js";
 import { seedSidebarOnce } from "./sidebar-tools.js";
+import {
+  acquireServingReplicaRole,
+  type ServingReplicaRole,
+} from "./serving-role.js";
 import { MirrorStore } from "./store.js";
 
 const DEFAULT_REFRESH_INTERVAL_MS = 25;
@@ -29,6 +33,8 @@ export interface McpEngineOptions {
   store?: MirrorStore;
   /** Foreign-commit polling interval. Same-process appends wake immediately. */
   refreshIntervalMs?: number;
+  /** Own the store's one silent serving-replica role for this engine's life. */
+  serving?: boolean;
 }
 
 export interface UberblickMcpEngine {
@@ -73,8 +79,25 @@ export async function createMcpEngine(
 
   const store =
     options.store ?? new MirrorStore(config.databasePath, config.workspaceId);
-  const replicas = new Replicas(config, store);
-  await seedSidebarOnce(replicas);
+  let servingRole: ServingReplicaRole | null = null;
+  let replicas: Replicas | null = null;
+  try {
+    if (options.serving === true) {
+      servingRole = acquireServingReplicaRole(store.databasePath, {
+        pid: process.pid,
+        sessionId: config.sessionId,
+      });
+    }
+    replicas = new Replicas(config, store, {
+      publishOwnPresence: options.serving !== true,
+    });
+    await seedSidebarOnce(replicas);
+  } catch (error) {
+    replicas?.destroy();
+    servingRole?.close();
+    store.close();
+    throw error;
+  }
 
   const listeners = new Set<() => void>();
   let dirty = false;
@@ -179,6 +202,7 @@ export async function createMcpEngine(
         stopLoop();
         listeners.clear();
         replicas.destroy();
+        servingRole?.close();
         store.close();
       });
       return closePromise;

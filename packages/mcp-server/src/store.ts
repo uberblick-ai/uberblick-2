@@ -14,10 +14,10 @@
  *    any time from the log — see {@link MirrorStore.clearDerived}. It is never
  *    authoritative, and no document state exists only here.
  *
- * Alongside both, one row of `meta` records which workspace this replica
- * holds. Nothing derives from it: it exists so that a file opened against a
- * different `WORKSPACE_ID` is refused instead of serving two corpora as one —
- * see `claimWorkspace`.
+ * Alongside both, `meta` records process-local facts that cannot be derived
+ * from documents. The permanent `workspace` row binds the file to its corpus;
+ * the serving engine's holder row is meaningful only while its separate
+ * process-held SQLite lock is live — see `serving-role.ts`.
  *
  * Encoding is Yjs v1 everywhere (`Y.encodeStateAsUpdate` / `Y.applyUpdate`),
  * matching the hub's persistence and the schema package. Never v2.
@@ -164,9 +164,11 @@ function parseTags(packed: string | null): string[] {
 }
 
 /**
- * What this file is, as opposed to what is in it. One row so far:
- * \`workspace\`, the uuid whose corpus this replica holds. The index tables
- * carry no workspace column, so the file itself is the boundary.
+ * Process-local facts about this file, as opposed to document state. The
+ * `workspace` row is the uuid whose corpus this replica holds. The index tables
+ * carry no workspace column, so the file itself is the boundary. The serving
+ * role also keeps its diagnostic holder here; its authority is the separate
+ * process-held lock, never this persistent row.
  *
  * Its own script, run before {@link SCHEMA}: it is everything the store is
  * allowed to write to a file it has not yet established is its own. See

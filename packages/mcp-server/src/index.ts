@@ -23,6 +23,11 @@ export type {
   McpEngineOptions,
   UberblickMcpEngine,
 } from "./engine.js";
+export { ServingReplicaHeldError } from "./serving-role.js";
+export type {
+  ServingReplicaHolder,
+  ServingReplicaRole,
+} from "./serving-role.js";
 export {
   BRIDGE_CONNECT_TIMEOUT_MS,
   BRIDGE_SYNC_TIMEOUT_MS,

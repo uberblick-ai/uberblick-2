@@ -172,6 +172,9 @@ export class Replicas {
 
   readonly sync: HubSync;
 
+  /** Whether this process publishes its own agent awareness state. */
+  private readonly publishOwnPresence: boolean;
+
   private readonly replicas = new Map<string, Replica>();
 
   private readonly cursorTimers = new Map<string, NodeJS.Timeout>();
@@ -230,9 +233,14 @@ export class Replicas {
 
   private destroyed = false;
 
-  constructor(config: McpConfig, store: MirrorStore) {
+  constructor(
+    config: McpConfig,
+    store: MirrorStore,
+    options: { publishOwnPresence?: boolean } = {},
+  ) {
     this.config = config;
     this.store = store;
+    this.publishOwnPresence = options.publishOwnPresence ?? true;
     this.agentName = "agent";
     this.sync = new HubSync(config, () => {
       // A hub that just came up may hold docs (or updates) this replica set has
@@ -363,7 +371,11 @@ export class Replicas {
    * sidebar room.
    */
   touch(replica: Replica): void {
-    if (replica.isDirectory || replica.isSidebar) {
+    if (
+      !this.publishOwnPresence ||
+      replica.isDirectory ||
+      replica.isSidebar
+    ) {
       return;
     }
     replica.awareness.setLocalState({
@@ -433,7 +445,7 @@ export class Replicas {
     // publishes nothing until a tool call touches it ({@link touch}); the
     // directory is workspace-level presence and publishes from the moment it
     // attaches.
-    if (id === DIRECTORY_SUFFIX) {
+    if (this.publishOwnPresence && id === DIRECTORY_SUFFIX) {
       awareness.setLocalState(this.presenceState());
     } else {
       awareness.setLocalState(null);
@@ -1202,6 +1214,9 @@ export class Replicas {
    * agent that wrote once and went away must not leave a caret behind forever.
    */
   publishCursor(replica: Replica, blockId: string, index: number): void {
+    if (!this.publishOwnPresence) {
+      return;
+    }
     const text = blockText(replica.doc, blockId);
     if (text === null) {
       return;
