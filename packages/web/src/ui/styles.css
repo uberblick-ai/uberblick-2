@@ -187,7 +187,7 @@
      6.71:1 on the page's white. One rung lighter (0.49) leaves 4.61:1, which is
      the floor with nothing in hand; chroma comes down with the lightness
      because sRGB does not hold 0.15 this dark. */
-  --brand-ink: light-dark(oklch(0.48 0.1 65), oklch(0.8 0.18 65));
+  --brand-ink: light-dark(oklch(0.48 0.1 65), var(--brand));
 
   /* Ink on a `--brand` fill (#482, the workspace tile). Theme-invariant for the
      same reason as `--cursor-label-foreground` below: `--brand` is a light
