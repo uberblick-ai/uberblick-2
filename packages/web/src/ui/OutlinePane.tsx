@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent, ReactElement } from "react";
-import { flushSync } from "react-dom";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useOutline } from "./hooks.js";
 import { scrollBlockIntoView } from "./outline.js";
@@ -10,36 +9,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "./shadcn/dropdown-menu.js";
 
 /** Long enough to cross the trigger/content gap, short enough to feel direct. */
 const HOVER_CLOSE_DELAY_MS = 120;
-
-const FOCUSABLE =
-  "a[href],button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[contenteditable='true'],[tabindex]:not([tabindex='-1'])";
-
-/** The first real page control after the outline's in-flow slot. */
-function nextPageControl(outline: HTMLElement | null): HTMLElement | null {
-  for (
-    let sibling = outline?.nextElementSibling;
-    sibling;
-    sibling = sibling.nextElementSibling
-  ) {
-    const candidates = [
-      ...(sibling.matches(FOCUSABLE) ? [sibling] : []),
-      ...sibling.querySelectorAll(FOCUSABLE),
-    ];
-    const visible = candidates.find(
-      (candidate): candidate is HTMLElement =>
-        candidate instanceof HTMLElement &&
-        candidate.getClientRects().length > 0 &&
-        candidate.closest("[hidden], [inert], [aria-hidden='true']") === null,
-    );
-    if (visible) return visible;
-  }
-  return null;
-}
 
 export function OutlinePane({
   connection,
@@ -55,6 +30,7 @@ export function OutlinePane({
   const openedFromHover = useRef(false);
   const closingFromHover = useRef(false);
   const closingFromTab = useRef(false);
+  const focusBeforeHover = useRef<HTMLElement | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
 
   const cancelClose = (): void => {
@@ -68,6 +44,8 @@ export function OutlinePane({
     cancelClose();
     if (open) return;
     openedFromHover.current = true;
+    focusBeforeHover.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setOpen(true);
   };
 
@@ -105,9 +83,9 @@ export function OutlinePane({
     if (entries.length !== 0) return;
     if (closeTimer.current !== null) clearTimeout(closeTimer.current);
     closeTimer.current = null;
-    closingFromHover.current = true;
+    if (open) closingFromHover.current = true;
     setOpen(false);
-  }, [entries.length]);
+  }, [entries.length, open]);
 
   useEffect(() => {
     // The state is meaningful only where CSS turns the rail into an overlay;
@@ -117,13 +95,13 @@ export function OutlinePane({
       if (trigger.current?.getClientRects().length !== 0) return;
       if (closeTimer.current !== null) clearTimeout(closeTimer.current);
       closeTimer.current = null;
-      closingFromHover.current = true;
+      if (open) closingFromHover.current = true;
       setOpen(false);
     };
     closeWhenCovered();
     window.addEventListener("resize", closeWhenCovered);
     return () => window.removeEventListener("resize", closeWhenCovered);
-  }, [obscured]);
+  }, [obscured, open]);
 
   if (entries.length === 0) return null;
 
@@ -133,7 +111,11 @@ export function OutlinePane({
       open={open}
       onOpenChange={(shown) => {
         cancelClose();
-        if (shown) closingFromHover.current = false;
+        if (shown) {
+          closingFromHover.current = false;
+        } else {
+          openedFromHover.current = false;
+        }
         setOpen(shown);
       }}
     >
@@ -160,7 +142,6 @@ export function OutlinePane({
         side="bottom"
         collisionPadding={8}
         className="ub-outline-panel"
-        aria-label="On this page"
         onPointerEnter={(event) => {
           if (event.pointerType === "mouse") cancelClose();
         }}
@@ -179,28 +160,28 @@ export function OutlinePane({
           closingFromHover.current = false;
           openedFromHover.current = false;
           event.preventDefault();
+          if (focusBeforeHover.current?.isConnected) {
+            focusBeforeHover.current.focus({ preventScroll: true });
+          }
+          focusBeforeHover.current = null;
         }}
         onKeyDown={(event) => {
           if (event.key !== "Tab") return;
           event.preventDefault();
           closingFromTab.current = true;
-          // Remove Radix's menu focus scope, then continue at the next control
-          // in this in-flow lane rather than its portalled focus guards.
-          flushSync(() => setOpen(false));
-          if (event.shiftKey) {
-            trigger.current?.focus({ preventScroll: true });
-          } else {
-            nextPageControl(
-              trigger.current?.closest(".ub-outline") ?? null,
-            )?.focus({ preventScroll: true });
-          }
+          setOpen(false);
+          trigger.current?.focus({ preventScroll: true });
         }}
       >
         <div className="ub-outline-panel-body">
-          <p className="ub-rail-head">On this page</p>
+          <DropdownMenuLabel className="ub-rail-head">On this page</DropdownMenuLabel>
           <ul>
             {entries.map((entry) => (
-              <li key={entry.id} className={`ub-outline-l${entry.level}`}>
+              <li
+                key={entry.id}
+                role="none"
+                className={`ub-outline-l${entry.level}`}
+              >
                 <DropdownMenuItem asChild>
                   <button
                     type="button"

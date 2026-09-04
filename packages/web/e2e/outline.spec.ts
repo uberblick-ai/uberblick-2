@@ -143,16 +143,24 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
   await expect(panel).toBeVisible();
   await page.mouse.move(0, 0);
   await expect(panel).toBeHidden();
+  await expect(page.locator(".ub-editor .ProseMirror")).toBeFocused();
+  await page.keyboard.type("x");
+  await expect(page.locator(".ub-editor .ub-paragraph").last()).toHaveText("x");
+
+  // Mouse activation does not poison the next keyboard opening.
+  await trigger.hover();
+  await expect(panel).toBeVisible();
+  await first.click();
+  await expect(panel).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(rows.first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
 
   // A real Tab reaches the trigger without opening the menu. Enter opens it,
-  // arrow keys visit every heading in order, and Tab closes and moves onward.
-  await page.locator(".ub-body").evaluate((body) => {
-    const afterOutline = document.createElement("button");
-    afterOutline.id = "outline-after";
-    afterOutline.textContent = "After outline";
-    body.append(afterOutline);
-  });
-  const afterOutline = page.locator("#outline-after");
+  // arrow keys visit every heading in order, and Tab closes at the trigger so
+  // the browser owns subsequent page traversal in the shipped, threadless DOM.
   await tabTo(page, trigger);
   await expect(panel).toBeHidden();
   await page.keyboard.press("Enter");
@@ -164,11 +172,12 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
     if (index < expected.length - 1) await page.keyboard.press("ArrowDown");
   }
   await page.keyboard.press("Tab");
-  await expect(afterOutline).toBeFocused();
+  await expect(trigger).toBeFocused();
   await expect(panel).toBeHidden();
 
-  await page.keyboard.press("Shift+Tab");
-  await expect(trigger).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.locator("body")).not.toBeFocused();
+  await tabTo(page, trigger);
   await expect(panel).toBeHidden();
   await page.keyboard.press("Enter");
   await expect(rows.first()).toBeFocused();
@@ -218,6 +227,8 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
 }) => {
   const context = await browser.newContext({ hasTouch: true });
   const page = await context.newPage();
+  let desktopContext: Awaited<ReturnType<Browser["newContext"]>> | null = null;
+  let touchContextClosed = false;
   try {
     await page.setViewportSize({ width: 720, height: 540 });
     await openDocument(page);
@@ -237,33 +248,57 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     await expect(panel).toBeHidden();
     await expect(page.locator(".ub-title")).toBeFocused();
 
+    // The drawer path is pointer-independent. Keep its text-selection setup in
+    // a normal desktop context rather than asking a touch emulation to synthesize
+    // a keyboard selection.
+    await context.close();
+    touchContextClosed = true;
+    desktopContext = await browser.newContext();
+    const desktopPage = await desktopContext.newPage();
+    await desktopPage.setViewportSize({ width: 720, height: 540 });
+    await openDocument(desktopPage);
+    await typeHeading(desktopPage, 1, "Drawer target");
+    await desktopPage.getByRole("button", { name: "Hide document list" }).click();
+    const desktopTrigger = desktopPage.getByRole("button", { name: "Contents 1" });
+    const desktopPanel = desktopPage.getByRole("menu", { name: "Contents 1" });
+
     // An open threads drawer owns this edge: the covered outline is removed
     // from both rendering and keyboard navigation, and its portal closes.
-    await page.locator(".ub-editor .ub-paragraph").last().click();
-    await page.keyboard.type("annotate me");
-    await page.keyboard.press("Shift+Home");
-    await page.locator(".ub-composer-open").click();
-    await page.getByPlaceholder(/Comment as/).fill("a thread");
-    await page.keyboard.press("Enter");
-    const threads = page.locator(".ub-threads-toggle");
+    const paragraph = desktopPage.locator(".ub-editor .ub-paragraph").last();
+    await paragraph.click();
+    await desktopPage.keyboard.type("annotate me");
+    await paragraph.evaluate((node) => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+    await expect(desktopPage.locator(".ub-composer-open")).toBeVisible();
+    await desktopPage.locator(".ub-composer-open").click();
+    await desktopPage.getByPlaceholder(/Comment as/).fill("a thread");
+    await desktopPage.keyboard.press("Enter");
+    const threads = desktopPage.locator(".ub-threads-toggle");
     await expect(threads).toBeVisible();
-    await trigger.tap();
-    await expect(panel).toBeVisible();
-    await threads.tap();
-    await expect(page.locator(".ub-rail-open")).toBeVisible();
-    await expect(trigger).toBeHidden();
-    await expect(panel).toBeHidden();
+    await desktopTrigger.click();
+    await expect(desktopPanel).toBeVisible();
+    await threads.click();
+    await expect(desktopPage.locator(".ub-rail-open")).toBeVisible();
+    await expect(desktopTrigger).toBeHidden();
+    await expect(desktopPanel).toBeHidden();
 
     // The drawer stays open across the breakpoint. If Contents opens while
     // wide, narrowing again must close its portal when CSS hides the trigger.
-    await page.setViewportSize({ width: 1400, height: 540 });
-    await expect(trigger).toBeVisible();
-    await trigger.tap();
-    await expect(panel).toBeVisible();
-    await page.setViewportSize({ width: 720, height: 540 });
-    await expect(trigger).toBeHidden();
-    await expect(panel).toBeHidden();
+    await desktopPage.setViewportSize({ width: 1400, height: 540 });
+    await expect(desktopTrigger).toBeVisible();
+    await desktopTrigger.click();
+    await expect(desktopPanel).toBeVisible();
+    await desktopPage.setViewportSize({ width: 720, height: 540 });
+    await expect(desktopTrigger).toBeHidden();
+    await expect(desktopPanel).toBeHidden();
   } finally {
-    await context.close();
+    await desktopContext?.close();
+    if (!touchContextClosed) await context.close();
   }
 });
