@@ -11,7 +11,8 @@ test("two production-path harnesses run together and both stop", async () => {
       const response = await fetch(new URL("/uberblick-config.json", harness.appUrl));
       expect(response.ok).toBe(true);
       await expect(response.json()).resolves.toMatchObject({
-        hubUrl: harness.hubUrl,
+        hubUrl: harness.appUrl.replace(/^http:/, "ws:").replace(/\/$/, ""),
+        remoteHubUrl: harness.hubUrl,
         workspaces: [harness.workspace],
       });
     }

@@ -288,6 +288,39 @@ describe("the served configuration", () => {
   });
 });
 
+describe("the local-serving diagnostic", () => {
+  it("keeps the frozen workspace/upstream pair and accepts only a literal rebound", async () => {
+    const servingDocument = (rebound: unknown, remote = true): string =>
+      JSON.stringify({
+        hubUrl: "ws://127.0.0.1:4321",
+        workspaces: [FIRST],
+        ...(remote ? { remoteHubUrl: "wss://remote.example/ws" } : {}),
+        ...(rebound === undefined ? {} : { rebound }),
+      });
+
+    const rebound = await readClientConfig(
+      serving({ body: servingDocument(true) }).fetch,
+    );
+    expect(rebound.localServing).toEqual({
+      workspace: FIRST,
+      remoteHubUrl: "wss://remote.example/ws",
+      rebound: true,
+    });
+
+    for (const value of [undefined, false, "true", 1]) {
+      const config = await readClientConfig(
+        serving({ body: servingDocument(value) }).fetch,
+      );
+      expect(config.localServing?.rebound, String(value)).toBe(false);
+    }
+
+    const direct = await readClientConfig(
+      serving({ body: servingDocument(true, false) }).fetch,
+    );
+    expect(direct.localServing).toBeNull();
+  });
+});
+
 describe("the workspaces it names", () => {
   it("takes them in the order listed — the first is the one `/` opens", async () => {
     const { workspaces, workspacesSource, rejected } = await readClientConfig(

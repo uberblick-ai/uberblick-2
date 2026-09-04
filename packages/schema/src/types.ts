@@ -232,6 +232,10 @@ export function readDocumentLifecycle(
 export interface DocMeta {
   uuid: string;
   title: string;
+  /**
+   * Raw stored tags. Catalog-aware writes put UUIDs here; provisional strings
+   * can remain until the first such write and are omitted by catalog-aware reads.
+   */
   tags: string[];
   /**
    * One or two sentences saying what this document is for, so a reader can
@@ -347,6 +351,7 @@ export interface AnnotationRange {
 export interface DirectoryEntry {
   uuid: string;
   title: string;
+  /** Stored catalog UUIDs, or provisional strings awaiting the clean cut. */
   tags: string[];
   deleted?: boolean;
   /**
@@ -374,6 +379,27 @@ export interface DirectoryEntry {
   /** Cached lifecycle state, present only when it is legal for {@link kind}. */
   status?: DocumentStatus;
 }
+
+/** One canonical entry in the workspace's tag catalog. */
+export interface TagCatalogEntry {
+  /** Stable canonical UUID. A converged duplicate identity resolves to this one. */
+  id: string;
+  /** Validated human-facing name. It is display data, never document identity. */
+  name: string;
+  /** Retired entries remain visible on documents but cannot be newly assigned. */
+  state: "active" | "retired";
+}
+
+/** A stored catalog UUID this replica cannot resolve from its current catalog. */
+export interface UnresolvedTagAssignment {
+  id: string;
+  /** No display name is available until the catalog entry hydrates. */
+  name: null;
+  state: "unresolved";
+}
+
+/** One stored tag assignment as the current catalog replica can read it. */
+export type TagAssignment = TagCatalogEntry | UnresolvedTagAssignment;
 
 /** One group in the sidebar doc: a stable id, a name, and what it pins. */
 export interface SidebarGroup {

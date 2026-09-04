@@ -375,6 +375,30 @@ body {
   height: 100vh;
 }
 
+/* `ub open` keeps serving its useful startup binding after the machine is
+   rebound. This page-level fact sits above every route without covering or
+   disabling the panes behind it. */
+.ub-rebound-notice {
+  flex: none;
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--status-warning);
+  background: var(--status-warning-subtle);
+  color: var(--foreground);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.ub-rebound-notice strong {
+  font-weight: 500;
+}
+
+.ub-rebound-notice code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+
 /* One control in either sidebar state: attached to the open pane's boundary,
    or floating over the main pane while the sidebar is absent. Neither form
    reserves a cross-pane row. */

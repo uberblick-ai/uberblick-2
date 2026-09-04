@@ -20,12 +20,27 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { HocuspocusProvider } from "@hocuspocus/provider";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Hub } from "@uberblick/hub";
-import { createHub, silentLogger } from "@uberblick/hub";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
-import { resolveMcpConfig } from "@uberblick/mcp-server";
+import {
+  MAX_TOKEN_LIFETIME_SECONDS,
+  createHub,
+  importRootSecret,
+  mintToken,
+  silentLogger,
+} from "@uberblick/hub";
+import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/hub/protocol";
+import {
+  createMcpServer,
+  resolveMcpConfig,
+} from "@uberblick/mcp-server";
+import { editBlock, getBlocks, roomForDoc } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
+import * as Y from "yjs";
 import { acquireInitLock } from "../src/init-lock.js";
 import type { Io } from "../src/io.js";
 import type { Stop } from "../src/open.js";
@@ -311,6 +326,8 @@ interface Running {
   url: string;
   stdout: () => string;
   stderr: () => string;
+  /** The command's own terminal outcome, without sending it a signal. */
+  wait: () => Promise<{ status: number | null; signal: string | null }>;
   /** SIGINT, then the exit status — what Ctrl-C in a terminal does. */
   interrupt: () => Promise<{ status: number | null; signal: string | null }>;
 }
@@ -369,6 +386,7 @@ async function open(
     url,
     stdout: () => stdout,
     stderr: () => stderr,
+    wait: () => exited,
     interrupt: async () => {
       child.kill("SIGINT");
       await waitUntil("`ub open` to exit after Ctrl-C", () => over);
@@ -512,8 +530,21 @@ function writeBinding(box: Sandbox, hubUrl: string, workspace: string): void {
   );
 }
 
-function documentOf(hubUrl: string, workspace: string, secret: string): string {
-  return `{"hubUrl":"${hubUrl}","workspaces":["${workspace}"],"hubAuthToken":"${secret}"}`;
+function servingDocumentOf(
+  appUrl: string,
+  remoteHubUrl: string,
+  workspace: string,
+  secret: string,
+  rebound = false,
+): string {
+  const hubUrl = appUrl.replace(/^http:/, "ws:").replace(/\/$/, "");
+  return JSON.stringify({
+    hubUrl,
+    workspaces: [workspace],
+    hubAuthToken: secret,
+    remoteHubUrl,
+    ...(rebound ? { rebound: true } : {}),
+  });
 }
 
 // --- the criteria ------------------------------------------------------------
@@ -573,7 +604,8 @@ describe("ub open", () => {
     expect(app.stdout()).toContain("already running — left alone");
     expect(app.stderr()).not.toContain("EADDRINUSE");
     expect(await (await get(`${app.url}uberblick-config.json`)).json()).toMatchObject({
-      hubUrl,
+      hubUrl: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
+      remoteHubUrl: hubUrl,
     });
 
     expect((await app.interrupt()).status).toBe(0);
@@ -581,7 +613,7 @@ describe("ub open", () => {
     expect(await hubAnswers(box, hubUrl)).toBe(true);
   });
 
-  it("serves a bundle pointed at a configured remote, and starts no hub", async () => {
+  it("serves the local browser endpoint and names the configured upstream", async () => {
     const { box, env } = configured();
     const remote = "wss://hub.example.ts.net/ws";
     pointAt(box, remote);
@@ -596,16 +628,99 @@ describe("ub open", () => {
     // app that cannot authenticate.
     const document = await get(`${app.url}uberblick-config.json`);
     expect(await document.text()).toBe(
-      `{"hubUrl":"${remote}","workspaces":["${WORKSPACE}"],"hubAuthToken":"${SECRET}"}`,
+      servingDocumentOf(app.url, remote, WORKSPACE, SECRET),
     );
     expect(app.stdout()).toContain("remote — nothing started here");
 
     expect((await app.interrupt()).status).toBe(0);
   });
 
-  // --- #449: the served document tracks the machine, not the startup ---------
+  it("makes an acknowledged browser edit visible to the next MCP call on the store", async () => {
+    const { box, env } = configured();
+    pointAt(box, FIRST_REMOTE);
+    const app = await open(box, ["--port", String(await freePort())], env);
 
-  it("serves the machine's current binding, not the one it started with", async () => {
+    const instance = createMcpServer(
+      resolveMcpConfig({
+        ...box.env,
+        ...env,
+        WORKSPACE_ID: WORKSPACE,
+        HUB_URL: FIRST_REMOTE,
+        HUB_AUTH_TOKEN: SECRET,
+      }),
+    );
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "ub-open-store-test", version: "0.0.0" });
+    const doc = new Y.Doc();
+    let provider: HocuspocusProvider | null = null;
+    try {
+      await Promise.all([
+        instance.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+      const call = async <T>(name: string, args: Record<string, unknown>): Promise<T> => {
+        const result = await client.callTool({ name, arguments: args });
+        const content = result.content as { text?: string }[];
+        return JSON.parse(content[0]?.text ?? "null") as T;
+      };
+      const created = await call<{ uuid: string }>("create_doc", {
+        title: "Browser durability boundary",
+        description: "A document shared by ub open and an MCP session.",
+        blocks: [{ type: "paragraph", text: "before" }],
+      });
+
+      provider = new HocuspocusProvider({
+        url: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
+        name: roomForDoc(WORKSPACE, created.uuid),
+        document: doc,
+        token: wrapToken(
+          await mintToken(await importRootSecret(SECRET), {
+            typ: "room",
+            sub: "open-test-browser",
+            workspace: WORKSPACE,
+            scope: "read-write",
+            kid: null,
+            lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+          }),
+        ),
+        ...{
+          WebSocketPolyfill: class extends WebSocket {
+            constructor(url: string | URL) {
+              super(url, { headers: { Origin: app.url.slice(0, -1) } } as unknown as string[]);
+            }
+          },
+        },
+      });
+      await waitUntil("the browser room to hydrate from the store", () =>
+        provider?.isSynced === true,
+      );
+      const block = getBlocks(doc)[0];
+      if (block === undefined) throw new Error("the store-hydrated document has no block");
+      expect(block.text).toBe("before");
+
+      editBlock(doc, block.id, "before", "durable before acknowledgement", {
+        rev: block.rev,
+      });
+      await waitUntil("the local server to acknowledge the browser edit", () =>
+        provider?.hasUnsyncedChanges === false,
+      );
+
+      const read = await call<{ blocks: { text: string }[] }>("get_doc", {
+        uuid: created.uuid,
+      });
+      expect(read.blocks[0]?.text).toBe("durable before acknowledgement");
+    } finally {
+      provider?.destroy();
+      doc.destroy();
+      await client.close().catch(() => {});
+      await instance.close().catch(() => {});
+      expect((await app.interrupt()).status).toBe(0);
+    }
+  });
+
+  // --- #758: serving freezes the startup binding and reports rebound ----------
+
+  it("freezes the serving binding and marks a later machine rebind", async () => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
     const webPort = await freePort();
@@ -614,7 +729,9 @@ describe("ub open", () => {
 
     const before = await get(url);
     expect(before.headers.get("cache-control")).toBe("no-store");
-    expect(await before.text()).toBe(documentOf(FIRST_REMOTE, WORKSPACE, SECRET));
+    expect(await before.text()).toBe(
+      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, SECRET),
+    );
 
     // `ub remote join` completes while this `ub open` keeps running.
     rebind(box, {
@@ -623,13 +740,24 @@ describe("ub open", () => {
       signingSecret: REBOUND_SECRET,
     });
 
-    // The next request — a reload, in a browser — sees all three new values
-    // together. Restarting `ub open` used to be the only way to get here.
+    // The live engine keeps its startup identity. A reload is told that the
+    // machine moved underneath it, without silently retargeting the replica.
     expect(await (await get(url)).text()).toBe(
-      documentOf(SECOND_REMOTE, REBOUND_WORKSPACE, REBOUND_SECRET),
+      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, SECRET, true),
     );
 
     expect((await app.interrupt()).status).toBe(0);
+
+    const restarted = await open(box, ["--port", String(webPort)], env);
+    expect(await (await get(`${restarted.url}uberblick-config.json`)).text()).toBe(
+      servingDocumentOf(
+        restarted.url,
+        SECOND_REMOTE,
+        REBOUND_WORKSPACE,
+        REBOUND_SECRET,
+      ),
+    );
+    expect((await restarted.interrupt()).status).toBe(0);
   });
 
   it("serves the last coherent document while `.init.lock` is held", async () => {
@@ -640,7 +768,7 @@ describe("ub open", () => {
     const url = `${app.url}uberblick-config.json`;
 
     expect(await (await get(url)).text()).toBe(
-      documentOf(FIRST_REMOTE, WORKSPACE, SECRET),
+      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, SECRET),
     );
 
     // A write is in flight after its first publication. Pairing this new secret
@@ -655,19 +783,22 @@ describe("ub open", () => {
     const held = await get(url);
     const text = await held.text();
     expect(Date.now() - started).toBeLessThan(1_000);
-    expect(text).toBe(documentOf(FIRST_REMOTE, WORKSPACE, SECRET));
+    expect(text).toBe(servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, SECRET));
 
     writeBinding(box, SECOND_REMOTE, REBOUND_WORKSPACE);
     lock.release();
     expect(await (await get(url)).text()).toBe(
-      documentOf(SECOND_REMOTE, REBOUND_WORKSPACE, REBOUND_SECRET),
+      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, SECRET, true),
     );
 
     // Only an *active* write falls back like that. A completed removal is the
-    // configuration: the client is told there is no secret rather than handed
-    // one that is no longer on disk.
+    // configuration: the frozen serving identity remains usable, but is marked
+    // stale so a restart can adopt the removal coherently.
     rmSync(join(configDir(box), "credentials.json"), { force: true });
-    expect(await (await get(url)).json()).toMatchObject({ hubAuthToken: "" });
+    expect(await (await get(url)).json()).toMatchObject({
+      hubAuthToken: SECRET,
+      rebound: true,
+    });
 
     expect((await app.interrupt()).status).toBe(0);
   });
@@ -695,7 +826,7 @@ describe("ub open", () => {
 
     const app = await opening;
     expect(await (await get(`${app.url}uberblick-config.json`)).text()).toBe(
-      documentOf(SECOND_REMOTE, REBOUND_WORKSPACE, REBOUND_SECRET),
+      servingDocumentOf(app.url, SECOND_REMOTE, REBOUND_WORKSPACE, REBOUND_SECRET),
     );
     expect((await app.interrupt()).status).toBe(0);
   });
@@ -714,18 +845,19 @@ describe("ub open", () => {
     const url = `${app.url}uberblick-config.json`;
 
     expect(await (await get(url)).text()).toBe(
-      documentOf(FIRST_REMOTE, REBOUND_WORKSPACE, SECRET),
+      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, SECRET),
     );
 
     // The files change underneath, naming a different workspace. The pin still
-    // wins; the endpoint and the secret, which no pin covers, follow the files.
+    // wins; changes in the endpoint and secret mark this process stale, while
+    // the engine continues with its coherent startup snapshot.
     rebind(box, {
       hubUrl: SECOND_REMOTE,
       workspace: WORKSPACE,
       signingSecret: REBOUND_SECRET,
     });
     expect(await (await get(url)).text()).toBe(
-      documentOf(SECOND_REMOTE, REBOUND_WORKSPACE, REBOUND_SECRET),
+      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, SECRET, true),
     );
 
     expect((await app.interrupt()).status).toBe(0);
@@ -753,6 +885,33 @@ describe("ub open", () => {
     expect((await second.interrupt()).status).toBe(0);
   });
 
+  it("exits and releases the serving role when its replica refresh loop stops", async () => {
+    const { box, env } = configured();
+    const upstream = await startHub(box);
+    pointAt(box, `ws://127.0.0.1:${upstream.port}`);
+    const webPort = await freePort();
+    const app = await open(box, ["--port", String(webPort)], env);
+
+    const databasePath = resolveMcpConfig({
+      ...box.env,
+      ...env,
+      WORKSPACE_ID: WORKSPACE,
+    }).databasePath;
+    const database = new DatabaseSync(databasePath);
+    database.exec("DROP TABLE snapshots");
+    database.close();
+
+    const stopped = await app.wait();
+    expect(stopped).toEqual({ status: 1, signal: null });
+    expect(app.stderr()).toContain("local replica refresh failed");
+    expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
+
+    // The same store and port can be served again immediately: the failed
+    // process released its serving-role lock as part of the non-zero exit.
+    const restarted = await open(box, ["--port", String(webPort)], env);
+    expect((await restarted.interrupt()).status).toBe(0);
+  });
+
   it("serves the configuration document uncached, ahead of the SPA fallback", async () => {
     const { box, env } = configured();
     const webPort = await freePort();
@@ -765,7 +924,10 @@ describe("ub open", () => {
     expect(document.headers.get("content-type")).toBe("application/json");
     const body = await document.text();
     expect(body).not.toContain("<!doctype html");
-    expect(JSON.parse(body).hubUrl).toBe("wss://hub.example.ts.net/ws");
+    expect(JSON.parse(body)).toMatchObject({
+      hubUrl: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
+      remoteHubUrl: "wss://hub.example.ts.net/ws",
+    });
 
     // The fallback is still there for deep links (#68) — which is exactly why
     // the document has to be matched before it.
@@ -1257,7 +1419,7 @@ describe("ub open", () => {
     expect((await app.interrupt()).status).toBe(0);
   });
 
-  it("names the web port when it is taken, and says who has it", async () => {
+  it("names a taken port and refuses a second serving replica for the store", async () => {
     const { box, env } = configured();
     const foreignPort = await freePort();
     await foreignListener(foreignPort);
@@ -1270,10 +1432,14 @@ describe("ub open", () => {
 
     const webPort = await freePort();
     const app = await open(box, ["--port", String(webPort)], env);
-    const second = await openFails(box, ["--port", String(webPort)], env);
+    const secondPort = await freePort();
+    const second = await openFails(box, ["--port", String(secondPort)], env);
     expect(second.status).toBe(1);
-    expect(second.output).toContain(`port ${webPort}`);
     expect(second.output).toContain("`ub open`");
+    expect(second.output).toContain(WORKSPACE);
+    expect(second.output).toContain(".sqlite");
+    expect(second.output).toContain("process");
+    expect((await probePort("127.0.0.1", secondPort)).state).toBe("free");
 
     expect((await app.interrupt()).status).toBe(0);
   });
@@ -1350,6 +1516,7 @@ describe("ub open", () => {
     // taking the hub down without the flush its durability contract is made of.
     expect(run.signal).toBeNull();
     expect(run.status).toBe(0);
+    expect(run.output).not.toContain("uberblick is at");
     expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
     expect((await probePort("127.0.0.1", hubPort)).state).toBe("free");
   });

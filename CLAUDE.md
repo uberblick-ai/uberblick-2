@@ -289,6 +289,13 @@ the fallback, which is exactly why CI is high priority.
   from it on boot, never from the hub); the server starts and serves every
   tool with the hub unreachable; writes apply locally and return before hub
   ack — sync is background.
+- `ub open` is the machine's foreground serving process: one silent, exclusive
+  full replica on that same store plus a loopback Hocuspocus server for the
+  browser, joined only through the update log. A browser update is validated
+  and appended to the log before the server may apply, acknowledge or broadcast
+  it; a refused append never reaches another replica. The served configuration
+  points the browser at `ub open`, names the replica's upstream separately, and
+  keeps its startup binding until the process is restarted.
 
 ## Hosted future (directional — shapes cheap-now choices only)
 

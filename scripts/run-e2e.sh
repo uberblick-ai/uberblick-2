@@ -65,4 +65,4 @@ export TMPDIR
 cd "$root"
 
 pnpm --filter @uberblick/web exec playwright install chromium
-fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web run e2e
+fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web run e2e "$@"

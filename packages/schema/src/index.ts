@@ -19,8 +19,8 @@
  *
  * …plus workspace ids (a uuid, optionally slug-decorated for display), room
  * names (`<workspaceId>/<uuid>`), the directory doc that makes discovery a
- * synced doc, the sidebar doc that makes curation one, and one-way markdown
- * export.
+ * synced doc, the sidebar doc that makes curation one, the settings doc that
+ * owns the workspace tag catalog, and one-way markdown export.
  *
  * Runtime dependencies are limited to `yjs` and `fast-diff`.
  *
@@ -113,6 +113,7 @@ export type {
 
 export {
   DIRECTORY_SUFFIX,
+  SETTINGS_SUFFIX,
   SIDEBAR_SUFFIX,
   assertCanonicalRoom,
   canonicalDocumentUuid,
@@ -120,6 +121,7 @@ export {
   isCanonicalRoom,
   parseRoom,
   roomForDoc,
+  settingsRoom,
   sidebarRoom,
 } from "./rooms.js";
 export type { ParsedRoom } from "./rooms.js";
@@ -161,11 +163,37 @@ export {
 export type { DirectoryUpsert, ListDirectoryOptions } from "./directory.js";
 
 export {
+  EXAMPLE_TAGS,
+  MAX_TAG_NAME_LENGTH,
+  TAG_CATALOG_FLAGS_KEY,
+  TAG_CATALOG_IDENTITIES_KEY,
+  TAG_CATALOG_RESTORED_KEY,
+  TAG_CATALOG_RETIRED_KEY,
+  assignDocumentTags,
+  createTagCatalogEntry,
+  getTagCatalogEntry,
+  getTagCatalogFlags,
+  getTagCatalogIdentities,
+  isTagCatalogSeeded,
+  isTagName,
+  listTagCatalog,
+  readDirectoryTags,
+  readDocumentTags,
+  resolveTagAssignments,
+  restoreTagCatalogEntry,
+  retireTagCatalogEntry,
+  seedTagCatalog,
+} from "./tags.js";
+
+export {
   AnnotationRangeError,
   BlockNotFoundError,
   ConflictingLinkMarksError,
   InvalidDecisionReferenceError,
   InvalidDocumentLifecycleError,
+  InvalidTagAssignmentError,
+  InvalidTagIdentityError,
+  InvalidTagNameError,
   InlineLinkRangeError,
   InvalidDocLinkTargetError,
   InvalidLinkHrefError,
@@ -181,6 +209,7 @@ export type {
   InlineLinkRangeErrorReason,
   OldTextMismatchDetails,
   StaleBlockDetails,
+  InvalidTagIdentityReason,
 } from "./errors.js";
 
 export {
@@ -223,4 +252,7 @@ export type {
   ProseBlockType,
   RequirementStatus,
   SidebarGroup,
+  TagAssignment,
+  TagCatalogEntry,
+  UnresolvedTagAssignment,
 } from "./types.js";

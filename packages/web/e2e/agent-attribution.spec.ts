@@ -91,6 +91,20 @@ test.afterAll(async () => {
 async function openApp(browser: Browser): Promise<Page> {
   const context = await browser.newContext();
   contexts.push(context);
+  // This proof is specifically the upstream MCP-awareness path. `ub open`'s
+  // local/upstream awareness relay is #753, so keep both participants on the
+  // upstream until that separate bridge exists.
+  await context.route("**/uberblick-config.json", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        hubUrl: harness().hubUrl,
+        workspaces: [harness().workspace],
+        hubAuthToken: harness().authSecret,
+      }),
+    });
+  });
   const page = await context.newPage();
   await page.goto(harness().appUrl);
   await expect(page.locator(".ub-list-head")).toBeVisible();
