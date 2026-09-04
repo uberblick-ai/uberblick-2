@@ -38,7 +38,13 @@ import {
   createMcpServer,
   resolveMcpConfig,
 } from "@uberblick/mcp-server";
-import { editBlock, getBlocks, roomForDoc } from "@uberblick/schema";
+import {
+  directoryRoom,
+  editBlock,
+  getBlocks,
+  getDirectoryEntry,
+  roomForDoc,
+} from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { acquireInitLock } from "../src/init-lock.js";
@@ -635,7 +641,7 @@ describe("ub open", () => {
     expect((await app.interrupt()).status).toBe(0);
   });
 
-  it("makes an acknowledged browser edit visible to the next MCP call on the store", async () => {
+  it("bridges live browser and MCP edits through the shared store while upstream is down", async () => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
     const app = await open(box, ["--port", String(await freePort())], env);
@@ -652,7 +658,9 @@ describe("ub open", () => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "ub-open-store-test", version: "0.0.0" });
     const doc = new Y.Doc();
+    const directory = new Y.Doc();
     let provider: HocuspocusProvider | null = null;
+    let directoryProvider: HocuspocusProvider | null = null;
     try {
       await Promise.all([
         instance.connect(serverTransport),
@@ -694,6 +702,31 @@ describe("ub open", () => {
       await waitUntil("the browser room to hydrate from the store", () =>
         provider?.isSynced === true,
       );
+      directoryProvider = new HocuspocusProvider({
+        url: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
+        name: directoryRoom(WORKSPACE),
+        document: directory,
+        token: wrapToken(
+          await mintToken(await importRootSecret(SECRET), {
+            typ: "room",
+            sub: "open-test-directory",
+            workspace: WORKSPACE,
+            scope: "read-write",
+            kid: null,
+            lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+          }),
+        ),
+        ...{
+          WebSocketPolyfill: class extends WebSocket {
+            constructor(url: string | URL) {
+              super(url, { headers: { Origin: app.url.slice(0, -1) } } as unknown as string[]);
+            }
+          },
+        },
+      });
+      await waitUntil("the browser directory to hydrate from the store", () =>
+        directoryProvider?.isSynced === true,
+      );
       const block = getBlocks(doc)[0];
       if (block === undefined) throw new Error("the store-hydrated document has no block");
       expect(block.text).toBe("before");
@@ -709,9 +742,55 @@ describe("ub open", () => {
         uuid: created.uuid,
       });
       expect(read.blocks[0]?.text).toBe("durable before acknowledgement");
+
+      const current = await call<{
+        blocks: { id: string; text: string; rev: string }[];
+      }>("get_doc", { uuid: created.uuid });
+      const initialBlock = current.blocks[0];
+      if (initialBlock === undefined) throw new Error("the MCP replica has no block");
+      let currentBlock: { id: string; text: string; rev: string } = initialBlock;
+      const liveLatencies: number[] = [];
+      for (let index = 0; index < 20; index += 1) {
+        const newText = `agent edit arrived live ${index}`;
+        const startedAt = performance.now();
+        const edited: { block: { id: string; text: string; rev: string } } = await call<{
+          block: { id: string; text: string; rev: string };
+        }>("edit_block", {
+          uuid: created.uuid,
+          block_id: currentBlock.id,
+          old_text: currentBlock.text,
+          new_text: newText,
+          rev: currentBlock.rev,
+        });
+        await waitUntil("the MCP edit to reach the live browser room", () =>
+          getBlocks(doc)[0]?.text === newText,
+        );
+        liveLatencies.push(performance.now() - startedAt);
+        currentBlock = edited.block;
+      }
+      const p95 = [...liveLatencies].sort((a, b) => a - b)[18];
+      expect(p95, JSON.stringify(liveLatencies)).toBeLessThan(250);
+
+      const creationLatencies: number[] = [];
+      for (let index = 0; index < 20; index += 1) {
+        const title = `Created by the agent ${index}`;
+        const startedAt = performance.now();
+        const added = await call<{ uuid: string }>("create_doc", {
+          title,
+          description: "A document whose directory entry arrives live.",
+        });
+        await waitUntil("the MCP-created document to reach the browser directory", () =>
+          getDirectoryEntry(directory, added.uuid)?.title === title,
+        );
+        creationLatencies.push(performance.now() - startedAt);
+      }
+      const creationP95 = [...creationLatencies].sort((a, b) => a - b)[18];
+      expect(creationP95, JSON.stringify(creationLatencies)).toBeLessThan(250);
     } finally {
       provider?.destroy();
+      directoryProvider?.destroy();
       doc.destroy();
+      directory.destroy();
       await client.close().catch(() => {});
       await instance.close().catch(() => {});
       expect((await app.interrupt()).status).toBe(0);

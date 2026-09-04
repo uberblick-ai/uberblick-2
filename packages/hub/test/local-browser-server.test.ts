@@ -64,6 +64,7 @@ async function fixture() {
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
   const updates = new Map<string, Uint8Array[]>();
+  const reads: { room: string; afterSeq: number }[] = [];
   let failure: unknown = null;
   let readFailure: unknown = null;
   let readAttempts = 0;
@@ -73,13 +74,14 @@ async function fixture() {
     authSecret: TEST_SECRET,
     expectedOrigin: origin,
     log: () => {},
-    readRoom: (room) => {
+    readRoom: (room, afterSeq) => {
       readAttempts += 1;
+      reads.push({ room, afterSeq });
       if (readFailure !== null) throw readFailure;
       return {
         snapshot: null,
-        updates: (updates.get(room) ?? []).map((payload, index) => ({
-          seq: index + 1,
+        updates: (updates.get(room) ?? []).slice(afterSeq).map((payload, index) => ({
+          seq: afterSeq + index + 1,
           payload,
         })),
       };
@@ -117,6 +119,13 @@ async function fixture() {
     port,
     origin,
     updates,
+    storeUpdate: (room: string, payload: Uint8Array) => {
+      const stored = updates.get(room) ?? [];
+      stored.push(payload);
+      updates.set(room, stored);
+    },
+    readsFor: (room: string) =>
+      reads.filter((read) => read.room === room).map((read) => read.afterSeq),
     connect,
     failWith: (error: unknown) => {
       failure = error;
@@ -156,6 +165,61 @@ describe("the ub open browser server", () => {
     const reload = await box.connect(room);
     await reload.synced;
     expect(reload.text.toString()).toBe("durable before ack");
+  });
+
+  it("replays only the unseen store tail into every connected tab", async () => {
+    const box = await fixture();
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const writer = await box.connect(room);
+    const observer = await box.connect(room);
+    await Promise.all([writer.synced, observer.synced]);
+
+    let observedUpdates = 0;
+    observer.doc.on("update", () => {
+      observedUpdates += 1;
+    });
+    writer.text.insert(0, "browser");
+    await waitUntil("the browser update to reach the other tab", () =>
+      observer.text.toString() === "browser",
+    );
+    expect(box.updates.get(room)).toHaveLength(1);
+    expect(observedUpdates).toBe(1);
+
+    // Replaying the gate's own row is a Yjs no-op: no second document update,
+    // broadcast or store row is produced.
+    box.server.refresh();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(observedUpdates).toBe(1);
+    expect(box.updates.get(room)).toHaveLength(1);
+
+    const external = new Y.Doc();
+    try {
+      for (const update of box.updates.get(room) ?? []) {
+        Y.applyUpdate(external, update);
+      }
+      let appended: Uint8Array | null = null;
+      external.once("update", (update: Uint8Array) => {
+        appended = update;
+      });
+      external.getText(TEXT_KEY).insert(external.getText(TEXT_KEY).length, " + agent");
+      if (appended === null) throw new Error("the external edit produced no update");
+      box.storeUpdate(room, appended);
+    } finally {
+      external.destroy();
+    }
+
+    box.server.refresh();
+    await waitUntil("the external store update to reach every tab", () =>
+      writer.text.toString() === "browser + agent" &&
+      observer.text.toString() === "browser + agent",
+    );
+    expect(observedUpdates).toBe(2);
+
+    box.server.refresh();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(observedUpdates).toBe(2);
+    expect(box.updates.get(room)).toHaveLength(2);
+    expect(box.readsFor(room)).toEqual([0, 0, 1, 2]);
   });
 
   it("names busy and failed appends, stores no refused update, and recovers per room", async () => {
