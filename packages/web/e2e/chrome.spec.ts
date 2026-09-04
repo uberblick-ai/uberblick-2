@@ -1588,7 +1588,12 @@ async function groundsUnder(page: Page, locator: Locator): Promise<string[]> {
       return slashed === null || Number(slashed[1]) === 1;
     };
     for (let node: Element | null = element; node !== null; node = node.parentElement) {
-      const colour = getComputedStyle(node).backgroundColor;
+      if (node === document.body) break;
+      const style = getComputedStyle(node);
+      if (style.backgroundImage !== "none") {
+        throw new Error("cannot establish the ground through a painted image");
+      }
+      const colour = style.backgroundColor;
       if (opaque(colour)) return colour;
     }
     return null;
@@ -1676,15 +1681,34 @@ for (const scheme of ["light", "dark"] as const) {
     ];
 
     const inks = new Set<string>();
+    const grounds = new Map<string, string[]>();
     for (const [where, locator] of [...consumers, [".ub-action-pinned", pin] as const]) {
       const ink = await paintedIn(locator, "color");
       inks.add(ink);
-      for (const ground of await groundsUnder(page, locator)) {
+      const under = await groundsUnder(page, locator);
+      grounds.set(where, under);
+      for (const ground of under) {
         expect(
           contrast(ink, ground),
           `${where} — ${ink} on ${ground}`,
         ).toBeGreaterThanOrEqual(4.5);
       }
+    }
+    expect(grounds.get(".ub-link"), "the two link consumers sit on distinct grounds").not.toEqual(
+      grounds.get(".ub-doclink, annotated"),
+    );
+    if (scheme === "light") {
+      await page.locator("body").evaluate((body) => {
+        const layer = document.createElement("span");
+        layer.style.backgroundImage = "linear-gradient(red, red)";
+        const text = document.createElement("span");
+        text.id = "painted-ground-probe";
+        layer.append(text);
+        body.append(layer);
+      });
+      await expect(groundsUnder(page, page.locator("#painted-ground-probe"))).rejects.toThrow(
+        "cannot establish the ground through a painted image",
+      );
     }
     await page.keyboard.press("Escape");
 
@@ -1701,9 +1725,11 @@ for (const scheme of ["light", "dark"] as const) {
     expect([...inks], "the functional brand ink is one value").toHaveLength(1);
 
     // The badge is where both halves of the decision are painted at once: its
-    // outline is the accent and its letters are the ink.
+    // outline is the accent and its letters are the ink. Only light splits;
+    // dark's ink derives from the accent itself.
     const accent = await paintedIn(page.locator(".ub-badge"), "border-top-color");
     if (scheme === "light") expect([...inks][0]).not.toBe(accent);
+    else expect([...inks][0]).toBe(accent);
   });
 }
 
