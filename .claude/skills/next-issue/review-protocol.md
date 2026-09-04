@@ -35,11 +35,12 @@ with `--skip-git-repo-check`: it holds neither the role contracts nor current
 code, so bypassing the trust refusal only makes the round fail later.
 
 ```sh
-# A Codex reviewer — the transport issue preparation validated.
-codex exec -C <parent-worktree> -s workspace-write -c 'sandbox_workspace_write.network_access=true' - < <prompt-file> > <scratch-log> 2>&1
+# A Codex reviewer — the transport issue preparation validated. The subshell
+# records the transport's exit status beside its log the moment it ends.
+( codex exec -C <parent-worktree> -s workspace-write -c 'sandbox_workspace_write.network_access=true' - < <prompt-file> > <scratch-log> 2>&1; echo $? > <scratch-log>.status )
 
 # A Claude reviewer — the project adapter selects the role.
-claude -p --agent implementation-reviewer --model opus --permission-mode bypassPermissions < <prompt-file> > <scratch-log> 2>&1
+( claude -p --agent implementation-reviewer --model opus --permission-mode bypassPermissions < <prompt-file> > <scratch-log> 2>&1; echo $? > <scratch-log>.status )
 ```
 
 Each is a fresh top-level session: `codex exec` always is, and a headless
@@ -65,7 +66,15 @@ The implementer stays in the assignment, renewing its claim, until the
 reviewer completes its durable record. A dispatch failure edits that record to
 `Status: failed — <reason>` and is never presented as a review or repeated in a
 new failure comment; the integrator later supplies the missing challenge as
-well as its own. A further round is never a resumed session — it is a fresh
+well as its own. The failure is recorded at once, not at the end of the verdict
+window: a `<scratch-log>.status` that is nonzero, or a log that ends in a
+startup or overload error before any verdict — a transport that exited before
+starting, an HTTP 529 — marks the delegation failed on the dispatching role's
+next check, with the status and the log's last line as the reason (owner
+decision, 2026-09-04: seven dispatches failed in two days — PRs #750 twice,
+#761 three times, #763, #771 — and each one silently moved the owed round to
+the integrator, one of them at the cost of an owner question and a whole extra
+integrator session). A further round is never a resumed session — it is a fresh
 reviewer at the new head, within the re-review scoping below. Every brief says:
 be critical, try to falsify the implementation with focused failure-path or
 mutation probes, and hunt specifically for overtesting and overengineering per
