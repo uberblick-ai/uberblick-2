@@ -1088,6 +1088,7 @@ function separation(fill: string, ground: string): number {
  * `--card-accent` now gives.
  */
 const cardHighlightFloor = { light: 0.04, dark: 0.064 } as const;
+const orphanedChipFloor = { light: 0.0403, dark: 0.0602 } as const;
 
 for (const scheme of ["light", "dark"] as const) {
   test(`a card-grounded highlight steps off its ground — ${scheme}`, async ({
@@ -1183,6 +1184,44 @@ for (const scheme of ["light", "dark"] as const) {
     // fill wherever the card accent lands.
     expect(entry).toBe(drawer);
     expect(pill).toBe(entry);
+
+    // Remove the whole annotated range so this same thread becomes orphaned,
+    // then arrive again the way a reader does: resting first, focused by its
+    // own card click second. The focused status fill may change, but it cannot
+    // become less distinct than the shared fill already is on `--card`.
+    await thread.click();
+    await page.getByRole("button", { name: "Reopen" }).click();
+    await placeCaret(page);
+    await page.keyboard.press("Shift+Home");
+    await page.keyboard.press("Backspace");
+    await expect(page.locator(".ub-chip-orphaned")).toBeVisible();
+
+    await page.reload();
+    await expect(page.locator(".ub-workspace")).toBeVisible();
+    await handle.click();
+    const orphaned = page.locator(".ub-thread").first();
+    const orphanedChip = orphaned.locator(".ub-chip-orphaned");
+    await expect(orphanedChip).toBeVisible();
+
+    const restingGround = await paintedIn(orphaned, "background-color");
+    const restingFill = await paintedIn(orphanedChip, "background-color");
+    expect(separation(restingFill, restingGround)).toBeGreaterThanOrEqual(
+      orphanedChipFloor[scheme],
+    );
+    expect(
+      contrast(await paintedIn(orphanedChip, "color"), restingFill),
+    ).toBeGreaterThanOrEqual(4.5);
+
+    await orphaned.click();
+    await expect(orphaned).toHaveAttribute("aria-current", "true");
+    const focusedGround = await paintedIn(orphaned, "background-color");
+    const focusedFill = await paintedIn(orphanedChip, "background-color");
+    expect(separation(focusedFill, focusedGround)).toBeGreaterThanOrEqual(
+      separation(restingFill, restingGround),
+    );
+    expect(
+      contrast(await paintedIn(orphanedChip, "color"), focusedFill),
+    ).toBeGreaterThanOrEqual(4.5);
   });
 }
 
