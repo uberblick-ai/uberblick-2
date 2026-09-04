@@ -99,8 +99,11 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changed: boolean): void {
     uuid: meta.uuid,
     title: meta.title,
     tags: meta.tags,
-    // This client holds the document, so omission is an authoritative clear,
-    // not a reason to carry stale lifecycle metadata forward in the cache.
+    // State every optional field owned by the document, so repairing lifecycle
+    // metadata cannot carry an unrelated stale description through the stub.
+    // Like title, this replica's copy can itself be stale until document sync
+    // arrives; the next observed document update repairs the cache again.
+    description: meta.description ?? "",
     kind: meta.kind ?? "",
     status: meta.status ?? "",
     ...(stamp ? { updatedAt: now } : {}),

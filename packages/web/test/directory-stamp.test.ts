@@ -266,6 +266,61 @@ describe("directory stamps from the web", () => {
     stop();
   });
 
+  it("does not carry a stale description through a concurrent lifecycle repair", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, {
+      uuid: UUID,
+      title: "Lifecycle",
+      description: "Current description",
+    });
+    setKind(doc, "requirement");
+    setStatus(doc, "implementing");
+
+    const converge = (browserClientId: number, remoteClientId: number): void => {
+      const base = new Y.Doc();
+      base.clientID = 1;
+      upsertDirectoryEntry(base, {
+        uuid: UUID,
+        title: "Lifecycle",
+        description: "Stale description",
+        kind: "requirement",
+        status: "planned",
+      });
+
+      const browser = new Y.Doc();
+      browser.clientID = browserClientId;
+      Y.applyUpdate(browser, Y.encodeStateAsUpdate(base));
+      const remote = new Y.Doc();
+      remote.clientID = remoteClientId;
+      Y.applyUpdate(remote, Y.encodeStateAsUpdate(base));
+
+      upsertDirectoryEntry(remote, {
+        uuid: UUID,
+        title: "Lifecycle",
+        description: "Current description",
+        kind: "requirement",
+        status: "implementing",
+      });
+      const stop = watchDocumentStub(doc, browser);
+
+      Y.applyUpdate(browser, Y.encodeStateAsUpdate(remote));
+      Y.applyUpdate(remote, Y.encodeStateAsUpdate(browser));
+
+      expect(getDirectoryEntry(browser, UUID)?.description).toBe(
+        "Current description",
+      );
+      expect(getDirectoryEntry(remote, UUID)?.description).toBe(
+        "Current description",
+      );
+      stop();
+    };
+
+    // Whole-entry conflicts order by client id. Check both orders so the
+    // invariant does not accidentally depend on which repair wins.
+    converge(2, 3);
+    converge(3, 2);
+  });
+
   it("leaves a tombstone alone, however far the stub has drifted (#81)", () => {
     // The web repairs stubs from the document it has open, exactly as the MCP
     // replica does — and a tombstone stops both. Archiving is a directory write
