@@ -306,6 +306,7 @@ for (const scheme of ["light", "dark"] as const) {
       .getByRole("group", { name: "Presence colour" })
       .getByRole("button");
     await expect(swatches).toHaveCount(8);
+    await expect(panel.locator(".ub-panel-fact")).toHaveCount(2);
 
     const boxes = (): Promise<Array<[number, number, number, number]>> =>
       swatches.evaluateAll((elements) =>
