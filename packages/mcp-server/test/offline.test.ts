@@ -69,6 +69,7 @@ describe("with the hub stopped", () => {
       "set_status",
       "set_tags",
       "set_title",
+      "set_tldr",
       "sidebar_group",
       "sync_status",
       "unpin_doc",

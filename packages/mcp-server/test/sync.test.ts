@@ -10,7 +10,13 @@
 
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
-import { appendBlock, getBlocks, getMeta, listDirectory } from "@uberblick/schema";
+import {
+  appendBlock,
+  getBlocks,
+  getMeta,
+  listDirectory,
+  setTldr,
+} from "@uberblick/schema";
 import type { Hub, HubLogRecord } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import * as Y from "yjs";
@@ -360,6 +366,33 @@ describe("hub sync", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("converges a TL;DR between the MCP tool and another connected client", async () => {
+    const running = await hub();
+    const rig = await serverOn(running.port);
+    const created = await rig.ok("create_doc", {
+      title: "Shared summary",
+      description: "A document used to prove metadata convergence.",
+    });
+    await waitForQuiet(rig);
+
+    const other = await peer(running.port, `${WORKSPACE}/${created.uuid}`);
+    await other.synced;
+
+    await rig.ok("set_tldr", {
+      uuid: created.uuid,
+      tldr: "Written through MCP.",
+    });
+    await waitUntil("the connected client to see the MCP TL;DR", () =>
+      getMeta(other.doc).tldr === "Written through MCP.",
+    );
+
+    setTldr(other.doc, "Written by the connected client.");
+    await waitUntil("the MCP replica to see the client's TL;DR", async () =>
+      (await rig.ok("get_doc", { uuid: created.uuid })).tldr ===
+      "Written by the connected client.",
+    );
   });
 
   it("does not stamp a document for an edit that merely arrived", async () => {

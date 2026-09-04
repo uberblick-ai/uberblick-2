@@ -26,6 +26,7 @@ import {
   setLinks,
   setStatus,
   setTags,
+  setTldr,
   setTitle,
 } from "../src/index.js";
 
@@ -54,6 +55,7 @@ describe("document round-trip", () => {
       title: "Block model",
       tags: ["schema"],
       description: null,
+      tldr: null,
       links: [],
     });
     expect([...doc.share.keys()].sort()).toEqual([
@@ -75,6 +77,7 @@ describe("document round-trip", () => {
       title: "Block model, revised",
       tags: ["schema", "keystone"],
       description: null,
+      tldr: null,
       links: [target],
     });
   });
@@ -99,6 +102,27 @@ describe("document round-trip", () => {
 
     setDescription(doc, "");
     expect(getMeta(doc).description).toBeNull();
+  });
+
+  it("carries and clears a TL;DR independently of the description", () => {
+    const doc = seeded();
+    setDescription(doc, "Agent-facing discovery copy.");
+
+    setTldr(doc, "A quick summary for a person.");
+    expect(getMeta(doc)).toMatchObject({
+      description: "Agent-facing discovery copy.",
+      tldr: "A quick summary for a person.",
+    });
+
+    setDescription(doc, "Rewritten discovery copy.");
+    expect(getMeta(doc).tldr).toBe("A quick summary for a person.");
+
+    setTldr(doc, null);
+    expect(getMeta(doc)).toMatchObject({
+      description: "Rewritten discovery copy.",
+      tldr: null,
+    });
+    expect(getMetaMap(doc).get("tldr")).toBeNull();
   });
 
   it("keeps the changelog suggestion's three states apart", () => {
@@ -161,6 +185,7 @@ describe("document round-trip", () => {
       title: "Block model",
       tags: ["schema"],
       description: "What this document is for.",
+      tldr: null,
       changelogSuggestion: "Nothing a user can see changed here.",
       kind: "decision",
       status: "open",
