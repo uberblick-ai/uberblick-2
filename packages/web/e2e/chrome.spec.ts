@@ -204,6 +204,75 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
+for (const scheme of ["light", "dark"] as const) {
+  test(`the selected appearance has one non-hue cue — ${scheme}`, async ({
+    browser,
+  }) => {
+    const page = await openApp(browser, scheme);
+    await page.locator(".ub-user-card").click();
+    const panel = page.locator("[data-slot=popover-content]");
+    await expect(panel).toBeVisible();
+
+    const appearance = panel.getByRole("group", { name: "Appearance" });
+    const options = appearance.getByRole("button");
+    const system = appearance.getByRole("button", { name: "System", exact: true });
+    const matching = appearance.getByRole("button", {
+      name: scheme === "light" ? "Light" : "Dark",
+      exact: true,
+    });
+    const untouched = appearance.getByRole("button", {
+      name: scheme === "light" ? "Dark" : "Light",
+      exact: true,
+    });
+    const boxes = (): Promise<Array<[number, number, number, number]>> =>
+      options.evaluateAll((elements) =>
+        elements.map((element) => {
+          const box = element.getBoundingClientRect();
+          return [box.x, box.y, box.width, box.height];
+        }),
+      );
+    const treatment = (option: Locator) =>
+      option.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return [style.backgroundColor, style.borderColor, style.color];
+      });
+    const cue = async (option: Locator): Promise<string> => {
+      expect(
+        Number.parseFloat(await paintedIn(option, "border-top-width")),
+      ).toBeGreaterThan(0);
+      const colour = await paintedIn(option, "border-top-color");
+      expect(
+        contrast(colour, await paintedIn(option, "background-color")),
+      ).toBeGreaterThanOrEqual(3);
+      return colour;
+    };
+
+    const before = await boxes();
+    await expect(system).toHaveAttribute("aria-pressed", "true");
+    const selectedCue = await cue(system);
+
+    // The state cue and keyboard-focus cue are independent: tabbing onto the
+    // selected option must still add the browser's own focus outline.
+    await options.nth(1).focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(system).toBeFocused();
+    expect(await paintedIn(system, "outline-style")).not.toBe("none");
+
+    const rest = await treatment(untouched);
+    await untouched.hover();
+    const hover = await treatment(untouched);
+    await matching.click();
+
+    await expect(matching).toHaveAttribute("aria-pressed", "true");
+    expect(await cue(matching)).toBe(selectedCue);
+    expect(await paintedIn(system, "border-top-color")).not.toBe(selectedCue);
+    expect(await boxes()).toEqual(before);
+    expect(await treatment(untouched)).toEqual(rest);
+    await untouched.hover();
+    expect(await treatment(untouched)).toEqual(hover);
+  });
+}
+
 test("workspace settings is an address-selected, inert sidebar drill-in", async ({
   browser,
 }) => {

@@ -1032,7 +1032,7 @@ body {
 
 .ub-appearance-option[aria-pressed="true"] {
   background: var(--brand-subtle);
-  border-color: var(--brand);
+  border-color: var(--foreground);
 }
 
 /* Readouts. Nothing here takes the pointer or the keyboard, because there is
