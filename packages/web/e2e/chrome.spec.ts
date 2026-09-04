@@ -86,10 +86,8 @@ test.afterAll(async () => {
  * The app in its own context, at `path` — `/`, and the workspace the harness
  * configured, unless a test names another address.
  *
- * The address is an argument rather than a second `goto`, because the dev
- * server's module graph is hundreds of requests and loading it twice in one
- * context exhausts the browser's sockets (`ERR_INSUFFICIENT_RESOURCES`) instead
- * of failing on anything the test is about.
+ * The address is an argument rather than a second `goto`; each proof starts on
+ * the production serving path it means to exercise.
  */
 async function openApp(
   browser: Browser,
@@ -212,6 +210,15 @@ for (const scheme of ["light", "dark"] as const) {
     await page.locator(".ub-user-card").click();
     const panel = page.locator("[data-slot=popover-content]");
     await expect(panel).toBeVisible();
+    // The production bundle can paint before the asynchronous storage estimate
+    // arrives. Geometry belongs to the settled panel, with that fact present.
+    await expect(panel.getByText("Local cache", { exact: true })).toBeVisible();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
 
     const appearance = panel.getByRole("group", { name: "Appearance" });
     const options = appearance.getByRole("button");

@@ -3,10 +3,10 @@
  *
  * Chromium only, one worker, no retries, no `webServer`:
  *
- * - **One worker, serial file.** The tests share one hub and one dev server —
- *   started by the spec itself (see e2e/harness.ts), because the dev server has
- *   to be told the hub's ephemeral port, and one proof point stops the hub
- *   mid-file. Parallel workers would fight over both.
+ * - **One worker, serial file.** A spec's tests share one hub and one `ub open`
+ *   serving a private build (see e2e/harness.ts), and one proof point stops the
+ *   hub mid-file. Keeping files serial also keeps the browser proof load bounded;
+ *   separately started harnesses are collision-free and have a direct proof.
  * - **No retries.** A real-browser test that only passes on the second attempt
  *   is not evidence of anything; a flake here should be visible, not absorbed.
  * - **Chromium only** — a cross-browser matrix is explicitly out of scope

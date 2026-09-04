@@ -62,9 +62,22 @@ test.afterAll(async () => {
 });
 
 /** A fresh context: its own IndexedDB, its own history, its own tab. */
-async function openApp(browser: Browser, path = "/"): Promise<Page> {
+async function openApp(browser: Browser, path = "/", workspaces?: string[]): Promise<Page> {
   const context = await browser.newContext();
   contexts.push(context);
+  if (workspaces !== undefined) {
+    await context.route("**/uberblick-config.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          hubUrl: harness().hubUrl,
+          workspaces,
+          hubAuthToken: harness().authSecret,
+        }),
+      });
+    });
+  }
   const page = await context.newPage();
   await page.goto(new URL(path, harness().appUrl).href);
   return page;
@@ -312,7 +325,10 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
   // Switching is navigating: the control writes an address, and the app joins
   // that workspace's rooms. Nothing carries across, because two workspaces are
   // two corpora on one hub — separated by the room key and nothing else.
-  const page = await openApp(browser);
+  // `ub open` serves this machine's one configured workspace. The switcher
+  // proof owns its two-workspace document explicitly, just like the
+  // different-document proof below, so it does not rely on a build-time list.
+  const page = await openApp(browser, "/", [ws(), harness().secondWorkspace]);
   const title = docTitle("uberblick-only");
   await createDoc(page, title);
 
