@@ -31,7 +31,7 @@ function fixture() {
 		const path = join(bin, command);
 		writeFileSync(
 			path,
-			`#!/bin/sh\nprintf '%s\\t%s\\n' "$TMPDIR" "$*" >> "$E2E_TEST_LOG"\nexit "\${E2E_TEST_STATUS:-0}"\n`,
+			`#!/bin/sh\nprintf '%s' "$TMPDIR" >> "$E2E_TEST_LOG"\nfor arg do printf '\\t%s' "$arg" >> "$E2E_TEST_LOG"; done\nprintf '\\n' >> "$E2E_TEST_LOG"\nexit "\${E2E_TEST_STATUS:-0}"\n`,
 		);
 		chmodSync(path, 0o755);
 	}
@@ -42,8 +42,8 @@ function fixture() {
 	);
 	chmodSync(df, 0o755);
 
-	function run({ available = "2097152", status = "0" } = {}) {
-		return spawnSync("sh", [script], {
+	function run({ args = [], available = "2097152", status = "0" } = {}) {
+		return spawnSync("sh", [script, ...args], {
 			encoding: "utf8",
 			env: {
 				...process.env,
@@ -88,6 +88,23 @@ test("the browser install and suite share private storage that is always removed
 	assert.equal(result.status, 23);
 	const [failedTmp] = readFileSync(failed.log, "utf8").trim().split("\t");
 	assert.equal(existsSync(failedTmp), false);
+});
+
+test("Playwright arguments keep their boundaries and order", (t) => {
+	const current = fixture();
+	t.after(() => current.remove());
+
+	const result = current.run({
+		args: ["--repeat-each=3", "outline.spec.ts", "--grep", "focused name"],
+	});
+	assert.equal(result.status, 0, result.stderr);
+	const [, suite] = readFileSync(current.log, "utf8").trim().split("\n");
+	assert.deepEqual(suite.split("\t").slice(-4), [
+		"--repeat-each=3",
+		"outline.spec.ts",
+		"--grep",
+		"focused name",
+	]);
 });
 
 test("insufficient capacity stops before Chromium and cleans the private directory", (t) => {

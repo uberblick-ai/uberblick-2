@@ -121,7 +121,9 @@ own Vite dev server on an ephemeral port, so it needs no fnox key and cannot
 collide with a running `mise run dev`. It covers exactly what jsdom cannot —
 two live clients converging on one block, a rendered remote cursor, and a reload
 that comes out of the IndexedDB cache while the hub is down. Everything else
-belongs in `mise run test`.
+belongs in `mise run test`. Arguments after `--` go to Playwright unchanged; for
+example, `mise run e2e -- --repeat-each=3 outline.spec.ts` runs only that spec
+three times.
 
 `mise run dev` deliberately runs **hub + web only**. The MCP server speaks JSON-RPC
 over stdio and is normally spawned by its client (Claude Code and friends, via
