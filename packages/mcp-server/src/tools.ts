@@ -1,9 +1,9 @@
 /**
  * The v0 MCP tool set.
  *
- * Twenty-three tools and no more: create_doc, get_doc, list_docs, search,
+ * Twenty-four tools and no more: create_doc, get_doc, list_docs, search,
  * backlinks, edit_block, insert_block, delete_block, set_tags, set_links,
- * set_title, set_description, set_changelog_suggestion, archive_doc,
+ * set_title, set_description, set_status, set_changelog_suggestion, archive_doc,
  * restore_doc, annotate, link_range,
  * export_markdown, sync_status, the four sidebar tools registered from
  * ./sidebar-tools.ts — get_sidebar, pin_doc, unpin_doc, sidebar_group. There is
@@ -38,7 +38,11 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   BLOCK_TYPES,
+  DECISION_STATUSES,
+  DOCUMENT_KINDS,
+  InvalidDocumentLifecycleError,
   MAX_DESCRIPTION_LENGTH,
+  REQUIREMENT_STATUSES,
   addComment,
   appendBlock,
   canonicalDocumentUuid,
@@ -53,6 +57,7 @@ import {
   getMeta,
   initDoc,
   insertBlock,
+  isDocumentStatusForKind,
   isProseBlockType,
   listAnnotations,
   listDirectory,
@@ -61,7 +66,9 @@ import {
   setChangelogSuggestion,
   setDescription,
   setInlineLink,
+  setKind,
   setLinks,
+  setStatus,
   setTags,
   setTitle,
   tombstoneDirectoryEntry,
@@ -71,6 +78,8 @@ import type {
   Annotation,
   BlockInput,
   DirectoryEntry,
+  DocumentKind,
+  DocumentStatus,
   HeadingLevel,
   InlineMarkSet,
   InlineRun,
@@ -262,6 +271,42 @@ const titleArg = z
   .trim()
   .min(1, "a title cannot be empty or whitespace")
   .describe("Display title. Identity is the document's UUID, never this.");
+
+const documentKindArg = z.enum(DOCUMENT_KINDS).describe(
+  "The document's record kind. Omit it for an ordinary working document.",
+);
+
+const documentStatusArg = z
+  .enum([...REQUIREMENT_STATUSES, ...DECISION_STATUSES])
+  .describe("The recorded lifecycle state. Its kind owns the legal values.");
+
+const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
+  {
+    title: "A document with a lifecycle (`kind`)",
+    when: { field: "kind", present: true },
+  },
+  {
+    title: "An ordinary document",
+    when: { field: "kind", present: false },
+    forbids: ["status"],
+  },
+];
+
+const LIFECYCLE_RECORDS_STATE =
+  "`kind` and `status` record what sort of document this is and where it stands. They do not authorize " +
+  "execution: that authority comes from the owner's recorded GitHub decision.";
+
+function firstStatus(kind: DocumentKind): DocumentStatus {
+  return kind === "requirement"
+    ? REQUIREMENT_STATUSES[0]
+    : DECISION_STATUSES[0];
+}
+
+function kindForStatus(status: DocumentStatus): DocumentKind {
+  return REQUIREMENT_STATUSES.some((candidate) => candidate === status)
+    ? "requirement"
+    : "decision";
+}
 
 /** What `inline` is for, in the words an agent reads. */
 const INLINE_RUNS =
@@ -789,6 +834,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "set_title is the repair for the untitled ones the web UI creates. " +
         DESCRIPTION_IS_FOR_CHOOSING +
         "\n\n" +
+        "Pass `kind` to create a lifecycle document. Its `status` defaults to that kind's first state; `status` " +
+        "without `kind`, or a status owned by the other kind, is refused before a document is created. " +
+        LIFECYCLE_RECORDS_STATE +
+        "\n\n" +
         CREATE_DOC_PLACEMENT +
         "\n\n" +
         CREATE_DOC_DURABILITY +
@@ -798,19 +847,44 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       // `{sidebar: {...}, pinned: true}` must be refused wherever the redundant
       // key sits, so the nested placement object is strict too — see
       // {@link sidebarPlacementArg}. The top level is strict like every tool's.
-      inputSchema: strictInput({
-        title: titleArg,
-        description: descriptionArg,
-        tags: z.array(z.string().min(1)).optional(),
-        blocks: z
-          .array(blockInputSchema)
-          .optional()
-          .describe("Initial blocks, in order."),
-        sidebar: sidebarPlacementArg,
-      }),
+      inputSchema: strictInput(
+        {
+          title: titleArg,
+          description: descriptionArg,
+          tags: z.array(z.string().min(1)).optional(),
+          kind: documentKindArg.optional(),
+          status: documentStatusArg.optional(),
+          blocks: z
+            .array(blockInputSchema)
+            .optional()
+            .describe("Initial blocks, in order."),
+          sidebar: sidebarPlacementArg,
+        },
+        CREATE_DOC_LIFECYCLE_MODES,
+      ),
     },
-    guarded("create_doc", async ({ title, description, tags, blocks, sidebar }) => {
+    guarded("create_doc", async ({ title, description, tags, kind, status, blocks, sidebar }) => {
       await replicas.settle();
+
+      const lifecycle =
+        kind === undefined ? null : { kind, status: status ?? firstStatus(kind) };
+      if (
+        lifecycle !== null &&
+        !isDocumentStatusForKind(lifecycle.kind, lifecycle.status)
+      ) {
+        const error = new InvalidDocumentLifecycleError(
+          lifecycle.kind,
+          lifecycle.status,
+        );
+        throw new ToolError("invalid_document_lifecycle", error.message, {
+          kind: lifecycle.kind,
+          status: lifecycle.status,
+          recoveryClass: "manual",
+          recovery:
+            `Choose a status in the ${lifecycle.kind} lifecycle and call create_doc again. ` +
+            "Nothing was created by this refused call.",
+        });
+      }
 
       // Resolved before a uuid exists, because this is the one part of the call
       // that can still be all-or-nothing: an unknown group must fail having
@@ -935,6 +1009,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
             description,
             ...(tags === undefined ? {} : { tags }),
           });
+          if (lifecycle !== null) {
+            setKind(replica.doc, lifecycle.kind);
+            setStatus(replica.doc, lifecycle.status);
+          }
           for (const input of inputs) {
             appendBlock(replica.doc, input);
           }
@@ -952,6 +1030,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           title,
           description,
           ...(tags === undefined ? {} : { tags }),
+          ...(lifecycle === null ? {} : lifecycle),
           createdAt: now,
           updatedAt: now,
         });
@@ -1002,6 +1081,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         title,
         description,
         tags: tags ?? [],
+        ...(lifecycle === null ? {} : lifecycle),
         blocks: blocksJson(replica),
         ...(placement === null ? {} : { sidebar: placement }),
         ...durabilityAcross(replica, completed),
@@ -1015,7 +1095,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       title: "Read a document",
       description:
         "Read a document's metadata — including its `description`, null when nobody has written one — its blocks " +
-        "and its annotation threads. " +
+        "and its annotation threads. Lifecycle documents include `kind` and their compatible `status`; ordinary " +
+        "documents omit both. " +
+        LIFECYCLE_RECORDS_STATE +
+        "\n\n" +
         "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
         "`text` is plain and mark-free, as it has always been. A block that carries inline references to other " +
         "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
@@ -1057,18 +1140,29 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "resolve to the greater value, so a future-skewed clock pins the hint until a later stamp exceeds it. It is also " +
         "deliberately coarse — at most one re-stamp every few minutes of its own edits, immediately on a title or tag " +
         "change. Both come from the clock of whichever replica wrote them, so treat them " +
-        "as approximate, and expect either to be missing on a stub written before they existed." +
+        "as approximate, and expect either to be missing on a stub written before they existed.\n\n" +
+        "Lifecycle documents include `kind` and their compatible `status`; ordinary documents omit both. " +
+        "The optional `kind` and `status` filters are answered from those directory stubs without opening a " +
+        "document room, and combine with `tag`. " +
+        LIFECYCLE_RECORDS_STATE +
         failureContract("list_docs"),
       inputSchema: strictInput({
         tag: z.string().min(1).optional().describe("Only documents carrying this tag."),
+        kind: documentKindArg.optional().describe("Only documents of this kind."),
+        status: documentStatusArg.optional().describe("Only documents at this lifecycle state."),
         include_deleted: z.boolean().optional(),
       }),
     },
-    guarded("list_docs", async ({ tag, include_deleted }) => {
+    guarded("list_docs", async ({ tag, kind, status, include_deleted }) => {
       await replicas.settle();
       const entries = listDirectory(replicas.directory().doc, {
         includeDeleted: include_deleted ?? false,
-      }).filter((entry) => tag === undefined || entry.tags.includes(tag));
+      }).filter(
+        (entry) =>
+          (tag === undefined || entry.tags.includes(tag)) &&
+          (kind === undefined || entry.kind === kind) &&
+          (status === undefined || entry.status === status),
+      );
       // Derived, never stored: the sidebar doc is the one place a pin lives.
       const pinned = pinnedUuids(replicas);
       return json({
@@ -1348,6 +1442,70 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const replica = requireWritableDoc(uuid);
       setDescription(replica.doc, description);
       return json({ uuid, description, ...durability(replica) });
+    }),
+  );
+
+  server.registerTool(
+    "set_status",
+    {
+      title: "Set a document's lifecycle status",
+      description:
+        "Record a document's lifecycle status. On an ordinary document this also adopts the kind that owns the " +
+        "status; the result names both, so adoption is never silent. A document that already has a kind accepts " +
+        "only that kind's statuses. Its kind is fixed through MCP: if it was adopted in error, retrying with the " +
+        "other kind's status cannot change it.\n\n" +
+        LIFECYCLE_RECORDS_STATE +
+        "\n\n" +
+        ARCHIVED_IS_READ_ONLY +
+        "\n\n" +
+        SYNCED_IS_ACKNOWLEDGED +
+        failureContract("set_status"),
+      inputSchema: strictInput({ uuid: uuidArg, status: documentStatusArg }),
+    },
+    guarded("set_status", async ({ uuid, status }) => {
+      await replicas.settle();
+      const replica = requireWritableDoc(uuid);
+      const stored = getMeta(replica.doc);
+      const kind = stored.kind ?? kindForStatus(status);
+
+      replica.doc.transact(() => {
+        if (stored.kind === undefined) {
+          // Adoption is unconditional on the tolerant read. Clear any hidden,
+          // incompatible raw pair before writing the derived legal pair; the
+          // outer transaction keeps the replacement in one logged update.
+          setKind(replica.doc, "");
+          setKind(replica.doc, kind);
+        }
+        setStatus(replica.doc, status);
+      });
+
+      const failure = replicas.persistenceError();
+      if (failure !== null && failure.room === replicas.directory().room) {
+        throw new ToolError(
+          "persistence_failed",
+          `The lifecycle update is durable in ${replica.room}, but its directory stub could not be updated: ${failure.message}`,
+          {
+            uuid,
+            kind,
+            status,
+            applied: false,
+            partial: true,
+            synced: false,
+            rolledBack: false,
+            completed: [
+              { purpose: "document", room: replica.room, applied: true },
+            ],
+            failed: { purpose: "directory", room: failure.room },
+            room: failure.room,
+            recoveryClass: "manual",
+            recovery:
+              "Restart the MCP server. The document lifecycle is already durable; the next settle repairs the " +
+              "directory stub from it, so do not repeat set_status before re-reading.",
+          },
+        );
+      }
+
+      return json({ uuid, kind, status, ...durability(replica) });
     }),
   );
 
@@ -1635,8 +1793,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           .boolean()
           .optional()
           .describe(
-            "Emit a YAML frontmatter block with uuid, title, tags and — when the document has one — description. " +
-              "Default true.",
+            "Emit a YAML frontmatter block with uuid, title, tags and — when present — description, kind and " +
+              "status. The lifecycle fields record state; they do not authorize execution. Default true.",
           ),
         annotations: z
           .enum(["html-comments", "drop"])

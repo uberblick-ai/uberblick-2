@@ -66,6 +66,7 @@ describe("with the hub stopped", () => {
       "set_changelog_suggestion",
       "set_description",
       "set_links",
+      "set_status",
       "set_tags",
       "set_title",
       "sidebar_group",
@@ -230,6 +231,7 @@ describe("with the hub stopped", () => {
     for (const call of [
       rig.ok("set_tags", { uuid: created.uuid, tags: ["x"] }),
       rig.ok("set_links", { uuid: created.uuid, links: [] }),
+      rig.ok("set_status", { uuid: created.uuid, status: "planned" }),
     ]) {
       const payload = await call;
       expect(payload.applied).toBe(true);

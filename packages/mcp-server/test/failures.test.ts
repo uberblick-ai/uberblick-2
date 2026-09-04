@@ -128,6 +128,10 @@ const EXPECTED: Record<
   },
   doc_archived: { recoveryClass: "manual", detail: ["uuid", "archived"] },
   group_not_found: { recoveryClass: "reread", detail: ["group"] },
+  invalid_document_lifecycle: {
+    recoveryClass: "manual",
+    detail: ["kind", "status"],
+  },
   // The unclassified fallback: a handler that threw something nobody mapped
   // cannot say what happened to a write, so it promises the floor and no more.
   internal_error: { recoveryClass: null, detail: [] },
@@ -276,6 +280,19 @@ describe("the failure contract", () => {
           action: "rename",
           group: "no-such-group",
           name: "Renamed",
+        })
+      ).payload,
+    );
+    const requirement = await rig.ok("create_doc", {
+      title: "Fixed kind",
+      description: "A requirement with a schema-owned lifecycle.",
+      kind: "requirement",
+    });
+    record(
+      (
+        await rig.call("set_status", {
+          uuid: requirement.uuid,
+          status: "open",
         })
       ).payload,
     );

@@ -122,6 +122,35 @@ describe("unknown fields", () => {
   });
 });
 
+describe("create_doc lifecycle arguments", () => {
+  it("refuses a status without a kind and a cross-kind pair before creation", async () => {
+    const rig = await localRig();
+
+    const withoutKind = await rig.call("create_doc", {
+      title: "No kind",
+      description: "A request that must not create a document.",
+      status: "planned",
+    });
+    expect(withoutKind.payload.error).toBe("schema_validation");
+
+    const mismatched = await rig.call("create_doc", {
+      title: "Bad pair",
+      description: "A request that must not create a document.",
+      kind: "requirement",
+      status: "open",
+    });
+    expect(mismatched.payload).toMatchObject({
+      error: "invalid_document_lifecycle",
+      kind: "requirement",
+      status: "open",
+      applied: false,
+      partial: false,
+    });
+    expect(mismatched.payload.recovery).toContain("Nothing was created");
+    expect((await rig.ok("list_docs")).docs).toEqual([]);
+  });
+});
+
 describe("annotate", () => {
   it("advertises two shapes and accepts nothing in between", async () => {
     const rig = await localRig();

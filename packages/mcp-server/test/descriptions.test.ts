@@ -1,5 +1,5 @@
 /**
- * Document descriptions: the field that lets an agent choose what to read.
+ * Document discovery metadata: the fields that let an agent choose what to read.
  *
  * The bargain this suite defends is asymmetric on purpose. `create_doc` refuses
  * without a description, because an agent writing a document can say what it is
@@ -17,11 +17,17 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   getDirectoryEntry,
   getMeta,
+  getMetaMap,
   initDoc,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
-import { removeTempDirs, startServer, testConfig } from "./helpers.js";
+import {
+  removeTempDirs,
+  startServer,
+  testConfig,
+  WORKSPACE,
+} from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
@@ -30,6 +36,18 @@ async function localRig(): Promise<Rig> {
   const rig = await startServer(testConfig());
   rigs.push(rig);
   return rig;
+}
+
+async function lifecycleDoc(
+  rig: Rig,
+  title: string,
+  lifecycle: Record<string, string> = {},
+): Promise<any> {
+  return rig.ok("create_doc", {
+    title,
+    description: "A document used to exercise lifecycle behavior.",
+    ...lifecycle,
+  });
 }
 
 function stub(rig: Rig, uuid: string): DirectoryEntry {
@@ -345,5 +363,205 @@ describe("directory churn", () => {
       });
     }
     expect(directoryUpdates()).toBe(1);
+  });
+});
+
+describe("lifecycle metadata reaches discovery", () => {
+  it("creates a default status in one document update and omits an ordinary pair", async () => {
+    const rig = await localRig();
+    const created = await lifecycleDoc(rig, "Roadmap", {
+      kind: "requirement",
+    });
+
+    expect(created).toMatchObject({ kind: "requirement", status: "draft" });
+    expect(
+      rig.instance.replicas.store.updateCount(
+        `${WORKSPACE}/${created.uuid}`,
+      ),
+    ).toBe(1);
+    expect(await rig.ok("get_doc", { uuid: created.uuid })).toMatchObject({
+      kind: "requirement",
+      status: "draft",
+    });
+    expect(stub(rig, created.uuid)).toMatchObject({
+      kind: "requirement",
+      status: "draft",
+    });
+    expect((await rig.ok("list_docs", { kind: "requirement" })).docs).toMatchObject([
+      { uuid: created.uuid, kind: "requirement", status: "draft" },
+    ]);
+
+    const ordinary = await lifecycleDoc(rig, "Working notes");
+    expect(ordinary).not.toHaveProperty("kind");
+    expect(ordinary).not.toHaveProperty("status");
+    expect(await rig.ok("get_doc", { uuid: ordinary.uuid })).not.toHaveProperty(
+      "kind",
+    );
+    expect(stub(rig, ordinary.uuid)).not.toHaveProperty("kind");
+  });
+
+  it("filters lifecycle stubs by kind and status, combined with tag", async () => {
+    const rig = await localRig();
+    const planned = await rig.ok("create_doc", {
+      title: "Planned",
+      description: "A planned tagged requirement.",
+      tags: ["shared"],
+      kind: "requirement",
+      status: "planned",
+    });
+    const draft = await lifecycleDoc(rig, "Draft", { kind: "requirement" });
+    const decision = await rig.ok("create_doc", {
+      title: "Decision",
+      description: "An open tagged decision.",
+      tags: ["shared"],
+      kind: "decision",
+    });
+
+    expect(
+      (await rig.ok("list_docs", { kind: "requirement" })).docs
+        .map((doc: any) => doc.uuid)
+        .sort(),
+    ).toEqual([planned.uuid, draft.uuid].sort());
+    expect(
+      (await rig.ok("list_docs", { status: "open" })).docs.map(
+        (doc: any) => doc.uuid,
+      ),
+    ).toEqual([decision.uuid]);
+    expect(
+      (
+        await rig.ok("list_docs", {
+          tag: "shared",
+          kind: "requirement",
+          status: "planned",
+        })
+      ).docs.map((doc: any) => doc.uuid),
+    ).toEqual([planned.uuid]);
+  });
+
+  it("repairs a stale lifecycle in either direction on the next document write", async () => {
+    const rig = await localRig();
+    const requirement = await lifecycleDoc(rig, "Authoritative", {
+      kind: "requirement",
+      status: "planned",
+    });
+    const ordinary = await lifecycleDoc(rig, "Ordinary");
+    const directory = rig.instance.replicas.directory().doc;
+
+    upsertDirectoryEntry(directory, {
+      uuid: requirement.uuid,
+      title: requirement.title,
+      kind: "decision",
+      status: "open",
+    });
+    upsertDirectoryEntry(directory, {
+      uuid: ordinary.uuid,
+      title: ordinary.title,
+      kind: "requirement",
+      status: "done",
+    });
+
+    await rig.ok("set_description", {
+      uuid: requirement.uuid,
+      description: "The document repairs its lifecycle cache.",
+    });
+    await rig.ok("set_description", {
+      uuid: ordinary.uuid,
+      description: "The document clears a lifecycle it does not carry.",
+    });
+
+    expect(stub(rig, requirement.uuid)).toMatchObject({
+      kind: "requirement",
+      status: "planned",
+    });
+    expect(stub(rig, ordinary.uuid)).not.toHaveProperty("kind");
+    expect(stub(rig, ordinary.uuid)).not.toHaveProperty("status");
+  });
+});
+
+describe("set_status", () => {
+  it("adopts an ordinary document atomically, including over a hidden raw pair", async () => {
+    const rig = await localRig();
+    const ordinary = await lifecycleDoc(rig, "Adopt me");
+    const replica = rig.instance.replicas.replica(ordinary.uuid);
+    const meta = getMetaMap(replica.doc);
+
+    // Reachable after sanctioned concurrent writes: the tolerant reader sees
+    // no lifecycle, while a raw status incompatible with the future kind
+    // remains. Adoption replaces both in one update, with no durable prefix.
+    replica.doc.transact(() => {
+      meta.set("kind", "");
+      meta.set("status", "done");
+    });
+    expect(getMeta(replica.doc)).not.toHaveProperty("kind");
+    const before = rig.instance.replicas.store.updateCount(replica.room);
+
+    const adopted = await rig.ok("set_status", {
+      uuid: ordinary.uuid,
+      status: "open",
+    });
+    expect(adopted).toMatchObject({ kind: "decision", status: "open" });
+    expect(rig.instance.replicas.store.updateCount(replica.room)).toBe(
+      before + 1,
+    );
+    expect(getMeta(replica.doc)).toMatchObject({
+      kind: "decision",
+      status: "open",
+    });
+    expect(stub(rig, ordinary.uuid)).toMatchObject({
+      kind: "decision",
+      status: "open",
+    });
+  });
+
+  it("moves within a kind and gives fixed-kind recovery for the other kind", async () => {
+    const rig = await localRig();
+    const requirement = await lifecycleDoc(rig, "Requirement", {
+      kind: "requirement",
+      status: "planned",
+    });
+
+    expect(
+      await rig.ok("set_status", {
+        uuid: requirement.uuid,
+        status: "implementing",
+      }),
+    ).toMatchObject({ kind: "requirement", status: "implementing" });
+
+    const refused = await rig.call("set_status", {
+      uuid: requirement.uuid,
+      status: "open",
+    });
+    expect(refused.payload).toMatchObject({
+      error: "invalid_document_lifecycle",
+      kind: "requirement",
+      status: "open",
+      applied: false,
+      partial: false,
+      recoveryClass: "manual",
+    });
+    expect(refused.payload.recovery).toContain("stored kind is fixed");
+    expect(await rig.ok("get_doc", { uuid: requirement.uuid })).toMatchObject({
+      kind: "requirement",
+      status: "implementing",
+    });
+  });
+});
+
+describe("lifecycle tool text", () => {
+  it("names the recorded fields and their authority boundary on every surface", async () => {
+    const rig = await localRig();
+    const { tools } = await rig.client.listTools();
+    for (const name of ["create_doc", "get_doc", "list_docs", "set_status"]) {
+      const description = tools.find((tool) => tool.name === name)?.description;
+      expect(description, name).toContain("`kind`");
+      expect(description, name).toContain("`status`");
+      expect(description, name).toContain("do not authorize");
+    }
+    const exported = tools.find((tool) => tool.name === "export_markdown");
+    if (exported === undefined) throw new Error("no tool export_markdown");
+    const frontmatter = (exported.inputSchema as any).properties.frontmatter;
+    expect(frontmatter.description).toContain("kind");
+    expect(frontmatter.description).toContain("status");
+    expect(frontmatter.description).toContain("do not authorize");
   });
 });

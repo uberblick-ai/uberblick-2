@@ -56,6 +56,7 @@ import {
   AnnotationRangeError,
   BlockNotFoundError,
   ConflictingLinkMarksError,
+  InvalidDocumentLifecycleError,
   InlineLinkRangeError,
   OldTextMismatchError,
   StaleBlockError,
@@ -113,6 +114,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "set_links",
   "set_title",
   "set_description",
+  "set_status",
   "set_changelog_suggestion",
   "archive_doc",
   "restore_doc",
@@ -234,6 +236,12 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Call get_sidebar for the group ids that exist. pin_doc is what brings a group into being, by naming one " +
       "that does not exist yet.",
+  },
+  invalid_document_lifecycle: {
+    recoveryClass: "manual",
+    guidance:
+      "The document's stored kind is fixed through MCP. Choose a status in that kind's lifecycle; if the kind " +
+      "itself is wrong, retrying cannot change or clear it through this interface.",
   },
 };
 
@@ -473,6 +481,14 @@ export function toFailure(tool: string, error: unknown): CallToolResult {
       reason: error.reason,
       blockId: error.blockId,
       conflictingThreadId: error.conflictingThreadId ?? null,
+    });
+  }
+  if (error instanceof InvalidDocumentLifecycleError) {
+    return stamped(tool, {
+      error: "invalid_document_lifecycle",
+      message: error.message,
+      kind: error.kind,
+      status: error.status,
     });
   }
   if (error instanceof ToolError) {
