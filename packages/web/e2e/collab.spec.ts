@@ -237,6 +237,29 @@ test("the open document's last-updated reading follows its stub through status a
   expect(Number.isFinite(Date.parse(firstDateTime ?? ""))).toBe(true);
   await expect(time).toHaveAttribute("title", /.+/);
 
+  const status = page.locator(".ub-status");
+  const firstBlock = editor(page).locator(":scope > *").first();
+  const word = status.locator(".ub-status-word");
+  const wordText = await word.textContent();
+  expect(await status.evaluate((element) => getComputedStyle(element).lineHeight)).toBe(
+    await word.evaluate((element) => getComputedStyle(element).lineHeight),
+  );
+  const geometry = async () => ({
+    status: await status.boundingBox(),
+    prose: await firstBlock.boundingBox(),
+  });
+  const withFreshness = await geometry();
+  await page.evaluate(() => {
+    document.querySelector(".ub-status-word")?.replaceChildren();
+    const updated = document.querySelector<HTMLElement>(".ub-last-updated");
+    if (updated !== null) updated.style.display = "none";
+  });
+  expect(await geometry()).toEqual(withFreshness);
+  await word.evaluate((element, text) => {
+    element.textContent = text;
+  }, wordText);
+  await reading.evaluate((element) => element.style.removeProperty("display"));
+
   const renamed = `${title} fresh`;
   await page.locator(".ub-title").fill(renamed);
   await expect(reading).toContainText("last updated just now");

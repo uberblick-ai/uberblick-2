@@ -2072,6 +2072,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.8rem;
+  line-height: 1.2;
   color: var(--muted-foreground);
   padding: 0.35rem 0;
   border-bottom: 1px solid var(--border);
