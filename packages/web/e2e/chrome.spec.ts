@@ -1725,9 +1725,11 @@ for (const scheme of ["light", "dark"] as const) {
     expect([...inks], "the functional brand ink is one value").toHaveLength(1);
 
     // The badge is where both halves of the decision are painted at once: its
-    // outline is the accent and its letters are the ink.
+    // outline is the accent and its letters are the ink. Only light splits;
+    // dark's ink derives from the accent itself.
     const accent = await paintedIn(page.locator(".ub-badge"), "border-top-color");
     if (scheme === "light") expect([...inks][0]).not.toBe(accent);
+    else expect([...inks][0]).toBe(accent);
   });
 }
 
