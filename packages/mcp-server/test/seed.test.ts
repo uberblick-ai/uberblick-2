@@ -40,6 +40,7 @@ import { importSeedDir, importSeedDocs, readSeedDocs } from "../src/seed.js";
 import type { SeedImport } from "../src/seed.js";
 import {
   FailingStore,
+  LIVE_HUB_SETTLE,
   TEST_SECRET,
   WORKSPACE,
   hubUrl,
@@ -616,6 +617,7 @@ describe("starter sidebar seed", () => {
         databasePath,
         hubUrl: hubUrl(hub.port),
         authSecret: TEST_SECRET,
+        ...LIVE_HUB_SETTLE,
       }),
       { ...group, docs: [first, second] },
     );
