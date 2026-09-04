@@ -47,6 +47,7 @@ type Sandbox = "runtime" | "workspace-write" | "unsandboxed";
 interface RuntimeLaunch {
   adapter: string;
   sandbox: Sandbox;
+  permissionMode?: "auto";
 }
 
 interface RoleLaunch {
@@ -164,20 +165,29 @@ export function readLaunchData(root: string): LaunchData {
       const adapter = rawRuntime?.adapter;
       const sandbox = rawRuntime?.sandbox;
       const expectedAdapter = `.${runtime}/agents/${role}.${runtime === "claude" ? "md" : "toml"}`;
+      const permissionMode = rawRuntime?.permissionMode;
       const sandboxValid =
         runtime === "claude"
           ? sandbox === "runtime"
           : sandbox === "workspace-write" || sandbox === "unsandboxed";
       if (
         rawRuntime === null ||
-        !exactKeys(rawRuntime, ["adapter", "sandbox"]) ||
+        !exactKeys(
+          rawRuntime,
+          runtime === "claude" ? ["adapter", "sandbox", "permissionMode"] : ["adapter", "sandbox"],
+        ) ||
         adapter !== expectedAdapter ||
         !pathIsFile(root, expectedAdapter) ||
-        !sandboxValid
+        !sandboxValid ||
+        (runtime === "claude" && permissionMode !== "auto")
       ) {
         throw new Error(`.agents/launch.json entry ${JSON.stringify(role)} has invalid ${runtime} launch data`);
       }
-      parsedRuntimes[runtime] = { adapter, sandbox } as RuntimeLaunch;
+      parsedRuntimes[runtime] = {
+        adapter,
+        sandbox,
+        ...(runtime === "claude" ? { permissionMode: "auto" as const } : {}),
+      } as RuntimeLaunch;
     }
     entryRoles[role] = {
       contract: entry.contract,
@@ -295,7 +305,8 @@ export function launchAssignment(role: string, runId: string): string {
     `Identifiers: role \`${role}\`, run id \`${runId}\`, launched by \`ub launch\`.\n\n` +
     "MCP route: use the registered uberblick server. If it cannot start outside mise, use the throwaway " +
     "stdio route `mise x -- ub mcp serve` from scratch outside the committed worktree. Write every durable " +
-    "comment from a file. End with the role contract's final line.\n"
+    "comment from a file, removing that file first because the shell may use noclobber. End with the role " +
+    "contract's final line.\n"
   );
 }
 
@@ -318,8 +329,23 @@ export function codexSessionArgs(
   return args;
 }
 
-function defaultServices(env: NodeJS.ProcessEnv, io: Io): LaunchServices {
-  const root = repositoryRoot;
+/** Build the direct Claude invocation from the repository permission mode. */
+export function claudeSessionArgs(
+  role: string,
+  prompt: string,
+  permissionMode: RuntimeLaunch["permissionMode"],
+): string[] {
+  if (permissionMode !== "auto") {
+    throw new Error(`invalid Claude permission mode ${JSON.stringify(permissionMode)}`);
+  }
+  return ["-p", "--agent", role, "--permission-mode", permissionMode, prompt];
+}
+
+export function createLaunchServices(
+  root: string,
+  env: NodeJS.ProcessEnv,
+  io: Io,
+): LaunchServices {
   let scratch: string | null = null;
 
   return {
@@ -377,10 +403,6 @@ function defaultServices(env: NodeJS.ProcessEnv, io: Io): LaunchServices {
     async runSession(role, runtime, entry) {
       const runId = makeRunId(runtime, role);
       const prompt = launchAssignment(role, runId);
-      if (runtime === "claude") {
-        return await runForeground("claude", ["-p", "--agent", role, prompt], root, env, io);
-      }
-
       scratch ??= mkdtempSync(join(tmpdir(), "ub-launch-"));
       const worktree = join(scratch, runId);
       const added = runSync("git", ["worktree", "add", "--detach", worktree, "origin/main"], root, env);
@@ -391,15 +413,30 @@ function defaultServices(env: NodeJS.ProcessEnv, io: Io): LaunchServices {
           signal: null,
           interrupted: null,
           lastLine: "",
-          detail: "could not create the fresh Codex worktree; run `git worktree list` and repair it before retrying",
+          detail: "could not create the fresh runtime worktree; run `git worktree list` and repair it before retrying",
         };
       }
       const lastPath = join(scratch, `${runId}.last`);
-      const args = codexSessionArgs(worktree, lastPath, prompt, entry.runtimes.codex.sandbox);
-      const result = await runForeground("codex", args, root, env, io);
+      const result = runtime === "claude"
+        ? await runForeground(
+            "claude",
+            claudeSessionArgs(role, prompt, entry.runtimes.claude.permissionMode),
+            worktree,
+            env,
+            io,
+          )
+        : await runForeground(
+            "codex",
+            codexSessionArgs(worktree, lastPath, prompt, entry.runtimes.codex.sandbox),
+            worktree,
+            env,
+            io,
+          );
       const withLastLine = {
         ...result,
-        lastLine: existsSync(lastPath) ? lastLine(readFileSync(lastPath, "utf8")) : result.lastLine,
+        lastLine: runtime === "codex" && existsSync(lastPath)
+          ? lastLine(readFileSync(lastPath, "utf8"))
+          : result.lastLine,
       };
       if (!result.started || result.code !== 0 || result.signal !== null) {
         return {
@@ -502,7 +539,7 @@ export async function launchCommand(
   if (services === undefined) {
     const resolved = resolveConfig();
     for (const warning of resolved.warnings) io.err(`ub: warning: ${warning}\n`);
-    services = defaultServices(resolved.env, io);
+    services = createLaunchServices(repositoryRoot, launchEnvironment(resolved.env), io);
   }
 
   let data: LaunchData;

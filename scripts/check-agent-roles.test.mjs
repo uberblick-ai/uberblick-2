@@ -152,4 +152,13 @@ test("launch data is complete and stays aligned with the role triplets", { skip:
 	result = run(wrongDefault);
 	assert.equal(result.status, 1);
 	assert.match(result.stderr, /implementer defaultRuntime.*expected codex/);
+
+	const wrongPermission = completeFixture();
+	const permissionPath = join(wrongPermission, ".agents/launch.json");
+	const permissionData = JSON.parse(readFileSync(permissionPath, "utf8"));
+	permissionData.entryRoles.integrator.runtimes.claude.permissionMode = "manual";
+	writeFileSync(permissionPath, `${JSON.stringify(permissionData, null, 2)}\n`);
+	result = run(wrongPermission);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /integrator claude permissionMode.*expected auto/);
 });

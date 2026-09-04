@@ -8,7 +8,8 @@
       "runtimes": {
         "claude": {
           "adapter": ".claude/agents/issue-preparer.md",
-          "sandbox": "runtime"
+          "sandbox": "runtime",
+          "permissionMode": "auto"
         },
         "codex": {
           "adapter": ".codex/agents/issue-preparer.toml",
@@ -23,7 +24,8 @@
       "runtimes": {
         "claude": {
           "adapter": ".claude/agents/implementer.md",
-          "sandbox": "runtime"
+          "sandbox": "runtime",
+          "permissionMode": "auto"
         },
         "codex": {
           "adapter": ".codex/agents/implementer.toml",
@@ -38,7 +40,8 @@
       "runtimes": {
         "claude": {
           "adapter": ".claude/agents/integrator.md",
-          "sandbox": "runtime"
+          "sandbox": "runtime",
+          "permissionMode": "auto"
         },
         "codex": {
           "adapter": ".codex/agents/integrator.toml",

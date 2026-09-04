@@ -9,7 +9,8 @@
  * owner-approved `effort: high` pins on issue-preparer and implementer from
  * directive 438df7d, whose value is checked where the key is present and whose
  * presence is not required. The owner-approved launch map separately names the
- * entry-role defaults and Codex sandbox modes; other model, tool, permission,
+ * entry-role defaults, Codex sandbox modes and Claude's headless permission
+ * mode; other model, tool, permission,
  * sandbox and MCP configuration belongs to the runtime and invoker, never to
  * an adapter description.
  *
@@ -240,7 +241,10 @@ else {
 				const expectedSandbox = runtime === "claude"
 					? "runtime"
 					: slug === "implementer" ? "unsandboxed" : "workspace-write";
-				if (!config || !exactKeys(config, ["adapter", "sandbox"])) {
+				const expectedKeys = runtime === "claude"
+					? ["adapter", "sandbox", "permissionMode"]
+					: ["adapter", "sandbox"];
+				if (!config || !exactKeys(config, expectedKeys)) {
 					fail(`${LAUNCH}: ${slug} ${runtime} launch data is malformed`);
 					continue;
 				}
@@ -248,6 +252,8 @@ else {
 					fail(`${LAUNCH}: ${slug} ${runtime} adapter is ${JSON.stringify(config.adapter)}, expected ${expectedAdapter}`);
 				if (config.sandbox !== expectedSandbox)
 					fail(`${LAUNCH}: ${slug} ${runtime} sandbox is ${JSON.stringify(config.sandbox)}, expected ${expectedSandbox}`);
+				if (runtime === "claude" && config.permissionMode !== "auto")
+					fail(`${LAUNCH}: ${slug} claude permissionMode is ${JSON.stringify(config.permissionMode)}, expected auto`);
 			}
 		}
 	}

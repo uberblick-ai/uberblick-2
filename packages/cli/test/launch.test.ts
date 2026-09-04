@@ -1,5 +1,6 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -8,7 +9,9 @@ import {
   type LaunchSignals,
   type SessionResult,
   LAUNCH_HELP,
+  claudeSessionArgs,
   codexSessionArgs,
+  createLaunchServices,
   launchAssignment,
   launchCommand,
   launchEnvironment,
@@ -133,6 +136,20 @@ describe("ub launch", () => {
     ]);
     expect(() => codexSessionArgs("/worktree", "/last", prompt, "runtime")).toThrow(
       /invalid Codex sandbox/,
+    );
+  });
+
+  it("builds the data-owned headless Claude permission mode", () => {
+    expect(claudeSessionArgs("integrator", "one prompt", "auto")).toEqual([
+      "-p",
+      "--agent",
+      "integrator",
+      "--permission-mode",
+      "auto",
+      "one prompt",
+    ]);
+    expect(() => claudeSessionArgs("integrator", "one prompt", undefined)).toThrow(
+      /invalid Claude permission mode/,
     );
   });
 
@@ -268,6 +285,92 @@ describe("ub launch", () => {
     const env = launchEnvironment({ ...box.env, HUB_URL: "ws://ambient.invalid:9999" });
     expect(env.HUB_URL).toBeUndefined();
   });
+
+  it("runs Claude directly in a fresh worktree with a clean environment", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-runtime-"));
+    try {
+      const bin = join(root, "bin");
+      const evidence = join(root, "evidence.json");
+      mkdirSync(bin);
+      writeFileSync(join(root, "marker"), "main\n");
+      for (const args of [
+        ["init", "-b", "main"],
+        ["add", "marker"],
+        ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "base"],
+      ]) {
+        const ran = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+        expect(ran.status, ran.stderr).toBe(0);
+      }
+      const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" });
+      expect(head.status, head.stderr).toBe(0);
+      const remote = spawnSync("git", ["update-ref", "refs/remotes/origin/main", head.stdout.trim()], {
+        cwd: root,
+        encoding: "utf8",
+      });
+      expect(remote.status, remote.stderr).toBe(0);
+
+      const fakeClaude = join(bin, "claude");
+      writeFileSync(
+        fakeClaude,
+        `#!/usr/bin/env node
+const fs = require("node:fs");
+fs.writeFileSync(process.env.LAUNCH_EVIDENCE, JSON.stringify({
+  argv: process.argv.slice(2),
+  cwd: process.cwd(),
+  hub: process.env.HUB_URL ?? null,
+  marker: fs.readFileSync("marker", "utf8"),
+}));
+process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
+`,
+      );
+      chmodSync(fakeClaude, 0o755);
+      let output = "";
+      const services = createLaunchServices(
+        root,
+        launchEnvironment({
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH ?? ""}`,
+          HUB_URL: "ws://ambient.invalid:9999",
+          LAUNCH_EVIDENCE: evidence,
+        }),
+        {
+          out: (text) => {
+            output += text;
+          },
+          err: () => {},
+        },
+      );
+      const entry = readLaunchData(REPO_ROOT).entryRoles["issue-preparer"];
+      expect(entry).toBeDefined();
+      const outcome = await services.runSession("issue-preparer", "claude", entry!);
+      const observed = JSON.parse(readFileSync(evidence, "utf8"));
+
+      expect(outcome).toMatchObject({
+        started: true,
+        code: 0,
+        lastLine: "No eligible issue-preparer work: test fixture.",
+      });
+      expect(output).toContain("No eligible issue-preparer work: test fixture.");
+      expect(observed.hub).not.toBe("ws://ambient.invalid:9999");
+      expect(observed.cwd).not.toBe(root);
+      expect(observed.marker).toBe("main\n");
+      expect(observed.argv.slice(0, 5)).toEqual([
+        "-p",
+        "--agent",
+        "issue-preparer",
+        "--permission-mode",
+        "auto",
+      ]);
+      const worktrees = spawnSync("git", ["worktree", "list", "--porcelain"], {
+        cwd: root,
+        encoding: "utf8",
+      });
+      expect(worktrees.status, worktrees.stderr).toBe(0);
+      expect(worktrees.stdout.match(/^worktree /gm)).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("launch data", () => {
@@ -289,7 +392,11 @@ describe("launch data", () => {
               defaultRuntime: "codex",
               probe: ["sh", "scripts/probe-work.sh", "implementer"],
               runtimes: {
-                claude: { adapter: ".claude/agents/implementer.md", sandbox: "runtime" },
+                claude: {
+                  adapter: ".claude/agents/implementer.md",
+                  sandbox: "runtime",
+                  permissionMode: "auto",
+                },
                 codex: { adapter: ".codex/agents/implementer.toml", sandbox: "unsandboxed" },
               },
             },
