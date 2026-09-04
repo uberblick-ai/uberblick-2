@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 /**
- * The five agent roles and issue-authoring adapters, checked for portability.
+ * The five agent roles, adapters and entry-role launch map, checked for portability.
  *
  * A role is a triplet: the contract at `.agents/roles/<slug>.md` and two thin
  * adapters that point a runtime at it. This proves the triplets exist, that all
  * three agree on identity, that each adapter parses as its runtime's format and
- * names the exact contract, and that none pins runtime policy — except the
+ * names the exact contract, and that adapters do not pin runtime policy — except the
  * owner-approved `effort: high` pins on issue-preparer and implementer from
  * directive 438df7d, whose value is checked where the key is present and whose
- * presence is not required. Model, tools, permissions, sandbox and MCP
- * configuration belong to the runtime and the invoker, never to a checked-in
- * description.
+ * presence is not required. The owner-approved launch map separately names the
+ * entry-role defaults and Codex sandbox modes; other model, tool, permission,
+ * sandbox and MCP configuration belongs to the runtime and invoker, never to
+ * an adapter description.
  *
  * It deliberately does not check the contracts' or protocols' prose: no
  * headings, required sentences, uuids, product judgments or readiness rules.
@@ -33,8 +34,10 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const SLUGS = ["issue-preparer", "issue-adversary", "implementer",
 	"implementation-reviewer", "integrator"];
+const ENTRY_SLUGS = ["issue-preparer", "implementer", "integrator"];
 
 const ROLES = ".agents/roles";
+const LAUNCH = ".agents/launch.json";
 const CLAUDE = ".claude/agents";
 const CODEX = ".codex/agents";
 const ISSUE_SHAPING = ".agents/protocols/issue-shaping.md";
@@ -66,6 +69,10 @@ const listFiles = (relative) =>
 	readdirSync(join(root, relative), { withFileTypes: true })
 		.filter((entry) => entry.isFile())
 		.map((entry) => entry.name);
+const object = (value) =>
+	typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
+const exactKeys = (value, expected) =>
+	Object.keys(value).sort().join(",") === [...expected].sort().join(",");
 
 /** `---` fenced frontmatter, one `key: value` per line, and the body after it. */
 function parseFrontmatter(label, text) {
@@ -192,6 +199,60 @@ for (const slug of SLUGS) {
 	check(codexPath, slug, keys, CODEX_ALLOWED, CODEX_ALLOWED, tables, body);
 }
 
+if (!existsSync(join(root, LAUNCH))) fail(`${LAUNCH}: missing repository launch data`);
+else {
+	let launch = null;
+	try {
+		launch = object(JSON.parse(read(LAUNCH)));
+	} catch {
+		fail(`${LAUNCH}: invalid JSON`);
+	}
+	const entries = object(launch?.entryRoles);
+	if (launch && (!exactKeys(launch, ["version", "entryRoles"]) || launch.version !== 1))
+		fail(`${LAUNCH}: expected only version 1 and entryRoles`);
+	if (!entries) fail(`${LAUNCH}: entryRoles must be an object`);
+	else {
+		const names = Object.keys(entries).sort();
+		if (names.join(",") !== [...ENTRY_SLUGS].sort().join(","))
+			fail(`${LAUNCH}: holds [${names.join(", ")}], expected entry roles [${ENTRY_SLUGS.join(", ")}]`);
+		for (const slug of ENTRY_SLUGS) {
+			const entry = object(entries[slug]);
+			const runtimes = object(entry?.runtimes);
+			if (!entry || !exactKeys(entry, ["contract", "defaultRuntime", "probe", "runtimes"])) {
+				fail(`${LAUNCH}: ${slug} has a malformed entry`);
+				continue;
+			}
+			if (entry.contract !== `${ROLES}/${slug}.md`)
+				fail(`${LAUNCH}: ${slug} contract is ${JSON.stringify(entry.contract)}, expected ${ROLES}/${slug}.md`);
+			const expectedDefault = slug === "implementer" ? "codex" : "claude";
+			if (entry.defaultRuntime !== expectedDefault)
+				fail(`${LAUNCH}: ${slug} defaultRuntime is ${JSON.stringify(entry.defaultRuntime)}, expected ${expectedDefault}`);
+			if (JSON.stringify(entry.probe) !== JSON.stringify(["sh", "scripts/probe-work.sh", slug]))
+				fail(`${LAUNCH}: ${slug} probe does not name the repository probe and role`);
+			if (!runtimes || !exactKeys(runtimes, ["claude", "codex"])) {
+				fail(`${LAUNCH}: ${slug} must declare claude and codex runtimes`);
+				continue;
+			}
+			for (const runtime of ["claude", "codex"]) {
+				const config = object(runtimes[runtime]);
+				const extension = runtime === "claude" ? "md" : "toml";
+				const expectedAdapter = `.${runtime}/agents/${slug}.${extension}`;
+				const expectedSandbox = runtime === "claude"
+					? "runtime"
+					: slug === "implementer" ? "unsandboxed" : "workspace-write";
+				if (!config || !exactKeys(config, ["adapter", "sandbox"])) {
+					fail(`${LAUNCH}: ${slug} ${runtime} launch data is malformed`);
+					continue;
+				}
+				if (config.adapter !== expectedAdapter)
+					fail(`${LAUNCH}: ${slug} ${runtime} adapter is ${JSON.stringify(config.adapter)}, expected ${expectedAdapter}`);
+				if (config.sandbox !== expectedSandbox)
+					fail(`${LAUNCH}: ${slug} ${runtime} sandbox is ${JSON.stringify(config.sandbox)}, expected ${expectedSandbox}`);
+			}
+		}
+	}
+}
+
 for (const relative of [ISSUE_SHAPING, ...ISSUE_PREPARATION]) {
 	if (!existsSync(join(root, relative))) fail(`${relative}: missing provider-neutral issue-authoring file`);
 }
@@ -213,4 +274,4 @@ if (failures.length > 0) {
 	process.exit(1);
 }
 
-console.log(`check-agent-roles: ${SLUGS.length} roles and issue-authoring wiring, structure only.`);
+console.log(`check-agent-roles: ${SLUGS.length} roles, ${ENTRY_SLUGS.length} launch entries and issue-authoring wiring, structure only.`);

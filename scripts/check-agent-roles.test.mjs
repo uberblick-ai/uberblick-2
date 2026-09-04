@@ -30,6 +30,7 @@ function completeFixture() {
 	copyFileSync(join(here, "check-agent-roles.mjs"), join(fixture, "scripts/check-agent-roles.mjs"));
 	for (const relative of [".agents/roles", ".claude/agents", ".codex/agents"])
 		cpSync(join(root, relative), join(fixture, relative), { recursive: true });
+	copyFileSync(join(root, ".agents/launch.json"), join(fixture, ".agents/launch.json"));
 	for (const relative of [
 		".agents/protocols",
 		".agents/skills/shape-issue",
@@ -125,4 +126,30 @@ test("issue-authoring adapters point to the neutral protocol and its files exist
 	result = run(missingPreparationTest);
 	assert.equal(result.status, 1);
 	assert.match(result.stderr, /issue-preparation\.test\.mjs: missing provider-neutral issue-authoring file/);
+});
+
+test("launch data is complete and stays aligned with the role triplets", { skip: claudeSkip }, () => {
+	const missing = completeFixture();
+	rmSync(join(missing, ".agents/launch.json"));
+	let result = run(missing);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /launch\.json: missing repository launch data/);
+
+	const stale = completeFixture();
+	const path = join(stale, ".agents/launch.json");
+	const data = JSON.parse(readFileSync(path, "utf8"));
+	data.entryRoles.implementer.runtimes.codex.adapter = ".codex/agents/integrator.toml";
+	writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
+	result = run(stale);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /implementer codex adapter.*implementer\.toml/);
+
+	const wrongDefault = completeFixture();
+	const wrongPath = join(wrongDefault, ".agents/launch.json");
+	const wrongData = JSON.parse(readFileSync(wrongPath, "utf8"));
+	wrongData.entryRoles.implementer.defaultRuntime = "claude";
+	writeFileSync(wrongPath, `${JSON.stringify(wrongData, null, 2)}\n`);
+	result = run(wrongDefault);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /implementer defaultRuntime.*expected codex/);
 });

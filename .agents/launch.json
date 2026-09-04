@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "entryRoles": {
+    "issue-preparer": {
+      "contract": ".agents/roles/issue-preparer.md",
+      "defaultRuntime": "claude",
+      "probe": ["sh", "scripts/probe-work.sh", "issue-preparer"],
+      "runtimes": {
+        "claude": {
+          "adapter": ".claude/agents/issue-preparer.md",
+          "sandbox": "runtime"
+        },
+        "codex": {
+          "adapter": ".codex/agents/issue-preparer.toml",
+          "sandbox": "workspace-write"
+        }
+      }
+    },
+    "implementer": {
+      "contract": ".agents/roles/implementer.md",
+      "defaultRuntime": "codex",
+      "probe": ["sh", "scripts/probe-work.sh", "implementer"],
+      "runtimes": {
+        "claude": {
+          "adapter": ".claude/agents/implementer.md",
+          "sandbox": "runtime"
+        },
+        "codex": {
+          "adapter": ".codex/agents/implementer.toml",
+          "sandbox": "unsandboxed"
+        }
+      }
+    },
+    "integrator": {
+      "contract": ".agents/roles/integrator.md",
+      "defaultRuntime": "claude",
+      "probe": ["sh", "scripts/probe-work.sh", "integrator"],
+      "runtimes": {
+        "claude": {
+          "adapter": ".claude/agents/integrator.md",
+          "sandbox": "runtime"
+        },
+        "codex": {
+          "adapter": ".codex/agents/integrator.toml",
+          "sandbox": "workspace-write"
+        }
+      }
+    }
+  }
+}

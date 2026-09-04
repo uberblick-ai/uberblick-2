@@ -28,6 +28,7 @@ import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
 import { ENV_HELP } from "../src/env.js";
 import { INIT_HELP, INIT_OPTIONS } from "../src/init.js";
 import { INSTALL_HELP, INSTALL_OPTIONS } from "../src/install.js";
+import { LAUNCH_HELP, LAUNCH_OPTIONS } from "../src/launch.js";
 import { OPEN_HELP, OPEN_OPTIONS } from "../src/open.js";
 import {
   REMOTE_INIT_HELP,
@@ -102,6 +103,7 @@ const ROOT_PATH: Path = { argv: [], help: HELP, options: {} };
 const PATHS: Path[] = [
   ROOT_PATH,
   { argv: ["init"], help: INIT_HELP, options: INIT_OPTIONS },
+  { argv: ["launch"], help: LAUNCH_HELP, options: LAUNCH_OPTIONS },
   { argv: ["open"], help: OPEN_HELP, options: OPEN_OPTIONS },
   { argv: ["status"], help: STATUS_HELP, options: STATUS_OPTIONS },
   { argv: ["doctor"], help: DOCTOR_HELP, options: DOCTOR_OPTIONS },
@@ -334,6 +336,7 @@ describe("help before the work", () => {
   const inert: string[][] = [
     ["init", "--yes", "--help"],
     ["init", "--mcp", "--no-mcp", "--help"],
+    ["launch", "implementation-reviewer", "--help"],
     ["open", "--port", "0", "-h"],
     ["status", "--help"],
     ["doctor", "-h"],

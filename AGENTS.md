@@ -121,8 +121,8 @@ dispositions on the PR; merge authority comes from CLAUDE.md.
 ## Loop pacing
 
 A loop that repeatedly launches a continuous entry role (issue-preparer,
-implementer, integrator) — `ub launch`, or a `/loop /next-issue` session until
-it lands — paces relaunch by the session's own result, not a fixed interval. A
+implementer, integrator) through `ub launch` paces relaunch by the session's own
+result, not a fixed interval. A
 session that did work, or stopped on a recorded boundary, is followed by the
 next fresh session at once. A session that ended with the exact line
 `No eligible <role slug> work: <reason>.` is followed by an idle wait of about
