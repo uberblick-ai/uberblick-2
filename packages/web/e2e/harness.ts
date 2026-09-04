@@ -1,5 +1,5 @@
 /**
- * The e2e bootstrap: one real hub, one real dev server, both ephemeral.
+ * The e2e bootstrap: one real hub and the bundle served by one real `ub open`.
  *
  * Nothing here is a test double. The proof points these tests exist for —
  * convergence between two live clients, rendered remote cursors, an IndexedDB
@@ -8,20 +8,16 @@
  *
  * Two things are deliberate:
  *
- * - **Ephemeral ports, temp database.** The hub binds `port: 0` and writes to a
- *   temp SQLite file, the dev server binds `port: 0`; a `mise run dev` on 1234
- *   and 5173, or a second e2e run, cannot collide with this one. The hub's port
- *   is read back before the dev server starts, because the bundle needs it.
+ * - **Run-owned everything.** The hub binds `port: 0`; the bundle, database and
+ *   XDG homes live below one temporary directory; and `ub open` gets a freshly
+ *   selected web port. A bind race is retried, so another e2e run or
+ *   `mise run dev` cannot collide with this one.
  *
- * - **The bundle is configured the way `mise run web` configures it.**
- *   The dev server answers `/uberblick-config.json` from `process.env` — the
- *   endpoint, the workspaces and the signing secret (`dev-config-document.ts`,
- *   #426) — so setting those here before `createServer` is what points the
- *   browser at *this* hub with a token it accepts. fnox supplies the same
- *   variables in the real task; there is no committed `.env` and no second copy
- *   of that wiring. A deployed host serves the same document from Caddy, and
- *   the one spec that proves a *different* document wins fulfils the request in
- *   its own browser context (see deep-link.spec.ts).
+ * - **The production path.** Vite builds the checkout's current sources into
+ *   that private directory, then `ub open` serves them and its real
+ *   `/uberblick-config.json`. The harness writes the same configuration files
+ *   `ub init` writes and removes inherited configuration pins before spawning
+ *   it, so no developer machine state can steer the run.
  *
  * The hub is startable and stoppable on its own: the offline proof point needs
  * the hub gone while the browser stays up, and back on the same port and
@@ -29,7 +25,10 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,8 +36,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { createHub, silentLogger } from "@uberblick/hub";
 import type { Hub, HubConfig } from "@uberblick/hub";
-import { createServer } from "vite";
-import type { ViteDevServer } from "vite";
+import { build } from "vite";
 
 /**
  * The hub's HMAC signing secret for the run. Not a secret in any sense worth
@@ -46,33 +44,140 @@ import type { ViteDevServer } from "vite";
  */
 const SECRET = "uberblick-e2e-hub-secret";
 
-/**
- * The workspace for the run: a fresh uuid, decorated with a display slug.
- *
- * Fresh per run, so nothing shares a corpus with a previous one; decorated,
- * because the bundle's `WORKSPACE_ID` is what `/` redirects to, and a run
- * should exercise the spelling a person would actually configure.
- */
-const WORKSPACE_UUID = randomUUID();
-const WORKSPACE = `uberblick-${WORKSPACE_UUID}`;
-
-/**
- * A second workspace for the run, so the bundle has a list to switch between.
- *
- * Nothing creates it: a workspace is a uuid, and its rooms exist the moment
- * somebody opens one. That is the whole of "light multi-workspace" (#151), and
- * it is what makes an empty second workspace a real state rather than an error.
- */
-const SECOND_UUID = randomUUID();
-const SECOND = `ablauf-${SECOND_UUID}`;
-
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = resolve(packageRoot, "..", "..");
+const UB = join(repoRoot, "packages", "cli", "bin", "ub.mjs");
+
+const OPEN_ATTEMPTS = 5;
+const OPEN_READY_MS = 30_000;
+const OPEN_STOP_MS = 5_000;
+
+function freePort(): Promise<number> {
+  return new Promise((resolvePort, reject) => {
+    const server = createNetServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        server.close();
+        reject(new Error("e2e: the web port probe reported no TCP address"));
+        return;
+      }
+      server.close((error) => (error === undefined ? resolvePort(address.port) : reject(error)));
+    });
+  });
+}
+
+function exited(child: ChildProcessWithoutNullStreams): Promise<number | null> {
+  return new Promise((resolveExit) => child.once("exit", resolveExit));
+}
+
+async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exit = exited(child);
+  child.kill("SIGTERM");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stopped = await Promise.race([
+    exit.then(() => true),
+    new Promise<false>((resolveTimeout) => {
+      timer = setTimeout(() => resolveTimeout(false), OPEN_STOP_MS);
+    }),
+  ]);
+  if (timer !== undefined) clearTimeout(timer);
+  if (!stopped) {
+    child.kill("SIGKILL");
+    await exit;
+  }
+}
+
+function openEnvironment(runDir: string, bundleDir: string): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of ["HOME", "HUB_AUTH_TOKEN", "HUB_URL", "WORKSPACE_ID", "WORKSPACES"]) {
+    delete env[key];
+  }
+  env.HOME = runDir;
+  env.XDG_CONFIG_HOME = join(runDir, "config");
+  env.XDG_DATA_HOME = join(runDir, "data");
+  env.XDG_STATE_HOME = join(runDir, "state");
+  env.UBERBLICK_WEB_DIST = bundleDir;
+  env.BROWSER = "none";
+  return env;
+}
+
+async function startOpen(
+  runDir: string,
+  bundleDir: string,
+): Promise<{ child: ChildProcessWithoutNullStreams; appUrl: string }> {
+  for (let attempt = 1; attempt <= OPEN_ATTEMPTS; attempt += 1) {
+    const port = await freePort();
+    const child = spawn(process.execPath, [UB, "open", "--no-browser", "--port", String(port)], {
+      cwd: runDir,
+      env: openEnvironment(runDir, bundleDir),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      new Promise<"ready">((resolveReady) => {
+        const inspect = (): void => {
+          if (stdout.includes(`uberblick is at http://127.0.0.1:${port}/`)) resolveReady("ready");
+        };
+        child.stdout.on("data", inspect);
+        inspect();
+      }),
+      exited(child).then(() => "exit" as const),
+      new Promise<"timeout">((resolveTimeout) => {
+        timer = setTimeout(() => resolveTimeout("timeout"), OPEN_READY_MS);
+      }),
+    ]);
+    if (timer !== undefined) clearTimeout(timer);
+
+    if (outcome === "ready") {
+      return { child, appUrl: `http://127.0.0.1:${port}/` };
+    }
+    await stopChild(child);
+    if (outcome === "exit" && stderr.includes(`port ${port} is in use`) && attempt < OPEN_ATTEMPTS) {
+      continue;
+    }
+    throw new Error(
+      `e2e: ub open ${outcome === "timeout" ? "did not become ready" : "exited during startup"}` +
+        `\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+    );
+  }
+  throw new Error("e2e: ub open exhausted its web-port retries");
+}
+
+async function buildBundle(bundleDir: string, hubUrl: string, workspace: string): Promise<void> {
+  await build({
+    configFile: join(packageRoot, "vite.config.ts"),
+    root: packageRoot,
+    logLevel: "error",
+    // Override only the public fallbacks. The served document is authoritative,
+    // and passing them here keeps concurrent harness builds off process.env.
+    define: {
+      __HUB_URL__: JSON.stringify(hubUrl),
+      __WORKSPACE_ID__: JSON.stringify(workspace),
+      __WORKSPACES__: JSON.stringify(""),
+    },
+    build: { outDir: bundleDir, emptyOutDir: true },
+  });
+}
 
 export interface Harness {
-  /** Where the browser goes. The dev server's real, ephemeral address. */
+  /** Where the browser goes. This run's real `ub open` address. */
   readonly appUrl: string;
   /**
-   * This run's hub, as a client dials it. The dev server's own document already
+   * This run's hub, as a client dials it. `ub open`'s own document already
    * names it; a test that fulfils that request with a document of its own has
    * to name it there too, because that document supplies the endpoint and the
    * signing secret as well as the workspaces.
@@ -150,11 +255,19 @@ export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Pro
 }
 
 export async function startHarness(): Promise<Harness> {
-  const databaseDir = mkdtempSync(join(tmpdir(), "uberblick-e2e-"));
+  const runDir = mkdtempSync(join(tmpdir(), "uberblick-e2e-"));
+  const bundleDir = join(runDir, "bundle");
+  // Fresh and decorated per harness: room keys stay isolated, while `/`
+  // exercises the spelling a person would actually configure.
+  const workspaceUuid = randomUUID();
+  const workspace = `uberblick-${workspaceUuid}`;
+  // Nothing creates the second workspace: its rooms begin existing when the
+  // switcher proof opens them, which is the real light-multi-workspace model.
+  const secondWorkspace = `ablauf-${randomUUID()}`;
   const config: HubConfig = {
     authSecret: SECRET,
     port: 0,
-    databasePath: join(databaseDir, "hub.sqlite"),
+    databasePath: join(runDir, "hub.sqlite"),
     log: silentLogger,
     // Short: a test that stops the hub should not have to wait out a 2s
     // debounce to know its writes are durable.
@@ -164,7 +277,7 @@ export async function startHarness(): Promise<Harness> {
   };
 
   let hub: Hub | null = null;
-  let vite: ViteDevServer | null = null;
+  let open: ChildProcessWithoutNullStreams | null = null;
 
   // One failure boundary for the whole bootstrap, the temp directory included:
   // a harness that did not finish starting must leave nothing behind — no
@@ -177,29 +290,23 @@ export async function startHarness(): Promise<Harness> {
     const port = hub.port;
 
     const hubUrl = `ws://127.0.0.1:${port}`;
-    process.env.HUB_URL = hubUrl;
-    process.env.HUB_AUTH_TOKEN = SECRET;
-    // The one address that names no workspace, `/`, resolves through this — the
-    // same define `mise run web` supplies from mise `[env]`.
-    process.env.WORKSPACE_ID = WORKSPACE;
-    // The switcher's menu — plaintext config like HUB_URL, and the same define
-    // `mise run web` supplies. It lists places to go; the address still names
-    // the workspace.
-    process.env.WORKSPACES = `${WORKSPACE},${SECOND}`;
-
-    vite = await createServer({
-      configFile: join(packageRoot, "vite.config.ts"),
-      root: packageRoot,
-      server: { port: 0 },
-      logLevel: "warn",
+    const configDir = join(runDir, "config", "uberblick");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      `${JSON.stringify({ workspace, hubUrl }, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+    const credentials = join(configDir, "credentials.json");
+    writeFileSync(credentials, `${JSON.stringify({ signingSecret: SECRET }, null, 2)}\n`, {
+      mode: 0o600,
     });
-    await vite.listen();
+    chmodSync(credentials, 0o600);
 
-    const appUrl = vite.resolvedUrls?.local[0];
-    if (appUrl === undefined) {
-      throw new Error("e2e: the vite dev server reported no local URL");
-    }
-    const server = vite;
+    await buildBundle(bundleDir, hubUrl, workspace);
+    const serving = await startOpen(runDir, bundleDir);
+    open = serving.child;
+    const appUrl = serving.appUrl;
 
     const stopHub = async (): Promise<void> => {
       if (hub === null) return;
@@ -212,9 +319,9 @@ export async function startHarness(): Promise<Harness> {
       appUrl,
       hubUrl,
       authSecret: SECRET,
-      workspace: WORKSPACE,
-      workspaceUuid: WORKSPACE_UUID,
-      secondWorkspace: SECOND,
+      workspace,
+      workspaceUuid,
+      secondWorkspace,
       async startHub() {
         if (hub !== null) return;
         hub = await createHub({ ...config, port });
@@ -222,20 +329,22 @@ export async function startHarness(): Promise<Harness> {
       stopHub,
       async stop() {
         // Every step is best-effort and the temp directory goes last, in a
-        // `finally`: a hub or dev server that fails to shut down cleanly must
+        // `finally`: a hub or serving process that fails to shut down cleanly must
         // not leave a database behind as well.
         try {
+          const child = open;
+          open = null;
+          if (child !== null) await stopChild(child).catch(() => {});
           await stopHub().catch(() => {});
-          await server.close().catch(() => {});
         } finally {
-          rmSync(databaseDir, { recursive: true, force: true });
+          rmSync(runDir, { recursive: true, force: true });
         }
       },
     };
   } catch (error) {
-    await vite?.close().catch(() => {});
+    if (open !== null) await stopChild(open).catch(() => {});
     await hub?.stop().catch(() => {});
-    rmSync(databaseDir, { recursive: true, force: true });
+    rmSync(runDir, { recursive: true, force: true });
     throw error;
   }
 }

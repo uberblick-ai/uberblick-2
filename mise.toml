@@ -175,12 +175,12 @@ run = "node scripts/check-agent-roles.mjs"
 
 [tasks.e2e]
 description = "Run the browser end-to-end proof points (Playwright, Chromium only)"
-# The harness starts its own hub on an ephemeral port with its own throwaway
-# signing secret and a temp database, so nothing here needs the real one — and
-# nothing collides with a `mise run dev` on 1234/5173. It runs under the same
-# `fnox exec -- ub env --` wrapper as every other task all the same, so there is
-# one way a checkout task gets its environment; the harness sets its own
-# endpoint over it, which is test wiring rather than configuration (#283).
+# The harness builds the current checkout into private storage, starts its own
+# hub on an ephemeral port, and serves that bundle through a real `ub open`
+# under private XDG homes. Nothing needs the developer's configuration and no
+# socket or artifact collides with `mise run dev` or another e2e run. It still
+# runs under the same `fnox exec -- ub env --` wrapper as every other task; the
+# spawned `ub open` removes those inherited pins and reads the run's files.
 #
 # `playwright install` runs first because the browser is a download, not a
 # dependency pnpm can fetch: it is a no-op once the pinned Chromium is in the
