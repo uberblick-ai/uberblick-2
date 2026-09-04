@@ -20,6 +20,10 @@ export type EngineHealth =
   | { status: "healthy" }
   | { status: "quarantined"; room: string; message: string };
 
+export type EngineRefreshStatus =
+  | { status: "running" }
+  | { status: "failed"; message: string };
+
 export interface McpEngineOptions {
   /** Existing store to own and hand back; omitted opens `config.databasePath`. */
   store?: MirrorStore;
@@ -32,6 +36,8 @@ export interface UberblickMcpEngine {
   readonly replicas: Replicas;
   /** Sticky replica/log health, readable even after the engine quarantines. */
   readonly health: EngineHealth;
+  /** Whether the hub-free refresh loop is still progressing. */
+  readonly refreshStatus: EngineRefreshStatus;
   /**
    * Observe completed refreshes. The replica set already includes the tick's
    * log tail when the listener runs.
@@ -73,6 +79,7 @@ export async function createMcpEngine(
   const listeners = new Set<() => void>();
   let dirty = false;
   let lastDataVersion = store.dataVersion();
+  let refreshStatus: EngineRefreshStatus = { status: "running" };
   let closed = false;
   let stopped = false;
   let immediate: NodeJS.Immediate | null = null;
@@ -93,34 +100,36 @@ export async function createMcpEngine(
     immediate = null;
     if (closed || stopped) return;
 
-    const health = engineHealth(replicas);
-    if (health.status === "quarantined") {
-      stopLoop();
-      return;
-    }
-
-    const dataVersion = store.dataVersion();
-    const pendingCanAdvance =
-      replicas.sync.state().status === "connected" &&
-      store.pendingRooms().length > 0;
-    if (!dirty && dataVersion === lastDataVersion && !pendingCanAdvance) {
-      return;
-    }
-
-    // Clear before refreshing: an append made by the refresh itself re-arms the
-    // next pass instead of having its wake overwritten on return.
-    dirty = false;
-    lastDataVersion = dataVersion;
     try {
+      const health = engineHealth(replicas);
+      if (health.status === "quarantined") {
+        stopLoop();
+        return;
+      }
+
+      const dataVersion = store.dataVersion();
+      const pendingCanAdvance =
+        replicas.sync.state().status === "connected" &&
+        store.pendingRooms().length > 0;
+      if (!dirty && dataVersion === lastDataVersion && !pendingCanAdvance) {
+        return;
+      }
+
+      // Clear before refreshing: an append made by the refresh itself re-arms
+      // the next pass instead of having its wake overwritten on return.
+      dirty = false;
+      lastDataVersion = dataVersion;
       replicas.refresh();
     } catch (error) {
       if (engineHealth(replicas).status === "quarantined") {
         stopLoop();
         return;
       }
-      // A transient read or derived-index failure remains retryable. Nothing in
-      // the replica is ahead of its log, so keep the loop live and try again.
-      dirty = true;
+      refreshStatus = {
+        status: "failed",
+        message: error instanceof Error ? error.message : String(error),
+      };
+      stopLoop();
       log.warn("transport-free engine refresh failed", error);
       return;
     }
@@ -152,6 +161,9 @@ export async function createMcpEngine(
     replicas,
     get health() {
       return engineHealth(replicas);
+    },
+    get refreshStatus() {
+      return refreshStatus;
     },
     onRefresh(listener) {
       if (closed || stopped) return () => {};

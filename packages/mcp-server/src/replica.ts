@@ -1025,7 +1025,7 @@ export class Replicas {
       await inFlight;
       // Cheap and local: pick up anything logged while we were waiting.
       if (this.persistenceFailure === null) {
-        this.refresh({ requireHealthy });
+        this.refreshReplicas();
       }
       if (requireHealthy) {
         this.assertHealthy();
@@ -1058,20 +1058,15 @@ export class Replicas {
    * transport-free engine may call it on every refresh tick even while the hub
    * is unavailable.
    */
-  refresh(options: { requireHealthy?: boolean } = {}): void {
-    const requireHealthy = options.requireHealthy !== false;
-    if (requireHealthy) {
-      this.assertHealthy();
-    }
+  refresh(): void {
+    this.assertHealthy();
     if (this.destroyed || this.persistenceFailure !== null) {
       return;
     }
 
     this.refreshReplicas();
     if (this.persistenceFailure !== null) {
-      if (requireHealthy) {
-        this.assertHealthy();
-      }
+      this.assertHealthy();
       return;
     }
     this.releaseQuietRooms();

@@ -19,6 +19,7 @@ export type { McpConfig } from "./config.js";
 export { createMcpEngine } from "./engine.js";
 export type {
   EngineHealth,
+  EngineRefreshStatus,
   McpEngineOptions,
   UberblickMcpEngine,
 } from "./engine.js";
