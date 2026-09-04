@@ -109,6 +109,68 @@ function line(patch: Partial<RoomStatus>): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function updatedReading(
+  lastUpdated: number | undefined,
+  patch: Partial<RoomStatus> = {},
+): { text: string | null; dateTime: string | null; title: string | null } {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+    true;
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  act(() =>
+    root.render(
+      <StatusLine
+        connection={stubConnection(0, patch)}
+        presence={NOBODY}
+        docPresent
+        lastUpdated={lastUpdated}
+      />,
+    ),
+  );
+  const time = host.querySelector<HTMLTimeElement>(".ub-last-updated time");
+  const reading = {
+    text: host.querySelector(".ub-last-updated")?.textContent ?? null,
+    dateTime: time?.getAttribute("dateTime") ?? null,
+    title: time?.getAttribute("title") ?? null,
+  };
+  act(() => root.unmount());
+  host.remove();
+  return reading;
+}
+
+describe("the selected document's edit freshness", () => {
+  it("uses the shared semantic timestamp and omits unusable values", () => {
+    const stamp = Date.now() - 2 * 60 * 60_000;
+    const reading = updatedReading(stamp);
+    expect(reading.text?.replace(/\s+/g, " ").trim()).toBe(
+      "· last updated 2 hours ago",
+    );
+    expect(reading.dateTime).toBe(new Date(stamp).toISOString());
+    expect(reading.title).not.toBeNull();
+
+    for (const unusable of [undefined, Number.NaN, Infinity, Number.MAX_VALUE]) {
+      expect(updatedReading(unusable)).toEqual({
+        text: null,
+        dateTime: null,
+        title: null,
+      });
+    }
+  });
+
+  it("stays beside syncing, synced, offline, and refusal readings", () => {
+    const stamp = Date.now();
+    for (const status of [
+      { connected: true, synced: false },
+      { connected: true, synced: true },
+      { connected: false, synced: false },
+      { authFailed: true },
+    ]) {
+      expect(updatedReading(stamp, status).text).toContain("last updated just now");
+    }
+  });
+});
+
 describe("a hub that refuses this page", () => {
   it("says an update is needed, and which side needs it", () => {
     // A reading of its own, not a fourth sync state: the other three describe a

@@ -30,6 +30,7 @@ import {
   useCalmSyncState,
 } from "./calm.js";
 import { statusReading } from "./status-reading.js";
+import { formatTimestamp, useTimestampClock } from "./timestamps.js";
 import { BlockMenu } from "./BlockMenu.js";
 import { MentionMenu } from "./MentionMenu.js";
 import {
@@ -133,6 +134,7 @@ export function StatusLine({
   connection,
   presence,
   docPresent,
+  lastUpdated,
   endpoint = null,
   syncOpen = false,
   onToggleSync,
@@ -155,6 +157,8 @@ export function StatusLine({
    * copy is not a fact this client has — see {@link localCopyState}.
    */
   docPresent: boolean;
+  /** The selected directory stub's edit-freshness hint, not a sync state. */
+  lastUpdated?: number | undefined;
   /** The hub this reading describes, null while configuration is resolving. */
   endpoint?: HubEndpoint | null;
   /** The reading is the details-panel trigger when this callback is present. */
@@ -237,12 +241,28 @@ export function StatusLine({
         {word}
       </button>
     );
+  const now = useTimestampClock();
+  const formattedUpdatedAt =
+    lastUpdated === undefined ? null : formatTimestamp(lastUpdated, now);
+  const updatedReading =
+    formattedUpdatedAt === null ? null : (
+      <span className="ub-last-updated">
+        <span aria-hidden="true">·</span> last updated{" "}
+        <time
+          dateTime={formattedUpdatedAt.dateTime}
+          title={formattedUpdatedAt.title}
+        >
+          {formattedUpdatedAt.label}
+        </time>
+      </span>
+    );
 
   // A refusal replaces the rest of the line rather than decorating it: the
   // backlog and peer strip are about a connection that is working or returning.
   return (
     <div className="ub-status">
       {syncReading}
+      {updatedReading}
       {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
       {!blank && copyNote}
       {!blank &&
@@ -613,6 +633,7 @@ export function EditorPane({
   author,
   knownTags,
   archived,
+  updatedAt,
   pinned = false,
   onTogglePin = null,
   onArchive = null,
@@ -646,6 +667,8 @@ export function EditorPane({
    * the value changes under an open pane when anyone archives or restores.
    */
   archived: boolean;
+  /** The selected directory stub's edit-freshness hint. */
+  updatedAt?: number | undefined;
   pinned?: boolean;
   onTogglePin?: (() => void) | null;
   onArchive?: (() => void) | null;
@@ -760,6 +783,7 @@ export function EditorPane({
           connection={connection}
           presence={presence}
           docPresent
+          lastUpdated={updatedAt}
           endpoint={endpoint}
           syncOpen={syncOpen}
           onToggleSync={onToggleSync}

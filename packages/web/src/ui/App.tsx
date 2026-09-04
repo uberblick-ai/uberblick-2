@@ -97,6 +97,7 @@ export function RoutePane({
   author,
   knownTags,
   archived,
+  updatedAt,
   docLinks,
   pinned = false,
   onTogglePin = null,
@@ -148,6 +149,8 @@ export function RoutePane({
   knownTags: readonly string[];
   /** Whether the directory tombstones this document — see `useArchived`. */
   archived: boolean;
+  /** The selected directory stub's edit-freshness hint, when it has one. */
+  updatedAt?: number | undefined;
   /** What an inline document reference resolves against — see {@link EditorPane}. */
   docLinks: DocLinkContext | null;
   /** Sidebar curation and lifecycle actions for the live document. */
@@ -266,6 +269,7 @@ export function RoutePane({
       author={author}
       knownTags={knownTags}
       archived={archived}
+      updatedAt={updatedAt}
       docLinks={docLinks}
       pinned={pinned}
       onTogglePin={onTogglePin}
@@ -461,7 +465,9 @@ export function App(): ReactElement {
   const archived = useArchived(directory, selected);
   const restoreFocusRoom = useRef<string | null>(null);
   const archiveConfirmationFocusRoom = useRef<string | null>(null);
-  const liveDirectoryEntry =
+  // `entries` is the live directory observer, while this exact lookup keeps the
+  // selected tombstone available after archiving removes it from that listing.
+  const selectedDirectoryEntry =
     directory === null || selected === null
       ? undefined
       : getDirectoryEntry(directory.ydoc, selected);
@@ -788,13 +794,14 @@ export function App(): ReactElement {
             author={identity.name}
             knownTags={knownTags}
             archived={archived}
+            updatedAt={selectedDirectoryEntry?.updatedAt}
             docLinks={docLinks}
             pinned={pinned}
             onTogglePin={sidebar !== null && selected !== null ? onTogglePin : null}
             onArchive={
-              liveDirectoryEntry !== null &&
-              liveDirectoryEntry !== undefined &&
-              liveDirectoryEntry.deleted !== true
+              selectedDirectoryEntry !== null &&
+              selectedDirectoryEntry !== undefined &&
+              selectedDirectoryEntry.deleted !== true
                 ? onArchive
                 : null
             }
