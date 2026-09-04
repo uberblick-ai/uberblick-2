@@ -108,7 +108,9 @@ import {
 import {
   DEFAULT_HUB_URL,
   ServingReplicaHeldError,
+  collectServingSyncStatus,
   createMcpEngine,
+  type ServingSyncStatus,
   type UberblickMcpEngine,
 } from "@uberblick/mcp-server";
 import { budget, resolveMcpConfig } from "./budget.js";
@@ -858,10 +860,12 @@ function respond(
 
 const API_PREFIX = "/api/";
 const SEARCH_PATH = "/api/search";
+const STATUS_PATH = "/api/status";
 const SEARCH_LIMIT = 100;
 const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
 type ApiAuthenticator = (authMessage: string) => Promise<boolean>;
+type ApiStatus = () => ServingSyncStatus;
 
 async function createApiAuthenticator(
   authSecret: string,
@@ -889,7 +893,7 @@ function apiResponse(
   request: IncomingMessage,
   response: ServerResponse,
   status: number,
-  body: Record<string, unknown>,
+  body: object,
   headers: Record<string, string> = {},
 ): void {
   respond(
@@ -920,6 +924,7 @@ async function serveApiRequest(
   target: URL,
   authenticate: ApiAuthenticator,
   engine: UberblickMcpEngine,
+  status: ApiStatus,
 ): Promise<void> {
   const queriedToken = TOKEN_QUERY_PARAMS.some((name) =>
     target.searchParams.has(name),
@@ -942,6 +947,10 @@ async function serveApiRequest(
       { error: "method_not_allowed" },
       { allow: "GET" },
     );
+    return;
+  }
+  if (target.pathname === STATUS_PATH) {
+    apiResponse(request, response, 200, status());
     return;
   }
   if (target.pathname !== SEARCH_PATH) {
@@ -979,6 +988,7 @@ function serveBoundRequest(
   document: () => string,
   authenticate: ApiAuthenticator,
   engine: UberblickMcpEngine,
+  status: ApiStatus,
   request: IncomingMessage,
   response: ServerResponse,
 ): void {
@@ -987,13 +997,18 @@ function serveBoundRequest(
     serveBundleRequest(root, document, request, response);
     return;
   }
-  void serveApiRequest(request, response, target, authenticate, engine).catch(
-    () => {
-      if (!response.headersSent) {
-        apiResponse(request, response, 500, { error: "internal_error" });
-      }
-    },
-  );
+  void serveApiRequest(
+    request,
+    response,
+    target,
+    authenticate,
+    engine,
+    status,
+  ).catch(() => {
+    if (!response.headersSent) {
+      apiResponse(request, response, 500, { error: "internal_error" });
+    }
+  });
 }
 
 function serveBundleRequest(
@@ -1573,12 +1588,36 @@ export async function openCommand(
         initial.resolved,
         localHubUrl,
       );
-      const localServer = await createLocalBrowserServer({
+      const observedServedRooms = new Set<string>();
+      let collectingServedRooms: Set<string> | null = null;
+      let localServer: LocalBrowserServer | null = null;
+      const status = (): ServingSyncStatus => {
+        if (localServer !== null) {
+          const current = new Set<string>();
+          collectingServedRooms = current;
+          try {
+            // `refresh` synchronously walks the Hocuspocus document map. The
+            // read callback below therefore gives this endpoint exactly the
+            // rooms the in-process server currently has loaded, including the
+            // directory and sidebar rooms.
+            localServer.refresh();
+          } finally {
+            collectingServedRooms = null;
+          }
+          observedServedRooms.clear();
+          for (const room of current) observedServedRooms.add(room);
+        }
+        return collectServingSyncStatus(engine, observedServedRooms);
+      };
+      localServer = await createLocalBrowserServer({
         port: options.port,
         workspaceId: mcpConfig.workspaceId,
         authSecret: mcpConfig.authSecret,
         expectedOrigin: `http://${WEB_HOST}:${options.port}`,
-        readRoom: (room, afterSeq) => engine.store.readSince(room, afterSeq),
+        readRoom: (room, afterSeq) => {
+          (collectingServedRooms ?? observedServedRooms).add(room);
+          return engine.store.readSince(room, afterSeq);
+        },
         appendUpdate: (room, payload) => {
           const health = engine.health;
           if (health.status === "quarantined") {
@@ -1604,6 +1643,7 @@ export async function openCommand(
             document,
             authenticateApi,
             engine,
+            status,
             request,
             response,
           );

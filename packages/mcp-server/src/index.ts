@@ -45,7 +45,12 @@ export type { SeedDoc, SeedImport, StarterSeed } from "./seed.js";
 export { createMcpServer } from "./server.js";
 export type { UberblickMcpServer } from "./server.js";
 export type { HubState, HubStatus } from "./sync.js";
-export { collectSyncStatus } from "./status.js";
-export type { RoomSyncStatus, SyncStatus } from "./status.js";
+export { collectServingSyncStatus, collectSyncStatus } from "./status.js";
+export type {
+  RoomSyncStatus,
+  ServedRoomSyncStatus,
+  ServingSyncStatus,
+  SyncStatus,
+} from "./status.js";
 export { log, logAt } from "./log.js";
 export type { LogLevel } from "./log.js";
