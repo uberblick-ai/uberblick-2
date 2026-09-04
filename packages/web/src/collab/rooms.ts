@@ -120,6 +120,9 @@ export function forcedDropCooldownMs(random: () => number = Math.random): number
  */
 let protocolMismatch: { hub: number; client: number } | null = null;
 
+/** Rooms the store refused remain closed until this page is reloaded. */
+const storeRefusedRooms = new Set<string>();
+
 let lastForcedDrop = 0;
 /**
  * The window the last drop opened. Only read after a drop has set it — the
@@ -134,6 +137,12 @@ let forcedDropWindowMs: number = FORCED_DROP_COOLDOWN.maxMs;
  * while a legitimately empty room that has synced does.
  */
 const LOCAL_COPY_CHECKPOINT = "uberblick:local-copy-confirmed";
+
+/**
+ * The store's terminal refusal. `uberblick:store-busy` is deliberately an
+ * ordinary drop so the existing reconnect backoff handles it.
+ */
+const STORE_REFUSED_REASON = "uberblick:store-refused";
 
 /** A drop asked for during the cooldown, waiting for the window to end. */
 let pendingDrop: ReturnType<typeof setTimeout> | null = null;
@@ -170,6 +179,7 @@ function haltForProtocolMismatch(hub: number): void {
     // `refresh` keeps them settled when the close finally arrives.
     status.connected = false;
     status.synced = false;
+    status.writable = false;
     for (const listener of entry.listeners) {
       listener({ ...status });
     }
@@ -270,6 +280,7 @@ function setTokenMissing(missing: boolean): void {
   for (const entry of entries.values()) {
     const status = entry.connection.status;
     status.tokenMissing = missing;
+    if (missing) status.writable = false;
     for (const listener of entry.listeners) {
       listener({ ...status });
     }
@@ -330,6 +341,16 @@ async function hubToken(room: string, identity: AwarenessUser): Promise<string> 
 export interface RoomStatus {
   connected: boolean;
   synced: boolean;
+  /**
+   * True only after this room's live connection has admitted the client.
+   * Authentication is the observable admission boundary, not a per-write
+   * acknowledgement: during #402's rare same-tick re-acquire race, the
+   * accepted in-flight loss window widens until the room repairs itself if the
+   * tab also dies before then.
+   */
+  writable: boolean;
+  /** The local store refused this room; terminal until a page reload. */
+  storeRefused: boolean;
   /**
    * Provider sync messages awaiting the hub's acknowledgement. Messages, not
    * updates: a batch merges into one message, and a reconnect resets the
@@ -443,7 +464,8 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // provider to the socket and sends its token, and there is nothing to send an
   // envelope this hub will not read. The room still opens — its local replica
   // loads and the status line says why it is not syncing.
-  if (protocolMismatch === null) {
+  const storeRefused = storeRefusedRooms.has(room);
+  if (protocolMismatch === null && !storeRefused) {
     provider.attach();
   }
 
@@ -474,8 +496,13 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // fires on socket transitions, and the socket is not transitioning — so a
   // second room would read "offline" forever.
   const status: RoomStatus = {
-    connected: protocolMismatch === null && socket.status === WebSocketStatus.Connected,
-    synced: protocolMismatch === null && provider.isSynced,
+    connected:
+      protocolMismatch === null &&
+      !storeRefused &&
+      socket.status === WebSocketStatus.Connected,
+    synced: protocolMismatch === null && !storeRefused && provider.isSynced,
+    writable: false,
+    storeRefused,
     unsyncedChanges: provider.unsyncedChanges,
     localReplicaLoaded: false,
     hasLocalCache: false,
@@ -503,8 +530,16 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     // arrives after `haltForProtocolMismatch` has already settled them, and a
     // provider still reporting the sync it had before it was refused.
     const halted = protocolMismatch !== null;
-    status.connected = !halted && socket.status === WebSocketStatus.Connected;
-    status.synced = !halted && provider.isSynced;
+    status.connected =
+      !halted &&
+      !status.storeRefused &&
+      socket.status === WebSocketStatus.Connected;
+    status.synced = !halted && !status.storeRefused && provider.isSynced;
+    status.writable =
+      status.connected &&
+      provider.isAuthenticated &&
+      !status.storeRefused &&
+      !status.tokenMissing;
     status.unsyncedChanges = provider.unsyncedChanges;
     emit();
   };
@@ -518,11 +553,12 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
       return;
     }
     status.authFailed = true;
+    status.writable = false;
     emit();
   });
   provider.on("authenticated", () => {
     status.authFailed = false;
-    emit();
+    refresh();
   });
 
   provider.on("status", refresh);
@@ -540,7 +576,20 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     // `provider_initiated` is the hub echoing back a close *we* asked for by
     // detaching (switching documents, a StrictMode remount). Re-joining after
     // that works by itself, so dropping the socket there would be pure churn.
-    if (event?.event?.reason === "provider_initiated") return;
+    const reason = event?.event?.reason;
+    if (reason === "provider_initiated") return;
+    if (reason === STORE_REFUSED_REASON) {
+      storeRefusedRooms.add(room);
+      status.storeRefused = true;
+      status.connected = false;
+      status.synced = false;
+      status.writable = false;
+      emit();
+      // Refusal is room-local. Detach this provider without disrupting the
+      // shared socket, so other rooms remain live and this one cannot rejoin.
+      provider.detach();
+      return;
+    }
     dropSocket();
   });
 

@@ -324,6 +324,7 @@ export function ThreadsPane({
       onReplyOpen={() => setReplyTo(thread.id)}
       onReplyClose={() => setReplyTo(null)}
       onReply={(text) => {
+        if (!connection.status.writable) return false;
         // Read the thread as the document has it *now*, not as this card was
         // rendered: between the two, another client may have resolved it or
         // deleted it, and neither should quietly take a reply.
@@ -346,6 +347,7 @@ export function ThreadsPane({
         return true;
       }}
       onResolve={(next) => {
+        if (!connection.status.writable) return;
         setAnnotationResolved(ydoc, thread.id, next);
         setReplyTo((current) => (current === thread.id ? null : current));
         setExpanded(null);

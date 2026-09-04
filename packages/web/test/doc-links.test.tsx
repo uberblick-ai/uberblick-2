@@ -34,6 +34,7 @@ import {
   appendBlock,
   getBlocks,
   getBlocksFragment,
+  getMeta,
   initDoc,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
@@ -384,9 +385,11 @@ describe("what a reference says about its target", () => {
   });
 });
 
-const OFFLINE: RoomStatus = {
-  connected: false,
-  synced: false,
+const LIVE: RoomStatus = {
+  connected: true,
+  synced: true,
+  writable: true,
+  storeRefused: false,
   unsyncedChanges: 0,
   localReplicaLoaded: false,
   hasLocalCache: false,
@@ -395,19 +398,72 @@ const OFFLINE: RoomStatus = {
   tokenMissing: false,
 };
 
-function connectionFor(ydoc: Y.Doc): RoomConnection {
+function connectionFor(
+  ydoc: Y.Doc,
+  status: RoomStatus = LIVE,
+): RoomConnection {
   return {
     room: `${WORKSPACE}/${DOC}`,
     ydoc,
     provider: { awareness: null },
-    status: OFFLINE,
+    status,
     onStatusChange: (listener: (next: RoomStatus) => void) => {
-      listener(OFFLINE);
+      listener(status);
       return () => {};
     },
     whenLocalReplicaLoaded: Promise.resolve(),
   } as unknown as RoomConnection;
 }
+
+describe("an unwritable document room", () => {
+  it("keeps every document-local editor surface read-only and says not saved", async () => {
+    const ydoc = emptyDoc();
+    const connection = connectionFor(ydoc, {
+      ...LIVE,
+      connected: false,
+      synced: false,
+      writable: false,
+    });
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+    try {
+      await act(async () => {
+        root.render(
+          <EditorPane
+            connection={connection}
+            segment={WORKSPACE}
+            presence={[]}
+            author="tester"
+            knownTags={[]}
+            archived={false}
+            docLinks={null}
+            onRestore={() => {}}
+            onSelectThread={() => {}}
+          />,
+        );
+      });
+      const title = host.querySelector<HTMLInputElement>(".ub-title");
+      expect(title?.readOnly).toBe(true);
+      expect(host.querySelector(".ub-tag-add")).toBeNull();
+      expect(host.querySelector(".ub-editor [contenteditable=true]")).toBeNull();
+      expect(host.querySelector(".ub-status")?.textContent).toContain("not saved");
+
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(title, "Browser only");
+      act(() => title?.dispatchEvent(new Event("input", { bubbles: true })));
+      expect(getMeta(ydoc).title).toBe("References");
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+});
 
 describe("following a reference", () => {
   /**

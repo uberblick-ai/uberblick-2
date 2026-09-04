@@ -383,6 +383,8 @@ function openingConnection(room: string): {
   const status: RoomStatus = {
     connected: false,
     synced: false,
+    writable: true,
+    storeRefused: false,
     unsyncedChanges: 0,
     localReplicaLoaded: false,
     hasLocalCache: false,
@@ -501,6 +503,8 @@ function stubConnection(room: string): RoomConnection {
   const status: RoomStatus = {
     connected: false,
     synced: false,
+    writable: true,
+    storeRefused: false,
     unsyncedChanges: 0,
     localReplicaLoaded: true,
     hasLocalCache: false,

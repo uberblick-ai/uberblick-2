@@ -68,7 +68,7 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
 
 /**
  * Bring one document's stub in line with the document, stamping it when
- * `changed` says this replica is the author of what it is reacting to.
+ * `changedAt` says when this replica authored what it is reacting to.
  *
  * Writes nothing when there is nothing to say: an unchanged stub inside its
  * window costs the workspace no directory update at all. A tombstone is left
@@ -76,13 +76,12 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
  * observed update would churn the directory to no end, and un-archiving is
  * `restoreDirectoryEntry`'s business.
  */
-function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changed: boolean): void {
+function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changedAt: number | null): void {
   const meta = getMeta(docDoc);
   if (meta.uuid === "") return;
   const stub = getDirectoryEntry(dirDoc, meta.uuid);
   if (stub?.deleted === true) return;
 
-  const now = Date.now();
   const metaChanged =
     stub === null ||
     stub.title !== meta.title ||
@@ -91,8 +90,9 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changed: boolean): void {
     !sameSet(stub.tags, meta.tags);
   const staleStamp =
     stub?.updatedAt === undefined ||
-    now - stub.updatedAt >= UPDATED_AT_COARSENESS_MS;
-  const stamp = changed && (metaChanged || staleStamp);
+    (changedAt !== null &&
+      changedAt - stub.updatedAt >= UPDATED_AT_COARSENESS_MS);
+  const stamp = changedAt !== null && (metaChanged || staleStamp);
   if (!metaChanged && !stamp) return;
 
   upsertDirectoryEntry(dirDoc, {
@@ -106,7 +106,7 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changed: boolean): void {
     description: meta.description ?? "",
     kind: meta.kind ?? "",
     status: meta.status ?? "",
-    ...(stamp ? { updatedAt: now } : {}),
+    ...(stamp ? { updatedAt: changedAt } : {}),
   });
 }
 
@@ -117,14 +117,34 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changed: boolean): void {
  * Repairs once up front, for the case where the document is already hydrated
  * when this attaches, and then on every update the document takes.
  */
-export function watchDocumentStub(docDoc: Y.Doc, dirDoc: Y.Doc): () => void {
+export interface StubWriteGate {
+  writable(): boolean;
+  subscribe(listener: () => void): () => void;
+}
+
+export function watchDocumentStub(
+  docDoc: Y.Doc,
+  dirDoc: Y.Doc,
+  gate?: StubWriteGate,
+): () => void {
+  let pendingChangedAt: number | null = null;
+  const attempt = (changed: boolean): void => {
+    if (changed) pendingChangedAt = Date.now();
+    if (gate !== undefined && !gate.writable()) return;
+    repairStub(docDoc, dirDoc, pendingChangedAt);
+    pendingChangedAt = null;
+  };
   const onUpdate = (
     _update: Uint8Array,
     _origin: unknown,
     _doc: Y.Doc,
     transaction: Y.Transaction,
-  ): void => repairStub(docDoc, dirDoc, transaction.local);
-  repairStub(docDoc, dirDoc, false);
+  ): void => attempt(transaction.local);
+  attempt(false);
   docDoc.on("update", onUpdate);
-  return () => docDoc.off("update", onUpdate);
+  const stopGate = gate?.subscribe(() => attempt(false));
+  return () => {
+    docDoc.off("update", onUpdate);
+    stopGate?.();
+  };
 }

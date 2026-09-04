@@ -86,7 +86,7 @@ function ArchivedBanner({
   focusRestore,
   onRestoreFocused,
 }: {
-  onRestore: () => void;
+  onRestore: (() => void) | null;
   focusRestore: boolean;
   onRestoreFocused?: (() => void) | undefined;
 }): ReactElement {
@@ -101,8 +101,19 @@ function ArchivedBanner({
       <strong>Archived.</strong> This document is tombstoned in the directory:
       it is read-only here and hidden from the document list. Restore it to edit
       it again.
-      <button ref={restore} type="button" className="ub-tool" onClick={onRestore}>
-        Restore
+      <button
+        ref={restore}
+        type="button"
+        className="ub-tool"
+        disabled={onRestore === null}
+        title={
+          onRestore === null
+            ? "Restore unavailable while the directory is offline"
+            : undefined
+        }
+        onClick={() => onRestore?.()}
+      >
+        {onRestore === null ? "Restore unavailable" : "Restore"}
       </button>
     </p>
   );
@@ -185,6 +196,10 @@ export function StatusLine({
         {localCopy ? "local copy" : "no local copy"}
       </span>
     );
+  const saveNote =
+    !status.writable && reading.detail === null ? (
+      <span className="ub-muted ub-not-saved">not saved</span>
+    ) : null;
   // Presence is independent of the connection's settled status word. Keep the
   // current room's roster in its ordinary slot while that word is blank; the
   // directory's roster is already excluded by App's room pairing (#606).
@@ -261,6 +276,7 @@ export function StatusLine({
     <div className="ub-status">
       {syncReading}
       {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
+      {!blank && saveNote}
       {!blank && updatedReading}
       {!blank && copyNote}
       {!blank &&
@@ -301,24 +317,26 @@ export function StatusLine({
 function LinkConflictRepair({
   connection,
   archived,
+  writable,
   docLinks,
 }: {
   connection: RoomConnection;
   archived: boolean;
+  writable: boolean;
   docLinks: DocLinkContext | null;
 }): ReactElement | null {
   const { conflicts, refresh } = useLinkConflicts(connection);
   const repair = (conflict: LinkConflict, keep: LinkSurvivor): void => {
     // Guarded here as well as by the absent control below: an archived document
     // takes no write from this pane, and the rule belongs where the write is.
-    if (archived) return;
+    if (archived || !connection.status.writable) return;
     repairLinkConflict(conflict, keep);
     // Unconditional: a repair changes the list, and a refusal means live state
     // has already moved on without this render hearing about it yet.
     refresh();
   };
   // An archived document's one action is Restore — the banner above says so.
-  if (archived || conflicts.length === 0) return null;
+  if (archived || !writable || conflicts.length === 0) return null;
   const name = (docId: string): string => docLinks?.lookup(docId).title ?? docId;
   return (
     <div className="ub-link-repair">
@@ -371,11 +389,13 @@ function ForeignFallback({
   connection,
   summary,
   archived,
+  writable,
   docLinks,
 }: {
   connection: RoomConnection;
   summary: string;
   archived: boolean;
+  writable: boolean;
   docLinks: DocLinkContext | null;
 }): ReactElement {
   const blocks = useRawBlocks(connection);
@@ -387,6 +407,7 @@ function ForeignFallback({
       <LinkConflictRepair
         connection={connection}
         archived={archived}
+        writable={writable}
         docLinks={docLinks}
       />
       <ol className="ub-foreign-list">
@@ -411,7 +432,13 @@ function ForeignFallback({
  * dropping this field would leave a human no way to set it at all, so it stays,
  * shown only while it applies.
  */
-function CodeLanguageField({ editor }: { editor: Editor }): ReactElement | null {
+function CodeLanguageField({
+  editor,
+  canWrite,
+}: {
+  editor: Editor;
+  canWrite: () => boolean;
+}): ReactElement | null {
   const [, tick] = useState(0);
   useEffect(() => {
     const bump = (): void => tick((n) => n + 1);
@@ -433,9 +460,10 @@ function CodeLanguageField({ editor }: { editor: Editor }): ReactElement | null 
         value={
           typeof current.attrs.language === "string" ? current.attrs.language : ""
         }
-        onChange={(event) =>
-          retypeSelectedBlock(editor, "code", { language: event.target.value })
-        }
+        onChange={(event) => {
+          if (!canWrite()) return;
+          retypeSelectedBlock(editor, "code", { language: event.target.value });
+        }}
       />
     </div>
   );
@@ -459,6 +487,7 @@ function BoundEditor({
   const host = useRef<HTMLDivElement | null>(null);
   const frame = useRef<HTMLDivElement | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const { writable } = useRoomStatus(connection);
   // The only names anyone can mention are the peers publishing awareness right
   // now — there is no registry, and a mention is plain text.
   const peers = usePeers(connection);
@@ -483,7 +512,8 @@ function BoundEditor({
       element,
       fragment: getBlocksFragment(connection.ydoc),
       awareness: connection.provider.awareness,
-      editable: !archivedNow.current,
+      editable: !archivedNow.current && connection.status.writable,
+      canWrite: () => connection.status.writable,
       docLinks,
     });
     // A comment highlight is a plain span ProseMirror renders from the `comment`
@@ -583,12 +613,22 @@ function BoundEditor({
    */
   useLayoutEffect(() => {
     if (editor === null || editor.isDestroyed) return;
-    editor.setEditable(!archived);
-  }, [editor, archived]);
+    editor.setEditable(!archived && writable);
+    if (!archived && writable) {
+      // A repair suppressed while the link was gone gets another plugin pass
+      // as soon as the admitted room is writable again.
+      editor.view.dispatch(editor.state.tr.setMeta("uberblick:writable", true));
+    }
+  }, [editor, archived, writable]);
 
   return (
     <>
-      {editor !== null && !archived && <CodeLanguageField editor={editor} />}
+      {editor !== null && !archived && writable && (
+        <CodeLanguageField
+          editor={editor}
+          canWrite={() => connection.status.writable}
+        />
+      )}
       {/* The composer and the block menu are positioned against this frame, not
           against the editor itself: ProseMirror owns every child of
           `.ub-editor`. */}
@@ -597,8 +637,10 @@ function BoundEditor({
         {/* Both are ways of writing to the document, so an archived document
             offers neither: the insertion menu and the comment composer are
             gone, not merely inert. */}
-        {editor !== null && !archived && <BlockMenu editor={editor} host={frame} />}
-        {editor !== null && !archived && (
+        {editor !== null && !archived && writable && (
+          <BlockMenu editor={editor} host={frame} />
+        )}
+        {editor !== null && !archived && writable && (
           <MentionMenu
             editor={editor}
             host={frame}
@@ -609,7 +651,7 @@ function BoundEditor({
             openDocId={parseRoom(connection.room).uuid}
           />
         )}
-        {editor !== null && !archived && (
+        {editor !== null && !archived && writable && (
           <CommentComposer
             editor={editor}
             ydoc={connection.ydoc}
@@ -682,7 +724,7 @@ export function EditorPane({
    */
   docLinks: DocLinkContext | null;
   /** Lift the tombstone. */
-  onRestore: () => void;
+  onRestore: (() => void) | null;
   /**
    * Called when a click lands inside a comment highlight, so the rail can focus
    * that thread. Must be referentially stable — it is an effect dependency.
@@ -712,6 +754,7 @@ export function EditorPane({
   }, []);
   const meta = useDocMeta(connection);
   const foreign = useForeignBlocks(connection);
+  const { writable } = useRoomStatus(connection);
   const openThreads = threads.filter((thread) => !thread.resolved).length;
 
   if (connection === null) {
@@ -753,6 +796,7 @@ export function EditorPane({
           meta={meta}
           knownTags={knownTags}
           archived={archived}
+          readOnly={!writable}
           pinned={pinned}
           onTogglePin={onTogglePin}
           onArchive={onArchive}
@@ -764,14 +808,14 @@ export function EditorPane({
           placeholder="Untitled"
           // `readOnly`, not `disabled`: the title is still the document's name
           // and still worth selecting and copying — it just cannot be retyped.
-          readOnly={archived}
+          readOnly={archived || !writable}
           // And the write is guarded as well as the field. `readOnly` is a
           // statement to the browser about typing; the rule is that an archived
           // document takes no write from here, and a rule worth having is worth
           // enforcing where the write happens rather than trusting the one
           // attribute that happens to sit in front of it today.
           onChange={(event) => {
-            if (archived) return;
+            if (archived || !connection.status.writable) return;
             setTitle(connection.ydoc, event.target.value);
           }}
         />
@@ -792,6 +836,7 @@ export function EditorPane({
             connection={connection}
             summary={describeForeignBlocks(foreign, { repairable: !archived })}
             archived={archived}
+            writable={writable}
             docLinks={docLinks}
           />
         ) : (

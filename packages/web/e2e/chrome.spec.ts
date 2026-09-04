@@ -386,7 +386,7 @@ for (const scheme of ["light", "dark"] as const) {
     browser,
   }) => {
     const page = await openApp(browser, scheme, "not-a-workspace");
-    const create = page.getByRole("button", { name: "+ new doc" });
+    const create = page.getByRole("button", { name: "new doc unavailable" });
     await expect(create).toBeDisabled();
 
     const disabled = await paintedIn(create, "background-color");

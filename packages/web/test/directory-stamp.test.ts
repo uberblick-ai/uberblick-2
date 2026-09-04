@@ -120,6 +120,39 @@ afterEach(() => {
 });
 
 describe("directory stamps from the web", () => {
+  it("defers stub repair and its authored stamp until the directory is writable", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Before" });
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, {
+      uuid: UUID,
+      title: "Stale",
+      updatedAt: T0,
+    });
+    let writable = false;
+    const listeners = new Set<() => void>();
+    const stop = watchDocumentStub(doc, directory, {
+      writable: () => writable,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    });
+
+    vi.setSystemTime(T0 + 1_000);
+    setTitle(doc, "After");
+    expect(getDirectoryEntry(directory, UUID)?.title).toBe("Stale");
+
+    vi.setSystemTime(T0 + 5_000);
+    writable = true;
+    for (const listener of listeners) listener();
+    expect(getDirectoryEntry(directory, UUID)).toMatchObject({
+      title: "After",
+      updatedAt: T0 + 1_000,
+    });
+    stop();
+  });
+
   it("bumps updatedAt at most once per window under a typing burst", () => {
     const client = rig("Burst");
     vi.setSystemTime(T0 + 500);

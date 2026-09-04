@@ -80,6 +80,7 @@ function TagStrip({
   tags,
   known,
   readOnly,
+  canWrite,
 }: {
   ydoc: Y.Doc;
   /** The document's tags as last read — what the chips show. */
@@ -88,6 +89,8 @@ function TagStrip({
   known: readonly string[];
   /** Archived: the chips are still worth reading, and nothing here writes. */
   readOnly: boolean;
+  /** Recheck the live room at the exact write boundary. */
+  canWrite: () => boolean;
 }): ReactElement {
   const [draft, setDraft] = useState("");
   const strip = useRef<HTMLSpanElement | null>(null);
@@ -119,6 +122,7 @@ function TagStrip({
   }, [refocus]);
 
   const add = (): void => {
+    if (!canWrite()) return;
     const next = withTag(getMeta(ydoc).tags, draft, [...GROUP_TAGS, ...known]);
     // Cleared either way: a duplicate or a blank is rejected quietly, and
     // leaving the word in the field would read as a failure nobody explained.
@@ -127,6 +131,7 @@ function TagStrip({
   };
 
   const remove = (tag: string, at: number): void => {
+    if (!canWrite()) return;
     setRefocus(at);
     setTags(ydoc, withoutTag(getMeta(ydoc).tags, tag));
   };
@@ -318,6 +323,7 @@ export function DocMetaLine({
   meta,
   knownTags,
   archived,
+  readOnly = false,
   pinned = false,
   onTogglePin = null,
   onArchive = null,
@@ -331,6 +337,8 @@ export function DocMetaLine({
   knownTags: readonly string[];
   /** Whether the directory tombstones this document: no writes from here. */
   archived: boolean;
+  /** Whether the document room currently refuses writes. */
+  readOnly?: boolean;
   pinned?: boolean;
   onTogglePin?: (() => void) | null;
   /** Null means this replica cannot establish a current live directory stub. */
@@ -355,7 +363,8 @@ export function DocMetaLine({
             ydoc={connection.ydoc}
             tags={meta.tags}
             known={knownTags}
-            readOnly={archived}
+            readOnly={archived || readOnly}
+            canWrite={() => connection.status.writable}
           />
           <span className="ub-doc-ids">
             uuid {meta.uuid.slice(0, 8)} · rev {rev ?? "········"}
@@ -429,7 +438,11 @@ function DocumentActions({
               className={pinned ? "ub-action-pinned" : ""}
               onSelect={() => onTogglePin?.()}
             >
-              {pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+              {onTogglePin === null
+                ? `${pinned ? "Unpin" : "Pin"} unavailable — sidebar is read-only`
+                : pinned
+                  ? "Unpin from sidebar"
+                  : "Pin to sidebar"}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem

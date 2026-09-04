@@ -44,9 +44,11 @@ const ONE = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
 const TWO = "1f77c0d9-6b42-4a18-9e35-2c8d0f6a1b73";
 const THREE = "7c2e5a11-3f80-4d66-b1a9-8e4d2c6f0a55";
 
-const OFFLINE: RoomStatus = {
-  connected: false,
-  synced: false,
+const LIVE: RoomStatus = {
+  connected: true,
+  synced: true,
+  writable: true,
+  storeRefused: false,
   unsyncedChanges: 0,
   localReplicaLoaded: false,
   hasLocalCache: false,
@@ -60,7 +62,7 @@ const OFFLINE: RoomStatus = {
  * rooms are made, which is how the directory line's readings are exercised
  * (#448); reset after each test with the rooms that were handed it.
  */
-let roomStatus: RoomStatus = OFFLINE;
+let roomStatus: RoomStatus = LIVE;
 
 const rooms = new Map<string, RoomConnection>();
 
@@ -139,7 +141,7 @@ afterEach(() => {
     open.host.remove();
   }
   rooms.clear();
-  roomStatus = OFFLINE;
+  roomStatus = LIVE;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -767,7 +769,13 @@ describe("the sidebar's directory line reads a refusal", () => {
       open.host.remove();
     }
     rooms.clear();
-    roomStatus = { ...OFFLINE, ...status };
+    roomStatus = {
+      ...LIVE,
+      connected: false,
+      synced: false,
+      writable: false,
+      ...status,
+    };
     const host = await openApp(`/${WORKSPACE}`);
     return host.querySelector(".ub-list-head .ub-muted")?.textContent ?? "";
   }
@@ -781,6 +789,9 @@ describe("the sidebar's directory line reads a refusal", () => {
     ).toBe("update required");
     expect(await directoryLine({ ...live, tokenMissing: true })).toBe("no hub token");
     expect(await directoryLine({ ...live, authFailed: true })).toBe("not authorized");
+    expect(await directoryLine({ ...live, storeRefused: true })).toBe(
+      "edit refused",
+    );
   });
 
   it("keeps its own three readings when nothing is refused", async () => {
@@ -789,5 +800,51 @@ describe("the sidebar's directory line reads a refusal", () => {
     );
     expect(await directoryLine({ connected: true, synced: false })).toBe("syncing…");
     expect(await directoryLine({})).toBe("offline");
+  });
+});
+
+describe("unwritable workspace rooms", () => {
+  it("makes directory creation and sidebar curation unavailable", async () => {
+    roomStatus = { ...LIVE, connected: false, synced: false, writable: false };
+    seedDirectory();
+    createGroup(sidebarDoc(), "Reading");
+    const before = rooms.size;
+    const host = await openApp(`/${WORKSPACE}`);
+
+    const create = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent?.includes("new doc"),
+    );
+    expect(create?.disabled).toBe(true);
+    expect(create?.title).toContain("directory is read-only");
+    expect(create?.textContent).toContain("unavailable");
+    const listPin = host.querySelector<HTMLButtonElement>(".ub-docs-pin");
+    expect(listPin?.disabled).toBe(true);
+    expect(listPin?.getAttribute("aria-label")).toContain(
+      "unavailable while sidebar is read-only",
+    );
+    expect(host.querySelector(".ub-sidebar-unwritable")?.textContent).toContain(
+      "Sidebar changes unavailable",
+    );
+    expect(host.querySelectorAll(".ub-group-act")).toHaveLength(0);
+    expect(host.querySelector<HTMLButtonElement>(".ub-group-add")?.disabled).toBe(
+      true,
+    );
+
+    act(() => create?.click());
+    expect(rooms.size).toBe(before);
+  });
+
+  it("names an unavailable pin in the open document's action surface", async () => {
+    roomStatus = { ...LIVE, connected: false, synced: false, writable: false };
+    seedDirectory();
+    const doc = room(roomForDoc(WORKSPACE, THREE)).ydoc;
+    initDoc(doc, { uuid: THREE, title: "Sync" });
+    appendBlock(doc, { type: "paragraph", text: "how sync behaves" });
+    const host = await openApp(`/${WORKSPACE}/${THREE}`);
+
+    openActions(host);
+    expect(
+      documentAction("Pin unavailable — sidebar is read-only"),
+    ).not.toBeUndefined();
   });
 });

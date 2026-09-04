@@ -195,7 +195,7 @@ export function RoutePane({
   /** Consume that one-shot focus request after the Restore control receives it. */
   onRestoreFocused?: (() => void) | undefined;
   /** Lift that tombstone. The only action an archived document offers. */
-  onRestore: () => void;
+  onRestore: (() => void) | null;
   onSelectThread: SelectThread;
   /** The open document's conversations, for the narrow pane-edge trigger. */
   threads?: readonly ThreadView[];
@@ -476,6 +476,9 @@ export function App(): ReactElement {
     hubReady && workspace !== null ? sidebarRoom(workspace.uuid) : null,
     identity,
   );
+  const directoryStatus = useRoomStatus(directory);
+  const docStatus = useRoomStatus(doc);
+  const sidebarStatus = useRoomStatus(sidebar);
   const entries = useDirectory(directory);
   /**
    * The curated sidebar (#115), live — the same reading a second browser and an
@@ -541,7 +544,13 @@ export function App(): ReactElement {
    * are one operation with two front doors.
    */
   const onRestore = useCallback(() => {
-    if (directory === null || selected === null) return;
+    if (
+      directory === null ||
+      selected === null ||
+      !directory.status.writable
+    ) {
+      return;
+    }
     restoreFocusRoom.current = null;
     restoreDirectoryEntry(directory.ydoc, selected);
   }, [directory, selected]);
@@ -574,7 +583,14 @@ export function App(): ReactElement {
    * optimistic archived state here.
    */
   const onArchive = useCallback(() => {
-    if (directory === null || doc === null || selected === null) return;
+    if (
+      directory === null ||
+      doc === null ||
+      selected === null ||
+      !directory.status.writable
+    ) {
+      return;
+    }
     const entry = getDirectoryEntry(directory.ydoc, selected);
     if (entry === null || entry.deleted === true) return;
     restoreFocusRoom.current = doc.room;
@@ -618,7 +634,7 @@ export function App(): ReactElement {
    */
   const onTogglePinDoc = useCallback(
     (uuid: string) => {
-      if (sidebar === null) return;
+      if (sidebar === null || !sidebar.status.writable) return;
       togglePin(sidebar.ydoc, uuid);
     },
     [sidebar],
@@ -686,41 +702,110 @@ export function App(): ReactElement {
    * soon as the pane has it is what keeps navigating away from actually closing
    * the connection instead of leaving it publishing stale awareness.
    */
-  const pending = useRef<{ room: string; release: () => void } | null>(null);
-  useEffect(() => () => pending.current?.release(), []);
+  const pending = useRef<{
+    room: string;
+    release: () => void;
+    stop: () => void;
+    created: boolean;
+    mounted: boolean;
+  } | null>(null);
+  useEffect(
+    () => () => {
+      pending.current?.stop();
+      pending.current?.release();
+    },
+    [],
+  );
 
   useEffect(() => {
     const held = pending.current;
-    if (held === null || doc === null || doc.room !== held.room) return;
+    if (held === null) return;
+    if (doc === null || doc.room !== held.room) {
+      if (!held.mounted || held.created) return;
+      pending.current = null;
+      held.stop();
+      held.release();
+      return;
+    }
+    held.mounted = true;
+    if (!held.created) return;
     pending.current = null;
+    held.stop();
     held.release();
   }, [doc]);
 
   const onCreate = useCallback(() => {
-    if (directory === null || workspace === null) return;
+    if (
+      directory === null ||
+      workspace === null ||
+      !directory.status.writable
+    ) {
+      return;
+    }
     const uuid = crypto.randomUUID();
     const room = roomForDoc(workspace.uuid, uuid);
     const handle = acquireRoom(room, identity);
-    initDoc(handle.connection.ydoc, { uuid, title: "Untitled" });
-    // A document with no blocks has nowhere to put the caret, so seed one.
-    appendBlock(handle.connection.ydoc, { type: "paragraph", text: "" });
-    // Stamped here, because this is the moment the document is created and
-    // nothing else knows it: the stub carries `createdAt` from then on (the
-    // schema keeps the first one), which is what the "Created" sort reads.
-    // Creating is also the document's first change, and it opens the stamping
-    // window the first edits then fall inside — the same pair `create_doc`
-    // writes on the MCP side.
-    const createdAt = Date.now();
-    upsertDirectoryEntry(directory.ydoc, {
-      uuid,
-      title: "Untitled",
-      createdAt,
-      updatedAt: createdAt,
-    });
+    pending.current?.stop();
     pending.current?.release();
-    pending.current = { room, release: handle.release };
+    const held = {
+      room,
+      release: handle.release,
+      stop: () => {},
+      created: false,
+      mounted: false,
+    };
+    pending.current = held;
+    const attempt = (): void => {
+      // The subscription supplies its seed synchronously. Defer the decision
+      // so `held.stop` has received the actual unsubscribe before it is used.
+      queueMicrotask(() => {
+        if (pending.current !== held) return;
+        if (held.created) return;
+        const status = handle.connection.status;
+        if (
+          status.storeRefused ||
+          status.protocolMismatch !== null ||
+          directory.status.storeRefused ||
+          directory.status.protocolMismatch !== null
+        ) {
+          pending.current = null;
+          held.stop();
+          held.release();
+          onBackToWorkspace();
+          return;
+        }
+        if (!status.writable || !directory.status.writable) return;
+        held.created = true;
+        held.stop();
+        initDoc(handle.connection.ydoc, { uuid, title: "Untitled" });
+        // A document with no blocks has nowhere to put the caret, so seed one.
+        appendBlock(handle.connection.ydoc, { type: "paragraph", text: "" });
+        const createdAt = Date.now();
+        upsertDirectoryEntry(directory.ydoc, {
+          uuid,
+          title: "Untitled",
+          createdAt,
+          updatedAt: createdAt,
+        });
+        if (held.mounted) {
+          pending.current = null;
+          held.release();
+        }
+      });
+    };
+    let stopDocument = handle.connection.onStatusChange(attempt);
+    let stopDirectory = directory.onStatusChange(attempt);
+    held.stop = () => {
+      stopDocument();
+      stopDirectory();
+      stopDocument = () => {};
+      stopDirectory = () => {};
+    };
+    // Move to the new room immediately. Until admission its route draws the
+    // waiting/read-only state, so a second create cannot keep editing the old
+    // document while the new connection is still handshaking.
     onSelect(uuid);
-  }, [directory, identity, onSelect, workspace]);
+  }, [directory, identity, onBackToWorkspace, onSelect, workspace]);
 
   /**
    * The directory stub is a cache; `meta.title` in the document is
@@ -731,7 +816,10 @@ export function App(): ReactElement {
    */
   useEffect(() => {
     if (doc === null || directory === null) return;
-    return watchDocumentStub(doc.ydoc, directory.ydoc);
+    return watchDocumentStub(doc.ydoc, directory.ydoc, {
+      writable: () => directory.status.writable,
+      subscribe: (listener) => directory.onStatusChange(() => listener()),
+    });
   }, [doc, directory]);
 
   const sidebarToggleLabel = settings
@@ -814,7 +902,7 @@ export function App(): ReactElement {
             entries={entries}
             groups={sidebarGroups}
             onSelect={onSelect}
-            onTogglePin={sidebar !== null ? onTogglePinDoc : null}
+            onTogglePin={sidebarStatus.writable ? onTogglePinDoc : null}
           />
         ) : (
           <RoutePane
@@ -830,11 +918,14 @@ export function App(): ReactElement {
             updatedAt={selectedDirectoryEntry?.updatedAt}
             docLinks={docLinks}
             pinned={pinned}
-            onTogglePin={sidebar !== null && selected !== null ? onTogglePin : null}
+            onTogglePin={
+              sidebarStatus.writable && selected !== null ? onTogglePin : null
+            }
             onArchive={
               selectedDirectoryEntry !== null &&
               selectedDirectoryEntry !== undefined &&
-              selectedDirectoryEntry.deleted !== true
+              selectedDirectoryEntry.deleted !== true &&
+              directoryStatus.writable
                 ? onArchive
                 : null
             }
@@ -845,7 +936,7 @@ export function App(): ReactElement {
                 archiveConfirmationFocusRoom.current === doc.room)
             }
             onRestoreFocused={onRestoreFocused}
-            onRestore={onRestore}
+            onRestore={directoryStatus.writable ? onRestore : null}
             onSelectThread={onFocusThread}
             threads={threads}
             threadsOpen={threadsOpen}
@@ -873,7 +964,7 @@ export function App(): ReactElement {
             threads={threads}
             focused={focusedThread}
             author={identity.name}
-            readOnly={archived}
+            readOnly={archived || !docStatus.writable}
             onFocus={onFocusThread}
           />
         </aside>

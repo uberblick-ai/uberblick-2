@@ -59,6 +59,8 @@ function fixture(status: Partial<RoomStatus> = {}): Fixture {
   const full: RoomStatus = {
     connected: true,
     synced: true,
+    writable: true,
+    storeRefused: false,
     unsyncedChanges: 0,
     localReplicaLoaded: true,
     hasLocalCache: false,
@@ -393,11 +395,16 @@ describe("the sync panel renders the state this client holds", () => {
     const refused: Array<[string, string, Partial<RoomStatus>]> = [
       [
         "update required",
-        "the hub is older than this app — update the hub (app 2, hub 1)",
+        "the hub is older than this app — update the hub (app 2, hub 1); " +
+          "this document is not saved",
         { protocolMismatch: { hub: 1, client: 2 } },
       ],
       ["no hub token", TOKEN_MISSING, { tokenMissing: true }],
-      ["not authorized", AUTH_REJECTED, { authFailed: true }],
+      [
+        "not authorized",
+        `${AUTH_REJECTED}; this document is not saved`,
+        { authFailed: true },
+      ],
     ];
     for (const [word, reason, status] of refused) {
       const { host, root } = mount(fixture(status));

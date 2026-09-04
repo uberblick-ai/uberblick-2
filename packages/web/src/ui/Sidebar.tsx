@@ -186,8 +186,11 @@ export function Sidebar({
   settingsOpen: boolean;
 }): ReactElement {
   const status = useRoomStatus(connection);
+  const sidebarStatus = useRoomStatus(sidebar);
   const reading = statusReading(status, rawSyncState(status));
-  const ydoc = sidebar?.ydoc ?? null;
+  const sidebarWritable = sidebar !== null && sidebarStatus.writable;
+  const ydoc = sidebarWritable ? sidebar.ydoc : null;
+  const canWriteSidebar = (): boolean => sidebar?.status.writable === true;
   const [drag, setDrag] = useState<Drag | null>(null);
   const [over, setOver] = useState<string | null>(null);
   /**
@@ -233,6 +236,7 @@ export function Sidebar({
     kind: drag?.kind ?? null,
     over,
     start: (next, event) => {
+      if (!canWriteSidebar()) return;
       // Firefox starts no drag at all without a payload; nothing reads it.
       event.dataTransfer.setData("text/plain", next.kind === "doc" ? next.uuid : next.id);
       setDrag(next);
@@ -244,7 +248,7 @@ export function Sidebar({
     enter: (slot) => setOver((previous) => (previous === slot ? previous : slot)),
     leave: (slot) => setOver((previous) => (previous === slot ? null : previous)),
     dropDoc: (groupId, index) => {
-      if (ydoc === null || drag?.kind !== "doc") return;
+      if (ydoc === null || !canWriteSidebar() || drag?.kind !== "doc") return;
       const target = groups.find((group) => group.id === groupId);
       moveDoc(ydoc, drag.uuid, groupId, landingIndex(target?.docs ?? [], drag.uuid, index));
       end();
@@ -252,14 +256,14 @@ export function Sidebar({
   };
 
   const dropGroup = (index: number): void => {
-    if (ydoc === null || drag?.kind !== "group") return;
+    if (ydoc === null || !canWriteSidebar() || drag?.kind !== "group") return;
     const order = groups.map((group) => group.id);
     moveGroup(ydoc, drag.id, landingIndex(order, drag.id, index));
     end();
   };
 
   const addGroup = (): void => {
-    if (ydoc === null) return;
+    if (ydoc === null || !canWriteSidebar()) return;
     // Straight into its rename field: a group is named by the person making it,
     // and "New group" is a placeholder, not a decision.
     setRenaming({ id: createGroup(ydoc, NEW_GROUP_NAME), fresh: true });
@@ -268,7 +272,9 @@ export function Sidebar({
   const commitRename = (groupId: string, name: string): void => {
     setRenaming(null);
     // An empty name is a slip, not a rename: the group keeps the one it has.
-    if (ydoc !== null && name.trim() !== "") renameGroup(ydoc, groupId, name.trim());
+    if (ydoc !== null && canWriteSidebar() && name.trim() !== "") {
+      renameGroup(ydoc, groupId, name.trim());
+    }
   };
 
   /**
@@ -279,8 +285,16 @@ export function Sidebar({
   const cancelRename = (): void => {
     const open = renaming;
     setRenaming(null);
-    if (ydoc !== null && open?.fresh === true) deleteGroup(ydoc, open.id);
+    if (ydoc !== null && canWriteSidebar() && open?.fresh === true) {
+      deleteGroup(ydoc, open.id);
+    }
   };
+
+  useEffect(() => {
+    if (sidebarWritable) return;
+    setRenaming(null);
+    end();
+  }, [sidebarWritable, end]);
 
   return (
     <aside
@@ -320,8 +334,17 @@ export function Sidebar({
             active={!settingsOpen}
           />
           <div className="ub-list-head">
-            <button type="button" onClick={onCreate} disabled={connection === null}>
-              + new doc
+            <button
+              type="button"
+              onClick={onCreate}
+              disabled={!status.writable}
+              title={
+                status.writable
+                  ? undefined
+                  : "New document unavailable while the directory is read-only"
+              }
+            >
+              {status.writable ? "+ new doc" : "new doc unavailable"}
             </button>
             {/* A refusal takes this line's word, because the three readings below
                 all describe a connection that is working or coming back and none of
@@ -339,6 +362,11 @@ export function Sidebar({
             </span>
           </div>
           <Navigation allOpen={allOpen} onOpenAll={onOpenAll} />
+          {!sidebarWritable && (
+            <p className="ub-muted ub-sidebar-unwritable">
+              Sidebar changes unavailable while offline.
+            </p>
+          )}
           {groups.length === 0 && (
             <p className="ub-muted ub-empty">
               Nothing pinned yet. Pin the open document from its Document actions
@@ -360,6 +388,7 @@ export function Sidebar({
                 selected={selected}
                 onSelect={onSelect}
                 dnd={dnd}
+                canWrite={canWriteSidebar}
                 editing={renaming?.id === group.id}
                 onEdit={() => setRenaming({ id: group.id, fresh: false })}
                 onCancel={cancelRename}
@@ -378,6 +407,11 @@ export function Sidebar({
             className="ub-group-add"
             onClick={addGroup}
             disabled={ydoc === null}
+            title={
+              ydoc === null
+                ? "Group changes unavailable while the sidebar is offline"
+                : undefined
+            }
           >
             + group
           </button>
@@ -711,6 +745,7 @@ function GroupSection({
   selected,
   onSelect,
   dnd,
+  canWrite,
   editing,
   onEdit,
   onCancel,
@@ -724,6 +759,8 @@ function GroupSection({
   selected: string | null;
   onSelect: (uuid: string) => void;
   dnd: Dnd;
+  /** Recheck the live room at the write boundary, not only at render time. */
+  canWrite: () => boolean;
   /** Whether this group's name is the one being edited — one field at a time. */
   editing: boolean;
   onEdit: () => void;
@@ -818,7 +855,9 @@ function GroupSection({
               className="ub-group-act"
               aria-label={`Delete group ${group.name}`}
               title="Delete group"
-              onClick={() => deleteGroup(ydoc, group.id)}
+              onClick={() => {
+                if (canWrite()) deleteGroup(ydoc, group.id);
+              }}
             >
               <span aria-hidden="true">×</span>
             </button>

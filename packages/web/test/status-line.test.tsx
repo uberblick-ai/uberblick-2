@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { StatusLine } from "../src/ui/EditorPane.js";
-import { TOKEN_MISSING } from "../src/ui/status-reading.js";
+import { STORE_REFUSED, TOKEN_MISSING } from "../src/ui/status-reading.js";
 import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { HubEndpoint } from "../src/config.js";
@@ -32,6 +32,8 @@ function stubConnection(
   const status: RoomStatus = {
     connected: false,
     synced: false,
+    writable: true,
+    storeRefused: false,
     unsyncedChanges,
     localReplicaLoaded: false,
     hasLocalCache: false,
@@ -85,6 +87,22 @@ describe("the status line names the unit of its backlog count", () => {
     expect(label(0)).toBeNull();
   });
 
+});
+
+describe("an unwritable document", () => {
+  it("waits for a cause before saying that a newly opened room is not saved", () => {
+    expect(line({ connected: true, synced: false, writable: false })).toBe("");
+  });
+
+  it("says browser changes are not saved while the live link is gone", () => {
+    expect(line({ writable: false })).toContain("not saved");
+  });
+
+  it("names a sticky store refusal and its recovery", () => {
+    const refused = line({ writable: false, storeRefused: true });
+    expect(refused).toContain("edit refused");
+    expect(refused).toContain(STORE_REFUSED);
+  });
 });
 
 /** The whole line, for a room in the given state. */
@@ -186,6 +204,7 @@ describe("a hub that refuses this page", () => {
     expect(older).toContain("update required");
     expect(older).toContain("this app is older than the hub");
     expect(older).toContain("(app 1, hub 2)");
+    expect(older).toContain("not saved");
 
     const newer = line({ protocolMismatch: { hub: 1, client: 2 } });
     expect(newer).toContain("the hub is older than this app");
@@ -204,6 +223,7 @@ describe("a hub that refuses this page", () => {
     // names both causes rather than guessing, and it is composed locally —
     // the hub's own words never reach the line.
     expect(line({ authFailed: true })).toContain(AUTH_REJECTED);
+    expect(line({ authFailed: true })).toContain("not saved");
   });
 });
 
@@ -219,6 +239,7 @@ describe("an app served without a token", () => {
     expect(missing).toContain("no hub token");
     expect(missing).toContain(TOKEN_MISSING);
     expect(missing).not.toContain(AUTH_REJECTED);
+    expect(missing).toContain("not saved");
 
     // It outranks a refusal left over from before the secret went missing, and
     // it never appears without one.

@@ -275,7 +275,11 @@ describe("the rail renders its cards", () => {
 
   /** Only the document matters to the rail: it reads the Y.Doc and nothing else. */
   function stubConnection(ydoc: Y.Doc): RoomConnection {
-    return { room: `${WORKSPACE}/doc-1`, ydoc } as unknown as RoomConnection;
+    return {
+      room: `${WORKSPACE}/doc-1`,
+      ydoc,
+      status: { writable: true },
+    } as unknown as RoomConnection;
   }
 
   function renderRail(

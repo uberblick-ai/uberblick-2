@@ -47,6 +47,8 @@ const UUID = "5c2f8a41-7b93-4d6e-a018-3f9c2b7e5d04";
 const OFFLINE: RoomStatus = {
   connected: false,
   synced: false,
+  writable: true,
+  storeRefused: false,
   unsyncedChanges: 0,
   localReplicaLoaded: false,
   hasLocalCache: false,
