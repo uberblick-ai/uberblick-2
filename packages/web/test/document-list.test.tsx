@@ -296,6 +296,7 @@ describe("the order", () => {
         entry({ uuid: THREE, title: "Gamma", updatedAt: 200 }),
       ],
       "changed",
+      "descending",
     ).map((row) => row.title);
     expect(titles).toEqual(["Alpha", "Gamma", "Beta"]);
   });
@@ -317,6 +318,7 @@ describe("the order", () => {
         }),
       ],
       "changed",
+      "descending",
     ).map((row) => row.title);
     expect(titles).toEqual(["Beta", "Aardvark", "Skewed", "Zeta"]);
 
@@ -337,10 +339,9 @@ describe("the order", () => {
       entry({ uuid: ONE, title: "Second", updatedAt: 500 }),
       entry({ uuid: TWO, title: "First", updatedAt: 500 }),
     ];
-    expect(sortDirectory(tied, "changed").map((row) => row.title)).toEqual([
-      "First",
-      "Second",
-    ]);
+    expect(sortDirectory(tied, "changed", "descending").map((row) => row.title)).toEqual(
+      ["First", "Second"],
+    );
   });
 
   /**
@@ -360,7 +361,7 @@ describe("the order", () => {
     const directory = new Y.Doc();
     for (const row of entries) upsertDirectoryEntry(directory, row);
 
-    const ordered = sortDirectory(entries, "title");
+    const ordered = sortDirectory(entries, "title", "ascending");
     expect(ordered.map((row) => row.uuid)).toEqual([
       GONE,
       TWO,
@@ -879,7 +880,7 @@ describe("opening a document", () => {
     // A reload: the app goes, the address stays, and the document opens.
     unmount();
     const again = await openApp(`/${WORKSPACE}/${ONE}`);
-    expect(again.querySelector(".ub-docs-rows")).toBeNull();
+    expect(again.querySelector(".ub-docs-table")).toBeNull();
     expect(again.querySelector<HTMLInputElement>(".ub-title")?.value).toBe(
       "Overview",
     );

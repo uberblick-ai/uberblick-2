@@ -132,7 +132,7 @@ const INITIAL_DIRECTION: Record<Order, Direction> = {
 export function sortDirectory(
   entries: readonly DirectoryEntry[],
   order: Order,
-  direction: Direction = INITIAL_DIRECTION[order],
+  direction: Direction,
 ): DirectoryEntry[] {
   if (order === "title") {
     return [...entries].sort((a, b) =>
@@ -247,7 +247,7 @@ export function DocumentList({
    */
   const [sort, setSort] = useState<{ order: Order; direction: Direction }>({
     order: "changed",
-    direction: "descending",
+    direction: INITIAL_DIRECTION.changed,
   });
   const now = useTimestampClock();
   /**
@@ -291,7 +291,7 @@ export function DocumentList({
             onChange={(event) => setQuery(event.currentTarget.value)}
           />
         </label>
-        <table className="ub-docs-table ub-docs-rows">
+        <table className="ub-docs-table">
           <colgroup>
             <col />
             <col className="ub-docs-age-column" />
@@ -332,7 +332,7 @@ export function DocumentList({
                   </button>
                 </th>
               ))}
-              <th scope="col" className="ub-docs-heading-cell ub-docs-pin-heading">
+              <th scope="col" className="ub-docs-heading-cell">
                 <span className="ub-sr-only">Actions</span>
               </th>
             </tr>
