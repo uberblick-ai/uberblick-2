@@ -1,8 +1,8 @@
 /** The real protocol boundary `ub open` serves, over loopback and real Yjs. */
 
 import { randomUUID } from "node:crypto";
-import { createConnection, createServer } from "node:net";
-import type { Server as NetServer, Socket } from "node:net";
+import { createServer } from "node:net";
+import type { Server as NetServer } from "node:net";
 import {
   HocuspocusProvider,
   HocuspocusProviderWebsocket,
@@ -31,14 +31,12 @@ const servers: LocalBrowserServer[] = [];
 const clients: TestClient[] = [];
 const providers: HocuspocusProvider[] = [];
 const websockets: HocuspocusProviderWebsocket[] = [];
-const rawClients: Socket[] = [];
 
 afterEach(async () => {
   for (const client of clients.splice(0)) client.destroy();
   for (const provider of providers.splice(0)) provider.destroy();
   for (const websocket of websockets.splice(0)) websocket.destroy();
   for (const server of servers.splice(0)) await server.stop();
-  for (const socket of rawClients.splice(0)) socket.destroy();
 });
 
 async function freePort(): Promise<number> {
@@ -50,36 +48,6 @@ async function freePort(): Promise<number> {
   }
   await new Promise<void>((resolve) => server.close(() => resolve()));
   return address.port;
-}
-
-/** Upgrade successfully without opening a Hocuspocus document. */
-async function rawUpgrade(port: number, origin: string): Promise<Socket> {
-  const socket = createConnection(port, "127.0.0.1");
-  rawClients.push(socket);
-  let response = "";
-  socket.setEncoding("utf8");
-  const upgraded = new Promise<Socket>((resolve, reject) => {
-    socket.once("error", reject);
-    socket.on("data", (chunk: string) => {
-      response += chunk;
-      if (!response.includes("\r\n\r\n")) return;
-      if (!response.startsWith("HTTP/1.1 101")) {
-        reject(new Error(`websocket upgrade was refused: ${response}`));
-        return;
-      }
-      resolve(socket);
-    });
-  });
-  socket.write(
-    `GET / HTTP/1.1\r\n` +
-      `Host: 127.0.0.1:${port}\r\n` +
-      "Upgrade: websocket\r\n" +
-      "Connection: Upgrade\r\n" +
-      "Sec-WebSocket-Key: MDEyMzQ1Njc4OWFiY2RlZg==\r\n" +
-      "Sec-WebSocket-Version: 13\r\n" +
-      `Origin: ${origin}\r\n\r\n`,
-  );
-  return await upgraded;
 }
 
 function textFrom(updates: readonly Uint8Array[]): string {
@@ -287,10 +255,24 @@ describe("the ub open browser server", () => {
 
   it("closes every accepted upgraded socket on stop, including a refused room load", async () => {
     const box = await fixture();
-    const raw = await rawUpgrade(box.port, box.origin);
-    const rawClosed = new Promise<void>((resolve) => {
-      raw.once("close", () => resolve());
+    const raw = new HocuspocusProviderWebsocket({
+      url: `ws://127.0.0.1:${box.port}`,
+      autoConnect: false,
+      delay: 60_000,
+      minDelay: 60_000,
+      WebSocketPolyfill: class extends WebSocket {
+        constructor(url: string | URL) {
+          super(url, { headers: { Origin: box.origin } } as unknown as string[]);
+        }
+      },
     });
+    websockets.push(raw);
+    const rawOpened = new Promise<void>((resolve) => raw.on("open", () => resolve()));
+    const rawClosed = new Promise<void>((resolve) => {
+      raw.on("close", () => resolve());
+    });
+    raw.connect();
+    await rawOpened;
 
     box.failReadsWith(Object.assign(new Error("database is locked"), { errcode: 5 }));
     const readsBefore = box.readAttempts();
@@ -308,7 +290,6 @@ describe("the ub open browser server", () => {
       undefined,
       undefined,
     ]);
-    expect(raw.destroyed).toBe(true);
   });
 
   it("reuses hub auth, enforces read-only, and rejects a foreign Origin without throwing", async () => {
