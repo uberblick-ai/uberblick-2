@@ -3635,7 +3635,7 @@ h3.ub-heading {
   cursor: pointer;
 }
 
-.ub-docs-open:hover {
+.ub-docs-row:hover {
   background: var(--accent);
   color: var(--accent-foreground);
 }
@@ -3669,6 +3669,7 @@ h3.ub-heading {
   padding: 0.4rem;
   text-align: right;
   vertical-align: middle;
+  white-space: nowrap;
 }
 
 .ub-docs-pin-cell {
