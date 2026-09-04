@@ -8,6 +8,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
 import type { WebSocketLike } from "@hocuspocus/server";
 import { Server } from "@hocuspocus/server";
 import {
@@ -121,6 +122,7 @@ export async function createLocalBrowserServer(
     log,
     servedWorkspace: config.workspaceId,
   });
+  const upgradedSockets = new Set<Duplex>();
 
   const server = new Server<HubContext>({
     port: config.port,
@@ -145,6 +147,8 @@ export async function createLocalBrowserServer(
         return Promise.reject();
       }
       request.headers[PEER_ADDRESS_HEADER] = request.socket?.remoteAddress ?? "";
+      upgradedSockets.add(socket);
+      socket.once("close", () => upgradedSockets.delete(socket));
     },
 
     onAuthenticate: authenticate,
@@ -166,7 +170,11 @@ export async function createLocalBrowserServer(
           cause: reason,
           error: String(error),
         });
-        throw refused(reason, error);
+        // Hocuspocus creates the room's Connection only after this hook
+        // succeeds, so no per-room close exists yet to carry `reason` to the
+        // browser. Keep the structured terminal log honest and let the load
+        // fail plainly; accepted raw sockets remain owned for shutdown below.
+        throw error;
       }
     },
 
@@ -228,6 +236,21 @@ export async function createLocalBrowserServer(
         }
         server.httpServer.closeAllConnections();
         await server.destroy();
+
+        // Node's HTTP close helpers deliberately exclude upgraded sockets, and
+        // Hocuspocus only enumerates sockets that already own a loaded room.
+        // Destroy the accepted remainder after its graceful document closes,
+        // then wait for the raw handles to leave the process.
+        const remaining = [...upgradedSockets];
+        const closed = remaining.map(
+          (socket) =>
+            new Promise<void>((resolve) => {
+              if (socket.destroyed) resolve();
+              else socket.once("close", () => resolve());
+            }),
+        );
+        for (const socket of remaining) socket.destroy();
+        await Promise.all(closed);
       });
       return stopPromise;
     },

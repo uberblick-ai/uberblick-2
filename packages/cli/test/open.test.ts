@@ -20,6 +20,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -325,6 +326,8 @@ interface Running {
   url: string;
   stdout: () => string;
   stderr: () => string;
+  /** The command's own terminal outcome, without sending it a signal. */
+  wait: () => Promise<{ status: number | null; signal: string | null }>;
   /** SIGINT, then the exit status — what Ctrl-C in a terminal does. */
   interrupt: () => Promise<{ status: number | null; signal: string | null }>;
 }
@@ -383,6 +386,7 @@ async function open(
     url,
     stdout: () => stdout,
     stderr: () => stderr,
+    wait: () => exited,
     interrupt: async () => {
       child.kill("SIGINT");
       await waitUntil("`ub open` to exit after Ctrl-C", () => over);
@@ -879,6 +883,33 @@ describe("ub open", () => {
     const second = await open(box, ["--port", String(webPort)], env);
     expect(second.url).toBe(`http://127.0.0.1:${webPort}/`);
     expect((await second.interrupt()).status).toBe(0);
+  });
+
+  it("exits and releases the serving role when its replica refresh loop stops", async () => {
+    const { box, env } = configured();
+    const upstream = await startHub(box);
+    pointAt(box, `ws://127.0.0.1:${upstream.port}`);
+    const webPort = await freePort();
+    const app = await open(box, ["--port", String(webPort)], env);
+
+    const databasePath = resolveMcpConfig({
+      ...box.env,
+      ...env,
+      WORKSPACE_ID: WORKSPACE,
+    }).databasePath;
+    const database = new DatabaseSync(databasePath);
+    database.exec("DROP TABLE snapshots");
+    database.close();
+
+    const stopped = await app.wait();
+    expect(stopped).toEqual({ status: 1, signal: null });
+    expect(app.stderr()).toContain("local replica refresh failed");
+    expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
+
+    // The same store and port can be served again immediately: the failed
+    // process released its serving-role lock as part of the non-zero exit.
+    const restarted = await open(box, ["--port", String(webPort)], env);
+    expect((await restarted.interrupt()).status).toBe(0);
   });
 
   it("serves the configuration document uncached, ahead of the SPA fallback", async () => {
@@ -1485,6 +1516,7 @@ describe("ub open", () => {
     // taking the hub down without the flush its durability contract is made of.
     expect(run.signal).toBeNull();
     expect(run.status).toBe(0);
+    expect(run.output).not.toContain("uberblick is at");
     expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
     expect((await probePort("127.0.0.1", hubPort)).state).toBe("free");
   });

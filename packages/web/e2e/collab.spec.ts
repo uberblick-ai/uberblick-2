@@ -264,19 +264,33 @@ test("the open document's last-updated reading follows its stub through status a
     .getByRole("alertdialog")
     .getByRole("button", { name: "Archive document" })
     .click();
-  await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
+  const restore = page.getByRole("button", { name: "Restore" });
+  await expect(restore).toBeVisible();
+  // Archive completion deliberately transfers focus to the surviving action.
+  // That focus may scroll the pane, so it is the settle boundary before the
+  // position this test expects the later upstream outage to preserve.
+  await expect(restore).toBeFocused();
   await expect(reading).toContainText("last updated just now");
   await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
+
+  // `Restore` is painted from this tab's local Y.Doc before its directory
+  // update has necessarily completed the local server round trip. A fresh tab
+  // seeing the tombstone proves that durable apply and broadcast completed;
+  // the upstream can now be stopped without racing the archive itself.
+  const archiveObserver = await openApp(browser, new URL(page.url()).pathname);
+  await expect(
+    archiveObserver.getByRole("button", { name: "Restore" }),
+  ).toBeVisible();
   const stablePosition = await reading.boundingBox();
   expect(stablePosition).not.toBeNull();
 
   await harness().stopHub();
   try {
     // The browser remains connected to `ub open`; only its silent upstream
-    // replica is offline, so the local durability boundary stays synced.
-    await expect
-      .poll(() => page.locator(".ub-status").textContent())
-      .toContain("synced");
+    // replica is offline, so the local durability boundary stays synced. The
+    // awaited stop is the upstream-down signal; the focus assertion above is
+    // the page-settle signal, before the baseline is captured.
+    await expect(page.locator(".ub-status")).toContainText("synced");
     await expect(reading).toContainText("last updated just now");
     await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
     expect(await reading.boundingBox()).toEqual(stablePosition);

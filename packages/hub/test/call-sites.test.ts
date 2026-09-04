@@ -72,7 +72,7 @@ describe("token minting sites", () => {
    * Every file that calls `mintToken`. Adding one means a new thing in this
    * repository signs its own authority — so it belongs on this list, with the
    * lifetime and `kid` its call site passes reviewed alongside it.
-  */
+   */
   const EXPECTED = [
     // Browser-shaped integration token: maximum lifetime, no credential kid.
     "packages/cli/test/open.test.ts",

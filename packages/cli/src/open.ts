@@ -1232,7 +1232,7 @@ function monitorEngine(engine: UberblickMcpEngine): EngineMonitor {
     }
     if (failure !== null) wake(failure);
   };
-  const timer = setInterval(inspect, 25);
+  const timer = setInterval(inspect, 1_000);
   return {
     failed,
     failure: () => failure,
@@ -1463,6 +1463,10 @@ export async function openCommand(
       io.err(`ub open: could not serve on port ${options.port}: ${message(error)}\n`);
     }
     return await foreground.shutdown(1);
+  }
+
+  if (foreground.interrupted()) {
+    return await foreground.shutdown(0);
   }
 
   const earlyFailure = owned.engineMonitor?.failure() ?? null;

@@ -301,6 +301,8 @@ export async function createRoomAuthenticator(options: {
       requestParameters.has(name),
     );
     if (queried !== undefined) {
+      // No token identity here: the connection is refused on the URL, before
+      // any token has been read, and the parameter is the whole finding.
       options.log(rejected("token-in-query", { parameter: queried }));
       throw new AuthError(
         "token-in-query",
@@ -308,6 +310,10 @@ export async function createRoomAuthenticator(options: {
       );
     }
 
+    // The version exchange comes before anything about the token is believed,
+    // and before JSON parsing, which keeps MAX_TOKEN_LENGTH's promise that an
+    // unauthenticated caller cannot choose how much work the server does. A
+    // bare token is a flag-day mismatch too.
     const envelope = readAuthEnvelope(token);
     if (
       envelope === null ||
@@ -315,6 +321,7 @@ export async function createRoomAuthenticator(options: {
     ) {
       options.log(
         rejected("protocol-mismatch", {
+          // Integers or absence only: never log the token or its envelope.
           clientProtocol: envelope?.protocolVersion ?? null,
           hubProtocol: options.protocolVersion,
         }),
@@ -335,6 +342,9 @@ export async function createRoomAuthenticator(options: {
     }
     const claims = inspected;
 
+    // Every client mints locally, so the hub applies the lifetime ceiling.
+    // Log the specific cause, but expose the same wire refusal for an expired
+    // token as for a forged one.
     const clamped = clampToken(claims, Math.floor(Date.now() / 1000));
     if (clamped !== null) {
       options.log(rejected(clamped, { typ: claims.typ, sub: claims.sub }));

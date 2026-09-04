@@ -1,8 +1,8 @@
 /** The real protocol boundary `ub open` serves, over loopback and real Yjs. */
 
 import { randomUUID } from "node:crypto";
-import { createServer } from "node:net";
-import type { Server as NetServer } from "node:net";
+import { createConnection, createServer } from "node:net";
+import type { Server as NetServer, Socket } from "node:net";
 import {
   HocuspocusProvider,
   HocuspocusProviderWebsocket,
@@ -31,12 +31,14 @@ const servers: LocalBrowserServer[] = [];
 const clients: TestClient[] = [];
 const providers: HocuspocusProvider[] = [];
 const websockets: HocuspocusProviderWebsocket[] = [];
+const rawClients: Socket[] = [];
 
 afterEach(async () => {
   for (const client of clients.splice(0)) client.destroy();
   for (const provider of providers.splice(0)) provider.destroy();
   for (const websocket of websockets.splice(0)) websocket.destroy();
   for (const server of servers.splice(0)) await server.stop();
+  for (const socket of rawClients.splice(0)) socket.destroy();
 });
 
 async function freePort(): Promise<number> {
@@ -48,6 +50,36 @@ async function freePort(): Promise<number> {
   }
   await new Promise<void>((resolve) => server.close(() => resolve()));
   return address.port;
+}
+
+/** Upgrade successfully without opening a Hocuspocus document. */
+async function rawUpgrade(port: number, origin: string): Promise<Socket> {
+  const socket = createConnection(port, "127.0.0.1");
+  rawClients.push(socket);
+  let response = "";
+  socket.setEncoding("utf8");
+  const upgraded = new Promise<Socket>((resolve, reject) => {
+    socket.once("error", reject);
+    socket.on("data", (chunk: string) => {
+      response += chunk;
+      if (!response.includes("\r\n\r\n")) return;
+      if (!response.startsWith("HTTP/1.1 101")) {
+        reject(new Error(`websocket upgrade was refused: ${response}`));
+        return;
+      }
+      resolve(socket);
+    });
+  });
+  socket.write(
+    `GET / HTTP/1.1\r\n` +
+      `Host: 127.0.0.1:${port}\r\n` +
+      "Upgrade: websocket\r\n" +
+      "Connection: Upgrade\r\n" +
+      "Sec-WebSocket-Key: MDEyMzQ1Njc4OWFiY2RlZg==\r\n" +
+      "Sec-WebSocket-Version: 13\r\n" +
+      `Origin: ${origin}\r\n\r\n`,
+  );
+  return await upgraded;
 }
 
 function textFrom(updates: readonly Uint8Array[]): string {
@@ -65,19 +97,25 @@ async function fixture() {
   const origin = `http://127.0.0.1:${port}`;
   const updates = new Map<string, Uint8Array[]>();
   let failure: unknown = null;
+  let readFailure: unknown = null;
+  let readAttempts = 0;
   const server = await createLocalBrowserServer({
     port,
     workspaceId: WORKSPACE,
     authSecret: TEST_SECRET,
     expectedOrigin: origin,
     log: () => {},
-    readRoom: (room) => ({
-      snapshot: null,
-      updates: (updates.get(room) ?? []).map((payload, index) => ({
-        seq: index + 1,
-        payload,
-      })),
-    }),
+    readRoom: (room) => {
+      readAttempts += 1;
+      if (readFailure !== null) throw readFailure;
+      return {
+        snapshot: null,
+        updates: (updates.get(room) ?? []).map((payload, index) => ({
+          seq: index + 1,
+          payload,
+        })),
+      };
+    },
     appendUpdate: (room, payload) => {
       if (failure !== null) throw failure;
       const stored = updates.get(room) ?? [];
@@ -115,6 +153,10 @@ async function fixture() {
     failWith: (error: unknown) => {
       failure = error;
     },
+    failReadsWith: (error: unknown) => {
+      readFailure = error;
+    },
+    readAttempts: () => readAttempts,
     recover: () => {
       failure = null;
     },
@@ -243,6 +285,32 @@ describe("the ub open browser server", () => {
     expect(box.updates.get(malformedRoom)).toBeUndefined();
   });
 
+  it("closes every accepted upgraded socket on stop, including a refused room load", async () => {
+    const box = await fixture();
+    const raw = await rawUpgrade(box.port, box.origin);
+    const rawClosed = new Promise<void>((resolve) => {
+      raw.once("close", () => resolve());
+    });
+
+    box.failReadsWith(Object.assign(new Error("database is locked"), { errcode: 5 }));
+    const readsBefore = box.readAttempts();
+    const refused = await box.connect(`${WORKSPACE}/${randomUUID()}`);
+    const refusedClosed = new Promise<void>((resolve) => {
+      refused.provider.on("close", () => resolve());
+    });
+    await waitUntil(
+      "the refused room load to reach the store",
+      () => box.readAttempts() > readsBefore,
+    );
+
+    await box.server.stop();
+    await expect(Promise.all([rawClosed, refusedClosed])).resolves.toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect(raw.destroyed).toBe(true);
+  });
+
   it("reuses hub auth, enforces read-only, and rejects a foreign Origin without throwing", async () => {
     const box = await fixture();
     const room = `${WORKSPACE}/${randomUUID()}`;
@@ -260,15 +328,27 @@ describe("the ub open browser server", () => {
     expect(box.updates.get(room)).toBeUndefined();
     expect(writer.text.toString()).toBe("");
 
-    const foreign = createClient({
+    const foreignClaim = createClient({
       port: box.port,
       room,
       token: await token("read-write", { workspace: OTHER_WORKSPACE }),
       origin: box.origin,
       reconnectDelayMs: 60_000,
     });
-    clients.push(foreign);
-    await expect(foreign.denied).resolves.toBe("workspace-mismatch");
+    clients.push(foreignClaim);
+    await expect(foreignClaim.denied).resolves.toBe("workspace-mismatch");
+
+    // Token and room agree with each other, so only this server's one-store
+    // boundary can refuse the otherwise valid foreign workspace.
+    const foreignStore = createClient({
+      port: box.port,
+      room: `${OTHER_WORKSPACE}/${randomUUID()}`,
+      token: await token("read-write", { workspace: OTHER_WORKSPACE }),
+      origin: box.origin,
+      reconnectDelayMs: 60_000,
+    });
+    clients.push(foreignStore);
+    await expect(foreignStore.denied).resolves.toBe("workspace-mismatch");
 
     const valid = wrapToken(await token(), SYNC_PROTOCOL_VERSION);
     let originRejected!: () => void;
