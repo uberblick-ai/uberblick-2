@@ -1033,6 +1033,8 @@ body {
 .ub-appearance-option[aria-pressed="true"] {
   background: var(--brand-subtle);
   border-color: var(--brand);
+  outline: 2px solid var(--foreground);
+  outline-offset: 1px;
 }
 
 /* Readouts. Nothing here takes the pointer or the keyboard, because there is

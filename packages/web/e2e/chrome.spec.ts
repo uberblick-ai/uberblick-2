@@ -204,6 +204,64 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
+for (const scheme of ["light", "dark"] as const) {
+  test(`the selected appearance has one non-hue cue — ${scheme}`, async ({
+    browser,
+  }) => {
+    const page = await openApp(browser, scheme);
+    await page.locator(".ub-user-card").click();
+    const panel = page.locator("[data-slot=popover-content]");
+    await expect(panel).toBeVisible();
+
+    const appearance = panel.getByRole("group", { name: "Appearance" });
+    const options = appearance.getByRole("button");
+    const system = appearance.getByRole("button", { name: "System", exact: true });
+    const matching = appearance.getByRole("button", {
+      name: scheme === "light" ? "Light" : "Dark",
+      exact: true,
+    });
+    const untouched = appearance.getByRole("button", {
+      name: scheme === "light" ? "Dark" : "Light",
+      exact: true,
+    });
+    const boxes = (): Promise<Array<[number, number, number, number]>> =>
+      options.evaluateAll((elements) =>
+        elements.map((element) => {
+          const box = element.getBoundingClientRect();
+          return [box.x, box.y, box.width, box.height];
+        }),
+      );
+    const treatment = (option: Locator) =>
+      option.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return [style.backgroundColor, style.borderColor, style.color];
+      });
+    const cue = async (option: Locator): Promise<string> => {
+      await expect(option).toHaveCSS("outline-style", "solid");
+      await expect(option).toHaveCSS("outline-width", "2px");
+      return paintedIn(option, "outline-color");
+    };
+
+    const ground = await paintedIn(panel, "background-color");
+    const before = await boxes();
+    await expect(system).toHaveAttribute("aria-pressed", "true");
+    expect(contrast(await cue(system), ground)).toBeGreaterThanOrEqual(3);
+
+    const rest = await treatment(untouched);
+    await untouched.hover();
+    const hover = await treatment(untouched);
+    await matching.click();
+
+    await expect(system).toHaveCSS("outline-style", "none");
+    await expect(matching).toHaveAttribute("aria-pressed", "true");
+    expect(contrast(await cue(matching), ground)).toBeGreaterThanOrEqual(3);
+    expect(await boxes()).toEqual(before);
+    expect(await treatment(untouched)).toEqual(rest);
+    await untouched.hover();
+    expect(await treatment(untouched)).toEqual(hover);
+  });
+}
+
 test("workspace settings is an address-selected, inert sidebar drill-in", async ({
   browser,
 }) => {
