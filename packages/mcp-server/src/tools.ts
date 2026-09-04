@@ -537,7 +537,8 @@ const RECOVERY: Record<string, string> & { other: string } = {
     "archive_doc on this uuid to retire the orphan; do NOT call create_doc again as recovery for this call.",
   other:
     "The log refused a write to a room this call does not own — another document syncing while it ran. Restart " +
-    "the MCP server, then check with list_docs and get_sidebar what the rooms in `completed` left behind.",
+    "the MCP server, then check with list_docs — for a decision, with a matching `kind`, `status` or `tag` " +
+    "predicate — and get_sidebar what the rooms in `completed` left behind.",
 };
 
 const REQUIREMENT_DIRECTORY_RECOVERY =
@@ -854,7 +855,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     {
       title: "Create a document",
       description:
-        "Create a document and publish its directory stub, so every client can discover it. " +
+        "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
+        "search; a decision needs a matching `kind`, `status` or `tag` predicate in list_docs. " +
         "Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
         "The write applies to the local replica and syncs in the background.\n\n" +
         "A `title` and a `description` are both REQUIRED here and the call fails without either, creating nothing. " +
@@ -1479,8 +1481,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "here and no `old_text` to assert. Identity is the uuid and a rename never touches it, so every link, " +
         "backlink and annotation survives one.\n\n" +
         "`meta.title` in the document is authoritative and the directory stub caches it. This writes the " +
-        "document and the stub follows in the same call, so the next list_docs, search and get_sidebar answer " +
-        "with the new title without opening a single document room.\n\n" +
+        "document and the stub follows in the same call, so the next search and get_sidebar answer with the new " +
+        "title without opening a single document room. list_docs does too; for a decision, pass a matching `kind`, " +
+        "`status` or `tag` predicate.\n\n" +
         "An empty title, and a title of nothing but whitespace, are both refused: a document nobody can name is " +
         "a document nobody can pick out of a listing.\n\n" +
         ARCHIVED_IS_READ_ONLY +

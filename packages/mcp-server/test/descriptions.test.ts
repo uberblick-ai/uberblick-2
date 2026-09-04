@@ -598,9 +598,22 @@ describe("lifecycle tool text", () => {
     expect(description("list_docs")).toContain(
       "`include_deleted` admits tombstones but is not a predicate",
     );
-    for (const name of ["archive_doc", "restore_doc", "set_title"]) {
-      expect(description(name), name).toContain("decision");
-      expect(description(name), name).toContain("predicate");
+    expect(description("archive_doc")).toContain(
+      "for a decision, add a matching `kind`, `status` or `tag` predicate",
+    );
+    expect(description("restore_doc")).toContain(
+      "default list_docs listing unless it is a decision",
+    );
+    expect(description("create_doc")).toContain(
+      "a decision needs a matching `kind`, `status` or `tag` predicate in list_docs",
+    );
+    expect(description("set_title")).toContain(
+      "list_docs does too; for a decision, pass a matching `kind`",
+    );
+    for (const name of ["get_sidebar", "sidebar_group"]) {
+      expect(description(name), name).toContain(
+        "a decision needs a matching `kind`, `status` or `tag` predicate in list_docs",
+      );
     }
   });
 });
