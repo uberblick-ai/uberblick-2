@@ -47,6 +47,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   getDirectoryEntry,
+  getMeta,
   listDirectory,
   setTitle,
   upsertDirectoryEntry,
@@ -257,6 +258,66 @@ describe("a create that only half landed", () => {
     await restarted.ok("get_doc", { uuid });
     await restarted.ok("search", { query: "Undiscoverable" });
     expect(directoryUpdates).toBe(0);
+  });
+});
+
+describe("a lifecycle update that only half landed", () => {
+  it("names the durable document room and repairs its stale stub after restart", async () => {
+    const databasePath = tempDatabasePath();
+    const store = failingStore(databasePath);
+    const rig = await server(databasePath, store);
+    const created = await rig.ok("create_doc", {
+      title: "Adopted requirement",
+      description: DESCRIPTION,
+    });
+
+    store.failRoom = (room) => room === `${WORKSPACE}/_directory`;
+    store.failing = true;
+    const refused = await rig.call("set_status", {
+      uuid: created.uuid,
+      status: "planned",
+    });
+    expect(refused.payload).toMatchObject({
+      error: "persistence_failed",
+      uuid: created.uuid,
+      kind: "requirement",
+      status: "planned",
+      applied: false,
+      partial: true,
+      synced: false,
+      rolledBack: false,
+      completed: [
+        {
+          purpose: "document",
+          room: `${WORKSPACE}/${created.uuid}`,
+          applied: true,
+        },
+      ],
+      failed: { purpose: "directory", room: `${WORKSPACE}/_directory` },
+    });
+    expect(refused.payload.recovery).toContain("do not repeat set_status");
+
+    await stop(rig);
+    store.failing = false;
+    expect(
+      getMeta(fromLog(databasePath, `${WORKSPACE}/${created.uuid}`)),
+    ).toMatchObject({ kind: "requirement", status: "planned" });
+    expect(
+      getDirectoryEntry(
+        fromLog(databasePath, `${WORKSPACE}/_directory`),
+        created.uuid,
+      ),
+    ).not.toHaveProperty("kind");
+
+    const restarted = await server(databasePath);
+    expect(await listed(restarted, created.uuid)).toMatchObject({
+      kind: "requirement",
+      status: "planned",
+    });
+    expect(await restarted.ok("get_doc", { uuid: created.uuid })).toMatchObject({
+      kind: "requirement",
+      status: "planned",
+    });
   });
 });
 

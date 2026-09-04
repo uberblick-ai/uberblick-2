@@ -935,6 +935,8 @@ export class Replicas {
       stub === null ||
       stub.title !== meta.title ||
       (stub.description ?? null) !== meta.description ||
+      stub.kind !== meta.kind ||
+      stub.status !== meta.status ||
       !sameSet(stub.tags, meta.tags);
     const staleStamp =
       stub?.updatedAt === undefined ||
@@ -958,6 +960,11 @@ export class Replicas {
       // and whichever of them saw the newer document then repairs the entry on
       // its next observed update. The cache heals; it is not arbitrated.
       description: meta.description ?? "",
+      // Always stated like description: this replica holds the authoritative
+      // document, so omission clears a stale cached lifecycle rather than
+      // carrying it forward.
+      kind: meta.kind ?? "",
+      status: meta.status ?? "",
       createdAt: now,
       ...(stamp ? { updatedAt: now } : {}),
     });
