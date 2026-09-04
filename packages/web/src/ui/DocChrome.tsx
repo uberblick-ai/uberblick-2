@@ -15,6 +15,7 @@ import { writeToClipboard } from "../editor/source-chrome.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { GROUP_TAGS, groupKeyForTags, groupLabel } from "./groups.js";
 import { useDocRev } from "./hooks.js";
+import { LifecycleBadge } from "./LifecycleBadge.js";
 import { shareUrl } from "./route.js";
 import { distinctTags, withTag, withoutTag } from "./tags.js";
 import {
@@ -345,6 +346,7 @@ export function DocMetaLine({
           tag in it either — but the row itself stands, holding the space. */}
       {meta !== null && meta.uuid !== "" && (
         <>
+          <LifecycleBadge kind={meta.kind} status={meta.status} />
           {/* Only where the document is in a named group: a badge for the
               fallback would label every untagged document with a word that
               names no group (#535). */}

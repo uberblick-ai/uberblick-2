@@ -14,7 +14,10 @@ import {
   appendBlock,
   editBlock,
   getMeta,
+  getMetaMap,
   initDoc,
+  setKind,
+  setStatus,
   setTags,
 } from "@uberblick/schema";
 import { DocMetaLine } from "../src/ui/DocChrome.js";
@@ -139,6 +142,40 @@ describe("the document identity line keeps its local controls", () => {
     } finally {
       act(() => root.unmount());
       host.remove();
+    }
+  });
+
+  it("names lifecycle records, omits ordinary documents and tolerates a mismatched status", () => {
+    const decision = fixture();
+    setKind(decision.ydoc, "decision");
+    setStatus(decision.ydoc, "open");
+    const mountedDecision = mount(decision);
+    try {
+      expect(text(mountedDecision.host, ".ub-lifecycle-badge")).toBe(
+        "Decision · open",
+      );
+    } finally {
+      act(() => mountedDecision.root.unmount());
+      mountedDecision.host.remove();
+    }
+
+    const mismatched = fixture();
+    getMetaMap(mismatched.ydoc).set("kind", "requirement");
+    getMetaMap(mismatched.ydoc).set("status", "open");
+    const mountedMismatch = mount(mismatched);
+    try {
+      expect(text(mountedMismatch.host, ".ub-lifecycle-badge")).toBe("Product");
+    } finally {
+      act(() => mountedMismatch.root.unmount());
+      mountedMismatch.host.remove();
+    }
+
+    const ordinary = mount(fixture());
+    try {
+      expect(ordinary.host.querySelector(".ub-lifecycle-badge")).toBeNull();
+    } finally {
+      act(() => ordinary.root.unmount());
+      ordinary.host.remove();
     }
   });
 

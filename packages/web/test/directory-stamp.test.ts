@@ -26,6 +26,8 @@ import {
   editBlock,
   getDirectoryEntry,
   initDoc,
+  setKind,
+  setStatus,
   setTags,
   setTitle,
   tombstoneDirectoryEntry,
@@ -228,6 +230,40 @@ describe("directory stamps from the web", () => {
       createdAt: T0,
       updatedAt: T0,
     });
+  });
+
+  it("repairs and clears lifecycle metadata on attach and later remote updates", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Lifecycle" });
+    setKind(doc, "requirement");
+    setStatus(doc, "planned");
+
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, {
+      uuid: UUID,
+      title: "Lifecycle",
+      kind: "decision",
+      status: "open",
+      updatedAt: T0,
+    });
+    const directoryPeer = peerOf(directory);
+    const stop = watchDocumentStub(doc, directory);
+    expect(getDirectoryEntry(directoryPeer, UUID)).toMatchObject({
+      kind: "requirement",
+      status: "planned",
+      updatedAt: T0,
+    });
+
+    const remote = peerOf(doc);
+    vi.setSystemTime(T0 + 1_000);
+    setKind(remote, "");
+    const repaired = getDirectoryEntry(directoryPeer, UUID);
+    expect(repaired?.kind).toBeUndefined();
+    expect(repaired?.status).toBeUndefined();
+    // Repairing a cache from an update authored elsewhere is not a document
+    // change and must not claim a new updatedAt.
+    expect(repaired?.updatedAt).toBe(T0);
+    stop();
   });
 
   it("leaves a tombstone alone, however far the stub has drifted (#81)", () => {

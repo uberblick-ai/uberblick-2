@@ -10,21 +10,34 @@
  *
  * The semantic table and keyboard-sort contract need the browser's own
  * accessibility and activation behavior. Everything else — missing-stamp
- * ordering, tag and description matching, the pinned group, the empty-state
- * wording — is pinned in `test/document-list.test.tsx` over shared Y.Docs and
- * is not repeated here. The one filter exercised is the one a second browser
- * can predict.
+ * ordering, filter edge cases, the pinned group, the empty-state wording — is
+ * pinned in `test/document-list.test.tsx` over shared Y.Docs and is not
+ * repeated here. The lifecycle scenario is the browser-only seam: an external
+ * writer moves the open header and the directory-backed row without a reload.
  */
 
+import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
+import { resolveStorage } from "@uberblick/hub";
 import { startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 
 test.describe.configure({ mode: "serial" });
 
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const UB = join(repoRoot, "packages", "cli", "bin", "ub.mjs");
+const GRACEFUL_EXIT_MS = 5_000;
+
 let started: Harness | null = null;
 const contexts: BrowserContext[] = [];
+const sessions = new Set<McpSession>();
+let agentState = "";
 
 function harness(): Harness {
   if (started === null) {
@@ -33,11 +46,26 @@ function harness(): Harness {
   return started;
 }
 
+function configureAgent(): void {
+  const { configDir } = resolveStorage({
+    env: { XDG_CONFIG_HOME: join(agentState, "config") },
+  });
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(
+    join(configDir, "config.json"),
+    `${JSON.stringify({ workspace: harness().workspace, hubUrl: harness().hubUrl }, null, 2)}\n`,
+  );
+}
+
 test.beforeAll(async () => {
   started = await startHarness();
+  agentState = mkdtempSync(join(tmpdir(), "uberblick-e2e-document-list-"));
+  configureAgent();
 });
 
 test.afterEach(async () => {
+  await Promise.all([...sessions].map((session) => session.close()));
+  sessions.clear();
   for (const context of contexts.splice(0)) await context.close();
 });
 
@@ -45,6 +73,7 @@ test.afterAll(async () => {
   const running = started;
   started = null;
   await running?.stop();
+  if (agentState !== "") rmSync(agentState, { recursive: true, force: true });
 });
 
 /** A fresh context: its own IndexedDB, its own history, its own tab. */
@@ -71,6 +100,124 @@ async function createDoc(page: Page, title: string): Promise<void> {
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
   await page.locator(".ub-title").fill(title);
+}
+
+interface Frame {
+  id?: number;
+  error?: unknown;
+  result?: { content?: { type: string; text?: string }[]; isError?: boolean };
+}
+
+/** A real `ub mcp serve` client, kept local because this file needs two calls. */
+class McpSession {
+  readonly ready: Promise<void>;
+
+  private readonly child: ChildProcess;
+  private readonly pending = new Map<number, (message: Frame) => void>();
+  private nextId = 1;
+  private buffer = "";
+  private stderr = "";
+  private closing: Promise<void> | null = null;
+
+  constructor() {
+    sessions.add(this);
+    this.child = spawn(process.execPath, [UB, "mcp", "serve"], {
+      cwd: agentState,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        WORKSPACE_ID: harness().workspace,
+        HUB_AUTH_TOKEN: harness().authSecret,
+        UBERBLICK_DB: join(agentState, "agent.sqlite"),
+        XDG_CONFIG_HOME: join(agentState, "config"),
+        XDG_DATA_HOME: join(agentState, "data"),
+      },
+    });
+    this.child.stderr?.on("data", (chunk: Buffer) => {
+      this.stderr += chunk.toString();
+    });
+    this.child.stdout?.on("data", (chunk: Buffer) => {
+      this.buffer += chunk.toString();
+      let end = this.buffer.indexOf("\n");
+      while (end !== -1) {
+        const line = this.buffer.slice(0, end).trim();
+        this.buffer = this.buffer.slice(end + 1);
+        if (line !== "") {
+          try {
+            const message = JSON.parse(line) as Frame;
+            if (typeof message.id === "number") {
+              this.pending.get(message.id)?.(message);
+              this.pending.delete(message.id);
+            }
+          } catch {
+            this.stderr += `\nnot a JSON-RPC frame on stdout: ${line}`;
+          }
+        }
+        end = this.buffer.indexOf("\n");
+      }
+    });
+    this.ready = this.request("initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "document-list-e2e", version: "0.0.0" },
+    }).then(() => {
+      this.notify("notifications/initialized", {});
+    });
+  }
+
+  private request(method: string, params: unknown): Promise<Frame> {
+    const id = this.nextId++;
+    return new Promise((settle, fail) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        fail(new Error(`e2e: ${method} timed out\n${this.stderr}`));
+      }, 30_000);
+      this.pending.set(id, (message) => {
+        clearTimeout(timer);
+        settle(message);
+      });
+      this.child.stdin?.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`,
+      );
+    });
+  }
+
+  private notify(method: string, params: unknown): void {
+    this.child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
+  }
+
+  async call<T>(name: string, args: Record<string, unknown>): Promise<T> {
+    await this.ready;
+    const message = await this.request("tools/call", { name, arguments: args });
+    const text = message.result?.content?.[0]?.text ?? "null";
+    if (message.error !== undefined || message.result?.isError === true) {
+      throw new Error(
+        `e2e: ${name} failed: ${JSON.stringify(message.error ?? text)}`,
+      );
+    }
+    return JSON.parse(text) as T;
+  }
+
+  close(): Promise<void> {
+    this.closing ??= new Promise<void>((settle) => {
+      if (this.child.exitCode !== null || this.child.signalCode !== null) {
+        settle();
+        return;
+      }
+      const term = setTimeout(() => this.child.kill("SIGTERM"), GRACEFUL_EXIT_MS);
+      const kill = setTimeout(
+        () => this.child.kill("SIGKILL"),
+        GRACEFUL_EXIT_MS * 2,
+      );
+      this.child.once("exit", () => {
+        clearTimeout(term);
+        clearTimeout(kill);
+        settle();
+      });
+      this.child.stdin?.end();
+    });
+    return this.closing;
+  }
 }
 
 test("the workspace address is the list, and it holds what another browser created", async ({
@@ -151,4 +298,38 @@ test("a new document stores the title shown by the list", async ({ browser }) =>
   await page.getByRole("button", { name: "All docs" }).click();
   await page.locator(".ub-docs-search").fill("untitled");
   await expect(listedTitles(page)).toHaveText(["Untitled"]);
+});
+
+test("a lifecycle update outside the browser moves the row and both badges", async ({
+  browser,
+}) => {
+  const title = docTitle("roadmap");
+  const page = await openApp(browser);
+  const agent = new McpSession();
+  const created = await agent.call<{ uuid: string }>("create_doc", {
+    title,
+    description: "A roadmap item created outside the browser.",
+    kind: "requirement",
+    status: "planned",
+  });
+  await expect(page.locator(".ub-docs-title", { hasText: title })).toHaveCount(0);
+  await page.getByRole("button", { name: "Product", exact: true }).click();
+  const row = page.locator(".ub-docs-row", { hasText: title });
+  await expect(row.locator(".ub-lifecycle-badge")).toHaveText(
+    "Product · planned",
+  );
+
+  await row.locator(".ub-docs-open").click();
+  await expect(page.locator(".ub-lifecycle-badge")).toHaveText(
+    "Product · planned",
+  );
+  await agent.call("set_status", { uuid: created.uuid, status: "implementing" });
+  await expect(page.locator(".ub-lifecycle-badge")).toHaveText(
+    "Product · implementing",
+  );
+  await page.getByRole("button", { name: "All docs" }).click();
+  await page.getByRole("button", { name: "Product", exact: true }).click();
+  await expect(
+    page.locator(".ub-docs-row", { hasText: title }).locator(".ub-lifecycle-badge"),
+  ).toHaveText("Product · implementing");
 });
