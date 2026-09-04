@@ -147,6 +147,7 @@ export function preflight(signals) {
   }
   if (findingState === "split") {
     return plan("split", {
+      add: ["umbrella"],
       remove: ["needs-preparation", "ready"],
       comment: true,
     });

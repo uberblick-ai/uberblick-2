@@ -14,8 +14,7 @@ it belongs to the caller, and the role contracts under `.agents/roles/` do not
 change when the launcher does.
 
 **Roles.** The continuous entry roles `issue-preparer`, `implementer` and
-`integrator`, and `program-coordinator` for an explicitly requested program
-issue. `issue-adversary` and `implementation-reviewer` are internal: their
+`integrator`. `issue-adversary` and `implementation-reviewer` are internal: their
 parent starts them under `.agents/protocols/issue-preparation.md` or
 `review-protocol.md` beside this file, never this launcher. Any other name: say
 so and return.

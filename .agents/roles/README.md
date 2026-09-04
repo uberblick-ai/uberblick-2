@@ -2,9 +2,11 @@
 
 The delivery workflow has three continuous entry roles: `issue-preparer`,
 `implementer` and `integrator`. They delegate the exact-key internal roles
-`issue-adversary` and `implementation-reviewer`; `program-coordinator` is called
-directly only for explicit program work. Each file beside this one is one
-role's contract, with thin runtime adapters pointing back at it.
+`issue-adversary` and `implementation-reviewer`. Each file beside this one is one
+role's contract, with thin runtime adapters pointing back at it. There is no
+coordinator role: a multi-issue program is a milestone plus `umbrella` parents,
+ordered by `Depends-on` and dispatched by the ordinary queues (owner decision,
+2026-09-04).
 
 This file states what every role obeys, so no contract repeats it. Repository
 policy — `AGENTS.md`, `CLAUDE.md`, `.github/ISSUE_SPEC.md` — wins on conflicts,
@@ -30,7 +32,7 @@ before side effects.
 
 **An internal subagent is the one exception, and it is the same exception for
 every delegating role** — issue-preparer to issue-adversary, implementer or
-integrator to implementation-reviewer, program coordinator to implementer. The
+integrator to implementation-reviewer. The
 parent supplies the child's role and run identity, the exact GitHub issue or PR
 key, and its own run identity as parent; nothing else. The child reconstructs
 from GitHub, never searches a queue and never acts on another item, and writes
@@ -54,10 +56,9 @@ the latest `Delegated:` record for its role and target names its run id, and
 every supplied value before its first side effect. A missing or mismatched
 record is a refusal, not permission to fall back to the queue.
 
-For a delegated **implementation**, branch ownership still needs the child's
-separate implementation claim and `Done:` handoff. For a non-implementation
-child (`issue-adversary` or `implementation-reviewer`), the delegation comment
-is instead its one mutable lifecycle record: the child edits `Status: pending`
+Every internal child is a non-implementation child (`issue-adversary` or
+`implementation-reviewer`); no role delegates an implementation. The delegation
+comment is the child's one mutable lifecycle record: the child edits `Status: pending`
 to `Status: running` before substantive work and to `Status: complete` when it
 appends its grounded verdict. It posts no separate nested claim or `Done:`
 comment. The parent edits the same record to `Status: failed — <reason>` when
@@ -95,13 +96,12 @@ ignored by preparation and sorts as Medium for implementation pickup.
 **The claim record.** The implementer claims in `.github/ISSUE_SPEC.md`'s
 grammar: `Claimed: <branch>` / `Implementer: <claude|codex> <id>`. Every
 top-level role other than the implementer posts `Claim: <role> <session-or-run
-id>`, plus the grounding SHA when its outcome is tied to one. A delegated
-implementation also posts `Parent: <parent role> <run id>` — a comment record,
-distinct from the `Parent: #N` reservation header `.github/ISSUE_SPEC.md`
-defines for an issue body. A top-level handoff, and a delegated implementation
-handoff, opens `Done: <role> <session-or-run id>` with that grounding and parent
-where applicable. Non-implementation children use the single mutable
-delegation record above instead. Handoffs stay proportional: link evidence
+id>`, plus the grounding SHA when its outcome is tied to one. (The `Parent:`
+line of a delegation record names a role and run id; the `Parent: #N` split
+header `.github/ISSUE_SPEC.md` defines for an issue body is a different record
+in a different place.) A top-level handoff opens `Done: <role>
+<session-or-run id>` with that grounding. Internal children use the single
+mutable delegation record above instead. Handoffs stay proportional: link evidence
 instead of narrating transcripts. GitHub must be sufficient for recovery.
 
 **A durable comment reaches GitHub as composed.** Every durable comment body —
@@ -149,10 +149,9 @@ garbled record survives only in the launching session's transcript, the private
 channel every rule here exists to keep out of the record.
 
 **The race rule.** A live top-level claim makes the item ineligible for every
-other queue pickup. A delegated implementation may hold the one nested claim;
-the mutable assignment record is the equivalent ownership record for a
-non-implementation child. Neither releases the parent claim or admits another
-role. Re-read immediately before and after a top-level or implementation claim;
+other queue pickup. An internal child's mutable assignment record is its
+ownership record; it neither releases the parent claim nor admits another
+role. Re-read immediately before and after a claim;
 the earliest valid claim wins, and a loser posts a one-line withdrawal and
 tries the next candidate.
 
@@ -187,10 +186,9 @@ A top-level claim other than an implementation claim is stale when no completion
 exists and its claim comment's `updated_at` is more than 60 minutes old; the
 window is twice the renewal interval so that a healthy foreground run is never
 reclaimed in the gap between two renewals.
-Every implementation claim, top-level or delegated, uses `AGENTS.md`'s
-30-minute durable-liveness rule. A later valid claim takes over a stale one and
-continues the current remote branch head; the superseded holder stops if it
-resumes. A parent replaces a stale delegated implementer the same way.
+Every implementation claim uses `AGENTS.md`'s 30-minute durable-liveness
+rule. A later valid claim takes over a stale one and continues the current
+remote branch head; the superseded holder stops if it resumes.
 
 A nested **non-implementation** assignment expires when its record remains
 `pending` for 10 minutes, when a `running` record's `updated_at` is more than 30

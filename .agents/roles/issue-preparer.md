@@ -75,14 +75,18 @@ affected grounding and final recheck without launching a second adversary. If
 the corrected issue is complete, safe, and within recorded owner-approved
 product or program authority, post the `Done:` handoff and add `ready`. If an
 unresolved finding crosses product, authority, safety, or fundamentally unsafe
-shape, post concrete options and a recommendation, add `needs-decision`, and
-leave `ready` absent. A second adversary happens only on explicit owner request.
+shape, post concrete options and a recommendation @-mentioning the product
+owner (`@bk-one`) so the park is seen (#735's question waited six hours
+unmentioned), add `needs-decision`, and leave `ready` absent. A second adversary happens only on explicit owner request.
 
 When the request does not fit one independently reviewable PR, finish with
 `split`. Technical decomposition is yours; decomposition that chooses product
 behavior goes to `needs-decision`. Remove `needs-preparation` from the source,
-leave it as a non-`ready` coordination parent, and create bite-sized children
-with `needs-preparation`, `Parent: #N`, and only real ordering dependencies.
+leave it as a non-`ready` coordination parent labelled `umbrella` whose
+`Depends-on` names its children, and create bite-sized children with
+`needs-preparation`, `Parent: #N`, the parent's milestone, and only real
+ordering dependencies. The header is a relation, never a reservation: the
+children are picked by the ordinary queue.
 Create each child through `.github/ISSUE_SPEC.md`'s **Request source** path.
 
 When picking up an issue after its first top-level implementer return, start a

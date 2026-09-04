@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The six agent roles and issue-authoring adapters, checked for portability.
+ * The five agent roles and issue-authoring adapters, checked for portability.
  *
  * A role is a triplet: the contract at `.agents/roles/<slug>.md` and two thin
  * adapters that point a runtime at it. This proves the triplets exist, that all
@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const SLUGS = ["issue-preparer", "issue-adversary", "implementer",
-	"implementation-reviewer", "integrator", "program-coordinator"];
+	"implementation-reviewer", "integrator"];
 
 const ROLES = ".agents/roles";
 const CLAUDE = ".claude/agents";
