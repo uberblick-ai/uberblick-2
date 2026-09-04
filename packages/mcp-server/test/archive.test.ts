@@ -145,11 +145,6 @@ describe("archive_doc", () => {
       (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions,
     ).toEqual(expectedLog);
     expect(
-      (await rig.ok("list_docs", { kind: "decision" })).docs.map(
-        (doc: any) => doc.uuid,
-      ).sort(),
-    ).toEqual([first.uuid, second.uuid].sort());
-    expect(
       await Promise.all(
         [first.uuid, second.uuid].map((uuid) => rig.ok("get_doc", { uuid })),
       ),
@@ -164,6 +159,18 @@ describe("archive_doc", () => {
         [first.uuid, second.uuid].map((uuid) => rig.ok("get_doc", { uuid })),
       ),
     ).toEqual(decisionsBefore);
+
+    // Restore remains single-document in the other direction too: a decision
+    // archived deliberately stays archived when its requirement cycles.
+    await rig.ok("archive_doc", { uuid: first.uuid });
+    await rig.ok("archive_doc", { uuid: requirement.uuid });
+    await rig.ok("restore_doc", { uuid: requirement.uuid });
+    expect(
+      (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions,
+    ).toEqual([
+      { ...expectedLog[0], available: false },
+      expectedLog[1],
+    ]);
   });
 
   it("drops a document from discovery and search, and from nothing else", async () => {

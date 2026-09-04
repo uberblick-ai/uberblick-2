@@ -625,7 +625,12 @@ describe("decision log tools", () => {
 
     for (const name of ["archive_doc", "restore_doc"]) {
       const description = tools.find((tool) => tool.name === name)?.description;
-      expect(description, name).toContain("changes only the uuid passed");
+      expect(description, name).toContain(
+        "writes lifecycle state only for the uuid passed",
+      );
+      expect(description, name).toContain(
+        "decision log can still report whether the target is available",
+      );
       expect(description, name).toContain(
         "Call archive_doc or restore_doc separately for each related document",
       );

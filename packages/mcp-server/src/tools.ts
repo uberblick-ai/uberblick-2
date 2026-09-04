@@ -146,10 +146,11 @@ const ARCHIVE_IS_LAST_WRITE_WINS =
 
 /** The single-document boundary shared by both lifecycle tools. */
 const DECISION_LOG_LIFECYCLES_ARE_INDEPENDENT =
-  "Document lifecycles are independent across a requirement's decision log: archive_doc or restore_doc changes " +
-  "only the uuid passed. It does not archive, restore or edit any decision that document references, and it does " +
-  "not edit any requirement that references the document. Call archive_doc or restore_doc separately for each " +
-  "related document whose lifecycle should change.";
+  "Document lifecycles are independent across a requirement's decision log: archive_doc or restore_doc writes " +
+  "lifecycle state only for the uuid passed. It does not archive, restore or edit any decision that document " +
+  "references, and it does not edit any requirement that references the document; a requirement's decision log " +
+  "can still report whether the target is available. Call archive_doc or restore_doc separately for each related " +
+  "document whose lifecycle should change.";
 
 /**
  * What an archive costs a writer, in the words an agent reads.
