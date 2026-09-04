@@ -144,6 +144,12 @@ test("launch data is complete and stays aligned with the role triplets", { skip:
 	assert.equal(result.status, 1);
 	assert.match(result.stderr, /implementer codex adapter.*implementer\.toml/);
 
+	const missingAdapter = completeFixture();
+	rmSync(join(missingAdapter, ".claude/agents/implementer.md"));
+	result = run(missingAdapter);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /\.claude\/agents\/implementer\.md: missing/);
+
 	const wrongDefault = completeFixture();
 	const wrongPath = join(wrongDefault, ".agents/launch.json");
 	const wrongData = JSON.parse(readFileSync(wrongPath, "utf8"));

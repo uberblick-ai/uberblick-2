@@ -16,10 +16,16 @@ import {
   readFileSync,
   statSync,
 } from "node:fs";
-import { constants, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import {
+  FORWARDED,
+  reraise,
+  SIGNAL_DELIVERY_GRACE_MS,
+  signalExitCode,
+} from "./child.js";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
@@ -91,7 +97,6 @@ const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repositoryRoot = dirname(dirname(packageRoot));
 const IDLE_MS = 30 * 60 * 1_000;
 const FAILURE_BACKOFF_MS = 5_000;
-const FORWARDED: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"];
 
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -177,7 +182,7 @@ export function readLaunchData(root: string): LaunchData {
           runtime === "claude" ? ["adapter", "sandbox", "permissionMode"] : ["adapter", "sandbox"],
         ) ||
         adapter !== expectedAdapter ||
-        !pathIsFile(root, expectedAdapter) ||
+        (runtime === "codex" && !pathIsFile(root, expectedAdapter)) ||
         !sandboxValid ||
         (runtime === "claude" && permissionMode !== "auto")
       ) {
@@ -347,6 +352,7 @@ export function createLaunchServices(
   io: Io,
 ): LaunchServices {
   let scratch: string | null = null;
+  let preservedFailureWorktree: string | null = null;
 
   return {
     root,
@@ -439,9 +445,27 @@ export function createLaunchServices(
           : result.lastLine,
       };
       if (!result.started || result.code !== 0 || result.signal !== null) {
+        const failure = result.detail ??
+          (result.signal === null
+            ? `session exited with status ${result.code}`
+            : `session ended from ${result.signal}`);
+        if (preservedFailureWorktree === null) {
+          preservedFailureWorktree = worktree;
+          return {
+            ...withLastLine,
+            detail: `${failure}; worktree preserved at ${worktree}`,
+          };
+        }
+        const removed = runSync("git", ["worktree", "remove", "--force", worktree], root, env);
+        if (removed.status !== 0) {
+          return {
+            ...withLastLine,
+            detail: `${failure}; worktree cleanup failed at ${worktree}; first failed worktree remains at ${preservedFailureWorktree}`,
+          };
+        }
         return {
           ...withLastLine,
-          detail: result.detail ?? `session ended abnormally; worktree preserved at ${worktree}`,
+          detail: `${failure}; first failed worktree preserved at ${preservedFailureWorktree}`,
         };
       }
       const removed = runSync("git", ["worktree", "remove", "--force", worktree], root, env);
@@ -456,12 +480,7 @@ export function createLaunchServices(
     },
     wait: waitForSignal,
     terminate(signal) {
-      try {
-        process.kill(process.pid, signal);
-        return true;
-      } catch {
-        return false;
-      }
+      return reraise(signal);
     },
   };
 }
@@ -519,10 +538,9 @@ async function stopFromSignal(
   signal: NodeJS.Signals,
 ): Promise<number> {
   if (services.terminate(signal)) {
-    await new Promise<never>(() => {});
+    await new Promise((resolve) => setTimeout(resolve, SIGNAL_DELIVERY_GRACE_MS));
   }
-  const numbers = constants.signals as unknown as Record<string, number>;
-  return 128 + (numbers[signal] ?? 0);
+  return signalExitCode(signal);
 }
 
 /** Run the standing loop. It returns only for usage/configuration failure or a signal fallback. */
@@ -564,8 +582,10 @@ export async function launchCommand(
   for (;;) {
     const refreshFailure = services.refreshMain();
     if (refreshFailure !== null) {
-      io.err(`ub launch: ${refreshFailure}\n`);
-      return 1;
+      io.err(`ub launch: ${refreshFailure}; retrying after a short backoff\n`);
+      const stopped = await pause(services, FAILURE_BACKOFF_MS);
+      if (stopped !== null) return stopped;
+      continue;
     }
     try {
       entry = services.loadData().entryRoles[parsed.role];

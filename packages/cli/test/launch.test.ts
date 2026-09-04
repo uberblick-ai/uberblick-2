@@ -37,6 +37,7 @@ function result(overrides: Partial<SessionResult> = {}): SessionResult {
 function rig(options: {
   preflight?: string | null;
   refresh?: string | null;
+  refreshes?: Array<string | null>;
   probes?: number[];
   sessions?: SessionResult[];
   waits?: Array<NodeJS.Signals | null>;
@@ -45,6 +46,7 @@ function rig(options: {
   const probes = [...(options.probes ?? [0])];
   const sessions = [...(options.sessions ?? [result({ interrupted: "SIGINT" })])];
   const waits = [...(options.waits ?? [])];
+  const refreshes = [...(options.refreshes ?? [])];
   const seen = {
     preflight: [] as string[],
     refreshes: 0,
@@ -62,6 +64,7 @@ function rig(options: {
     },
     refreshMain() {
       seen.refreshes++;
+      if (refreshes.length > 0) return refreshes.shift()!;
       return options.refresh ?? null;
     },
     async runProbe(command) {
@@ -74,7 +77,7 @@ function rig(options: {
     },
     async wait(milliseconds) {
       seen.waits.push(milliseconds);
-      return waits.shift() ?? "SIGINT";
+      return waits.length > 0 ? waits.shift()! : "SIGINT";
     },
     terminate(signal) {
       seen.terminations.push(signal);
@@ -262,22 +265,27 @@ describe("ub launch", () => {
     }
   });
 
-  it("backs off after an abnormal session and keeps configuration failures separate", async () => {
+  it("backs off after an abnormal session or transient refresh failure", async () => {
     const crashed = rig({ sessions: [result({ code: 23 })], waits: ["SIGINT"] });
     expect(await launchCommand(["issue-preparer"], crashed.io, crashed.services)).toBe(130);
     expect(crashed.seen.waits).toEqual([5_000]);
     expect(crashed.stderr()).toMatch(/status 23.*short backoff/);
 
-    for (const options of [
-      { preflight: "codex is not authenticated" },
-      { refresh: "main cannot fast-forward" },
-    ]) {
-      const current = rig(options);
-      expect(await launchCommand(["implementer"], current.io, current.services)).toBe(1);
-      expect(current.seen.sessions).toEqual([]);
-      expect(current.seen.probes).toEqual([]);
-      expect(current.stderr()).toMatch(/not authenticated|fast-forward/);
-    }
+    const refresh = rig({
+      refreshes: ["could not fetch origin/main", null],
+      waits: [null],
+    });
+    expect(await launchCommand(["implementer"], refresh.io, refresh.services)).toBe(130);
+    expect(refresh.seen.refreshes).toBe(2);
+    expect(refresh.seen.waits).toEqual([5_000]);
+    expect(refresh.seen.sessions).toHaveLength(1);
+    expect(refresh.stderr()).toMatch(/could not fetch.*short backoff/);
+
+    const preflight = rig({ preflight: "codex is not authenticated" });
+    expect(await launchCommand(["implementer"], preflight.io, preflight.services)).toBe(1);
+    expect(preflight.seen.sessions).toEqual([]);
+    expect(preflight.seen.probes).toEqual([]);
+    expect(preflight.stderr()).toMatch(/not authenticated/);
   });
 
   it("removes an ambient HUB_URL from the environment runtime children receive", () => {
@@ -286,11 +294,13 @@ describe("ub launch", () => {
     expect(env.HUB_URL).toBeUndefined();
   });
 
-  it("runs Claude directly in a fresh worktree with a clean environment", async () => {
+  it("runs Claude in a fresh worktree and retains at most one failed worktree", async () => {
     const root = mkdtempSync(join(tmpdir(), "ub-launch-runtime-"));
+    let preserved = "";
     try {
       const bin = join(root, "bin");
       const evidence = join(root, "evidence.json");
+      const failure = join(root, "fail");
       mkdirSync(bin);
       writeFileSync(join(root, "marker"), "main\n");
       for (const args of [
@@ -320,6 +330,7 @@ fs.writeFileSync(process.env.LAUNCH_EVIDENCE, JSON.stringify({
   hub: process.env.HUB_URL ?? null,
   marker: fs.readFileSync("marker", "utf8"),
 }));
+if (fs.existsSync(process.env.LAUNCH_FAILURE)) process.exit(23);
 process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
 `,
       );
@@ -332,6 +343,7 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
           PATH: `${bin}:${process.env.PATH ?? ""}`,
           HUB_URL: "ws://ambient.invalid:9999",
           LAUNCH_EVIDENCE: evidence,
+          LAUNCH_FAILURE: failure,
         }),
         {
           out: (text) => {
@@ -367,14 +379,33 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
       });
       expect(worktrees.status, worktrees.stderr).toBe(0);
       expect(worktrees.stdout.match(/^worktree /gm)).toHaveLength(1);
+
+      writeFileSync(failure, "fail\n");
+      const firstFailure = await services.runSession("issue-preparer", "claude", entry!);
+      const secondFailure = await services.runSession("issue-preparer", "claude", entry!);
+      expect(firstFailure).toMatchObject({ started: true, code: 23 });
+      expect(secondFailure).toMatchObject({ started: true, code: 23 });
+      preserved = firstFailure.detail?.match(/worktree preserved at (.+)$/)?.[1] ?? "";
+      expect(preserved).not.toBe("");
+      expect(secondFailure.detail).toContain(`first failed worktree preserved at ${preserved}`);
+      const afterFailures = spawnSync("git", ["worktree", "list", "--porcelain"], {
+        cwd: root,
+        encoding: "utf8",
+      });
+      expect(afterFailures.status, afterFailures.stderr).toBe(0);
+      expect(afterFailures.stdout.match(/^worktree /gm)).toHaveLength(2);
     } finally {
+      if (preserved !== "") {
+        spawnSync("git", ["worktree", "remove", "--force", preserved], { cwd: root });
+        rmSync(dirname(preserved), { recursive: true, force: true });
+      }
       rmSync(root, { recursive: true, force: true });
     }
   });
 });
 
 describe("launch data", () => {
-  it("refuses malformed data and a missing adapter", () => {
+  it("refuses malformed data without requiring an excluded Claude adapter at runtime", () => {
     const root = mkdtempSync(join(tmpdir(), "ub-launch-data-"));
     try {
       const launch = join(root, ".agents/launch.json");
@@ -404,6 +435,12 @@ describe("launch data", () => {
         }),
       );
       expect(() => readLaunchData(root)).toThrow(/readable role contract/);
+
+      mkdirSync(join(root, ".agents/roles"), { recursive: true });
+      mkdirSync(join(root, ".codex/agents"), { recursive: true });
+      writeFileSync(join(root, ".agents/roles/implementer.md"), "# Implementer\n");
+      writeFileSync(join(root, ".codex/agents/implementer.toml"), 'name = "implementer"\n');
+      expect(readLaunchData(root).entryRoles.implementer).toBeDefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
