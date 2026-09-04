@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
@@ -25,8 +25,7 @@ const SYNCED: RoomStatus = {
   writable: true,
   storeRefused: false,
   unsyncedChanges: 0,
-  localReplicaLoaded: true,
-  hasLocalCache: true,
+  hasAnswered: true,
   protocolMismatch: null,
   authFailed: false,
   tokenMissing: false,
@@ -48,7 +47,6 @@ function statusRoom(initial: RoomStatus, workspace = WORKSPACE.uuid): {
       listener(status);
       return () => listeners.delete(listener);
     },
-    whenLocalReplicaLoaded: Promise.resolve(),
   } as unknown as RoomConnection;
   return {
     connection,
@@ -81,7 +79,6 @@ afterEach(() => {
     mounted.host.remove();
     mounted = null;
   }
-  vi.unstubAllGlobals();
 });
 
 async function mount(
@@ -126,9 +123,6 @@ async function settleSynced(): Promise<void> {
 }
 
 it("renders only live client-held facts and preserves each unknown rule", async () => {
-  vi.stubGlobal("navigator", {
-    storage: { estimate: async () => ({ usage: 2_500_000, quota: 1e9 }) },
-  });
   const room = statusRoom(SYNCED);
   seedDocuments(room.connection, 3);
   const host = await mount(room.connection);
@@ -141,31 +135,25 @@ it("renders only live client-held facts and preserves each unknown rule", async 
   expect(shown.get("Hub")).toBe(ENDPOINT.url);
   expect(shown.get("Source")).toBe("served /uberblick-config.json");
   expect(shown.get("Connection")).toBe("synced");
-  expect(shown.get("Local cache (all workspaces)")).toBe("2.5 MB");
   expect(shown.get("MCP connections")).toBe("2");
 
   act(() => mounted?.root.unmount());
   mounted?.host.remove();
   mounted = null;
-  vi.stubGlobal("navigator", { storage: undefined });
   const unknown = facts(await mount(null, null));
   expect(unknown.get("Hub")).toBe("—");
   expect(unknown.get("Source")).toBe("—");
   expect(unknown.get("Connection")).toBe("offline");
   expect(unknown.get("Documents")).toBe("—");
-  expect(
-    [...unknown.keys()].some((label) => label.startsWith("Local cache")),
-  ).toBe(false);
 });
 
-it("counts only the routed directory after its local replica has answered", async () => {
-  vi.stubGlobal("navigator", { storage: undefined });
-  const unread = statusRoom({ ...SYNCED, localReplicaLoaded: false });
+it("counts only the routed directory after its server has answered", async () => {
+  const unread = statusRoom({ ...SYNCED, hasAnswered: false });
   seedDocuments(unread.connection, 2);
   const host = await mount(unread.connection);
   expect(facts(host).get("Documents")).toBe("—");
 
-  unread.update({ localReplicaLoaded: true });
+  unread.update({ hasAnswered: true });
   expect(facts(host).get("Documents")).toBe("2");
 
   const foreign = statusRoom(
@@ -187,7 +175,6 @@ it("counts only the routed directory after its local replica has answered", asyn
 });
 
 it("takes offline and refusal readings live from the shared status derivation", async () => {
-  vi.stubGlobal("navigator", { storage: undefined });
   const room = statusRoom(SYNCED);
   const host = await mount(room.connection);
   await settleSynced();

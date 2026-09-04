@@ -254,10 +254,15 @@ it("keeps a room on a live socket read-only until its token is admitted", async 
   await seedDocument(first, firstUuid);
 
   const second = await openTab(`${WORKSPACE}/${randomUUID()}`, hub.port);
-  expect(second.history[0]).toMatchObject({ connected: true, writable: false });
+  expect(second.history[0]).toMatchObject({
+    connected: true,
+    writable: false,
+    hasAnswered: false,
+  });
   await waitFor("the second room's token to be admitted", () =>
     second.latest().writable,
   );
+  await waitFor("the second room's server answer", () => second.latest().hasAnswered);
 }, TEST_TIMEOUT_MS);
 
 /** Send the same room-local close reason the local browser bridge sends. */
@@ -361,6 +366,7 @@ it("keeps a store-refused room read-only across reacquire without dropping peers
 
   closeRoom(hub, refusedRoom, STORE_REFUSED_REASON);
   await waitFor("the refusal reading", () => refused.latest().storeRefused);
+  expect(refused.latest().hasAnswered).toBe(true);
   expect(refused.latest().writable).toBe(false);
   expect(other.latest().writable).toBe(true);
   await expectLiveWrite(other, hub.port, otherRoom, "the other room stays live");
@@ -368,6 +374,7 @@ it("keeps a store-refused room read-only across reacquire without dropping peers
   refused.release();
   const reopened = await openTab(refusedRoom, hub.port);
   expect(reopened.latest().storeRefused).toBe(true);
+  expect(reopened.latest().hasAnswered).toBe(true);
   expect(reopened.latest().writable).toBe(false);
   expect(reopened.connection.provider.isAttached).toBe(false);
   expect(other.latest().writable).toBe(true);

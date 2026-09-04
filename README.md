@@ -119,8 +119,8 @@ TLS, WebSocket proxying, and SPA fallback.
 an ephemeral port with a throwaway signing secret and a temp database, and its
 own Vite dev server on an ephemeral port, so it needs no fnox key and cannot
 collide with a running `mise run dev`. It covers exactly what jsdom cannot —
-two live clients converging on one block, a rendered remote cursor, and a reload
-that comes out of the IndexedDB cache while the hub is down. Everything else
+two live clients converging on one block, a rendered remote cursor, and fresh
+and reloaded browsers receiving only what their server sends. Everything else
 belongs in `mise run test`. Arguments after `--` go to Playwright unchanged; for
 example, `mise run e2e -- --repeat-each=3 outline.spec.ts` runs only that spec
 three times.

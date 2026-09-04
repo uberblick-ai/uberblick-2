@@ -310,23 +310,21 @@ export function docIsHydrated(uuid: string, meta: DocMeta | null): boolean {
  *
  * `meta` being null is one kind of silence — nothing has been read. An empty
  * `meta` is a second kind, and it looks identical: `getMeta` on a Y.Doc that
- * holds nothing returns `uuid: ""`, and a room that has just been opened holds
- * nothing until its IndexedDB replica is applied. Reading that as "answered,
- * and not this document" is what put "waiting for sync" on screen for a frame
- * when a reader navigates away from a document and back (#161) — the room is
- * released and re-opened from nothing, and the local read can slip past a
- * React commit.
+ * holds nothing returns `uuid: ""`, and a room that has just been opened starts
+ * there too. Reading that as "answered, and not this document" is what put
+ * "waiting for sync" on screen for a frame when a reader navigates away from a
+ * document and back (#161).
  *
- * So the empty answer only counts once `localReplicaLoaded` says the local read
- * is done. After that an empty room *is* an answer: a deep link to a uuid this
- * replica does not hold keeps its waiting screen, which is the whole point of
- * that screen.
+ * So the empty answer only counts once the room has completed a sync or its
+ * connection has failed or been refused. After that an empty room *is* an
+ * answer: a deep link to a uuid this server does not hold keeps its waiting
+ * screen, which is the whole point of that screen.
  */
 export function replicaHasAnswered(
   meta: DocMeta | null,
-  localReplicaLoaded: boolean,
+  connectionAnswered: boolean,
 ): boolean {
-  return meta !== null && (meta.uuid !== "" || localReplicaLoaded);
+  return meta !== null && (meta.uuid !== "" || connectionAnswered);
 }
 
 /** Push a new address, or replace the current one without growing the history. */

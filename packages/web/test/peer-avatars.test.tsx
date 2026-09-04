@@ -239,7 +239,7 @@ function Shell({
     onFrame?.();
   });
   return doc === null ? null : (
-    <StatusLine connection={doc} presence={presence} docPresent />
+    <StatusLine connection={doc} presence={presence} />
   );
 }
 
@@ -257,8 +257,7 @@ function roomFixture(room: string): {
     writable: true,
     storeRefused: false,
     unsyncedChanges: 0,
-    localReplicaLoaded: true,
-    hasLocalCache: false,
+    hasAnswered: true,
     protocolMismatch: null,
     authFailed: false,
     tokenMissing: false,

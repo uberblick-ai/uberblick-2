@@ -62,8 +62,7 @@ function fixture(status: Partial<RoomStatus> = {}): Fixture {
     writable: true,
     storeRefused: false,
     unsyncedChanges: 0,
-    localReplicaLoaded: true,
-    hasLocalCache: false,
+    hasAnswered: true,
     protocolMismatch: null,
     authFailed: false,
     tokenMissing: false,
@@ -132,12 +131,10 @@ function publish(
 function Panel({
   fix,
   endpoint = ENDPOINT,
-  docPresent = true,
   onClose = () => {},
 }: {
   fix: Fixture;
   endpoint?: HubEndpoint | null;
-  docPresent?: boolean;
   onClose?: () => void;
 }): ReactElement {
   const presence = usePresence(fix.connection);
@@ -146,7 +143,6 @@ function Panel({
       connection={fix.connection}
       presence={presence}
       endpoint={endpoint}
-      docPresent={docPresent}
       onClose={onClose}
     />
   );
@@ -155,16 +151,13 @@ function Panel({
 function mount(
   fix: Fixture,
   endpoint: HubEndpoint | null = ENDPOINT,
-  docPresent = true,
 ): { host: HTMLElement; root: Root } {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  act(() =>
-    root.render(<Panel fix={fix} endpoint={endpoint} docPresent={docPresent} />),
-  );
+  act(() => root.render(<Panel fix={fix} endpoint={endpoint} />));
   // Past every settle window, so the state word is what a reader sees rather
   // than the "offline" every mount starts from.
   act(() => void vi.advanceTimersByTime(5_000));
@@ -215,7 +208,6 @@ describe("the sync panel renders the state this client holds", () => {
           connection={null}
           presence={[]}
           endpoint={ENDPOINT}
-          docPresent={false}
           onClose={() => {}}
         />,
       ),
@@ -227,7 +219,6 @@ describe("the sync panel renders the state this client holds", () => {
         Room: "—",
         State: "—",
         Backlog: "—",
-        "Local copy": "—",
       });
     } finally {
       act(() => root.unmount());
@@ -249,7 +240,6 @@ describe("the sync panel renders the state this client holds", () => {
         Room: ROOM,
         State: "—",
         Backlog: "3 sync messages unacked",
-        "Local copy": "unavailable",
       });
     } finally {
       act(() => root.unmount());
@@ -272,10 +262,6 @@ describe("the sync panel renders the state this client holds", () => {
         State: "syncing…",
         // The status line's wording, from the one place both read it.
         Backlog: "4 sync messages unacked",
-        // The local read is over and found nothing — this fixture's browser has
-        // no IndexedDB. An answer, not a silence: the status line only says this
-        // during an outage, so the panel is where it is always readable (#535).
-        "Local copy": "unavailable",
       });
     } finally {
       act(() => root.unmount());
@@ -331,56 +317,6 @@ describe("the sync panel renders the state this client holds", () => {
 
     const words = [offline.State, busy.State, quiet.State];
     expect(new Set(words).size).toBe(words.length);
-  });
-
-  it("keeps the local-copy row in every state, unknown until the read settles", () => {
-    vi.useFakeTimers();
-    const localCopy = (status: Partial<RoomStatus>): string | undefined => {
-      const { host, root } = mount(fixture(status));
-      try {
-        return facts(host)["Local copy"];
-      } finally {
-        act(() => root.unmount());
-        host.remove();
-      }
-    };
-    // `hasLocalCache: false` is two different things — a read that found
-    // nothing, and a read still running — and the panel must not spell them the
-    // same way. `localReplicaLoaded` is what tells them apart.
-    expect(localCopy({ localReplicaLoaded: false, hasLocalCache: false })).toBe("—");
-    expect(localCopy({ localReplicaLoaded: true, hasLocalCache: false })).toBe(
-      "unavailable",
-    );
-    expect(localCopy({ localReplicaLoaded: true, hasLocalCache: true })).toBe(
-      "available",
-    );
-    // Including where the reader is least able to check for themselves.
-    expect(
-      localCopy({
-        protocolMismatch: { hub: 2, client: 1 },
-        localReplicaLoaded: true,
-        hasLocalCache: true,
-      }),
-    ).toBe("available");
-  });
-
-  it("knows nothing about a document that has not reached this replica", () => {
-    // The panel opens over the waiting screen too. A checkpoint can prove the
-    // room was cached, but not that the deep-linked document now on the route
-    // is the content this replica actually holds (#601). Unknown, in the
-    // panel's own word for it, rather than a promise.
-    vi.useFakeTimers();
-    const { host, root } = mount(
-      fixture({ localReplicaLoaded: true, hasLocalCache: true }),
-      ENDPOINT,
-      false,
-    );
-    try {
-      expect(facts(host)["Local copy"]).toBe("—");
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
   });
 
   /**

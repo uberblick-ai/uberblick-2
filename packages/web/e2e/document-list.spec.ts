@@ -65,7 +65,7 @@ test.afterAll(async () => {
   await running?.stop();
 });
 
-/** A fresh context: its own IndexedDB, its own history, its own tab. */
+/** A fresh context: its own history and its own tab. */
 async function openApp(browser: Browser): Promise<Page> {
   const context = await browser.newContext();
   contexts.push(context);

@@ -36,8 +36,7 @@ const OFFLINE: RoomStatus = {
   writable: true,
   storeRefused: false,
   unsyncedChanges: 0,
-  localReplicaLoaded: false,
-  hasLocalCache: false,
+  hasAnswered: true,
   protocolMismatch: null,
   authFailed: false,
   tokenMissing: false,
@@ -55,7 +54,6 @@ vi.mock("../src/collab/rooms.js", () => ({
         listener(OFFLINE);
         return () => {};
       },
-      whenLocalReplicaLoaded: Promise.resolve(),
     } as unknown as RoomConnection,
     release: () => {},
   }),

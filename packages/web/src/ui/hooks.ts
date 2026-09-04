@@ -101,11 +101,10 @@ export function useRoom(
 const OFFLINE: RoomStatus = {
   connected: false,
   synced: false,
+  hasAnswered: false,
   writable: false,
   storeRefused: false,
   unsyncedChanges: 0,
-  localReplicaLoaded: false,
-  hasLocalCache: false,
   protocolMismatch: null,
   authFailed: false,
   tokenMissing: false,

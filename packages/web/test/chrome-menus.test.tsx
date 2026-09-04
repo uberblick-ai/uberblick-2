@@ -327,28 +327,18 @@ describe("the user menu is this client, as it publishes itself", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
   });
 
-  it("omits the cache row where the browser will not estimate one", async () => {
-    vi.stubGlobal("navigator", { storage: undefined });
-    const view = mount(menu());
-    open(view);
-    expect(panel(".ub-panel-fact dt").map((row) => row.textContent)).toEqual([
-      "MCP connections",
-    ]);
-    view.unmount();
-
+  it("shows no browser-storage fact even where an estimate is available", async () => {
     vi.stubGlobal("navigator", {
       storage: { estimate: async () => ({ usage: 2_500_000, quota: 1e9 }) },
     });
-    const estimating = mount(menu());
-    open(estimating);
-    // The estimate is a promise; the row appears when it answers.
+    const view = mount(menu());
+    open(view);
     await act(async () => {});
     expect(panel(".ub-panel-fact dt").map((row) => row.textContent)).toEqual([
-      "Local cache",
       "MCP connections",
     ]);
-    expect(panel(".ub-panel-fact dd")[0]?.textContent).toBe("2.5 MB");
-    estimating.unmount();
+    expect(panel(".ub-panel-fact dd")[0]?.textContent).toBe("0");
+    view.unmount();
   });
 
   it("reports the agent sessions it is given", () => {

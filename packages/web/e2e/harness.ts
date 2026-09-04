@@ -2,8 +2,8 @@
  * The e2e bootstrap: one real hub and the bundle served by one real `ub open`.
  *
  * Nothing here is a test double. The proof points these tests exist for —
- * convergence between two live clients, rendered remote cursors, an IndexedDB
- * replica surviving a reload — only mean something against the real transport
+ * convergence between two live clients, rendered remote cursors, and reloads
+ * receiving only what their server sends — only mean something against the real transport
  * and the real bundle, which is also why they are not in the jsdom suite.
  *
  * Two things are deliberate:

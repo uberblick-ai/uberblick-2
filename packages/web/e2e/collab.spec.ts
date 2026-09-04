@@ -2,8 +2,8 @@
  * The collaboration proof points, in a real browser against a real hub.
  *
  * Each one is here because jsdom structurally cannot host it: two live clients
- * on one document, cursor decorations rendered by a browser, and an IndexedDB
- * replica that survives a reload. Nothing else belongs in this file — Tiptap
+ * on one document, cursor decorations rendered by a browser, and a reload from
+ * the serving process's store. Nothing else belongs in this file — Tiptap
  * typing characters, Yjs merging updates and vite serving modules are other
  * people's tests, and the contracts already pinned by `test/` (golden
  * round-trip, block ids, the palette gate) are not re-tested here.
@@ -52,7 +52,7 @@ test.afterAll(async () => {
   await running?.stop();
 });
 
-/** A fresh context: its own IndexedDB, its own awareness identity, its own tab. */
+/** A fresh context: its own awareness identity and its own tab. */
 async function openApp(browser: Browser, path = "/"): Promise<Page> {
   const context = await browser.newContext();
   contexts.push(context);
@@ -67,10 +67,6 @@ async function openUpstream(browser: Browser, path: string): Promise<Page> {
   const { context, page } = await openUpstreamApp(browser, harness(), path);
   contexts.push(context);
   return page;
-}
-
-function localCopyFact(page: Page) {
-  return page.locator('.ub-sync-fact:has(dt:text-is("Local copy")) dd');
 }
 
 /** Unique per run: every test in the file shares one workspace directory. */
@@ -300,14 +296,11 @@ test("a fresh browser hydrates from the ub open store while the upstream is offl
 
   await harness().stopHub();
   try {
-    // A fresh browser has no IndexedDB. The document and directory therefore
-    // come from `ub open`'s store-backed rooms, not from browser cache or the
-    // unavailable upstream.
+    // The document and directory come from `ub open`'s store-backed rooms, not
+    // from the unavailable upstream.
     const fresh = await openApp(browser, path);
     await expect(editor(fresh)).toBeVisible();
     await expect(fresh.locator(".ub-status")).toContainText("synced");
-    await fresh.locator(".ub-sync-toggle").click();
-    await expect(localCopyFact(fresh)).toHaveText("available");
 
     // Reload is another store hydration while upstream remains unavailable.
     await fresh.reload();
@@ -336,10 +329,6 @@ test("a multi-author block survives upstream loss and converges back without dup
   await type(b, "-peer");
   await expect.poll(() => blockText(a)).toBe("before-peer");
   await expect(a.locator(".ub-status")).toContainText("synced");
-  // Nothing about the local copy while the hub is acking: it is a promise
-  // nobody is waiting on, and it stood here permanently before #535.
-  await expect(a.locator(".ub-status .ub-local-copy")).toHaveCount(0);
-
   await harness().stopHub();
   await expect(a.locator(".ub-status")).toContainText("synced");
 

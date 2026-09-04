@@ -8,7 +8,7 @@
  * acquired early would dial the fallback and stay there.
  *
  * StrictMode is deliberately absent. Its double-invoked effects open every
- * WebSocket, IndexedDB replica and ProseMirror binding twice, which for a
+ * WebSocket and ProseMirror binding twice, which for a
  * live-sync spike means the presence strip and awareness state lie in dev but
  * not in production. Room connections are refcounted (see collab/rooms.ts), so
  * turning StrictMode back on is safe; the noise just is not worth it here.

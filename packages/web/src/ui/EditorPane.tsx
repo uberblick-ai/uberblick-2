@@ -23,12 +23,7 @@ import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
 import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
-import {
-  backlogLabel,
-  localCopyState,
-  rawSyncState,
-  useCalmSyncState,
-} from "./calm.js";
+import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
 import { formatTimestamp, useTimestampClock } from "./timestamps.js";
 import { BlockMenu } from "./BlockMenu.js";
@@ -132,7 +127,7 @@ function ArchivedBanner({
  * 2. The mark and the word each sit in a fixed-width slot, so swapping the dot
  *    for the spinner and "synced" for "syncing…" moves nothing to their right.
  * 3. The fixed sync slots keep the stable freshness and peer readings still
- *    while transient local-copy and backlog facts appear only when relevant.
+ *    while the transient backlog fact appears only when relevant.
  *
  * The suppression in (3) is safe only because a non-empty backlog is itself
  * part of what makes the state busy (`rawSyncState`). A backlog that outlives
@@ -142,7 +137,6 @@ function ArchivedBanner({
 export function StatusLine({
   connection,
   presence,
-  docPresent,
   lastUpdated,
   endpoint = null,
   syncOpen = false,
@@ -160,12 +154,6 @@ export function StatusLine({
    * keystroke anyone types, a reading the shell has already made.
    */
   presence: readonly RemotePresence[];
-  /**
-   * Whether the document this line is about has reached this replica. The
-   * waiting screen draws this line for one that has not, and there the local
-   * copy is not a fact this client has — see {@link localCopyState}.
-   */
-  docPresent: boolean;
   /** The selected directory stub's edit-freshness hint, not a sync state. */
   lastUpdated?: number | undefined;
   /** The hub this reading describes, null while configuration is resolving. */
@@ -180,22 +168,6 @@ export function StatusLine({
   const raw = rawSyncState(status);
   const state = useCalmSyncState(raw, connection);
   const reading = statusReading(status, state ?? raw);
-  /**
-   * Whether this client holds a durable copy of the document — the one
-   * additional fact worth saying inline while syncing is not happening (owner,
-   * #535), and said nowhere while the reading is `synced`, where it is a
-   * promise nobody is waiting on. `null` is "not known", which is why it asks
-   * `localCopyState` rather than `hasLocalCache`: false before the local read
-   * settles is a read still running, not an absent copy.
-   */
-  const localCopy =
-    reading.tone === "synced" ? null : localCopyState(status, docPresent);
-  const copyNote =
-    localCopy === null ? null : (
-      <span className="ub-muted ub-local-copy">
-        {localCopy ? "local copy" : "no local copy"}
-      </span>
-    );
   const saveNote =
     !status.writable && reading.detail === null ? (
       <span className="ub-muted ub-not-saved">not saved</span>
@@ -278,7 +250,6 @@ export function StatusLine({
       {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
       {!blank && saveNote}
       {!blank && updatedReading}
-      {!blank && copyNote}
       {!blank &&
         reading.detail === null &&
         state !== "synced" &&
@@ -824,7 +795,6 @@ export function EditorPane({
         <StatusLine
           connection={connection}
           presence={presence}
-          docPresent
           lastUpdated={updatedAt}
           endpoint={endpoint}
           syncOpen={syncOpen}

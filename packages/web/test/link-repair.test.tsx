@@ -62,8 +62,7 @@ const OFFLINE: RoomStatus = {
   writable: true,
   storeRefused: false,
   unsyncedChanges: 0,
-  localReplicaLoaded: false,
-  hasLocalCache: false,
+  hasAnswered: true,
   protocolMismatch: null,
   authFailed: false,
   tokenMissing: false,
@@ -83,7 +82,6 @@ function room(name: string): RoomConnection {
       listener(OFFLINE);
       return () => {};
     },
-    whenLocalReplicaLoaded: Promise.resolve(),
   } as unknown as RoomConnection;
   rooms.set(name, connection);
   return connection;

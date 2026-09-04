@@ -192,7 +192,7 @@ describe("directory stamps from the web", () => {
 
   it("bumps nothing when a document is opened, hydrated or edited elsewhere", () => {
     // The shape of an open: the room's Y.Doc is empty when the watcher attaches
-    // and the content arrives afterwards, from IndexedDB or from the hub.
+    // and the content arrives afterwards from the server.
     const source = new Y.Doc();
     initDoc(source, { uuid: UUID, title: "Arrived" });
     appendBlock(source, { type: "paragraph", text: "written elsewhere" });
