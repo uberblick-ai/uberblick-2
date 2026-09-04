@@ -546,6 +546,11 @@ const REQUIREMENT_DIRECTORY_RECOVERY =
   "and this uuid with get_doc. When `decisions` contains this uuid, the create succeeded — do NOT call create_doc " +
   "again.";
 
+const DECISION_DIRECTORY_RECOVERY =
+  "The decision's own room is durable, but it has no directory stub and the governed requirement does not " +
+  "reference it. Restart the MCP server, then get_doc with this uuid to republish its stub. Use archive_doc on " +
+  "this uuid to retire the orphan; do NOT call create_doc again as recovery for this call.";
+
 /**
  * `annotate`'s two shapes, stated once for the boundary and for `tools/list`.
  *
@@ -1048,6 +1053,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           { purpose: failedAt, room: failure.room },
           purpose === "requirement" && failedAt === "directory"
             ? REQUIREMENT_DIRECTORY_RECOVERY
+            : requirement !== null && failedAt === "directory"
+              ? DECISION_DIRECTORY_RECOVERY
             : (RECOVERY[failedAt] ?? RECOVERY.other),
         );
       };
