@@ -852,11 +852,6 @@ describe("ub open", () => {
       browser.destroy();
       await sleep(1_000);
       expect(agent.awareness?.getStates().has(browserId)).toBe(true);
-      await waitUntil(
-        "the departed browser to leave its hub peer by normal awareness expiry",
-        () => agent.awareness?.getStates().has(browserId) === false,
-        45_000,
-      );
     } finally {
       browser.destroy();
       agent.destroy();

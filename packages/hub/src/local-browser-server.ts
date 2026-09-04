@@ -64,7 +64,7 @@ interface AwarenessChange {
  * erase a live tab's own state and make its cursor flicker. The tab's periodic
  * awareness renewal re-adds it to the replica once the hub is reachable again.
  */
-function bridgeAwareness(served: Awareness, replica: Awareness): () => void {
+export function bridgeAwareness(served: Awareness, replica: Awareness): () => void {
   const servedClients = new Set<number>();
 
   const relay = (
@@ -82,9 +82,14 @@ function bridgeAwareness(served: Awareness, replica: Awareness): () => void {
 
   const fromServed = (change: AwarenessChange, origin: unknown): void => {
     if (origin === AWARENESS_BRIDGE) return;
-    const clients = [...change.added, ...change.updated, ...change.removed];
-    for (const client of clients) servedClients.add(client);
-    relay(served, replica, clients);
+    for (const client of [...change.added, ...change.updated]) {
+      servedClients.add(client);
+    }
+    relay(served, replica, [
+      ...change.added,
+      ...change.updated,
+      ...change.removed,
+    ]);
   };
   const fromReplica = (change: AwarenessChange, origin: unknown): void => {
     if (origin === AWARENESS_BRIDGE) return;
@@ -230,6 +235,10 @@ export async function createLocalBrowserServer(
         for (const update of slice.updates) {
           Y.applyUpdate(document, update.payload, LOAD_ORIGIN);
         }
+        awarenessBridges.set(
+          documentName,
+          bridgeAwareness(document.awareness, config.awarenessForRoom(documentName)),
+        );
       } catch (error) {
         const reason = isBusy(error) ? STORE_BUSY_REASON : STORE_REFUSED_REASON;
         log({
@@ -244,11 +253,6 @@ export async function createLocalBrowserServer(
         // fail plainly; accepted raw sockets remain owned for shutdown below.
         throw error;
       }
-
-      awarenessBridges.set(
-        documentName,
-        bridgeAwareness(document.awareness, config.awarenessForRoom(documentName)),
-      );
     },
 
     async afterUnloadDocument({ documentName }) {
@@ -314,8 +318,6 @@ export async function createLocalBrowserServer(
         }
         server.httpServer.closeAllConnections();
         await server.destroy();
-        for (const detach of awarenessBridges.values()) detach();
-        awarenessBridges.clear();
 
         // Node's HTTP close helpers deliberately exclude upgraded sockets, and
         // Hocuspocus only enumerates sockets that already own a loaded room.

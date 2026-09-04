@@ -16,6 +16,7 @@ import {
 } from "y-protocols/awareness";
 import * as Y from "yjs";
 import {
+  bridgeAwareness,
   createLocalBrowserServer,
   type LocalBrowserServer,
   STORE_BUSY_REASON,
@@ -28,6 +29,7 @@ import {
   TEXT_KEY,
   WORKSPACE,
   createClient,
+  sleep,
   token,
   waitUntil,
   type TestClient,
@@ -184,31 +186,7 @@ describe("the ub open browser server", () => {
   it("relays room awareness both ways without echoing served clients", async () => {
     const box = await fixture();
     const room = `${WORKSPACE}/${randomUUID()}`;
-    const first = await box.connect(room);
-    const second = await box.connect(room);
-    await Promise.all([first.synced, second.synced]);
-
-    first.provider.setAwarenessField("user", {
-      name: "first tab",
-      color: "#112233",
-    });
-    first.provider.setAwarenessField("client", "web");
-    second.provider.setAwarenessField("user", {
-      name: "second tab",
-      color: "#445566",
-    });
-    second.provider.setAwarenessField("client", "web");
-
     const replica = box.awarenessForRoom(room);
-    const firstId = first.provider.awareness?.clientID;
-    const secondId = second.provider.awareness?.clientID;
-    if (firstId === undefined || secondId === undefined) {
-      throw new Error("the served providers have no awareness");
-    }
-    await waitUntil("both tab states to reach the replica", () =>
-      [firstId, secondId].every((client) => replica.getStates().has(client)),
-    );
-
     const agentDoc = new Y.Doc();
     const agent = new Awareness(agentDoc);
     replicaAwareness.push({ awareness: agent, doc: agentDoc });
@@ -221,6 +199,34 @@ describe("the ub open browser server", () => {
       replica,
       encodeAwarenessUpdate(agent, [agent.clientID]),
       "hub-relay",
+    );
+
+    const first = await box.connect(room);
+    await first.synced;
+    await waitUntil("the first tab to receive existing upstream presence", () =>
+      first.provider.awareness?.getStates().has(agent.clientID) === true,
+    );
+    const second = await box.connect(room);
+    await second.synced;
+
+    first.provider.setAwarenessField("user", {
+      name: "first tab",
+      color: "#112233",
+    });
+    first.provider.setAwarenessField("client", "web");
+    second.provider.setAwarenessField("user", {
+      name: "second tab",
+      color: "#445566",
+    });
+    second.provider.setAwarenessField("client", "web");
+
+    const firstId = first.provider.awareness?.clientID;
+    const secondId = second.provider.awareness?.clientID;
+    if (firstId === undefined || secondId === undefined) {
+      throw new Error("the served providers have no awareness");
+    }
+    await waitUntil("both tab states to reach the replica", () =>
+      [firstId, secondId].every((client) => replica.getStates().has(client)),
     );
 
     await waitUntil("the relayed agent to reach both tabs", () =>
@@ -238,11 +244,14 @@ describe("the ub open browser server", () => {
     // An upstream close clears remote states from the replica. A served tab is
     // one of those states, but must not be played back into its own room as a
     // removal: the other local tab keeps seeing it without a cursor flicker.
-    removeAwarenessStates(replica, [firstId], "upstream-close");
+    removeAwarenessStates(replica, [firstId, secondId], "upstream-close");
+    await sleep(750);
     expect(second.provider.awareness?.getStates().has(firstId)).toBe(true);
+    expect(first.provider.awareness?.getStates().has(secondId)).toBe(true);
     first.provider.setAwarenessField("heartbeat", 1);
-    await waitUntil("the tab's renewal to return to the replica", () =>
-      replica.getStates().has(firstId),
+    second.provider.setAwarenessField("heartbeat", 1);
+    await waitUntil("the tabs' renewals to return to the replica", () =>
+      [firstId, secondId].every((client) => replica.getStates().has(client)),
     );
 
     removeAwarenessStates(replica, [agent.clientID], "hub-ended");
@@ -276,6 +285,45 @@ describe("the ub open browser server", () => {
       !replica.getStates().has(firstId) &&
       second.provider.awareness?.getStates().has(firstId) === false,
     );
+  });
+
+  it("does not let a served-side timeout claim an upstream client", async () => {
+    const servedDoc = new Y.Doc();
+    const replicaDoc = new Y.Doc();
+    const agentDoc = new Y.Doc();
+    const served = new Awareness(servedDoc);
+    const replica = new Awareness(replicaDoc);
+    const agent = new Awareness(agentDoc);
+    const detach = bridgeAwareness(served, replica);
+    try {
+      agent.setLocalState({ client: "agent", heartbeat: 0 });
+      applyAwarenessUpdate(
+        replica,
+        encodeAwarenessUpdate(agent, [agent.clientID]),
+        "hub-relay",
+      );
+      expect(served.getStates().has(agent.clientID)).toBe(true);
+
+      // Exercise the removal a resumed y-protocols timeout emits directly,
+      // without waiting for its 30-second timer.
+      removeAwarenessStates(served, [agent.clientID], "timeout");
+      expect(replica.getStates().has(agent.clientID)).toBe(false);
+      agent.setLocalStateField("heartbeat", 1);
+      applyAwarenessUpdate(
+        replica,
+        encodeAwarenessUpdate(agent, [agent.clientID]),
+        "hub-renewal",
+      );
+      expect(served.getStates().has(agent.clientID)).toBe(true);
+    } finally {
+      detach();
+      served.destroy();
+      replica.destroy();
+      agent.destroy();
+      servedDoc.destroy();
+      replicaDoc.destroy();
+      agentDoc.destroy();
+    }
   });
 
   it("names busy and failed appends, stores no refused update, and recovers per room", async () => {
