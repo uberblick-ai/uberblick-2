@@ -75,8 +75,8 @@ affected grounding and final recheck without launching a second adversary. If
 the corrected issue is complete, safe, and within recorded owner-approved
 product or program authority, post the `Done:` handoff and add `ready`. If an
 unresolved finding crosses product, authority, safety, or fundamentally unsafe
-shape, post concrete options and a recommendation with an @-mention of the
-repository owner so the park is seen (#735's question waited six hours
+shape, post concrete options and a recommendation @-mentioning the product
+owner (`@bk-one`) so the park is seen (#735's question waited six hours
 unmentioned), add `needs-decision`, and leave `ready` absent. A second adversary happens only on explicit owner request.
 
 When the request does not fit one independently reviewable PR, finish with

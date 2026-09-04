@@ -1,7 +1,7 @@
 # Agent-neutral development workflow
 
-This is the canonical workflow shared by every implementer and coordinator,
-regardless of agent or transport. Read [CLAUDE.md](CLAUDE.md) for the
+This is the canonical workflow shared by every implementer lane, regardless of
+agent or transport. Read [CLAUDE.md](CLAUDE.md) for the
 repository's principles, invariants, validation commands, and merge tiers.
 Read [.github/ISSUE_SPEC.md](.github/ISSUE_SPEC.md) for the issue grammar,
 eligibility, scheduling, and footprint rules. Do not infer missing product

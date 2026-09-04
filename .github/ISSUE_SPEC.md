@@ -35,13 +35,12 @@ Parent: #486
   Grammar: `^Touches: [a-z0-9-]+(, [a-z0-9-]+)*$`, every name from that list.
 - **`Parent`** — optional, at most one line, directly after `Touches`. Grammar:
   `^Parent: #[0-9]+$`. It records the split relation and nothing else: this
-  issue is one child of that coordination parent. It never affects eligibility
-  or order — a child is picked exactly like any other issue (owner decision,
-  2026-09-04: a header that reserved children for a dispatcher nobody ran held
-  the re-cut's chain heads `ready` for a day while lower-priority work was
-  picked, and five more dependency-complete issues for up to five days). A
-  parent body's list of children is reading order for a human; the headers on
-  the children are the relation's authority.
+  issue is one child of that coordination parent. A well-formed header never
+  affects eligibility or order — a child is picked exactly like any other issue
+  (owner decision, 2026-09-04, after reserved children sat `ready` for days
+  with nobody able to dispatch them). A parent body's list of children is
+  reading order for a human; the headers on the children are the relation's
+  authority.
 
   A malformed header is still a defect: more than one `Parent` line, one naming
   an issue that does not exist or cannot be read, a self-reference, or a cycle
@@ -266,7 +265,8 @@ doesn't answer? Then the issue is not `ready`.**
   gates — lint, typecheck, the general test suite, review and CI — already live
   in `AGENTS.md`, `CLAUDE.md` and CI; they are never issue acceptance criteria.
   A post-merge corpus update sequenced by `CLAUDE.md` is not a diff acceptance
-  criterion either; point the coordinator to the document under Pointers.
+  criterion either; point the integrator's post-merge pass to the document
+  under Pointers.
 - **Out of scope** — explicit non-goals, or `None.` if genuinely none. This
   is the "least code wins" principle made enforceable: it is what scope
   creep gets rejected against.

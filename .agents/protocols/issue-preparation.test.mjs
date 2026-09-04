@@ -137,7 +137,7 @@ describe("one-pass issue preparation", () => {
     assert.equal(plan.adversaries, 1);
     assert.equal(plan.outcome, "split");
     assert.deepEqual(plan.labels, {
-      add: [],
+      add: ["umbrella"],
       remove: ["needs-preparation", "ready"],
     });
   });

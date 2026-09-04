@@ -60,7 +60,7 @@ findings-conditional protocol.
 **Re-read before ruling.** Immediately before any ruling — a triage disposition,
 an acceptance validation, a tier call, a merge — re-read the linked issue thread
 and the PR thread (`gh issue view <n> --comments`, `gh pr view <n> --comments`).
-Owner decisions and coordinator notes land there mid-flight; a ruling made from
+Owner decisions and preparer cross-references land there mid-flight; a ruling made from
 session memory can contradict one that was written down while you were
 elsewhere.
 

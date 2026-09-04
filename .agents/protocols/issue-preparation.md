@@ -156,7 +156,7 @@ generic delivery gate or post-merge corpus task.
 | yes | none (`none`) | ready | remove `needs-preparation`, add `ready` | yes |
 | yes | all correctable findings applied (`correctable-applied`) | ready | remove `needs-preparation`, add `ready` | yes |
 | yes | unresolved product, authority, safety or unsafe-shape boundary (`owner-boundary`) | park-needs-decision | remove `needs-preparation`, remove `ready`, add `needs-decision` | yes |
-| yes | request was split into a coordination parent and child intakes (`split`) | split | remove `needs-preparation`, remove `ready` | yes |
+| yes | request was split into a coordination parent and child intakes (`split`) | split | add `umbrella`, remove `needs-preparation`, remove `ready` | yes |
 | no | anything (`any`) | requeue | none | no |
 
 The recheck outranks findings: if the parent no longer owns the issue, do not
