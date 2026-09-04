@@ -321,7 +321,17 @@ export class MirrorStore {
 
   private readonly db: DatabaseSync;
 
+  /**
+   * Same-process commits, observed only after their transaction completed.
+   *
+   * SQLite's `data_version` deliberately does not move for the connection that
+   * made a commit. A process driving replicas without MCP tool calls therefore
+   * needs this second wake path beside its foreign-commit poll.
+   */
+  private readonly appendListeners = new Set<() => void>();
+
   private readonly statements: {
+    dataVersion: Prepared<[]>;
     append: Prepared<[string, Uint8Array, string, number]>;
     after: Prepared<[string, number]>;
     countRoom: Prepared<[string]>;
@@ -411,6 +421,7 @@ export class MirrorStore {
       this.db.prepare(sql) as Prepared<P>;
 
     this.statements = {
+      dataVersion: prepare("PRAGMA data_version"),
       append: prepare(
         "INSERT INTO updates (room, payload, origin, logged_at) VALUES (?, ?, ?, ?)",
       ),
@@ -599,7 +610,40 @@ export class MirrorStore {
     payload: Uint8Array,
     origin: UpdateOrigin,
   ): number {
-    return this.appendTx(room, payload, origin);
+    const seq = this.appendTx(room, payload, origin);
+    for (const listener of [...this.appendListeners]) {
+      try {
+        listener();
+      } catch (error) {
+        // The update is already committed. An observer cannot turn a durable
+        // append into a reported failure or starve the remaining observers.
+        log.warn("an update-log append observer failed", error);
+      }
+    }
+    return seq;
+  }
+
+  /**
+   * Run `listener` after every successful append made through this store
+   * instance. Returns an idempotent unsubscribe.
+   */
+  onAppend(listener: () => void): () => void {
+    this.appendListeners.add(listener);
+    return () => {
+      this.appendListeners.delete(listener);
+    };
+  }
+
+  /**
+   * SQLite's connection-local view of commits made by other connections.
+   * Commits made through this instance are intentionally reported by
+   * {@link onAppend} instead.
+   */
+  dataVersion(): number {
+    const row = this.statements.dataVersion.get() as {
+      data_version: number;
+    };
+    return Number(row.data_version);
   }
 
   /**
@@ -889,6 +933,7 @@ export class MirrorStore {
    * is the worst place to learn that.
    */
   close(): void {
+    this.appendListeners.clear();
     if (this.db.isOpen) {
       this.db.close();
     }

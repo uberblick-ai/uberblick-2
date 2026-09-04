@@ -1025,7 +1025,7 @@ export class Replicas {
       await inFlight;
       // Cheap and local: pick up anything logged while we were waiting.
       if (this.persistenceFailure === null) {
-        this.refresh();
+        this.refresh({ requireHealthy });
       }
       if (requireHealthy) {
         this.assertHealthy();
@@ -1049,8 +1049,37 @@ export class Replicas {
     }
   }
 
+  /**
+   * Run one hub-free engine pass.
+   *
+   * This is the local half of {@link settle}: replay the log tail, attach newly
+   * discovered documents, repair derived state, release pending markers whose
+   * providers are already quiet, and compact. It never waits for the hub, so a
+   * transport-free engine may call it on every refresh tick even while the hub
+   * is unavailable.
+   */
+  refresh(options: { requireHealthy?: boolean } = {}): void {
+    const requireHealthy = options.requireHealthy !== false;
+    if (requireHealthy) {
+      this.assertHealthy();
+    }
+    if (this.destroyed || this.persistenceFailure !== null) {
+      return;
+    }
+
+    this.refreshReplicas();
+    if (this.persistenceFailure !== null) {
+      if (requireHealthy) {
+        this.assertHealthy();
+      }
+      return;
+    }
+    this.releaseQuietRooms();
+    this.compactLargeLogs();
+  }
+
   /** Replay the log tail and attach newly discovered documents. Synchronous. */
-  private refresh(): void {
+  private refreshReplicas(): void {
     this.pollAll();
     this.adoptKnownDocs();
     // Retry whatever the store refused last time. Reconciliation normally rides
@@ -1063,7 +1092,7 @@ export class Replicas {
   }
 
   private async runSettle(): Promise<void> {
-    this.refresh();
+    this.refreshReplicas();
 
     if (this.sync.enabled && this.settleNeeded) {
       try {
