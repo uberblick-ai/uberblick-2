@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { Hub } from "@uberblick/hub";
+import type { Hub, TokenClaims, TokenScope } from "@uberblick/hub";
 import {
   MAX_TOKEN_LIFETIME_SECONDS,
   createHub,
@@ -547,6 +547,42 @@ function servingDocumentOf(
   });
 }
 
+async function authMessage(
+  scope: TokenScope = "read-only",
+  options: {
+    secret?: string;
+    workspace?: string;
+    protocolVersion?: number;
+  } = {},
+): Promise<string> {
+  const token = await mintToken(
+    await importRootSecret(options.secret ?? SECRET),
+    {
+      typ: "room",
+      sub: "open-api-test",
+      workspace: options.workspace ?? WORKSPACE,
+      scope,
+      kid: null,
+      lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+    },
+  );
+  return wrapToken(token, options.protocolVersion ?? SYNC_PROTOCOL_VERSION);
+}
+
+async function forgedAuthMessage(claims: TokenClaims): Promise<string> {
+  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    await importRootSecret(SECRET),
+    new TextEncoder().encode(payload),
+  );
+  return wrapToken(`${payload}.${Buffer.from(signature).toString("base64url")}`);
+}
+
+function bearer(auth: string): Record<string, string> {
+  return { authorization: `Bearer ${auth}` };
+}
+
 // --- the criteria ------------------------------------------------------------
 
 describe("ub open", () => {
@@ -714,6 +750,161 @@ describe("ub open", () => {
       doc.destroy();
       await client.close().catch(() => {});
       await instance.close().catch(() => {});
+      expect((await app.interrupt()).status).toBe(0);
+    }
+  });
+
+  it("searches the shared store while the hub is unreachable and discloses its cap", async () => {
+    const { box, env } = configured();
+    pointAt(box, FIRST_REMOTE);
+    const app = await open(box, ["--port", String(await freePort())], env);
+    const instance = createMcpServer(
+      resolveMcpConfig({
+        ...box.env,
+        ...env,
+        WORKSPACE_ID: WORKSPACE,
+        HUB_URL: FIRST_REMOTE,
+        HUB_AUTH_TOKEN: SECRET,
+      }),
+    );
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "ub-open-search-test", version: "0.0.0" });
+    try {
+      await Promise.all([
+        instance.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+      const result = await client.callTool({
+        name: "create_doc",
+        arguments: {
+          title: "Offline badger",
+          description: "A document written by another local process.",
+          blocks: [{ type: "paragraph", text: "orchard telemetry" }],
+        },
+      });
+      const content = result.content as { text?: string }[];
+      const created = JSON.parse(content[0]?.text ?? "null") as { uuid: string };
+      const auth = await authMessage();
+
+      const found = await fetch(`${app.url}api/search?q=offline+badg*`, {
+        headers: bearer(auth),
+      });
+      expect(found.status).toBe(200);
+      expect(found.headers.get("cache-control")).toBe("no-store");
+      expect(found.headers.get("access-control-allow-origin")).toBeNull();
+      expect(await found.json()).toEqual({
+        hits: [{ uuid: created.uuid }],
+        limit: 100,
+        capped: false,
+      });
+
+      for (let index = 0; index <= 100; index += 1) {
+        instance.store.indexDoc(
+          {
+            uuid: `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+            title: `Capacity ${index}`,
+            description: "",
+            tags: [],
+            links: [],
+            body: "capacityneedle",
+          },
+          1,
+        );
+      }
+      const capped = await fetch(`${app.url}api/search?q=capacityneedle`, {
+        headers: bearer(auth),
+      });
+      const cappedBody = (await capped.json()) as {
+        hits: { uuid: string }[];
+        limit: number;
+        capped: boolean;
+      };
+      expect(cappedBody).toMatchObject({
+        limit: 100,
+        capped: true,
+      });
+      expect(cappedBody.hits).toHaveLength(100);
+      expect(cappedBody.hits.every((hit) => Object.keys(hit).join() === "uuid"))
+        .toBe(true);
+
+      const empty = await fetch(`${app.url}api/search?q=%F0%9F%8C%BF`, {
+        headers: bearer(auth),
+      });
+      expect(empty.status).toBe(200);
+      expect(await empty.json()).toEqual({ hits: [], limit: 100, capped: false });
+
+      const missing = await fetch(`${app.url}api/search`, {
+        headers: bearer(auth),
+      });
+      expect(missing.status).toBe(400);
+      expect(missing.headers.get("cache-control")).toBe("no-store");
+    } finally {
+      await client.close().catch(() => {});
+      await instance.close().catch(() => {});
+      expect((await app.interrupt()).status).toBe(0);
+    }
+  });
+
+  it("admits API requests exactly through the served workspace token boundary", async () => {
+    const { box, env } = configured();
+    pointAt(box, FIRST_REMOTE);
+    const app = await open(box, ["--port", String(await freePort())], env);
+    const now = Math.floor(Date.now() / 1_000);
+    const valid = await authMessage();
+    const refused: { name: string; auth?: string; suffix?: string }[] = [
+      { name: "missing" },
+      { name: "malformed", auth: "not-an-envelope" },
+      { name: "bad signature", auth: await authMessage("read-only", { secret: "wrong" }) },
+      {
+        name: "protocol mismatch",
+        auth: await authMessage("read-only", {
+          protocolVersion: SYNC_PROTOCOL_VERSION + 1,
+        }),
+      },
+      {
+        name: "other workspace",
+        auth: await authMessage("read-only", { workspace: REBOUND_WORKSPACE }),
+      },
+      {
+        name: "lifetime beyond the ceiling",
+        auth: await forgedAuthMessage({
+          typ: "room",
+          sub: "compromised-minter",
+          workspace: WORKSPACE,
+          scope: "read-only",
+          kid: null,
+          iat: now,
+          exp: now + MAX_TOKEN_LIFETIME_SECONDS + 1,
+        }),
+      },
+      {
+        name: "token in query",
+        auth: valid,
+        suffix: `&token=${encodeURIComponent(valid)}`,
+      },
+    ];
+
+    try {
+      for (const sample of refused) {
+        const response = await fetch(
+          `${app.url}api/search?q=nothing${sample.suffix ?? ""}`,
+          sample.auth === undefined ? undefined : { headers: bearer(sample.auth) },
+        );
+        expect(response.status, sample.name).toBe(401);
+        expect(response.headers.get("cache-control"), sample.name).toBe("no-store");
+        expect(
+          response.headers.get("access-control-allow-origin"),
+          sample.name,
+        ).toBeNull();
+      }
+
+      const unknown = await fetch(`${app.url}api/unknown`, {
+        headers: bearer(valid),
+      });
+      expect(unknown.status).toBe(404);
+      expect(unknown.headers.get("cache-control")).toBe("no-store");
+      expect(unknown.headers.get("access-control-allow-origin")).toBeNull();
+    } finally {
       expect((await app.interrupt()).status).toBe(0);
     }
   });
@@ -1415,6 +1606,11 @@ describe("ub open", () => {
     );
     expect(app.stdout()).toContain("no signing secret");
     expect(app.stdout()).toContain("ub init");
+
+    const unboundApi = await get(`${app.url}api/search?q=unchanged`);
+    expect(unboundApi.status).toBe(200);
+    expect(unboundApi.headers.get("cache-control")).toBe("no-cache");
+    expect(await unboundApi.text()).toContain("<title>uberblick</title>");
 
     expect((await app.interrupt()).status).toBe(0);
   });

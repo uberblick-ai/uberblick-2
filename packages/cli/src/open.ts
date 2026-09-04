@@ -90,9 +90,16 @@ import type { Hub, LocalBrowserServer } from "@uberblick/hub";
 import {
   createHub,
   createLocalBrowserServer,
+  importRootSecret,
   resolveHubConfig,
+  verifyToken,
 } from "@uberblick/hub";
-import { SYNC_PROTOCOL_VERSION, isProtocolVersion } from "@uberblick/hub/protocol";
+import {
+  SYNC_PROTOCOL_VERSION,
+  isProtocolVersion,
+  readAuthEnvelope,
+} from "@uberblick/hub/protocol";
+import { clampToken } from "@uberblick/hub/token";
 import {
   DEFAULT_HUB_URL,
   ServingReplicaHeldError,
@@ -844,6 +851,146 @@ function respond(
   response.end(request.method === "HEAD" ? undefined : body);
 }
 
+const API_PREFIX = "/api/";
+const SEARCH_PATH = "/api/search";
+const SEARCH_LIMIT = 100;
+const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
+
+type ApiAuthenticator = (authMessage: string) => Promise<boolean>;
+
+async function createApiAuthenticator(
+  authSecret: string,
+  workspaceId: string,
+): Promise<ApiAuthenticator> {
+  const rootKey = await importRootSecret(authSecret);
+  return async (authMessage) => {
+    const envelope = readAuthEnvelope(authMessage);
+    if (
+      envelope === null ||
+      envelope.protocolVersion !== SYNC_PROTOCOL_VERSION
+    ) {
+      return false;
+    }
+    const claims = await verifyToken(rootKey, envelope.token);
+    return !(
+      claims === null ||
+      claims.workspace !== workspaceId ||
+      clampToken(claims, Math.floor(Date.now() / 1_000)) !== null
+    );
+  };
+}
+
+function apiResponse(
+  request: IncomingMessage,
+  response: ServerResponse,
+  status: number,
+  body: Record<string, unknown>,
+  headers: Record<string, string> = {},
+): void {
+  respond(
+    request,
+    response,
+    status,
+    {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      ...headers,
+    },
+    `${JSON.stringify(body)}\n`,
+  );
+}
+
+function bearerToken(request: IncomingMessage): string | null {
+  const authorization = request.headers.authorization;
+  if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
+    return null;
+  }
+  const token = authorization.slice("Bearer ".length);
+  return token === "" ? null : token;
+}
+
+async function serveApiRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  target: URL,
+  authenticate: ApiAuthenticator,
+  engine: UberblickMcpEngine,
+): Promise<void> {
+  const queriedToken = TOKEN_QUERY_PARAMS.some((name) =>
+    target.searchParams.has(name),
+  );
+  const authMessage = bearerToken(request);
+  if (
+    queriedToken ||
+    authMessage === null ||
+    !(await authenticate(authMessage))
+  ) {
+    apiResponse(request, response, 401, { error: "unauthorized" });
+    return;
+  }
+
+  if (request.method !== "GET") {
+    apiResponse(
+      request,
+      response,
+      405,
+      { error: "method_not_allowed" },
+      { allow: "GET" },
+    );
+    return;
+  }
+  if (target.pathname !== SEARCH_PATH) {
+    apiResponse(request, response, 404, { error: "not_found" });
+    return;
+  }
+
+  const query = target.searchParams.get("q");
+  if (query === null) {
+    apiResponse(request, response, 400, { error: "query_required" });
+    return;
+  }
+  if (
+    engine.health.status === "quarantined" ||
+    engine.refreshStatus.status === "failed"
+  ) {
+    apiResponse(request, response, 503, { error: "replica_unavailable" });
+    return;
+  }
+
+  try {
+    const matches = engine.store.search(query, SEARCH_LIMIT + 1);
+    apiResponse(request, response, 200, {
+      hits: matches.slice(0, SEARCH_LIMIT).map(({ uuid }) => ({ uuid })),
+      limit: SEARCH_LIMIT,
+      capped: matches.length > SEARCH_LIMIT,
+    });
+  } catch {
+    apiResponse(request, response, 500, { error: "search_failed" });
+  }
+}
+
+function serveBoundRequest(
+  root: string,
+  document: () => string,
+  authenticate: ApiAuthenticator,
+  engine: UberblickMcpEngine,
+  request: IncomingMessage,
+  response: ServerResponse,
+): void {
+  const target = new URL(request.url ?? "/", "http://localhost");
+  if (!target.pathname.startsWith(API_PREFIX)) {
+    serveBundleRequest(root, document, request, response);
+    return;
+  }
+  void serveApiRequest(request, response, target, authenticate, engine).catch(
+    () => {
+      if (!response.headersSent) {
+        apiResponse(request, response, 500, { error: "internal_error" });
+      }
+    },
+  );
+}
+
 function serveBundleRequest(
   root: string,
   document: () => string,
@@ -1408,6 +1555,10 @@ export async function openCommand(
       const engine = await createMcpEngine(mcpConfig, { serving: true });
       owned.engine = engine;
       owned.engineMonitor = monitorEngine(engine);
+      const authenticateApi = await createApiAuthenticator(
+        mcpConfig.authSecret,
+        mcpConfig.workspaceId,
+      );
       const document = servingConfigSource(
         startupEnv,
         initial.resolved,
@@ -1433,7 +1584,14 @@ export async function openCommand(
           engine.store.appendUpdate(room, payload, "local");
         },
         onRequest: (request, response) => {
-          serveBundleRequest(plan.dir, document, request, response);
+          serveBoundRequest(
+            plan.dir,
+            document,
+            authenticateApi,
+            engine,
+            request,
+            response,
+          );
         },
       });
     } else {
