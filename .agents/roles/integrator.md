@@ -87,6 +87,13 @@ The mechanics are repository procedure, followed there rather than copied:
 execution, and `review-protocol.md` for the external round, fix-up waves and
 convergence. Rule P2/P3 from the bounded record or park its focused owner
 question `needs-human`; never dispatch a reviewer merely to debate severity.
+A ruling whose findings are all P3 merges at the reviewed head, each P3
+recorded as accepted debt on the PR — the disposition `CLAUDE.md` already
+permits — instead of parking for a fix-up wave; parking a P3-only ruling
+requires naming, in the ruling, the artifact the accepted debt would leave
+misleading (owner decision, 2026-09-04: three P3-only waves on PRs #763,
+#776 and #777 cost about six hours of dwell, six sessions and three
+work-in-flight units while the cap sat at its edge).
 
 ## Boundaries
 
