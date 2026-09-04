@@ -329,12 +329,7 @@ export function App(): ReactElement {
   // re-renders this component with them.
   const hubReady = useHubEndpoint();
   const configured = hubReady ? configuredWorkspaces() : [];
-  // A re-bind after this load must not retarget or clear this page's diagnosis:
-  // `ub open` keeps the startup binding until the process is restarted.
-  const servingAtLoad = useRef<LocalServing | null | undefined>(undefined);
-  if (hubReady && servingAtLoad.current === undefined) {
-    servingAtLoad.current = localServing();
-  }
+  const serving = hubReady ? localServing() : null;
   /**
    * Which hub every "synced" in this window is about (#362) — read once here
    * and handed to the document-local reading and panel, so they cannot name
@@ -749,7 +744,7 @@ export function App(): ReactElement {
 
   return (
     <main className="ub-app">
-      <ReboundNotice serving={servingAtLoad.current ?? null} />
+      <ReboundNotice serving={serving} />
       <div className="ub-body">
         {collapsed && (
           /* Pane-local and out of flow: restoring the sidebar costs no global

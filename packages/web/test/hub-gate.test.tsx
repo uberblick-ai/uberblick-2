@@ -114,6 +114,41 @@ it("holds the first connect until the endpoint resolves, without holding the ren
   await act(async () => {
     answer(
       new Response(
+        JSON.stringify({ hubUrl: "wss://hub.example/ws" }),
+        { status: 200 },
+      ),
+    );
+  });
+
+  expect(acquireRoom).toHaveBeenCalledWith(
+    directoryRoom(WORKSPACE),
+    expect.anything(),
+  );
+
+  await act(async () => {
+    root.unmount();
+  });
+  container.remove();
+});
+
+it("keeps the rebound notice visible across routes without replacing the page", async () => {
+  let answer: (response: Response) => void = () => {};
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    () => new Promise<Response>((resolve) => { answer = resolve; }),
+  );
+  acquireRoom.mockImplementation((room: string) => fakeHandle(room));
+
+  window.history.replaceState(null, "", `/${WORKSPACE}`);
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => {
+    root.render(<App />);
+  });
+
+  await act(async () => {
+    answer(
+      new Response(
         JSON.stringify({
           hubUrl: "ws://127.0.0.1:4321",
           workspaces: [WORKSPACE],
@@ -125,10 +160,6 @@ it("holds the first connect until the endpoint resolves, without holding the ren
     );
   });
 
-  expect(acquireRoom).toHaveBeenCalledWith(
-    directoryRoom(WORKSPACE),
-    expect.anything(),
-  );
   const notice = container.querySelector(".ub-rebound-notice");
   expect(notice?.getAttribute("role")).toBe("status");
   expect(notice?.textContent).toContain(`workspace ${WORKSPACE}`);
