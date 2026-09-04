@@ -15,7 +15,7 @@
 
 import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
-import { placeCaret, startHarness } from "./harness.js";
+import { openUpstreamApp, placeCaret, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 
 test.describe.configure({ mode: "serial" });
@@ -64,22 +64,8 @@ async function openApp(browser: Browser, path = "/"): Promise<Page> {
 
 /** Read through the upstream hub, bypassing `ub open`'s loopback server. */
 async function openUpstream(browser: Browser, path: string): Promise<Page> {
-  const context = await browser.newContext();
+  const { context, page } = await openUpstreamApp(browser, harness(), path);
   contexts.push(context);
-  await context.route("**/uberblick-config.json", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        hubUrl: harness().hubUrl,
-        workspaces: [harness().workspace],
-        hubAuthToken: harness().authSecret,
-      }),
-    });
-  });
-  const page = await context.newPage();
-  await page.goto(new URL(path, harness().appUrl).href);
-  await expect(page.locator(".ub-list-head")).toBeVisible();
   return page;
 }
 

@@ -18,7 +18,7 @@
 
 import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
-import { startHarness } from "./harness.js";
+import { openUpstreamApp, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
 
@@ -175,7 +175,10 @@ test("a lifecycle update outside the browser moves the row and both badges", asy
   browser,
 }) => {
   const title = docTitle("roadmap");
-  const page = await openApp(browser);
+  // The local/upstream store replay is #752. This criterion concerns #441's
+  // lifecycle UI, so keep its browser on the same upstream as its MCP writer.
+  const { context, page } = await openUpstreamApp(browser, harness());
+  contexts.push(context);
   const session = agent().open({ name: "document-list-e2e" });
   const created = await session.call<{ uuid: string }>("create_doc", {
     title,
