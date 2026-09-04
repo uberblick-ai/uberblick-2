@@ -95,6 +95,77 @@ afterAll(() => {
 });
 
 describe("archive_doc", () => {
+  it("leaves a requirement and its ordered decisions independent", async () => {
+    const rig = await localRig();
+    const requirement = await rig.ok("create_doc", {
+      title: "Choose the delivery path",
+      description: "A requirement with two decisions in its log.",
+      kind: "requirement",
+      status: "planned",
+    });
+    const first = await rig.ok("create_doc", {
+      title: "Choose the store",
+      description: "The first decision in the requirement's log.",
+      kind: "decision",
+      status: "decided",
+      governs: requirement.uuid,
+      blocks: [{ type: "paragraph", text: "Use the append-only update log." }],
+    });
+    const second = await rig.ok("create_doc", {
+      title: "Choose the serving process",
+      description: "The second decision in the requirement's log.",
+      kind: "decision",
+      governs: requirement.uuid,
+      blocks: [{ type: "paragraph", text: "Use ub open." }],
+    });
+    const expectedLog = [
+      {
+        uuid: first.uuid,
+        title: "Choose the store",
+        status: "decided",
+        available: true,
+      },
+      {
+        uuid: second.uuid,
+        title: "Choose the serving process",
+        status: "open",
+        available: true,
+      },
+    ];
+    const decisionsBefore = await Promise.all(
+      [first.uuid, second.uuid].map((uuid) => rig.ok("get_doc", { uuid })),
+    );
+
+    expect(
+      (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions,
+    ).toEqual(expectedLog);
+
+    await rig.ok("archive_doc", { uuid: requirement.uuid });
+    expect(
+      (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions,
+    ).toEqual(expectedLog);
+    expect(
+      (await rig.ok("list_docs", { kind: "decision" })).docs.map(
+        (doc: any) => doc.uuid,
+      ).sort(),
+    ).toEqual([first.uuid, second.uuid].sort());
+    expect(
+      await Promise.all(
+        [first.uuid, second.uuid].map((uuid) => rig.ok("get_doc", { uuid })),
+      ),
+    ).toEqual(decisionsBefore);
+
+    await rig.ok("restore_doc", { uuid: requirement.uuid });
+    expect(
+      (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions,
+    ).toEqual(expectedLog);
+    expect(
+      await Promise.all(
+        [first.uuid, second.uuid].map((uuid) => rig.ok("get_doc", { uuid })),
+      ),
+    ).toEqual(decisionsBefore);
+  });
+
   it("drops a document from discovery and search, and from nothing else", async () => {
     const rig = await localRig();
     const doc = await seedDoc(rig);

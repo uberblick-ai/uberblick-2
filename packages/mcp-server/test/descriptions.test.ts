@@ -619,6 +619,19 @@ describe("lifecycle tool text", () => {
 });
 
 describe("decision log tools", () => {
+  it("states that archive and restore never cascade through a decision log", async () => {
+    const rig = await localRig();
+    const { tools } = await rig.client.listTools();
+
+    for (const name of ["archive_doc", "restore_doc"]) {
+      const description = tools.find((tool) => tool.name === name)?.description;
+      expect(description, name).toContain("changes only the uuid passed");
+      expect(description, name).toContain(
+        "Call archive_doc or restore_doc separately for each related document",
+      );
+    }
+  });
+
   it("raises a decision into its requirement and reads the ordered log", async () => {
     const rig = await localRig();
     const requirement = await lifecycleDoc(rig, "Requirement", {
