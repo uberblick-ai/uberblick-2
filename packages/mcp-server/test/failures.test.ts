@@ -132,6 +132,10 @@ const EXPECTED: Record<
     recoveryClass: "manual",
     detail: ["kind", "status"],
   },
+  governs_not_requirement: {
+    recoveryClass: "reread",
+    detail: ["governs", "kind"],
+  },
   // The unclassified fallback: a handler that threw something nobody mapped
   // cannot say what happened to a write, so it promises the floor and no more.
   internal_error: { recoveryClass: null, detail: [] },
@@ -293,6 +297,16 @@ describe("the failure contract", () => {
         await rig.call("set_status", {
           uuid: requirement.uuid,
           status: "open",
+        })
+      ).payload,
+    );
+    record(
+      (
+        await rig.call("create_doc", {
+          title: "Wrong governing kind",
+          description: "A decision cannot govern an ordinary document.",
+          kind: "decision",
+          governs: doc.uuid,
         })
       ).payload,
     );

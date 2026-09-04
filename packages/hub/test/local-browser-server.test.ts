@@ -22,6 +22,7 @@ import {
   STORE_BUSY_REASON,
   STORE_REFUSED_REASON,
 } from "../src/local-browser-server.js";
+import type { HubLogRecord } from "../src/log.js";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "../src/protocol.js";
 import {
   OTHER_WORKSPACE,
@@ -73,12 +74,25 @@ function textFrom(updates: readonly Uint8Array[]): string {
   }
 }
 
+function updateWithText(text: string): Uint8Array {
+  const doc = new Y.Doc();
+  try {
+    doc.getText(TEXT_KEY).insert(0, text);
+    return Y.encodeStateAsUpdate(doc);
+  } finally {
+    doc.destroy();
+  }
+}
+
 async function fixture() {
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
   const updates = new Map<string, Uint8Array[]>();
+  const reads: { room: string; afterSeq: number }[] = [];
+  const logs: HubLogRecord[] = [];
   let failure: unknown = null;
   let readFailure: unknown = null;
+  const roomReadFailures = new Map<string, unknown>();
   let readAttempts = 0;
   const awarenessByRoom = new Map<string, Awareness>();
   const awarenessForRoom = (room: string): Awareness => {
@@ -95,14 +109,16 @@ async function fixture() {
     workspaceId: WORKSPACE,
     authSecret: TEST_SECRET,
     expectedOrigin: origin,
-    log: () => {},
-    readRoom: (room) => {
+    log: (record) => logs.push(record),
+    readRoom: (room, afterSeq) => {
       readAttempts += 1;
+      reads.push({ room, afterSeq });
+      if (roomReadFailures.has(room)) throw roomReadFailures.get(room);
       if (readFailure !== null) throw readFailure;
       return {
         snapshot: null,
-        updates: (updates.get(room) ?? []).map((payload, index) => ({
-          seq: index + 1,
+        updates: (updates.get(room) ?? []).slice(afterSeq).map((payload, index) => ({
+          seq: afterSeq + index + 1,
           payload,
         })),
       };
@@ -142,12 +158,26 @@ async function fixture() {
     origin,
     updates,
     awarenessForRoom,
+    logs,
+    storeUpdate: (room: string, payload: Uint8Array) => {
+      const stored = updates.get(room) ?? [];
+      stored.push(payload);
+      updates.set(room, stored);
+    },
+    readsFor: (room: string) =>
+      reads.filter((read) => read.room === room).map((read) => read.afterSeq),
     connect,
     failWith: (error: unknown) => {
       failure = error;
     },
     failReadsWith: (error: unknown) => {
       readFailure = error;
+    },
+    failReadsFor: (room: string, error: unknown) => {
+      roomReadFailures.set(room, error);
+    },
+    recoverReadsFor: (room: string) => {
+      roomReadFailures.delete(room);
     },
     readAttempts: () => readAttempts,
     recover: () => {
@@ -324,6 +354,93 @@ describe("the ub open browser server", () => {
       replicaDoc.destroy();
       agentDoc.destroy();
     }
+  });
+
+  it("replays only the unseen store tail into every connected tab", async () => {
+    const box = await fixture();
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const writer = await box.connect(room);
+    const observer = await box.connect(room);
+    await Promise.all([writer.synced, observer.synced]);
+
+    let observedUpdates = 0;
+    observer.doc.on("update", () => {
+      observedUpdates += 1;
+    });
+    writer.text.insert(0, "browser");
+    await waitUntil("the browser update to reach the other tab", () =>
+      observer.text.toString() === "browser",
+    );
+    expect(box.updates.get(room)).toHaveLength(1);
+    expect(observedUpdates).toBe(1);
+
+    // Replaying the gate's own row is a Yjs no-op: no second document update,
+    // broadcast or store row is produced.
+    box.server.refresh();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(observedUpdates).toBe(1);
+    expect(box.updates.get(room)).toHaveLength(1);
+
+    const external = new Y.Doc();
+    try {
+      for (const update of box.updates.get(room) ?? []) {
+        Y.applyUpdate(external, update);
+      }
+      let appended: Uint8Array | null = null;
+      external.once("update", (update: Uint8Array) => {
+        appended = update;
+      });
+      external.getText(TEXT_KEY).insert(external.getText(TEXT_KEY).length, " + agent");
+      if (appended === null) throw new Error("the external edit produced no update");
+      box.storeUpdate(room, appended);
+    } finally {
+      external.destroy();
+    }
+
+    box.server.refresh();
+    await waitUntil("the external store update to reach every tab", () =>
+      writer.text.toString() === "browser + agent" &&
+      observer.text.toString() === "browser + agent",
+    );
+    expect(observedUpdates).toBe(2);
+
+    box.server.refresh();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(observedUpdates).toBe(2);
+    expect(box.updates.get(room)).toHaveLength(2);
+    expect(box.readsFor(room)).toEqual([0, 0, 1, 2]);
+  });
+
+  it("retries a refused room while replaying later rooms", async () => {
+    const box = await fixture();
+    const refusedRoom = `${WORKSPACE}/${randomUUID()}`;
+    const laterRoom = `${WORKSPACE}/${randomUUID()}`;
+    const refused = await box.connect(refusedRoom);
+    await refused.synced;
+    const later = await box.connect(laterRoom);
+    await later.synced;
+
+    box.storeUpdate(refusedRoom, updateWithText("retried"));
+    box.storeUpdate(laterRoom, updateWithText("not starved"));
+    box.failReadsFor(
+      refusedRoom,
+      Object.assign(new Error("database is locked"), { errcode: 5 }),
+    );
+
+    box.server.refresh();
+    await waitUntil("the later room to replay despite the refusal", () =>
+      later.text.toString() === "not starved",
+    );
+    box.recoverReadsFor(refusedRoom);
+    await waitUntil("the refused room to replay without another append", () =>
+      refused.text.toString() === "retried",
+    );
+    expect(box.logs).toContainEqual({
+      event: "ub-open.store.refused",
+      room: refusedRoom,
+      cause: STORE_BUSY_REASON,
+      error: "Error: database is locked",
+    });
   });
 
   it("names busy and failed appends, stores no refused update, and recovers per room", async () => {

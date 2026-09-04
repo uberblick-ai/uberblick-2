@@ -435,7 +435,8 @@ export function registerSidebarTools(
       description:
         "The workspace's curated navigation: named groups of pinned documents, in the order they are stored. " +
         "This is not the corpus — unpinned documents are fully alive and reachable through list_docs, search, " +
-        "links and backlinks; they are simply not entry points.\n\n" +
+        "links and backlinks; a decision needs a matching `kind`, `status` or `tag` predicate in list_docs. " +
+        "Unpinned documents are simply not entry points.\n\n" +
         SIDEBAR_SHAPE +
         failureContract("get_sidebar"),
       inputSchema: strictInput({}),
@@ -531,7 +532,8 @@ export function registerSidebarTools(
       title: "Rename, delete or move a sidebar group",
       description:
         "Manage the groups themselves. `delete` removes the group and its pins — the documents are untouched, " +
-        "because the group only ever held their uuids, and they stay reachable through list_docs and search.\n\n" +
+        "because the group only ever held their uuids, and they stay reachable through list_docs and search; a " +
+        "decision needs a matching `kind`, `status` or `tag` predicate in list_docs.\n\n" +
         SIDEBAR_GROUP_SHAPES +
         "\n\n" +
         "There is no create action: pin_doc creates a group by naming one that does not exist, which is how a " +

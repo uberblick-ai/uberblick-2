@@ -1359,6 +1359,7 @@ interface Owned {
   localServer: LocalBrowserServer | null;
   engine: UberblickMcpEngine | null;
   engineMonitor: EngineMonitor | null;
+  stopEngineRefresh: (() => void) | null;
 }
 
 interface EngineMonitor {
@@ -1428,6 +1429,8 @@ function takeForeground(owned: Owned, io: Io): Foreground {
     process.off("SIGTERM", onSignal);
 
     owned.engineMonitor?.stop();
+    owned.stopEngineRefresh?.();
+    owned.stopEngineRefresh = null;
     let result = code;
 
     if (owned.localServer !== null) {
@@ -1510,6 +1513,7 @@ export async function openCommand(
     localServer: null,
     engine: null,
     engineMonitor: null,
+    stopEngineRefresh: null,
   };
   const foreground = takeForeground(owned, io);
   let hubNote = "";
@@ -1569,12 +1573,12 @@ export async function openCommand(
         initial.resolved,
         localHubUrl,
       );
-      owned.localServer = await createLocalBrowserServer({
+      const localServer = await createLocalBrowserServer({
         port: options.port,
         workspaceId: mcpConfig.workspaceId,
         authSecret: mcpConfig.authSecret,
         expectedOrigin: `http://${WEB_HOST}:${options.port}`,
-        readRoom: (room) => engine.store.readSince(room, 0),
+        readRoom: (room, afterSeq) => engine.store.readSince(room, afterSeq),
         appendUpdate: (room, payload) => {
           const health = engine.health;
           if (health.status === "quarantined") {
@@ -1605,6 +1609,8 @@ export async function openCommand(
           );
         },
       });
+      owned.localServer = localServer;
+      owned.stopEngineRefresh = engine.onRefresh(() => localServer.refresh());
     } else {
       // The unbound and no-credential paths keep serving the bundle directly;
       // there is no workspace-local server a browser could authenticate to.

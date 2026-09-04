@@ -3,7 +3,7 @@
  *
  * The browser-facing server owns protocol mechanics; its caller owns the
  * store. The only bridge between this server and the full upstream replica is
- * therefore the callbacks below: hydrate a room from the update log, append a
+ * therefore the callbacks below: read a room from the update log, append a
  * browser update before Hocuspocus may apply or ack it, and pair the room's
  * awareness with its full upstream replica.
  */
@@ -111,6 +111,16 @@ export function bridgeAwareness(served: Awareness, replica: Awareness): () => vo
   };
 }
 
+/** A log replay broadcasts through Hocuspocus but never writes another row. */
+const REPLAY_ORIGIN = Object.freeze({
+  source: "local" as const,
+  skipStoreHooks: true,
+  uberblick: "store-replay",
+});
+
+/** Retry a refused replay without spinning or waiting for another store write. */
+const REPLAY_RETRY_MS = 25;
+
 export interface LocalRoomSlice {
   snapshot: { state: Uint8Array; throughSeq: number } | null;
   updates: readonly { seq: number; payload: Uint8Array }[];
@@ -123,7 +133,7 @@ export interface LocalBrowserServerConfig {
   expectedOrigin: string;
   protocolVersion?: number;
   log?: HubLogger;
-  readRoom(room: string): LocalRoomSlice;
+  readRoom(room: string, afterSeq: number): LocalRoomSlice;
   appendUpdate(room: string, payload: Uint8Array): void;
   awarenessForRoom(room: string): Awareness;
   onRequest(request: IncomingMessage, response: ServerResponse): void;
@@ -131,7 +141,27 @@ export interface LocalBrowserServerConfig {
 
 export interface LocalBrowserServer {
   readonly port: number;
+  /** Apply each loaded room's unseen store tail and broadcast real changes. */
+  refresh(): void;
   stop(): Promise<void>;
+}
+
+function applyRoomSlice(
+  document: Y.Doc,
+  slice: LocalRoomSlice,
+  afterSeq: number,
+  origin: object,
+): number {
+  let throughSeq = afterSeq;
+  if (slice.snapshot !== null) {
+    Y.applyUpdate(document, slice.snapshot.state, origin);
+    throughSeq = Math.max(throughSeq, slice.snapshot.throughSeq);
+  }
+  for (const update of slice.updates) {
+    Y.applyUpdate(document, update.payload, origin);
+    throughSeq = Math.max(throughSeq, update.seq);
+  }
+  return throughSeq;
 }
 
 /** SQLite's primary busy result, including extended BUSY codes. */
@@ -196,6 +226,7 @@ export async function createLocalBrowserServer(
   });
   const upgradedSockets = new Set<Duplex>();
   const awarenessBridges = new Map<string, () => void>();
+  const appliedThrough = new WeakMap<Y.Doc, number>();
 
   const server = new Server<HubContext>({
     port: config.port,
@@ -228,13 +259,15 @@ export async function createLocalBrowserServer(
 
     async onLoadDocument({ document, documentName }) {
       try {
-        const slice = config.readRoom(documentName);
-        if (slice.snapshot !== null) {
-          Y.applyUpdate(document, slice.snapshot.state, LOAD_ORIGIN);
-        }
-        for (const update of slice.updates) {
-          Y.applyUpdate(document, update.payload, LOAD_ORIGIN);
-        }
+        appliedThrough.set(
+          document,
+          applyRoomSlice(
+            document,
+            config.readRoom(documentName, 0),
+            0,
+            LOAD_ORIGIN,
+          ),
+        );
         awarenessBridges.set(
           documentName,
           bridgeAwareness(document.awareness, config.awarenessForRoom(documentName)),
@@ -304,10 +337,57 @@ export async function createLocalBrowserServer(
     throw error;
   }
 
+  let retryTimer: NodeJS.Timeout | null = null;
+  let stopped = false;
+  const refresh = (): void => {
+    if (stopped) return;
+
+    let retry = false;
+    for (const [room, document] of server.hocuspocus.documents) {
+      const afterSeq = appliedThrough.get(document);
+      if (afterSeq === undefined) continue;
+      try {
+        appliedThrough.set(
+          document,
+          applyRoomSlice(
+            document,
+            config.readRoom(room, afterSeq),
+            afterSeq,
+            REPLAY_ORIGIN,
+          ),
+        );
+      } catch (error) {
+        retry = true;
+        log({
+          event: "ub-open.store.refused",
+          room,
+          cause: isBusy(error) ? STORE_BUSY_REASON : STORE_REFUSED_REASON,
+          error: String(error),
+        });
+      }
+    }
+
+    if (retry && retryTimer === null) {
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        refresh();
+      }, REPLAY_RETRY_MS);
+    } else if (!retry && retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+  };
+
   let stopPromise: Promise<void> | null = null;
   return {
     port: server.address.port,
+    refresh,
     stop() {
+      stopped = true;
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
       stopPromise ??= Promise.resolve().then(async () => {
         for (const socket of sockets(server)) {
           try {

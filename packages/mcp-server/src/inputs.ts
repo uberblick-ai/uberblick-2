@@ -76,6 +76,7 @@ function branch(mode: ToolMode): Record<string, unknown> {
   const required: string[] = [];
   if ("is" in mode.when) {
     properties[mode.when.field] = { const: mode.when.is };
+    required.push(mode.when.field);
   } else if (mode.when.present) {
     required.push(mode.when.field);
   } else {
