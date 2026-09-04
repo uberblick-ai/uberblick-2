@@ -15,6 +15,7 @@ import {
   STORE_BUSY_REASON,
   STORE_REFUSED_REASON,
 } from "../src/local-browser-server.js";
+import type { HubLogRecord } from "../src/log.js";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "../src/protocol.js";
 import {
   OTHER_WORKSPACE,
@@ -60,23 +61,36 @@ function textFrom(updates: readonly Uint8Array[]): string {
   }
 }
 
+function updateWithText(text: string): Uint8Array {
+  const doc = new Y.Doc();
+  try {
+    doc.getText(TEXT_KEY).insert(0, text);
+    return Y.encodeStateAsUpdate(doc);
+  } finally {
+    doc.destroy();
+  }
+}
+
 async function fixture() {
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
   const updates = new Map<string, Uint8Array[]>();
   const reads: { room: string; afterSeq: number }[] = [];
+  const logs: HubLogRecord[] = [];
   let failure: unknown = null;
   let readFailure: unknown = null;
+  const roomReadFailures = new Map<string, unknown>();
   let readAttempts = 0;
   const server = await createLocalBrowserServer({
     port,
     workspaceId: WORKSPACE,
     authSecret: TEST_SECRET,
     expectedOrigin: origin,
-    log: () => {},
+    log: (record) => logs.push(record),
     readRoom: (room, afterSeq) => {
       readAttempts += 1;
       reads.push({ room, afterSeq });
+      if (roomReadFailures.has(room)) throw roomReadFailures.get(room);
       if (readFailure !== null) throw readFailure;
       return {
         snapshot: null,
@@ -119,6 +133,7 @@ async function fixture() {
     port,
     origin,
     updates,
+    logs,
     storeUpdate: (room: string, payload: Uint8Array) => {
       const stored = updates.get(room) ?? [];
       stored.push(payload);
@@ -132,6 +147,12 @@ async function fixture() {
     },
     failReadsWith: (error: unknown) => {
       readFailure = error;
+    },
+    failReadsFor: (room: string, error: unknown) => {
+      roomReadFailures.set(room, error);
+    },
+    recoverReadsFor: (room: string) => {
+      roomReadFailures.delete(room);
     },
     readAttempts: () => readAttempts,
     recover: () => {
@@ -220,6 +241,38 @@ describe("the ub open browser server", () => {
     expect(observedUpdates).toBe(2);
     expect(box.updates.get(room)).toHaveLength(2);
     expect(box.readsFor(room)).toEqual([0, 0, 1, 2]);
+  });
+
+  it("retries a refused room while replaying later rooms", async () => {
+    const box = await fixture();
+    const refusedRoom = `${WORKSPACE}/${randomUUID()}`;
+    const laterRoom = `${WORKSPACE}/${randomUUID()}`;
+    const refused = await box.connect(refusedRoom);
+    await refused.synced;
+    const later = await box.connect(laterRoom);
+    await later.synced;
+
+    box.storeUpdate(refusedRoom, updateWithText("retried"));
+    box.storeUpdate(laterRoom, updateWithText("not starved"));
+    box.failReadsFor(
+      refusedRoom,
+      Object.assign(new Error("database is locked"), { errcode: 5 }),
+    );
+
+    box.server.refresh();
+    await waitUntil("the later room to replay despite the refusal", () =>
+      later.text.toString() === "not starved",
+    );
+    box.recoverReadsFor(refusedRoom);
+    await waitUntil("the refused room to replay without another append", () =>
+      refused.text.toString() === "retried",
+    );
+    expect(box.logs).toContainEqual({
+      event: "ub-open.store.refused",
+      room: refusedRoom,
+      cause: STORE_BUSY_REASON,
+      error: "Error: database is locked",
+    });
   });
 
   it("names busy and failed appends, stores no refused update, and recovers per room", async () => {

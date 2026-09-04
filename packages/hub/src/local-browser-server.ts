@@ -47,6 +47,9 @@ const REPLAY_ORIGIN = Object.freeze({
   uberblick: "store-replay",
 });
 
+/** Retry a refused replay without spinning or waiting for another store write. */
+const REPLAY_RETRY_MS = 25;
+
 export interface LocalRoomSlice {
   snapshot: { state: Uint8Array; throughSeq: number } | null;
   updates: readonly { seq: number; payload: Uint8Array }[];
@@ -252,13 +255,16 @@ export async function createLocalBrowserServer(
     throw error;
   }
 
-  let stopPromise: Promise<void> | null = null;
-  return {
-    port: server.address.port,
-    refresh() {
-      for (const [room, document] of server.hocuspocus.documents) {
-        const afterSeq = appliedThrough.get(document);
-        if (afterSeq === undefined) continue;
+  let retryTimer: NodeJS.Timeout | null = null;
+  let stopped = false;
+  const refresh = (): void => {
+    if (stopped) return;
+
+    let retry = false;
+    for (const [room, document] of server.hocuspocus.documents) {
+      const afterSeq = appliedThrough.get(document);
+      if (afterSeq === undefined) continue;
+      try {
         appliedThrough.set(
           document,
           applyRoomSlice(
@@ -268,9 +274,38 @@ export async function createLocalBrowserServer(
             REPLAY_ORIGIN,
           ),
         );
+      } catch (error) {
+        retry = true;
+        log({
+          event: "ub-open.store.refused",
+          room,
+          cause: isBusy(error) ? STORE_BUSY_REASON : STORE_REFUSED_REASON,
+          error: String(error),
+        });
       }
-    },
+    }
+
+    if (retry && retryTimer === null) {
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        refresh();
+      }, REPLAY_RETRY_MS);
+    } else if (!retry && retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+  };
+
+  let stopPromise: Promise<void> | null = null;
+  return {
+    port: server.address.port,
+    refresh,
     stop() {
+      stopped = true;
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
       stopPromise ??= Promise.resolve().then(async () => {
         for (const socket of sockets(server)) {
           try {
