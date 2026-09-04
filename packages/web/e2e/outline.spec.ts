@@ -104,16 +104,14 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
   // Hover opens without stealing the editor's focus. The portal is a short
   // pointer crossing away; entering it before the grace expires keeps it open.
   await trigger.hover();
-  const panel = page.getByRole("dialog", { name: "On this page" });
-  await expect(panel).toBeVisible();
-  await trigger.click();
+  const panel = page.getByRole("menu", { name: `Contents ${expected.length}` });
   await expect(panel).toBeVisible();
   expect(
     await panel.evaluate((node) => !node.contains(document.activeElement)),
   ).toBe(true);
-  const rows = panel.getByRole("button");
+  const rows = panel.getByRole("menuitem");
   await expect(rows).toHaveText(expected);
-  await expect(panel.getByRole("button", { name: "Hidden detail" })).toHaveCount(0);
+  await expect(panel.getByRole("menuitem", { name: "Hidden detail" })).toHaveCount(0);
 
   const [panelBox, listMetrics] = await Promise.all([
     panel.boundingBox(),
@@ -146,8 +144,8 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
   await page.mouse.move(0, 0);
   await expect(panel).toBeHidden();
 
-  // A real Tab reaches the trigger without being pulled into the portal. The
-  // next Tabs visit every heading in order and then leave the panel normally.
+  // A real Tab reaches the trigger without opening the menu. Enter opens it,
+  // arrow keys visit every heading in order, and Tab closes and moves onward.
   await page.locator(".ub-body").evaluate((body) => {
     const afterOutline = document.createElement("button");
     afterOutline.id = "outline-after";
@@ -156,12 +154,14 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
   });
   const afterOutline = page.locator("#outline-after");
   await tabTo(page, trigger);
+  await expect(panel).toBeHidden();
+  await page.keyboard.press("Enter");
   await expect(panel).toBeVisible();
-  await expect(trigger).toBeFocused();
+  await expect(rows.first()).toBeFocused();
   for (let index = 0; index < expected.length; index += 1) {
-    await page.keyboard.press("Tab");
     await expect(rows.nth(index)).toBeFocused();
     if (index === 0) await expect(first).toHaveCSS("outline-width", "2px");
+    if (index < expected.length - 1) await page.keyboard.press("ArrowDown");
   }
   await page.keyboard.press("Tab");
   await expect(afterOutline).toBeFocused();
@@ -169,24 +169,12 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
 
   await page.keyboard.press("Shift+Tab");
   await expect(trigger).toBeFocused();
-  await expect(panel).toBeVisible();
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
-  await expect(trigger).toBeFocused();
-
-  // Escape while focus never left the trigger must not suppress the next
-  // keyboard arrival at that trigger.
   await page.keyboard.press("Enter");
-  await expect(panel).toBeVisible();
-  await expect(trigger).toBeFocused();
+  await expect(rows.first()).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
-  await page.keyboard.press("Tab");
-  await expect(afterOutline).toBeFocused();
-  await page.keyboard.press("Shift+Tab");
   await expect(trigger).toBeFocused();
-  await expect(panel).toBeVisible();
 
   const target = page.locator(".ub-editor h2", { hasText: "Install" });
   const targetId = await target.getAttribute("id");
@@ -203,15 +191,10 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
     };
   });
   for (const key of ["Enter", "Space"]) {
-    await page.keyboard.press("Shift+Tab");
     await tabTo(page, trigger);
-    await page.keyboard.press("Tab");
-    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("ArrowDown");
     await expect(second).toBeFocused();
-    if (key === "Enter") {
-      await panel.hover();
-      await expect(second).toBeFocused();
-    }
     await page.keyboard.press(key);
     await expect(panel).toBeHidden();
     await expect(trigger).toBeFocused();
@@ -242,7 +225,7 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     await page.getByRole("button", { name: "Hide document list" }).tap();
 
     const trigger = page.getByRole("button", { name: "Contents 1" });
-    const panel = page.getByRole("dialog", { name: "On this page" });
+    const panel = page.getByRole("menu", { name: "Contents 1" });
     await trigger.tap();
     await expect(panel).toBeVisible();
     await trigger.tap();
