@@ -30,7 +30,8 @@ overlap while it is still cheap to reshape or defer the issue. Prefer tracked
 file searches (`git ls-files`, `rg`) and exclude `.claude/worktrees/` and
 `.worktrees/`; copied agent worktrees are not additional grounding evidence.
 
-Grounding is proportional, not exhaustive — enough to establish the outcome, approach and material risks. A proven mechanical, local correction may skip broad
+Grounding is proportional, not exhaustive — enough to establish the outcome,
+approach and material risks. A proven mechanical, local correction may skip broad
 repository and issue corpus searches when the handoff says why. Repeating MCP
 calls to prove an absence is not grounding. If `main` advances while you are
 here, refresh only the grounding and challenge the new commits actually affect;
@@ -77,8 +78,9 @@ preferably on the other runtime/model. It reconstructs from GitHub and tests the
 assumptions that could change the outcome, violate an invariant or waste
 substantial work: missing failure boundaries, simpler approaches, real conflicts
 with current work, and a coherent, independently useful work shape. Apply
-ISSUE_SPEC's intent and sizing rules; do not enumerate every conceivable edge
-case or turn engineering options into requirements.
+ISSUE_SPEC's intent and sizing rules. Both preparer and adversary distinguish
+missing outcomes or invariants from optional engineering approaches; correct the
+former without making the latter requirements or enumerating every edge case.
 
 The adversary classifies each material finding as `correctable-findings` when
 settled intent or repository evidence is enough, or `owner-boundary` for product

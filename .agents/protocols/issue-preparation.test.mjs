@@ -62,10 +62,12 @@ describe("one-pass issue preparation", () => {
     for (const axes of everyCombination()) {
       const expected = axes.intentSettled && axes.approachKnown && !axes.materialRisk
         ? "self-check" : "challenged";
-      assert.equal(classify(axes), expected);
-      assert.equal(preflight(axes).adversaries, expected === "self-check" ? 0 : 1);
+      const plan = preflight(axes);
+      const evidence = JSON.stringify(axes);
+      assert.equal(classify(axes), expected, evidence);
+      assert.equal(plan.route, expected, evidence);
+      assert.equal(plan.adversaries, expected === "self-check" ? 0 : 1, evidence);
     }
-
   });
 
   it("routes every documented final outcome at every risk shape", () => {

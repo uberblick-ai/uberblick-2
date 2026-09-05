@@ -8,8 +8,11 @@ const BOOLEANS = [true, false];
 
 /** Evidence judgments, not an extra intake questionnaire. */
 export const AXES = {
+  /** Supported by owner intent, not the preparer's preferred design. */
   intentSettled: BOOLEANS,
+  /** Grounded in current code and constraints. */
   approachKnown: BOOLEANS,
+  /** Any substantive risk named in the protocol's Classify section. */
   materialRisk: BOOLEANS,
 };
 
