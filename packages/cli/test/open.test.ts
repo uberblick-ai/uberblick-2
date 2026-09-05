@@ -17,7 +17,7 @@
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { request as httpRequest } from "node:http";
+import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
 import { join, resolve } from "node:path";
@@ -51,7 +51,7 @@ import * as Y from "yjs";
 import { acquireInitLock } from "../src/init-lock.js";
 import type { Io } from "../src/io.js";
 import type { Stop } from "../src/open.js";
-import { bundlePlan, ensureBundle } from "../src/open.js";
+import { bundlePlan, ensureBundle, whoHoldsPort } from "../src/open.js";
 import { probeHub, probePort } from "../src/probes.js";
 import type { Sandbox } from "./helpers.js";
 import {
@@ -115,10 +115,31 @@ async function freePort(): Promise<number> {
   return address.port;
 }
 
-/** A process holding a port and answering nothing — the foreign-holder case. */
-async function foreignListener(port: number): Promise<void> {
+/**
+ * A process holding a port and answering nothing — the unidentified case.
+ *
+ * It never answers at all, so the probe's verdict does not depend on beating a
+ * deadline: no ceiling makes this holder identifiable.
+ */
+async function silentListener(port: number): Promise<void> {
   const sockets: Socket[] = [];
   const server = createServer((socket) => sockets.push(socket));
+  await new Promise<void>((done) => server.listen(port, "127.0.0.1", done));
+  listeners.push({ server, sockets });
+}
+
+/** A process holding a port and giving one complete HTTP answer to everything. */
+async function answeringListener(
+  port: number,
+  status: number,
+  body: string,
+): Promise<void> {
+  const sockets: Socket[] = [];
+  const server = createHttpServer((_request, response) => {
+    response.writeHead(status);
+    response.end(body);
+  });
+  server.on("connection", (socket) => sockets.push(socket));
   await new Promise<void>((done) => server.listen(port, "127.0.0.1", done));
   listeners.push({ server, sockets });
 }
@@ -1994,13 +2015,25 @@ describe("ub open", () => {
   it("names a taken port and refuses a second serving replica for the store", async () => {
     const { box, env } = configured();
     const foreignPort = await freePort();
-    await foreignListener(foreignPort);
+    await answeringListener(foreignPort, 200, '{"not":"the config document"}');
     pointAt(box, "wss://hub.example.ts.net/ws");
 
     const foreign = await openFails(box, ["--port", String(foreignPort)], env);
     expect(foreign.status).toBe(1);
     expect(foreign.output).toContain(`port ${foreignPort}`);
     expect(foreign.output).toContain("another process");
+
+    // A holder that never answers is nobody in particular, and the refusal for
+    // it must not send the user to stop what may be their own `ub open` (#600).
+    const silentPort = await freePort();
+    await silentListener(silentPort);
+    const silent = await openFails(box, ["--port", String(silentPort)], env);
+    expect(silent.status).toBe(1);
+    expect(silent.output).toContain(`port ${silentPort}`);
+    expect(silent.output).toContain("--port");
+    expect(silent.output).not.toContain("another process");
+    expect(silent.output).not.toContain("`ub open`");
+    expect(silent.output).not.toMatch(/stop/);
 
     const webPort = await freePort();
     const app = await open(box, ["--port", String(webPort)], env);
@@ -2014,6 +2047,27 @@ describe("ub open", () => {
     expect((await probePort("127.0.0.1", secondPort)).state).toBe("free");
 
     expect((await app.interrupt()).status).toBe(0);
+  });
+
+  it("identifies the port's holder from what it answers, not from the deadline", async () => {
+    // Three holders, three behaviours, no race: each verdict follows from what
+    // the holder does, so no ceiling on the probe's budget can change one.
+    const servingPort = await freePort();
+    await answeringListener(servingPort, 200, '{"hubUrl":"ws://127.0.0.1:1234"}');
+    expect(await whoHoldsPort(servingPort)).toBe("ub-open");
+
+    // A complete answer that is not the configuration document is the
+    // definitive stranger — including a refusal, and a body that is not JSON.
+    const refusingPort = await freePort();
+    await answeringListener(refusingPort, 404, "no such thing");
+    expect(await whoHoldsPort(refusingPort)).toBe("foreign");
+    const gibberishPort = await freePort();
+    await answeringListener(gibberishPort, 200, "<html>hello</html>");
+    expect(await whoHoldsPort(gibberishPort)).toBe("foreign");
+
+    const silentPort = await freePort();
+    await silentListener(silentPort);
+    expect(await whoHoldsPort(silentPort)).toBe("unidentified");
   });
 
   it("never binds a hub off loopback, whatever the endpoint says", async () => {
@@ -2096,7 +2150,7 @@ describe("ub open", () => {
   it("refuses when the hub's endpoint is held by something that is not a hub", async () => {
     const { box, env } = configured();
     const hubPort = await freePort();
-    await foreignListener(hubPort);
+    await silentListener(hubPort);
 
     pointAt(box, `ws://127.0.0.1:${hubPort}`);
     const refused = await openFails(box, ["--port", String(await freePort())], env);
