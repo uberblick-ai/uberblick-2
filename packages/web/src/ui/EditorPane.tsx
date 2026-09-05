@@ -808,7 +808,7 @@ export function EditorPane({
   segment,
   presence,
   author,
-  knownTags,
+  catalogConnection = null,
   archived,
   updatedAt,
   pinned = false,
@@ -835,11 +835,8 @@ export function EditorPane({
   presence: readonly RemotePresence[];
   /** The awareness name this client publishes — the author of its comments. */
   author: string;
-  /**
-   * Every tag the workspace already uses, read from the directory stubs by the
-   * shell. The identity line's add field suggests from it (#122).
-   */
-  knownTags: readonly string[];
+  /** The workspace settings room that owns the curated tag catalog. */
+  catalogConnection?: RoomConnection | null;
   /**
    * Whether the directory tombstones this document. Live in both directions:
    * the value changes under an open pane when anyone archives or restores.
@@ -934,9 +931,9 @@ export function EditorPane({
             version of it is on screen — above the title, as design 1a has it. */}
         <DocMetaLine
           connection={connection}
+          catalogConnection={catalogConnection}
           segment={segment}
           meta={meta}
-          knownTags={knownTags}
           archived={archived}
           readOnly={!writable}
           pinned={pinned}

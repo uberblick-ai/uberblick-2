@@ -1,5 +1,5 @@
 /**
- * The document identity line: group, uuid/revision, copy and document actions.
+ * The document identity line: tags, uuid/revision, copy and document actions.
  *
  * The removed global header deliberately has no test double here. These tests
  * pin only the document-local controls that survive #611.
@@ -60,7 +60,6 @@ function mount(fix: Fixture): { host: HTMLElement; root: Root } {
         connection={fix.connection}
         segment={WORKSPACE}
         meta={getMeta(fix.ydoc)}
-        knownTags={["reference"]}
         archived={false}
         onTogglePin={() => {}}
       />,
@@ -130,10 +129,10 @@ describe("the document identity line keeps its local controls", () => {
     }
   });
 
-  it("names the group and keeps the shortened uuid and revision", () => {
+  it("does not derive navigation from tags and keeps the shortened identity", () => {
     const { host, root } = mount(fixture());
     try {
-      expect(text(host, ".ub-badge")).toBe("Features");
+      expect(text(host, ".ub-badge")).toBeNull();
       expect(text(host, ".ub-doc-ids")).toMatch(
         /^uuid 9f3c1a2b · rev [0-9a-f]{8}$/,
       );
