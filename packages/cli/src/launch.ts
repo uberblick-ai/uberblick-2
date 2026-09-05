@@ -858,8 +858,10 @@ export async function launchCommand(
       // at once, forever. Only the closing words — the rest is its reasoning.
       if (blocked(io, closingLines(session.tail ?? session.lastLine, 5))) return 1;
       io.out(
-        `work: ${parsed.role} session reported no outcome${transcriptSuffix(session)}\n`,
+        `work: ${parsed.role} session reported no outcome${transcriptSuffix(session)}; retrying in ${BACKOFF_LABEL}\n`,
       );
+      const stopped = await pause(services, FAILURE_BACKOFF_MS);
+      if (stopped !== null) return stopped;
       continue;
     }
     // An empty queue is a reason, not a verdict on access.

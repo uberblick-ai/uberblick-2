@@ -350,11 +350,12 @@ const ready = setInterval(() => {
         result({ lastLine: "still waiting for review", transcript: "/tmp/session.log" }),
         result({ interrupted: "SIGTERM" }),
       ],
+      waits: [null],
     });
     expect(await launchCommand(["implementer"], unreported.io, unreported.services)).toBe(143);
-    expect(unreported.seen.waits).toEqual([]);
+    expect(unreported.seen.waits).toEqual([5_000]);
     expect(unreported.stdout()).toContain(
-      "work: implementer session reported no outcome; transcript at /tmp/session.log\n",
+      "work: implementer session reported no outcome; transcript at /tmp/session.log; retrying in 5s\n",
     );
 
     const empty = rig({
