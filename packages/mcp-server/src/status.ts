@@ -82,14 +82,6 @@ export function collectServingSyncStatus(
     return unavailableServingStatus(servedRooms);
   }
 
-  try {
-    // Hub-free and synchronous: a request made after another process's write
-    // first applies that store tail, but never pays settle's network wait.
-    engine.replicas.refresh();
-  } catch {
-    return unavailableServingStatus(servedRooms);
-  }
-
   const attached = engine.replicas.attachedReplicas();
   const store = engine.store.syncSnapshot(
     attached.map(({ room, lastSeq }) => ({ room, throughSeq: lastSeq })),
