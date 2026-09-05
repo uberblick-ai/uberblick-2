@@ -101,6 +101,7 @@ mise run hub          # Hocuspocus sync hub
 mise run mcp          # MCP server, standalone smoke test only (see below)
 mise run web          # Vite dev server
 mise run build-web    # production web bundle in packages/web/dist
+mise run build-install-payload -- 0.1.0  # dist/uberblick-0.1.0.tar.gz
 mise run dev          # hub + web in parallel
 mise run lint         # Biome lint across the workspace (no formatter)
 mise run typecheck    # tsc --noEmit across all packages

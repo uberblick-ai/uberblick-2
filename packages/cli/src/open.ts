@@ -116,6 +116,7 @@ import {
 import { budget, resolveMcpConfig } from "./budget.js";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
+import { isInstallPayload } from "./installation.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock, tryAcquireInitLock, tryAcquireLock } from "./init-lock.js";
 import type { Io } from "./io.js";
@@ -206,11 +207,11 @@ export interface Stop {
  */
 export type BundleAction =
   /** A built bundle is there; serve it. */
-  | { action: "serve"; dir: string; ours: boolean }
+  | { action: "serve"; dir: string; ours: boolean; installed: boolean }
   /** No bundle, but a web package to build one from — if pnpm is there. */
-  | { action: "build"; dir: string; ours: boolean }
+  | { action: "build"; dir: string; ours: boolean; installed: boolean }
   /** Neither, and `reason` says which half is missing. */
-  | { action: "missing"; dir: string; ours: boolean; reason: string };
+  | { action: "missing"; dir: string; ours: boolean; reason: string; installed: boolean };
 
 function isFile(path: string): boolean {
   try {
@@ -232,17 +233,28 @@ function isFile(path: string): boolean {
 export function bundlePlan(env: NodeJS.ProcessEnv = process.env): BundleAction {
   const override = trimmed(env.UBERBLICK_WEB_DIST);
   const dir = override === null ? resolve(DEFAULT_BUNDLE) : resolve(override);
-  const ours = override === null;
+  const installed = override === null && isInstallPayload();
+  const ours = override === null && !installed;
 
   if (isFile(join(dir, "index.html"))) {
-    return { action: "serve", dir, ours };
+    return { action: "serve", dir, ours, installed };
   }
   if (override !== null) {
     return {
       action: "missing",
       dir,
       ours,
+      installed,
       reason: `UBERBLICK_WEB_DIST names ${dir}, which holds no index.html`,
+    };
+  }
+  if (installed) {
+    return {
+      action: "missing",
+      dir,
+      ours,
+      installed,
+      reason: `the installed web app at ${dir} holds no index.html`,
     };
   }
   if (!isFile(join(WEB_PACKAGE, "package.json"))) {
@@ -250,10 +262,11 @@ export function bundlePlan(env: NodeJS.ProcessEnv = process.env): BundleAction {
       action: "missing",
       dir,
       ours,
+      installed,
       reason: `there is no built web app at ${dir}, and no web package beside this one to build from`,
     };
   }
-  return { action: "build", dir, ours };
+  return { action: "build", dir, ours, installed };
 }
 
 /**
@@ -372,7 +385,14 @@ function speaks(stamped: number | null): string {
  * #426 that task wants no age key either (`fnox exec --if-missing warn`), so
  * what it really needs is mise and a `ub` on PATH.
  */
-function staleBundle(dir: string, stamped: number | null): string {
+function staleBundle(dir: string, stamped: number | null, installed: boolean): string {
+  if (installed) {
+    return (
+      `ub open: the installed web app at ${dir} ${speaks(stamped)}, and this uberblick speaks ` +
+      `${SYNC_PROTOCOL_VERSION} — it could not sync, so it is not being served. ` +
+      "Reinstall Uberblick; an installation never rebuilds or changes its packaged web app at run time.\n"
+    );
+  }
   return (
     `ub open: the web app at ${dir} ${speaks(stamped)}, and this uberblick speaks ` +
     `${SYNC_PROTOCOL_VERSION} — it could not sync, so it is not being served. ` +
@@ -541,7 +561,7 @@ export async function ensureBundle(
     return "servable";
   }
   if (!plan.ours) {
-    io.err(staleBundle(plan.dir, stamped));
+    io.err(staleBundle(plan.dir, stamped, plan.installed));
     return "refused";
   }
 
@@ -1565,10 +1585,11 @@ export async function openCommand(
         ? `there is no built web app at ${plan.dir}, and pnpm — which builds it — is not on PATH`
         : null;
   if (missing !== null) {
-    io.err(
-      `ub open: ${missing}. Point UBERBLICK_WEB_DIST at a built bundle, or ` +
-        "build one from a checkout — the README says how.\n",
-    );
+    const recovery =
+      plan.action === "missing" && plan.installed === true
+        ? "Reinstall Uberblick; an installation never builds or changes its packaged web app at run time."
+        : "Point UBERBLICK_WEB_DIST at a built bundle, or build one from a checkout — the README says how.";
+    io.err(`ub open: ${missing}. ${recovery}\n`);
     return await foreground.shutdown(1);
   }
   // Every build this command runs happens in here, under one lock, and it
