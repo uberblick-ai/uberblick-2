@@ -761,6 +761,106 @@ describe("decision log tools", () => {
     ]);
   });
 
+  it("records supersession on the new decision and exposes it as a backlink", async () => {
+    const rig = await localRig();
+    const earlier = await lifecycleDoc(rig, "Earlier decision", {
+      kind: "decision",
+      status: "decided",
+    });
+    const before = await rig.ok("get_doc", { uuid: earlier.uuid });
+
+    const successor = await rig.ok("create_doc", {
+      title: "Replacement decision",
+      description: "Records the choice that replaces an earlier decision.",
+      kind: "decision",
+      supersedes: earlier.uuid,
+    });
+
+    expect(successor).toMatchObject({
+      kind: "decision",
+      status: "open",
+      supersedes: earlier.uuid,
+    });
+    expect(await rig.ok("get_doc", { uuid: successor.uuid })).toMatchObject({
+      supersedes: earlier.uuid,
+      links: [earlier.uuid],
+    });
+    expect(await rig.ok("get_doc", { uuid: earlier.uuid })).toEqual(before);
+    expect(
+      (await rig.ok("backlinks", { uuid: earlier.uuid })).backlinks,
+    ).toEqual([
+      {
+        uuid: successor.uuid,
+        title: "Replacement decision",
+        description: "Records the choice that replaces an earlier decision.",
+      },
+    ]);
+    expect(
+      getMetaMap(rig.instance.replicas.replica(successor.uuid).doc).get(
+        "links",
+      ),
+    ).toEqual([]);
+  });
+
+  it("refuses a non-decision supersession target without writing", async () => {
+    const rig = await localRig();
+    const ordinary = await lifecycleDoc(rig, "Ordinary target");
+    const beforeLog = rig.instance.replicas.store.logSize();
+    const before = await rig.ok("get_doc", { uuid: ordinary.uuid });
+
+    const refused = await rig.call("create_doc", {
+      title: "Refused replacement",
+      description: "Must not replace an ordinary document.",
+      kind: "decision",
+      supersedes: ordinary.uuid,
+    });
+
+    expect(refused.payload).toMatchObject({
+      error: "supersedes_not_decision",
+      supersedes: ordinary.uuid,
+      kind: null,
+      applied: false,
+      partial: false,
+      synced: false,
+    });
+    expect(rig.instance.replicas.store.logSize()).toBe(beforeLog);
+    expect(await rig.ok("get_doc", { uuid: ordinary.uuid })).toEqual(before);
+  });
+
+  it("refuses a generated supersession self-reference without writing", async () => {
+    const uuid = randomUUID();
+    const rig = await startServer(
+      testConfig(),
+      undefined,
+      undefined,
+      () => uuid,
+    );
+    rigs.push(rig);
+    const earlier = await lifecycleDoc(rig, "Collision target", {
+      kind: "decision",
+    });
+    const beforeLog = rig.instance.replicas.store.logSize();
+    const before = await rig.ok("get_doc", { uuid: earlier.uuid });
+
+    const refused = await rig.call("create_doc", {
+      title: "Refused self-reference",
+      description: "Must not replace itself.",
+      kind: "decision",
+      supersedes: earlier.uuid,
+    });
+
+    expect(refused.payload).toMatchObject({
+      error: "supersedes_self_reference",
+      supersedes: earlier.uuid,
+      uuid: earlier.uuid,
+      applied: false,
+      partial: false,
+      synced: false,
+    });
+    expect(rig.instance.replicas.store.logSize()).toBe(beforeLog);
+    expect(await rig.ok("get_doc", { uuid: earlier.uuid })).toEqual(before);
+  });
+
   it("keeps archived and missing decision references visible in stored order", async () => {
     const rig = await localRig();
     const requirement = await lifecycleDoc(rig, "Requirement", {
@@ -872,8 +972,11 @@ describe("decision log tools", () => {
 
     expect(create?.description).toContain("`governs`");
     expect(create?.description).toContain("governed requirement");
+    expect(create?.description).toContain("`supersedes`");
+    expect(create?.description).toContain("without editing that earlier document");
     expect(get?.description).toContain("ordered log");
     expect(get?.description).toContain("derived outbound edges");
+    expect(get?.description).toContain("immutable `supersedes` reference");
     expect(setLinks?.description).toContain("curated link array");
     expect(setLinks?.description).toContain("passing get_doc's effective `links`");
   });

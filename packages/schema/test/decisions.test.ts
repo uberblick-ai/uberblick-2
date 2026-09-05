@@ -3,6 +3,7 @@ import * as Y from "yjs";
 import type { DecisionStatus } from "../src/index.js";
 import {
   InvalidDecisionReferenceError,
+  InvalidSupersedesReferenceError,
   addDecision,
   appendBlock,
   exportMarkdown,
@@ -13,6 +14,7 @@ import {
   readDecisions,
   removeDecision,
   reorderDecisions,
+  setKind,
   setLinks,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
@@ -90,6 +92,62 @@ describe("the decision log", () => {
     expect(uuids(doc)).toEqual([SLUGS]);
     expect(getMeta(doc).links).toEqual([ROOMS, SLUGS]);
     expect(updates).toBe(1);
+  });
+
+  it("stores one immutable supersession reference as a derived graph edge", () => {
+    const decision = new Y.Doc();
+    initDoc(decision, {
+      uuid: TOKENS,
+      title: "Token format",
+      supersedes: SLUGS.toUpperCase(),
+    });
+    setKind(decision, "decision");
+
+    expect(getMeta(decision)).toMatchObject({
+      uuid: TOKENS,
+      supersedes: SLUGS,
+      links: [SLUGS],
+    });
+    // Re-initialising with the same reference is idempotent, while replacing
+    // it is refused before title or metadata changes.
+    initDoc(decision, {
+      uuid: TOKENS,
+      title: "Token format",
+      supersedes: SLUGS,
+    });
+    expect(() =>
+      initDoc(decision, {
+        uuid: TOKENS,
+        title: "Changed while refusing",
+        supersedes: ROOMS,
+      }),
+    ).toThrow(InvalidSupersedesReferenceError);
+    expect(getMeta(decision)).toMatchObject({
+      title: "Token format",
+      supersedes: SLUGS,
+      links: [SLUGS],
+    });
+  });
+
+  it("refuses a supersession self-reference before writing metadata", () => {
+    const decision = new Y.Doc();
+
+    let thrown: unknown;
+    try {
+      initDoc(decision, {
+        uuid: SLUGS,
+        title: "Self",
+        supersedes: SLUGS,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(InvalidSupersedesReferenceError);
+    expect((thrown as InvalidSupersedesReferenceError).reason).toBe(
+      "self-reference",
+    );
+    expect(getMeta(decision).uuid).toBe("");
   });
 
   it("refuses a non-uuid, a reserved room name and a duplicate, storing nothing", () => {

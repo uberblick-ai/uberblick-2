@@ -58,10 +58,13 @@ export interface UberblickMcpServer {
  * @param store The SQLite mirror. Defaults to one opened at
  * `config.databasePath`; injectable so a test can drive persistence failures
  * through the real code path.
+ * @param nextDocumentUuid UUID source; injectable only to prove collision
+ * refusal before a create writes anything.
  */
 export function createMcpServer(
   config: McpConfig,
   store: MirrorStore = new MirrorStore(config.databasePath, config.workspaceId),
+  nextDocumentUuid?: () => string,
 ): UberblickMcpServer {
   const replicas = new Replicas(config, store);
 
@@ -91,7 +94,7 @@ export function createMcpServer(
     replicas.setAgentName(agentDisplayName(server.server.getClientVersion()));
   };
 
-  registerTools(server, replicas);
+  registerTools(server, replicas, nextDocumentUuid);
 
   let closed = false;
 

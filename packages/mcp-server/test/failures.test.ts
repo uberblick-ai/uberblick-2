@@ -140,6 +140,14 @@ const EXPECTED: Record<
     recoveryClass: "reread",
     detail: ["governs", "kind"],
   },
+  supersedes_not_decision: {
+    recoveryClass: "reread",
+    detail: ["supersedes", "kind"],
+  },
+  supersedes_self_reference: {
+    recoveryClass: "retry",
+    detail: ["supersedes", "uuid"],
+  },
   // The unclassified fallback: a handler that threw something nobody mapped
   // cannot say what happened to a write, so it promises the floor and no more.
   internal_error: { recoveryClass: null, detail: [] },
@@ -324,6 +332,39 @@ describe("the failure contract", () => {
           description: "A decision cannot govern an ordinary document.",
           kind: "decision",
           governs: doc.uuid,
+        })
+      ).payload,
+    );
+    record(
+      (
+        await rig.call("create_doc", {
+          title: "Wrong superseded kind",
+          description: "A decision cannot supersede an ordinary document.",
+          kind: "decision",
+          supersedes: doc.uuid,
+        })
+      ).payload,
+    );
+    const collidingUuid = randomUUID();
+    const colliding = await startServer(
+      testConfig(),
+      undefined,
+      undefined,
+      () => collidingUuid,
+    );
+    rigs.push(colliding);
+    const earlierDecision = await colliding.ok("create_doc", {
+      title: "Collision target",
+      description: "The decision whose generated UUID is reused by the probe.",
+      kind: "decision",
+    });
+    record(
+      (
+        await colliding.call("create_doc", {
+          title: "Self reference",
+          description: "A request whose generated UUID collides with its target.",
+          kind: "decision",
+          supersedes: earlierDecision.uuid,
         })
       ).payload,
     );

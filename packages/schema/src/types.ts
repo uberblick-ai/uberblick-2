@@ -273,6 +273,8 @@ export interface DocMeta {
   kind?: DocumentKind;
   /** The lifecycle state, present only when it is legal for {@link kind}. */
   status?: DocumentStatus;
+  /** Earlier decision this decision replaces, by immutable document UUID. */
+  supersedes?: string;
   /** Outbound links, by target document UUID. Never paths or titles. */
   links: string[];
 }
