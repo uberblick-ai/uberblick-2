@@ -80,8 +80,8 @@ export interface SessionResult {
 export interface LaunchServices {
   root: string;
   loadData(): LaunchData;
-  preflight(runtime: Runtime): string | null;
-  refreshMain(): string | null;
+  preflight(runtime: Runtime, adapter: string): string | null;
+  refreshMain(): { detail: string; retry: boolean } | null;
   runProbe(command: readonly string[]): Promise<number>;
   runSession(role: string, runtime: Runtime, entry: RoleLaunch): Promise<SessionResult>;
   wait(milliseconds: number): Promise<NodeJS.Signals | null>;
@@ -237,6 +237,15 @@ export function runForeground(
     let settled = false;
     const handlers = new Map(FORWARDED.map((signal) => [signal, () => forward(signal)]));
 
+    const sendToGroup = (signal: NodeJS.Signals): void => {
+      try {
+        if (child.pid === undefined) throw new Error("child has no process id");
+        process.kill(-child.pid, signal);
+      } catch {
+        if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+      }
+    };
+
     const finish = (result: SessionResult): void => {
       if (settled) return;
       settled = true;
@@ -246,12 +255,7 @@ export function runForeground(
     const forward = (signal: NodeJS.Signals): void => {
       if (interrupted !== null) return;
       interrupted = signal;
-      try {
-        if (child.pid === undefined) throw new Error("child has no process id");
-        process.kill(-child.pid, signal);
-      } catch {
-        child.kill(signal);
-      }
+      sendToGroup(signal);
     };
     for (const [signal, handler] of handlers) signals.on(signal, handler);
 
@@ -270,6 +274,11 @@ export function runForeground(
         lastLine: "",
         detail: error.code === "ENOENT" ? `${command}: command not found` : error.message,
       });
+    });
+    child.once("exit", (code, signal) => {
+      if (interrupted === null && (code !== 0 || signal !== null)) {
+        sendToGroup("SIGTERM");
+      }
     });
     child.once("close", (code, signal) => {
       finish({
@@ -357,7 +366,10 @@ export function createLaunchServices(
   return {
     root,
     loadData: () => readLaunchData(root),
-    preflight(runtime) {
+    preflight(runtime, adapter) {
+      if (!pathIsFile(root, adapter)) {
+        return `${runtime} adapter ${adapter} is missing; restore it from origin/main before retrying`;
+      }
       const version = runSync(runtime, ["--version"], root, env);
       if ((version.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
         return `${runtime} is not installed; install it and authenticate before retrying`;
@@ -386,16 +398,32 @@ export function createLaunchServices(
     refreshMain() {
       const branch = runSync("git", ["branch", "--show-current"], root, env);
       if (branch.status !== 0 || branch.stdout.trim() !== "main") {
-        return "run `ub launch` from the repository's clean `main` checkout";
+        return {
+          detail: "run `ub launch` from the repository's clean `main` checkout",
+          retry: false,
+        };
       }
       const status = runSync("git", ["status", "--porcelain"], root, env);
       if (status.status !== 0 || status.stdout.trim() !== "") {
-        return "the main checkout has local changes; commit or move them before running `ub launch`";
+        return {
+          detail: "the main checkout has local changes; commit or move them before running `ub launch`",
+          retry: false,
+        };
       }
       const fetched = runSync("git", ["fetch", "origin", "main"], root, env);
-      if (fetched.status !== 0) return "could not fetch origin/main; restore GitHub access and retry";
+      if (fetched.status !== 0) {
+        return {
+          detail: "could not fetch origin/main; restore GitHub access and retry",
+          retry: true,
+        };
+      }
       const merged = runSync("git", ["merge", "--ff-only", "origin/main"], root, env);
-      if (merged.status !== 0) return "main cannot fast-forward to origin/main; reconcile it before retrying";
+      if (merged.status !== 0) {
+        return {
+          detail: "main cannot fast-forward to origin/main; reconcile it before retrying",
+          retry: false,
+        };
+      }
       return null;
     },
     async runProbe(command) {
@@ -573,7 +601,7 @@ export async function launchCommand(
     return 2;
   }
   const runtime = parsed.selected ?? entry.defaultRuntime;
-  const runtimeFailure = services.preflight(runtime);
+  const runtimeFailure = services.preflight(runtime, entry.runtimes[runtime].adapter);
   if (runtimeFailure !== null) {
     io.err(`ub launch: ${runtimeFailure}\n`);
     return 1;
@@ -582,7 +610,11 @@ export async function launchCommand(
   for (;;) {
     const refreshFailure = services.refreshMain();
     if (refreshFailure !== null) {
-      io.err(`ub launch: ${refreshFailure}; retrying after a short backoff\n`);
+      if (!refreshFailure.retry) {
+        io.err(`ub launch: ${refreshFailure.detail}\n`);
+        return 1;
+      }
+      io.err(`ub launch: ${refreshFailure.detail}; retrying after a short backoff\n`);
       const stopped = await pause(services, FAILURE_BACKOFF_MS);
       if (stopped !== null) return stopped;
       continue;
@@ -611,6 +643,9 @@ export async function launchCommand(
 
     const session = await services.runSession(parsed.role, runtime, entry);
     if (session.interrupted !== null) {
+      if (session.detail !== undefined) {
+        io.err(`ub launch: ${parsed.role} ${runtime} ${session.detail}\n`);
+      }
       return await stopFromSignal(services, session.interrupted);
     }
     if (!session.started || session.code !== 0 || session.signal !== null) {

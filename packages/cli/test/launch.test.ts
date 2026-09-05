@@ -36,8 +36,8 @@ function result(overrides: Partial<SessionResult> = {}): SessionResult {
 
 function rig(options: {
   preflight?: string | null;
-  refresh?: string | null;
-  refreshes?: Array<string | null>;
+  refresh?: { detail: string; retry: boolean } | null;
+  refreshes?: Array<{ detail: string; retry: boolean } | null>;
   probes?: number[];
   sessions?: SessionResult[];
   waits?: Array<NodeJS.Signals | null>;
@@ -48,7 +48,7 @@ function rig(options: {
   const waits = [...(options.waits ?? [])];
   const refreshes = [...(options.refreshes ?? [])];
   const seen = {
-    preflight: [] as string[],
+    preflight: [] as Array<{ runtime: string; adapter: string }>,
     refreshes: 0,
     probes: [] as Array<readonly string[]>,
     sessions: [] as Array<{ role: string; runtime: string }>,
@@ -58,8 +58,8 @@ function rig(options: {
   const services: LaunchServices = {
     root: REPO_ROOT,
     loadData: () => data,
-    preflight(runtime) {
-      seen.preflight.push(runtime);
+    preflight(runtime, adapter) {
+      seen.preflight.push({ runtime, adapter });
       return options.preflight ?? null;
     },
     refreshMain() {
@@ -195,6 +195,59 @@ describe("ub launch", () => {
     }
   });
 
+  it("stops an inherited-pipe descendant before resolving an abnormal session", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-child-"));
+    try {
+      const evidence = join(root, "evidence");
+      const descendant = join(root, "descendant.cjs");
+      const leader = join(root, "leader.cjs");
+      writeFileSync(
+        descendant,
+        `const fs = require("node:fs");
+const evidence = process.argv[2];
+process.on("SIGTERM", () => {
+  fs.appendFileSync(evidence, "SIGTERM\\n");
+  process.exit(0);
+});
+fs.appendFileSync(evidence, "ready\\n");
+setTimeout(() => {
+  fs.appendFileSync(evidence, "deadline\\n");
+  process.exit(0);
+}, 2000);
+`,
+      );
+      writeFileSync(
+        leader,
+        `const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+const descendant = process.argv[2];
+const evidence = process.argv[3];
+spawn(process.execPath, [descendant, evidence], { stdio: "inherit" });
+setTimeout(() => process.exit(24), 2000);
+const ready = setInterval(() => {
+  if (fs.existsSync(evidence)) {
+    clearInterval(ready);
+    process.exit(23);
+  }
+}, 10);
+`,
+      );
+
+      const outcome = await runForeground(
+        process.execPath,
+        [leader, descendant, evidence],
+        root,
+        process.env,
+        { out: () => {}, err: () => {} },
+      );
+
+      expect(outcome).toMatchObject({ started: true, code: 23, interrupted: null });
+      expect(readFileSync(evidence, "utf8")).toBe("ready\nSIGTERM\n");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("answers help before reading launch data or starting anything", async () => {
     let touched = false;
     const current = rig();
@@ -219,7 +272,12 @@ describe("ub launch", () => {
       const current = rig();
       expect(await launchCommand([...argv], current.io, current.services)).toBe(130);
       expect(current.seen.sessions).toEqual([{ role: expected[0], runtime: expected[1] }]);
-      expect(current.seen.preflight).toEqual([expected[1]]);
+      expect(current.seen.preflight).toEqual([
+        {
+          runtime: expected[1],
+          adapter: `.${expected[1]}/agents/${expected[0]}.${expected[1] === "claude" ? "md" : "toml"}`,
+        },
+      ]);
     }
   });
 
@@ -265,14 +323,14 @@ describe("ub launch", () => {
     }
   });
 
-  it("backs off after an abnormal session or transient refresh failure", async () => {
+  it("backs off after transient failures and refuses a permanent refresh failure", async () => {
     const crashed = rig({ sessions: [result({ code: 23 })], waits: ["SIGINT"] });
     expect(await launchCommand(["issue-preparer"], crashed.io, crashed.services)).toBe(130);
     expect(crashed.seen.waits).toEqual([5_000]);
     expect(crashed.stderr()).toMatch(/status 23.*short backoff/);
 
     const refresh = rig({
-      refreshes: ["could not fetch origin/main", null],
+      refreshes: [{ detail: "could not fetch origin/main", retry: true }, null],
       waits: [null],
     });
     expect(await launchCommand(["implementer"], refresh.io, refresh.services)).toBe(130);
@@ -281,11 +339,36 @@ describe("ub launch", () => {
     expect(refresh.seen.sessions).toHaveLength(1);
     expect(refresh.stderr()).toMatch(/could not fetch.*short backoff/);
 
+    const permanent = rig({
+      refresh: { detail: "main cannot fast-forward to origin/main; reconcile it", retry: false },
+    });
+    expect(await launchCommand(["implementer"], permanent.io, permanent.services)).toBe(1);
+    expect(permanent.seen.waits).toEqual([]);
+    expect(permanent.seen.sessions).toEqual([]);
+    expect(permanent.stderr()).toMatch(/cannot fast-forward/);
+    expect(permanent.stderr()).not.toMatch(/retrying/);
+
     const preflight = rig({ preflight: "codex is not authenticated" });
     expect(await launchCommand(["implementer"], preflight.io, preflight.services)).toBe(1);
     expect(preflight.seen.sessions).toEqual([]);
     expect(preflight.seen.probes).toEqual([]);
     expect(preflight.stderr()).toMatch(/not authenticated/);
+  });
+
+  it("reports a retained interrupted worktree before stopping", async () => {
+    const current = rig({
+      sessions: [
+        result({
+          code: 130,
+          interrupted: "SIGINT",
+          detail: "session ended from SIGINT; worktree preserved at /tmp/ub-launch-test",
+        }),
+      ],
+    });
+
+    expect(await launchCommand(["implementer"], current.io, current.services)).toBe(130);
+    expect(current.stderr()).toContain("worktree preserved at /tmp/ub-launch-test");
+    expect(current.stderr()).not.toContain("retrying");
   });
 
   it("removes an ambient HUB_URL from the environment runtime children receive", () => {
@@ -405,6 +488,18 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
 });
 
 describe("launch data", () => {
+  it("refuses a missing selected adapter during runtime preflight", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-preflight-"));
+    try {
+      const services = createLaunchServices(root, process.env, { out: () => {}, err: () => {} });
+      expect(services.preflight("claude", ".claude/agents/integrator.md")).toMatch(
+        /claude adapter .* is missing/,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("refuses malformed data without requiring an excluded Claude adapter at runtime", () => {
     const root = mkdtempSync(join(tmpdir(), "ub-launch-data-"));
     try {

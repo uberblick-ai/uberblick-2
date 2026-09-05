@@ -1,0 +1,6 @@
+{
+  "enabledMcpjsonServers": ["uberblick"],
+  "permissions": {
+    "allow": ["Bash(codex exec:*)"]
+  }
+}
