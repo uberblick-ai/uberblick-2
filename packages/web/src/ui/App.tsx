@@ -838,13 +838,15 @@ export function App(): ReactElement {
    * The directory stub is a cache; `meta.title` in the document is
    * authoritative. Repair the stub for as long as the document is open — the
    * "repaired on write/connect" half of that invariant — and stamp `updatedAt`
-   * on the changes this client makes. See `collab/directory-stub.ts` for the
-   * rule and for why an update that merely arrived stamps nothing.
+   * on the changes this client makes. Admission alone is not enough: wait for
+   * the current directory state so an unseen tombstone cannot race the repair.
+   * See `collab/directory-stub.ts` for the full rule.
    */
   useEffect(() => {
     if (doc === null || directory === null) return;
     return watchDocumentStub(doc.ydoc, directory.ydoc, {
       writable: () => directory.status.writable,
+      synchronized: () => directory.status.synced,
       subscribe: (listener) => directory.onStatusChange(() => listener()),
     });
   }, [doc, directory]);

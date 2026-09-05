@@ -133,6 +133,7 @@ describe("directory stamps from the web", () => {
     const listeners = new Set<() => void>();
     const stop = watchDocumentStub(doc, directory, {
       writable: () => writable,
+      synchronized: () => true,
       subscribe: (listener) => {
         listeners.add(listener);
         return () => listeners.delete(listener);
@@ -150,6 +151,72 @@ describe("directory stamps from the web", () => {
       title: "After",
       updatedAt: T0 + 1_000,
     });
+    stop();
+  });
+
+  it("waits for directory sync before repairing a missing stub", () => {
+    const converge = (browserClientId: number, archiverClientId: number): void => {
+      const doc = new Y.Doc();
+      initDoc(doc, { uuid: UUID, title: "Archived elsewhere" });
+
+      const archived = new Y.Doc();
+      archived.clientID = archiverClientId;
+      upsertDirectoryEntry(archived, {
+        uuid: UUID,
+        title: "Archived elsewhere",
+      });
+      tombstoneDirectoryEntry(archived, UUID);
+
+      const browser = new Y.Doc();
+      browser.clientID = browserClientId;
+      let synchronized = false;
+      const listeners = new Set<() => void>();
+      const stop = watchDocumentStub(doc, browser, {
+        // Admission precedes the first sync, which is the race this guards.
+        writable: () => true,
+        synchronized: () => synchronized,
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      });
+
+      expect(getDirectoryEntry(browser, UUID)).toBeNull();
+      Y.applyUpdate(browser, Y.encodeStateAsUpdate(archived));
+      synchronized = true;
+      for (const listener of listeners) listener();
+      Y.applyUpdate(archived, Y.encodeStateAsUpdate(browser));
+
+      expect(getDirectoryEntry(browser, UUID)?.deleted).toBe(true);
+      expect(getDirectoryEntry(archived, UUID)?.deleted).toBe(true);
+      stop();
+    };
+
+    // Concurrent whole-entry writes resolve by client id. No repair is
+    // allowed before hydration, so the tombstone wins in either ordering.
+    converge(2, 3);
+    converge(3, 2);
+  });
+
+  it("publishes an absent stub once the directory has synchronized", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Publish after sync" });
+    const directory = new Y.Doc();
+    let synchronized = false;
+    const listeners = new Set<() => void>();
+    const stop = watchDocumentStub(doc, directory, {
+      writable: () => true,
+      synchronized: () => synchronized,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    });
+
+    expect(getDirectoryEntry(directory, UUID)).toBeNull();
+    synchronized = true;
+    for (const listener of listeners) listener();
+    expect(getDirectoryEntry(directory, UUID)?.title).toBe("Publish after sync");
     stop();
   });
 
