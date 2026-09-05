@@ -328,6 +328,8 @@ export function DocMetaLine({
   onTogglePin = null,
   onArchive = null,
   onArchiveConfirmationFocusChange,
+  hasTldr = false,
+  onEditTldr,
 }: {
   connection: RoomConnection;
   /** The workspace as the address spells it — what a copied link carries. */
@@ -345,6 +347,9 @@ export function DocMetaLine({
   onArchive?: (() => void) | null;
   /** Whether focus is inside the confirmation a remote archive may remove. */
   onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
+  /** Whether the document-actions entry adds or edits the person-facing summary. */
+  hasTldr?: boolean;
+  onEditTldr?: (() => void) | undefined;
 }): ReactElement {
   const rev = useDocRev(connection);
   const group = meta === null ? null : groupOf(meta);
@@ -380,6 +385,8 @@ export function DocMetaLine({
               onTogglePin={onTogglePin}
               onArchive={onArchive}
               onConfirmationFocusChange={onArchiveConfirmationFocusChange}
+              hasTldr={hasTldr}
+              onEditTldr={readOnly ? null : (onEditTldr ?? null)}
             />
           )}
         </>
@@ -394,14 +401,19 @@ function DocumentActions({
   onTogglePin,
   onArchive,
   onConfirmationFocusChange,
+  hasTldr,
+  onEditTldr,
 }: {
   title: string;
   pinned: boolean;
   onTogglePin: (() => void) | null;
   onArchive: (() => void) | null;
   onConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
+  hasTldr: boolean;
+  onEditTldr: (() => void) | null;
 }): ReactElement {
   const [confirming, setConfirming] = useState(false);
+  const openingTldrEditor = useRef(false);
 
   useEffect(
     () => () => onConfirmationFocusChange?.(false),
@@ -432,7 +444,16 @@ function DocumentActions({
               </button>
             </DialogTrigger>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent
+            align="end"
+            onCloseAutoFocus={(event) => {
+              if (!openingTldrEditor.current) return;
+              openingTldrEditor.current = false;
+              // The selected action reveals a textarea outside this portal.
+              // Let that field keep the focus its mount effect gives it.
+              event.preventDefault();
+            }}
+          >
             <DropdownMenuItem
               disabled={onTogglePin === null}
               className={pinned ? "ub-action-pinned" : ""}
@@ -443,6 +464,17 @@ function DocumentActions({
                 : pinned
                   ? "Unpin from sidebar"
                   : "Pin to sidebar"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={onEditTldr === null}
+              onSelect={() => {
+                openingTldrEditor.current = true;
+                onEditTldr?.();
+              }}
+            >
+              {onEditTldr === null
+                ? `${hasTldr ? "Edit" : "Add"} TL;DR unavailable — document is read-only`
+                : `${hasTldr ? "Edit" : "Add"} TL;DR`}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
