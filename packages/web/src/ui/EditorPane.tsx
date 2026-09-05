@@ -213,7 +213,7 @@ export function StatusLine({
   ) : null;
   const blank = facts.primary === null;
   const hub =
-    endpoint === null
+    endpoint === null || (hubAcked !== undefined && !facts.twoFact)
       ? null
       : `${endpoint.url ?? "unknown"} (${endpointSourceLabel(endpoint.source)})`;
   const factLabel = [facts.primary, facts.hub].filter(

@@ -10,6 +10,8 @@ import type {
 } from "../src/shell/document-search.js";
 import {
   SERVING_STATUS_POLL_MS,
+  SERVING_STATUS_SETTLE_MS,
+  SERVING_STATUS_TIMEOUT_MS,
   useServingRoomStatus,
 } from "../src/ui/serving-status.js";
 
@@ -86,7 +88,13 @@ describe("the locally served room's upstream reading", () => {
     vi.useFakeTimers();
     const a = deferred<DocumentSearchStatus>();
     const b = deferred<DocumentSearchStatus>();
-    const api = client(vi.fn().mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise));
+    const api = client(
+      vi
+        .fn()
+        .mockReturnValueOnce(a.promise)
+        .mockReturnValueOnce(b.promise)
+        .mockResolvedValue(status(ROOM_B, false)),
+    );
     const { host, root } = mount(api, ROOM_A);
 
     act(() => root.render(<Reading api={api} room={ROOM_B} />));
@@ -95,32 +103,32 @@ describe("the locally served room's upstream reading", () => {
 
     await act(async () => b.resolve(status(ROOM_B, false)));
     expect(host.textContent).toBe("unknown");
-    await act(async () => vi.advanceTimersByTimeAsync(400));
+    await act(async () =>
+      vi.advanceTimersByTimeAsync(SERVING_STATUS_SETTLE_MS),
+    );
     expect(host.textContent).toBe("no");
     act(() => root.unmount());
   });
 
   it("blanks a previous success on failure, omission and serving-mode exit", async () => {
     vi.useFakeTimers();
-    const answers: Array<DocumentSearchStatus | Error> = [
-      status(ROOM_A, true),
-      new Error("refused"),
-      { caughtUp: true, rooms: { [ROOM_B]: { hubAcked: true } } },
-    ];
+    let answer: DocumentSearchStatus | Error = status(ROOM_A, true);
     const api = client(async () => {
-      const next = answers.shift();
-      if (next instanceof Error) throw next;
-      if (next === undefined) return status(ROOM_A, true);
-      return next;
+      if (answer instanceof Error) throw answer;
+      return answer;
     });
     const { host, root } = mount(api, ROOM_A);
 
     await flush();
-    await act(async () => vi.advanceTimersByTimeAsync(300));
+    await act(async () =>
+      vi.advanceTimersByTimeAsync(SERVING_STATUS_SETTLE_MS),
+    );
     expect(host.textContent).toBe("yes");
 
+    answer = new Error("refused");
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(host.textContent).toBe("unknown");
+    answer = { caughtUp: true, rooms: { [ROOM_B]: { hubAcked: true } } };
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(host.textContent).toBe("unknown");
 
@@ -129,26 +137,55 @@ describe("the locally served room's upstream reading", () => {
     act(() => root.unmount());
   });
 
-  it("holds a brief false answer instead of strobing while writes settle", async () => {
+  it("does not adopt a contrary one-poll sample", async () => {
     vi.useFakeTimers();
-    const answers = [status(ROOM_A, true), status(ROOM_A, false), status(ROOM_A, true)];
-    const api = client(async () => answers.shift() ?? status(ROOM_A, true));
+    let hubAcked = true;
+    const api = client(async () => status(ROOM_A, hubAcked));
     const { host, root } = mount(api, ROOM_A);
 
     await flush();
-    await act(async () => vi.advanceTimersByTimeAsync(300));
+    await act(async () =>
+      vi.advanceTimersByTimeAsync(SERVING_STATUS_SETTLE_MS),
+    );
     expect(host.textContent).toBe("yes");
 
+    hubAcked = false;
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(host.textContent).toBe("yes");
-    await act(async () => vi.advanceTimersByTimeAsync(399));
+    hubAcked = true;
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(host.textContent).toBe("yes");
-    await act(async () => vi.advanceTimersByTimeAsync(1));
-    expect(host.textContent).toBe("no");
+    act(() => root.unmount());
+  });
 
-    await act(async () => vi.advanceTimersByTimeAsync(600));
-    expect(host.textContent).toBe("no");
-    await act(async () => vi.advanceTimersByTimeAsync(300));
+  it("expires a hung request, blanks the old fact and keeps polling", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const recovered = deferred<DocumentSearchStatus>();
+    const api = client(async () => {
+      calls += 1;
+      if (calls === 2) return await new Promise<DocumentSearchStatus>(() => {});
+      if (calls === 3) return await recovered.promise;
+      return status(ROOM_A, true);
+    });
+    const { host, root } = mount(api, ROOM_A);
+
+    await flush();
+    await act(async () =>
+      vi.advanceTimersByTimeAsync(SERVING_STATUS_SETTLE_MS),
+    );
+    expect(host.textContent).toBe("yes");
+
+    await act(async () =>
+      vi.advanceTimersByTimeAsync(SERVING_STATUS_TIMEOUT_MS),
+    );
+    expect(host.textContent).toBe("unknown");
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    expect(calls).toBeGreaterThanOrEqual(3);
+    await act(async () => recovered.resolve(status(ROOM_A, true)));
+    await act(async () =>
+      vi.advanceTimersByTimeAsync(SERVING_STATUS_SETTLE_MS),
+    );
     expect(host.textContent).toBe("yes");
     act(() => root.unmount());
   });

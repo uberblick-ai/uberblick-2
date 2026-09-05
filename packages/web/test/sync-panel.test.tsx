@@ -324,7 +324,11 @@ describe("the sync panel renders the state this client holds", () => {
       true,
     );
     try {
-      expect(facts(host).State).toBe("not saved");
+      expect(facts(host)).toMatchObject({
+        Hub: "—",
+        Source: "—",
+        State: "offline",
+      });
       expect(facts(host)["Hub state"]).toBeUndefined();
     } finally {
       act(() => root.unmount());

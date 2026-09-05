@@ -153,6 +153,33 @@ test("two contexts typing into different ranges of one block converge byte-ident
   await expect.poll(() => blockText(b)).toBe(converged);
 });
 
+test("the settled upstream fact stays still through acknowledged typing", async ({
+  browser,
+}) => {
+  const page = await openApp(browser);
+  await createDoc(page, docTitle("calm-upstream"));
+  await placeCaret(page);
+  const upstream = page.locator(".ub-status-word--hub");
+  await expect(upstream).toHaveText("synced with hub");
+
+  const samples = page.evaluate(async () => {
+    const seen: string[] = [];
+    const until = performance.now() + 4_000;
+    while (performance.now() < until) {
+      seen.push(
+        document.querySelector(".ub-status-word--hub")?.textContent ?? "",
+      );
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return seen;
+  });
+  const [seen] = await Promise.all([
+    samples,
+    page.keyboard.type("calm".repeat(60), { delay: 15 }),
+  ]);
+  expect(new Set(seen)).toEqual(new Set(["synced with hub"]));
+});
+
 test("a peer's cursor renders in the other context with its name and colour", async ({
   browser,
 }) => {

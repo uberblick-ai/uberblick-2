@@ -6,6 +6,15 @@ import { useCalmSyncState } from "./calm.js";
 
 /** Keep the status current without turning every render into an HTTP request. */
 export const SERVING_STATUS_POLL_MS = 1_000;
+/** A local status request older than this is not a usable current answer. */
+export const SERVING_STATUS_TIMEOUT_MS = 5_000;
+/** Two contrary samples must survive before the upstream fact moves. */
+export const SERVING_STATUS_SETTLE_MS = SERVING_STATUS_POLL_MS * 2 + 100;
+const SERVING_STATUS_CADENCE = {
+  offline: 0,
+  syncing: SERVING_STATUS_SETTLE_MS,
+  synced: SERVING_STATUS_SETTLE_MS,
+} as const;
 
 interface RoomAnswer {
   client: DocumentSearchClient;
@@ -43,17 +52,30 @@ export function useServingRoomStatus(
   const calm = useCalmSyncState(
     current === true ? "synced" : "syncing",
     current === null ? null : source,
+    SERVING_STATUS_CADENCE,
   );
 
   useEffect(() => {
     if (client === null || client === undefined || room === null) return;
-    const controller = new AbortController();
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let inFlight: AbortController | null = null;
 
     const poll = async (): Promise<void> => {
+      const request = new AbortController();
+      inFlight = request;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
-        const status = await client.status(controller.signal);
+        const expired = new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(() => {
+            request.abort();
+            reject(new Error("ub open status request timed out"));
+          }, SERVING_STATUS_TIMEOUT_MS);
+        });
+        const status = await Promise.race([
+          client.status(request.signal),
+          expired,
+        ]);
         if (!active) return;
         setAnswer({
           client,
@@ -63,6 +85,9 @@ export function useServingRoomStatus(
       } catch {
         if (!active) return;
         setAnswer({ client, room, hubAcked: null });
+      } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
+        if (inFlight === request) inFlight = null;
       }
       if (active) {
         timer = setTimeout(() => void poll(), SERVING_STATUS_POLL_MS);
@@ -73,7 +98,7 @@ export function useServingRoomStatus(
     return () => {
       active = false;
       if (timer !== undefined) clearTimeout(timer);
-      controller.abort();
+      inFlight?.abort();
     };
   }, [client, room]);
 

@@ -430,11 +430,15 @@ describe("the locally served document's two sync facts", () => {
   });
 
   it("lets an unsaved or refused reading suppress the upstream fact", () => {
-    expect(localLine(true, { connected: false, synced: false, writable: false }).words).toEqual([
-      "offline",
-    ]);
-    expect(
-      localLine(true, { writable: false, tokenMissing: true }).words,
-    ).toEqual(["no hub token"]);
+    const unsaved = localLine(true, {
+      connected: false,
+      synced: false,
+      writable: false,
+    });
+    expect(unsaved.words).toEqual(["offline"]);
+    expect(unsaved.label).toBe("Sync details — offline");
+    const refused = localLine(true, { writable: false, tokenMissing: true });
+    expect(refused.words).toEqual(["no hub token"]);
+    expect(refused.label).toBe("Sync details — no hub token");
   });
 });

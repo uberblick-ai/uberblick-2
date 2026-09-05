@@ -79,6 +79,7 @@ export function SyncPanel({
   const reading = statusReading(status, state ?? raw);
   const facts = documentSyncFacts(status, state, reading, hubAcked);
   const hasReading = connection !== null && facts.primary !== null;
+  const namedEndpoint = hubAcked !== undefined && !facts.twoFact ? null : endpoint;
 
   /**
    * Escape closes the panel, and the panel alone.
@@ -123,23 +124,21 @@ export function SyncPanel({
         </button>
       </div>
       <dl className="ub-sync-facts">
-        <Fact label="Hub" value={endpoint?.url ?? UNKNOWN} />
+        <Fact label="Hub" value={namedEndpoint?.url ?? UNKNOWN} />
         {/* Always drawn, "served config" included: a reader checking which hub
             they are on is asking in the same breath who decided it. */}
         <Fact
           label="Source"
-          value={endpoint === null ? UNKNOWN : endpointSourceLabel(endpoint.source)}
+          value={
+            namedEndpoint === null
+              ? UNKNOWN
+              : endpointSourceLabel(namedEndpoint.source)
+          }
         />
         <Fact label="Room" value={connection?.room ?? UNKNOWN} />
         <Fact
           label="State"
-          value={
-            hasReading
-              ? hubAcked !== undefined && !status.writable && reading.detail === null
-                ? "not saved"
-                : (facts.primary ?? UNKNOWN)
-              : UNKNOWN
-          }
+          value={hasReading ? (facts.primary ?? UNKNOWN) : UNKNOWN}
         />
         {facts.twoFact && (
           <Fact label="Hub state" value={facts.hub ?? UNKNOWN} />
