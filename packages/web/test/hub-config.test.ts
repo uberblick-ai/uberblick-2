@@ -490,9 +490,10 @@ describe("the endpoint as it is shown", () => {
     expect(endpointLabel("wss://hub.example/ws#s3cret")).toBe(
       "wss://hub.example/ws",
     );
-    // The ordinary case is left as it reads, and the `/` `new URL` adds to a
+    // An ordinary path is left as it reads, while the `/` `new URL` adds to a
     // bare host is dropped rather than shown as a path.
     expect(endpointLabel("wss://hub.example/ws")).toBe("wss://hub.example/ws");
+    expect(endpointLabel("ws://localhost:1234")).toBe("ws://localhost:1234");
     // Nothing at all rather than a best effort: a string this cannot take
     // apart is one it cannot promise carries no credential — and an opaque
     // scheme is exactly that, since `new URL` leaves its whole payload in
