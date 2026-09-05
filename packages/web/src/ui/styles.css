@@ -1028,8 +1028,7 @@ body {
 /* The chosen one is ringed in the ink of the ground it sits on, so the mark
    works over any of the eight hues. */
 .ub-swatch[aria-pressed="true"] {
-  outline: 2px solid var(--foreground);
-  outline-offset: 1px;
+  border-color: var(--foreground);
 }
 
 .ub-appearance {

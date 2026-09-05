@@ -291,6 +291,73 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
+for (const scheme of ["light", "dark"] as const) {
+  test(`presence selection and keyboard focus stay distinct — ${scheme}`, async ({
+    browser,
+  }) => {
+    const page = await openApp(browser, scheme);
+    await page.locator(".ub-user-card").click();
+    const panel = page.locator("[data-slot=popover-content]");
+    await expect(panel).toBeVisible();
+    const swatches = panel
+      .getByRole("group", { name: "Presence colour" })
+      .getByRole("button");
+    await expect(swatches).toHaveCount(8);
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+
+    const boxes = (): Promise<Array<[number, number, number, number]>> =>
+      swatches.evaluateAll((elements) =>
+        elements.map((element) => {
+          const box = element.getBoundingClientRect();
+          return [box.x, box.y, box.width, box.height];
+        }),
+      );
+    const focusCue = (swatch: Locator): Promise<string[]> =>
+      swatch.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return [
+          style.outlineStyle,
+          style.outlineWidth,
+          style.outlineColor,
+          style.outlineOffset,
+        ];
+      });
+
+    const before = await boxes();
+    for (let index = 0; index < 8; index += 1) {
+      const selected = swatches.nth(index);
+      await selected.click();
+      await expect(selected).toHaveAttribute("aria-pressed", "true");
+      const selectionCue = await paintedIn(selected, "border-top-color");
+      expect(
+        contrast(selectionCue, await paintedIn(selected, "background-color")),
+      ).toBeGreaterThanOrEqual(3);
+    }
+
+    const selected = swatches.first();
+    const neighbour = swatches.nth(1);
+    await selected.click();
+    const selectionCue = await paintedIn(selected, "border-top-color");
+    await neighbour.focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(selected).toBeFocused();
+    const selectedFocus = await focusCue(selected);
+    expect(selectedFocus[0]).not.toBe("none");
+
+    await page.keyboard.press("Tab");
+    await expect(neighbour).toBeFocused();
+    expect(await focusCue(neighbour)).toEqual(selectedFocus);
+    expect(await paintedIn(selected, "outline-style")).toBe("none");
+    expect(await paintedIn(selected, "border-top-color")).toBe(selectionCue);
+    expect(await boxes()).toEqual(before);
+  });
+}
+
 test("workspace settings is an address-selected, inert sidebar drill-in", async ({
   browser,
 }) => {
@@ -1563,6 +1630,13 @@ for (const scheme of ["light", "dark"] as const) {
       }
       // A stroke above the threshold is the accent, which the criterion excludes.
       if (ink.chroma > accentChroma) continue;
+      // Awareness hues are the one legacy-colour ground on this surface. UI
+      // component strokes on them have a contrast contract, not an OKLab-token
+      // separation to compare with the sidebar edge.
+      if (legacySrgb(under) !== null) {
+        expect(contrast(colour, under), seen).toBeGreaterThanOrEqual(3);
+        continue;
+      }
       if (scheme === "dark") {
         expect(contrast(colour, under), seen).toBeGreaterThanOrEqual(floor);
       } else {
