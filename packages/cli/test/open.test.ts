@@ -17,6 +17,7 @@
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
 import { join, resolve } from "node:path";
@@ -494,6 +495,39 @@ function configured(): {
 
 async function get(url: string): Promise<Response> {
   return await fetch(url, { cache: "no-store" });
+}
+
+async function getWithHost(
+  url: string,
+  host: string | null,
+  authorization?: string,
+): Promise<{ status: number; headers: NodeJS.Dict<string | string[]>; body: string }> {
+  return await new Promise((resolve, reject) => {
+    const request = httpRequest(
+      url,
+      {
+        method: "GET",
+        setHost: host !== null,
+        headers: {
+          ...(host === null ? {} : { host }),
+          ...(authorization === undefined ? {} : bearer(authorization)),
+        },
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => {
+          resolve({
+            status: response.statusCode ?? 0,
+            headers: response.headers,
+            body: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      },
+    );
+    request.on("error", reject);
+    request.end();
+  });
 }
 
 /** This machine's config directory — the one the sandbox points XDG at. */
@@ -1400,6 +1434,43 @@ describe("ub open", () => {
     expect((await app.interrupt()).status).toBe(0);
   });
 
+  it("refuses every HTTP surface before routing when Host is not the served address", async () => {
+    const { box, env } = configured();
+    const webPort = await freePort();
+    pointAt(box, "wss://hub.example.ts.net/ws");
+    const app = await open(box, ["--port", String(webPort)], env);
+    const valid = await authMessage();
+    const samples = [
+      { path: "uberblick-config.json", host: `rebound.example:${webPort}` },
+      { path: "assets/app.js", host: `localhost:${webPort}` },
+      { path: `${WORKSPACE}/unknown`, host: `[::1]:${webPort}` },
+      { path: "api/unknown", host: `127.0.0.1:${webPort + 1}` },
+      { path: "api/status", host: `rebound.example:${webPort}`, authorization: valid },
+    ];
+
+    try {
+      for (const sample of samples) {
+        const response = await getWithHost(
+          `${app.url}${sample.path}`,
+          sample.host,
+          sample.authorization,
+        );
+        expect(response.status, sample.path).toBe(421);
+        expect(response.headers["cache-control"], sample.path).toBe("no-store");
+        expect(response.body, sample.path).toBe("misdirected request\n");
+      }
+
+      // Node may reject HTTP/1.1 without Host before the request reaches our
+      // handler. Either layer must refuse it without exposing served content.
+      const missing = await getWithHost(`${app.url}uberblick-config.json`, null);
+      expect(missing.status).toBeGreaterThanOrEqual(400);
+      expect(missing.status).toBeLessThan(500);
+      expect(missing.body).not.toContain(SECRET);
+    } finally {
+      expect((await app.interrupt()).status).toBe(0);
+    }
+  });
+
   it("refuses rather than serving a blank page when there is no bundle", async () => {
     const { box, env } = configured();
     const empty = join(box.cwd, "not-a-bundle");
@@ -1877,6 +1948,20 @@ describe("ub open", () => {
     );
     expect(app.stdout()).toContain("no signing secret");
     expect(app.stdout()).toContain("ub init");
+
+    const refusedConfig = await getWithHost(
+      `${app.url}uberblick-config.json`,
+      `localhost:${webPort}`,
+    );
+    const refusedApi = await getWithHost(
+      `${app.url}api/status`,
+      `foreign.example:${webPort}`,
+    );
+    for (const response of [refusedConfig, refusedApi]) {
+      expect(response.status).toBe(421);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.body).toBe("misdirected request\n");
+    }
 
     const unboundApi = await get(`${app.url}api/search?q=unchanged`);
     expect(unboundApi.status).toBe(200);

@@ -909,6 +909,23 @@ function apiResponse(
   );
 }
 
+/** Refuse DNS-rebound requests before routing can reveal content or credentials. */
+function acceptRequestHost(
+  expectedHost: string,
+  request: IncomingMessage,
+  response: ServerResponse,
+): boolean {
+  if (request.headers.host === expectedHost) return true;
+  respond(
+    request,
+    response,
+    421,
+    { "content-type": "text/plain", "cache-control": "no-store" },
+    "misdirected request\n",
+  );
+  return false;
+}
+
 function bearerToken(request: IncomingMessage): string | null {
   const authorization = request.headers.authorization;
   if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
@@ -984,6 +1001,7 @@ async function serveApiRequest(
 }
 
 function serveBoundRequest(
+  expectedHost: string,
   root: string,
   document: () => string,
   authenticate: ApiAuthenticator,
@@ -992,6 +1010,7 @@ function serveBoundRequest(
   request: IncomingMessage,
   response: ServerResponse,
 ): void {
+  if (!acceptRequestHost(expectedHost, request, response)) return;
   const target = new URL(request.url ?? "/", "http://localhost");
   if (!target.pathname.startsWith(API_PREFIX)) {
     serveBundleRequest(root, document, request, response);
@@ -1061,8 +1080,13 @@ function serveBundleRequest(
     });
 }
 
-function serveBundle(root: string, document: () => string): Server {
+function serveBundle(
+  expectedHost: string,
+  root: string,
+  document: () => string,
+): Server {
   return createServer((request, response) => {
+    if (!acceptRequestHost(expectedHost, request, response)) return;
     serveBundleRequest(root, document, request, response);
   });
 }
@@ -1572,6 +1596,8 @@ export async function openCommand(
   }
 
   const workspace = trimmed(env.WORKSPACE_ID);
+  const servedUrl = new URL(`http://${WEB_HOST}:${options.port}/`);
+  const expectedHost = servedUrl.host;
   const localHubUrl = `ws://${WEB_HOST}:${options.port}`;
   try {
     const mcpConfig = workspace === null ? null : resolveMcpConfig(env);
@@ -1613,7 +1639,7 @@ export async function openCommand(
         port: options.port,
         workspaceId: mcpConfig.workspaceId,
         authSecret: mcpConfig.authSecret,
-        expectedOrigin: `http://${WEB_HOST}:${options.port}`,
+        expectedOrigin: servedUrl.origin,
         readRoom: (room, afterSeq) => {
           (collectingServedRooms ?? observedServedRooms).add(room);
           return engine.store.readSince(room, afterSeq);
@@ -1639,6 +1665,7 @@ export async function openCommand(
         },
         onRequest: (request, response) => {
           serveBoundRequest(
+            expectedHost,
             plan.dir,
             document,
             authenticateApi,
@@ -1655,6 +1682,7 @@ export async function openCommand(
       // The unbound and no-credential paths keep serving the bundle directly;
       // there is no workspace-local server a browser could authenticate to.
       const server = serveBundle(
+        expectedHost,
         plan.dir,
         configSource(startupEnv, initial.document),
       );
@@ -1692,7 +1720,7 @@ export async function openCommand(
     return await foreground.shutdown(1);
   }
 
-  const url = `http://${WEB_HOST}:${options.port}/`;
+  const url = servedUrl.href;
   let banner = `uberblick is at ${url}\n\n`;
   banner += `  hub        ${hubNote}\n`;
   banner += `  workspace  ${workspace ?? "none configured — run `ub init`"}\n`;
