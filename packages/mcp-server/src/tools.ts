@@ -144,6 +144,14 @@ const ARCHIVE_IS_LAST_WRITE_WINS =
   "seen it, which is not the same as holding against every concurrent one. When it matters which way it went, re-read " +
   "with list_docs and `include_deleted: true`; for a decision, also pass a matching `kind`, `status` or `tag` predicate.";
 
+/** The single-document boundary shared by both lifecycle tools. */
+const DECISION_LOG_LIFECYCLES_ARE_INDEPENDENT =
+  "Document lifecycles are independent across a requirement's decision log: archive_doc or restore_doc writes " +
+  "lifecycle state only for the uuid passed. It does not archive, restore or edit any decision that document " +
+  "references, and it does not edit any requirement that references the document; a requirement's decision log " +
+  "can still report whether the target is available. Call archive_doc or restore_doc separately for each related " +
+  "document whose lifecycle should change.";
+
 /**
  * What an archive costs a writer, in the words an agent reads.
  *
@@ -1660,6 +1668,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "serves the document by uuid, and list_docs with `include_deleted: true` still lists it, flagged `deleted`; " +
         "for a decision, add a matching `kind`, `status` or `tag` predicate. " +
         "There is no tool that erases content, by design.\n\n" +
+        DECISION_LOG_LIFECYCLES_ARE_INDEPENDENT +
+        "\n\n" +
         "What the tombstone does cost is writing: while it stands the document is read-only, and every mutating tool " +
         "refuses it with `doc_archived`. restore_doc is the way back, and the only mutation an archived document " +
         "accepts.\n\n" +
@@ -1704,6 +1714,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Restoring one that is not archived leaves its archive state alone, but is not quite a no-op: the directory " +
         "entry is a cache of the document's own metadata, and this trues it up, so a stub that had drifted is " +
         "repaired in passing.\n\n" +
+        DECISION_LOG_LIFECYCLES_ARE_INDEPENDENT +
+        "\n\n" +
         "Check `indexed`. It is true when this replica holds the document itself and has just re-derived its search " +
         "rows — the usual case. It is false in two: when this replica knows the document only from the directory, and " +
         "when the index write was refused. Either way the restore is real, replicates, and shows immediately in the " +
