@@ -175,7 +175,7 @@ export function OutlinePane({
       >
         <div className="ub-outline-panel-body">
           <DropdownMenuLabel className="ub-rail-head">On this page</DropdownMenuLabel>
-          <ul>
+          <ul role="none">
             {entries.map((entry) => (
               <li
                 key={entry.id}
