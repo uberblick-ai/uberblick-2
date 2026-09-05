@@ -199,6 +199,31 @@ child may renew by editing its record under the same 25/30-minute cadence as a
 claim. An unfinished attempt produced no verdict, so replacement is not a
 second adversary or review round.
 
+## Every process a run starts is that run's to end
+
+A run owns each process it spawns on the host — a browser, a load or timing
+probe, a server, a watcher — until that process exits. Start one in the
+foreground of a script under a cleanup trap so that an interrupted run still
+tears it down, and give it its own deadline (a `timeout`, or the tool's own
+equivalent) so it dies on its own clock rather than waiting on a parent that may
+never return. Never disown a process to make it someone else's problem.
+
+Where a helper must outlive a single foreground call — the claim renewer is the
+standing example, because a foreground call is capped well below the renewal
+interval — detaching it is correct, and two obligations come with it: the run
+stops it by exact pid before it finishes, and the helper carries a deadline of
+its own so that a run which dies without stopping it cannot leave it running
+indefinitely. A renewer that outlives its run is worse than none, because it
+keeps an abandoned claim looking alive instead of letting it age into recovery.
+
+This is not housekeeping for its own sake. The harness reaps background tasks
+under memory pressure, and it does so with `SIGTERM` — which a trap can catch,
+and which leaves a spawned tree behind when nothing does. On 2026-09-02 an
+implementation-reviewer's headless Chromium probes outlived their run by two and
+a half days and held 1.4 GB across 36 processes on a swapless host, which makes
+the next reap more likely rather than less. Reclaiming what leaks anyway is a
+separate mechanism and belongs with the housekeeping script, not here.
+
 ## Product context, proportional to the action
 
 Current Uberblick context is required before a product-sensitive choice or a
