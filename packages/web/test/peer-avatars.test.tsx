@@ -21,7 +21,7 @@
  * over the same `usePresence` snapshot this strip reads.
  */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import * as Y from "yjs";
@@ -42,6 +42,23 @@ import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const DOC_UUID = "9f3c1a2b-0000-4000-8000-0123456789ab";
+
+/** jsdom has neither, and Radix's floating surface uses both. */
+class FakeResizeObserver {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+
+beforeEach(() => {
+  vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+  vi.stubGlobal("PointerEvent", MouseEvent);
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 /** The session id an MCP server publishes — `agent-<uuid>`, as `ub` mints it. */
 const SESSION = "agent-7e8de6c1-2f44-4a90-9b31-0c5a7d2e6f83";
@@ -108,7 +125,7 @@ describe("the compact collaborator cluster", () => {
     );
   }
 
-  it("caps the circles at three and makes every remaining session operable", () => {
+  it("caps the circles at three and makes every remaining session operable", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
       true;
     const activate = vi.fn();
@@ -131,7 +148,7 @@ describe("the compact collaborator cluster", () => {
       );
       act(() => more?.click());
 
-      const rows = host.querySelectorAll<HTMLButtonElement>(
+      const rows = document.querySelectorAll<HTMLButtonElement>(
         ".ub-peer-overflow-row",
       );
       expect(rows).toHaveLength(2);
@@ -142,15 +159,16 @@ describe("the compact collaborator cluster", () => {
       expect(activate).toHaveBeenCalledWith(
         expect.objectContaining({ clientId: 4, blockId: "block-4" }),
       );
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
       expect(document.activeElement).toBe(more);
-      expect(host.querySelector(".ub-peer-overflow")).toBeNull();
+      expect(document.querySelector(".ub-peer-overflow")).toBeNull();
     } finally {
       act(() => root.unmount());
       host.remove();
     }
   });
 
-  it("returns focus after dismissal and after live removal", () => {
+  it("returns focus after dismissal and after live removal", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
       true;
     const host = document.createElement("div");
@@ -173,22 +191,30 @@ describe("the compact collaborator cluster", () => {
       const more = host.querySelector<HTMLButtonElement>(".ub-peer-more");
       act(() => more?.focus());
       act(() => more?.click());
-      const row = host.querySelector<HTMLButtonElement>(
+      const row = document.querySelector<HTMLButtonElement>(
         '.ub-peer-overflow-row[data-peer-id="4"]',
       );
       act(() => row?.focus());
-      act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+      act(() =>
+        row?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
+      );
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
       expect(document.activeElement).toBe(more);
 
       act(() => more?.click());
-      expect(host.querySelector(".ub-peer-overflow")).not.toBeNull();
-      act(() =>
-        host
-          .querySelector(".ub-status-sync")
-          ?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })),
-      );
-      expect(host.querySelector(".ub-peer-overflow")).toBeNull();
+      expect(document.querySelector(".ub-peer-overflow")).not.toBeNull();
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      const sync = host.querySelector<HTMLButtonElement>(".ub-status-sync");
+      act(() => {
+        sync?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+        sync?.click();
+        sync?.focus();
+      });
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      expect(document.querySelector(".ub-peer-overflow")).toBeNull();
+      expect(document.activeElement).toBe(sync);
 
+      act(() => more?.focus());
       render(peers(3));
       expect(document.activeElement).toBe(
         host.querySelector('[data-peer-id="1"]'),
@@ -197,7 +223,7 @@ describe("the compact collaborator cluster", () => {
       render(peers(4));
       const restoredMore = host.querySelector<HTMLButtonElement>(".ub-peer-more");
       act(() => restoredMore?.click());
-      const nextRow = host.querySelector<HTMLButtonElement>(
+      const nextRow = document.querySelector<HTMLButtonElement>(
         '.ub-peer-overflow-row[data-peer-id="4"]',
       );
       act(() => nextRow?.focus());

@@ -1,10 +1,15 @@
 /** The compact, operable document-presence cluster (#616). */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { RemotePresence } from "./doc-chrome.js";
 import { presenceLabel } from "./doc-chrome.js";
 import { PeerAvatar } from "./PeerAvatar.js";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "./shadcn/popover.js";
 
 const VISIBLE_PEERS = 3;
 
@@ -28,16 +33,23 @@ export function PeerCluster({
   const remaining = presence.slice(VISIBLE_PEERS);
   const [open, setOpen] = useState(false);
   const cluster = useRef<HTMLSpanElement | null>(null);
+  const overflow = useRef<HTMLDivElement | null>(null);
   const overflowTrigger = useRef<HTMLButtonElement | null>(null);
   const focusedPeer = useRef<number | null>(null);
   const focusWasInside = useRef(false);
+  const interactedOutside = useRef(false);
+
+  const containsFocus = (): boolean =>
+    cluster.current?.contains(document.activeElement) === true ||
+    overflow.current?.contains(document.activeElement) === true;
 
   const focusFallback = (clientId: number | null): void => {
     const root = cluster.current;
     if (root === null) return;
-    const controls = Array.from(
-      root.querySelectorAll<HTMLButtonElement>("[data-peer-id]"),
-    );
+    const controls = [
+      ...root.querySelectorAll<HTMLButtonElement>("[data-peer-id]"),
+      ...(overflow.current?.querySelectorAll<HTMLButtonElement>("[data-peer-id]") ?? []),
+    ];
     const samePeer =
       clientId === null
         ? undefined
@@ -58,7 +70,7 @@ export function PeerCluster({
     // focused row. Let the layout-effect fallback run first; an ordinary move
     // outside clears the marker immediately afterwards.
     queueMicrotask(() => {
-      if (cluster.current?.contains(document.activeElement)) return;
+      if (containsFocus()) return;
       focusedPeer.current = null;
       focusWasInside.current = false;
     });
@@ -69,95 +81,85 @@ export function PeerCluster({
   // sync-details control when nobody remains.
   useLayoutEffect(() => {
     if (remaining.length === 0 && open) setOpen(false);
-    if (!focusWasInside.current || cluster.current?.contains(document.activeElement)) {
-      return;
-    }
+    if (!focusWasInside.current || containsFocus()) return;
     focusFallback(focusedPeer.current);
   });
-
-  // Escape is the keyboard dismissal and returns to the trigger. A pointer
-  // outside dismisses too, while the browser remains free to focus its target.
-  useEffect(() => {
-    if (!open) return;
-    const dismissByKey = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      event.preventDefault();
-      event.stopPropagation();
-      setOpen(false);
-      overflowTrigger.current?.focus({ preventScroll: true });
-    };
-    const dismissOutside = (event: MouseEvent): void => {
-      const target = event.target;
-      if (target instanceof Node && cluster.current?.contains(target) === true) return;
-      setOpen(false);
-    };
-    window.addEventListener("keydown", dismissByKey, true);
-    document.addEventListener("mousedown", dismissOutside);
-    return () => {
-      window.removeEventListener("keydown", dismissByKey, true);
-      document.removeEventListener("mousedown", dismissOutside);
-    };
-  }, [open]);
 
   const activate = (session: RemotePresence, dismiss = false): void => {
     onActivate?.(session);
     if (!dismiss) return;
     setOpen(false);
-    overflowTrigger.current?.focus({ preventScroll: true });
   };
 
   return (
-    <span className="ub-peers" ref={cluster}>
-      {visible.map((session) => {
-        const label = presenceLabel(session);
-        return (
-          <button
-            key={session.clientId}
-            type="button"
-            className="ub-peer-control"
-            data-peer-id={peerKey(session.clientId)}
-            aria-label={label}
-            onFocus={() => {
-              focusWasInside.current = true;
-              focusedPeer.current = session.clientId;
-            }}
-            onBlur={leaveCluster}
-            onClick={() => activate(session)}
-          >
-            <PeerAvatar session={session} />
-            <span className="ub-peer-tooltip" role="tooltip">
-              {session.name} · {session.kind === "agent" ? "agent" : "person"}
-            </span>
-          </button>
-        );
-      })}
+    <Popover
+      open={open}
+      onOpenChange={(shown) => {
+        if (shown) interactedOutside.current = false;
+        setOpen(shown);
+      }}
+    >
+      <span className="ub-peers" ref={cluster}>
+        {visible.map((session) => {
+          const label = presenceLabel(session);
+          return (
+            <button
+              key={session.clientId}
+              type="button"
+              className="ub-peer-control"
+              data-peer-id={peerKey(session.clientId)}
+              aria-label={label}
+              onFocus={() => {
+                focusWasInside.current = true;
+                focusedPeer.current = session.clientId;
+              }}
+              onBlur={leaveCluster}
+              onClick={() => activate(session)}
+            >
+              <PeerAvatar session={session} />
+              <span className="ub-peer-tooltip" role="tooltip">
+                {session.name} · {session.kind === "agent" ? "agent" : "person"}
+              </span>
+            </button>
+          );
+        })}
+        {remaining.length > 0 && (
+          <PopoverTrigger asChild>
+            <button
+              ref={overflowTrigger}
+              type="button"
+              className="ub-peer-control ub-peer-more"
+              aria-label={`${remaining.length} more active ${
+                remaining.length === 1 ? "collaborator" : "collaborators"
+              }`}
+              onFocus={() => {
+                focusWasInside.current = true;
+                focusedPeer.current = null;
+              }}
+              onBlur={leaveCluster}
+            >
+              +{remaining.length}
+            </button>
+          </PopoverTrigger>
+        )}
+      </span>
       {remaining.length > 0 && (
-        <button
-          ref={overflowTrigger}
-          type="button"
-          className="ub-peer-control ub-peer-more"
-          aria-label={`${remaining.length} more active ${
-            remaining.length === 1 ? "collaborator" : "collaborators"
-          }`}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          aria-controls="ub-peer-overflow"
-          onFocus={() => {
-            focusWasInside.current = true;
-            focusedPeer.current = null;
-          }}
-          onBlur={leaveCluster}
-          onClick={() => setOpen((shown) => !shown)}
-        >
-          +{remaining.length}
-        </button>
-      )}
-      {open && remaining.length > 0 && (
-        <span
-          id="ub-peer-overflow"
+        <PopoverContent
+          ref={overflow}
+          align="end"
           className="ub-peer-overflow"
-          role="dialog"
           aria-label="More active collaborators"
+          onInteractOutside={() => {
+            interactedOutside.current = true;
+          }}
+          onCloseAutoFocus={(event) => {
+            // Radix owns the close policy; this local override changes only its
+            // trigger focus to preventScroll. Plain focus would undo #616's
+            // editor jump by scrolling the pane back to this status row.
+            if (interactedOutside.current) return;
+            event.preventDefault();
+            overflowTrigger.current?.focus({ preventScroll: true });
+          }}
         >
           {remaining.map((session) => (
             <button
@@ -180,8 +182,8 @@ export function PeerCluster({
               </span>
             </button>
           ))}
-        </span>
+        </PopoverContent>
       )}
-    </span>
+    </Popover>
   );
 }
