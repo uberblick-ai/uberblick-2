@@ -15,27 +15,27 @@
 #   or PR, never an unreferenced local commit (`AGENTS.md`, Claim and recovery).
 # Every prune reports what it reclaimed, so a 0 B reclaim is visible in the run
 # record instead of looking like success.
-set -u
+set -fu
 usage='usage: housekeeping.sh <review sha>... [--dry-run]'
 if [ "$#" -lt 1 ]; then
-	echo "$usage" >&2
-	exit 2
+  echo "$usage" >&2
+  exit 2
 fi
 shas=
 dry=
 while [ "$#" -gt 0 ]; do
-	case $1 in
-		--dry-run)
-			if [ "$#" -ne 1 ] || [ -z "$shas" ]; then
-				echo "$usage" >&2
-				exit 2
-			fi
-			dry=$1
-			;;
-		-*) echo "$usage" >&2; exit 2 ;;
-		*) shas="${shas}${shas:+ }$1" ;;
-	esac
-	shift
+  case $1 in
+    --dry-run)
+      if [ "$#" -ne 1 ] || [ -z "$shas" ]; then
+        echo "$usage" >&2
+        exit 2
+      fi
+      dry=$1
+      ;;
+    -*) echo "$usage" >&2; exit 2 ;;
+    *) shas="${shas}${shas:+ }$1" ;;
+  esac
+  shift
 done
 
 # Tunable, so a host with a different disk budget needs no edit here.
@@ -90,16 +90,16 @@ image_list() {
   fi
 }
 review_images() {
-	named=
-	for sha in $shas; do
-		current=$(image_list "docker image ls uberblick-review:$sha" docker image ls -q "uberblick-review:$sha") || return 1
-		[ -n "$current" ] && named="${named}${named:+ }uberblick-review:$sha"
-	done
-	older=$(image_list "docker image ls review images older than 24h" docker image ls -q --filter reference=uberblick-review --filter until=24h) || return 1
-	older=$(printf '%s\n' "$older" | sort -u)
-	[ -n "$older" ] && run docker image rm -f $older
-	[ -n "$named" ] && run docker image rm -f $named
-	return 0
+  named=
+  for sha in $shas; do
+    current=$(image_list "docker image ls uberblick-review:$sha" docker image ls -q "uberblick-review:$sha") || return 1
+    [ -n "$current" ] && named="${named}${named:+ }uberblick-review:$sha"
+  done
+  older=$(image_list "docker image ls review images older than 24h" docker image ls -q --filter reference=uberblick-review --filter until=24h) || return 1
+  older=$(printf '%s\n' "$older" | sort -u)
+  [ -n "$older" ] && run docker image rm -f $older
+  [ -n "$named" ] && run docker image rm -f $named
+  return 0
 }
 
 # Why `git worktree remove` would refuse, so --dry-run predicts the same set the
