@@ -37,6 +37,10 @@ function services(overrides = {}) {
   const calls = [];
   const service = {
     calls,
+    getSourceRepository: async () => {
+      calls.push("get source");
+      return { visibility: "public" };
+    },
     getRelease: async () => {
       calls.push("get release");
       return null;
@@ -52,6 +56,9 @@ function services(overrides = {}) {
     publishedArchiveVersion: async () => {
       calls.push("published version");
       return VERSION;
+    },
+    assertPublicAsset: async () => {
+      calls.push("public asset");
     },
     buildArchive: async () => {
       calls.push("build");
@@ -118,6 +125,7 @@ test("a new tag builds, verifies, publishes, then commits the generated formula"
 
   assert.equal(result.outcome, "published");
   assert.deepEqual(fake.calls, [
+    "get source",
     "get release",
     "get formula",
     "build",
@@ -125,6 +133,7 @@ test("a new tag builds, verifies, publishes, then commits the generated formula"
     "read",
     "create release",
     "upload",
+    "public asset",
     "put formula old-sha",
   ]);
   assert.equal(result.formula, formulaFor(TAG, VERSION, DIGEST));
@@ -147,7 +156,14 @@ test("a matching published tag verifies the asset and changes nothing", async ()
   const result = await publishHomebrewRelease(input(), fake);
 
   assert.equal(result.outcome, "no-op");
-  assert.deepEqual(fake.calls, ["get release", "get formula", "download", "published version"]);
+  assert.deepEqual(fake.calls, [
+    "get source",
+    "get release",
+    "get formula",
+    "download",
+    "published version",
+    "public asset",
+  ]);
 });
 
 test("a published payload refuses a disagreeing formula without mutating either repository", async () => {
@@ -163,7 +179,14 @@ test("a published payload refuses a disagreeing formula without mutating either 
   });
 
   await assert.rejects(() => publishHomebrewRelease(input(), fake), /asset .* and the tap formula disagree/);
-  assert.deepEqual(fake.calls, ["get release", "get formula", "download", "published version"]);
+  assert.deepEqual(fake.calls, [
+    "get source",
+    "get release",
+    "get formula",
+    "download",
+    "published version",
+    "public asset",
+  ]);
 });
 
 test("a payload version mismatch publishes nothing", async () => {
@@ -175,7 +198,7 @@ test("a payload version mismatch publishes nothing", async () => {
   });
 
   await assert.rejects(() => publishHomebrewRelease(input(), fake), /payload reports "1\.2\.4"/);
-  assert.deepEqual(fake.calls, ["get release", "get formula", "build", "version"]);
+  assert.deepEqual(fake.calls, ["get source", "get release", "get formula", "build", "version"]);
 });
 
 test("moving a tag after publication is refused before the asset is downloaded", async () => {
@@ -191,7 +214,7 @@ test("moving a tag after publication is refused before the asset is downloaded",
     () => publishHomebrewRelease(input(), fake),
     /immutable stable-tag contract/,
   );
-  assert.deepEqual(fake.calls, ["get release"]);
+  assert.deepEqual(fake.calls, ["get source", "get release"]);
 });
 
 test("a partial publication can add an absent formula from the verified asset", async () => {
@@ -206,10 +229,12 @@ test("a partial publication can add an absent formula from the verified asset", 
 
   assert.equal(result.outcome, "recovered-formula");
   assert.deepEqual(fake.calls, [
+    "get source",
     "get release",
     "get formula",
     "download",
     "published version",
+    "public asset",
     "put formula new",
   ]);
 });
@@ -240,6 +265,46 @@ test("a mismatched tag ref refuses before any external read or write", async () 
     /matching GitHub Actions tag ref/,
   );
   assert.deepEqual(fake.calls, []);
+});
+
+test("a private source repository refuses before any release or tap mutation", async () => {
+  const fake = services({
+    getSourceRepository: async () => {
+      fake.calls.push("get source");
+      return { visibility: "private" };
+    },
+  });
+
+  await assert.rejects(
+    () => publishHomebrewRelease(input(), fake),
+    /must be public before publishing/,
+  );
+  assert.deepEqual(fake.calls, ["get source"]);
+});
+
+test("an anonymously unreachable uploaded asset never reaches the public tap", async () => {
+  const fake = services({
+    assertPublicAsset: async () => {
+      fake.calls.push("public asset");
+      throw new Error("anonymous asset probe returned 404");
+    },
+  });
+
+  await assert.rejects(
+    () => publishHomebrewRelease(input(), fake),
+    /anonymous asset probe returned 404/,
+  );
+  assert.deepEqual(fake.calls, [
+    "get source",
+    "get release",
+    "get formula",
+    "build",
+    "version",
+    "read",
+    "create release",
+    "upload",
+    "public asset",
+  ]);
 });
 
 test("only the tag-triggered publishing job can declare the tap environment", () => {

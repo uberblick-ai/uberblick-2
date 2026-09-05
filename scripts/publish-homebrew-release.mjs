@@ -115,6 +115,12 @@ export async function publishHomebrewRelease(input, services) {
 	const version = versionForTag(input.tag);
 	const name = assetName(version);
 	assertTagContext(input);
+	if (!input.dryRun) {
+		const source = await services.getSourceRepository();
+		if (source.visibility !== "public") {
+			fail(`${SOURCE_REPOSITORY} must be public before publishing a Homebrew release`);
+		}
+	}
 
 	const release = input.dryRun ? null : await services.getRelease(input.tag);
 	const existingAsset =
@@ -135,6 +141,7 @@ export async function publishHomebrewRelease(input, services) {
 		if (reportedVersion !== version) {
 			fail(`published payload reports ${JSON.stringify(reportedVersion)}, expected ${version}`);
 		}
+		await services.assertPublicAsset(existingAsset.browser_download_url);
 		published = true;
 	} else {
 		if (release !== null && release.assets.length > 0) {
@@ -177,6 +184,7 @@ export async function publishHomebrewRelease(input, services) {
 	const targetRelease =
 		release ?? (await services.createRelease(input.tag, input.headSha));
 	await services.uploadAsset(targetRelease.upload_url, name, bytes);
+	await services.assertPublicAsset(assetUrl(input.tag, version));
 	await services.putTapFormula(formula, existingFormula?.sha ?? null, version);
 	services.log(`Published ${input.tag} and committed ${TAP_FORMULA_PATH} to ${TAP_REPOSITORY}.`);
 	return { outcome: "published", formula };
@@ -260,6 +268,8 @@ function productionServices() {
 	}
 	return {
 		...localServices,
+		getSourceRepository: () =>
+			githubRequest(`/repos/${SOURCE_REPOSITORY}`, sourceToken),
 		getRelease: (tag) =>
 			githubRequest(`/repos/${SOURCE_REPOSITORY}/releases/tags/${tag}`, sourceToken, {
 				notFound: true,
@@ -280,6 +290,12 @@ function productionServices() {
 			});
 			if (!response.ok) fail(`published asset download returned ${response.status}`);
 			return Buffer.from(await response.arrayBuffer());
+		},
+		assertPublicAsset: async (url) => {
+			const response = await fetch(url, { method: "HEAD" });
+			if (!response.ok) {
+				fail(`published asset is not anonymously downloadable: ${url} returned ${response.status}`);
+			}
 		},
 		createRelease: (tag, headSha) =>
 			githubRequest(`/repos/${SOURCE_REPOSITORY}/releases`, sourceToken, {
@@ -348,9 +364,11 @@ async function main() {
 function productionServicesForDryRun() {
 	return {
 		...localServices,
+		getSourceRepository: async () => fail("dry-run cannot read the source repository"),
 		getRelease: async () => null,
 		getTapFormula: async () => null,
 		downloadAsset: async () => fail("dry-run cannot download an existing asset"),
+		assertPublicAsset: async () => fail("dry-run cannot probe a published asset"),
 		createRelease: async () => fail("dry-run cannot create a release"),
 		uploadAsset: async () => fail("dry-run cannot upload an asset"),
 		putTapFormula: async () => fail("dry-run cannot update the tap"),
