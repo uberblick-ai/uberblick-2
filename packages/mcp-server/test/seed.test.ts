@@ -370,7 +370,7 @@ describe("seed import", () => {
       old_text: "Original prose.",
       new_text: "Prose an agent rewrote.",
     });
-    await editing.ok("set_tags", { uuid, tags: ["feature"] });
+    await editing.ok("set_tags", { uuid, tags: ["mcp"] });
     const added = await editing.ok("insert_block", {
       uuid,
       after_block_id: paragraph.id,
@@ -394,7 +394,13 @@ describe("seed import", () => {
         "Prose an agent rewrote.",
         "A block the template never had.",
       ]);
-      expect(doc.tags).toEqual(["feature"]);
+      expect(doc.tags).toEqual([
+        {
+          id: "00000000-0000-4000-8000-000000000003",
+          name: "mcp",
+          state: "active",
+        },
+      ]);
       expect((doc.blocks as { id: string }[])[1]?.id).toBe(paragraph.id);
       expect((doc.blocks as { id: string }[])[2]?.id).toBe(added.block.id);
     } finally {
@@ -605,7 +611,7 @@ describe("starter sidebar seed", () => {
     upsertDirectoryEntry(directory.doc, {
       uuid: "9f3d7c1e-5a82-4b06-9e17-3c48d05b6a2f",
       title: "Real work",
-      tags: ["feature"],
+      tags: [],
     });
     await hub.flush();
 
@@ -633,8 +639,7 @@ describe("starter sidebar seed", () => {
   });
 
   it("adopts a sidebar that already holds a group rather than seeding beside it", async () => {
-    // Curation — a user's, another client's, or the MCP server's own legacy tag
-    // migration — is exactly what a seed must not write over.
+    // Curation from another client is exactly what a seed must not write over.
     const curated = "57a27e40-0000-4000-8000-0000000000fe";
     const databasePath = tempDatabasePath();
     const dir = starterDir();

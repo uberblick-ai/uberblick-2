@@ -57,6 +57,7 @@ import {
   BlockNotFoundError,
   ConflictingLinkMarksError,
   InvalidDocumentLifecycleError,
+  InvalidTagAssignmentError,
   InlineLinkRangeError,
   OldTextMismatchError,
   StaleBlockError,
@@ -132,6 +133,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
  * does not claim.
  */
 export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "list_tags",
   "get_doc",
   "list_docs",
   "search",
@@ -256,6 +258,12 @@ const RECOVERIES: Record<string, Recovery> = {
       "Choose a live requirement UUID from list_docs with `kind: requirement`, then call create_doc again. " +
       "Nothing was created by this refused call.",
   },
+  invalid_tag_assignment: {
+    recoveryClass: "manual",
+    guidance:
+      "Call list_tags for the complete active catalog, then call again with active ids or exact active names. " +
+      "An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
+  },
   supersedes_not_decision: {
     recoveryClass: "reread",
     guidance:
@@ -331,6 +339,29 @@ export function hydrationRecovery(hubStatus: string): {
           "says where the connection stands.",
       };
   }
+}
+
+/**
+ * What to do about an invalid tag value on a replica whose catalog has not
+ * arrived.
+ *
+ * The class answers the same question an unhydrated room asks — can this hub
+ * still deliver it? — so it comes from {@link hydrationRecovery} rather than
+ * being classified twice. The sentence is the part that differs: the table's
+ * "call list_tags" is advice that loops here, because the catalog `list_tags`
+ * would answer from is the one that has not arrived.
+ */
+export function incompleteCatalogRecovery(hubStatus: string): {
+  recoveryClass: RecoveryClass;
+  recovery: string;
+} {
+  return {
+    recoveryClass: hydrationRecovery(hubStatus).recoveryClass,
+    recovery:
+      "The workspace tag catalog has not reached this replica, so this may be a real workspace tag and list_tags " +
+      "cannot name it either — it answers `complete: false` while that is so. Nothing was written. sync_status says " +
+      "whether the catalog can still arrive; until it has, only a value this replica already holds can be used.",
+  };
 }
 
 /**
@@ -508,6 +539,14 @@ export function toFailure(tool: string, error: unknown): CallToolResult {
       message: error.message,
       kind: error.kind,
       status: error.status,
+    });
+  }
+  if (error instanceof InvalidTagAssignmentError) {
+    return stamped(tool, {
+      error: "invalid_tag_assignment",
+      message: error.message,
+      unknown: error.unknown,
+      retired: error.retired,
     });
   }
   if (error instanceof ToolError) {

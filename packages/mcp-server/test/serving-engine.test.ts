@@ -173,7 +173,7 @@ describe("serving MCP engine", () => {
       serving.replicas
         .attachedReplicas()
         .map((replica) => replica.awareness.getLocalState()),
-    ).toEqual([null, null]);
+    ).toEqual([null, null, null]);
 
     const uuid = randomUUID();
     const room = roomForDoc(WORKSPACE, uuid);

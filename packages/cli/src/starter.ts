@@ -83,8 +83,8 @@ export const TEMPLATE_DIR = join(
 export const STARTER_GROUP_NAME = "Überblick";
 
 /**
- * Its id, fixed rather than generated — see the header. It is starter-specific
- * and shares nothing with the MCP server's legacy tag-migration group ids.
+ * Its id, fixed rather than generated — see the header. It is specific to the
+ * starter layout and never derived from document metadata.
  */
 export const STARTER_GROUP_ID = "57a27e40-0000-4000-8000-000000000001";
 

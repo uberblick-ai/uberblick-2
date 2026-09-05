@@ -95,7 +95,7 @@ describe("the index derivation cut", () => {
     const created = await first.ok("create_doc", {
       title: "Race winner",
       description: "A test document.",
-      tags: ["complete"],
+      tags: ["auth"],
       blocks: [{ type: "paragraph", text: "searchable pangolin" }],
     });
     await first.ok("set_links", {
@@ -130,7 +130,7 @@ describe("the index derivation cut", () => {
               uuid: created.uuid,
               title: "Race winner",
               description: "A test document.",
-              tags: ["complete"],
+              tags: ["00000000-0000-4000-8000-000000000001"],
               links: [target.uuid],
               body: "searchable pangolin",
             },
@@ -182,7 +182,7 @@ describe("the index derivation cut", () => {
     expect(first.instance.store.search("pangolin", 10)).toEqual([
       expect.objectContaining({
         uuid: created.uuid,
-        tags: ["complete"],
+        tags: ["00000000-0000-4000-8000-000000000001"],
       }),
     ]);
   });

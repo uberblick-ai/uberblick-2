@@ -60,6 +60,7 @@ describe("with the hub stopped", () => {
       "insert_block",
       "link_range",
       "list_docs",
+      "list_tags",
       "pin_doc",
       "restore_doc",
       "search",
@@ -123,7 +124,7 @@ describe("with the hub stopped", () => {
     const created = await rig.ok("create_doc", {
       title: "Offline notes",
       description: "A test document.",
-      tags: ["spike"],
+      tags: ["mcp"],
       blocks: [
         { type: "heading", text: "Offline notes", level: 1 },
         { type: "paragraph", text: "written with no hub in sight" },
@@ -169,14 +170,14 @@ describe("with the hub stopped", () => {
       block_id: inserted.block.id,
     });
 
-    await rig.ok("set_tags", { uuid: created.uuid, tags: ["spike", "offline"] });
+    await rig.ok("set_tags", { uuid: created.uuid, tags: ["mcp", "sync"] });
 
     const listed = await rig.ok("list_docs", {});
     expect(listed.docs.map((doc: { uuid: string }) => doc.uuid).sort()).toEqual(
       [created.uuid, target.uuid].sort(),
     );
 
-    const filtered = await rig.ok("list_docs", { tag: "offline" });
+    const filtered = await rig.ok("list_docs", { tag: "sync" });
     expect(filtered.docs).toHaveLength(1);
 
     const found = await rig.ok("search", { query: "hub in sight" });
@@ -230,7 +231,7 @@ describe("with the hub stopped", () => {
     expect(block.synced).toBe(false);
 
     for (const call of [
-      rig.ok("set_tags", { uuid: created.uuid, tags: ["x"] }),
+      rig.ok("set_tags", { uuid: created.uuid, tags: ["auth"] }),
       rig.ok("set_links", { uuid: created.uuid, links: [] }),
       rig.ok("set_status", { uuid: created.uuid, status: "planned" }),
     ]) {
@@ -329,6 +330,7 @@ describe("with the hub stopped", () => {
     ).toEqual([
       `${WORKSPACE}/_directory`,
       `${WORKSPACE}/_sidebar`,
+      `${WORKSPACE}/_settings`,
     ]);
   });
 

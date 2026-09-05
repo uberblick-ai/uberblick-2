@@ -303,7 +303,7 @@ describe("a document nobody described", () => {
     expect(inserted.descriptionHint).toContain("set_description");
 
     // Every mutator, not one — the nudge lives where durability is reported.
-    const tagged = await rig.ok("set_tags", { uuid, tags: ["draft"] });
+    const tagged = await rig.ok("set_tags", { uuid, tags: ["auth"] });
     expect(tagged.descriptionHint).toContain("set_description");
 
     // And it stops the moment the gap is closed.
@@ -312,7 +312,7 @@ describe("a document nobody described", () => {
       description: "What the browser made, now that somebody said so.",
     });
     expect(described.descriptionHint).toBeUndefined();
-    const after = await rig.ok("set_tags", { uuid, tags: ["reference"] });
+    const after = await rig.ok("set_tags", { uuid, tags: ["mcp"] });
     expect(after.descriptionHint).toBeUndefined();
   });
 
@@ -406,7 +406,7 @@ describe("lifecycle metadata reaches discovery", () => {
     const planned = await rig.ok("create_doc", {
       title: "Planned",
       description: "A planned tagged requirement.",
-      tags: ["shared"],
+      tags: ["sync"],
       kind: "requirement",
       status: "planned",
     });
@@ -414,13 +414,13 @@ describe("lifecycle metadata reaches discovery", () => {
     const decision = await rig.ok("create_doc", {
       title: "Decision",
       description: "An open tagged decision.",
-      tags: ["shared"],
+      tags: ["sync"],
       kind: "decision",
     });
     const archivedDecision = await rig.ok("create_doc", {
       title: "Archived decision",
       description: "A decided record kept outside ordinary orientation.",
-      tags: ["retired"],
+      tags: ["billing"],
       kind: "decision",
       status: "decided",
     });
@@ -440,13 +440,13 @@ describe("lifecycle metadata reaches discovery", () => {
       decision.uuid,
     ]);
     expect(await listedUuids({ status: "open" })).toEqual([decision.uuid]);
-    expect(await listedUuids({ tag: "shared" })).toEqual(
+    expect(await listedUuids({ tag: "sync" })).toEqual(
       [planned.uuid, decision.uuid].sort(),
     );
 
     expect(
       await listedUuids({
-        tag: "shared",
+        tag: "sync",
         kind: "requirement",
         status: "planned",
       }),

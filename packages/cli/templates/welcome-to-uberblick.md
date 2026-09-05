@@ -2,8 +2,6 @@
 uuid: 2d56b281-5614-43bd-b8d8-edd1c270a85a
 title: Welcome to Überblick
 description: What Überblick is and how a fresh workspace works — local-first documents shared by you and the agents you connect. Read How to Use It next.
-tags:
-  - start-here
 links:
   - d7ddd0b1-fee9-4ef0-8f1e-42882f925c31
 ---
