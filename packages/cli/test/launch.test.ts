@@ -355,6 +355,75 @@ const ready = setInterval(() => {
     expect(preflight.stderr()).toMatch(/not authenticated/);
   });
 
+  it("classifies a failed fast-forward from the checkout state", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-refresh-"));
+    try {
+      const runGit = (args: string[]) =>
+        spawnSync("git", args, { cwd: root, encoding: "utf8" });
+      writeFileSync(join(root, "marker"), "base\n");
+      for (const args of [
+        ["init", "-b", "main"],
+        ["add", "marker"],
+        ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "base"],
+      ]) {
+        const ran = runGit(args);
+        expect(ran.status, ran.stderr).toBe(0);
+      }
+      const base = runGit(["rev-parse", "HEAD"]).stdout.trim();
+      writeFileSync(join(root, "marker"), "remote\n");
+      expect(runGit(["add", "marker"]).status).toBe(0);
+      expect(
+        runGit(["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "remote"])
+          .status,
+      ).toBe(0);
+      const remote = runGit(["rev-parse", "HEAD"]).stdout.trim();
+      expect(runGit(["reset", "--hard", base]).status).toBe(0);
+      expect(runGit(["update-ref", "refs/remotes/origin/main", remote]).status).toBe(0);
+
+      const bin = join(root, ".git", "test-bin");
+      mkdirSync(bin);
+      const git = join(bin, "git");
+      writeFileSync(
+        git,
+        `#!/bin/sh
+case "$1" in
+  fetch) exit 0 ;;
+  merge) exit 23 ;;
+  *) PATH="$UB_TEST_GIT_PATH" exec git "$@" ;;
+esac
+`,
+      );
+      chmodSync(git, 0o755);
+      const services = createLaunchServices(
+        root,
+        {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH ?? ""}`,
+          UB_TEST_GIT_PATH: process.env.PATH ?? "",
+        },
+        { out: () => {}, err: () => {} },
+      );
+
+      expect(services.refreshMain()).toEqual({
+        detail: "could not fast-forward main; retrying may resolve a concurrent git operation",
+        retry: true,
+      });
+
+      writeFileSync(join(root, "marker"), "local\n");
+      expect(runGit(["add", "marker"]).status).toBe(0);
+      expect(
+        runGit(["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "local"])
+          .status,
+      ).toBe(0);
+      expect(services.refreshMain()).toEqual({
+        detail: "main cannot fast-forward to origin/main; reconcile it before retrying",
+        retry: false,
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("reports a retained interrupted worktree before stopping", async () => {
     const current = rig({
       sessions: [
