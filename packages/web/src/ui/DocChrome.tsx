@@ -122,6 +122,7 @@ function TagStrip({
     const isSelected = liveIds.includes(entry.id);
     const liveEntry = getTagCatalogEntry(catalogConnection.ydoc, entry.id);
     if (!isSelected && liveEntry?.state !== "active") return;
+    if (isSelected && liveEntry?.state === "retired") search.current?.focus();
     assignDocumentTags(
       ydoc,
       catalogConnection.ydoc,
@@ -169,7 +170,7 @@ function TagStrip({
           aria-label="Edit tags"
           aria-expanded={open}
           aria-haspopup="listbox"
-          aria-controls={listId}
+          aria-controls={open ? listId : undefined}
         >
           <span className="ub-tag-selected">
             {labels.length > 0 ? labels : <span className="ub-tag-placeholder">Add tags</span>}
@@ -207,9 +208,6 @@ function TagStrip({
               if (event.key === "ArrowDown") {
                 event.preventDefault();
                 focusOption(0);
-              } else if (event.key === "Enter" && filtered[0] !== undefined) {
-                event.preventDefault();
-                toggle(filtered[0]);
               }
             }}
           />

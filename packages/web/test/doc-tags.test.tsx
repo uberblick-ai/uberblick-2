@@ -268,6 +268,7 @@ describe("the document tag picker", () => {
     click(option("legacy"));
     expect(getMeta(fix.document.ydoc).tags).not.toContain(TAGS.legacy);
     expect(option("legacy")).toBeUndefined();
+    expect(document.activeElement).toBe(search());
 
     // The button can be stale too; the write boundary reads live writability.
     const before = getMeta(fix.document.ydoc).tags;
@@ -284,11 +285,11 @@ describe("the document tag picker", () => {
     click(trigger);
     expect(document.activeElement).toBe(search());
 
+    act(() => press(search(), "Enter"));
+    expect(getMeta(fix.document.ydoc).tags).toEqual([]);
     act(() => typeInto(search(), "mcp"));
     act(() => press(search(), "Enter", { isComposing: true }));
     expect(getMeta(fix.document.ydoc).tags).toEqual([]);
-    act(() => press(search(), "Enter"));
-    expect(getMeta(fix.document.ydoc).tags).toEqual([TAGS.mcp]);
 
     act(() => typeInto(search(), ""));
     act(() => press(search(), "ArrowDown"));
