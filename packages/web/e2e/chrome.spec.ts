@@ -245,8 +245,13 @@ for (const scheme of ["light", "dark"] as const) {
     const boxes = (): Promise<Array<[number, number, number, number]>> =>
       options.evaluateAll((elements) =>
         elements.map((element) => {
+          const frame = element.closest<HTMLElement>("[data-slot=popover-content]");
+          if (frame === null) {
+            throw new Error("e2e: appearance option geometry has no popover frame");
+          }
           const box = element.getBoundingClientRect();
-          return [box.x, box.y, box.width, box.height];
+          const origin = frame.getBoundingClientRect();
+          return [box.x - origin.x, box.y - origin.y, box.width, box.height];
         }),
       );
     const treatment = (option: Locator) =>
@@ -1055,18 +1060,22 @@ test("the document collaborator cluster stays compact and jumps once without mov
     await page.locator(".ub-title").click();
     await expect(overflow).toHaveCount(0);
     await expect(page.locator(".ub-title")).toBeFocused();
+    const pane = page.locator(".ub-pane");
+    const waitForPaneScrollToSettle = async (): Promise<void> => {
+      let previousScrollTop: number | null = null;
+      let stableScrollReads = 0;
+      await expect
+        .poll(async () => {
+          const scrollTop = await pane.evaluate((element) => element.scrollTop);
+          stableScrollReads = scrollTop === previousScrollTop ? stableScrollReads + 1 : 0;
+          previousScrollTop = scrollTop;
+          return stableScrollReads;
+        }, { intervals: [100, 100, 100, 100, 100, 100], timeout: 2_000 })
+        .toBeGreaterThanOrEqual(5);
+    };
     // The title's native focus scroll can outlive the focus transfer. Let the
     // pane settle before resetting it for the independent presence checks.
-    let previousScrollTop: number | null = null;
-    let stableScrollReads = 0;
-    await expect
-      .poll(async () => {
-        const scrollTop = await page.locator(".ub-pane").evaluate((pane) => pane.scrollTop);
-        stableScrollReads = scrollTop === previousScrollTop ? stableScrollReads + 1 : 0;
-        previousScrollTop = scrollTop;
-        return stableScrollReads;
-      }, { intervals: [100, 100, 100, 100, 100, 100], timeout: 2_000 })
-      .toBeGreaterThanOrEqual(5);
+    await waitForPaneScrollToSettle();
 
     await page.evaluate(() => {
       const first = document.querySelector(".ub-editor .ProseMirror > *")?.firstChild;
@@ -1086,15 +1095,15 @@ test("the document collaborator cluster stays compact and jumps once without mov
         original.call(this, options);
       };
     });
-    await page.locator(".ub-pane").evaluate((pane) => {
-      pane.scrollTop = 0;
+    await pane.evaluate((element) => {
+      element.scrollTop = 0;
     });
 
     const visibleJump = page.locator(
       '.ub-peers > .ub-peer-control[aria-label*="editing block 29"]',
     ).first();
     await visibleJump.click();
-    await expect.poll(() => page.locator(".ub-pane").evaluate((pane) => pane.scrollTop))
+    await expect.poll(() => pane.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
     expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("start");
     expect(
@@ -1102,9 +1111,10 @@ test("the document collaborator cluster stays compact and jumps once without mov
         () => (window as unknown as { peerScrollCalls: number }).peerScrollCalls,
       ),
     ).toBe(1);
+    await waitForPaneScrollToSettle();
 
-    await page.locator(".ub-pane").evaluate((pane) => {
-      pane.scrollTop = 0;
+    await pane.evaluate((element) => {
+      element.scrollTop = 0;
     });
     await more.focus();
     await page.keyboard.press("Enter");
@@ -1117,7 +1127,7 @@ test("the document collaborator cluster stays compact and jumps once without mov
     await jumpRow.focus();
     await expect(jumpRow).toHaveCSS("outline-width", "2px");
     await page.keyboard.press("Enter");
-    await expect.poll(() => page.locator(".ub-pane").evaluate((pane) => pane.scrollTop))
+    await expect.poll(() => pane.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
     expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("start");
     expect(
@@ -1126,15 +1136,17 @@ test("the document collaborator cluster stays compact and jumps once without mov
       ),
     ).toBe(2);
     await expect(more).toBeFocused();
+    await waitForPaneScrollToSettle();
 
-    await page.locator(".ub-pane").evaluate((pane) => {
-      pane.scrollTop = 0;
+    await pane.evaluate((element) => {
+      element.scrollTop = 0;
     });
     await more.click();
     const noLocation = page.getByRole("button", { name: "Eli · person" });
     await expect(noLocation).toBeVisible();
     await noLocation.click();
-    expect(await page.locator(".ub-pane").evaluate((pane) => pane.scrollTop)).toBe(0);
+    await waitForPaneScrollToSettle();
+    expect(await pane.evaluate((element) => element.scrollTop)).toBe(0);
     expect(
       await page.evaluate(
         () => (window as unknown as { peerScrollCalls: number }).peerScrollCalls,
