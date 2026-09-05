@@ -163,9 +163,11 @@ test("a TL;DR added, edited and cleared in one client follows in the other", asy
 
   await a.getByRole("button", { name: "Document actions" }).click();
   await a.getByRole("menuitem", { name: "Add TL;DR" }).click();
-  await a.getByLabel("Write one or two plain-English sentences that help a reader understand this document.").fill(
-    "A short summary for readers.",
+  const summaryA = a.getByLabel(
+    "Write one or two plain-English sentences that help a reader understand this document.",
   );
+  await expect(summaryA).toBeFocused();
+  await summaryA.fill("A short summary for readers.");
   await a.getByRole("button", { name: "Save", exact: true }).click();
 
   const calloutA = a.locator(".ub-tldr");

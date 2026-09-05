@@ -144,22 +144,27 @@ function TldrCallout({
   onEditingChange: (editing: boolean) => void;
 }): ReactElement | null {
   const [draft, setDraft] = useState(tldr ?? "");
-  const [attempted, setAttempted] = useState(false);
+  const input = useRef<HTMLTextAreaElement | null>(null);
   const readOnly = archived || !writable;
   const value = draft.trim();
   const tooLong = value.length > MAX_TLDR_LENGTH;
   const error = tooLong
     ? `A TL;DR is at most ${MAX_TLDR_LENGTH} characters.`
-    : attempted && value.length === 0
-      ? "Write a short summary, or use Clear to remove the current one."
-      : null;
+    : null;
 
   useEffect(() => {
     if (!editing) {
       setDraft(tldr ?? "");
-      setAttempted(false);
     }
   }, [editing, tldr]);
+
+  useEffect(() => {
+    if (!editing || readOnly) return;
+    // The document menu suppresses its usual trigger-focus restoration for
+    // this action; focus the field after React mounts it outside that portal.
+    const timer = setTimeout(() => input.current?.focus(), 0);
+    return () => clearTimeout(timer);
+  }, [editing, readOnly]);
 
   if (!editing && tldr === null) return null;
 
@@ -185,7 +190,6 @@ function TldrCallout({
             aria-label={`${tldr === null ? "Add" : "Edit"} TL;DR`}
             onSubmit={(event) => {
               event.preventDefault();
-              setAttempted(true);
               if (value.length === 0 || tooLong) return;
               write(value);
             }}
@@ -195,6 +199,7 @@ function TldrCallout({
               understand this document.
             </label>
             <textarea
+              ref={input}
               id="ub-tldr-input"
               value={draft}
               readOnly={readOnly}
@@ -206,7 +211,6 @@ function TldrCallout({
               }
               onChange={(event) => {
                 setDraft(event.target.value);
-                setAttempted(false);
               }}
             />
             <div className="ub-tldr-form-meta">
@@ -240,7 +244,11 @@ function TldrCallout({
               >
                 Cancel
               </button>
-              <button type="submit" className="ub-tool ub-tool-on" disabled={readOnly}>
+              <button
+                type="submit"
+                className="ub-tool ub-tool-on"
+                disabled={readOnly || value.length === 0}
+              >
                 Save
               </button>
             </div>

@@ -145,9 +145,14 @@ describe("the document TL;DR", () => {
     act(() => menuItem("Add TL;DR")?.click());
     expect(host.querySelector(".ub-tldr-label")?.textContent).toBe("Quick summary");
     expect(host.querySelector(".ub-tldr h2")?.textContent).toBe("TL;DR");
+    expect(host.querySelector(".ub-tldr-icon")).not.toBeNull();
     expect(host.querySelector(".ub-tldr-form label")?.textContent).toContain(
       "plain-English sentences",
     );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(document.activeElement).toBe(field(host));
 
     act(() => typeInto(field(host), "x".repeat(MAX_TLDR_LENGTH + 1)));
     expect(host.querySelector("#ub-tldr-count")?.textContent).toContain(
@@ -159,6 +164,13 @@ describe("the document TL;DR", () => {
     );
     expect(getMeta(ydoc).tldr).toBeNull();
 
+    const atLimit = "x".repeat(MAX_TLDR_LENGTH);
+    act(() => typeInto(field(host), atLimit));
+    act(() => host.querySelector<HTMLButtonElement>("button[type=submit]")?.click());
+    expect(getMeta(ydoc).tldr).toBe(atLimit);
+
+    act(() => openActions(host));
+    act(() => menuItem("Edit TL;DR")?.click());
     act(() => typeInto(field(host), "  A short summary for a person.  "));
     act(() => host.querySelector<HTMLButtonElement>("button[type=submit]")?.click());
     expect(getMeta(ydoc).tldr).toBe("A short summary for a person.");

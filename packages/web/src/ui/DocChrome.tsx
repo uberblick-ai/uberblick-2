@@ -413,6 +413,7 @@ function DocumentActions({
   onEditTldr: (() => void) | null;
 }): ReactElement {
   const [confirming, setConfirming] = useState(false);
+  const openingTldrEditor = useRef(false);
 
   useEffect(
     () => () => onConfirmationFocusChange?.(false),
@@ -443,7 +444,16 @@ function DocumentActions({
               </button>
             </DialogTrigger>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent
+            align="end"
+            onCloseAutoFocus={(event) => {
+              if (!openingTldrEditor.current) return;
+              openingTldrEditor.current = false;
+              // The selected action reveals a textarea outside this portal.
+              // Let that field keep the focus its mount effect gives it.
+              event.preventDefault();
+            }}
+          >
             <DropdownMenuItem
               disabled={onTogglePin === null}
               className={pinned ? "ub-action-pinned" : ""}
@@ -455,7 +465,13 @@ function DocumentActions({
                   ? "Unpin from sidebar"
                   : "Pin to sidebar"}
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={onEditTldr === null} onSelect={() => onEditTldr?.()}>
+            <DropdownMenuItem
+              disabled={onEditTldr === null}
+              onSelect={() => {
+                openingTldrEditor.current = true;
+                onEditTldr?.();
+              }}
+            >
               {onEditTldr === null
                 ? `${hasTldr ? "Edit" : "Add"} TL;DR unavailable — document is read-only`
                 : `${hasTldr ? "Edit" : "Add"} TL;DR`}
