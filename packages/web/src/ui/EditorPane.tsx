@@ -11,6 +11,7 @@ import {
   parseRoom,
   setTitle,
 } from "@uberblick/schema";
+import type { DecisionReference } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { bindGuardedEditor } from "../editor/guarded-binding.js";
 import { docLinkFromTarget } from "../editor/doc-links.js";
@@ -682,6 +683,8 @@ export function EditorPane({
   onToggleThreads,
   syncOpen = false,
   onToggleSync,
+  decisions = [],
+  onOpenDecision,
 }: {
   connection: RoomConnection | null;
   /** The workspace as the address spells it — see {@link DocMetaLine}. */
@@ -732,6 +735,10 @@ export function EditorPane({
   onToggleThreads?: (() => void) | undefined;
   syncOpen?: boolean;
   onToggleSync?: (() => void) | undefined;
+  /** Disposable #844 prototype: the routed document's resolved decision log. */
+  decisions?: readonly DecisionReference[];
+  /** Open one decision without replacing the routed document. */
+  onOpenDecision?: ((uuid: string) => void) | undefined;
 }): ReactElement {
   const pane = useRef<HTMLElement | null>(null);
   const revealPresence = useCallback((session: RemotePresence): void => {
@@ -826,6 +833,32 @@ export function EditorPane({
           onToggleSync={onToggleSync}
           onActivatePresence={revealPresence}
         />
+        {decisions.length > 0 && onOpenDecision !== undefined && (
+          <section className="ub-decision-log" aria-label="Decision log">
+            <h2>Decision log</h2>
+            {decisions.map((decision) => {
+              const status =
+                decision.status === "decided"
+                  ? "Decided"
+                  : decision.status === "open"
+                    ? "Open"
+                    : "Unknown";
+              return (
+                <button
+                  key={decision.uuid}
+                  type="button"
+                  className="ub-decision-entry"
+                  disabled={!decision.available}
+                  onClick={() => onOpenDecision(decision.uuid)}
+                  aria-label={`Open decision ${decision.title ?? decision.uuid}`}
+                >
+                  <span>{decision.title ?? decision.uuid}</span>
+                  <span className="ub-muted">{status}</span>
+                </button>
+              );
+            })}
+          </section>
+        )}
         {foreign.length > 0 ? (
           <ForeignFallback
             connection={connection}

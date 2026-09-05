@@ -1491,6 +1491,72 @@ body {
   margin-inline: 0;
 }
 
+/* Disposable #844 prototype: a compact log entry and one modal document. */
+.ub-decision-log {
+  display: grid;
+  gap: 0.35rem;
+  margin-block: 0.75rem 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.ub-decision-log h2 {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.ub-decision-entry {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.65rem;
+  background: var(--secondary);
+  color: var(--foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ub-decision-entry:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ub-decision-dialog {
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(68rem, calc(100vw - 2rem));
+  height: min(50rem, calc(100vh - 2rem));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  box-shadow: var(--shadow-float);
+}
+
+.ub-decision-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.ub-decision-dialog-head h2,
+.ub-decision-dialog-head p {
+  margin: 0;
+}
+
+.ub-decision-dialog > .ub-document-pane {
+  min-height: 0;
+  padding: 1rem 2rem;
+}
+
 /* ---- document contents and the independent threads rail ---- */
 
 /* A compact sibling of the scrolling document pane: the body itself does not

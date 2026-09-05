@@ -20,8 +20,11 @@ import type { ReactElement } from "react";
 import {
   appendBlock,
   directoryRoom,
+  getDecisionsArray,
   getDirectoryEntry,
+  getDirectoryMap,
   initDoc,
+  readDecisions,
   restoreDirectoryEntry,
   roomForDoc,
   settingsRoom,
@@ -29,7 +32,7 @@ import {
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
-import type { DocMeta } from "@uberblick/schema";
+import type { DecisionReference, DocMeta } from "@uberblick/schema";
 import {
   configuredWorkspaces,
   endpointLabel,
@@ -51,6 +54,13 @@ import { OutlinePane } from "./OutlinePane.js";
 import { SyncPanel } from "./SyncPanel.js";
 import { ThreadsPane } from "./ThreadsPane.js";
 import { WorkspaceSettings } from "./WorkspaceSettings.js";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "./shadcn/dialog.js";
 import { workspaceTags } from "./tags.js";
 import { focusThread } from "./threads.js";
 import type { SelectThread, ThreadFocus, ThreadView } from "./threads.js";
@@ -86,6 +96,32 @@ import {
 
 /** Sidebar preference, persisted per browser. */
 const SIDEBAR_COLLAPSED_KEY = "uberblick.sidebar.collapsed";
+
+/** Disposable #844 prototype: observe the fixed slot and its directory labels. */
+function useDecisionLog(
+  connection: RoomConnection | null,
+  directory: RoomConnection | null,
+): DecisionReference[] {
+  const [decisions, setDecisions] = useState<DecisionReference[]>([]);
+  useEffect(() => {
+    if (connection === null || directory === null) {
+      setDecisions([]);
+      return;
+    }
+    const slot = getDecisionsArray(connection.ydoc);
+    const entries = getDirectoryMap(directory.ydoc);
+    const read = (): void =>
+      setDecisions(readDecisions(connection.ydoc, directory.ydoc));
+    read();
+    slot.observe(read);
+    entries.observe(read);
+    return () => {
+      slot.unobserve(read);
+      entries.unobserve(read);
+    };
+  }, [connection, directory]);
+  return decisions;
+}
 
 /** The frozen serving process is still useful; this notice only names its binding. */
 export function ReboundNotice({
@@ -147,6 +183,8 @@ export function RoutePane({
   onToggleThreads,
   syncOpen = false,
   onToggleSync,
+  decisions = [],
+  onOpenDecision,
 }: {
   route: Route;
   /**
@@ -210,6 +248,8 @@ export function RoutePane({
   /** The document-local sync reading opens the existing details panel. */
   syncOpen?: boolean;
   onToggleSync?: (() => void) | undefined;
+  decisions?: readonly DecisionReference[];
+  onOpenDecision?: ((uuid: string) => void) | undefined;
 }): ReactElement {
   // Before the branches: a hook may not sit behind an early return. The answer
   // flag tells a freshly opened empty room apart from an empty server answer.
@@ -318,6 +358,8 @@ export function RoutePane({
       onToggleThreads={onToggleThreads}
       syncOpen={syncOpen}
       onToggleSync={onToggleSync}
+      decisions={decisions}
+      onOpenDecision={onOpenDecision}
     />
   );
 }
@@ -495,6 +537,14 @@ export function App(): ReactElement {
       : null,
     identity,
   );
+  const decisions = useDecisionLog(doc, directory);
+  const [openDecision, setOpenDecision] = useState<string | null>(null);
+  const decision = useRoom(
+    hubReady && workspace !== null && openDecision !== null
+      ? roomForDoc(workspace.uuid, openDecision)
+      : null,
+    identity,
+  );
   const sidebar = useRoom(
     hubReady && workspace !== null ? sidebarRoom(workspace.uuid) : null,
     identity,
@@ -556,6 +606,16 @@ export function App(): ReactElement {
    * words; one subscription over the awareness map keeps both views identical.
    */
   const presence = usePresence(chromeRoom);
+  const decisionPresence = usePresence(decision);
+  const decisionArchived = useArchived(directory, openDecision);
+  const ignoreDecisionThread = useCallback<SelectThread>(() => {}, []);
+  const decisionParent = useRef(selected);
+
+  useEffect(() => {
+    const moved = decisionParent.current !== selected;
+    decisionParent.current = selected;
+    if (moved) setOpenDecision(null);
+  }, [selected]);
   /**
    * The agent sessions the user menu counts. It is a workspace-wide fact, so
    * the directory is the room every session joins.
@@ -981,6 +1041,8 @@ export function App(): ReactElement {
             onToggleThreads={onToggleThreads}
             syncOpen={syncOpen}
             onToggleSync={onToggleSync}
+            decisions={decisions}
+            onOpenDecision={setOpenDecision}
           />
         )}
         {/* The outline follows the document independently of the comments rail:
@@ -1019,6 +1081,42 @@ export function App(): ReactElement {
             onClose={closeSync}
           />
         )}
+        <Dialog
+          open={openDecision !== null}
+          onOpenChange={(open) => {
+            if (!open) setOpenDecision(null);
+          }}
+        >
+          {openDecision !== null && (
+            <DialogContent className="ub-decision-dialog">
+              <header className="ub-decision-dialog-head">
+                <span>
+                  <DialogTitle>Decision in context</DialogTitle>
+                  <DialogDescription>
+                    The requirement remains open behind this decision.
+                  </DialogDescription>
+                </span>
+                <DialogClose asChild>
+                  <button type="button" className="ub-tool">
+                    Close decision
+                  </button>
+                </DialogClose>
+              </header>
+              <EditorPane
+                connection={decision}
+                segment={route.kind === "doc" ? route.workspace.segment : ""}
+                presence={decisionPresence}
+                endpoint={statusEndpoint}
+                author={identity.name}
+                knownTags={knownTags}
+                archived={decisionArchived}
+                docLinks={docLinks}
+                onRestore={null}
+                onSelectThread={ignoreDecisionThread}
+              />
+            </DialogContent>
+          )}
+        </Dialog>
       </div>
     </main>
   );
