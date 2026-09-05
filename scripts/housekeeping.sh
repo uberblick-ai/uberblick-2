@@ -11,6 +11,8 @@
 # Worktrees — an agent run removes its own, so abandoned ones accumulate. Old
 #   ones go here, never with `--force`: a locked worktree, or one holding
 #   modified or untracked files, is reported and left for a human.
+#   Clean detached worktrees are removable: durable recovery is a remote commit
+#   or PR, never an unreferenced local commit (`AGENTS.md`, Claim and recovery).
 # Every prune reports what it reclaimed, so a 0 B reclaim is visible in the run
 # record instead of looking like success.
 set -u
@@ -65,7 +67,7 @@ prune() {
   # `container`/`image prune` report "Total reclaimed space: X"; `builder prune`
   # reports "Total:<tab>X". Parse both, or the figure silently reads 0B.
   reclaimed=$(printf '%s\n' "$output" | sed -n -e 's/^Total reclaimed space: //p' -e 's/^Total:[[:space:]]*//p' | tail -1)
-  [ -n "$reclaimed" ] || reclaimed="0B"
+  [ -n "$reclaimed" ] || reclaimed="unparsed"
   echo "housekeeping: reclaimed $reclaimed: $*"
   return 0
 }
@@ -101,7 +103,7 @@ worktree_blocked() {
     echo "locked"
     return 0
   }
-  status_output=$(git -C "$wt" status --porcelain 2>/dev/null)
+  status_output=$(GIT_OPTIONAL_LOCKS=0 git -C "$wt" status --porcelain 2>/dev/null)
   status=$?
   if [ "$status" -ne 0 ]; then
     echo "worktree status unavailable"

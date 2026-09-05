@@ -7,6 +7,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -129,7 +130,7 @@ test("reports each prune's reclaimed space and honors the configured cache floor
 			'  info*) printf "%s\\n" "$HOUSEKEEPING_DOCKER_ROOT" ;;\n' +
 			'  "image ls"*) ;;\n' +
 			'  "container prune"*) printf "Total reclaimed space: 12MB\\n" ;;\n' +
-			'  "image prune -f") printf "Total reclaimed space: 0B\\n" ;;\n' +
+			'  "image prune -f") printf "new Docker output format\\n" ;;\n' +
 			'  "image prune -a"*) printf "Total reclaimed space: 3.1GB\\n" ;;\n' +
 			'  "builder prune -f --filter"*) printf "Total:\\t2.5GB\\n" ;;\n' +
 			'  "builder prune -f --min-free-space 7GB") printf "Total:\\t0B\\n" ;;\n' +
@@ -151,7 +152,7 @@ test("reports each prune's reclaimed space and honors the configured cache floor
 		result.stdout,
 		/housekeeping: reclaimed 12MB: docker container prune -f --filter until=168h/,
 	);
-	assert.match(result.stdout, /housekeeping: reclaimed 0B: docker image prune -f/);
+	assert.match(result.stdout, /housekeeping: reclaimed unparsed: docker image prune -f/);
 	assert.match(
 		result.stdout,
 		/housekeeping: reclaimed 3\.1GB: docker image prune -a -f --filter until=168h/,
@@ -250,21 +251,29 @@ test("dry-run and real cleanup agree on removable, dirty, locked, and current wo
 	const dirty = join(worktreeRoot, "dirty");
 	const locked = join(worktreeRoot, "locked");
 	const current = join(worktreeRoot, "current");
+	const young = join(worktreeRoot, "young");
+	const outside = join(base, "outside-worktree");
 	for (const [branch, path] of [
 		["clean", clean],
 		["dirty", dirty],
 		["locked", locked],
 		["current", current],
+		["young", young],
+		["outside", outside],
 	]) {
 		runGit(base, ["worktree", "add", "-q", "-b", branch, path]);
 	}
 	writeFileSync(join(dirty, "untracked"), "keep me\n");
 	runGit(base, ["worktree", "lock", locked]);
+	const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+	for (const path of [clean, dirty, locked, current, outside]) {
+		utimesSync(path, old, old);
+	}
 	successfulDocker(bin);
 	const env = environment(bin, calls, {
 		HOUSEKEEPING_DOCKER_ROOT: base,
 		HOUSEKEEPING_WARN_FREE_GB: "0",
-		HOUSEKEEPING_WORKTREE_MAX_AGE_H: "0",
+		HOUSEKEEPING_WORKTREE_MAX_AGE_H: "1",
 	});
 
 	const dryRun = spawnSync("sh", [script, "test-sha", "--dry-run"], {
@@ -277,12 +286,14 @@ test("dry-run and real cleanup agree on removable, dirty, locked, and current wo
 		dryRun.stdout,
 		/would: docker builder prune -f --min-free-space 5GB/,
 	);
-	assert.ok(dryRun.stdout.includes(`would: git worktree remove ${clean} (0h old)`));
+	assert.ok(dryRun.stdout.includes(`would: git worktree remove ${clean} (2h old)`));
 	assert.ok(
-		dryRun.stdout.includes(`would keep (0h old): ${dirty} -- modified or untracked files`),
+		dryRun.stdout.includes(`would keep (2h old): ${dirty} -- modified or untracked files`),
 	);
-	assert.ok(dryRun.stdout.includes(`would keep (0h old): ${locked} -- locked`));
+	assert.ok(dryRun.stdout.includes(`would keep (2h old): ${locked} -- locked`));
 	assert.equal(dryRun.stdout.includes(current), false);
+	assert.equal(dryRun.stdout.includes(young), false);
+	assert.equal(dryRun.stdout.includes(outside), false);
 	assert.equal(existsSync(clean), true);
 
 	const realRun = spawnSync("sh", [script, "test-sha"], {
@@ -291,14 +302,18 @@ test("dry-run and real cleanup agree on removable, dirty, locked, and current wo
 		env,
 	});
 	assert.equal(realRun.status, 0, realRun.stderr);
-	assert.ok(realRun.stdout.includes(`housekeeping: removed worktree (0h old): ${clean}`));
-	assert.ok(realRun.stdout.includes(`housekeeping: kept worktree (0h old): ${dirty}`));
-	assert.ok(realRun.stdout.includes(`housekeeping: kept worktree (0h old): ${locked}`));
+	assert.ok(realRun.stdout.includes(`housekeeping: removed worktree (2h old): ${clean}`));
+	assert.ok(realRun.stdout.includes(`housekeeping: kept worktree (2h old): ${dirty}`));
+	assert.ok(realRun.stdout.includes(`housekeeping: kept worktree (2h old): ${locked}`));
 	assert.equal(realRun.stdout.includes(current), false);
+	assert.equal(realRun.stdout.includes(young), false);
+	assert.equal(realRun.stdout.includes(outside), false);
 	assert.equal(existsSync(clean), false);
 	assert.equal(existsSync(dirty), true);
 	assert.equal(existsSync(locked), true);
 	assert.equal(existsSync(current), true);
+	assert.equal(existsSync(young), true);
+	assert.equal(existsSync(outside), true);
 });
 
 test("rejects --dry-run without a review sha before invoking Docker", (t) => {
