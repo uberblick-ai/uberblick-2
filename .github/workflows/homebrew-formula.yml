@@ -1,0 +1,50 @@
+name: Homebrew formula
+
+on:
+  pull_request:
+    paths:
+      - Formula/uberblick.rb
+      - scripts/homebrew-formula-proof.mjs
+      - .github/workflows/homebrew-formula.yml
+  push:
+    branches: [main]
+    paths:
+      - Formula/uberblick.rb
+      - scripts/homebrew-formula-proof.mjs
+      - .github/workflows/homebrew-formula.yml
+
+permissions:
+  contents: read
+
+jobs:
+  formula:
+    name: Apple Silicon install
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install and prove the formula from a throwaway tap
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/uberblick-formula-config"
+          export XDG_DATA_HOME="$RUNNER_TEMP/uberblick-formula-data"
+          curlrc="$RUNNER_TEMP/uberblick-formula.curlrc"
+          printf 'header = "Accept: application/octet-stream"\nheader = "Authorization: Bearer %s"\n' "$GH_TOKEN" > "$curlrc"
+          export HOMEBREW_CURLRC="$curlrc"
+
+          tap=uberblick-ai/formula-proof
+          brew tap-new "$tap"
+          cp Formula/uberblick.rb "$(brew --repository "$tap")/Formula/uberblick.rb"
+          mkdir "$RUNNER_TEMP/uberblick-formula-cwd"
+          cd "$RUNNER_TEMP/uberblick-formula-cwd"
+
+          brew install --build-from-source "$tap/uberblick"
+          brew test "$tap/uberblick"
+          brew audit --strict "$tap/uberblick"
+          node "$GITHUB_WORKSPACE/scripts/homebrew-formula-proof.mjs" \
+            "$tap/uberblick" 0.1.0 "$GITHUB_WORKSPACE/Formula/uberblick.rb"
