@@ -265,6 +265,8 @@ describe("the document tag picker", () => {
       getMeta(fix.document.ydoc).tags,
     );
 
+    option("legacy")?.focus();
+    expect(document.activeElement).toBe(option("legacy"));
     click(option("legacy"));
     expect(getMeta(fix.document.ydoc).tags).not.toContain(TAGS.legacy);
     expect(option("legacy")).toBeUndefined();
@@ -277,7 +279,7 @@ describe("the document tag picker", () => {
     expect(getMeta(fix.document.ydoc).tags).toEqual(before);
   });
 
-  it("supports search and option movement from the keyboard, and ignores IME Enter", async () => {
+  it("supports search and option movement from the keyboard, and ignores IME navigation", async () => {
     const fix = documentFixture();
     addCatalogTags(fix.catalog.ydoc, ["auth", "billing", "mcp"]);
     const host = await openApp();
@@ -288,8 +290,8 @@ describe("the document tag picker", () => {
     act(() => press(search(), "Enter"));
     expect(getMeta(fix.document.ydoc).tags).toEqual([]);
     act(() => typeInto(search(), "mcp"));
-    act(() => press(search(), "Enter", { isComposing: true }));
-    expect(getMeta(fix.document.ydoc).tags).toEqual([]);
+    act(() => press(search(), "ArrowDown", { isComposing: true }));
+    expect(document.activeElement).toBe(search());
 
     act(() => typeInto(search(), ""));
     act(() => press(search(), "ArrowDown"));
