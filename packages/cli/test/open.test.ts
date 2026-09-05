@@ -507,7 +507,7 @@ async function getWithHost(
       url,
       {
         method: "GET",
-        setHost: host !== null,
+        ...(host === null ? { setHost: false } : {}),
         headers: {
           ...(host === null ? {} : { host }),
           ...(authorization === undefined ? {} : bearer(authorization)),
