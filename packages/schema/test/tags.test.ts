@@ -7,6 +7,7 @@ import {
   assignDocumentTags,
   createTagCatalogEntry,
   getMeta,
+  getMetaMap,
   initDoc,
   isTagCatalogSeeded,
   listTagCatalog,
@@ -15,10 +16,11 @@ import {
   restoreTagCatalogEntry,
   retireTagCatalogEntry,
   seedTagCatalog,
+  setTags,
   upsertDirectoryEntry,
   getDirectoryEntry,
 } from "../src/index.js";
-import { syncDocs } from "./helpers.js";
+import { replicaPair, syncDocs } from "./helpers.js";
 
 const DOCUMENT = "11111111-1111-4111-8111-111111111111";
 const AUTH = "22222222-2222-4222-8222-222222222222";
@@ -33,6 +35,79 @@ function document(tags: string[] = []): Y.Doc {
 }
 
 describe("workspace tag catalog", () => {
+  it("stores every complete tag set as deterministic flat presence entries", () => {
+    const catalog = new Y.Doc();
+    createTagCatalogEntry(catalog, "auth", AUTH);
+    createTagCatalogEntry(catalog, "billing", BILLING);
+    const doc = document([BILLING, AUTH, BILLING]);
+    const meta = getMetaMap(doc);
+
+    expect(meta.has("tags")).toBe(false);
+    expect(getMeta(doc).tags).toEqual([AUTH, BILLING]);
+    expect(
+      [...meta.entries()]
+        .filter(([key]) => key.startsWith("tag-assigned:"))
+        .sort(([left], [right]) => left.localeCompare(right)),
+    ).toEqual([
+      [`tag-assigned:${AUTH}`, true],
+      [`tag-assigned:${BILLING}`, true],
+    ]);
+
+    setTags(doc, [RETIRED, RETIRED]);
+    expect(getMeta(doc).tags).toEqual([RETIRED]);
+    assignDocumentTags(doc, catalog, [BILLING, AUTH]);
+    expect(getMeta(doc).tags).toEqual([AUTH, BILLING]);
+    expect(meta.has("tags")).toBe(false);
+  });
+
+  it("merges concurrent additions and removals independently per tag", () => {
+    const [left, right] = replicaPair((doc) => {
+      initDoc(doc, {
+        uuid: DOCUMENT,
+        title: "Tagged",
+        tags: [AUTH, BILLING],
+      });
+    });
+
+    setTags(left, [BILLING, RETIRED]);
+    setTags(right, [AUTH, UNKNOWN]);
+    syncDocs(left, right);
+    expect(getMeta(left).tags).toEqual([RETIRED, UNKNOWN]);
+    expect(getMeta(right).tags).toEqual(getMeta(left).tags);
+
+    const [first, second] = replicaPair((doc) => {
+      initDoc(doc, { uuid: DOCUMENT, title: "First assignment" });
+    });
+    setTags(first, [AUTH]);
+    setTags(second, [BILLING]);
+    syncDocs(first, second);
+    expect(getMeta(first).tags).toEqual([AUTH, BILLING]);
+    expect(getMeta(second).tags).toEqual(getMeta(first).tags);
+  });
+
+  it("converges same-tag toggles to one assignment", () => {
+    const [left, right] = replicaPair((doc) => {
+      initDoc(doc, { uuid: DOCUMENT, title: "Same tag" });
+    });
+    setTags(left, [AUTH, AUTH]);
+    setTags(right, [AUTH]);
+    syncDocs(left, right);
+    expect(getMeta(left).tags).toEqual([AUTH]);
+    expect(getMeta(right).tags).toEqual([AUTH]);
+
+    setTags(left, []);
+    setTags(right, []);
+    syncDocs(left, right);
+    expect(getMeta(left).tags).toEqual([]);
+    expect(getMeta(right).tags).toEqual([]);
+  });
+
+  it("does not read the replaced array shape", () => {
+    const legacy = new Y.Doc();
+    getMetaMap(legacy).set("tags", [AUTH]);
+    expect(getMeta(legacy).tags).toEqual([]);
+  });
+
   it("validates unique names and exposes ordinary active and retired entries", () => {
     const catalog = new Y.Doc();
     expect(createTagCatalogEntry(catalog, "auth", AUTH)).toEqual({
@@ -146,14 +221,14 @@ describe("workspace tag catalog", () => {
       .toThrow(InvalidTagAssignmentError);
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
 
-    // A valid identity-based write is a wholesale clean cut from old strings.
+    // A valid identity-based write is a clean cut from old strings.
     assignDocumentTags(doc, catalog, [AUTH, BILLING, AUTH]);
     expect(getMeta(doc).tags).toEqual([AUTH, BILLING]);
 
     // Retirement after assignment permits keeping or removing that identity.
     retireTagCatalogEntry(catalog, BILLING);
     assignDocumentTags(doc, catalog, [BILLING, AUTH]);
-    expect(getMeta(doc).tags).toEqual([BILLING, AUTH]);
+    expect(getMeta(doc).tags).toEqual([AUTH, BILLING]);
     assignDocumentTags(doc, catalog, [AUTH]);
     expect(getMeta(doc).tags).toEqual([AUTH]);
 

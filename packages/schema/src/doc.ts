@@ -5,7 +5,8 @@
  * top-level shared types:
  *
  *   - `meta`        Y.Map     — uuid, title, description, TL;DR, changelog
- *                              suggestion, tags, links, kind, status and decision
+ *                              suggestion, `tag-assigned:<identity>` presence
+ *                              entries, links, kind, status and decision
  *                              remove/add levels
  *   - `blocks`      Y.XmlFragment — one Y.XmlElement per block
  *   - `annotations` Y.Map     — threadId → that thread's own Y.Map
@@ -57,6 +58,12 @@ export const META_KEY = "meta";
 export const BLOCKS_KEY = "blocks";
 export const ANNOTATIONS_KEY = "annotations";
 export const DECISIONS_KEY = "decisions";
+
+/**
+ * One flat presence key per tag keeps independent toggles independent. A
+ * same-key set/delete conflict follows Yjs's set-wins semantics.
+ */
+const TAG_ASSIGNED_PREFIX = "tag-assigned:";
 
 /** Flat `meta` keys keep each replica's decision-removal level independent. */
 const DECISION_REMOVED_PREFIX = "decision-removed:";
@@ -123,7 +130,7 @@ export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
   ydoc.transact(() => {
     meta.set("uuid", options.uuid);
     meta.set("title", options.title);
-    meta.set("tags", [...(options.tags ?? [])]);
+    replaceTags(meta, options.tags ?? []);
     if (options.description !== undefined) {
       meta.set("description", options.description);
     }
@@ -138,6 +145,37 @@ export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
 function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+/** Deterministic public view over the flat per-tag presence entries. */
+function storedTags(meta: Y.Map<unknown>): string[] {
+  const tags: string[] = [];
+  for (const [key, value] of meta.entries()) {
+    if (key.startsWith(TAG_ASSIGNED_PREFIX) && value === true) {
+      tags.push(key.slice(TAG_ASSIGNED_PREFIX.length));
+    }
+  }
+  return tags.sort();
+}
+
+/**
+ * Make the assignment equal to `tags`, writing only the tags whose presence
+ * changed. An unchanged tag must not compete with another replica's toggle.
+ */
+function replaceTags(meta: Y.Map<unknown>, tags: readonly string[]): void {
+  const next = new Set(tags);
+  for (const key of meta.keys()) {
+    if (
+      key.startsWith(TAG_ASSIGNED_PREFIX) &&
+      !next.has(key.slice(TAG_ASSIGNED_PREFIX.length))
+    ) {
+      meta.delete(key);
+    }
+  }
+  for (const tag of next) {
+    const key = `${TAG_ASSIGNED_PREFIX}${tag}`;
+    if (meta.get(key) !== true) meta.set(key, true);
+  }
 }
 
 /** Highest per-client level recorded for one decision and one operation. */
@@ -187,7 +225,7 @@ export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
   return {
     uuid: typeof uuid === "string" ? uuid : "",
     title: typeof title === "string" ? title : "",
-    tags: readStringArray(meta.get("tags")),
+    tags: storedTags(meta),
     description:
       typeof description === "string" && description !== "" ? description : null,
     tldr: typeof tldr === "string" && tldr !== "" ? tldr : null,
@@ -537,15 +575,15 @@ export function reorderDecisions(
 }
 
 /**
- * Replace the raw tag field; last write wins.
+ * Replace the local tag set through independent per-tag presence writes.
  *
  * This is the provisional free-form boundary. Catalog-aware clients use
- * `assignDocumentTags`, which validates identities and replaces this array.
+ * `assignDocumentTags`, which validates identities before calling this writer.
  */
 export function setTags(ydoc: Y.Doc, tags: string[]): void {
   const meta = getMetaMap(ydoc);
   ydoc.transact(() => {
-    meta.set("tags", [...tags]);
+    replaceTags(meta, tags);
   });
 }
 

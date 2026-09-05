@@ -184,7 +184,7 @@ describe("markdown round-trip", () => {
     initDoc(doc, {
       uuid: UUID,
       title: "Schema: the keystone",
-      tags: ["a tag", "with: colon"],
+      tags: ["with: colon", "a tag"],
     });
     appendBlock(doc, { type: "paragraph", text: "Body." });
 

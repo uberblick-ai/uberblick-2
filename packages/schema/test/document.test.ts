@@ -75,7 +75,7 @@ describe("document round-trip", () => {
     expect(getMeta(doc)).toEqual({
       uuid: UUID,
       title: "Block model, revised",
-      tags: ["schema", "keystone"],
+      tags: ["keystone", "schema"],
       description: null,
       tldr: null,
       links: [target],

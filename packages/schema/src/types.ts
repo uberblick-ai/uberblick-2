@@ -236,8 +236,8 @@ export interface DocMeta {
   uuid: string;
   title: string;
   /**
-   * Raw stored tags. Catalog-aware writes put UUIDs here; provisional strings
-   * can remain until the first such write and are omitted by catalog-aware reads.
+   * Deterministic tag assignment view. Catalog-aware writes use UUIDs;
+   * provisional strings are omitted by catalog-aware reads.
    */
   tags: string[];
   /**
