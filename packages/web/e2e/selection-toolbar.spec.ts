@@ -148,6 +148,8 @@ test("the measured toolbar flips below at the viewport edge and follows scrollin
 }) => {
   await page.setViewportSize({ width: 520, height: 360 });
   await openDoc(page, "scrolling prose ".repeat(350));
+  await page.getByRole("button", { name: "Hide document list" }).click();
+  await expect(page.locator(".ub-list")).toHaveCount(0);
   const pane = page.locator(".ub-pane");
   const paragraph = page.locator(".ub-paragraph").first();
   await pane.evaluate((element) => {
