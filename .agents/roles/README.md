@@ -12,7 +12,9 @@ This file states what every role obeys, so no contract repeats it. Repository
 policy — `AGENTS.md`, `CLAUDE.md`, `.github/ISSUE_SPEC.md` — wins on conflicts,
 with the owner-authorized exceptions recorded here: each role posts its own
 claim, and an issue-preparer may grant `ready` after the one-pass clearance its
-contract defines (owner corrections on #467 and #477, 2026-08-29). Installing
+contract defines (owner corrections on #467 and #477, 2026-08-29), narrowed for
+an issue carrying `Implements:` by the owner-decision gate in
+`.github/ISSUE_SPEC.md`. Installing
 these descriptions starts nothing, and merge authority still comes only from
 repository policy. The role split's reasoning is Uberblick project agent
 workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
