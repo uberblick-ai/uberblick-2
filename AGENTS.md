@@ -132,6 +132,24 @@ run the over-inclusive `scripts/probe-work.sh <role>` first to skip a session
 that could only end that way. The loop never selects, claims or transitions
 work itself.
 
+A session that did work ends with the mirror line
+`Worked <role slug>: <issue|PR> #N — <outcome>.`, naming the one item it worked
+and, in a few words, what became of it — including when what became of it is a
+park for an owner decision or approval. That line is the only thing the loop
+learns about an outcome, so a session that ends any other way is reported as an
+unconfirmed outcome rather than guessed at; reading each role's own claim and
+handoff grammar back off GitHub instead would move workflow policy into the
+generic CLI, which Pipeline ownership for ub launch
+(`38289473-9e0d-4543-9af2-b919be5b8b90`) decided against. Printing a line is not
+a durable record: GitHub still carries the claim, the handoff and every
+transition.
+
+The third and last line is `Blocked <role slug>: <reason>.`, for a run a
+permission or authentication failure stopped rather than the queue. It stops
+the loop with a recovery instruction, because retrying what no credential
+allows is the failure mode the owner asked to remove; a run that finished its
+work reports `Worked`, whatever that work was about.
+
 ## Process changes
 
 A change to `AGENTS.md`, `CLAUDE.md`, `.github/ISSUE_SPEC.md`, `.agents/` or

@@ -174,7 +174,7 @@ describe("the TL;DR review reminder", () => {
     expect(reviewed.tldrHint).toContain("review its TL;DR");
 
     const metadataResults = [
-      await rig.ok("set_tags", { uuid: source.uuid, tags: ["guide"] }),
+      await rig.ok("set_tags", { uuid: source.uuid, tags: ["auth"] }),
       await rig.ok("set_links", { uuid: source.uuid, links: [target.uuid] }),
       await rig.ok("set_title", { uuid: source.uuid, title: "Renamed source" }),
       await rig.ok("set_description", {

@@ -70,7 +70,7 @@ describe("the update log", () => {
       const doc = await first.ok("create_doc", {
         title: "Written once",
         description: "A test document.",
-        tags: ["kept"],
+        tags: ["auth"],
         blocks: [
           { type: "heading", text: "Written once", level: 2 },
           { type: "paragraph", text: "read back from the log" },
@@ -90,7 +90,13 @@ describe("the update log", () => {
         {
           uuid,
           title: "Written once",
-          tags: ["kept"],
+          tags: [
+            {
+              id: "00000000-0000-4000-8000-000000000001",
+              name: "auth",
+              state: "active",
+            },
+          ],
           description: "A test document.",
           pinned: false,
           createdAt: expect.any(Number),

@@ -47,8 +47,7 @@
  * because a seeded workspace is a *first-open state* rather than a set of
  * rooms: `ub init` owns the starter sidebar group and writes it here, through
  * this same replica set and this same log, so the pins exist whether or not an
- * MCP server ever starts. The MCP server's own boot-time migration
- * (`sidebar-tools.ts`) then adopts what it finds rather than seeding again.
+ * MCP server ever starts. Tags never derive or modify that explicit curation.
  */
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -414,9 +413,8 @@ function holdsOnlyStarters(replicas: Replicas, docs: SeedDoc[]): boolean {
  *
  * 1. **The seed marker is set.** Set once and never cleared, which is what lets
  *    a sidebar deliberately emptied stay empty.
- * 2. **A group is already there.** Curation — a user's, another client's, or
- *    the MCP server's own legacy tag migration — is exactly what a seed must
- *    not write over.
+ * 2. **A group is already there.** Curation from a user or another client is
+ *    exactly what a seed must not write over.
  * 3. **A pin would not resolve.** Every uuid must have a live directory entry:
  *    an archived starter document stays archived rather than being pinned back,
  *    and a layout that is not fully durable is not one to mark as seeded.

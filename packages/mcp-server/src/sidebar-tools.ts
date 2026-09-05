@@ -17,49 +17,9 @@
  *    has never heard of, and one whose entry is tombstoned, are reported as
  *    `unknown` and `archived` rather than dropped: a pin nothing can resolve is
  *    exactly what the reader has to see in order to unpin it.
- * 3. **The one-time seed.** Before the sidebar existed, the web UI grouped the
- *    corpus by four tags. {@link seedSidebarOnce} reproduces that grouping —
- *    including the owner's reading order, Overview before Install and run —
- *    after which tags are metadata and the sidebar is the navigation. It is a
- *    migration for corpora that predate curation, and nothing more: a new
- *    workspace gets its first-open sidebar from `ub init` (see the CLI's
- *    `starter.ts` and `seed.ts`'s `SidebarSeed`), because the web client is
- *    usually the first thing opened and it runs no migration at all. What this
- *    finds already written, it adopts.
- *
- * The seed runs at server start and nowhere else. Not from the tools: a read
- * that writes would report a sidebar the update log may have refused, because
- * only a mutating handler ends with `assertHealthy` and `{applied, synced}`.
- * Running it from one place at boot means a refused append is caught where it
- * happens — it poisons the replica set, every tool then refuses to serve, and
- * the restart that follows rebuilds from the log with the seed unwritten, which
- * is the honest outcome.
- *
- * It decides *after* the first settle, so it decides from the whole picture
- * rather than from this machine's log: with a hub configured, the directory that
- * says what to seed — and any curation made before the flag existed — may still
- * be on the wire when the process comes up. The wait is the bounded one every
- * tool call already pays on boot, and there is nothing to wait for offline, so
- * an unreachable or unconfigured hub decides immediately.
- *
- * Two things make running it safe without any coordination:
- *
- *   - **A set-once flag in the sidebar doc says it has run** (schema's
- *     `isSidebarSeeded` / `markSidebarSeeded`), so it is a migration rather than
- *     a derivation: a sidebar deliberately emptied stays empty, and the flag
- *     travels with the document to every replica.
- *   - **Its group ids are fixed constants, not generated.** Two replicas that
- *     both seed while offline — neither having seen the other's flag — write the
- *     same four groups rather than eight, and the merge is one sidebar. It is
- *     also why the sidebar room is attached from boot in `replica.ts`:
- *     hydrating from the log before the seed decides is what makes a second run
- *     rare in the first place.
- *
- * Sharing an id is what makes those two runs merge, and it has a boundary the
- * schema module's header states in full: concurrent creates of one group id are
- * two writes of one key, so one nested map wins whole. Identical runs lose
- * nothing, because both sides wrote the same pins; two replicas seeding from
- * *different* views of the directory can lose one side's. #210 is the layout fix.
+ * 3. **Tags never derive navigation.** A new workspace's optional starter
+ *    sidebar is written explicitly by `ub init`; this module only exposes the
+ *    curation an agent asked for.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -68,9 +28,6 @@ import {
   createGroup,
   deleteGroup,
   getDirectoryEntry,
-  isSidebarSeeded,
-  listDirectory,
-  markSidebarSeeded,
   moveDoc,
   moveGroup,
   pinDoc,
@@ -83,41 +40,7 @@ import { z } from "zod";
 import { ToolError, failureContract, guarded } from "./failures.js";
 import { strictInput } from "./inputs.js";
 import type { ToolMode } from "./inputs.js";
-import { log } from "./log.js";
 import type { Replica, Replicas } from "./replica.js";
-
-/**
- * The tag groups the web sidebar derived before curation was stored, in the
- * order it showed them. The seed reproduces exactly this, once.
- */
-const LEGACY_TAG_GROUPS = [
-  {
-    tag: "start-here",
-    name: "Start here",
-    id: "5e1d0000-0000-4000-8000-000000000001",
-  },
-  {
-    tag: "feature",
-    name: "Features",
-    id: "5e1d0000-0000-4000-8000-000000000002",
-  },
-  { tag: "verify", name: "Verify", id: "5e1d0000-0000-4000-8000-000000000003" },
-  {
-    tag: "reference",
-    name: "Reference",
-    id: "5e1d0000-0000-4000-8000-000000000004",
-  },
-] as const;
-
-/**
- * Titles that lead their group in the seeded sidebar, in this order.
- *
- * The owner's reading order for the onboarding docs (2026-08-24): Overview
- * first, Install and run second. Alphabetical order gets that backwards, which
- * is the ordering intent the sidebar exists to carry. It applies to the seed
- * and to nothing else — after it, order is whatever an agent or a human made it.
- */
-const SEED_LEADING_TITLES = ["Overview", "Install and run"];
 
 /**
  * What the tools need from `tools.ts`, so neither module imports the other.
@@ -142,118 +65,6 @@ interface PinnedDoc {
   /** The stub's cached title, or null when the directory has no entry. */
   title: string | null;
   status: PinStatus;
-}
-
-/**
- * The seed's ordering: the leading titles first, then everything else in the
- * order `listDirectory` gave it (by title).
- */
-function seedOrder(entries: DirectoryEntry[]): DirectoryEntry[] {
-  const leading = SEED_LEADING_TITLES.flatMap((title) =>
-    entries.filter((entry) => entry.title === title),
-  );
-  return [...leading, ...entries.filter((entry) => !leading.includes(entry))];
-}
-
-/**
- * Reproduce the legacy tag grouping in the sidebar, once.
- *
- * A document carrying more than one legacy tag lands in the first group that
- * claims it, which is what the derived sidebar did — one pin per document is a
- * sidebar rule, not a convention this could break.
- *
- * @returns the groups written, zero when the corpus gave it nothing to do.
- */
-function seedFromTags(replicas: Replicas, sidebar: Replica): number {
-  const buckets = new Map<string, DirectoryEntry[]>();
-  for (const entry of listDirectory(replicas.directory().doc)) {
-    const group = LEGACY_TAG_GROUPS.find((candidate) =>
-      entry.tags.includes(candidate.tag),
-    );
-    if (group === undefined) continue;
-    const bucket = buckets.get(group.tag);
-    if (bucket === undefined) buckets.set(group.tag, [entry]);
-    else bucket.push(entry);
-  }
-  if (buckets.size === 0) return 0;
-
-  // One transaction, so the migration is one update in the log and one merge on
-  // every other replica — never a half-built sidebar somebody else can see, and
-  // never a flag without the groups it stands for.
-  let written = 0;
-  sidebar.doc.transact(() => {
-    for (const { tag, name, id } of LEGACY_TAG_GROUPS) {
-      const bucket = buckets.get(tag);
-      if (bucket === undefined) continue;
-      // The id is fixed, so a replica seeding this group offline writes THIS
-      // group rather than a second one carrying the same name.
-      createGroup(sidebar.doc, name, undefined, id);
-      written += 1;
-      for (const entry of seedOrder(bucket)) {
-        pinDoc(sidebar.doc, id, entry.uuid);
-      }
-    }
-    markSidebarSeeded(sidebar.doc);
-  });
-  return written;
-}
-
-/**
- * Run the one-time migration out of tag grouping, at server start.
- *
- * Called once, from `server.ts`, and never from a tool — see the header for why
- * a read must not write. It settles first, so the corpus it groups and the
- * curation it must not overwrite have both had their bounded chance to arrive
- * from the hub; with no hub there is nothing to wait for and it decides at once.
- *
- * A sidebar that already holds a group is adopted, not seeded: curation made
- * before this flag existed, or by another client, is exactly what a migration
- * must not write over.
- *
- * Never throws. An append the log refuses is already recorded as this replica
- * set's sticky persistence failure, which stops every tool; failing server
- * construction on top of that would only take the diagnostics away too.
- */
-export async function seedSidebarOnce(replicas: Replicas): Promise<void> {
-  try {
-    // Bounded, and a no-op with no hub configured — see the header. Diagnostics
-    // rather than health: a poisoned replica set is checked for below, and a
-    // settle that cannot run is the next tool call's problem to report.
-    await replicas.settle({ requireHealthy: false });
-  } catch (error) {
-    log.warn("the sidebar seed could not settle first, so it did not run", error);
-    return;
-  }
-  if (replicas.persistenceError() !== null) return;
-
-  const sidebar = replicas.sidebar();
-  if (isSidebarSeeded(sidebar.doc)) return;
-
-  if (readSidebar(sidebar.doc).length > 0) {
-    markSidebarSeeded(sidebar.doc);
-  } else if (seedFromTags(replicas, sidebar) === 0) {
-    // Nothing carries a legacy tag — an empty workspace, or one that never had
-    // them. Left unflagged on purpose: a corpus that arrives later still gets
-    // its sidebar, on the next start.
-    return;
-  }
-
-  // The same honesty a mutating tool owes its caller, told to the only reader
-  // there is at boot: applied means the update log took it.
-  const failure = replicas.persistenceError();
-  if (failure !== null) {
-    log.error("the sidebar seed did not reach the update log", {
-      room: sidebar.room,
-      applied: false,
-      message: failure.message,
-    });
-    return;
-  }
-  log.info("seeded the sidebar from the legacy tag groups", {
-    room: sidebar.room,
-    applied: true,
-    synced: replicas.isRoomQuiet(sidebar.room),
-  });
 }
 
 /** Every uuid the sidebar pins, for `list_docs`' derived `pinned` flag. */

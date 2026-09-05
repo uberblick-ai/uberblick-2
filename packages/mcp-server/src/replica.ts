@@ -27,6 +27,7 @@ import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import {
   DIRECTORY_SUFFIX,
+  SETTINGS_SUFFIX,
   SIDEBAR_SUFFIX,
   directoryRoom,
   getBlocksFragment,
@@ -37,7 +38,9 @@ import {
   isProseBlockType,
   listDirectory,
   repairDuplicateBlocks,
+  resolveTagAssignments,
   roomForDoc,
+  settingsRoom,
   sidebarRoom,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -68,10 +71,11 @@ export const AGENT_CLIENT = "agent";
 export interface Replica {
   /** `<workspaceId>/<uuid>`, or one of the workspace's well-known rooms. */
   readonly room: string;
-  /** The document uuid, or `_directory` / `_sidebar`. */
+  /** The document uuid, or one of the workspace's well-known suffixes. */
   readonly id: string;
   readonly isDirectory: boolean;
   readonly isSidebar: boolean;
+  readonly isSettings: boolean;
   readonly doc: Y.Doc;
   readonly awareness: Awareness;
   /** The highest log sequence applied to this replica. */
@@ -252,11 +256,11 @@ export class Replicas {
     // The directory doc exists from boot: discovery is a synced doc, and every
     // stub repair needs it in hand.
     this.directory();
-    // So does the sidebar, and for the same reason `settle` matters to it: a
-    // room attached from boot is one the hub gets to fill in before any tool
-    // reads it, so curation made elsewhere is in hand before this replica acts
-    // on the absence of it.
+    // So do the two curated workspace documents. Rooms attached from boot are
+    // ones the hub gets to fill before a tool reads them, so neither sidebar
+    // curation nor the tag catalog is guessed from an unhydrated empty doc.
     this.sidebar();
+    this.settings();
     for (const pending of this.store.pendingRooms()) {
       this.adoptRoom(pending.room);
     }
@@ -374,7 +378,8 @@ export class Replicas {
     if (
       !this.publishOwnPresence ||
       replica.isDirectory ||
-      replica.isSidebar
+      replica.isSidebar ||
+      replica.isSettings
     ) {
       return;
     }
@@ -417,6 +422,14 @@ export class Replicas {
     );
   }
 
+  /** The workspace settings replica, including the curated tag catalog. */
+  settings(): Replica {
+    return this.ensureRoom(
+      settingsRoom(this.config.workspaceId),
+      SETTINGS_SUFFIX,
+    );
+  }
+
   /** The replica for one document, hydrated from the log and attached to the hub. */
   replica(uuid: string): Replica {
     return this.ensureRoom(roomForDoc(this.config.workspaceId, uuid), uuid);
@@ -456,6 +469,7 @@ export class Replicas {
       id,
       isDirectory: id === DIRECTORY_SUFFIX,
       isSidebar: id === SIDEBAR_SUFFIX,
+      isSettings: id === SETTINGS_SUFFIX,
       doc,
       awareness,
       lastSeq: 0,
@@ -651,9 +665,39 @@ export class Replicas {
       this.reconcileDirectory();
       return;
     }
-    // The sidebar holds uuids rather than blocks or metadata, so there is no
-    // stub to repair and nothing to index. Falling through would ask a
-    // document-shaped question of a doc that is not one.
+    // Workspace-owned docs hold curation rather than document blocks or meta,
+    // so there is no stub to repair. A catalog change does affect the derived
+    // tag rows: re-index every held document against the new vocabulary.
+    if (replica.isSettings) {
+      for (const document of this.replicas.values()) {
+        if (
+          document.isDirectory ||
+          document.isSidebar ||
+          document.isSettings
+        ) {
+          continue;
+        }
+        const meta = getMeta(document.doc);
+        if (meta.uuid === "") continue;
+        try {
+          if (
+            getDirectoryEntry(this.directory().doc, meta.uuid)?.deleted === true
+          ) {
+            if (this.store.isIndexed(meta.uuid)) this.store.unindexDoc(meta.uuid);
+            continue;
+          }
+          this.indexRows(document, meta);
+        } catch (error) {
+          // Catalog state is authoritative and logged; the index is only a
+          // cache. Nothing else would come back for this document — the
+          // catalog update is already applied, so no later settle replays it —
+          // so it joins the paced reconciliation queue that drains one entry
+          // per settle, the same one a refused stub reconciliation uses.
+          this.recordStubFailure(meta.uuid, error);
+        }
+      }
+      return;
+    }
     if (replica.isSidebar) {
       return;
     }
@@ -694,7 +738,9 @@ export class Replicas {
       {
         uuid: meta.uuid,
         title: meta.title,
-        tags: meta.tags,
+        tags: resolveTagAssignments(this.settings().doc, meta.tags).map(
+          (entry) => entry.id,
+        ),
         description: meta.description ?? "",
         links: [
           ...meta.links,
@@ -705,6 +751,7 @@ export class Replicas {
         body: blocks.map(({ block }) => block.text).join("\n"),
       },
       replica.indexedThroughSeq,
+      this.settings().indexedThroughSeq,
     );
   }
 

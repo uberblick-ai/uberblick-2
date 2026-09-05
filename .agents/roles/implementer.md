@@ -150,6 +150,17 @@ Cost: <the one thing that consumed time for no value, or none>
 Fix: <the smallest workflow or repository change that would remove it, or none>
 ```
 
+End the run with the launcher's one line, and nothing after it:
+`Worked implementer: issue #N — <outcome>.` — the issue this run claimed, or
+the PR a fix-up wave corrected, and in a few words what became of it (`opened
+PR #M`, `parked for owner approval`, `returned as stale-contract`). It reports;
+GitHub records.
+
+When a permission or authentication failure — not the queue — is what stopped
+the run, that line is `Blocked implementer: <reason>.` instead, naming the
+command or credential that was refused. It stops the loop, so never use it for
+work that finished.
+
 ## Known traps
 
 Each of these was re-derived by several runs in Discussion #522. Read once;

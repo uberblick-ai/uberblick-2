@@ -121,3 +121,13 @@ non-blocking. Skip routine corpus inventories, “appropriate” ratings and
 undefined time/token totals. Clean and self-check outcomes remain in the issue's
 handoff; discussion posts alone are not a denominator for challenge effectiveness.
 Then stop.
+
+End the run with the launcher's one line, and nothing after it:
+`Worked issue-preparer: issue #N — <outcome>.` — the issue this run claimed and,
+in a few words, what became of it (`ready`, `split into #a and #b`, `parked as
+needs-decision`, `closed wontfix`). It reports; GitHub records.
+
+When a permission or authentication failure — not the queue — is what stopped
+the run, that line is `Blocked issue-preparer: <reason>.` instead, naming the
+command or credential that was refused. It stops the loop, so never use it for
+work that finished.

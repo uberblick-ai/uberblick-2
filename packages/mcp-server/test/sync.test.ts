@@ -225,6 +225,7 @@ describe("hub sync", () => {
     ).toEqual([
       `${WORKSPACE}/_directory`,
       `${WORKSPACE}/_sidebar`,
+      `${WORKSPACE}/_settings`,
       legacyRoom,
     ]);
 
@@ -241,7 +242,11 @@ describe("hub sync", () => {
     expect(status.pendingRooms).toEqual([]);
     expect(
       status.rooms.map((entry: { room: string }) => entry.room),
-    ).toEqual([`${WORKSPACE}/_directory`, `${WORKSPACE}/_sidebar`]);
+    ).toEqual([
+      `${WORKSPACE}/_directory`,
+      `${WORKSPACE}/_sidebar`,
+      `${WORKSPACE}/_settings`,
+    ]);
   });
 
   it("delivers a document created while the hub was down", async () => {
@@ -299,7 +304,7 @@ describe("hub sync", () => {
     const first = await author.ok("create_doc", {
       title: "Alpha",
       description: "A test document.",
-      tags: ["seed"],
+      tags: ["auth"],
       blocks: [{ type: "paragraph", text: "the quick brown capybara" }],
     });
     const second = await author.ok("create_doc", {

@@ -7,10 +7,9 @@
  * document an ordinary MCP client can list, read and export, and it has to
  * happen offline, which is the only state a machine being initialised is
  * reliably in. The sidebar is read straight out of the update log instead,
- * without constructing a server at all, because the MCP server runs a boot-time
- * migration that would build a sidebar of its own: a broken `ub init` would
- * pass every test that let that migration run first, and the web client — the
- * first thing a new user opens — runs no migration at all.
+ * without constructing a server at all: a broken `ub init` must not pass
+ * because a later reader repaired or reinterpreted its output, and the web
+ * client is usually the first thing a new user opens.
  */
 
 import { execFileSync } from "node:child_process";
@@ -207,19 +206,27 @@ it("pins both starter documents into the Überblick group, in order", () => {
   expect(sidebar.seeded).toBe(true);
 });
 
-it("seeds exactly the two starter documents, with their uuids, tags and links", async () => {
+it("seeds exactly two untagged starter documents, with their uuids and links", async () => {
+  const directory = replayRoom(directoryRoom);
+  for (const template of TEMPLATES) {
+    const document = replayRoom((id) => roomForDoc(id, template.uuid));
+    expect(getMeta(document).tags).toEqual([]);
+    expect(getDirectoryEntry(directory, template.uuid)?.tags).toEqual([]);
+  }
+
   await withTools(async (call) => {
     const { docs } = await call("list_docs");
     expect(docs.map((doc: { title: string }) => doc.title)).toEqual([
       "How to Use It",
       "Welcome to Überblick",
     ]);
+    expect(docs.every((doc: { tags: unknown[] }) => doc.tags.length === 0)).toBe(
+      true,
+    );
     for (const template of TEMPLATES) {
       const doc = await call("get_doc", { uuid: template.uuid });
       expect(doc.title).toBe(template.title);
-      // Metadata, not navigation: the tag stays, and the sidebar is what the
-      // reader is actually shown.
-      expect(doc.tags).toEqual(["start-here"]);
+      expect(doc.tags).toEqual([]);
       // Each starter document points at the other, by uuid.
       expect(doc.links).toEqual([
         PINS.find((uuid) => uuid !== template.uuid),
@@ -261,7 +268,7 @@ it("leaves a freshly seeded document nothing to backfill", async () => {
   await withTools(async (call) => {
     const result = await call("set_tags", {
       uuid: PINS[0]!,
-      tags: ["start-here"],
+      tags: ["mcp"],
     });
     expect(result.applied).toBe(true);
     expect(result.descriptionHint).toBeUndefined();
@@ -304,9 +311,8 @@ it("refuses a template that carries no description", () => {
 });
 
 it("is adopted by an MCP server started afterwards, with no second group", async () => {
-  // The server's boot-time migration turns the legacy `start-here` tag into a
-  // "Start here" group. An explicit sidebar is exactly what it must not do that
-  // to: it adopts what it finds.
+  // The sidebar is explicit seed state, not a projection of document tags. A
+  // later MCP process adopts the group exactly as `ub init` wrote it.
   await withTools(async (call) => {
     const { groups } = await call("get_sidebar");
     expect(groups).toHaveLength(1);
@@ -451,7 +457,6 @@ it("adds nothing to a workspace that already holds other documents", async () =>
       call("create_doc", {
         title: "Real work",
         description: "A test document.",
-        tags: ["feature"],
       }),
     owned,
   );
@@ -616,7 +621,7 @@ it("ships exactly the approved starter copy, frontmatter included", () => {
     );
     const other = TEMPLATES.find((one) => one !== template);
     expect(source).toBe(
-      `---\nuuid: ${template.uuid}\ntitle: ${template.title}\ndescription: ${template.description}\ntags:\n  - start-here\nlinks:\n  - ${other?.uuid}\n---\n\n${COPY[template.file]}`,
+      `---\nuuid: ${template.uuid}\ntitle: ${template.title}\ndescription: ${template.description}\nlinks:\n  - ${other?.uuid}\n---\n\n${COPY[template.file]}`,
     );
   }
 });

@@ -44,14 +44,18 @@ class CountingStore extends MirrorStore {
 
   indexAttempts = 0;
 
-  override indexDoc(doc: IndexedDoc, throughSeq: number): void {
+  override indexDoc(
+    doc: IndexedDoc,
+    throughSeq: number,
+    catalogThroughSeq = 0,
+  ): void {
     this.indexAttempts += 1;
     if (this.failEveryIndex || this.failNextIndex) {
       this.failNextIndex = false;
       throw new Error("simulated index failure");
     }
     this.indexed.push(doc.uuid);
-    super.indexDoc(doc, throughSeq);
+    super.indexDoc(doc, throughSeq, catalogThroughSeq);
   }
 
   unindexAttempts = 0;
@@ -79,7 +83,7 @@ async function seedDoc(rig: Rig): Promise<any> {
   return rig.ok("create_doc", {
     title: "Concepts",
     description: "A test document.",
-    tags: ["reference"],
+    tags: ["mcp"],
     blocks: [{ type: "paragraph", text: BODY }],
   });
 }
@@ -197,7 +201,13 @@ describe("archive_doc", () => {
     ).toEqual({
       uuid: doc.uuid,
       title: "Concepts",
-      tags: ["reference"],
+      tags: [
+        {
+          id: "00000000-0000-4000-8000-000000000003",
+          name: "mcp",
+          state: "active",
+        },
+      ],
       description: "A test document.",
       deleted: true,
       pinned: false,
@@ -265,7 +275,7 @@ describe("an archived document is read-only", () => {
         { uuid: doc.uuid, block_id: blockId, old_text: BODY, new_text: "No." },
       ],
       ["insert_block", { uuid: doc.uuid, type: "paragraph", text: "No." }],
-      ["set_tags", { uuid: doc.uuid, tags: ["retired"] }],
+      ["set_tags", { uuid: doc.uuid, tags: ["billing"] }],
     ] as const) {
       const refused = await rig.call(tool, args);
       expect(refused.isError).toBe(true);
@@ -283,7 +293,13 @@ describe("an archived document is read-only", () => {
     // Refused, not merely reported as refused.
     const read = await rig.ok("get_doc", { uuid: doc.uuid });
     expect(read.blocks.map((block: any) => block.text)).toEqual([BODY]);
-    expect(read.tags).toEqual(["reference"]);
+    expect(read.tags).toEqual([
+      {
+        id: "00000000-0000-4000-8000-000000000003",
+        name: "mcp",
+        state: "active",
+      },
+    ]);
   });
 
   it("goes back to accepting edits once restored", async () => {
@@ -372,7 +388,13 @@ describe("restore_doc", () => {
     expect(listed.docs.find((entry: any) => entry.uuid === doc.uuid)).toEqual({
       uuid: doc.uuid,
       title: "Concepts",
-      tags: ["reference"],
+      tags: [
+        {
+          id: "00000000-0000-4000-8000-000000000003",
+          name: "mcp",
+          state: "active",
+        },
+      ],
       description: "A test document.",
       pinned: false,
       createdAt: expect.any(Number),
@@ -562,14 +584,22 @@ describe("restore_doc", () => {
     // rides document updates, and those stop at the tombstone. The directory
     // would otherwise keep serving the tags it was archived with while search
     // answers from the new ones — divergence with no way back.
-    setTags(rig.instance.replicas.replica(doc.uuid).doc, ["retired"]);
+    setTags(rig.instance.replicas.replica(doc.uuid).doc, [
+      "00000000-0000-4000-8000-000000000002",
+    ]);
     await rig.ok("restore_doc", { uuid: doc.uuid });
 
     const listed = await rig.ok("list_docs");
     expect(listed.docs.find((entry: any) => entry.uuid === doc.uuid)).toEqual({
       uuid: doc.uuid,
       title: "Concepts",
-      tags: ["retired"],
+      tags: [
+        {
+          id: "00000000-0000-4000-8000-000000000002",
+          name: "billing",
+          state: "active",
+        },
+      ],
       description: "A test document.",
       pinned: false,
       createdAt: expect.any(Number),

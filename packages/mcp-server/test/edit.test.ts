@@ -238,7 +238,7 @@ describe("the directory stub as a cache", () => {
     const doc = await rig.ok("create_doc", {
       title: "The real title",
       description: "A test document.",
-      tags: ["reference"],
+      tags: ["mcp"],
       blocks: [{ type: "paragraph", text: "body" }],
     });
 
@@ -259,17 +259,21 @@ describe("the directory stub as a cache", () => {
     // The next tool call settles, and the settle repairs the cache from the
     // document that owns the truth.
     const listed = await rig.ok("list_docs");
-    const stub = (
-      listed.docs as { uuid: string; title: string; tags: string[] }[]
-    ).find((entry) => entry.uuid === doc.uuid);
+    const stub = listed.docs.find((entry: any) => entry.uuid === doc.uuid);
     expect(stub?.title).toBe("The real title");
-    expect(stub?.tags).toEqual(["reference"]);
+    expect(stub?.tags).toEqual([
+      {
+        id: "00000000-0000-4000-8000-000000000003",
+        name: "mcp",
+        state: "active",
+      },
+    ]);
 
     // Repaired in the directory doc itself, not masked by the read path — the
     // next replica to sync the directory gets the corrected stub.
     expect(getDirectoryEntry(directory, doc.uuid)).toMatchObject({
       title: "The real title",
-      tags: ["reference"],
+      tags: ["00000000-0000-4000-8000-000000000003"],
     });
 
     // And a write repairs it the same way, through the observer rather than the
@@ -287,7 +291,7 @@ describe("the directory stub as a cache", () => {
     });
     expect(getDirectoryEntry(directory, doc.uuid)).toMatchObject({
       title: "The real title",
-      tags: ["reference"],
+      tags: ["00000000-0000-4000-8000-000000000003"],
     });
   });
 });
@@ -468,7 +472,7 @@ describe("the derived index", () => {
     const doc = await rig.ok("create_doc", {
       title: "Tagged",
       description: "A test document.",
-      tags: ["alpha", "beta"],
+      tags: ["auth", "billing"],
       blocks: [{ type: "paragraph", text: "quokka" }],
     });
 
@@ -477,7 +481,18 @@ describe("the derived index", () => {
       {
         uuid: doc.uuid,
         title: "Tagged",
-        tags: ["alpha", "beta"],
+        tags: [
+          {
+            id: "00000000-0000-4000-8000-000000000001",
+            name: "auth",
+            state: "active",
+          },
+          {
+            id: "00000000-0000-4000-8000-000000000002",
+            name: "billing",
+            state: "active",
+          },
+        ],
         description: "A test document.",
         // The description leads the indexed body, so a short document's
         // snippet window reaches back over it. That is the visible cost of
@@ -488,13 +503,17 @@ describe("the derived index", () => {
     ]);
 
     // Retagging is reflected, so the packed column is not a stale cache.
-    await rig.ok("set_tags", { uuid: doc.uuid, tags: ["gamma"] });
+    await rig.ok("set_tags", { uuid: doc.uuid, tags: ["mcp"] });
     expect((await rig.ok("search", { query: "quokka" })).hits[0].tags).toEqual([
-      "gamma",
+      {
+        id: "00000000-0000-4000-8000-000000000003",
+        name: "mcp",
+        state: "active",
+      },
     ]);
   });
 
-  it("packs tags losslessly, whatever they contain", async () => {
+  it("packs canonical tag identities and drops provisional foreign strings", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
       title: "Awkward tags",
@@ -502,24 +521,34 @@ describe("the derived index", () => {
       blocks: [{ type: "paragraph", text: "bilby" }],
     });
 
-    // Tags are arbitrary text. A tag holding the separator an in-band encoding
-    // would use must survive as one tag, not two.
-    const awkward = `one${String.fromCharCode(31)}two`;
     await rig.ok("set_tags", {
       uuid: doc.uuid,
-      tags: [awkward, 'quote"and,comma', "[]"],
+      tags: ["permissions", "auth", "sync"],
     });
     expect(
-      (await rig.ok("search", { query: "bilby" })).hits[0].tags.sort(),
-    ).toEqual([awkward, "[]", 'quote"and,comma'].sort());
-
-    // And an empty tag — which only a foreign writer can produce, since the
-    // tool rejects one — must not vanish from the row.
-    setTags(rig.instance.replicas.replica(doc.uuid).doc, ["", "after"]);
-    expect(rig.instance.store.search("bilby", 10)[0]?.tags).toEqual([
-      "",
-      "after",
+      (await rig.ok("search", { query: "bilby" })).hits[0].tags,
+    ).toEqual([
+      {
+        id: "00000000-0000-4000-8000-000000000001",
+        name: "auth",
+        state: "active",
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000004",
+        name: "permissions",
+        state: "active",
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000005",
+        name: "sync",
+        state: "active",
+      },
     ]);
+
+    // A legacy/foreign writer can still put provisional strings in the CRDT,
+    // but they are not catalog identities and must not become index authority.
+    setTags(rig.instance.replicas.replica(doc.uuid).doc, ["", "after"]);
+    expect(rig.instance.store.search("bilby", 10)[0]?.tags).toEqual([]);
   });
 
   it("keeps a tombstoned document out of a rebuilt index", async () => {
