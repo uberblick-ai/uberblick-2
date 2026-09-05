@@ -276,7 +276,8 @@ Prefer substantial independently implementable slices that enable parallel work.
 Split when the expected change cannot be reviewed coherently in one sitting or
 substantial independent outcomes justify separate work. Different proof
 environments, test stages or tiny enabling changes alone do not justify serial
-children. Keep cohesive work together and declare only actual dependency edges.
+children. Keep cohesive work together and declare real prerequisites; later release
+proof alone does not require serial implementation against a settled interface.
 Size an investigation's prototype and durable evidence to the uncertainty it
 must resolve; a previous spike's report-only PR, separate branch, comparison
 matrix or estimates are not automatic deliverables. Needed prototype evidence
