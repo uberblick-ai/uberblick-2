@@ -2,7 +2,7 @@ class Uberblick < Formula
   desc "Local-first collaborative documents for people and agents"
   homepage "https://github.com/uberblick-ai/uberblick-2"
   url "https://api.github.com/repos/uberblick-ai/uberblick-2/releases/assets/546301506",
-      header: [
+      headers: [
         "Accept: application/octet-stream",
         "Authorization: Bearer #{ENV.fetch("HOMEBREW_GITHUB_API_TOKEN")}",
       ]
