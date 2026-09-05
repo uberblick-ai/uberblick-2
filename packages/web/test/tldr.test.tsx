@@ -96,7 +96,6 @@ async function mountPane(
         segment={WORKSPACE}
         presence={[]}
         author="reader"
-        knownTags={[]}
         archived={archived}
         docLinks={null}
         onRestore={() => {}}
@@ -208,7 +207,6 @@ describe("the document TL;DR", () => {
           segment={WORKSPACE}
           presence={[]}
           author="reader"
-          knownTags={[]}
           archived={true}
           docLinks={null}
           onRestore={() => {}}

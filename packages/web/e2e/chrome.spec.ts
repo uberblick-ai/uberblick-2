@@ -28,7 +28,7 @@
  *   wish; only an engine that fetched the woff2 and put it in `document.fonts`
  *   says the title is set in the face the app ships rather than in the serif
  *   behind it (#536).
- * - **The brand's ink is one value, and readable.** Five rules across three
+ * - **The brand's ink is one value, and readable.** Four rules across three
  *   surfaces are meant to resolve to the same colour and clear AA on every
  *   ground they land on; only an engine that ran the cascade can say whether
  *   they did (#569).
@@ -115,6 +115,21 @@ async function openApp(
   await page.goto(new URL(path, harness().appUrl).href);
   await expect(page.locator(".ub-workspace")).toBeVisible();
   return page;
+}
+
+/** Visit the owner surface once so its ordinary example catalog is available. */
+async function ensureExampleCatalog(page: Page): Promise<void> {
+  await page.goto(
+    new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href,
+  );
+  await expect(page.getByRole("heading", { name: "Tags", level: 1 })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Active" }).getByRole("listitem"),
+  ).toHaveCount(5);
+  await page.locator(".ub-settings-back").click();
+  await expect(page).toHaveURL(
+    new URL(`/${harness().workspace}`, harness().appUrl).href,
+  );
 }
 
 /** What a browser actually paints for one property of one element. */
@@ -245,8 +260,13 @@ for (const scheme of ["light", "dark"] as const) {
     const boxes = (): Promise<Array<[number, number, number, number]>> =>
       options.evaluateAll((elements) =>
         elements.map((element) => {
+          const frame = element.closest<HTMLElement>("[data-slot=popover-content]");
+          if (frame === null) {
+            throw new Error("e2e: appearance option geometry has no popover frame");
+          }
           const box = element.getBoundingClientRect();
-          return [box.x, box.y, box.width, box.height];
+          const origin = frame.getBoundingClientRect();
+          return [box.x - origin.x, box.y - origin.y, box.width, box.height];
         }),
       );
     const treatment = (option: Locator) =>
@@ -1055,18 +1075,22 @@ test("the document collaborator cluster stays compact and jumps once without mov
     await page.locator(".ub-title").click();
     await expect(overflow).toHaveCount(0);
     await expect(page.locator(".ub-title")).toBeFocused();
+    const pane = page.locator(".ub-pane");
+    const waitForPaneScrollToSettle = async (): Promise<void> => {
+      let previousScrollTop: number | null = null;
+      let stableScrollReads = 0;
+      await expect
+        .poll(async () => {
+          const scrollTop = await pane.evaluate((element) => element.scrollTop);
+          stableScrollReads = scrollTop === previousScrollTop ? stableScrollReads + 1 : 0;
+          previousScrollTop = scrollTop;
+          return stableScrollReads;
+        }, { intervals: [100, 100, 100, 100, 100, 100], timeout: 2_000 })
+        .toBeGreaterThanOrEqual(5);
+    };
     // The title's native focus scroll can outlive the focus transfer. Let the
     // pane settle before resetting it for the independent presence checks.
-    let previousScrollTop: number | null = null;
-    let stableScrollReads = 0;
-    await expect
-      .poll(async () => {
-        const scrollTop = await page.locator(".ub-pane").evaluate((pane) => pane.scrollTop);
-        stableScrollReads = scrollTop === previousScrollTop ? stableScrollReads + 1 : 0;
-        previousScrollTop = scrollTop;
-        return stableScrollReads;
-      }, { intervals: [100, 100, 100, 100, 100, 100], timeout: 2_000 })
-      .toBeGreaterThanOrEqual(5);
+    await waitForPaneScrollToSettle();
 
     await page.evaluate(() => {
       const first = document.querySelector(".ub-editor .ProseMirror > *")?.firstChild;
@@ -1086,15 +1110,15 @@ test("the document collaborator cluster stays compact and jumps once without mov
         original.call(this, options);
       };
     });
-    await page.locator(".ub-pane").evaluate((pane) => {
-      pane.scrollTop = 0;
+    await pane.evaluate((element) => {
+      element.scrollTop = 0;
     });
 
     const visibleJump = page.locator(
       '.ub-peers > .ub-peer-control[aria-label*="editing block 29"]',
     ).first();
     await visibleJump.click();
-    await expect.poll(() => page.locator(".ub-pane").evaluate((pane) => pane.scrollTop))
+    await expect.poll(() => pane.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
     expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("start");
     expect(
@@ -1102,9 +1126,10 @@ test("the document collaborator cluster stays compact and jumps once without mov
         () => (window as unknown as { peerScrollCalls: number }).peerScrollCalls,
       ),
     ).toBe(1);
+    await waitForPaneScrollToSettle();
 
-    await page.locator(".ub-pane").evaluate((pane) => {
-      pane.scrollTop = 0;
+    await pane.evaluate((element) => {
+      element.scrollTop = 0;
     });
     await more.focus();
     await page.keyboard.press("Enter");
@@ -1117,7 +1142,7 @@ test("the document collaborator cluster stays compact and jumps once without mov
     await jumpRow.focus();
     await expect(jumpRow).toHaveCSS("outline-width", "2px");
     await page.keyboard.press("Enter");
-    await expect.poll(() => page.locator(".ub-pane").evaluate((pane) => pane.scrollTop))
+    await expect.poll(() => pane.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
     expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("start");
     expect(
@@ -1126,15 +1151,17 @@ test("the document collaborator cluster stays compact and jumps once without mov
       ),
     ).toBe(2);
     await expect(more).toBeFocused();
+    await waitForPaneScrollToSettle();
 
-    await page.locator(".ub-pane").evaluate((pane) => {
-      pane.scrollTop = 0;
+    await pane.evaluate((element) => {
+      element.scrollTop = 0;
     });
     await more.click();
     const noLocation = page.getByRole("button", { name: "Eli · person" });
     await expect(noLocation).toBeVisible();
     await noLocation.click();
-    expect(await page.locator(".ub-pane").evaluate((pane) => pane.scrollTop)).toBe(0);
+    await waitForPaneScrollToSettle();
+    expect(await pane.evaluate((element) => element.scrollTop)).toBe(0);
     expect(
       await page.evaluate(
         () => (window as unknown as { peerScrollCalls: number }).peerScrollCalls,
@@ -1721,8 +1748,8 @@ async function groundsUnder(page: Page, locator: Locator): Promise<string[]> {
  * One brand ink, wherever the brand is text (#569).
  *
  * The walk above measures `.ub-menu-current` on `--sidebar` and on
- * `--sidebar-accent`. It cannot see the other four functional consumers: they
- * live on the document page. So this reads all five as the browser paints them,
+ * `--sidebar-accent`. It cannot see the other three functional consumers: they
+ * live on the document page. So this reads all four as the browser paints them,
  * holds each to AA on the grounds it actually sits on, and asserts they are
  * *one* value — no surface owning a private copy is the criterion, and five
  * rules reading five near-identical ambers would pass every contrast assertion
@@ -1733,8 +1760,6 @@ async function groundsUnder(page: Page, locator: Locator): Promise<string[]> {
  * where `.ub-comment` paints `--brand-subtle` under it. Both are derived from
  * the rendered element rather than named here.
  *
- * The badge also exposes the non-text accent on its outline; in light that is a
- * different colour from the shared functional ink.
  */
 for (const scheme of ["light", "dark"] as const) {
   test(`the brand's functional ink is one readable value — ${scheme}`, async ({
@@ -1742,16 +1767,12 @@ for (const scheme of ["light", "dark"] as const) {
   }) => {
     const page = await openApp(browser, scheme);
 
-    // A document carrying the four consumers outside the sidebar. It needs a
-    // title before the header offers Pin at all, and a canonical group tag
-    // before there is a badge to letter.
+    // A document carrying the three consumers outside the sidebar. It needs a
+    // title before the header offers Pin at all.
     await page.getByRole("button", { name: "+ new doc" }).click();
     await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
     const uuid = new URL(page.url()).pathname.split("/")[2] ?? "";
     await page.locator(".ub-title").fill(`brand ink ${scheme}`);
-    await page.getByLabel("Add a tag").fill("feature");
-    await page.getByLabel("Add a tag").press("Enter");
-    await expect(page.locator(".ub-badge")).toBeVisible();
 
     // Two links in one paragraph, and a thread over the second of them: the
     // external link stays on the page's own ground, the reference ends up on
@@ -1782,7 +1803,6 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(pin).toBeVisible();
 
     const consumers: Array<[string, Locator]> = [
-      [".ub-badge", page.locator(".ub-badge")],
       [".ub-link", page.locator(".ub-editor a.ub-link")],
       [".ub-doclink, annotated", reference],
     ];
@@ -1819,7 +1839,7 @@ for (const scheme of ["light", "dark"] as const) {
     }
     await page.keyboard.press("Escape");
 
-    // And the fifth rule, in the switcher the walk above opens for its own
+    // And the fourth rule, in the switcher the walk above opens for its own
     // reasons.
     await page.locator(".ub-workspace").click();
     await expect(page.locator("[data-slot=dropdown-menu-content]")).toBeVisible();
@@ -1830,13 +1850,6 @@ for (const scheme of ["light", "dark"] as const) {
       expect(contrast(currentInk, ground)).toBeGreaterThanOrEqual(4.5);
     }
     expect([...inks], "the functional brand ink is one value").toHaveLength(1);
-
-    // The badge is where both halves of the decision are painted at once: its
-    // outline is the accent and its letters are the ink. Only light splits;
-    // dark's ink derives from the accent itself.
-    const accent = await paintedIn(page.locator(".ub-badge"), "border-top-color");
-    if (scheme === "light") expect([...inks][0]).not.toBe(accent);
-    else expect([...inks][0]).toBe(accent);
   });
 }
 
@@ -1921,6 +1934,7 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
   browser,
 }) => {
   const page = await openApp(browser, "light");
+  await ensureExampleCatalog(page);
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
@@ -1929,13 +1943,13 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
   await placeCaret(page);
   await page.keyboard.type("a line of prose\n".repeat(24));
 
-  // A long tag strip, because that is what pushes this row around.
-  // `.ub-tag-add` carries a `list`, which makes its role combobox, not textbox.
-  const addTag = page.locator(".ub-tag-add");
-  for (const tag of ["alpha", "beta", "gamma", "delta", "epsilon"]) {
-    await addTag.fill(tag);
-    await addTag.press("Enter");
+  // A long tag selection, because that is what pushes this row around.
+  const editTags = page.getByRole("button", { name: "Edit tags" });
+  await editTags.click();
+  for (const tag of ["auth", "billing", "mcp", "permissions", "sync"]) {
+    await page.getByRole("option", { name: tag, exact: true }).click();
   }
+  await editTags.click();
 
   /**
    * The live target, hit-tested rather than computed. Reading the rule's own

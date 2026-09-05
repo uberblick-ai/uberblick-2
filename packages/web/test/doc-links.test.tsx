@@ -436,7 +436,6 @@ describe("an unwritable document room", () => {
             segment={WORKSPACE}
             presence={[]}
             author="tester"
-            knownTags={[]}
             archived={false}
             docLinks={null}
             onRestore={() => {}}
@@ -507,7 +506,6 @@ describe("following a reference", () => {
             segment={WORKSPACE}
             presence={[]}
             author="tester"
-            knownTags={[]}
             archived={false}
             docLinks={context}
             onRestore={() => {}}

@@ -4,8 +4,8 @@
  * Owns the Y.Doc layout for an uberblick document:
  *   - `meta`        Y.Map: uuid, title, description, TL;DR, changelog suggestion,
  *                        `tag-assigned:<identity>` presence entries,
- *                        links-by-UUID, kind, status and internal decision
- *                        remove/add levels
+ *                        links-by-UUID, kind, status, supersedes and internal
+ *                        decision remove/add levels
  *   - `blocks`      Y.XmlFragment: one Y.XmlElement per block, each holding a
  *                   single Y.XmlText of plain-text source
  *                   (types: paragraph, heading, code, mermaid, list-item,
@@ -193,6 +193,7 @@ export {
   ConflictingLinkMarksError,
   InvalidDecisionReferenceError,
   InvalidDocumentLifecycleError,
+  InvalidSupersedesReferenceError,
   InvalidTagAssignmentError,
   InvalidTagIdentityError,
   InvalidTagNameError,
@@ -208,6 +209,7 @@ export {
 export type {
   AnnotationRangeErrorReason,
   DecisionReferenceErrorReason,
+  SupersedesReferenceErrorReason,
   InlineLinkRangeErrorReason,
   OldTextMismatchDetails,
   StaleBlockDetails,

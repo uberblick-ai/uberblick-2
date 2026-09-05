@@ -53,8 +53,8 @@ and `.agents/roles/` defines three continuous entry roles (`issue-preparer`,
 coordinator role — a program is a milestone plus `umbrella` parents, ordered
 by `Depends-on` and dispatched by the ordinary queues (owner decision,
 2026-09-04). Every contract is runtime-neutral: a role runs as a Codex
-session or a Claude session, started by the launcher (`/next-issue <role>
---codex|--claude` today, `ub launch` once #489 lands), and its runtime shows
+session or a Claude session, started by `ub launch <role> --codex|--claude`,
+and its runtime shows
 only in the run id and the claim. The implementer's default runtime is Codex.
 Implementers run in isolation under the same claim, handoff and review rules.
 An entry role self-picks under its contract; an internal child follows its
@@ -229,7 +229,7 @@ the fallback, which is exactly why CI is high priority.
   the room key from day one so a hosted hub never needs a room migration.
 - Doc layout is a closed set of four root types: `meta` (Y.Map: uuid, title,
   description, TL;DR, changelog suggestion, tags as flat per-tag presence entries,
-  links-by-UUID, kind, status, and internal decision remove/add levels), `blocks`
+  links-by-UUID, kind, status, supersedes, and internal decision remove/add levels), `blocks`
   (Y.XmlFragment, one element per block with stable `id` attrs; types:
   paragraph, heading, code, mermaid, list-item, quote, table), `annotations`
   (Y.Map of one Y.Map per thread: anchor block, resolved flag, and the

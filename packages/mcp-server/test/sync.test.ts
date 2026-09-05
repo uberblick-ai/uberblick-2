@@ -8,14 +8,18 @@
  * updates landing in the log like any other.
  */
 
+import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   appendBlock,
   getBlocks,
   getMeta,
+  initDoc,
   listDirectory,
+  roomForDoc,
   setTldr,
+  upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { Hub, HubLogRecord } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
@@ -41,6 +45,32 @@ import type { HubOptions, PeerClient, Rig, TestConfigOptions } from "./helpers.j
 const hubs: Hub[] = [];
 const rigs: Rig[] = [];
 const peers: PeerClient[] = [];
+
+class FirstHydrationFailureStore extends MirrorStore {
+  private failRoom: string | null = null;
+
+  failNextRead(room: string): void {
+    this.failRoom = room;
+  }
+
+  override readSince(room: string, afterSeq: number) {
+    if (this.failRoom === room) {
+      this.failRoom = null;
+      throw Object.assign(new Error("simulated busy first hydration"), {
+        errcode: 5,
+      });
+    }
+    return super.readSince(room, afterSeq);
+  }
+}
+
+function encodedDoc(uuid: string, title: string): Uint8Array {
+  const doc = new Y.Doc();
+  initDoc(doc, { uuid, title, description: "A test document." });
+  const update = Y.encodeStateAsUpdate(doc);
+  doc.destroy();
+  return update;
+}
 
 afterEach(async () => {
   for (const peer of peers.splice(0)) {
@@ -95,6 +125,86 @@ async function waitForQuiet(rig: Rig): Promise<void> {
 }
 
 describe("hub sync", () => {
+  it("retries a room whose first log hydration failed", async () => {
+    const running = await hub();
+    const databasePath = tempDatabasePath();
+    const store = new FirstHydrationFailureStore(databasePath, WORKSPACE);
+    const rig = await startServer(
+      testConfig({
+        databasePath,
+        authSecret: TEST_SECRET,
+        hubUrl: hubUrl(running.port),
+        ...LIVE_HUB_SETTLE,
+      }),
+      store,
+    );
+    rigs.push(rig);
+
+    const directUuid = randomUUID();
+    const directRoom = roomForDoc(WORKSPACE, directUuid);
+    store.appendUpdate(directRoom, encodedDoc(directUuid, "Direct retry"), "remote");
+    store.failNextRead(directRoom);
+
+    expect(() => rig.instance.replicas.replica(directUuid)).toThrow(
+      "simulated busy first hydration",
+    );
+    expect(rig.instance.replicas.known(directUuid)).toBe(false);
+    expect(
+      rig.instance.replicas
+        .attachedReplicas()
+        .some((replica) => replica.room === directRoom),
+    ).toBe(false);
+
+    const recovered = rig.instance.replicas.replica(directUuid);
+    expect(getMeta(recovered.doc).title).toBe("Direct retry");
+    upsertDirectoryEntry(rig.instance.replicas.directory().doc, {
+      uuid: directUuid,
+      title: "Direct retry",
+    });
+    const written = await rig.ok("set_title", {
+      uuid: directUuid,
+      title: "Acknowledged after retry",
+    });
+    expect(written.applied).toBe(true);
+    await waitUntil("the retried room's write to be acknowledged", async () => {
+      const status = await rig.ok("sync_status", {});
+      return status.rooms.some(
+        (entry: { room: string; synced: boolean }) =>
+          entry.room === directRoom && entry.synced,
+      );
+    });
+    const observer = await peer(running.port, directRoom);
+    await waitUntil("a second client to receive the retried room's write", () =>
+      getMeta(observer.doc).title === "Acknowledged after retry",
+    );
+
+    const discoveredUuid = randomUUID();
+    const discoveredRoom = roomForDoc(WORKSPACE, discoveredUuid);
+    store.appendUpdate(
+      discoveredRoom,
+      encodedDoc(discoveredUuid, "Directory retry"),
+      "remote",
+    );
+    upsertDirectoryEntry(rig.instance.replicas.directory().doc, {
+      uuid: discoveredUuid,
+      title: "Directory retry",
+    });
+    store.failNextRead(discoveredRoom);
+
+    const failedSettle = await rig.call("list_docs", {});
+    expect(failedSettle.isError).toBe(true);
+    expect(failedSettle.payload.error).toBe("internal_error");
+    expect(rig.instance.replicas.known(discoveredUuid)).toBe(false);
+
+    await rig.ok("list_docs", {});
+    expect(rig.instance.replicas.hydrated(discoveredUuid)).toBe(true);
+    expect(
+      rig.instance.replicas
+        .attachedReplicas()
+        .filter((replica) => replica.room === `${WORKSPACE}/_directory`),
+    ).toHaveLength(1);
+  });
+
   it("drains a pending legacy feedback room, then leaves its residue inert", async () => {
     const running = await hub();
     const databasePath = tempDatabasePath();

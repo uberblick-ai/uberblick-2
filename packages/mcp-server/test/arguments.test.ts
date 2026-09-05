@@ -137,11 +137,20 @@ describe("create_doc lifecycle arguments", () => {
       {
         title: "A requirement document (`kind: requirement`)",
         required: ["kind"],
-        properties: { kind: { const: "requirement" }, governs: false },
+        properties: {
+          kind: { const: "requirement" },
+          governs: false,
+          supersedes: false,
+        },
       },
       {
         title: "An ordinary document",
-        properties: { kind: false, status: false, governs: false },
+        properties: {
+          kind: false,
+          status: false,
+          governs: false,
+          supersedes: false,
+        },
       },
     ]);
 
@@ -167,6 +176,30 @@ describe("create_doc lifecycle arguments", () => {
     });
     expect(mismatched.payload.recovery).toContain("Nothing was created");
     expect((await rig.ok("list_docs")).docs).toEqual([]);
+  });
+
+  it("accepts supersedes only on a decision shape", async () => {
+    const rig = await localRig();
+    const target = await rig.ok("create_doc", {
+      title: "Earlier decision",
+      description: "A decision another decision can replace.",
+      kind: "decision",
+    });
+
+    for (const args of [
+      { supersedes: target.uuid },
+      { kind: "requirement", supersedes: target.uuid },
+    ]) {
+      const refused = await rig.call("create_doc", {
+        title: "Wrong shape",
+        description: "A request that must not create a document.",
+        ...args,
+      });
+      expect(refused.payload.error).toBe("schema_validation");
+    }
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toHaveLength(
+      1,
+    );
   });
 });
 

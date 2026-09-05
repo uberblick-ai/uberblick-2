@@ -16,6 +16,7 @@ import { initCommand } from "./init.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
+import { launchCommand } from "./launch.js";
 import { openCommand } from "./open.js";
 import { remoteCommand } from "./remote.js";
 import { serveCommand } from "./serve.js";
@@ -30,6 +31,7 @@ usage: ub <command> [options]
 commands:
   init [hub-url]         identity, workspace and a signing secret — with a hub
                          given, the new workspace is created on that hub
+  launch <role>          keep one agent entry role running in this terminal
   open [options]         serve the web app and a hub in the foreground, and
                          open the browser
   status [--json]        workspace, hub, credential, database and sync state
@@ -77,6 +79,9 @@ export async function runCli(
   }
   if (command === "init") {
     return await initCommand(rest, io);
+  }
+  if (command === "launch") {
+    return await launchCommand(rest, io);
   }
   if (command === "open") {
     return await openCommand(rest, io);

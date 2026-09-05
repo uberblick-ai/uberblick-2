@@ -264,6 +264,12 @@ const RECOVERIES: Record<string, Recovery> = {
       "Call list_tags for the complete active catalog, then call again with active ids or exact active names. " +
       "An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
   },
+  supersedes_not_decision: {
+    recoveryClass: "reread",
+    guidance:
+      "Choose a decision UUID from list_docs with `kind: decision`, then call create_doc again. Nothing was " +
+      "created by this refused call.",
+  },
 };
 
 /**

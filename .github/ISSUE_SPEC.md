@@ -152,27 +152,16 @@ remove preparation and delivery labels. Never use this route for data loss,
 auth or security exposure, or a violated invariant. A concrete bug observed
 later is new evidence and may be filed or reopened then.
 
-Preparation is one foreground issue-preparer run. A narrowly mechanical, local,
-understood and easily reversible issue gets a code-grounded self-check and no
-adversary. Every other issue gets exactly one fresh issue-adversary subagent,
-preferably from the other runtime/model; the same preparer applies correctable
-findings and sets `ready` when recorded owner-approved authority covers the
-result. Unresolved product, agent-authority, safety or fundamentally unsafe-shape
-findings take `needs-decision`. Another adversary is exceptional and requires an
-explicit owner request, never an automatic preparation loop.
+Preparation follows `.agents/protocols/issue-preparation.md`; the issue-preparer
+owns its final verdict and transitions. Correctable findings stay in that pass;
+unresolved owner boundaries take `needs-decision`. Another adversary requires
+explicit owner request.
 
-Preparation may instead end in `split`. Decide from the expected diff, never
-the issue body's length: split when the combined change is not reviewable in
-one sitting or a child has an independently useful outcome; keep cohesive work
-together when a proposed child only enables its sibling. Technical decomposition
-is preparer judgment; choosing product behavior is an owner decision. Several
-independent interaction or lifecycle boundaries, or thousands of hand-written
-changed lines, are a strong presumption to split. The source
-becomes a coordination-only parent: remove `needs-preparation`, add
-`umbrella`, never add `ready`, set its `Depends-on` to its children, and close
-it after its independently reviewable children. Give each child
-`needs-preparation`, `Parent: #N`, the parent's milestone, and only real
-ordering dependencies.
+A split follows Sizing below. Remove `needs-preparation` from the source, add
+`umbrella`, never add `ready`, and set its `Depends-on` to its children. Give
+each child `needs-preparation`, `Parent: #N`, the parent's milestone, and only
+real ordering dependencies. Technical decomposition is preparer judgment;
+choosing product behavior beyond delegated authority is an owner decision.
 
 `needs-decision` exit path: the preparer asks one focused question as an issue
 comment, with concrete options and its recommendation, and replaces
@@ -255,18 +244,17 @@ doesn't answer? Then the issue is not `ready`.**
 - **Why** — a sentence or two, tied to the spike acceptance criteria or a
   doc. Keeps the agent from "improving" beyond intent.
 - **Acceptance criteria** — a short checkbox list (`- [ ]`) of **distinct,
-  observable and non-obvious outcomes or invariants**. Use one to five. Each
-  checkbox owns one independently pass/fail outcome; closely coupled conditions
-  may clarify it, but do not join distinct interaction paths, lifecycle changes
-  or failure modes into one long checkbox to satisfy the cap. Split the issue
-  when more than five independently useful outcomes remain. State what must be
-  true, not how to prove it: unit/e2e scenarios, test files and implementation
+  observable and non-obvious outcomes or invariants**. Each checkbox owns a
+  distinct pass/fail outcome; closely coupled conditions may clarify it, but
+  do not pack unrelated failures into one checkbox or split to meet a count.
+  State what must be true, not how to prove it: unit/e2e scenarios, test files and implementation
   steps belong in Pointers, not in checkboxes. Repository hygiene and delivery
   gates — lint, typecheck, the general test suite, review and CI — already live
   in `AGENTS.md`, `CLAUDE.md` and CI; they are never issue acceptance criteria.
   A post-merge corpus update sequenced by `CLAUDE.md` is not a diff acceptance
-  criterion either; point the integrator's post-merge pass to the document
-  under Pointers.
+  criterion either; distinguish pre-merge acceptance from verification that
+  requires a release, and never report the latter as already passed. Point the
+  integrator's post-merge pass to the document under Pointers.
 - **Out of scope** — explicit non-goals, or `None.` if genuinely none. This
   is the "least code wins" principle made enforceable: it is what scope
   creep gets rejected against.
@@ -284,7 +272,18 @@ doesn't answer? Then the issue is not `ready`.**
 
 ## Sizing
 
-A human request may become a coordination-only parent with several bite-sized
+Prefer substantial independently implementable slices that enable parallel work.
+Split when the expected change cannot be reviewed coherently in one sitting or
+substantial independent outcomes justify separate work. Different proof
+environments, test stages or tiny enabling changes alone do not justify serial
+children. Keep cohesive work together and declare real prerequisites; later release
+proof alone does not require serial implementation against a settled interface.
+Size an investigation's prototype and durable evidence to the uncertainty it
+must resolve; a previous spike's report-only PR, separate branch, comparison
+matrix or estimates are not automatic deliverables. Needed prototype evidence
+must remain reproducible.
+
+A human request may become a coordination-only parent with several substantial
 children. One `ready` implementation child describes at most one independently
 reviewable PR; each PR closes its child, and the parent closes after its required
 children. Parents carry `umbrella`, live outside the preparation and
@@ -313,8 +312,18 @@ preparation; preserve its material intent in the final contract and rely on the
 issue's edit history for the raw draft. Keep every body as short as complete. A
 complex or security-sensitive issue may carry more context when it changes a
 decision; a coordination parent carries only the shared outcome and child
-routing. Length alone never decides whether to split. Acceptance criteria stay
-at one to five atomic outcomes; prose density is not a workaround for the cap.
+routing. Length alone never decides whether to split.
+
+Preserve the owner's requirements, reasoning, constraints and expressly delegated
+engineering choices. Distinguish owner decisions from inferences and cite settled
+authority once. Authoring formats and user-visible limitations of durable content
+require owner decision; rendering mechanics remain engineering choices within
+existing constraints. An inaccessible reference limits evidence, never supplies a
+missing product decision. Ask only the unresolved consequence with a recommendation,
+keeping independent decisions separate. Before escalating replacement of an
+established primitive, identify that primitive and the contract it would supply;
+custom application rendering alone does not establish such a replacement. Merge
+tier routes approval, not design.
 
 - **Mechanism belongs in a document, not an issue.** When the corpus is
   unreachable and a design lands in an issue body instead, that is a recorded
