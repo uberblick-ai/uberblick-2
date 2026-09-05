@@ -60,6 +60,21 @@ const SECRET = "test-signing-secret-for-the-remote-bridge";
 const OTHER_SECRET = "a-different-secret-the-remote-was-deployed-with";
 const WORKSPACE = "b7c3d914-5a20-4e6f-8d13-9f04a2c68e75";
 
+/**
+ * `remote join` can spend 35 s in preflight (connect plus two sync waits),
+ * 50 s moving the mirror (connect plus three sync waits), and another 35 s
+ * verifying it: 120 s in capped, named waits. Ten seconds above that ceiling
+ * also leaves more than twice the slowest observed 57.9 s run.
+ */
+const LARGE_CORPUS_JOIN_TIMEOUT_MS = 130_000;
+
+/**
+ * The slowest observed seed took roughly 25 s. This stays another ten seconds
+ * above that seed plus the child deadline, so the child's named failure wins
+ * before Vitest's generic timeout.
+ */
+const LARGE_CORPUS_TEST_TIMEOUT_MS = 165_000;
+
 /** A JWT-ish token: base64url of `{"sub"…` always starts `eyJ`. */
 const TOKEN_SHAPE = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/;
 
@@ -804,17 +819,17 @@ describe("ub remote join", () => {
         ],
         local,
         { UB_TEST_MAX_WAIT_MS: "15000" },
-        60_000,
+        LARGE_CORPUS_JOIN_TIMEOUT_MS,
       );
 
-      expect(run.status).toBe(0);
+      expect(run.status, run.stderr).toBe(0);
       expect(run.stdout).toContain("joined 5000 documents — directory verified");
       expect(run.stdout).toContain("one live document's content");
       expect(run.stdout).not.toContain("a fresh client read\nthem back");
       expect(persistedHubUrl(local)).toBe(url(remote));
       expect(readConfigFile(local, "config.json").workspace).toBe(WORKSPACE);
     },
-    90_000,
+    LARGE_CORPUS_TEST_TIMEOUT_MS,
   );
 
   it("adds the remote as a second workspace, leaving the seeded one intact", async () => {
