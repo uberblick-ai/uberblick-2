@@ -146,10 +146,13 @@ const ACCESS_SIGNATURES = [
   /authentication expired/i,
   /bad credentials/i,
   /could not read username/i,
-  /http (401|403)/i,
+  /(?:http|status) (401|403)\b/i,
   /gh auth login/i,
   /not logged in/i,
 ];
+
+/** A refusal that waiting can repair, even when it carries an HTTP 403. */
+const TEMPORARY_ACCESS_SIGNATURES = [/rate limit/i, /\bquota\b/i];
 
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -298,7 +301,11 @@ function accessReason(text: string): string | null {
   const found = text
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .find((line) => ACCESS_SIGNATURES.some((pattern) => pattern.test(line)));
+    .find(
+      (line) =>
+        !TEMPORARY_ACCESS_SIGNATURES.some((pattern) => pattern.test(line)) &&
+        ACCESS_SIGNATURES.some((pattern) => pattern.test(line)),
+    );
   if (found === undefined) return null;
   return found.length > 160 ? `${found.slice(0, 159)}…` : found;
 }
@@ -306,7 +313,7 @@ function accessReason(text: string): string | null {
 /** How to repair the access this reason names. */
 function recoveryFor(reason: string): string {
   if (/\bclaude\b/i.test(reason)) return "run `claude auth login`";
-  if (/\bcodex\b/i.test(reason)) return "run `codex login`";
+  if (/\bcodex\b|api\.openai\.com/i.test(reason)) return "run `codex login`";
   if (/\bgh\b|github/i.test(reason)) return "run `gh auth login`";
   return "restore access, then run `ub launch` again";
 }
@@ -336,8 +343,8 @@ function closingLines(text: string, count: number): string {
 }
 
 function sentinelBody(prefix: string, line: string): string | null {
-  if (!line.startsWith(prefix) || !line.endsWith(".")) return null;
-  const body = line.slice(prefix.length, -1).trim();
+  if (!line.startsWith(prefix)) return null;
+  const body = line.slice(prefix.length).replace(/\.$/, "").trim();
   return body === "" ? null : body;
 }
 

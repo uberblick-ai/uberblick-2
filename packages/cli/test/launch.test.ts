@@ -335,7 +335,7 @@ const ready = setInterval(() => {
   it("prints one condensed line per session and idles on the role's own reason", async () => {
     const worked = rig({
       sessions: [
-        result({ lastLine: "Worked implementer: issue #877 — opened PR #881." }),
+        result({ lastLine: "Worked implementer: issue #877 — opened PR #881" }),
         result({ lastLine: "Worked implementer: issue #12 — parked for owner decision." }),
         result({ interrupted: "SIGTERM" }),
       ],
@@ -358,7 +358,7 @@ const ready = setInterval(() => {
     );
 
     const empty = rig({
-      sessions: [result({ lastLine: "No eligible implementer work: implementation lanes busy." })],
+      sessions: [result({ lastLine: "No eligible implementer work: implementation lanes busy" })],
       waits: ["SIGINT"],
     });
     expect(await launchCommand(["implementer"], empty.io, empty.services)).toBe(130);
@@ -420,22 +420,39 @@ const ready = setInterval(() => {
     // never reaches the final stdout line.
     const runtime = rig({
       sessions: [
-        result({ code: 1, lastLine: "", tail: "codex: authentication expired\n" }),
+        result({
+          code: 1,
+          lastLine: "",
+          tail:
+            "ERROR: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses\n",
+        }),
       ],
     });
     expect(await launchCommand(["implementer"], runtime.io, runtime.services)).toBe(1);
     expect(runtime.seen.waits).toEqual([]);
     expect(runtime.seen.sessions).toHaveLength(1);
-    expect(runtime.stderr()).toMatch(/authentication expired.*stopped — run `codex login`/);
+    expect(runtime.stderr()).toMatch(/401 Unauthorized.*stopped — run `codex login`/);
+
+    // GitHub reports temporary rate limits with the same HTTP 403 shape as a
+    // permission refusal. Waiting is the repair; re-authenticating is not.
+    for (const output of [
+      "gh: API rate limit exceeded for user ID 12345678. (HTTP 403)\n",
+      "gh: You have exceeded a secondary rate limit. (HTTP 403)\n",
+    ]) {
+      const limited = rig({ probes: [2], probeOutput: output, waits: ["SIGINT"] });
+      expect(await launchCommand(["integrator"], limited.io, limited.services)).toBe(130);
+      expect(limited.seen.waits).toEqual([30 * 60 * 1_000]);
+      expect(limited.stderr()).not.toMatch(/stopped|auth login/);
+    }
 
     // A role blocked while exiting 0 says so in its own final line.
     const reported = rig({
-      sessions: [result({ lastLine: "Blocked implementer: permission denied running git push." })],
+      sessions: [result({ lastLine: "Blocked implementer: the deploy key was revoked." })],
     });
     expect(await launchCommand(["implementer"], reported.io, reported.services)).toBe(1);
     expect(reported.seen.waits).toEqual([]);
     expect(reported.stderr()).toMatch(
-      /permission denied running git push.*stopped — restore access/,
+      /deploy key was revoked.*stopped — restore access/,
     );
 
     // One that reports it in loose prose instead would otherwise relaunch at
