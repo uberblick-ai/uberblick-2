@@ -866,10 +866,10 @@ export async function initCommand(
   }
 
   report += "\nnext steps\n";
-  if (root !== null) {
-    report +=
-      "  mise run dev          the hub and the web app on http://localhost:5173\n";
-  }
+  report +=
+    root === null
+      ? "  ub open               the web app and a hub in the foreground\n"
+      : "  mise run dev          the hub and the web app on http://localhost:5173\n";
   // Only when the question was left open: `--mcp` does it below instead, and
   // `--no-mcp` is somebody saying they do not want to be told about it.
   if (flags.mcp === undefined) {

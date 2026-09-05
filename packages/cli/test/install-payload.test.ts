@@ -172,11 +172,16 @@ describe("the versioned install payload", () => {
         command: "uberblick",
       }).stdout.trim(),
     ).toBe(VERSION);
+    const help = runPayload(box, ["--help"]);
+    expect(help.status, help.stderr).toBe(0);
+    expect(help.stdout).not.toContain("launch <role>");
+    expect(filesBelow(payload).some((path) => path.endsWith(".map"))).toBe(false);
 
     const initialized = runPayload(box, ["init", "--yes", "--no-mcp"], {
       cwd: REPO_ROOT,
     });
     expect(initialized.status, initialized.stderr).toBe(0);
+    expect(initialized.stdout).toContain("ub open");
     expect(initialized.stdout).not.toMatch(/mise run|pnpm/);
 
     const status = runPayload(box, ["status", "--json"]);

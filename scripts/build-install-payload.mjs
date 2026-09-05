@@ -60,7 +60,7 @@ async function bundle(entryPoint, outfile) {
 		format: "esm",
 		target: "node26",
 		minify: true,
-		sourcemap: true,
+		sourcemap: false,
 	});
 }
 
@@ -73,14 +73,18 @@ async function main() {
 	const payload = join(scratch, name);
 	const cli = join(payload, "packages", "cli");
 	const web = join(payload, "packages", "web", "dist");
-	const temporaryArchive = join(scratch, `${name}.tar.gz`);
+	const temporaryArchive = `${archive}.tmp`;
 
 	try {
 		let webDist = process.env.UBERBLICK_PAYLOAD_WEB_DIST;
 		if (webDist === undefined) {
 			webDist = join(scratch, "web-dist");
 			const buildEnvironment = { ...process.env };
-			delete buildEnvironment.HUB_AUTH_TOKEN;
+			for (const key of ["HUB_AUTH_TOKEN", "HUB_URL", "WORKSPACE_ID", "WORKSPACES"]) {
+				delete buildEnvironment[key];
+			}
+			// The package build cannot redirect Vite away from the checkout's dist,
+			// so run its two steps directly against this payload's private directory.
 			run("pnpm", ["--filter", "@uberblick/web", "exec", "tsc", "--noEmit"], {
 				env: buildEnvironment,
 			});
@@ -128,11 +132,12 @@ async function main() {
 		);
 		symlinkSync("ub", join(payload, "bin", "uberblick"));
 
-		run("tar", ["-czf", temporaryArchive, "-C", scratch, name]);
 		mkdirSync(outputDir, { recursive: true });
+		run("tar", ["-czf", temporaryArchive, "-C", scratch, name]);
 		renameSync(temporaryArchive, archive);
 		process.stdout.write(`payload: ${archive}\n`);
 	} finally {
+		rmSync(temporaryArchive, { force: true });
 		rmSync(scratch, { recursive: true, force: true });
 	}
 }

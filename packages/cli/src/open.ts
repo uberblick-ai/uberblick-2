@@ -207,11 +207,11 @@ export interface Stop {
  */
 export type BundleAction =
   /** A built bundle is there; serve it. */
-  | { action: "serve"; dir: string; ours: boolean; installed?: true }
+  | { action: "serve"; dir: string; ours: boolean; installed: boolean }
   /** No bundle, but a web package to build one from — if pnpm is there. */
-  | { action: "build"; dir: string; ours: boolean }
+  | { action: "build"; dir: string; ours: boolean; installed: boolean }
   /** Neither, and `reason` says which half is missing. */
-  | { action: "missing"; dir: string; ours: boolean; reason: string; installed?: true };
+  | { action: "missing"; dir: string; ours: boolean; reason: string; installed: boolean };
 
 function isFile(path: string): boolean {
   try {
@@ -237,13 +237,14 @@ export function bundlePlan(env: NodeJS.ProcessEnv = process.env): BundleAction {
   const ours = override === null && !installed;
 
   if (isFile(join(dir, "index.html"))) {
-    return { action: "serve", dir, ours, ...(installed ? { installed: true } : {}) };
+    return { action: "serve", dir, ours, installed };
   }
   if (override !== null) {
     return {
       action: "missing",
       dir,
       ours,
+      installed,
       reason: `UBERBLICK_WEB_DIST names ${dir}, which holds no index.html`,
     };
   }
@@ -252,7 +253,7 @@ export function bundlePlan(env: NodeJS.ProcessEnv = process.env): BundleAction {
       action: "missing",
       dir,
       ours,
-      installed: true,
+      installed,
       reason: `the installed web app at ${dir} holds no index.html`,
     };
   }
@@ -261,10 +262,11 @@ export function bundlePlan(env: NodeJS.ProcessEnv = process.env): BundleAction {
       action: "missing",
       dir,
       ours,
+      installed,
       reason: `there is no built web app at ${dir}, and no web package beside this one to build from`,
     };
   }
-  return { action: "build", dir, ours };
+  return { action: "build", dir, ours, installed };
 }
 
 /**
@@ -559,13 +561,7 @@ export async function ensureBundle(
     return "servable";
   }
   if (!plan.ours) {
-    io.err(
-      staleBundle(
-        plan.dir,
-        stamped,
-        "installed" in plan && plan.installed === true,
-      ),
-    );
+    io.err(staleBundle(plan.dir, stamped, plan.installed));
     return "refused";
   }
 
