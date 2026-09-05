@@ -138,7 +138,15 @@ stale_worktrees() {
     case $current in
       "$wt"|"$wt"/*) continue ;;
     esac
-    mtime=$(stat -c %Y "$wt" 2>/dev/null) || continue
+    if ! mtime=$(stat -c %Y "$wt" 2>/dev/null) &&
+       ! mtime=$(stat -f %m "$wt" 2>/dev/null); then
+      if [ -n "$dry" ]; then
+        echo "would keep (age unavailable): $wt -- could not read worktree age"
+      else
+        echo "housekeeping: kept worktree (age unavailable): $wt -- could not read worktree age"
+      fi
+      continue
+    fi
     age_h=$(( (now - mtime) / 3600 ))
     [ "$age_h" -ge "$worktree_max_age_h" ] || continue
     if [ -n "$dry" ]; then
