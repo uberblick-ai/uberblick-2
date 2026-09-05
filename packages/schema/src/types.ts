@@ -177,6 +177,9 @@ export interface BlockInput {
  */
 export const MAX_DESCRIPTION_LENGTH = 300;
 
+/** How long a person-facing document summary may be. */
+export const MAX_TLDR_LENGTH = 300;
+
 /** The document shapes whose lifecycle the schema records. */
 export const DOCUMENT_KINDS = ["requirement", "decision"] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
@@ -244,6 +247,12 @@ export interface DocMeta {
    * `create_doc` refuses to.
    */
   description: string | null;
+  /**
+   * One or two plain-English sentences for a person opening the document.
+   * Optional for additive consumers; `getMeta` normalizes an unwritten value to
+   * null.
+   */
+  tldr?: string | null;
   /**
    * Draft release-note copy for the work this document records: one short
    * sentence of simple English about the user-visible outcome.

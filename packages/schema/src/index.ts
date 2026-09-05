@@ -2,8 +2,8 @@
  * @uberblick/schema — the keystone package.
  *
  * Owns the Y.Doc layout for an uberblick document:
- *   - `meta`        Y.Map: uuid, title, description, changelog suggestion, tags,
- *                        links-by-UUID, kind, status and internal decision
+ *   - `meta`        Y.Map: uuid, title, description, TL;DR, changelog suggestion,
+ *                        tags, links-by-UUID, kind, status and internal decision
  *                        remove/add levels
  *   - `blocks`      Y.XmlFragment: one Y.XmlElement per block, each holding a
  *                   single Y.XmlText of plain-text source
@@ -47,6 +47,7 @@ export {
   reorderDecisions,
   setChangelogSuggestion,
   setDescription,
+  setTldr,
   setKind,
   setLinks,
   setStatus,
@@ -219,6 +220,7 @@ export {
   INLINE_MARKS,
   LIST_STYLES,
   MAX_DESCRIPTION_LENGTH,
+  MAX_TLDR_LENGTH,
   MAX_LIST_INDENT,
   PROSE_BLOCK_TYPES,
   REQUIREMENT_STATUSES,

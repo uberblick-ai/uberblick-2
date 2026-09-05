@@ -1,9 +1,10 @@
 /**
  * The v0 MCP tool set.
  *
- * Twenty-four tools and no more: create_doc, get_doc, list_docs, search,
+ * Twenty-five tools and no more: create_doc, get_doc, list_docs, search,
  * backlinks, edit_block, insert_block, delete_block, set_tags, set_links,
- * set_title, set_description, set_status, set_changelog_suggestion, archive_doc,
+ * set_title, set_description, set_tldr, set_status, set_changelog_suggestion,
+ * archive_doc,
  * restore_doc, annotate, link_range,
  * export_markdown, sync_status, the four sidebar tools registered from
  * ./sidebar-tools.ts — get_sidebar, pin_doc, unpin_doc, sidebar_group. There is
@@ -42,6 +43,7 @@ import {
   DOCUMENT_KINDS,
   InvalidDocumentLifecycleError,
   MAX_DESCRIPTION_LENGTH,
+  MAX_TLDR_LENGTH,
   REQUIREMENT_STATUSES,
   addDecision,
   addComment,
@@ -67,6 +69,7 @@ import {
   restoreDirectoryEntry,
   setChangelogSuggestion,
   setDescription,
+  setTldr,
   setInlineLink,
   setKind,
   setLinks,
@@ -214,6 +217,15 @@ const DESCRIPTION_NUDGE =
   "This document has no description: call set_description with one or two sentences saying what it is for, so " +
   "list_docs and search can answer for it without anyone opening it.";
 
+/** The expectation carried by every successful block-content mutation. */
+const TLDR_AFTER_CONTENT_CHANGE =
+  "After changing document content, review its TL;DR and call set_tldr when the summary needs to change.";
+
+/** The stronger prompt returned when a changed document has no summary yet. */
+const TLDR_MISSING_NUDGE =
+  "This content change left the document without a TL;DR: call set_tldr with one or two sentences of plain " +
+  "English for a person opening it.";
+
 /**
  * `trim` before the length checks, and the order is the point: it makes both
  * bounds measure the description rather than the whitespace around it. Without
@@ -235,6 +247,22 @@ const descriptionArg = z
     `a description is at most ${MAX_DESCRIPTION_LENGTH} characters — one or two sentences, not a summary`,
   )
   .describe(DESCRIPTION_IS_FOR_CHOOSING);
+
+const tldrArg = z
+  .string({
+    error:
+      "set_tldr requires a `tldr`: one or two sentences of plain English for a person, or null to clear it.",
+  })
+  .trim()
+  .min(1, "a TL;DR cannot be empty or whitespace; pass null to clear it")
+  .max(
+    MAX_TLDR_LENGTH,
+    `a TL;DR is at most ${MAX_TLDR_LENGTH} characters — one or two sentences`,
+  )
+  .nullable()
+  .describe(
+    `One or two sentences of plain English for a person opening the document. At most ${MAX_TLDR_LENGTH} characters; null clears it.`,
+  );
 
 /**
  * What a changelog suggestion is, and how its three states are asked for.
@@ -799,6 +827,12 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     return { description: null, descriptionHint: DESCRIPTION_NUDGE };
   };
 
+  /** A non-blocking reminder returned only after document content changes. */
+  const tldrReview = (replica: Replica): Record<string, unknown> =>
+    getMeta(replica.doc).tldr === null
+      ? { tldr: null, tldrHint: TLDR_MISSING_NUDGE }
+      : { tldrHint: TLDR_AFTER_CONTENT_CHANGE };
+
   /**
    * What a mutating tool owes its caller: the write landed locally, and whether
    * it has reached the hub — which, right after a write, it has not.
@@ -819,6 +853,12 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       ...descriptionGap(replica),
     };
   };
+
+  /** Document-content durability plus the deliberately narrower TL;DR nudge. */
+  const contentDurability = (replica: Replica): Record<string, unknown> => ({
+    ...durability(replica),
+    ...tldrReview(replica),
+  });
 
   /**
    * The same honesty for a call that mutated more than one room.
@@ -866,6 +906,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
         "search; a decision needs a matching `kind`, `status` or `tag` predicate in list_docs. " +
         "Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
+        "When the call seeds at least one block, its answer also carries the non-blocking TL;DR review reminder; " +
+        "a metadata-only create carries no such reminder. " +
         "The write applies to the local replica and syncs in the background.\n\n" +
         "A `title` and a `description` are both REQUIRED here and the call fails without either, creating nothing. " +
         "A title cannot be empty or whitespace: an untitled document cannot be picked out of a listing, and " +
@@ -1166,6 +1208,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         blocks: blocksJson(replica),
         ...(placement === null ? {} : { sidebar: placement }),
         ...durabilityAcross(replica, completed),
+        ...(inputs.length === 0 ? {} : tldrReview(replica)),
       });
     }),
   );
@@ -1175,7 +1218,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     {
       title: "Read a document",
       description:
-        "Read a document's metadata — including its `description`, null when nobody has written one — its blocks " +
+        "Read a document's metadata — including `description` and the person-facing `tldr`, each null when nobody " +
+        "has written one — its blocks " +
         "and its annotation threads. Lifecycle documents include `kind` and their compatible `status`; ordinary " +
         "documents omit both. " +
         LIFECYCLE_RECORDS_STATE +
@@ -1346,6 +1390,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_MEANS +
+        "\n\n" +
+        TLDR_AFTER_CONTENT_CHANGE +
         failureContract("edit_block"),
       inputSchema: strictInput({
         uuid: uuidArg,
@@ -1369,7 +1415,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       return json({
         uuid,
         block: getBlock(replica.doc, block_id),
-        ...durability(replica),
+        ...contentDurability(replica),
       });
     }),
   );
@@ -1386,6 +1432,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
+        "\n\n" +
+        TLDR_AFTER_CONTENT_CHANGE +
         failureContract("insert_block"),
       inputSchema: strictInput({
         uuid: uuidArg,
@@ -1411,7 +1459,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       return json({
         uuid,
         block,
-        ...durability(replica),
+        ...contentDurability(replica),
       });
     }),
   );
@@ -1426,6 +1474,8 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
+        "\n\n" +
+        TLDR_AFTER_CONTENT_CHANGE +
         failureContract("delete_block"),
       inputSchema: strictInput({ uuid: uuidArg, block_id: z.string().min(1) }),
     },
@@ -1433,7 +1483,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       await replicas.settle();
       const replica = requireWritableDoc(uuid);
       deleteBlock(replica.doc, block_id);
-      return json({ uuid, blockId: block_id, ...durability(replica) });
+      return json({ uuid, blockId: block_id, ...contentDurability(replica) });
     }),
   );
 
@@ -1535,6 +1585,30 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const replica = requireWritableDoc(uuid);
       setDescription(replica.doc, description);
       return json({ uuid, description, ...durability(replica) });
+    }),
+  );
+
+  server.registerTool(
+    "set_tldr",
+    {
+      title: "Set or clear a document's TL;DR",
+      description:
+        "Replace the person-facing TL;DR wholesale with one or two sentences of plain English, or pass null to " +
+        "clear it. It is independent of the agent-facing description: writing either leaves the other untouched. " +
+        "The value lives only in the document metadata — discovery, search and Markdown do not carry it.\n\n" +
+        "An empty or whitespace-only string is refused rather than treated as a clear, and an overlong value is " +
+        `refused rather than truncated. The shared limit is ${MAX_TLDR_LENGTH} characters.\n\n` +
+        ARCHIVED_IS_READ_ONLY +
+        "\n\n" +
+        SYNCED_IS_ACKNOWLEDGED +
+        failureContract("set_tldr"),
+      inputSchema: strictInput({ uuid: uuidArg, tldr: tldrArg }),
+    },
+    guarded("set_tldr", async ({ uuid, tldr }) => {
+      await replicas.settle();
+      const replica = requireWritableDoc(uuid);
+      setTldr(replica.doc, tldr);
+      return json({ uuid, tldr, ...durability(replica) });
     }),
   );
 

@@ -4,8 +4,8 @@
  * A document is one Y.Doc (room name = document UUID) with exactly four
  * top-level shared types:
  *
- *   - `meta`        Y.Map     — uuid, title, description, changelog suggestion,
- *                              tags, links, kind, status and decision
+ *   - `meta`        Y.Map     — uuid, title, description, TL;DR, changelog
+ *                              suggestion, tags, links, kind, status and decision
  *                              remove/add levels
  *   - `blocks`      Y.XmlFragment — one Y.XmlElement per block
  *   - `annotations` Y.Map     — threadId → that thread's own Y.Map
@@ -177,11 +177,12 @@ function decisionIsVisible(ydoc: Y.Doc, uuid: string): boolean {
  * are the same fact — nobody has said what this document is for — and one shape
  * for it keeps every reader from having to test for both.
  */
-export function getMeta(ydoc: Y.Doc): DocMeta {
+export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
   const meta = getMetaMap(ydoc);
   const uuid = meta.get("uuid");
   const title = meta.get("title");
   const description = meta.get("description");
+  const tldr = meta.get("tldr");
   const lifecycle = readDocumentLifecycle(meta.get("kind"), meta.get("status"));
   return {
     uuid: typeof uuid === "string" ? uuid : "",
@@ -189,6 +190,7 @@ export function getMeta(ydoc: Y.Doc): DocMeta {
     tags: readStringArray(meta.get("tags")),
     description:
       typeof description === "string" && description !== "" ? description : null,
+    tldr: typeof tldr === "string" && tldr !== "" ? tldr : null,
     ...readChangelogSuggestion(meta.get("changelogSuggestion")),
     ...lifecycle,
     links: effectiveLinks(ydoc, readStringArray(meta.get("links"))),
@@ -236,6 +238,20 @@ export function setDescription(ydoc: Y.Doc, description: string): void {
   const meta = getMetaMap(ydoc);
   ydoc.transact(() => {
     meta.set("description", description);
+  });
+}
+
+/**
+ * Replace or clear the person-facing summary wholesale.
+ *
+ * Length is enforced by write boundaries through `MAX_TLDR_LENGTH`, not here.
+ * A clear stores null so it competes with concurrent whole-value writes like
+ * the document's other metadata rather than behaving like key deletion.
+ */
+export function setTldr(ydoc: Y.Doc, tldr: string | null): void {
+  const meta = getMetaMap(ydoc);
+  ydoc.transact(() => {
+    meta.set("tldr", tldr);
   });
 }
 

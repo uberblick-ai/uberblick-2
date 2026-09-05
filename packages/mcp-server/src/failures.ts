@@ -114,6 +114,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "set_links",
   "set_title",
   "set_description",
+  "set_tldr",
   "set_status",
   "set_changelog_suggestion",
   "archive_doc",

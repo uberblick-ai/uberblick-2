@@ -35,6 +35,7 @@ import {
   setLinks,
   setStatus,
   setTags,
+  setTldr,
   setTitle,
 } from "@uberblick/schema";
 import * as Y from "yjs";
@@ -189,6 +190,13 @@ describe("docFingerprint", () => {
     const doc = source();
     const copy = replicate(doc);
     setDescription(doc, "what this note is for");
+    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+  });
+
+  it("changes when only the TL;DR changes", () => {
+    const doc = source();
+    const copy = replicate(doc);
+    setTldr(doc, "A short person-facing summary.");
     expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
   });
 
