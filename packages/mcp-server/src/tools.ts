@@ -116,6 +116,7 @@ import {
   activeTagCatalog,
   resolveTagFilter,
   resolveTagSelectors,
+  tagCatalogComplete,
 } from "./tag-catalog.js";
 
 function json(payload: unknown): CallToolResult {
@@ -924,9 +925,13 @@ export function registerTools(
     {
       title: "List assignable tags",
       description:
-        "The complete active workspace tag catalog, in deterministic name order. Each entry carries the stable " +
+        "The active workspace tag catalog, in deterministic name order. Each entry carries the stable " +
         "canonical `id` documents store and its current display `name`. Retired entries are absent here but remain " +
-        "visible, marked retired, on documents that still carry them. MCP cannot curate this catalog." +
+        "visible, marked retired, on documents that still carry them. MCP cannot curate this catalog.\n\n" +
+        "`complete` says whether this is the whole workspace vocabulary. It is false while a configured hub has not " +
+        "delivered the catalog room to this replica: what is listed is then a local copy that may be missing curated " +
+        "entries, and a tag value this replica has never seen is refused rather than assigned. `hub` says where that " +
+        "connection stands." +
         failureContract("list_tags"),
       inputSchema: strictInput({}),
     },
@@ -934,7 +939,7 @@ export function registerTools(
       await replicas.settle();
       return json({
         workspace: replicas.config.workspaceId,
-        complete: true,
+        complete: tagCatalogComplete(replicas),
         tags: activeTagCatalog(tagCatalog()).map(({ id, name }) => ({ id, name })),
         hub: replicas.sync.state(),
       });
@@ -1069,7 +1074,7 @@ export function registerTools(
 
       // Before allocating a document uuid: an invalid tag selection is an
       // all-or-nothing refusal, not the first stage of a partial create.
-      const tagIds = resolveTagSelectors(tagCatalog(), tags ?? []);
+      const tagIds = resolveTagSelectors(replicas, tags ?? []);
 
       // Resolved before a uuid exists, because this is the one part of the call
       // that can still be all-or-nothing: an unknown group must fail having
@@ -1357,7 +1362,8 @@ export function registerTools(
         "as approximate, and expect either to be missing on a stub written before they existed.\n\n" +
         "Lifecycle documents include `kind` and their compatible `status`; ordinary documents omit both. " +
         "The optional `kind` and `status` filters are answered from those directory stubs without opening a " +
-        "document room, and combine with `tag`. A tag filter accepts a catalog id or exact current name. Each " +
+        "document room, and combine with `tag`. A tag filter accepts a catalog id or exact current name; a value " +
+        "this catalog does not have is refused rather than answered with an empty listing. Each " +
         "returned assignment carries its canonical id, current name (or null while unresolved), and active, retired " +
         "or unresolved state. " +
         LIFECYCLE_RECORDS_STATE +
@@ -1373,7 +1379,7 @@ export function registerTools(
       await replicas.settle();
       const hasPredicate = tag !== undefined || kind !== undefined || status !== undefined;
       const catalog = tagCatalog();
-      const tagId = tag === undefined ? null : resolveTagFilter(catalog, tag);
+      const tagId = tag === undefined ? null : resolveTagFilter(replicas, tag);
       const entries = listDirectory(replicas.directory().doc, {
         includeDeleted: include_deleted ?? false,
       }).filter(
@@ -1381,9 +1387,8 @@ export function registerTools(
           const assignments = readDirectoryTags(entry, catalog);
           return (
             (hasPredicate || entry.kind !== "decision") &&
-            (tag === undefined ||
-              (tagId !== null &&
-                assignments.some((assignment) => assignment.id === tagId))) &&
+            (tagId === null ||
+              assignments.some((assignment) => assignment.id === tagId)) &&
             (kind === undefined || entry.kind === kind) &&
             (status === undefined || entry.status === status)
           );
@@ -1422,7 +1427,8 @@ export function registerTools(
         "Every hit carries the document's `description` — null where nobody has written one — so relevance can be " +
         "judged from the result list rather than by opening each document in turn. Its tag assignments carry " +
         "canonical ids, current names and retirement state. Pass `tag` as a catalog id or exact current name to " +
-        "restrict hits to that assignment." +
+        "restrict hits to that assignment; a value this catalog does not have is refused rather than answered with " +
+        "no hits." +
         failureContract("search"),
       inputSchema: strictInput({
         query: z
@@ -1438,11 +1444,8 @@ export function registerTools(
     guarded("search", async ({ query, limit, tag }) => {
       await replicas.settle();
       const catalog = tagCatalog();
-      const tagId = tag === undefined ? undefined : resolveTagFilter(catalog, tag);
-      const hits =
-        tag !== undefined && tagId === null
-          ? []
-          : replicas.store.search(query, limit ?? 20, tagId ?? undefined);
+      const tagId = tag === undefined ? undefined : resolveTagFilter(replicas, tag);
+      const hits = replicas.store.search(query, limit ?? 20, tagId);
       return json({
         query,
         ...(tag === undefined ? {} : { tag }),
@@ -1613,7 +1616,7 @@ export function registerTools(
       await replicas.settle();
       const replica = requireWritableDoc(uuid);
       const tagIds = resolveTagSelectors(
-        tagCatalog(),
+        replicas,
         tags,
         documentTags(replica),
       );

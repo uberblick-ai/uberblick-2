@@ -342,6 +342,29 @@ export function hydrationRecovery(hubStatus: string): {
 }
 
 /**
+ * What to do about an invalid tag value on a replica whose catalog has not
+ * arrived.
+ *
+ * The class answers the same question an unhydrated room asks — can this hub
+ * still deliver it? — so it comes from {@link hydrationRecovery} rather than
+ * being classified twice. The sentence is the part that differs: the table's
+ * "call list_tags" is advice that loops here, because the catalog `list_tags`
+ * would answer from is the one that has not arrived.
+ */
+export function incompleteCatalogRecovery(hubStatus: string): {
+  recoveryClass: RecoveryClass;
+  recovery: string;
+} {
+  return {
+    recoveryClass: hydrationRecovery(hubStatus).recoveryClass,
+    recovery:
+      "The workspace tag catalog has not reached this replica, so this may be a real workspace tag and list_tags " +
+      "cannot name it either — it answers `complete: false` while that is so. Nothing was written. sync_status says " +
+      "whether the catalog can still arrive; until it has, only a value this replica already holds can be used.",
+  };
+}
+
+/**
  * Every code this server can answer with, the unclassified fallback included.
  * The contract test enumerates it, so a code added without a recovery class is
  * a test failure rather than a surprise for an agent.

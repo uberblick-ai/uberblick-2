@@ -677,9 +677,9 @@ export class Replicas {
         ) {
           continue;
         }
+        const meta = getMeta(document.doc);
+        if (meta.uuid === "") continue;
         try {
-          const meta = getMeta(document.doc);
-          if (meta.uuid === "") continue;
           if (
             getDirectoryEntry(this.directory().doc, meta.uuid)?.deleted === true
           ) {
@@ -689,11 +689,11 @@ export class Replicas {
           this.indexRows(document, meta);
         } catch (error) {
           // Catalog state is authoritative and logged; the index is only a
-          // cache. A later settle or explicit rebuild retries the derivation.
-          log.warn("failed to re-index a document after a tag catalog change", {
-            room: document.room,
-            error: String(error),
-          });
+          // cache. Nothing else would come back for this document — the
+          // catalog update is already applied, so no later settle replays it —
+          // so it joins the paced reconciliation queue that drains one entry
+          // per settle, the same one a refused stub reconciliation uses.
+          this.recordStubFailure(meta.uuid, error);
         }
       }
       return;

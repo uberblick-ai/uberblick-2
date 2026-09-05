@@ -10,6 +10,7 @@ import {
   seedTagCatalog,
 } from "@uberblick/schema";
 import type { TagAssignment, TagCatalogEntry } from "@uberblick/schema";
+import { ToolError, incompleteCatalogRecovery } from "./failures.js";
 import { log } from "./log.js";
 import type { Replicas } from "./replica.js";
 
@@ -48,14 +49,71 @@ export function activeTagCatalog(catalog: Y.Doc): TagCatalogEntry[] {
   return listTagCatalog(catalog).filter((entry) => entry.state === "active");
 }
 
-/** Resolve an id or exact current name for a discovery filter. */
+/**
+ * Whether this replica may call the catalog it holds the whole workspace one.
+ *
+ * With no hub configured this replica *is* the workspace, so what it holds is
+ * all there is. With a hub, the seeded examples are only this replica's guess
+ * until the settings room has actually exchanged state with it — a curated
+ * vocabulary lives there, and answering `complete: true` before it arrives
+ * tells an agent a false vocabulary is the whole one.
+ *
+ * `isRoomQuiet` is the conservative side of that question: it cannot be true
+ * before the room synced, so this never dresses an unhydrated catalog up as a
+ * complete one. It also reads false for the moment a local seed is still on
+ * its way to the hub, which understates completeness rather than overstating
+ * it — and every read settles first, so that moment is not one an agent waits
+ * in.
+ */
+export function tagCatalogComplete(replicas: Replicas): boolean {
+  return (
+    !replicas.sync.enabled || replicas.isRoomQuiet(replicas.settings().room)
+  );
+}
+
+/**
+ * Refuse a whole call for tag values this catalog does not have.
+ *
+ * The recovery depends on what this replica knows. With the catalog complete,
+ * the failure table's "call list_tags" is the whole answer. Where the settings
+ * room has not reached this replica, `list_tags` cannot name the value either
+ * — it may be a real workspace tag — so the failure says that instead of
+ * sending the caller round a loop that cannot help.
+ */
+function refuseTagValues(
+  replicas: Replicas,
+  unknown: string[],
+  retired: string[],
+): never {
+  const { message } = new InvalidTagAssignmentError(unknown, retired);
+  throw new ToolError("invalid_tag_assignment", message, {
+    unknown,
+    retired,
+    ...(tagCatalogComplete(replicas)
+      ? {}
+      : incompleteCatalogRecovery(replicas.sync.state().status)),
+  });
+}
+
+/**
+ * Resolve an id or exact current name for a discovery filter.
+ *
+ * A selector nothing resolves is refused rather than answered with an empty
+ * result: the same value refuses on a write, and an empty listing is
+ * indistinguishable from the honest "no document carries this tag".
+ */
 export function resolveTagFilter(
-  catalog: Y.Doc,
+  replicas: Replicas,
   selector: string,
-): string | null {
+): string {
+  const catalog = replicas.settings().doc;
   const byIdentity = getTagCatalogEntry(catalog, selector);
   if (byIdentity !== null) return byIdentity.id;
-  return listTagCatalog(catalog).find((entry) => entry.name === selector)?.id ?? null;
+  const byName = listTagCatalog(catalog).find(
+    (entry) => entry.name === selector,
+  );
+  if (byName !== undefined) return byName.id;
+  return refuseTagValues(replicas, [selector], []);
 }
 
 /**
@@ -66,10 +124,11 @@ export function resolveTagFilter(
  * why reads return canonical ids beside display names.
  */
 export function resolveTagSelectors(
-  catalog: Y.Doc,
+  replicas: Replicas,
   selectors: readonly string[],
   existing: readonly TagAssignment[] = [],
 ): string[] {
+  const catalog = replicas.settings().doc;
   const entries = listTagCatalog(catalog);
   const activeNames = new Map(
     entries
@@ -114,7 +173,7 @@ export function resolveTagSelectors(
   }
 
   if (unknown.length > 0 || retired.length > 0) {
-    throw new InvalidTagAssignmentError(unknown, retired);
+    refuseTagValues(replicas, unknown, retired);
   }
   return resolved;
 }

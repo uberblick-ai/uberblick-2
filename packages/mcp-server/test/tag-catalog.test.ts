@@ -1,11 +1,14 @@
 /** The MCP server's read-only, catalog-aware tag boundary. */
 
 import { afterEach, describe, expect, it } from "vitest";
+import * as Y from "yjs";
 import type { Hub } from "@uberblick/hub";
 import {
   EXAMPLE_TAGS,
+  createTagCatalogEntry,
   getDirectoryEntry,
   retireTagCatalogEntry,
+  setTags,
   settingsRoom,
 } from "@uberblick/schema";
 import {
@@ -39,6 +42,8 @@ const MCP = {
   name: EXAMPLE_TAGS[2].name,
   state: "active",
 } as const;
+/** A catalog identity no replica in these tests has an entry for. */
+const OFF_CATALOG = "3f5c0b1e-6f6a-4a2b-9c1d-0e7a5b3c9d21";
 
 async function local(databasePath = tempDatabasePath()): Promise<Rig> {
   const rig = await startServer(testConfig({ databasePath }));
@@ -117,6 +122,70 @@ describe("the workspace tag catalog", () => {
     );
   });
 
+  it("never claims a catalog the hub has not delivered is the complete one", async () => {
+    const rig = await startServer(
+      testConfig({ authSecret: TEST_SECRET, hubUrl: hubUrl(1) }),
+    );
+    rigs.push(rig);
+
+    const listed = await rig.ok("list_tags");
+    expect(listed).toMatchObject({ complete: false });
+    expect(listed.hub.status).not.toBe("connected");
+
+    // The curated value this replica has never seen is not an argument to
+    // correct: the recovery must not send the caller to a list_tags that is
+    // missing the same entry.
+    const refused = await rig.call("create_doc", {
+      title: "Must not exist",
+      description: "A workspace tag this replica may simply not have yet.",
+      tags: ["release-notes"],
+    });
+    expect(refused.payload).toMatchObject({
+      error: "invalid_tag_assignment",
+      unknown: ["release-notes"],
+      applied: false,
+      partial: false,
+    });
+    expect(refused.payload.recovery).toContain("has not reached this replica");
+    expect((await rig.ok("list_docs")).docs).toEqual([]);
+  });
+
+  it("keeps a filtered search hit when a second identity for one name converges", async () => {
+    const rig = await local();
+    // Sorted: the peer's identity is the one the merged entry canonicalises on,
+    // so the document's stored id is an alias and its derived index rows have
+    // to be re-derived against the arriving catalog.
+    const mine = "ffffffff-0000-4000-8000-000000000001";
+    const theirs = "11111111-0000-4000-8000-000000000001";
+    createTagCatalogEntry(rig.instance.replicas.settings().doc, "collision", mine);
+    const created = await rig.ok("create_doc", {
+      title: "Converging identities",
+      description: "A document tagged before the same name arrived from a peer.",
+      tags: [mine],
+      blocks: [{ type: "paragraph", text: "collision aardvark" }],
+    });
+
+    const peer = new Y.Doc();
+    createTagCatalogEntry(peer, "collision", theirs);
+    rig.instance.store.appendUpdate(
+      settingsRoom(WORKSPACE),
+      Y.encodeStateAsUpdate(peer),
+      "remote",
+    );
+    peer.destroy();
+
+    expect((await rig.ok("list_tags")).tags).toContainEqual({
+      id: theirs,
+      name: "collision",
+    });
+    for (const tag of ["collision", mine, theirs]) {
+      const hits = await rig.ok("search", { query: "aardvark", tag });
+      expect(hits.hits.map((hit: { uuid: string }) => hit.uuid)).toEqual([
+        created.uuid,
+      ]);
+    }
+  });
+
   it("resolves ids and names through every structured read, filter and export", async () => {
     const rig = await local();
     const created = await rig.ok("create_doc", {
@@ -147,6 +216,21 @@ describe("the workspace tag catalog", () => {
       expect(searched.hits).toHaveLength(1);
       expect(searched.hits[0]).toMatchObject({ uuid: created.uuid });
       expect(searched.hits[0].tags).toEqual([AUTH, MCP]);
+    }
+
+    // A selector the catalog does not have is refused, not answered with an
+    // empty result a caller cannot tell from "nothing carries this tag".
+    for (const call of [
+      rig.call("list_docs", { tag: "mpc" }),
+      rig.call("search", { query: "capybara", tag: "mpc" }),
+    ]) {
+      const refused = await call;
+      expect(refused.payload).toMatchObject({
+        error: "invalid_tag_assignment",
+        unknown: ["mpc"],
+        retired: [],
+        recoveryClass: "manual",
+      });
     }
 
     const exported = await rig.ok("export_markdown", { uuid: created.uuid });
@@ -192,6 +276,19 @@ describe("the workspace tag catalog", () => {
       (await rig.ok("set_tags", { uuid: keeper.uuid, tags: [MCP.id] })).tags,
     ).toEqual([MCP]);
 
+    // An identity assigned by a client whose catalog this replica has not
+    // received: unresolved rather than invalid, so passing it back preserves
+    // the assignment nobody here can name.
+    const unresolved = { id: OFF_CATALOG, name: null, state: "unresolved" };
+    setTags(rig.instance.replicas.replica(keeper.uuid).doc, [
+      MCP.id,
+      OFF_CATALOG,
+    ]);
+    expect(
+      (await rig.ok("set_tags", { uuid: keeper.uuid, tags: [OFF_CATALOG] }))
+        .tags,
+    ).toEqual([unresolved]);
+
     const beforeDoc = await rig.ok("get_doc", { uuid: target.uuid });
     const beforeStub = getDirectoryEntry(
       rig.instance.replicas.directory().doc,
@@ -200,7 +297,7 @@ describe("the workspace tag catalog", () => {
     const beforeIndex = rig.instance.store.search("armadillo", 10);
     const refused = await rig.call("set_tags", {
       uuid: target.uuid,
-      tags: ["missing", AUTH.id, AUTH.name, "also-missing"],
+      tags: ["missing", AUTH.id, AUTH.name, "also-missing", OFF_CATALOG],
     });
 
     expect(refused.isError).toBe(true);
@@ -208,7 +305,9 @@ describe("the workspace tag catalog", () => {
       error: "invalid_tag_assignment",
       applied: false,
       partial: false,
-      unknown: ["missing", "also-missing"],
+      // The unresolved identity the keeper preserves is still unknown here:
+      // only a document that already carries one may keep it.
+      unknown: ["missing", "also-missing", OFF_CATALOG],
       retired: [AUTH.id, AUTH.name],
       recoveryClass: "manual",
     });
