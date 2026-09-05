@@ -2,6 +2,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 const usage = "usage: run-codex-role.mjs <role> <run-id> <worktree> <scratch>";
@@ -25,7 +26,25 @@ const prompt = join(scratch, `${runId}.prompt`);
 const log = join(scratch, `${runId}.log`);
 const last = join(scratch, `${runId}.last`);
 const statusFile = join(scratch, `${runId}.status`);
+const deadlineFile = join(scratch, `${runId}.deadline`);
+const watchdogReadyFile = join(scratch, `${runId}.watchdog-ready`);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const FORWARDED = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"];
+const RUN_DEADLINE_MS = 3 * 60 * 60 * 1000;
+const GROUP_TERMINATION_GRACE_MS = 200;
+const GROUP_REAP_WAIT_MS = 1_800;
+const CLAIM_LOOKBACK_MS = 30 * 60 * 1000;
+
+function configuredDeadline() {
+	const value = process.env.CODEX_RUNNER_DEADLINE_MS;
+	if (value === undefined) return RUN_DEADLINE_MS;
+	const parsed = Number(value);
+	if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+		process.stderr.write("CODEX_RUNNER_DEADLINE_MS must be a positive integer.\n");
+		process.exit(2);
+	}
+	return parsed;
+}
 
 function isDirectory(path) {
 	try {
@@ -50,7 +69,10 @@ if (codexCheck.error?.code === "ENOENT") {
 
 rmSync(statusFile, { force: true });
 rmSync(last, { force: true });
+rmSync(deadlineFile, { force: true });
+rmSync(watchdogReadyFile, { force: true });
 const startedAt = new Date();
+const runDeadlineMs = configuredDeadline();
 
 const codexArgs = ["exec", "-C", worktree];
 if (role === "implementer") {
@@ -65,22 +87,79 @@ if (role === "implementer") {
 }
 codexArgs.push("-o", last, "-");
 
-// The shell and Codex share a detached process group, while this Node process
-// remains its supervisor. The shell writes the sentinel only after Codex
-// returns, so a kill of the whole run group cannot masquerade as an exit code.
+// This watchdog shares the detached run group but ignores its graceful
+// signals. It therefore survives long enough to escalate a deadline even when
+// the supervisor itself has disappeared; normal completion kills and reaps it.
+const watchdogSource = `
+const { writeFileSync } = require("node:fs");
+const [readyFile, deadlineFile, deadlineMs, graceMs, groupId] = process.argv.slice(1);
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"]) {
+	process.on(signal, () => {});
+}
+writeFileSync(readyFile, "ready\\n", { flag: "wx", mode: 0o600 });
+setTimeout(() => {
+	try {
+		writeFileSync(deadlineFile, "expired\\n", { flag: "wx", mode: 0o600 });
+	} catch {}
+	try {
+		process.kill(-Number(groupId), "SIGTERM");
+	} catch {}
+	setTimeout(() => {
+		try {
+			process.kill(-Number(groupId), "SIGKILL");
+		} catch {
+			process.exit(0);
+		}
+	}, Number(graceMs));
+}, Number(deadlineMs));
+`;
+
+// The shell, Codex and watchdog share one detached process group, while this
+// Node process remains its supervisor. The shell writes the sentinel only
+// after Codex returns and the watchdog is gone, so termination cannot
+// masquerade as a normal exit or leave deadline machinery behind.
 const command = `
 status_file=$1
 prompt=$2
 log=$3
-shift 3
+ready_file=$4
+deadline_file=$5
+watchdog_node=$6
+watchdog_source=$7
+deadline_ms=$8
+grace_ms=$9
+shift 9
+"$watchdog_node" -e "$watchdog_source" "$ready_file" "$deadline_file" "$deadline_ms" "$grace_ms" "$$" &
+watchdog=$!
+while [ ! -f "$ready_file" ]; do
+	kill -0 "$watchdog" 2>/dev/null || exit 125
+done
 "$@" < "$prompt" > "$log" 2>&1
 status=$?
+kill -KILL "$watchdog" 2>/dev/null || :
+wait "$watchdog" 2>/dev/null || :
+rm -f "$ready_file"
 (umask 077 && printf "%s\\n" "$status" > "$status_file") || exit 126
 exit "$status"
 `;
 const run = spawn(
 	"/bin/sh",
-	["-c", command, "run-codex-role", statusFile, prompt, log, "codex", ...codexArgs],
+	[
+		"-c",
+		command,
+		"run-codex-role",
+		statusFile,
+		prompt,
+		log,
+		watchdogReadyFile,
+		deadlineFile,
+		process.execPath,
+		watchdogSource,
+		String(runDeadlineMs),
+		String(GROUP_TERMINATION_GRACE_MS),
+		"codex",
+		...codexArgs,
+	],
 	{
 		cwd: root,
 		detached: true,
@@ -88,10 +167,49 @@ const run = spawn(
 	},
 );
 
+function signalGroup(signal) {
+	if (run.pid === undefined) return false;
+	try {
+		process.kill(-run.pid, signal);
+		return true;
+	} catch (error) {
+		if (error?.code === "ESRCH") return false;
+		throw error;
+	}
+}
+
+function groupExists() {
+	return signalGroup(0);
+}
+
+async function waitForGroupExit() {
+	const limit = Date.now() + GROUP_REAP_WAIT_MS;
+	while (groupExists() && Date.now() < limit) await delay(20);
+}
+
+let stopPromise;
+const signalHandlers = new Map();
+for (const signal of FORWARDED) {
+	const handler = () => {
+		if (stopPromise !== undefined) return;
+		stopPromise = (async () => {
+			signalGroup(signal);
+			await delay(GROUP_TERMINATION_GRACE_MS);
+			signalGroup("SIGKILL");
+			await waitForGroupExit();
+		})();
+	};
+	signalHandlers.set(signal, handler);
+	process.on(signal, handler);
+}
+
 const completion = await new Promise((resolve) => {
 	run.once("error", (error) => resolve({ error }));
 	run.once("close", (code, signal) => resolve({ code, signal }));
 });
+if (stopPromise !== undefined) await stopPromise;
+for (const [signal, handler] of signalHandlers) process.off(signal, handler);
+if (existsSync(deadlineFile)) await waitForGroupExit();
 const duration = Math.max(0, Math.round((Date.now() - startedAt.getTime()) / 1000));
 
 function removeWorktree() {
@@ -105,7 +223,7 @@ function removeWorktree() {
 }
 
 let unreadableSentinel = false;
-if (existsSync(statusFile)) {
+if (stopPromise === undefined && !existsSync(deadlineFile) && existsSync(statusFile)) {
 	const statusText = readFileSync(statusFile, "utf8").trim();
 	if (!/^(?:0|[1-9][0-9]{0,2})$/.test(statusText) || Number(statusText) > 255) {
 		unreadableSentinel = true;
@@ -129,12 +247,13 @@ function claimState() {
 	const repo = repoResult.stdout.trim();
 	if (!repo) return "could not be determined";
 
+	const since = new Date(startedAt.getTime() - CLAIM_LOOKBACK_MS).toISOString();
 	const commentsResult = spawnSync(
 		"gh",
 		[
 			"api",
 			"--paginate",
-			`repos/${repo}/issues/comments?since=${startedAt.toISOString()}&per_page=100`,
+			`repos/${repo}/issues/comments?since=${since}&per_page=100`,
 			"--jq",
 			".[].body",
 		],
@@ -153,6 +272,21 @@ function claimState() {
 }
 
 const state = claimState();
+if (existsSync(deadlineFile)) {
+	await new Promise((resolve) =>
+		process.stdout.write(
+			`Codex run ${runId} (${role}) reached its deadline after ${duration}s; durable claim: ${state}.\n` +
+				`Log preserved at ${log}.\n`,
+			resolve,
+		),
+	);
+	process.stdout.write(
+		role === "implementation-reviewer"
+			? `Parent worktree remains at ${worktree}; this reviewer did not own it.\n`
+			: `Worktree preserved and registered at ${worktree} because the run reached its deadline.\n`,
+	);
+	process.exit(1);
+}
 const sentinelDetail = unreadableSentinel ? "completion sentinel unreadable; " : "";
 await new Promise((resolve) =>
 	process.stdout.write(
