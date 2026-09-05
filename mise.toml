@@ -118,6 +118,10 @@ description = "Build a versioned, checkout-free CLI and web archive"
 usage = 'arg "<version>" help="Release version, for example 0.1.0"'
 run = 'node scripts/build-install-payload.mjs "${usage_version?}"'
 
+[tasks.publish-homebrew-release]
+description = "Publish a version tag's payload and generated Homebrew formula; add --dry-run to inspect"
+run = "node scripts/publish-homebrew-release.mjs"
+
 # hub + web only. The MCP server is a stdio process spawned by its client
 # (Claude Code et al.), so it is not part of the dev loop; use `mise run mcp`
 # for a standalone smoke test.
