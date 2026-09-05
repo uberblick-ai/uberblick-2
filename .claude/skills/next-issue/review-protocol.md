@@ -26,7 +26,7 @@ completion comments. A `Round: 2` of CLAUDE.md's required pair also carries one
 concrete unresolved risk; a package path is neither, and without that line the
 round is not dispatched. One transport per *reviewer* runtime — the command
 is chosen by the runtime the round must run on, not by the caller's, so a
-same-runtime round (a `--codex` integrator on a Codex-authored PR) uses the
+same-runtime round (a `--model codex` integrator on a Codex-authored PR) uses the
 same two commands. Both run from the parent's own worktree, named explicitly
 for Codex instead of inherited from the shell, and detached (a foreground shell
 call is killed at ten minutes), with the prompt read from a file and the log

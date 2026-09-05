@@ -121,3 +121,8 @@ non-blocking. Skip routine corpus inventories, “appropriate” ratings and
 undefined time/token totals. Clean and self-check outcomes remain in the issue's
 handoff; discussion posts alone are not a denominator for challenge effectiveness.
 Then stop.
+
+End the run with the launcher's one line, and nothing after it:
+`Worked issue-preparer: issue #N — <outcome>.` — the issue this run claimed and,
+in a few words, what became of it (`ready`, `split into #a and #b`, `parked as
+needs-decision`, `closed wontfix`). It reports; GitHub records.

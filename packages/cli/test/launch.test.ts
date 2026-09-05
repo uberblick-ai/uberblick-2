@@ -39,6 +39,8 @@ function rig(options: {
   refresh?: { detail: string; retry: boolean } | null;
   refreshes?: Array<{ detail: string; retry: boolean } | null>;
   probes?: number[];
+  probeOutput?: string;
+  linkBase?: string | null;
   sessions?: SessionResult[];
   waits?: Array<NodeJS.Signals | null>;
 } = {}) {
@@ -57,6 +59,7 @@ function rig(options: {
   };
   const services: LaunchServices = {
     root: REPO_ROOT,
+    linkBase: options.linkBase ?? null,
     loadData: () => data,
     preflight(runtime, adapter) {
       seen.preflight.push({ runtime, adapter });
@@ -69,7 +72,7 @@ function rig(options: {
     },
     async runProbe(command) {
       seen.probes.push(command);
-      return probes.shift() ?? 0;
+      return { status: probes.shift() ?? 0, output: options.probeOutput ?? "" };
     },
     async runSession(role, runtime) {
       seen.sessions.push({ role, runtime });
@@ -262,12 +265,12 @@ const ready = setInterval(() => {
     expect(touched).toBe(false);
   });
 
-  it("takes role defaults and explicit selectors from the launch interface", async () => {
+  it("takes role defaults and an explicit --model from the launch interface", async () => {
     for (const [argv, expected] of [
       [["issue-preparer"], ["issue-preparer", "claude"]],
       [["implementer"], ["implementer", "codex"]],
-      [["integrator", "--codex"], ["integrator", "codex"]],
-      [["implementer", "--claude"], ["implementer", "claude"]],
+      [["integrator", "--model", "codex"], ["integrator", "codex"]],
+      [["implementer", "--model", "claude"], ["implementer", "claude"]],
     ] as const) {
       const current = rig();
       expect(await launchCommand([...argv], current.io, current.services)).toBe(130);
@@ -278,39 +281,80 @@ const ready = setInterval(() => {
           adapter: `.${expected[1]}/agents/${expected[0]}.${expected[1] === "claude" ? "md" : "toml"}`,
         },
       ]);
+      expect(current.stdout()).toBe(`ub launch: ${expected[0]} on ${expected[1]}\n`);
     }
   });
 
-  it("refuses internal roles and contradictory selectors before a child starts", async () => {
+  it("refuses internal roles and an unknown --model before a child starts", async () => {
     for (const argv of [
       ["implementation-reviewer"],
       ["issue-adversary"],
-      ["implementer", "--codex", "--claude"],
+      ["implementer", "--model", "gpt"],
+      ["implementer", "--model"],
+      ["implementer", "--codex"],
       ["implementer", "--unknown"],
     ]) {
       const current = rig();
       expect(await launchCommand(argv, current.io, current.services)).toBe(2);
       expect(current.seen.sessions).toEqual([]);
-      expect(current.stderr()).toMatch(/entry role|choose only one|Unknown option/);
+      expect(current.stderr()).toMatch(/entry role|unknown --model|Unknown option|argument missing/);
     }
   });
 
-  it("relaunches immediately after work and idles only on the role's exact sentinel", async () => {
+  it("prints one condensed line per session and idles on the role's own reason", async () => {
     const worked = rig({
-      sessions: [result({ lastLine: "Done: implementer codex run" }), result({ interrupted: "SIGTERM" })],
+      sessions: [
+        result({ lastLine: "Worked implementer: issue #877 — opened PR #881." }),
+        result({ lastLine: "Worked implementer: issue #12 — parked for owner decision." }),
+        result({ interrupted: "SIGTERM" }),
+      ],
     });
     expect(await launchCommand(["implementer"], worked.io, worked.services)).toBe(143);
-    expect(worked.seen.sessions).toHaveLength(2);
     expect(worked.seen.waits).toEqual([]);
+    expect(worked.stdout()).toContain("work: issue #877 — opened PR #881\n");
+    expect(worked.stdout()).toContain("work: issue #12 — parked for owner decision\n");
+
+    const unreported = rig({
+      sessions: [
+        result({ lastLine: "still waiting for review", transcript: "/tmp/session.log" }),
+        result({ interrupted: "SIGTERM" }),
+      ],
+    });
+    expect(await launchCommand(["implementer"], unreported.io, unreported.services)).toBe(143);
+    expect(unreported.seen.waits).toEqual([]);
+    expect(unreported.stdout()).toContain(
+      "work: implementer session reported no outcome; transcript at /tmp/session.log\n",
+    );
 
     const empty = rig({
-      sessions: [result({ lastLine: "No eligible implementer work: queue empty." })],
+      sessions: [result({ lastLine: "No eligible implementer work: implementation lanes busy." })],
       waits: ["SIGINT"],
     });
     expect(await launchCommand(["implementer"], empty.io, empty.services)).toBe(130);
-    expect(empty.seen.sessions).toHaveLength(1);
     expect(empty.seen.waits).toEqual([30 * 60 * 1_000]);
-    expect(empty.stdout()).toMatch(/is idle/);
+    expect(empty.stdout()).toContain("work: implementation lanes busy; will idle for 30min\n");
+  });
+
+  it("links item numbers only where the terminal takes a hyperlink", async () => {
+    const linked = rig({
+      linkBase: "https://github.com/uberblick-ai/uberblick-2",
+      sessions: [result({ lastLine: "Worked integrator: PR #881 — merged." })],
+      waits: ["SIGINT"],
+      probes: [0, 1],
+    });
+    expect(await launchCommand(["integrator"], linked.io, linked.services)).toBe(130);
+    expect(linked.stdout()).toContain(
+      "\u001b]8;;https://github.com/uberblick-ai/uberblick-2/issues/881\u0007#881\u001b]8;;\u0007",
+    );
+
+    const plain = rig({
+      sessions: [result({ lastLine: "Worked integrator: PR #881 — merged." })],
+      waits: ["SIGINT"],
+      probes: [0, 1],
+    });
+    expect(await launchCommand(["integrator"], plain.io, plain.services)).toBe(130);
+    expect(plain.stdout()).toContain("work: PR #881 — merged\n");
+    expect(plain.stdout()).not.toContain("\u001b");
   });
 
   it("uses the over-inclusive probe without turning it into queue policy", async () => {
@@ -320,24 +364,66 @@ const ready = setInterval(() => {
       expect(current.seen.sessions).toEqual([]);
       expect(current.seen.waits).toEqual([30 * 60 * 1_000]);
       expect(current.seen.probes[0]).toEqual(["sh", "scripts/probe-work.sh", "integrator"]);
+      expect(current.stdout()).toMatch(/will idle for 30min/);
     }
   });
 
-  it("backs off after transient failures and refuses a permanent refresh failure", async () => {
-    const crashed = rig({ sessions: [result({ code: 23 })], waits: ["SIGINT"] });
-    expect(await launchCommand(["issue-preparer"], crashed.io, crashed.services)).toBe(130);
-    expect(crashed.seen.waits).toEqual([5_000]);
-    expect(crashed.stderr()).toMatch(/status 23.*short backoff/);
-
+  it("stops on a persistent access failure at every stage, and only on one", async () => {
     const refresh = rig({
-      refreshes: [{ detail: "could not fetch origin/main", retry: true }, null],
+      refresh: {
+        detail: "could not fetch origin/main: fatal: Authentication failed for 'https://github.com/x'",
+        retry: true,
+      },
+    });
+    expect(await launchCommand(["implementer"], refresh.io, refresh.services)).toBe(1);
+    expect(refresh.seen.waits).toEqual([]);
+    expect(refresh.seen.sessions).toEqual([]);
+    expect(refresh.stderr()).toMatch(/Authentication failed.*stopped — run `gh auth login`/);
+
+    const probe = rig({ probes: [2], probeOutput: "gh: HTTP 401: Bad credentials\n" });
+    expect(await launchCommand(["integrator"], probe.io, probe.services)).toBe(1);
+    expect(probe.seen.waits).toEqual([]);
+    expect(probe.stderr()).toMatch(/Bad credentials.*stopped — run `gh auth login`/);
+
+    // A role can be stopped by blocked access and still exit 0 — here inside
+    // the empty-queue reason, which would otherwise idle for half an hour.
+    const session = rig({
+      sessions: [
+        result({ lastLine: "No eligible implementer work: claude is not authenticated." }),
+      ],
+    });
+    expect(await launchCommand(["implementer"], session.io, session.services)).toBe(1);
+    expect(session.seen.waits).toEqual([]);
+    expect(session.stderr()).toMatch(/not authenticated.*stopped — run `claude auth login`/);
+
+    // A completed-work report is never mistaken for one.
+    const worked = rig({
+      sessions: [
+        result({ lastLine: "Worked implementer: issue #388 — opened PR #900 for HTTP 401 handling." }),
+        result({ interrupted: "SIGTERM" }),
+      ],
+    });
+    expect(await launchCommand(["implementer"], worked.io, worked.services)).toBe(143);
+    expect(worked.stderr()).not.toMatch(/stopped/);
+
+    // An ordinary transient failure keeps the visible backoff.
+    const transient = rig({
+      refreshes: [{ detail: "could not fetch origin/main: fatal: unable to access", retry: true }, null],
       waits: [null],
     });
-    expect(await launchCommand(["implementer"], refresh.io, refresh.services)).toBe(130);
-    expect(refresh.seen.refreshes).toBe(2);
-    expect(refresh.seen.waits).toEqual([5_000]);
-    expect(refresh.seen.sessions).toHaveLength(1);
-    expect(refresh.stderr()).toMatch(/could not fetch.*short backoff/);
+    expect(await launchCommand(["implementer"], transient.io, transient.services)).toBe(130);
+    expect(transient.seen.waits).toEqual([5_000]);
+    expect(transient.seen.sessions).toHaveLength(1);
+  });
+
+  it("backs off after transient failures and refuses a permanent refresh failure", async () => {
+    const crashed = rig({
+      sessions: [result({ code: 23, transcript: "/tmp/session.log" })],
+      waits: ["SIGINT"],
+    });
+    expect(await launchCommand(["issue-preparer"], crashed.io, crashed.services)).toBe(130);
+    expect(crashed.seen.waits).toEqual([5_000]);
+    expect(crashed.stderr()).toMatch(/status 23.*transcript at \/tmp\/session\.log.*retrying in 5s/);
 
     const permanent = rig({ refresh: { detail: "run from the main checkout", retry: false } });
     expect(await launchCommand(["implementer"], permanent.io, permanent.services)).toBe(1);
@@ -497,7 +583,12 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
         code: 0,
         lastLine: "No eligible issue-preparer work: test fixture.",
       });
-      expect(output).toContain("No eligible issue-preparer work: test fixture.");
+      // The transcript is captured for diagnosis and kept off this terminal.
+      expect(output).toBe("");
+      expect(outcome.transcript).toBeDefined();
+      expect(readFileSync(outcome.transcript as string, "utf8")).toContain(
+        "No eligible issue-preparer work: test fixture.",
+      );
       expect(observed.hub).not.toBe("ws://ambient.invalid:9999");
       expect(observed.cwd).not.toBe(root);
       expect(observed.marker).toBe("main\n");

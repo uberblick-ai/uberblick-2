@@ -5,16 +5,29 @@
  * runtime session, wait for it, and repeat. The launched role owns queue
  * selection and every GitHub transition. In particular, the probe named by the
  * launch data is deliberately over-inclusive; its result can save a session,
- * but the session's own `No eligible … work:` line remains authoritative.
+ * but the session's own final line remains authoritative.
+ *
+ * That final line is also the whole of what this command understands about a
+ * session's outcome. Each entry role ends with one of two exact lines —
+ * `No eligible <role> work: <reason>.` or `Worked <role>: <item> — <outcome>.`
+ * — and the loop prints one condensed line for it. The alternative, reading
+ * each role's own claim and handoff grammar back off GitHub, would put the
+ * repository's workflow policy inside a generic CLI, which is precisely what
+ * "Pipeline ownership for ub launch" decided against. A session that ends any
+ * other way is reported as an unconfirmed outcome rather than guessed at, and
+ * its transcript — which no longer streams to stdout — is named on disk.
  */
 
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
+  closeSync,
   existsSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   statSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -31,23 +44,24 @@ import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 
 export const LAUNCH_OPTIONS = {
-  codex: { type: "boolean" },
-  claude: { type: "boolean" },
+  model: { type: "string" },
 } as const;
 
-export const LAUNCH_HELP = `usage: ub launch <role> [--codex|--claude]
+export const LAUNCH_HELP = `usage: ub launch <role> [--model claude|codex]
 
 Keep one entry role running in this terminal. One fresh session runs at a time;
 completed work is followed immediately, while an empty queue waits about 30
 minutes. Ctrl-C stops the loop and its active session.
 
 options:
-  --codex          run the role with Codex
-  --claude         run the role with Claude
+  --model <name>   run the role with claude or codex; the role's own default
+                   applies when this is left out
   -h, --help       show this help
 `;
 
-type Runtime = "claude" | "codex";
+export const RUNTIMES = ["claude", "codex"] as const;
+
+type Runtime = (typeof RUNTIMES)[number];
 type Sandbox = "runtime" | "workspace-write" | "unsandboxed";
 
 interface RuntimeLaunch {
@@ -75,14 +89,28 @@ export interface SessionResult {
   interrupted: NodeJS.Signals | null;
   lastLine: string;
   detail?: string;
+  /** Where this session's captured output was written, when it was captured. */
+  transcript?: string;
+}
+
+export interface ProbeResult {
+  status: number;
+  /** Whatever the probe said about a failure; empty when it succeeded. */
+  output: string;
 }
 
 export interface LaunchServices {
   root: string;
+  /**
+   * `https://github.com/<owner>/<repo>` when this terminal can render a
+   * hyperlink and `origin` is a GitHub remote, and null when either is untrue —
+   * the one switch between linked and plain `#123`.
+   */
+  linkBase: string | null;
   loadData(): LaunchData;
   preflight(runtime: Runtime, adapter: string): string | null;
   refreshMain(): { detail: string; retry: boolean } | null;
-  runProbe(command: readonly string[]): Promise<number>;
+  runProbe(command: readonly string[]): Promise<ProbeResult>;
   runSession(role: string, runtime: Runtime, entry: RoleLaunch): Promise<SessionResult>;
   wait(milliseconds: number): Promise<NodeJS.Signals | null>;
   terminate(signal: NodeJS.Signals): boolean;
@@ -97,6 +125,27 @@ const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repositoryRoot = dirname(dirname(packageRoot));
 const IDLE_MS = 30 * 60 * 1_000;
 const FAILURE_BACKOFF_MS = 5_000;
+const IDLE_LABEL = `${IDLE_MS / 60_000}min`;
+const BACKOFF_LABEL = `${FAILURE_BACKOFF_MS / 1_000}s`;
+
+/**
+ * A failure no amount of waiting repairs: the loop stops instead of retrying.
+ *
+ * Deliberately narrow. Everything else — a dropped network, a busy index, a
+ * crashed session — keeps the ordinary visible backoff, because a wrong stop
+ * costs the owner a restart while a wrong retry only costs a few seconds.
+ */
+const ACCESS_SIGNATURES = [
+  /permission denied/i,
+  /authentication failed/i,
+  /not authenticated/i,
+  /authentication expired/i,
+  /bad credentials/i,
+  /could not read username/i,
+  /http (401|403)/i,
+  /gh auth login/i,
+  /not logged in/i,
+];
 
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -215,6 +264,67 @@ function runSync(command: string, args: readonly string[], root: string, env: No
 
 function lastLine(text: string): string {
   return text.trimEnd().split(/\r?\n/).at(-1) ?? "";
+}
+
+/** The `https://github.com/<owner>/<repo>` behind a remote URL, or null. */
+export function gitHubBase(remote: string): string | null {
+  const matched = /^(?:https:\/\/github\.com\/|git@github\.com:)(\S+?\/\S+?)(?:\.git)?$/.exec(
+    remote.trim(),
+  );
+  const slug = matched?.[1];
+  return slug === undefined ? null : `https://github.com/${slug}`;
+}
+
+/** Make every `#123` an OSC 8 hyperlink; plain text when there is no base. */
+export function linkItems(text: string, base: string | null): string {
+  if (base === null) return text;
+  return text.replace(
+    /#(\d+)\b/g,
+    (item, number) => `\u001b]8;;${base}/issues/${number}\u0007${item}\u001b]8;;\u0007`,
+  );
+}
+
+/**
+ * The persistent access failure in `text`, with how to repair it — or null.
+ *
+ * One classifier for every stage, because the owner's stop applies wherever the
+ * problem surfaces: the main refresh, the probe, or a session that reports
+ * blocked access while exiting 0.
+ */
+export function accessStop(text: string): { reason: string; recovery: string } | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  const blocked = lines.find((line) => ACCESS_SIGNATURES.some((pattern) => pattern.test(line)));
+  if (blocked === undefined) return null;
+  const recovery = /\bclaude\b/i.test(blocked)
+    ? "run `claude auth login`"
+    : /\bcodex\b/i.test(blocked)
+      ? "run `codex login`"
+      : /\bgh\b|github/i.test(blocked)
+        ? "run `gh auth login`"
+        : "restore access, then run `ub launch` again";
+  return {
+    reason: blocked.length > 160 ? `${blocked.slice(0, 159)}…` : blocked,
+    recovery,
+  };
+}
+
+/** The role's own reason for an empty queue, from its exact sentinel line. */
+export function idleReason(role: string, line: string): string | null {
+  return sentinelBody(`No eligible ${role} work: `, line);
+}
+
+/** What the role says it worked on, from its exact completed-work line. */
+export function workedItem(role: string, line: string): string | null {
+  return sentinelBody(`Worked ${role}: `, line);
+}
+
+function sentinelBody(prefix: string, line: string): string | null {
+  if (!line.startsWith(prefix) || !line.endsWith(".")) return null;
+  const body = line.slice(prefix.length, -1).trim();
+  return body === "" ? null : body;
 }
 
 export function runForeground(
@@ -362,9 +472,14 @@ export function createLaunchServices(
 ): LaunchServices {
   let scratch: string | null = null;
   let preservedFailureWorktree: string | null = null;
+  const remote = runSync("git", ["remote", "get-url", "origin"], root, env);
 
   return {
     root,
+    linkBase:
+      process.stdout.isTTY === true && remote.status === 0
+        ? gitHubBase(remote.stdout)
+        : null,
     loadData: () => readLaunchData(root),
     preflight(runtime, adapter) {
       if (!pathIsFile(root, adapter)) {
@@ -408,8 +523,9 @@ export function createLaunchServices(
       }
       const fetched = runSync("git", ["fetch", "origin", "main"], root, env);
       if (fetched.status !== 0) {
+        // Git's own words, because they are what says whether waiting helps.
         return {
-          detail: "could not fetch origin/main; restore GitHub access and retry",
+          detail: `could not fetch origin/main: ${fetched.stderr.trim() || "git fetch failed without an error message"}`,
           retry: true,
         };
       }
@@ -424,11 +540,13 @@ export function createLaunchServices(
     },
     async runProbe(command) {
       const [executable, ...args] = command;
-      if (executable === undefined) return 2;
+      if (executable === undefined) return { status: 2, output: "probe command is empty" };
       const result = runSync(executable, args, root, env);
       if (result.stdout) io.out(result.stdout);
-      if (result.stderr) io.err(result.stderr);
-      return result.status ?? 2;
+      return {
+        status: result.status ?? 2,
+        output: `${result.stderr ?? ""}${result.error === undefined ? "" : `\n${result.error.message}`}`,
+      };
     },
     async runSession(role, runtime, entry) {
       const runId = makeRunId(runtime, role);
@@ -447,23 +565,37 @@ export function createLaunchServices(
         };
       }
       const lastPath = join(scratch, `${runId}.last`);
-      const result = runtime === "claude"
-        ? await runForeground(
-            "claude",
-            claudeSessionArgs(role, prompt, entry.runtimes.claude.permissionMode),
-            worktree,
-            env,
-            io,
-          )
-        : await runForeground(
-            "codex",
-            codexSessionArgs(worktree, lastPath, prompt, entry.runtimes.codex.sandbox),
-            worktree,
-            env,
-            io,
-          );
+      // The session's raw transcript goes to a file, not to this terminal: the
+      // loop reports outcomes, and a failure names this path for diagnosis.
+      const transcript = join(scratch, `${runId}.log`);
+      const handle = openSync(transcript, "a");
+      const capture: Io = {
+        out: (text) => void writeSync(handle, text),
+        err: (text) => void writeSync(handle, text),
+      };
+      let result: SessionResult;
+      try {
+        result = runtime === "claude"
+          ? await runForeground(
+              "claude",
+              claudeSessionArgs(role, prompt, entry.runtimes.claude.permissionMode),
+              worktree,
+              env,
+              capture,
+            )
+          : await runForeground(
+              "codex",
+              codexSessionArgs(worktree, lastPath, prompt, entry.runtimes.codex.sandbox),
+              worktree,
+              env,
+              capture,
+            );
+      } finally {
+        closeSync(handle);
+      }
       const withLastLine = {
         ...result,
+        transcript,
         lastLine: runtime === "codex" && existsSync(lastPath)
           ? lastLine(readFileSync(lastPath, "utf8"))
           : result.lastLine,
@@ -515,7 +647,7 @@ export function launchEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.
 }
 
 function parse(argv: string[], io: Io): { role: string; selected: Runtime | null } | number {
-  let values: { codex?: boolean; claude?: boolean };
+  let values: { model?: string };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -533,19 +665,28 @@ function parse(argv: string[], io: Io): { role: string; selected: Runtime | null
     io.err(LAUNCH_HELP);
     return 2;
   }
-  if (values.codex === true && values.claude === true) {
-    io.err("ub launch: choose only one of --codex or --claude\n\n");
+  const model = values.model;
+  if (model !== undefined && !RUNTIMES.includes(model as Runtime)) {
+    io.err(`ub launch: unknown --model ${JSON.stringify(model)}; choose ${RUNTIMES.join(" or ")}\n\n`);
     io.err(LAUNCH_HELP);
     return 2;
   }
   return {
     role: positionals[0] as string,
-    selected: values.codex === true ? "codex" : values.claude === true ? "claude" : null,
+    selected: (model as Runtime | undefined) ?? null,
   };
 }
 
-function emptyQueueLine(role: string, line: string): boolean {
-  return line.startsWith(`No eligible ${role} work: `) && line.endsWith(".");
+/** Report a persistent access failure and say the loop must stop. */
+function blocked(io: Io, text: string): boolean {
+  const stop = accessStop(text);
+  if (stop === null) return false;
+  io.err(`launch: ${stop.reason}; stopped — ${stop.recovery}\n`);
+  return true;
+}
+
+function transcriptSuffix(session: SessionResult): string {
+  return session.transcript === undefined ? "" : `; transcript at ${session.transcript}`;
 }
 
 async function pause(
@@ -602,15 +743,16 @@ export async function launchCommand(
     io.err(`ub launch: ${runtimeFailure}\n`);
     return 1;
   }
-  io.out(`ub launch: ${parsed.role} on ${runtime}; Ctrl-C stops the loop\n`);
+  io.out(`ub launch: ${parsed.role} on ${runtime}\n`);
   for (;;) {
     const refreshFailure = services.refreshMain();
     if (refreshFailure !== null) {
+      if (blocked(io, refreshFailure.detail)) return 1;
       if (!refreshFailure.retry) {
-        io.err(`ub launch: ${refreshFailure.detail}\n`);
+        io.err(`launch: ${refreshFailure.detail}\n`);
         return 1;
       }
-      io.err(`ub launch: ${refreshFailure.detail}; retrying after a short backoff\n`);
+      io.err(`launch: ${refreshFailure.detail}; retrying in ${BACKOFF_LABEL}\n`);
       const stopped = await pause(services, FAILURE_BACKOFF_MS);
       if (stopped !== null) return stopped;
       continue;
@@ -626,12 +768,12 @@ export async function launchCommand(
       return 1;
     }
     const probe = await services.runProbe(entry.probe);
-    if (probe !== 0) {
-      io.out(
-        probe === 1
-          ? `ub launch: no ${parsed.role} candidate; checking again in about 30 minutes\n`
-          : `ub launch: ${parsed.role} probe failed; checking again in about 30 minutes\n`,
-      );
+    if (probe.status !== 0) {
+      if (blocked(io, probe.output)) return 1;
+      const reason = probe.status === 1
+        ? `no eligible ${parsed.role} work`
+        : `probe failed${probe.output.trim() === "" ? "" : `: ${lastLine(probe.output)}`}`;
+      io.out(`work: ${reason}; will idle for ${IDLE_LABEL}\n`);
       const stopped = await pause(services, IDLE_MS);
       if (stopped !== null) return stopped;
       continue;
@@ -640,7 +782,7 @@ export async function launchCommand(
     const session = await services.runSession(parsed.role, runtime, entry);
     if (session.interrupted !== null) {
       if (session.detail !== undefined) {
-        io.err(`ub launch: ${parsed.role} ${runtime} ${session.detail}\n`);
+        io.err(`launch: ${parsed.role} ${runtime} ${session.detail}${transcriptSuffix(session)}\n`);
       }
       return await stopFromSignal(services, session.interrupted);
     }
@@ -649,15 +791,32 @@ export async function launchCommand(
         (session.signal === null
           ? `session exited with status ${session.code}`
           : `session ended from ${session.signal}`);
-      io.err(`ub launch: ${parsed.role} ${runtime} ${detail}; retrying after a short backoff\n`);
+      if (blocked(io, `${detail}\n${session.lastLine}`)) return 1;
+      io.err(
+        `launch: ${parsed.role} ${runtime} ${detail}${transcriptSuffix(session)}; retrying in ${BACKOFF_LABEL}\n`,
+      );
       const stopped = await pause(services, FAILURE_BACKOFF_MS);
       if (stopped !== null) return stopped;
       continue;
     }
-    if (emptyQueueLine(parsed.role, session.lastLine)) {
-      io.out(`ub launch: ${parsed.role} is idle; checking again in about 30 minutes\n`);
-      const stopped = await pause(services, IDLE_MS);
-      if (stopped !== null) return stopped;
+    const worked = workedItem(parsed.role, session.lastLine);
+    if (worked !== null) {
+      io.out(`work: ${linkItems(worked, services.linkBase)}\n`);
+      continue;
     }
+    // A role can be stopped by blocked access and still exit 0 — including
+    // inside its empty-queue reason, which would otherwise idle for half an
+    // hour on a problem that waiting cannot fix.
+    if (blocked(io, session.lastLine)) return 1;
+    const idle = idleReason(parsed.role, session.lastLine);
+    if (idle === null) {
+      io.out(
+        `work: ${parsed.role} session reported no outcome${transcriptSuffix(session)}\n`,
+      );
+      continue;
+    }
+    io.out(`work: ${idle}; will idle for ${IDLE_LABEL}\n`);
+    const stopped = await pause(services, IDLE_MS);
+    if (stopped !== null) return stopped;
   }
 }

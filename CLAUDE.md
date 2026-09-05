@@ -53,7 +53,7 @@ and `.agents/roles/` defines three continuous entry roles (`issue-preparer`,
 coordinator role — a program is a milestone plus `umbrella` parents, ordered
 by `Depends-on` and dispatched by the ordinary queues (owner decision,
 2026-09-04). Every contract is runtime-neutral: a role runs as a Codex
-session or a Claude session, started by `ub launch <role> --codex|--claude`,
+session or a Claude session, started by `ub launch <role> --model codex|claude`,
 and its runtime shows
 only in the run id and the claim. The implementer's default runtime is Codex.
 Implementers run in isolation under the same claim, handoff and review rules.

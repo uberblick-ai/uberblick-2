@@ -144,3 +144,8 @@ or a recurrence in the same area, and whether the current representation still
 appears capable of converging. The retrospective is non-blocking telemetry.
 Last, run the host housekeeping `integration.md` names for Docker review
 artifacts, and stop.
+
+End the run with the launcher's one line, and nothing after it:
+`Worked integrator: PR #N — <outcome>.` — the PR this run claimed and, in a few
+words, what became of it (`merged`, `parked with one fix-up wave`, `parked as
+needs-human`). It reports; GitHub records.
