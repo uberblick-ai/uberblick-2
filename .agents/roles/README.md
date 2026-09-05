@@ -207,6 +207,9 @@ foreground of a script under a cleanup trap so that an interrupted run still
 tears it down, and give it its own deadline (a `timeout`, or the tool's own
 equivalent) so it dies on its own clock rather than waiting on a parent that may
 never return. Never disown a process to make it someone else's problem.
+A trap only runs between commands, so a loop that blocks in a foreground
+`sleep` will not honour `SIGTERM` until that sleep ends: background the wait
+and `wait` on it, or signal the process group, or the trap is decoration.
 
 Where a helper must outlive a single foreground call — the claim renewer is the
 standing example, because a foreground call is capped well below the renewal
