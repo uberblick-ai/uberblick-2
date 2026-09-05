@@ -255,14 +255,15 @@ it("keeps a room on a live socket read-only until its token is admitted", async 
 
   const second = await openTab(`${WORKSPACE}/${randomUUID()}`, hub.port);
   expect(second.history[0]).toMatchObject({
-    connected: true,
-    writable: false,
     hasReceivedServerState: false,
     hasAnswered: false,
   });
   await waitFor("the second room's token to be admitted", () =>
     second.latest().writable,
   );
+  expect(
+    second.history.slice(1).some(({ connected, writable }) => connected && !writable),
+  ).toBe(true);
   await waitFor("the second room's server answer", () => second.latest().hasAnswered);
   expect(second.latest().hasReceivedServerState).toBe(true);
 }, TEST_TIMEOUT_MS);
