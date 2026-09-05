@@ -19,7 +19,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const script = join(root, "scripts/run-codex-role.mjs");
 const skill = join(root, ".claude/skills/next-issue/SKILL.md");
 
-function fixture(t, { claim = "found", codexExit = "0" } = {}) {
+function fixture(t, { claim = "found", codexExit = "0", role = "implementer" } = {}) {
 	const base = mkdtempSync(join(tmpdir(), "codex-role-runner-"));
 	t.after(() => rmSync(base, { recursive: true, force: true }));
 	const bin = join(base, "bin");
@@ -28,7 +28,7 @@ function fixture(t, { claim = "found", codexExit = "0" } = {}) {
 	mkdirSync(bin);
 	mkdirSync(scratch);
 	mkdirSync(worktree);
-	const runId = "codex-implementer-20260902T191751Z-test";
+	const runId = `codex-${role}-20260902T191751Z-test`;
 	writeFileSync(join(scratch, `${runId}.prompt`), "bounded assignment\n");
 
 	writeFileSync(
@@ -63,7 +63,7 @@ case "$1 $2" in
 	"repo view") printf '%s\n' 'uberblick-ai/uberblick-2' ;;
 	"api --paginate")
 		case "$CODEX_TEST_CLAIM" in
-			found) printf '%s\n' "Implementer: codex $CODEX_TEST_RUN_ID" ;;
+			found) printf '%s\n' "$CODEX_TEST_CLAIM_LINE" ;;
 			not-found) ;;
 			unknown) exit 23 ;;
 		esac
@@ -84,6 +84,11 @@ esac
 			...process.env,
 			CODEX_TEST_ARGS: join(base, "codex-args"),
 			CODEX_TEST_CLAIM: claim,
+			CODEX_TEST_CLAIM_LINE: role === "implementation-reviewer"
+				? `Delegated: implementation-reviewer ${runId}`
+				: role === "implementer"
+					? `Implementer: codex ${runId}`
+					: `Claim: ${role} ${runId}`,
 			CODEX_TEST_EXIT: codexExit,
 			CODEX_TEST_GIT: join(base, "git-calls"),
 			CODEX_TEST_RUN_ID: runId,
@@ -121,6 +126,21 @@ test("reports a real nonzero exit and removes the normal run worktree", (t) => {
 		/--dangerously-bypass-approvals-and-sandbox/,
 	);
 	assert.equal(existsSync(join(current.scratch, `${current.runId}.log`)), true);
+});
+
+test("runs an implementation reviewer sandboxed without removing its parent worktree", (t) => {
+	const current = fixture(t, { role: "implementation-reviewer" });
+	const result = spawnSync(
+		process.execPath,
+		[script, "implementation-reviewer", current.runId, current.worktree, current.scratch],
+		{ encoding: "utf8", env: current.env },
+	);
+
+	assert.equal(result.status, 0, result.stderr);
+	assert.equal(existsSync(current.worktree), true);
+	assert.equal(existsSync(current.env.CODEX_TEST_GIT), false);
+	assert.doesNotMatch(readFileSync(current.env.CODEX_TEST_ARGS, "utf8"), /dangerously-bypass/);
+	assert.match(readFileSync(current.env.CODEX_TEST_ARGS, "utf8"), /-s workspace-write/);
 });
 
 test("a vanished run group reports found and not-found claim states before cleanup", async (t) => {

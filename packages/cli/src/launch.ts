@@ -396,33 +396,16 @@ export function createLaunchServices(
       return null;
     },
     refreshMain() {
-      type CheckoutState = "clean" | "wrong-branch" | "dirty" | "unknown";
-      const inspectCheckout = (): CheckoutState => {
-        const branch = runSync("git", ["branch", "--show-current"], root, env);
-        if (branch.status !== 0) return "unknown";
-        if (branch.stdout.trim() !== "main") return "wrong-branch";
-        const status = runSync("git", ["status", "--porcelain"], root, env);
-        if (status.status !== 0) return "unknown";
-        return status.stdout.trim() === "" ? "clean" : "dirty";
-      };
-      const checkoutFailure = (state: Exclude<CheckoutState, "clean">) => {
-        if (state === "wrong-branch") {
-          return { detail: "run `ub launch` from the repository's clean `main` checkout", retry: false };
-        }
-        if (state === "dirty") {
-          return {
-            detail: "the main checkout has local changes; commit or move them before running `ub launch`",
-            retry: false,
-          };
-        }
+      const branch = runSync("git", ["branch", "--show-current"], root, env);
+      if (branch.status !== 0) {
         return {
           detail: "could not inspect the main checkout; retrying may resolve a concurrent git operation",
           retry: true,
         };
-      };
-
-      const initialState = inspectCheckout();
-      if (initialState !== "clean") return checkoutFailure(initialState);
+      }
+      if (branch.stdout.trim() !== "main") {
+        return { detail: "run `ub launch` from the repository's `main` checkout", retry: false };
+      }
       const fetched = runSync("git", ["fetch", "origin", "main"], root, env);
       if (fetched.status !== 0) {
         return {
@@ -432,23 +415,9 @@ export function createLaunchServices(
       }
       const merged = runSync("git", ["merge", "--ff-only", "origin/main"], root, env);
       if (merged.status !== 0) {
-        const currentState = inspectCheckout();
-        if (currentState !== "clean") return checkoutFailure(currentState);
-        const canFastForward = runSync(
-          "git",
-          ["merge-base", "--is-ancestor", "HEAD", "origin/main"],
-          root,
-          env,
-        );
-        if (canFastForward.status !== 1) {
-          return {
-            detail: "could not fast-forward main; retrying may resolve a concurrent git operation",
-            retry: true,
-          };
-        }
         return {
-          detail: "main cannot fast-forward to origin/main; reconcile it before retrying",
-          retry: false,
+          detail: merged.stderr.trim() || "git merge --ff-only origin/main failed without an error message",
+          retry: true,
         };
       }
       return null;

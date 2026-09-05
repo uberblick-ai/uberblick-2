@@ -30,14 +30,18 @@ same-runtime round (a `--codex` integrator on a Codex-authored PR) uses the
 same two commands. Both run from the parent's own worktree, named explicitly
 for Codex instead of inherited from the shell, and detached (a foreground shell
 call is killed at ten minutes), with the prompt read from a file and the log
-kept in private scratch. An empty scratch directory is not a substitute, even
-with `--skip-git-repo-check`: it holds neither the role contracts nor current
-code, so bypassing the trust refusal only makes the round fail later.
+kept in private scratch. Put a Codex reviewer's prompt at
+`<scratch>/<child-run-id>.prompt`, then start the runner as one background Bash
+call; it writes its own sibling `.log` and `.status` files and leaves the
+borrowed parent worktree registered. An empty scratch directory is not a
+substitute, even with `--skip-git-repo-check`: it holds neither the role
+contracts nor current code, so bypassing the trust refusal only makes the round
+fail later.
 
 ```sh
-# A Codex reviewer — the transport issue preparation validated. The subshell
-# records the transport's exit status beside its log the moment it ends.
-( codex exec -C <parent-worktree> -s workspace-write -c 'sandbox_workspace_write.network_access=true' - < <prompt-file> > <scratch-log> 2>&1; echo $? > <scratch-log>.status )
+# A Codex reviewer — the repository runner supervises Codex and records the
+# transport's log and exit status in private scratch.
+node scripts/run-codex-role.mjs implementation-reviewer <child-run-id> <parent-worktree> <scratch>
 
 # A Claude reviewer — the project adapter selects the role.
 ( claude -p --agent implementation-reviewer --model opus --permission-mode bypassPermissions < <prompt-file> > <scratch-log> 2>&1; echo $? > <scratch-log>.status )

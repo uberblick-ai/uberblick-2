@@ -339,13 +339,11 @@ const ready = setInterval(() => {
     expect(refresh.seen.sessions).toHaveLength(1);
     expect(refresh.stderr()).toMatch(/could not fetch.*short backoff/);
 
-    const permanent = rig({
-      refresh: { detail: "main cannot fast-forward to origin/main; reconcile it", retry: false },
-    });
+    const permanent = rig({ refresh: { detail: "run from the main checkout", retry: false } });
     expect(await launchCommand(["implementer"], permanent.io, permanent.services)).toBe(1);
     expect(permanent.seen.waits).toEqual([]);
     expect(permanent.seen.sessions).toEqual([]);
-    expect(permanent.stderr()).toMatch(/cannot fast-forward/);
+    expect(permanent.stderr()).toMatch(/main checkout/);
     expect(permanent.stderr()).not.toMatch(/retrying/);
 
     const preflight = rig({ preflight: "codex is not authenticated" });
@@ -355,7 +353,7 @@ const ready = setInterval(() => {
     expect(preflight.stderr()).toMatch(/not authenticated/);
   });
 
-  it("classifies a failed fast-forward from the checkout state", () => {
+  it("retries merge failures with Git's detail and permanently refuses only a non-main branch", () => {
     const root = mkdtempSync(join(tmpdir(), "ub-launch-refresh-"));
     try {
       const runGit = (args: string[]) =>
@@ -369,17 +367,6 @@ const ready = setInterval(() => {
         const ran = runGit(args);
         expect(ran.status, ran.stderr).toBe(0);
       }
-      const base = runGit(["rev-parse", "HEAD"]).stdout.trim();
-      writeFileSync(join(root, "marker"), "remote\n");
-      expect(runGit(["add", "marker"]).status).toBe(0);
-      expect(
-        runGit(["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "remote"])
-          .status,
-      ).toBe(0);
-      const remote = runGit(["rev-parse", "HEAD"]).stdout.trim();
-      expect(runGit(["reset", "--hard", base]).status).toBe(0);
-      expect(runGit(["update-ref", "refs/remotes/origin/main", remote]).status).toBe(0);
-
       const bin = join(root, ".git", "test-bin");
       mkdirSync(bin);
       const git = join(bin, "git");
@@ -388,7 +375,7 @@ const ready = setInterval(() => {
         `#!/bin/sh
 case "$1" in
   fetch) exit 0 ;;
-  merge) exit 23 ;;
+  merge) printf '%s\n' 'fatal: test fast-forward collision' >&2; exit 23 ;;
   *) PATH="$UB_TEST_GIT_PATH" exec git "$@" ;;
 esac
 `,
@@ -404,19 +391,15 @@ esac
         { out: () => {}, err: () => {} },
       );
 
+      writeFileSync(join(root, "marker"), "dirty\n");
       expect(services.refreshMain()).toEqual({
-        detail: "could not fast-forward main; retrying may resolve a concurrent git operation",
+        detail: "fatal: test fast-forward collision",
         retry: true,
       });
 
-      writeFileSync(join(root, "marker"), "local\n");
-      expect(runGit(["add", "marker"]).status).toBe(0);
-      expect(
-        runGit(["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "local"])
-          .status,
-      ).toBe(0);
+      expect(runGit(["switch", "-c", "topic"]).status).toBe(0);
       expect(services.refreshMain()).toEqual({
-        detail: "main cannot fast-forward to origin/main; reconcile it before retrying",
+        detail: "run `ub launch` from the repository's `main` checkout",
         retry: false,
       });
     } finally {
