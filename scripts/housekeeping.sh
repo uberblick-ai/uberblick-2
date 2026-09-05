@@ -1,8 +1,8 @@
 #!/bin/sh
 # Integrator housekeeping, run last (owner direction, 2026-09-01):
-#   sh scripts/housekeeping.sh <review sha> [--dry-run]
-# Docker — what fills the disk is one retained review image per run, so those go
-#   once they are 24 hours old; this run's own image still goes at once.
+#   sh scripts/housekeeping.sh <review sha>... [--dry-run]
+# Docker — every review image this run built goes at once; other review images
+#   go once they are 24 hours old.
 #   Stopped containers and dangling layers go too. Build cache and unused images
 #   are kept for a week (`until=168h`) so the next review still starts warm —
 #   but a review build regenerates the cache on every run, so almost nothing is
@@ -16,20 +16,27 @@
 # Every prune reports what it reclaimed, so a 0 B reclaim is visible in the run
 # record instead of looking like success.
 set -u
-usage='usage: housekeeping.sh <review sha> [--dry-run]'
-if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
-  echo "$usage" >&2
-  exit 2
+usage='usage: housekeeping.sh <review sha>... [--dry-run]'
+if [ "$#" -lt 1 ]; then
+	echo "$usage" >&2
+	exit 2
 fi
-case $1 in
-  -*) echo "$usage" >&2; exit 2 ;;
-esac
-sha=$1
-dry=${2:-}
-case $dry in
-  ''|--dry-run) ;;
-  *) echo "$usage" >&2; exit 2 ;;
-esac
+shas=
+dry=
+while [ "$#" -gt 0 ]; do
+	case $1 in
+		--dry-run)
+			if [ "$#" -ne 1 ] || [ -z "$shas" ]; then
+				echo "$usage" >&2
+				exit 2
+			fi
+			dry=$1
+			;;
+		-*) echo "$usage" >&2; exit 2 ;;
+		*) shas="${shas}${shas:+ }$1" ;;
+	esac
+	shift
+done
 
 # Tunable, so a host with a different disk budget needs no edit here.
 min_free=${HOUSEKEEPING_MIN_FREE:-5GB}
@@ -83,12 +90,16 @@ image_list() {
   fi
 }
 review_images() {
-  current=$(image_list "docker image ls uberblick-review:$sha" docker image ls -q "uberblick-review:$sha") || return 1
-  older=$(image_list "docker image ls review images older than 24h" docker image ls -q --filter reference=uberblick-review --filter until=24h) || return 1
-  older=$(printf '%s\n' "$older" | sort -u)
-  [ -n "$older" ] && run docker image rm -f $older
-  [ -n "$current" ] && run docker image rm -f "uberblick-review:$sha"
-  return 0
+	named=
+	for sha in $shas; do
+		current=$(image_list "docker image ls uberblick-review:$sha" docker image ls -q "uberblick-review:$sha") || return 1
+		[ -n "$current" ] && named="${named}${named:+ }uberblick-review:$sha"
+	done
+	older=$(image_list "docker image ls review images older than 24h" docker image ls -q --filter reference=uberblick-review --filter until=24h) || return 1
+	older=$(printf '%s\n' "$older" | sort -u)
+	[ -n "$older" ] && run docker image rm -f $older
+	[ -n "$named" ] && run docker image rm -f $named
+	return 0
 }
 
 # Why `git worktree remove` would refuse, so --dry-run predicts the same set the
