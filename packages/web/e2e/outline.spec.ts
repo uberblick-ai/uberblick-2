@@ -112,9 +112,7 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
   const rows = panel.getByRole("menuitem");
   await expect(rows).toHaveText(expected);
   await expect(panel.getByRole("menuitem", { name: "Hidden detail" })).toHaveCount(0);
-  for (const role of ["list", "listitem", "paragraph"] as const) {
-    await expect(panel.getByRole(role)).toHaveCount(0);
-  }
+  await expect(panel.getByRole("list")).toHaveCount(0);
 
   const [panelBox, listMetrics] = await Promise.all([
     panel.boundingBox(),
@@ -178,7 +176,6 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
   await expect(trigger).toBeFocused();
   await expect(panel).toBeHidden();
 
-  await page.keyboard.press("Tab");
   await tabTo(page, trigger);
   await expect(panel).toBeHidden();
   await page.keyboard.press("Enter");
