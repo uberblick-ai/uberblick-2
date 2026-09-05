@@ -229,7 +229,7 @@ independent-review rules live only in `AGENTS.md`.
 Conversation-to-intake behavior lives in
 `.agents/protocols/issue-shaping.md`; it grants no `ready` state. The shared
 preparation detail lives in `.agents/protocols/issue-preparation.md`: it owns
-the grounded self-check-vs-challenged classification, challenge questions,
+the grounded trivial-vs-challenged classification, challenge questions,
 recheck, and focused parity test. The issue-preparer role owns queue authority
 and side effects. This spec owns only the final schema and lifecycle above; do
 not grow a second copy of either procedure here or in `AGENTS.md`.

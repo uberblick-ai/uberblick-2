@@ -99,7 +99,7 @@ Post before changing labels:
 ```text
 Done: issue-preparer <run id>
 Grounding: <origin/main SHA>
-Preparation: self-check|one-adversary|resumed|grounded-wontfix
+Preparation: trivial-self-check|one-adversary|resumed|grounded-wontfix
 Outcome: ready|needs-decision|split|wontfix
 ```
 

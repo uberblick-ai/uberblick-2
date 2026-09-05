@@ -54,17 +54,15 @@ adversary by default. A second consecutive return is already parked on
 answer as resetting the count. A return that exposes a new owner boundary goes
 to `needs-decision` rather than back to `ready`.
 
-Classify from current evidence, not paths, labels or keywords. A focused
-self-check suffices when intent is settled, the approach is known and no material
-contract risk remains. Independent challenge earns its cost for material
-uncertainty, consequential semantics or interfaces, nontrivial persistence,
-auth or concurrency, or a substantive alternative work shape. Reversibility
-alone does not establish low risk; a spike has no automatic exemption.
+Classify from current evidence, not paths, labels or keywords. Self-check only
+when the change is mechanical (no behavior or contract choice), understood,
+local and easily reversed. Every other new preparation gets one independent
+adversary. A spike has no automatic exemption.
 
 | Route | Grounded condition | Adversaries |
 |---|---|---|
-| `self-check` | settled intent, known approach, no material contract risk | 0 |
-| `challenged` | intent unsettled, approach uncertain, or material contract risk | 1 |
+| `trivial` | mechanical, low uncertainty, local blast radius, easy reversal | 0 |
+| `challenged` | any other combination | 1 |
 
 `issue-preparation.mjs` expresses these grounded signals and the existing final
 recheck in executable form. State the concrete route reason briefly in the
@@ -72,7 +70,7 @@ existing handoff; the signals are not an additional report.
 
 ## Challenge
 
-For `self-check`, verify the grounded contract directly without an adversary.
+For `trivial`, verify the grounded contract directly without an adversary.
 For `challenged`, delegate one fresh issue-adversary scoped to this parent run,
 preferably on the other runtime/model. It reconstructs from GitHub and tests the
 assumptions that could change the outcome, violate an invariant or waste
