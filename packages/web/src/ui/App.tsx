@@ -53,6 +53,7 @@ import { WorkspaceSettings } from "./WorkspaceSettings.js";
 import { workspaceTags } from "./tags.js";
 import { focusThread } from "./threads.js";
 import type { SelectThread, ThreadFocus, ThreadView } from "./threads.js";
+import { useServingRoomStatus } from "./serving-status.js";
 import { DocumentList } from "../shell/DocumentList.js";
 import { createDocumentSearchClient } from "../shell/document-search.js";
 import {
@@ -125,6 +126,7 @@ export function RoutePane({
   connection,
   presence,
   endpoint = null,
+  hubAcked,
   meta,
   author,
   knownTags,
@@ -169,6 +171,8 @@ export function RoutePane({
   presence: readonly RemotePresence[];
   /** The hub the document-local sync reading describes. */
   endpoint?: HubEndpoint | null;
+  /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
+  hubAcked?: boolean | null | undefined;
   /**
    * That room's metadata, or null while it has not been read yet. The
    * difference carries a decision: unread is silence, read-and-not-this-document
@@ -270,6 +274,7 @@ export function RoutePane({
               connection={connection}
               presence={presence}
               endpoint={endpoint}
+              hubAcked={hubAcked}
               syncOpen={syncOpen}
               onToggleSync={onToggleSync}
             />
@@ -293,6 +298,7 @@ export function RoutePane({
       segment={route.workspace.segment}
       presence={presence}
       endpoint={endpoint}
+      hubAcked={hubAcked}
       author={author}
       knownTags={knownTags}
       archived={archived}
@@ -326,12 +332,22 @@ export function App(): ReactElement {
   const hubReady = useHubEndpoint();
   const configured = hubReady ? configuredWorkspaces() : [];
   const serving = hubReady ? localServing() : null;
-  /**
-   * Which hub every "synced" in this window is about (#362) — read once here
-   * and handed to the document-local reading and panel, so they cannot name
-   * different hubs.
-   */
+  /** Which hub the room providers dial. */
   const endpoint = hubReady ? hubEndpoint() : null;
+  /**
+   * Which hub the document chrome names. A locally served page dials `ub open`
+   * but reports the upstream named by the same configuration document; a
+   * direct page keeps naming the endpoint it dials.
+   */
+  const statusEndpoint = useMemo<HubEndpoint | null>(
+    () =>
+      !hubReady
+        ? null
+        : serving === null
+          ? endpoint
+          : { url: endpointLabel(serving.remoteHubUrl), source: "document" },
+    [endpoint, hubReady, serving],
+  );
   /** The one that answers `/`, the address that names no workspace. */
   const defaultWorkspace = configured[0] ?? null;
   const route = parseRoute(path, defaultWorkspace);
@@ -523,6 +539,10 @@ export function App(): ReactElement {
    * no open document has no global replacement control, so it has no room here.
    */
   const chromeRoom = selected === null ? null : doc;
+  const hubAcked = useServingRoomStatus(
+    documentSearch,
+    chromeRoom?.room ?? null,
+  );
   /**
    * Who else is in that room, read *here* and handed to every reader of it. The
    * status line's strip draws them as circles and the sync panel lists them in
@@ -917,7 +937,8 @@ export function App(): ReactElement {
             configured={hubReady}
             connection={doc}
             presence={presence}
-            endpoint={endpoint}
+            endpoint={statusEndpoint}
+            hubAcked={serving === null ? undefined : hubAcked}
             meta={meta}
             author={identity.name}
             knownTags={knownTags}
@@ -983,7 +1004,8 @@ export function App(): ReactElement {
           <SyncPanel
             connection={chromeRoom}
             presence={presence}
-            endpoint={endpoint}
+            endpoint={statusEndpoint}
+            hubAcked={serving === null ? undefined : hubAcked}
             onClose={closeSync}
           />
         )}

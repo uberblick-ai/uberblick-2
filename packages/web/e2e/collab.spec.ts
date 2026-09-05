@@ -235,21 +235,25 @@ test("the open document's last-updated reading follows its stub through status a
 
   const status = page.locator(".ub-status");
   const firstBlock = editor(page).locator(":scope > *").first();
-  const word = status.locator(".ub-status-word");
-  const wordText = await word.textContent();
+  const words = status.locator(".ub-status-word");
+  const wordText = await words.allTextContents();
   const geometry = async () => ({
     status: await status.boundingBox(),
     prose: await firstBlock.boundingBox(),
   });
   const withFreshness = await geometry();
   await page.evaluate(() => {
-    document.querySelector(".ub-status-word")?.replaceChildren();
+    for (const word of document.querySelectorAll(".ub-status-word")) {
+      word.replaceChildren();
+    }
     const updated = document.querySelector<HTMLElement>(".ub-last-updated");
     if (updated !== null) updated.style.display = "none";
   });
   expect(await geometry()).toEqual(withFreshness);
-  await word.evaluate((element, text) => {
-    element.textContent = text;
+  await words.evaluateAll((elements, text) => {
+    elements.forEach((element, index) => {
+      element.textContent = text[index] ?? "";
+    });
   }, wordText);
   await reading.evaluate((element) => element.style.removeProperty("display"));
 
@@ -285,21 +289,33 @@ test("the open document's last-updated reading follows its stub through status a
   ).toBeVisible();
   const stablePosition = await reading.boundingBox();
   expect(stablePosition).not.toBeNull();
+  const saved = page.locator(".ub-status-word--saved");
+  const upstream = page.locator(".ub-status-word--hub");
+  await expect(saved).toHaveText("saved here");
+  await expect(upstream).toHaveText("synced with hub");
 
   await harness().stopHub();
   try {
     // The browser remains connected to `ub open`; only its silent upstream
-    // replica is offline, so the local durability boundary stays synced. The
-    // awaited stop is the upstream-down signal; the focus assertion above is
-    // the page-settle signal, before the baseline is captured.
-    await expect(page.locator(".ub-status")).toContainText("synced");
+    // replica is offline, so the local durability boundary stays saved while
+    // the separately polled upstream fact turns negative.
+    await expect(saved).toHaveText("saved here");
+    await expect(upstream).toHaveText("not synced with hub");
+    await page.locator(".ub-sync-toggle").click();
+    const panel = page.getByRole("complementary", { name: "Sync and presence" });
+    const fact = (label: string) =>
+      panel.getByText(label, { exact: true }).locator("..").locator("dd");
+    await expect(fact("Hub")).toHaveText(harness().hubUrl);
+    await expect(fact("State")).toHaveText("saved here");
+    await expect(fact("Hub state")).toHaveText("not synced with hub");
+    await page.getByRole("button", { name: "Close sync details" }).click();
     await expect(reading).toContainText("last updated just now");
     await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
     expect(await reading.boundingBox()).toEqual(stablePosition);
   } finally {
     await harness().startHub();
   }
-  await expect(page.locator(".ub-status")).toContainText("synced", {
+  await expect(upstream).toHaveText("synced with hub", {
     timeout: 40_000,
   });
   await expect(reading).toContainText("last updated just now");
@@ -320,12 +336,18 @@ test("a fresh browser hydrates from the ub open store while the upstream is offl
     // from the unavailable upstream.
     const fresh = await openApp(browser, path);
     await expect(editor(fresh)).toBeVisible();
-    await expect(fresh.locator(".ub-status")).toContainText("synced");
+    await expect(fresh.locator(".ub-status-word--saved")).toHaveText("saved here");
+    await expect(fresh.locator(".ub-status-word--hub")).toHaveText(
+      "not synced with hub",
+    );
 
     // Reload is another store hydration while upstream remains unavailable.
     await fresh.reload();
     await expect(editor(fresh)).toBeVisible();
-    await expect(fresh.locator(".ub-status")).toContainText("synced");
+    await expect(fresh.locator(".ub-status-word--saved")).toHaveText("saved here");
+    await expect(fresh.locator(".ub-status-word--hub")).toHaveText(
+      "not synced with hub",
+    );
   } finally {
     await harness().startHub();
   }
@@ -348,16 +370,21 @@ test("a multi-author block survives upstream loss and converges back without dup
   await placeCaret(b);
   await type(b, "-peer");
   await expect.poll(() => blockText(a)).toBe("before-peer");
-  await expect(a.locator(".ub-status")).toContainText("synced");
+  await expect(a.locator(".ub-status-word--hub")).toHaveText("synced with hub");
   await harness().stopHub();
-  await expect(a.locator(".ub-status")).toContainText("synced");
+  await expect(a.locator(".ub-status-word--hub")).toHaveText(
+    "not synced with hub",
+  );
 
   // Reload with no upstream. Both rooms hydrate from the process-local store,
   // and the browser still has a real durability boundary to acknowledge it.
   await a.reload();
   await openDoc(a, title);
   await expect.poll(() => blockText(a)).toBe("before-peer");
-  await expect(a.locator(".ub-status")).toContainText("synced");
+  await expect(a.locator(".ub-status-word--saved")).toHaveText("saved here");
+  await expect(a.locator(".ub-status-word--hub")).toHaveText(
+    "not synced with hub",
+  );
 
   await placeCaret(a);
   await type(a, "-offline");

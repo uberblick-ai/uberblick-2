@@ -282,7 +282,7 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
   await docButton(author, firstTitle).click();
   await expect(author).toHaveURL(new RegExp(`/${ws()}/${first}$`));
   await expect(author.locator(".ub-title")).toHaveValue(firstTitle);
-  await expect(author.locator(".ub-status .ub-status-word")).toHaveText("synced");
+  await expect(author.locator(".ub-status-word--saved")).toHaveText("saved here");
   expect(await sessionSurvived(author)).toBe(true);
   expect(await wasEverInserted(author)).toBe(false);
   const claims = await statusClaims(author);

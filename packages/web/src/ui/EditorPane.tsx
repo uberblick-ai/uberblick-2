@@ -24,7 +24,9 @@ import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
+import type { SyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
+import { documentSyncFacts } from "./sync-facts.js";
 import { formatTimestamp, useTimestampClock } from "./timestamps.js";
 import { BlockMenu } from "./BlockMenu.js";
 import { MentionMenu } from "./MentionMenu.js";
@@ -139,6 +141,7 @@ export function StatusLine({
   presence,
   lastUpdated,
   endpoint = null,
+  hubAcked,
   syncOpen = false,
   onToggleSync,
   onActivatePresence,
@@ -158,6 +161,8 @@ export function StatusLine({
   lastUpdated?: number | undefined;
   /** The hub this reading describes, null while configuration is resolving. */
   endpoint?: HubEndpoint | null;
+  /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
+  hubAcked?: boolean | null | undefined;
   /** The reading is the details-panel trigger when this callback is present. */
   syncOpen?: boolean;
   onToggleSync?: (() => void) | undefined;
@@ -168,6 +173,7 @@ export function StatusLine({
   const raw = rawSyncState(status);
   const state = useCalmSyncState(raw, connection);
   const reading = statusReading(status, state ?? raw);
+  const facts = documentSyncFacts(status, state, reading, hubAcked);
   const saveNote =
     !status.writable && reading.detail === null ? (
       <span className="ub-muted ub-not-saved">not saved</span>
@@ -178,31 +184,46 @@ export function StatusLine({
   const peerStrip = (
     <PeerCluster presence={presence} onActivate={onActivatePresence} />
   );
-  const blank = state === null && reading.detail === null;
-  const mark = (
+  const mark = (tone: SyncState | null): ReactElement => (
     <span className="ub-status-mark" aria-hidden="true">
-      {!blank &&
-        (reading.detail !== null ? (
-          <span className="ub-dot ub-dot-off" />
-        ) : state === "syncing" ? (
-          <span className="ub-spinner" />
-        ) : (
-          <span
-            className={`ub-dot ${state === "synced" ? "ub-dot-live" : "ub-dot-off"}`}
-          />
-        ))}
+      {tone === "syncing" ? (
+        <span className="ub-spinner" />
+      ) : tone === null ? null : (
+        <span
+          className={`ub-dot ${tone === "synced" ? "ub-dot-live" : "ub-dot-off"}`}
+        />
+      )}
     </span>
   );
-  const word = <span className="ub-status-word">{blank ? null : reading.word}</span>;
+  const primary = (
+    <>
+      {mark(facts.primaryTone)}
+      <span
+        className={`ub-status-word${facts.twoFact ? " ub-status-word--saved" : ""}`}
+      >
+        {facts.primary}
+      </span>
+    </>
+  );
+  const hubFact = facts.twoFact ? (
+    <>
+      {mark(facts.hubTone)}
+      <span className="ub-status-word ub-status-word--hub">{facts.hub}</span>
+    </>
+  ) : null;
+  const blank = facts.primary === null;
   const hub =
     endpoint === null
       ? null
       : `${endpoint.url ?? "unknown"} (${endpointSourceLabel(endpoint.source)})`;
+  const factLabel = [facts.primary, facts.hub].filter(
+    (value): value is string => value !== null,
+  );
   const syncReading =
     onToggleSync === undefined ? (
       <>
-        {mark}
-        {word}
+        {primary}
+        {hubFact}
       </>
     ) : (
       <button
@@ -211,19 +232,19 @@ export function StatusLine({
         aria-expanded={syncOpen}
         aria-controls="ub-sync-panel"
         aria-label={
-          blank
+          factLabel.length === 0
             ? hub === null
               ? "Sync details"
               : `Sync details — hub ${hub}`
             : hub === null
-              ? `Sync details — ${reading.word}`
-              : `Sync details — ${reading.word}, hub ${hub}`
+              ? `Sync details — ${factLabel.join(", ")}`
+              : `Sync details — ${factLabel.join(", ")}${facts.twoFact ? ";" : ","} hub ${hub}`
         }
         title={hub === null ? "Sync details" : `Sync details — hub ${hub}`}
         onClick={onToggleSync}
       >
-        {mark}
-        {word}
+        {primary}
+        {hubFact}
       </button>
     );
   const now = useTimestampClock();
@@ -655,6 +676,7 @@ export function EditorPane({
   onRestore,
   onSelectThread,
   endpoint = null,
+  hubAcked,
   threads = [],
   threadsOpen = false,
   onToggleThreads,
@@ -703,6 +725,8 @@ export function EditorPane({
    */
   onSelectThread: SelectThread;
   endpoint?: HubEndpoint | null;
+  /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
+  hubAcked?: boolean | null | undefined;
   threads?: readonly ThreadView[];
   threadsOpen?: boolean;
   onToggleThreads?: (() => void) | undefined;
@@ -797,6 +821,7 @@ export function EditorPane({
           presence={presence}
           lastUpdated={updatedAt}
           endpoint={endpoint}
+          hubAcked={hubAcked}
           syncOpen={syncOpen}
           onToggleSync={onToggleSync}
           onActivatePresence={revealPresence}

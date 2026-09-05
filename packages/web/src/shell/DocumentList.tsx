@@ -299,7 +299,9 @@ export function DocumentList({
       searchClient.status(controller.signal).catch(() => ({ caughtUp: false })),
     ]).then(
       ([result, next]) => {
-        if (active) setSearch({ kind: "ready", query: needle, ...result, ...next });
+        if (active) {
+          setSearch({ kind: "ready", query: needle, ...result, caughtUp: next.caughtUp });
+        }
       },
       () => {
         if (active) setSearch({ kind: "failed", query: needle });
