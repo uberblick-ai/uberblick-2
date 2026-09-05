@@ -89,6 +89,8 @@ export interface SessionResult {
   signal: NodeJS.Signals | null;
   interrupted: NodeJS.Signals | null;
   lastLine: string;
+  /** Present only when the session leader left members of its process group behind. */
+  processGroupCleanup?: "terminated" | "failed";
   detail?: string;
   /** The end of both captured streams — read only when the session failed. */
   tail?: string;
@@ -128,6 +130,11 @@ const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repositoryRoot = dirname(dirname(packageRoot));
 const IDLE_MS = 30 * 60 * 1_000;
 const FAILURE_BACKOFF_MS = 5_000;
+// The nested Codex supervisor uses up to 2.8s to stop and observe its own
+// detached group. Its parent session must stay alive long enough to let it.
+const SESSION_GROUP_TERMINATION_GRACE_MS = 4_000;
+const SESSION_GROUP_KILL_WAIT_MS = 1_000;
+const SESSION_GROUP_POLL_MS = 20;
 const IDLE_LABEL = `${IDLE_MS / 60_000}min`;
 const BACKOFF_LABEL = `${FAILURE_BACKOFF_MS / 1_000}s`;
 const TAIL_LIMIT = 4_096;
@@ -370,15 +377,43 @@ export function runForeground(
     let tail = "";
     let interrupted: NodeJS.Signals | null = null;
     let settled = false;
+    let closeResult: { code: number; signal: NodeJS.Signals | null } | null = null;
+    let exitResult: { code: number; signal: NodeJS.Signals | null } | null = null;
+    let groupCleanupFinished = false;
+    let processGroupCleanup: SessionResult["processGroupCleanup"];
     const handlers = new Map(FORWARDED.map((signal) => [signal, () => forward(signal)]));
 
-    const sendToGroup = (signal: NodeJS.Signals): void => {
+    const signalGroup = (signal: NodeJS.Signals | 0): boolean => {
       try {
         if (child.pid === undefined) throw new Error("child has no process id");
         process.kill(-child.pid, signal);
+        return true;
       } catch {
-        if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+        return false;
       }
+    };
+    const groupExists = (): boolean => {
+      try {
+        if (child.pid === undefined) return false;
+        process.kill(-child.pid, 0);
+        return true;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code !== "ESRCH";
+      }
+    };
+    const waitForGroupExit = async (milliseconds: number): Promise<boolean> => {
+      const limit = Date.now() + milliseconds;
+      while (groupExists() && Date.now() < limit) {
+        await new Promise((resolve) => setTimeout(resolve, SESSION_GROUP_POLL_MS));
+      }
+      return !groupExists();
+    };
+    const cleanupProcessGroup = async (): Promise<SessionResult["processGroupCleanup"]> => {
+      if (!groupExists()) return undefined;
+      signalGroup("SIGTERM");
+      if (await waitForGroupExit(SESSION_GROUP_TERMINATION_GRACE_MS)) return "terminated";
+      signalGroup("SIGKILL");
+      return await waitForGroupExit(SESSION_GROUP_KILL_WAIT_MS) ? "terminated" : "failed";
     };
 
     const finish = (result: SessionResult): void => {
@@ -387,10 +422,29 @@ export function runForeground(
       for (const [signal, handler] of handlers) signals.off(signal, handler);
       resolve(result);
     };
+    const finishWhenReady = (): void => {
+      if (!groupCleanupFinished || exitResult === null) return;
+      if (processGroupCleanup !== "failed" && closeResult === null) return;
+      const outcome = closeResult ?? exitResult;
+      finish({
+        started: true,
+        code: outcome.code,
+        signal: outcome.signal,
+        interrupted,
+        lastLine: lastLine(outputTail),
+        tail,
+        ...(processGroupCleanup === undefined ? {} : { processGroupCleanup }),
+        ...(processGroupCleanup === "failed"
+          ? { detail: "session process group remained alive after SIGKILL" }
+          : {}),
+      });
+    };
     const forward = (signal: NodeJS.Signals): void => {
       if (interrupted !== null) return;
       interrupted = signal;
-      sendToGroup(signal);
+      if (!signalGroup(signal) && child.exitCode === null && child.signalCode === null) {
+        child.kill(signal);
+      }
     };
     for (const [signal, handler] of handlers) signals.on(signal, handler);
 
@@ -420,19 +474,16 @@ export function runForeground(
       });
     });
     child.once("exit", (code, signal) => {
-      if (interrupted === null && (code !== 0 || signal !== null)) {
-        sendToGroup("SIGTERM");
-      }
+      exitResult = { code: code ?? 1, signal };
+      void cleanupProcessGroup().then((cleanup) => {
+        processGroupCleanup = cleanup;
+        groupCleanupFinished = true;
+        finishWhenReady();
+      });
     });
     child.once("close", (code, signal) => {
-      finish({
-        started: true,
-        code: code ?? 1,
-        signal,
-        interrupted,
-        lastLine: lastLine(outputTail),
-        tail,
-      });
+      closeResult = { code: code ?? 1, signal };
+      finishWhenReady();
     });
   });
 }
@@ -635,6 +686,13 @@ export function createLaunchServices(
           ? lastLine(readFileSync(lastPath, "utf8"))
           : result.lastLine,
       };
+      if (result.processGroupCleanup === "failed") {
+        preservedFailureWorktree ??= worktree;
+        return {
+          ...withLastLine,
+          detail: `${result.detail ?? "session process group cleanup failed"}; worktree preserved at ${worktree}`,
+        };
+      }
       if (!result.started || result.code !== 0 || result.signal !== null) {
         const failure = result.detail ??
           (result.signal === null
@@ -821,6 +879,14 @@ export async function launchCommand(
     }
 
     const session = await services.runSession(parsed.role, runtime, entry);
+    if (session.processGroupCleanup === "terminated") {
+      io.err(`launch: ${parsed.role} ${runtime} session left processes running; ended its process group\n`);
+    } else if (session.processGroupCleanup === "failed") {
+      io.err(
+        `launch: ${parsed.role} ${runtime} ${session.detail ?? "session process group cleanup failed"}${transcriptSuffix(session)}; stopped\n`,
+      );
+      return 1;
+    }
     if (session.interrupted !== null) {
       if (session.detail !== undefined) {
         io.err(`launch: ${parsed.role} ${runtime} ${session.detail}${transcriptSuffix(session)}\n`);

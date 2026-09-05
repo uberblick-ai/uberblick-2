@@ -276,11 +276,66 @@ const ready = setInterval(() => {
       );
 
       expect(outcome).toMatchObject({ started: true, code: 23, interrupted: null });
+      expect(outcome.processGroupCleanup).toBe("terminated");
       expect(readFileSync(evidence, "utf8")).toBe("ready\nSIGTERM\n");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("escalates past SIGTERM and reaps a descendant left by a successful session", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-child-"));
+    try {
+      const evidence = join(root, "evidence");
+      const descendant = join(root, "descendant.cjs");
+      const leader = join(root, "leader.cjs");
+      writeFileSync(
+        descendant,
+        `const fs = require("node:fs");
+const evidence = process.argv[2];
+process.on("SIGTERM", () => fs.appendFileSync(evidence, "SIGTERM\\n"));
+fs.appendFileSync(evidence, "ready " + process.pid + "\\n");
+setInterval(() => {}, 1000);
+`,
+      );
+      writeFileSync(
+        leader,
+        `const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+const descendant = process.argv[2];
+const evidence = process.argv[3];
+spawn(process.execPath, [descendant, evidence], { stdio: "ignore" });
+const ready = setInterval(() => {
+  if (fs.existsSync(evidence)) {
+    clearInterval(ready);
+    process.exit(0);
+  }
+}, 10);
+`,
+      );
+
+      const outcome = await runForeground(
+        process.execPath,
+        [leader, descendant, evidence],
+        root,
+        process.env,
+        { out: () => {}, err: () => {} },
+      );
+
+      const [ready, pidText] = readFileSync(evidence, "utf8").trim().split(/\s+/);
+      expect(outcome).toMatchObject({
+        started: true,
+        code: 0,
+        interrupted: null,
+        processGroupCleanup: "terminated",
+      });
+      expect(ready).toBe("ready");
+      expect(readFileSync(evidence, "utf8")).toContain("SIGTERM\n");
+      expect(() => process.kill(Number(pidText), 0)).toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 10_000);
 
   it("answers help before reading launch data or starting anything", async () => {
     let touched = false;
@@ -522,6 +577,32 @@ const ready = setInterval(() => {
     expect(preflight.seen.sessions).toEqual([]);
     expect(preflight.seen.probes).toEqual([]);
     expect(preflight.stderr()).toMatch(/not authenticated/);
+  });
+
+  it("reports leftover processes and stops on a process-group cleanup failure", async () => {
+    const cleaned = rig({
+      sessions: [result({ processGroupCleanup: "terminated", interrupted: "SIGINT" })],
+    });
+    expect(await launchCommand(["implementer"], cleaned.io, cleaned.services)).toBe(130);
+    expect(cleaned.stderr()).toContain(
+      "launch: implementer codex session left processes running; ended its process group",
+    );
+
+    const failed = rig({
+      sessions: [
+        result({
+          processGroupCleanup: "failed",
+          detail:
+            "session process group remained alive after SIGKILL; worktree preserved at /tmp/ub-launch-test",
+        }),
+      ],
+    });
+    expect(await launchCommand(["implementer"], failed.io, failed.services)).toBe(1);
+    expect(failed.seen.waits).toEqual([]);
+    expect(failed.seen.sessions).toHaveLength(1);
+    expect(failed.stderr()).toContain("worktree preserved at /tmp/ub-launch-test");
+    expect(failed.stderr()).toContain("; stopped");
+    expect(failed.stderr()).not.toContain("retrying");
   });
 
   it("retries merge failures with Git's detail and permanently refuses only a non-main branch", () => {
