@@ -1,23 +1,25 @@
 /**
- * The document identity line above its prose: editable tags, stable identity,
- * copy affordance and document actions.
- *
- * The tags are the one writer here: they write `meta.tags` wholesale through
- * schema's `setTags`, the same call and key `set_tags` uses for an agent.
+ * The document identity line above its prose: catalog-backed tags, stable
+ * identity, copy affordance and document actions.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type * as Y from "yjs";
-import { getMeta, parseRoom, setTags } from "@uberblick/schema";
-import type { DocMeta } from "@uberblick/schema";
+import {
+  assignDocumentTags,
+  getMeta,
+  getTagCatalogEntry,
+  parseRoom,
+  resolveTagAssignments,
+} from "@uberblick/schema";
+import type { DocMeta, TagAssignment, TagCatalogEntry } from "@uberblick/schema";
 import { writeToClipboard } from "../editor/source-chrome.js";
 import type { RoomConnection } from "../collab/rooms.js";
-import { GROUP_TAGS, groupKeyForTags, groupLabel } from "./groups.js";
-import { useDocRev } from "./hooks.js";
+import { useDocRev, useRoomStatus } from "./hooks.js";
 import { LifecycleBadge } from "./LifecycleBadge.js";
 import { shareUrl } from "./route.js";
-import { distinctTags, withTag, withoutTag } from "./tags.js";
+import { useTagCatalog } from "./tags.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,6 +35,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./shadcn/dialog.js";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "./shadcn/popover.js";
 
 /** What an untitled document is called wherever its name is shown. */
 const UNTITLED = "Untitled";
@@ -41,166 +48,221 @@ function titleOf(meta: DocMeta): string {
   return meta.title === "" ? UNTITLED : meta.title;
 }
 
-/**
- * The document's group: the first canonical tag it carries (#39's rule), or
- * null when it carries none of them.
- */
-function groupOf(meta: DocMeta): string | null {
-  return groupLabel(groupKeyForTags(meta.tags));
+function named(entry: TagAssignment): entry is TagCatalogEntry {
+  return entry.name !== null;
 }
 
-/** The id the add field points at — one document is open at a time. */
-const SUGGESTIONS_ID = "ub-tag-suggestions";
+function tagLabel(entry: TagCatalogEntry): string {
+  return entry.state === "retired" ? `${entry.name} (retired)` : entry.name;
+}
 
-/**
- * The document's tags, editable (#122).
- *
- * Every write is `setTags` on the document's own Y.Doc — the wholesale replace
- * `set_tags` performs, on the same `meta.tags`. That is what makes this a
- * *human front door to the agent's write* rather than a second tagging
- * mechanism: the directory stub is repaired from `meta` by the shell's existing
- * observer, so the sidebar group, `list_docs` and every other
- * client follow a chip the way they follow an agent.
- *
- * The next array is folded from `getMeta(ydoc).tags`, never from the rendered
- * prop. A remote wholesale write that landed between paint and click is already
- * in the document, and adding a chip must not carry a stale list back over it.
- *
- * Suggestions ride a native `<datalist>`: the browser filters it as the reader
- * types, keyboard included, and free-form input stays free-form. The list is
- * the workspace's tags minus the ones already on this document — suggesting a
- * chip that is already on screen would offer a write this component rejects.
- *
- * The same list, with the canonical group tags in front of it, is what a new
- * tag's spelling is snapped to (`withTag`): the group tags are spelled a
- * particular way whether or not any document in this workspace carries one yet.
- */
+/** The searchable, catalog-backed multi-select in the document header. */
 function TagStrip({
   ydoc,
   tags,
-  known,
+  catalogConnection,
   readOnly,
   canWrite,
 }: {
   ydoc: Y.Doc;
-  /** The document's tags as last read — what the chips show. */
+  /** The document's identities as last read — what the selected labels resolve. */
   tags: readonly string[];
-  /** Every tag the workspace uses, from the directory stubs. */
-  known: readonly string[];
-  /** Archived: the chips are still worth reading, and nothing here writes. */
+  catalogConnection: RoomConnection | null;
+  /** Archived or disconnected: assignments remain readable, but nothing writes. */
   readOnly: boolean;
   /** Recheck the live room at the exact write boundary. */
   canWrite: () => boolean;
 }): ReactElement {
-  const [draft, setDraft] = useState("");
-  const strip = useRef<HTMLSpanElement | null>(null);
-  /**
-   * The chip position whose removal still owes the reader somewhere to stand.
-   *
-   * Removing a chip unmounts the button that had focus, and focus on a detached
-   * element is focus on `<body>` — the keyboard reader is silently returned to
-   * the top of the page, mid-gesture. The target cannot be picked here, because
-   * the element to focus does not exist until the write has re-rendered the
-   * strip, so the *position* is remembered and resolved in the layout effect
-   * below.
-   */
-  const [refocus, setRefocus] = useState<number | null>(null);
-
-  useLayoutEffect(() => {
-    if (refocus === null) return;
-    setRefocus(null);
-    const buttons = [
-      ...(strip.current?.querySelectorAll<HTMLButtonElement>(".ub-tag-x") ?? []),
-    ];
-    // The chip that took the removed one's place, the last chip when it was the
-    // last, and the add field when it was the only one: always the nearest
-    // thing to where the reader was.
-    const next = buttons[Math.min(refocus, buttons.length - 1)];
-    const target =
-      next ?? strip.current?.querySelector<HTMLInputElement>(".ub-tag-add");
-    target?.focus();
-  }, [refocus]);
-
-  const add = (): void => {
-    if (!canWrite()) return;
-    const next = withTag(getMeta(ydoc).tags, draft, [...GROUP_TAGS, ...known]);
-    // Cleared either way: a duplicate or a blank is rejected quietly, and
-    // leaving the word in the field would read as a failure nobody explained.
-    setDraft("");
-    if (next !== null) setTags(ydoc, next);
-  };
-
-  const remove = (tag: string, at: number): void => {
-    if (!canWrite()) return;
-    setRefocus(at);
-    setTags(ydoc, withoutTag(getMeta(ydoc).tags, tag));
-  };
-
-  // One chip per distinct tag: a duplicate in the array is one tag, and two
-  // chips carrying the same word would be two React children with one key.
-  const shown = distinctTags(tags);
-  const suggestions = known.filter(
-    (tag) => !tags.some((current) => current.toLowerCase() === tag.toLowerCase()),
+  const catalog = useTagCatalog(catalogConnection);
+  const catalogStatus = useRoomStatus(catalogConnection);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const search = useRef<HTMLInputElement | null>(null);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const listId = useId();
+  const arrived =
+    catalogConnection !== null && catalogStatus.hasReceivedServerState;
+  const assignments =
+    arrived && catalogConnection !== null
+      ? resolveTagAssignments(catalogConnection.ydoc, tags)
+      : [];
+  const shown = assignments.filter(named).sort((left, right) =>
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+  );
+  const selected = new Set(assignments.map((entry) => entry.id));
+  const options = (catalog?.entries ?? []).filter(
+    (entry) => entry.state === "active" || selected.has(entry.id),
+  );
+  const normalizedQuery = query.trim().toLowerCase();
+  const filtered = options.filter(
+    (entry) =>
+      normalizedQuery === "" || entry.name.toLowerCase().includes(normalizedQuery),
   );
 
+  useEffect(() => {
+    if (readOnly || !arrived) setOpen(false);
+  }, [arrived, readOnly]);
+
+  const toggle = (entry: TagCatalogEntry): void => {
+    if (
+      readOnly ||
+      !arrived ||
+      catalogConnection === null ||
+      !canWrite()
+    ) {
+      return;
+    }
+    // Re-read both replicas at the write boundary. A stale render therefore
+    // toggles only this identity on top of an intervening remote assignment.
+    const liveIds = resolveTagAssignments(
+      catalogConnection.ydoc,
+      getMeta(ydoc).tags,
+    ).map((assigned) => assigned.id);
+    const isSelected = liveIds.includes(entry.id);
+    const liveEntry = getTagCatalogEntry(catalogConnection.ydoc, entry.id);
+    if (!isSelected && liveEntry?.state !== "active") return;
+    if (isSelected && liveEntry?.state === "retired") search.current?.focus();
+    assignDocumentTags(
+      ydoc,
+      catalogConnection.ydoc,
+      isSelected
+        ? liveIds.filter((identity) => identity !== entry.id)
+        : [...liveIds, entry.id],
+    );
+  };
+
+  const focusOption = (index: number): void => {
+    if (filtered.length === 0) return;
+    const wrapped = (index + filtered.length) % filtered.length;
+    optionRefs.current[wrapped]?.focus();
+  };
+
+  const labels = shown.map((entry) => (
+    <span className="ub-tag" key={entry.id}>
+      <span className="ub-tag-name">{tagLabel(entry)}</span>
+    </span>
+  ));
+
+  if (readOnly || !arrived) {
+    return (
+      <span className="ub-tags ub-tags-readonly">
+        {arrived ? (labels.length > 0 ? labels : <span>No tags</span>) : (
+          <span role="status">Loading tags…</span>
+        )}
+      </span>
+    );
+  }
+
   return (
-    <span className="ub-tags" ref={strip}>
-      {shown.map((tag, at) => (
-        <span className="ub-tag" key={tag}>
-          <span className="ub-tag-name">{tag}</span>
-          {!readOnly && (
-            <button
-              type="button"
-              className="ub-tag-x"
-              // The visible label is a glyph, so the accessible name says what
-              // the button does and to which tag.
-              aria-label={`Remove tag ${tag}`}
-              title={`Remove tag ${tag}`}
-              onClick={() => remove(tag, at)}
-              // The keyboard-only path: the × is the chip's tab stop, and the
-              // keys a reader reaches for on a focused chip are the delete
-              // keys. Enter and Space already activate it, natively.
-              onKeyDown={(event) => {
-                if (event.key !== "Delete" && event.key !== "Backspace") return;
-                event.preventDefault();
-                remove(tag, at);
-              }}
-            >
-              ×
-            </button>
-          )}
-        </span>
-      ))}
-      {!readOnly && (
-        <>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setQuery("");
+      }}
+    >
+      <PopoverTrigger asChild>
+        <button
+          ref={trigger}
+          type="button"
+          className="ub-tags ub-tag-picker-trigger"
+          aria-label="Edit tags"
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          aria-controls={open ? listId : undefined}
+        >
+          <span className="ub-tag-selected">
+            {labels.length > 0 ? labels : <span className="ub-tag-placeholder">Add tags</span>}
+          </span>
+          <span className="ub-tag-chevron" aria-hidden="true">
+            ▾
+          </span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="ub-tag-picker-panel"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          search.current?.focus();
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          trigger.current?.focus();
+        }}
+      >
+        <div className="ub-tag-search-wrap">
           <input
-            className="ub-tag-add"
-            list={SUGGESTIONS_ID}
-            value={draft}
-            placeholder="+ tag"
-            aria-label="Add a tag"
-            onChange={(event) => setDraft(event.target.value)}
+            ref={search}
+            type="search"
+            className="ub-tag-search"
+            value={query}
+            placeholder="Search tags"
+            aria-label="Search tags"
+            aria-controls={listId}
+            onChange={(event) => setQuery(event.currentTarget.value)}
             onKeyDown={(event) => {
-              if (event.key !== "Enter") return;
-              // An Enter that ends an IME composition belongs to the input
-              // method, not to this field: it is how a Japanese or Chinese
-              // reader accepts the candidate they are still typing, and
-              // committing a tag there would cut the word in half. The keyCode
-              // is the same check for the browsers that predate `isComposing`.
               const native = event.nativeEvent;
               if (native.isComposing || native.keyCode === 229) return;
-              event.preventDefault();
-              add();
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                focusOption(0);
+              }
             }}
           />
-          <datalist id={SUGGESTIONS_ID}>
-            {suggestions.map((tag) => (
-              <option key={tag} value={tag} />
-            ))}
-          </datalist>
-        </>
-      )}
-    </span>
+        </div>
+        <div
+          id={listId}
+          className="ub-tag-options"
+          role="listbox"
+          aria-multiselectable="true"
+          aria-label="Available tags"
+        >
+          {filtered.map((entry, index) => (
+            <button
+              key={entry.id}
+              ref={(element) => {
+                optionRefs.current[index] = element;
+              }}
+              type="button"
+              className="ub-tag-option"
+              role="option"
+              aria-selected={selected.has(entry.id)}
+              onClick={() => toggle(entry)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  focusOption(index + 1);
+                } else if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  focusOption(index - 1);
+                } else if (event.key === "Home") {
+                  event.preventDefault();
+                  focusOption(0);
+                } else if (event.key === "End") {
+                  event.preventDefault();
+                  focusOption(filtered.length - 1);
+                }
+              }}
+            >
+              <span className="ub-tag-check" aria-hidden="true">
+                {selected.has(entry.id) ? "✓" : ""}
+              </span>
+              <span>{entry.name}</span>
+              {entry.state === "retired" && (
+                <span className="ub-tag-retired">retired</span>
+              )}
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <p className="ub-tag-empty">
+              {options.length === 0 ? "No tags available." : "No matching tags."}
+            </p>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -293,12 +355,10 @@ export function CopyLink({
  * to it.
  *
  * **Above the prose and above the title** (owner, design surface 1a): the
- * eyebrow line sits over the H1, and the tags sit in it. Putting them there
- * costs the title nothing, because the row is a fixed-height single line whose
- * add field is always drawn — the height with no chips is the height with six —
- * and the chips scroll sideways inside their own box rather than wrapping onto
- * a second line. The uuid and rev are pinned to the row's end, so a chip
- * appearing moves neither them nor the title.
+ * eyebrow line sits over the H1, and the tag picker sits in it. The picker is a
+ * fixed-height single control whose selected labels scroll inside their own
+ * box rather than wrapping. The uuid and rev are pinned to the row's end, so a
+ * changed assignment moves neither them nor the title.
  *
  * **The row is drawn before there is anything to put in it**, and that is the
  * same rule rather than a second one. `meta` is null for the first paint after
@@ -319,9 +379,9 @@ export function CopyLink({
  */
 export function DocMetaLine({
   connection,
+  catalogConnection = null,
   segment,
   meta,
-  knownTags,
   archived,
   readOnly = false,
   pinned = false,
@@ -332,11 +392,11 @@ export function DocMetaLine({
   onEditTldr,
 }: {
   connection: RoomConnection;
+  /** The workspace settings room that owns the curated tag catalog. */
+  catalogConnection?: RoomConnection | null;
   /** The workspace as the address spells it — what a copied link carries. */
   segment: string;
   meta: DocMeta | null;
-  /** Every tag the workspace uses — the add field's suggestions. */
-  knownTags: readonly string[];
   /** Whether the directory tombstones this document: no writes from here. */
   archived: boolean;
   /** Whether the document room currently refuses writes. */
@@ -352,7 +412,6 @@ export function DocMetaLine({
   onEditTldr?: (() => void) | undefined;
 }): ReactElement {
   const rev = useDocRev(connection);
-  const group = meta === null ? null : groupOf(meta);
   return (
     <p className="ub-doc-meta">
       {/* Nothing to say about a room that has not answered yet, and nothing to
@@ -360,14 +419,10 @@ export function DocMetaLine({
       {meta !== null && meta.uuid !== "" && (
         <>
           <LifecycleBadge kind={meta.kind} status={meta.status} />
-          {/* Only where the document is in a named group: a badge for the
-              fallback would label every untagged document with a word that
-              names no group (#535). */}
-          {group !== null && <span className="ub-badge">{group}</span>}
           <TagStrip
             ydoc={connection.ydoc}
             tags={meta.tags}
-            known={knownTags}
+            catalogConnection={catalogConnection}
             readOnly={archived || readOnly}
             canWrite={() => connection.status.writable}
           />

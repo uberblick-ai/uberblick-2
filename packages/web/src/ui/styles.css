@@ -2499,10 +2499,9 @@ body {
 /* The eyebrow above the H1 (design surface 1a): what kind of document this is,
    what it is tagged, and which version of it is on screen.
 
-   One row, fixed height, never wrapping. That is what lets the tag chips live
-   here without the title moving: the add field is always drawn, so the height
-   with no chips is the height with six, and the chips scroll sideways inside
-   their own box instead of taking a second line. */
+   One row, fixed height, never wrapping. The tag control keeps the same box
+   whether it holds a placeholder or several assignments, and its labels scroll
+   sideways instead of taking a second line. */
 .ub-doc-meta {
   display: flex;
   align-items: center;
@@ -2533,76 +2532,146 @@ body {
   white-space: nowrap;
 }
 
-/* The document's tags, in the row's flexible middle (#122). The scroll is the
-   promise the row makes to the title: a workspace that tags heavily gets a
-   sideways overflow, never a second line. The scrollbar is hidden because the
-   chips are a handful of words, not a pane. */
+/* The catalog-backed tag control, in the row's flexible middle (#509). */
 .ub-tags {
   display: flex;
   align-items: center;
   gap: 0.3rem;
   flex: 1 1 auto;
   min-width: 0;
+  color: inherit;
+  font: inherit;
+}
+
+.ub-tag-picker-trigger {
+  height: 2rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--input);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ub-tag-picker-trigger:hover {
+  border-color: var(--ring);
+}
+
+.ub-tag-picker-trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.ub-tag-selected {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  flex: 1 1 auto;
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-.ub-tags::-webkit-scrollbar {
+.ub-tag-selected::-webkit-scrollbar {
   display: none;
 }
 
 .ub-tag {
   display: inline-flex;
   align-items: center;
-  gap: 0.1rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.05rem 0.15rem 0.05rem 0.5rem;
+  border-radius: var(--radius-sm);
+  padding: 0.05rem 0.4rem;
   white-space: nowrap;
 }
 
-/* No remove affordance on an archived document, so the chip closes up. */
-.ub-tag:not(:has(.ub-tag-x)) {
-  padding-right: 0.5rem;
+.ub-tag-placeholder {
+  white-space: nowrap;
 }
 
-.ub-tag-x {
-  border: 0;
-  background: none;
-  color: var(--muted-foreground);
+.ub-tag-chevron {
+  flex: none;
+  opacity: 0.55;
+}
+
+.ub-tags-readonly {
+  min-height: 2rem;
+  overflow: hidden;
+}
+
+.ub-tag-picker-panel {
+  width: min(18rem, calc(100vw - 2rem));
+  padding: 0;
+  overflow: hidden;
+}
+
+.ub-tag-search-wrap {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.ub-tag-search {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--input);
+  color: var(--foreground);
   font: inherit;
-  line-height: 1;
-  padding: 0 0.25rem;
-  border-radius: 999px;
+  padding: 0.35rem 0.5rem;
+}
+
+.ub-tag-search:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -1px;
+}
+
+.ub-tag-options {
+  max-height: 14rem;
+  overflow-y: auto;
+  padding: 0.35rem;
+}
+
+.ub-tag-option {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--foreground);
+  font: inherit;
+  padding: 0.4rem 0.45rem;
+  text-align: left;
   cursor: pointer;
 }
 
-.ub-tag-x:hover {
-  color: var(--foreground);
-}
-
-.ub-tag-x:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 1px;
-}
-
-/* A field, not a box: it is one of the row's words until it is focused. Its
-   width is fixed for the same reason everything else here is — a field that
-   grew as the reader typed would drag the row around them. */
-.ub-tag-add {
-  border: 0;
-  border-bottom: 1px solid transparent;
-  background: none;
-  color: inherit;
-  font: inherit;
-  width: 9ch;
-  flex: none;
-  padding: 0.05rem 0.1rem;
-}
-
-.ub-tag-add:focus {
+.ub-tag-option:hover,
+.ub-tag-option:focus-visible {
+  background: var(--accent);
   outline: none;
-  border-bottom-color: var(--ring);
+}
+
+.ub-tag-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 0.2rem;
+}
+
+.ub-tag-retired {
+  margin-left: auto;
+  color: var(--muted-foreground);
+}
+
+.ub-tag-empty {
+  margin: 0;
+  padding: 0.65rem 0.5rem;
+  color: var(--muted-foreground);
 }
 
 /* Machine facts, in the machine face — and monospaced for the other reason

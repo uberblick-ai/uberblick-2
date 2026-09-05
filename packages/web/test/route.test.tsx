@@ -327,7 +327,6 @@ function LinkedPane({
       presence={NOBODY}
       meta={docMeta}
       author="tester"
-      knownTags={[]}
       archived={false}
       docLinks={null}
       onRestore={() => {}}
@@ -550,7 +549,6 @@ function paneText(target: Route, docMeta: DocMeta | null): string {
         presence={NOBODY}
         meta={docMeta}
         author="tester"
-        knownTags={[]}
         archived={false}
         docLinks={null}
         onRestore={() => {}}
@@ -632,7 +630,6 @@ async function clickCopy(
         connection={stubConnection(`${WS}/${UUID}`)}
         segment={segment}
         meta={meta(UUID)}
-        knownTags={[]}
         archived={false}
       />,
     ),

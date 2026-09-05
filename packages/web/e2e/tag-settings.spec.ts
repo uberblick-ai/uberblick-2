@@ -75,4 +75,51 @@ test("Tags settings is address-selected and its catalog changes converge", async
   await first.goBack();
   await expect(first).toHaveURL(new URL(path, harness().appUrl).href);
   await expect(first.getByRole("heading", { name: "Tags", level: 1 })).toBeVisible();
+
+  // The document front door consumes this catalog: one keyboard-operated
+  // control, overlaid without shifting the title, and the same identity on a
+  // second client.
+  await first.locator(".ub-settings-back").click();
+  await first.getByRole("button", { name: "+ new doc" }).click();
+  const documentUrl = first.url();
+  const title = first.locator(".ub-title");
+  const titleBefore = await title.boundingBox();
+  const picker = first.getByRole("button", { name: "Edit tags" });
+  await picker.focus();
+  await picker.press("Enter");
+  const search = first.getByRole("searchbox", { name: "Search tags" });
+  await expect(search).toBeFocused();
+  await search.fill("PRO");
+  await search.press("ArrowDown");
+  const product = first.getByRole("option", { name: "product", exact: true });
+  await expect(product).toBeFocused();
+  await product.press("Space");
+  await product.press("Escape");
+  await expect(picker).toBeFocused();
+  expect(await title.boundingBox()).toEqual(titleBefore);
+  await expect(picker).toContainText("product");
+  await expect(first.locator(".ub-doc-meta .ub-badge")).toHaveCount(0);
+
+  await second.goto(documentUrl);
+  await expect(second.getByRole("button", { name: "Edit tags" })).toContainText(
+    "product",
+  );
+
+  // Retirement remains visible on the assigned document, but once removed it
+  // cannot be selected again.
+  await second.goto(new URL(path, harness().appUrl).href);
+  await second.getByRole("button", { name: "Retire product" }).click();
+  await expect(picker).toContainText("product (retired)");
+  await picker.click();
+  const retired = first.getByRole("option", { name: "product retired" });
+  await expect(retired).toHaveAttribute("aria-selected", "true");
+  await retired.press("Space");
+  await expect(first.getByRole("option", { name: "product retired" })).toHaveCount(
+    0,
+  );
+  await picker.click();
+  await second.goto(documentUrl);
+  await expect(second.getByRole("button", { name: "Edit tags" })).toContainText(
+    "Add tags",
+  );
 });
