@@ -3195,6 +3195,113 @@ h3.ub-heading {
   margin-left: auto;
 }
 
+/* ---- the document's person-facing quick summary (#534) ---- */
+
+.ub-tldr {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.65rem;
+  margin: 0 0 0.85rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--brand);
+  border-radius: var(--radius);
+  background: var(--brand-subtle);
+  color: var(--foreground);
+}
+
+.ub-tldr-mark {
+  display: grid;
+  place-items: center;
+  align-self: start;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--brand-ink);
+}
+
+.ub-tldr-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: currentColor;
+}
+
+.ub-tldr-body {
+  min-width: 0;
+}
+
+.ub-tldr-label {
+  display: block;
+  color: var(--brand-ink);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ub-tldr h2 {
+  margin: 0.05rem 0 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.ub-tldr p {
+  margin: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ub-tldr-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ub-tldr-form > label,
+.ub-tldr-form-meta {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.ub-tldr-form textarea {
+  min-height: 5rem;
+  resize: vertical;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  line-height: 1.5;
+}
+
+.ub-tldr-form textarea:focus {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.ub-tldr-form-meta,
+.ub-tldr-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ub-tldr-error {
+  color: var(--destructive);
+  font-size: 0.75rem;
+}
+
+.ub-tldr-actions {
+  justify-content: flex-end;
+}
+
+.ub-tldr-actions .ub-tool:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 /* ---- what an address resolved to, when it was not a document (#68) ---- */
 
 /* The waiting screen's own row: what this link is waiting on, and the address

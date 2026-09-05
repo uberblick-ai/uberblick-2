@@ -8,7 +8,9 @@ import type { ReactElement, ReactNode } from "react";
 import {
   getAnnotation,
   getBlocksFragment,
+  MAX_TLDR_LENGTH,
   parseRoom,
+  setTldr,
   setTitle,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
@@ -113,6 +115,141 @@ function ArchivedBanner({
         {onRestore === null ? "Restore unavailable" : "Restore"}
       </button>
     </p>
+  );
+}
+
+function SparklesIcon(): ReactElement {
+  return (
+    <svg className="ub-tldr-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 2.5c.45 3.35 2.15 5.05 5.5 5.5-3.35.45-5.05 2.15-5.5 5.5C11.55 10.15 9.85 8.45 6.5 8 9.85 7.55 11.55 5.85 12 2.5Z" />
+      <path d="M18.25 13.5c.25 1.85 1.4 3 3.25 3.25-1.85.25-3 1.4-3.25 3.25-.25-1.85-1.4-3-3.25-3.25 1.85-.25 3-1.4 3.25-3.25ZM5 13c.2 1.35 1 2.15 2.35 2.35C6 15.55 5.2 16.35 5 17.7c-.2-1.35-1-2.15-2.35-2.35C4 15.15 4.8 14.35 5 13Z" />
+    </svg>
+  );
+}
+
+/** The person-facing summary and its one in-place write surface. */
+function TldrCallout({
+  connection,
+  tldr,
+  editing,
+  archived,
+  writable,
+  onEditingChange,
+}: {
+  connection: RoomConnection;
+  tldr: string | null;
+  editing: boolean;
+  archived: boolean;
+  writable: boolean;
+  onEditingChange: (editing: boolean) => void;
+}): ReactElement | null {
+  const [draft, setDraft] = useState(tldr ?? "");
+  const [attempted, setAttempted] = useState(false);
+  const readOnly = archived || !writable;
+  const value = draft.trim();
+  const tooLong = value.length > MAX_TLDR_LENGTH;
+  const error = tooLong
+    ? `A TL;DR is at most ${MAX_TLDR_LENGTH} characters.`
+    : attempted && value.length === 0
+      ? "Write a short summary, or use Clear to remove the current one."
+      : null;
+
+  useEffect(() => {
+    if (!editing) {
+      setDraft(tldr ?? "");
+      setAttempted(false);
+    }
+  }, [editing, tldr]);
+
+  if (!editing && tldr === null) return null;
+
+  const write = (next: string | null): void => {
+    // `readOnly` describes the committed render; the live connection and the
+    // tombstone guard the write itself, as the title field does below.
+    if (archived || !connection.status.writable) return;
+    setTldr(connection.ydoc, next);
+    onEditingChange(false);
+  };
+
+  return (
+    <section className="ub-tldr" aria-labelledby="ub-tldr-title">
+      <span className="ub-tldr-mark">
+        <SparklesIcon />
+      </span>
+      <div className="ub-tldr-body">
+        <span className="ub-tldr-label">Quick summary</span>
+        <h2 id="ub-tldr-title">TL;DR</h2>
+        {editing ? (
+          <form
+            className="ub-tldr-form"
+            aria-label={`${tldr === null ? "Add" : "Edit"} TL;DR`}
+            onSubmit={(event) => {
+              event.preventDefault();
+              setAttempted(true);
+              if (value.length === 0 || tooLong) return;
+              write(value);
+            }}
+          >
+            <label htmlFor="ub-tldr-input">
+              Write one or two plain-English sentences that help a reader
+              understand this document.
+            </label>
+            <textarea
+              id="ub-tldr-input"
+              value={draft}
+              readOnly={readOnly}
+              aria-invalid={error === null ? undefined : true}
+              aria-describedby={
+                error === null
+                  ? "ub-tldr-count"
+                  : "ub-tldr-count ub-tldr-error"
+              }
+              onChange={(event) => {
+                setDraft(event.target.value);
+                setAttempted(false);
+              }}
+            />
+            <div className="ub-tldr-form-meta">
+              <span id="ub-tldr-count">
+                {value.length} / {MAX_TLDR_LENGTH} characters
+              </span>
+              {readOnly && (
+                <span>{archived ? "Restore to edit." : "Editing unavailable."}</span>
+              )}
+            </div>
+            {error !== null && (
+              <p className="ub-tldr-error" id="ub-tldr-error" role="alert">
+                {error}
+              </p>
+            )}
+            <div className="ub-tldr-actions">
+              {tldr !== null && (
+                <button
+                  type="button"
+                  className="ub-tool"
+                  disabled={readOnly}
+                  onClick={() => write(null)}
+                >
+                  Clear
+                </button>
+              )}
+              <button
+                type="button"
+                className="ub-tool"
+                onClick={() => onEditingChange(false)}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="ub-tool ub-tool-on" disabled={readOnly}>
+                Save
+              </button>
+            </div>
+          </form>
+        ) : (
+          <p>{tldr}</p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -734,6 +871,7 @@ export function EditorPane({
   onToggleSync?: (() => void) | undefined;
 }): ReactElement {
   const pane = useRef<HTMLElement | null>(null);
+  const [tldrEditorRoom, setTldrEditorRoom] = useState<string | null>(null);
   const revealPresence = useCallback((session: RemotePresence): void => {
     if (session.blockId === null) return;
     const target = document.getElementById(session.blockId);
@@ -751,6 +889,7 @@ export function EditorPane({
   const foreign = useForeignBlocks(connection);
   const { writable } = useRoomStatus(connection);
   const openThreads = threads.filter((thread) => !thread.resolved).length;
+  const editingTldr = connection?.room === tldrEditorRoom;
 
   if (connection === null) {
     return (
@@ -796,6 +935,8 @@ export function EditorPane({
           onTogglePin={onTogglePin}
           onArchive={onArchive}
           onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
+          hasTldr={meta?.tldr != null}
+          onEditTldr={() => setTldrEditorRoom(connection.room)}
         />
         <input
           className="ub-title"
@@ -825,6 +966,17 @@ export function EditorPane({
           syncOpen={syncOpen}
           onToggleSync={onToggleSync}
           onActivatePresence={revealPresence}
+        />
+        <TldrCallout
+          key={connection.room}
+          connection={connection}
+          tldr={meta?.tldr ?? null}
+          editing={editingTldr}
+          archived={archived}
+          writable={writable}
+          onEditingChange={(editing) =>
+            setTldrEditorRoom(editing ? connection.room : null)
+          }
         />
         {foreign.length > 0 ? (
           <ForeignFallback

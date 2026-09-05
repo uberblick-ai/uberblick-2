@@ -153,6 +153,42 @@ test("two contexts typing into different ranges of one block converge byte-ident
   await expect.poll(() => blockText(b)).toBe(converged);
 });
 
+test("a TL;DR added, edited and cleared in one client follows in the other", async ({
+  browser,
+}) => {
+  const title = docTitle("tldr");
+  const [a, b] = await Promise.all([openApp(browser), openApp(browser)]);
+  await createDoc(a, title);
+  await openDoc(b, title);
+
+  await a.getByRole("button", { name: "Document actions" }).click();
+  await a.getByRole("menuitem", { name: "Add TL;DR" }).click();
+  await a.getByLabel("Write one or two plain-English sentences that help a reader understand this document.").fill(
+    "A short summary for readers.",
+  );
+  await a.getByRole("button", { name: "Save", exact: true }).click();
+
+  const calloutA = a.locator(".ub-tldr");
+  const calloutB = b.locator(".ub-tldr");
+  await expect(calloutA).toContainText("Quick summary");
+  await expect(calloutA).toContainText("TL;DR");
+  await expect(calloutB).toContainText("A short summary for readers.");
+
+  await b.getByRole("button", { name: "Document actions" }).click();
+  await b.getByRole("menuitem", { name: "Edit TL;DR" }).click();
+  await b.getByLabel("Write one or two plain-English sentences that help a reader understand this document.").fill(
+    "Changed in the other tab.",
+  );
+  await b.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(calloutA).toContainText("Changed in the other tab.");
+
+  await a.getByRole("button", { name: "Document actions" }).click();
+  await a.getByRole("menuitem", { name: "Edit TL;DR" }).click();
+  await a.getByRole("button", { name: "Clear" }).click();
+  await expect(calloutA).toHaveCount(0);
+  await expect(calloutB).toHaveCount(0);
+});
+
 test("the settled upstream fact stays still through acknowledged typing", async ({
   browser,
 }) => {
