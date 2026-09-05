@@ -198,6 +198,37 @@ describe("ub launch", () => {
     }
   });
 
+  it("carries a dying child's stderr out of the session, not only its last stdout line", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-child-"));
+    try {
+      let terminal = "";
+      const outcome = await runForeground(
+        process.execPath,
+        [
+          "-e",
+          'process.stdout.write("thinking\\n"); process.stderr.write("codex: authentication expired\\n"); process.exitCode = 1',
+        ],
+        root,
+        process.env,
+        {
+          out: (text) => {
+            terminal += text;
+          },
+          err: (text) => {
+            terminal += text;
+          },
+        },
+      );
+
+      expect(outcome).toMatchObject({ started: true, code: 1, lastLine: "thinking" });
+      // The one link the loop's access stop depends on.
+      expect(outcome.tail).toContain("codex: authentication expired");
+      expect(terminal).toContain("codex: authentication expired");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("stops an inherited-pipe descendant before resolving an abnormal session", async () => {
     const root = mkdtempSync(join(tmpdir(), "ub-launch-child-"));
     try {
@@ -384,6 +415,42 @@ const ready = setInterval(() => {
     expect(await launchCommand(["integrator"], probe.io, probe.services)).toBe(1);
     expect(probe.seen.waits).toEqual([]);
     expect(probe.stderr()).toMatch(/Bad credentials.*stopped — run `gh auth login`/);
+
+    // A runtime that dies on its own credentials says so on stderr, which
+    // never reaches the final stdout line.
+    const runtime = rig({
+      sessions: [
+        result({ code: 1, lastLine: "", tail: "codex: authentication expired\n" }),
+      ],
+    });
+    expect(await launchCommand(["implementer"], runtime.io, runtime.services)).toBe(1);
+    expect(runtime.seen.waits).toEqual([]);
+    expect(runtime.seen.sessions).toHaveLength(1);
+    expect(runtime.stderr()).toMatch(/authentication expired.*stopped — run `codex login`/);
+
+    // A role blocked while exiting 0 says so in its own final line.
+    const reported = rig({
+      sessions: [result({ lastLine: "Blocked implementer: permission denied running git push." })],
+    });
+    expect(await launchCommand(["implementer"], reported.io, reported.services)).toBe(1);
+    expect(reported.seen.waits).toEqual([]);
+    expect(reported.stderr()).toMatch(
+      /permission denied running git push.*stopped — restore access/,
+    );
+
+    // One that reports it in loose prose instead would otherwise relaunch at
+    // once, forever.
+    const prose = rig({
+      sessions: [
+        result({
+          lastLine: "Restore access before restarting.",
+          tail: "GitHub permission denied.\nRestore access before restarting.\n",
+        }),
+      ],
+    });
+    expect(await launchCommand(["implementer"], prose.io, prose.services)).toBe(1);
+    expect(prose.seen.sessions).toHaveLength(1);
+    expect(prose.stderr()).toMatch(/permission denied.*stopped — run `gh auth login`/);
 
     // A role can be stopped by blocked access and still exit 0 — here inside
     // the empty-queue reason, which would otherwise idle for half an hour.

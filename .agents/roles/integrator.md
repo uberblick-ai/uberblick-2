@@ -149,3 +149,8 @@ End the run with the launcher's one line, and nothing after it:
 `Worked integrator: PR #N — <outcome>.` — the PR this run claimed and, in a few
 words, what became of it (`merged`, `parked with one fix-up wave`, `parked as
 needs-human`). It reports; GitHub records.
+
+When a permission or authentication failure — not the queue — is what stopped
+the run, that line is `Blocked integrator: <reason>.` instead, naming the
+command or credential that was refused. It stops the loop, so never use it for
+work that finished.

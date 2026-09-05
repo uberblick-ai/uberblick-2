@@ -8,14 +8,15 @@
  * but the session's own final line remains authoritative.
  *
  * That final line is also the whole of what this command understands about a
- * session's outcome. Each entry role ends with one of two exact lines —
- * `No eligible <role> work: <reason>.` or `Worked <role>: <item> — <outcome>.`
- * — and the loop prints one condensed line for it. The alternative, reading
- * each role's own claim and handoff grammar back off GitHub, would put the
- * repository's workflow policy inside a generic CLI, which is precisely what
- * "Pipeline ownership for ub launch" decided against. A session that ends any
- * other way is reported as an unconfirmed outcome rather than guessed at, and
- * its transcript — which no longer streams to stdout — is named on disk.
+ * session's outcome. Each entry role ends with one of three exact lines —
+ * `No eligible <role> work: <reason>.`, `Worked <role>: <item> — <outcome>.`,
+ * or `Blocked <role>: <reason>.` — and the loop prints one condensed line for
+ * it, or stops for the last one. The alternative, reading each role's own
+ * claim and handoff grammar back off GitHub, would put the repository's
+ * workflow policy inside a generic CLI, which is precisely what "Pipeline
+ * ownership for ub launch" decided against. A session that ends any other way
+ * is reported as an unconfirmed outcome rather than guessed at, and its
+ * transcript — which no longer streams to stdout — is named on disk.
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -59,7 +60,7 @@ options:
   -h, --help       show this help
 `;
 
-export const RUNTIMES = ["claude", "codex"] as const;
+const RUNTIMES = ["claude", "codex"] as const;
 
 type Runtime = (typeof RUNTIMES)[number];
 type Sandbox = "runtime" | "workspace-write" | "unsandboxed";
@@ -89,6 +90,8 @@ export interface SessionResult {
   interrupted: NodeJS.Signals | null;
   lastLine: string;
   detail?: string;
+  /** The end of both captured streams — read only when the session failed. */
+  tail?: string;
   /** Where this session's captured output was written, when it was captured. */
   transcript?: string;
 }
@@ -127,6 +130,7 @@ const IDLE_MS = 30 * 60 * 1_000;
 const FAILURE_BACKOFF_MS = 5_000;
 const IDLE_LABEL = `${IDLE_MS / 60_000}min`;
 const BACKOFF_LABEL = `${FAILURE_BACKOFF_MS / 1_000}s`;
+const TAIL_LIMIT = 4_096;
 
 /**
  * A failure no amount of waiting repairs: the loop stops instead of retrying.
@@ -267,7 +271,7 @@ function lastLine(text: string): string {
 }
 
 /** The `https://github.com/<owner>/<repo>` behind a remote URL, or null. */
-export function gitHubBase(remote: string): string | null {
+function gitHubBase(remote: string): string | null {
   const matched = /^(?:https:\/\/github\.com\/|git@github\.com:)(\S+?\/\S+?)(?:\.git)?$/.exec(
     remote.trim(),
   );
@@ -276,7 +280,7 @@ export function gitHubBase(remote: string): string | null {
 }
 
 /** Make every `#123` an OSC 8 hyperlink; plain text when there is no base. */
-export function linkItems(text: string, base: string | null): string {
+function linkItems(text: string, base: string | null): string {
   if (base === null) return text;
   return text.replace(
     /#(\d+)\b/g,
@@ -285,40 +289,50 @@ export function linkItems(text: string, base: string | null): string {
 }
 
 /**
- * The persistent access failure in `text`, with how to repair it — or null.
+ * The persistent access failure in `text` — or null.
  *
- * One classifier for every stage, because the owner's stop applies wherever the
- * problem surfaces: the main refresh, the probe, or a session that reports
- * blocked access while exiting 0.
+ * One classifier for every stage where nobody said so in words: the main
+ * refresh, the probe, and the end of a failed session's output.
  */
-export function accessStop(text: string): { reason: string; recovery: string } | null {
-  const lines = text
+function accessReason(text: string): string | null {
+  const found = text
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line !== "");
-  const blocked = lines.find((line) => ACCESS_SIGNATURES.some((pattern) => pattern.test(line)));
-  if (blocked === undefined) return null;
-  const recovery = /\bclaude\b/i.test(blocked)
-    ? "run `claude auth login`"
-    : /\bcodex\b/i.test(blocked)
-      ? "run `codex login`"
-      : /\bgh\b|github/i.test(blocked)
-        ? "run `gh auth login`"
-        : "restore access, then run `ub launch` again";
-  return {
-    reason: blocked.length > 160 ? `${blocked.slice(0, 159)}…` : blocked,
-    recovery,
-  };
+    .find((line) => ACCESS_SIGNATURES.some((pattern) => pattern.test(line)));
+  if (found === undefined) return null;
+  return found.length > 160 ? `${found.slice(0, 159)}…` : found;
+}
+
+/** How to repair the access this reason names. */
+function recoveryFor(reason: string): string {
+  if (/\bclaude\b/i.test(reason)) return "run `claude auth login`";
+  if (/\bcodex\b/i.test(reason)) return "run `codex login`";
+  if (/\bgh\b|github/i.test(reason)) return "run `gh auth login`";
+  return "restore access, then run `ub launch` again";
 }
 
 /** The role's own reason for an empty queue, from its exact sentinel line. */
-export function idleReason(role: string, line: string): string | null {
+function idleReason(role: string, line: string): string | null {
   return sentinelBody(`No eligible ${role} work: `, line);
 }
 
 /** What the role says it worked on, from its exact completed-work line. */
-export function workedItem(role: string, line: string): string | null {
+function workedItem(role: string, line: string): string | null {
   return sentinelBody(`Worked ${role}: `, line);
+}
+
+/** The role saying in words that access, not the queue, stopped it. */
+function blockedReason(role: string, line: string): string | null {
+  return sentinelBody(`Blocked ${role}: `, line);
+}
+
+/** A session's closing words — enough to catch a report, not its reasoning. */
+function closingLines(text: string, count: number): string {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "")
+    .slice(-count)
+    .join("\n");
 }
 
 function sentinelBody(prefix: string, line: string): string | null {
@@ -343,6 +357,10 @@ export function runForeground(
       stdio: ["inherit", "pipe", "pipe"],
     });
     let outputTail = "";
+    // Both streams in arrival order, kept short: how a runtime that died says
+    // why, when its final stdout line says nothing. Only a failed session is
+    // read from it, so a role's earlier prose never reaches the classifier.
+    let tail = "";
     let interrupted: NodeJS.Signals | null = null;
     let settled = false;
     const handlers = new Map(FORWARDED.map((signal) => [signal, () => forward(signal)]));
@@ -369,12 +387,20 @@ export function runForeground(
     };
     for (const [signal, handler] of handlers) signals.on(signal, handler);
 
+    const keepTail = (text: string): void => {
+      tail = `${tail}${text}`.slice(-TAIL_LIMIT);
+    };
     child.stdout?.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf8");
       outputTail = `${outputTail}${text}`.slice(-65_536);
+      keepTail(text);
       io.out(text);
     });
-    child.stderr?.on("data", (chunk: Buffer) => io.err(chunk.toString("utf8")));
+    child.stderr?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      keepTail(text);
+      io.err(text);
+    });
     child.once("error", (error: NodeJS.ErrnoException) => {
       finish({
         started: false,
@@ -382,6 +408,7 @@ export function runForeground(
         signal: null,
         interrupted,
         lastLine: "",
+        tail,
         detail: error.code === "ENOENT" ? `${command}: command not found` : error.message,
       });
     });
@@ -397,6 +424,7 @@ export function runForeground(
         signal,
         interrupted,
         lastLine: lastLine(outputTail),
+        tail,
       });
     });
   });
@@ -677,11 +705,17 @@ function parse(argv: string[], io: Io): { role: string; selected: Runtime | null
   };
 }
 
-/** Report a persistent access failure and say the loop must stop. */
+/** The loop's one stop for a failure waiting cannot repair. */
+function stopFor(io: Io, reason: string): number {
+  io.err(`launch: ${reason}; stopped — ${recoveryFor(reason)}\n`);
+  return 1;
+}
+
+/** Whether `text` shows a persistent access failure; reports it if it does. */
 function blocked(io: Io, text: string): boolean {
-  const stop = accessStop(text);
-  if (stop === null) return false;
-  io.err(`launch: ${stop.reason}; stopped — ${stop.recovery}\n`);
+  const reason = accessReason(text);
+  if (reason === null) return false;
+  stopFor(io, reason);
   return true;
 }
 
@@ -791,7 +825,9 @@ export async function launchCommand(
         (session.signal === null
           ? `session exited with status ${session.code}`
           : `session ended from ${session.signal}`);
-      if (blocked(io, `${detail}\n${session.lastLine}`)) return 1;
+      // The runtime's own dying words are usually on stderr, so the end of
+      // both captured streams is what says whether waiting can help.
+      if (blocked(io, `${detail}\n${session.tail ?? session.lastLine}`)) return 1;
       io.err(
         `launch: ${parsed.role} ${runtime} ${detail}${transcriptSuffix(session)}; retrying in ${BACKOFF_LABEL}\n`,
       );
@@ -799,22 +835,28 @@ export async function launchCommand(
       if (stopped !== null) return stopped;
       continue;
     }
+    // A role stopped by blocked access exits 0 like any other, so it says so
+    // in words rather than leaving the loop to read that out of its prose.
+    const cannot = blockedReason(parsed.role, session.lastLine);
+    if (cannot !== null) return stopFor(io, cannot);
     const worked = workedItem(parsed.role, session.lastLine);
     if (worked !== null) {
       io.out(`work: ${linkItems(worked, services.linkBase)}\n`);
       continue;
     }
-    // A role can be stopped by blocked access and still exit 0 — including
-    // inside its empty-queue reason, which would otherwise idle for half an
-    // hour on a problem that waiting cannot fix.
-    if (blocked(io, session.lastLine)) return 1;
     const idle = idleReason(parsed.role, session.lastLine);
     if (idle === null) {
+      // No contract line at all, so the role's closing words are the only
+      // evidence left; without this a session blocked in prose would relaunch
+      // at once, forever. Only the closing words — the rest is its reasoning.
+      if (blocked(io, closingLines(session.tail ?? session.lastLine, 5))) return 1;
       io.out(
         `work: ${parsed.role} session reported no outcome${transcriptSuffix(session)}\n`,
       );
       continue;
     }
+    // An empty queue is a reason, not a verdict on access.
+    if (blocked(io, idle)) return 1;
     io.out(`work: ${idle}; will idle for ${IDLE_LABEL}\n`);
     const stopped = await pause(services, IDLE_MS);
     if (stopped !== null) return stopped;

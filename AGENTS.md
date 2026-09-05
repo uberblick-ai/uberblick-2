@@ -144,6 +144,12 @@ generic CLI, which Pipeline ownership for ub launch
 a durable record: GitHub still carries the claim, the handoff and every
 transition.
 
+The third and last line is `Blocked <role slug>: <reason>.`, for a run a
+permission or authentication failure stopped rather than the queue. It stops
+the loop with a recovery instruction, because retrying what no credential
+allows is the failure mode the owner asked to remove; a run that finished its
+work reports `Worked`, whatever that work was about.
+
 ## Process changes
 
 A change to `AGENTS.md`, `CLAUDE.md`, `.github/ISSUE_SPEC.md`, `.agents/` or
