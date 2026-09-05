@@ -40,6 +40,7 @@ function environment(bin, calls, overrides = {}) {
 	return {
 		...process.env,
 		HOUSEKEEPING_CALLS: calls,
+		HOUSEKEEPING_DOCKER_OS: "Docker Engine",
 		PATH: `${bin}:${process.env.PATH}`,
 		...overrides,
 	};
@@ -50,23 +51,10 @@ function successfulDocker(bin) {
 		bin,
 		'printf "%s\\n" "$*" >> "$HOUSEKEEPING_CALLS"\n' +
 			'case "$1 $2" in\n' +
-			'  "info --format") printf "%s\\n" "$HOUSEKEEPING_DOCKER_ROOT" ;;\n' +
-			'  "image ls") ;;\n' +
-			'  *) printf "Total reclaimed space: 0B\\n" ;;\n' +
-			'esac\n' +
-			'exit 0',
-	);
-}
-
-function dockerDesktop(bin) {
-	fakeDocker(
-		bin,
-		'printf "%s\\n" "$*" >> "$HOUSEKEEPING_CALLS"\n' +
-			'case "$1 $2" in\n' +
 			'  "info --format")\n' +
 			'    case "$3" in\n' +
-			'      "{{.DockerRootDir}}") printf "/var/lib/docker\\n" ;;\n' +
-			'      "{{.OperatingSystem}}") printf "Docker Desktop\\n" ;;\n' +
+			'      "{{.DockerRootDir}}") printf "%s\\n" "$HOUSEKEEPING_DOCKER_ROOT" ;;\n' +
+			'      "{{.OperatingSystem}}") printf "%s\\n" "$HOUSEKEEPING_DOCKER_OS" ;;\n' +
 			'    esac\n' +
 			'    ;;\n' +
 			'  "image ls") ;;\n' +
@@ -296,7 +284,7 @@ test("measures the host volume containing Docker Desktop's data", (t) => {
 	mkdirSync(desktopData, { recursive: true });
 	const diskImage = join(desktopData, "Docker.raw");
 	writeFileSync(diskImage, "");
-	dockerDesktop(bin);
+	successfulDocker(bin);
 	const dfCalls = join(base, "df-calls");
 	fakeExecutable(
 		bin,
@@ -311,6 +299,8 @@ test("measures the host volume containing Docker Desktop's data", (t) => {
 		encoding: "utf8",
 		env: environment(bin, calls, {
 			HOME: home,
+			HOUSEKEEPING_DOCKER_OS: "Docker Desktop",
+			HOUSEKEEPING_DOCKER_ROOT: base,
 			HOUSEKEEPING_DF_CALLS: dfCalls,
 			HOUSEKEEPING_WARN_FREE_GB: "3",
 		}),
@@ -368,7 +358,8 @@ test("does not substitute another filesystem when Docker's root is unavailable",
 	assert.match(invalidRoot.stderr, /housekeeping: WARNING could not determine Docker root/);
 	assert.equal(existsSync(invalidDfCalls), false);
 
-	dockerDesktop(bin);
+	successfulDocker(bin);
+	const desktopCalls = join(base, "desktop-docker-calls");
 	const desktopDfCalls = join(base, "desktop-df-calls");
 	const emptyHome = join(base, "empty-home");
 	mkdirSync(
@@ -387,8 +378,10 @@ test("does not substitute another filesystem when Docker's root is unavailable",
 	const missingDesktopData = spawnSync("sh", [script, "test-sha"], {
 		cwd: base,
 		encoding: "utf8",
-		env: environment(bin, calls, {
+		env: environment(bin, desktopCalls, {
 			HOME: emptyHome,
+			HOUSEKEEPING_DOCKER_OS: "Docker Desktop",
+			HOUSEKEEPING_DOCKER_ROOT: base,
 			HOUSEKEEPING_DF_CALLS: desktopDfCalls,
 		}),
 	});
@@ -399,7 +392,10 @@ test("does not substitute another filesystem when Docker's root is unavailable",
 		/housekeeping: WARNING could not determine Docker Desktop data location/,
 	);
 	assert.equal(existsSync(desktopDfCalls), false);
-	assert.match(readFileSync(calls, "utf8"), /builder prune -f --min-free-space 5GB/);
+	assert.match(
+		readFileSync(desktopCalls, "utf8"),
+		/builder prune -f --min-free-space 5GB/,
+	);
 });
 
 test("dry-run and real cleanup agree on removable, dirty, locked, and current worktrees", (t) => {

@@ -171,22 +171,18 @@ headroom() {
     return 0
   fi
   location="docker root $root"
-  if [ ! -d "$root" ]; then
-    operating_system=$(docker info --format '{{.OperatingSystem}}' 2>/dev/null)
-    if [ "$?" -ne 0 ] || [ "$operating_system" != "Docker Desktop" ]; then
-      echo "housekeeping: WARNING could not determine Docker root" >&2
-      return 0
-    fi
-    desktop_image=
-    if [ -n "${HOME:-}" ]; then
-      desktop_image="$HOME/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw"
-    fi
-    if [ -z "$desktop_image" ] || [ ! -f "$desktop_image" ]; then
+  operating_system=$(docker info --format '{{.OperatingSystem}}' 2>/dev/null)
+  if [ "$operating_system" = "Docker Desktop" ]; then
+    desktop_image=${HOME:+$HOME/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw}
+    if [ ! -f "$desktop_image" ]; then
       echo "housekeeping: WARNING could not determine Docker Desktop data location" >&2
       return 0
     fi
     root=$desktop_image
     location="Docker Desktop disk image $root"
+  elif [ ! -d "$root" ]; then
+    echo "housekeeping: WARNING could not determine Docker root" >&2
+    return 0
   fi
   line=$(df -Pk "$root" 2>/dev/null | awk 'NR==2{print $1, $4}')
   if [ -z "$line" ]; then
