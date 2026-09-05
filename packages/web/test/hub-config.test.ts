@@ -61,7 +61,7 @@ const repoRoot = resolve(webRoot, "../..");
  * and a default build all see. Named rather than repeated so these tests read
  * as being about precedence rather than about one address.
  */
-const INJECTED = "ws://localhost:1234";
+const INJECTED = process.env.HUB_URL ?? "ws://localhost:1234";
 
 /** Two workspaces a served document could name — one decorated, one bare. */
 const FIRST = "uberblick-6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
@@ -492,7 +492,7 @@ describe("the endpoint as it is shown", () => {
     );
     // The ordinary case is left as it reads, and the `/` `new URL` adds to a
     // bare host is dropped rather than shown as a path.
-    expect(endpointLabel(INJECTED)).toBe(INJECTED);
+    expect(endpointLabel("wss://hub.example/ws")).toBe("wss://hub.example/ws");
     // Nothing at all rather than a best effort: a string this cannot take
     // apart is one it cannot promise carries no credential — and an opaque
     // scheme is exactly that, since `new URL` leaves its whole payload in
