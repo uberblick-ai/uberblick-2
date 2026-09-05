@@ -91,13 +91,13 @@ describe("docFingerprint", () => {
     expect(docFingerprint(replicate(doc))).toBe(docFingerprint(doc));
   });
 
-  it("is unmoved by tag order", () => {
+  it("is stable across tag request order", () => {
     const doc = source();
     setTags(doc, ["one", "two"]);
     const copy = replicate(doc);
     setTags(copy, ["two", "one"]);
 
-    expect(getMeta(doc).tags).not.toEqual(getMeta(copy).tags);
+    expect(getMeta(doc).tags).toEqual(getMeta(copy).tags);
     expect(docFingerprint(doc)).toBe(docFingerprint(copy));
   });
 

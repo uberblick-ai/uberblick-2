@@ -2,8 +2,9 @@
  * Tag editing in the doc header (#122).
  *
  * One claim, told twice: **the chips are a human front door to the write an
- * agent already makes.** `set_tags` replaces `meta.tags` wholesale; so does the
- * identity line. Everything that follows a retag today — the directory stub,
+ * agent already makes.** `set_tags` replaces the document's tag set through
+ * per-tag writes; so does the identity line. Everything that follows a retag
+ * today — the directory stub,
  * its group badge, `list_docs` on a second client — follows a chip for the same
  * reason and over the same path, with nothing in the UI told about any of it.
  *
@@ -180,7 +181,7 @@ function addTag(host: HTMLElement, word: string): void {
 }
 
 describe("tags are editable in the document identity line", () => {
-  it("writes meta.tags wholesale, and the stub and the sidebar follow", async () => {
+  it("writes the document tag set, and the stub and the sidebar follow", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
     initDoc(ydoc, { uuid: UUID, title: "Sync and offline" });
@@ -258,13 +259,11 @@ describe("tags are editable in the document identity line", () => {
   });
 
   /**
-   * The documented semantics are wholesale replace, last write wins. A header
-   * open while an agent retags the same document is exactly where that could
-   * turn into a crash or a resurrection of tags the agent removed — the chips
-   * are rendered from a snapshot, and a stale snapshot written back would undo
-   * the agent's write with the reader's own next click.
+   * A header open while an agent retags the same document must take the remote
+   * state before its next local toggle. The chips are rendered from a snapshot;
+   * writing that stale snapshot back would undo the agent's write.
    */
-  it("takes an agent's set_tags wholesale, and adds on top of the result", async () => {
+  it("takes an agent's set_tags, and adds on top of the result", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
     initDoc(ydoc, { uuid: UUID, title: "Sync and offline", tags: ["feature"] });
@@ -279,7 +278,7 @@ describe("tags are editable in the document identity line", () => {
     const host = await openApp(`/${WORKSPACE}/${UUID}`);
     expect(chips(host)).toEqual(["feature"]);
 
-    // The agent replaces the whole array, from its own replica.
+    // The agent replaces its local set, from its own replica.
     act(() => setTags(agent, ["reference", "verify"]));
     expect(chips(host)).toEqual(["reference", "verify"]);
     expect(getMeta(ydoc).tags).toEqual(["reference", "verify"]);
@@ -292,7 +291,7 @@ describe("tags are editable in the document identity line", () => {
     // And the next chip is folded onto what the agent left, not onto what the
     // header was rendered from.
     addTag(host, "needs-love");
-    expect(getMeta(ydoc).tags).toEqual(["reference", "verify", "needs-love"]);
-    expect(getMeta(agent).tags).toEqual(["reference", "verify", "needs-love"]);
+    expect(getMeta(ydoc).tags).toEqual(["needs-love", "reference", "verify"]);
+    expect(getMeta(agent).tags).toEqual(["needs-love", "reference", "verify"]);
   });
 });

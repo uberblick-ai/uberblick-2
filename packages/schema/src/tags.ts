@@ -16,7 +16,7 @@
  */
 
 import type * as Y from "yjs";
-import { getMetaMap } from "./doc.js";
+import { getMeta, setTags } from "./doc.js";
 import {
   InvalidTagAssignmentError,
   InvalidTagIdentityError,
@@ -235,9 +235,9 @@ export function seedTagCatalog(catalogDoc: Y.Doc): void {
 }
 
 /**
- * Resolve stored identities in their document order. A UUID absent from this
- * replica's catalog remains visible as unresolved, while provisional name
- * strings are omitted; aliases converge on one canonical ID.
+ * Resolve identities in the supplied order. A UUID absent from this replica's
+ * catalog remains visible as unresolved, while provisional name strings are
+ * omitted; aliases converge on one canonical ID.
  */
 export function resolveTagAssignments(
   catalogDoc: Y.Doc,
@@ -258,18 +258,11 @@ export function resolveTagAssignments(
   return resolved;
 }
 
-function storedTags(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
 export function readDocumentTags(
   document: Y.Doc,
   catalogDoc: Y.Doc,
 ): TagAssignment[] {
-  return resolveTagAssignments(
-    catalogDoc,
-    storedTags(getMetaMap(document).get("tags")),
-  );
+  return resolveTagAssignments(catalogDoc, getMeta(document).tags);
 }
 
 export function readDirectoryTags(
@@ -282,8 +275,8 @@ export function readDirectoryTags(
 /**
  * Atomically replace a document's tag identities after validating the complete
  * request. An already-assigned retired tag or unresolved UUID may remain;
- * neither may be newly added. The first successful call naturally replaces
- * every provisional value.
+ * neither may be newly added. The first successful call naturally leaves
+ * every provisional value unassigned.
  */
 export function assignDocumentTags(
   document: Y.Doc,
@@ -292,10 +285,9 @@ export function assignDocumentTags(
 ): void {
   const index = catalogIndex(catalogDoc);
   const existing = new Set(
-    resolveTagAssignments(
-      catalogDoc,
-      storedTags(getMetaMap(document).get("tags")),
-    ).map((entry) => entry.id),
+    resolveTagAssignments(catalogDoc, getMeta(document).tags).map(
+      (entry) => entry.id,
+    ),
   );
   const unknown: string[] = [];
   const retired: string[] = [];
@@ -330,7 +322,5 @@ export function assignDocumentTags(
   if (unknown.length > 0 || retired.length > 0) {
     throw new InvalidTagAssignmentError(unknown, retired);
   }
-  document.transact(() => {
-    getMetaMap(document).set("tags", next);
-  });
+  setTags(document, next);
 }
