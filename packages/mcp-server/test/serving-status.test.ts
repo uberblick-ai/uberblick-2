@@ -28,6 +28,7 @@ interface Controls {
   draining: boolean;
   healthy: boolean;
   quiet: boolean;
+  refreshes: number;
 }
 
 function fakeEngine(
@@ -39,9 +40,12 @@ function fakeEngine(
     draining: false,
     healthy: true,
     quiet: true,
+    refreshes: 0,
   };
   const replicaSet = {
-    refresh() {},
+    refresh: () => {
+      controls.refreshes += 1;
+    },
     attachedReplicas: () => replicas,
     isRoomQuiet: () => controls.quiet,
     sync: {
@@ -69,6 +73,19 @@ function fakeEngine(
 }
 
 describe("serving sync status", () => {
+  it("reads engine state without refreshing replicas", () => {
+    const store = new MirrorStore(tempDatabasePath(), WORKSPACE);
+    stores.push(store);
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const { engine, controls } = fakeEngine(store, [{ room, lastSeq: 0 }]);
+
+    expect(collectServingSyncStatus(engine, [room])).toEqual({
+      caughtUp: true,
+      rooms: { [room]: { hubAcked: true } },
+    });
+    expect(controls.refreshes).toBe(0);
+  });
+
   it("requires both the shared pending marker and this replica's store cut", () => {
     const store = new MirrorStore(tempDatabasePath(), WORKSPACE);
     stores.push(store);

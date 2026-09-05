@@ -115,10 +115,15 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changedAt: number | null): voi
  * document is open. Returns the unsubscribe.
  *
  * Repairs once up front, for the case where the document is already hydrated
- * when this attaches, and then on every update the document takes.
+ * when this attaches, and then on every update the document takes. A gated
+ * repair waits for both admission and the directory's current server state:
+ * admission comes first, and writing into the empty interval could race and
+ * replace a tombstone that has not arrived yet.
  */
 export interface StubWriteGate {
   writable(): boolean;
+  /** Whether the directory has synchronized on its current connection. */
+  synchronized(): boolean;
   subscribe(listener: () => void): () => void;
 }
 
@@ -130,7 +135,12 @@ export function watchDocumentStub(
   let pendingChangedAt: number | null = null;
   const attempt = (changed: boolean): void => {
     if (changed) pendingChangedAt = Date.now();
-    if (gate !== undefined && !gate.writable()) return;
+    if (
+      gate !== undefined &&
+      (!gate.writable() || !gate.synchronized())
+    ) {
+      return;
+    }
     repairStub(docDoc, dirDoc, pendingChangedAt);
     pendingChangedAt = null;
   };

@@ -184,6 +184,17 @@ neither shaping nor its adapters grant `ready` or choose Priority.
   It covers conforming fix-ups and non-rewriting synchronization with `main`.
   If later work materially expands the design or scope, replace it with
   `needs-human` and name the delta.
+  **An owner decision on the issue is that approval** (owner decision,
+  2026-09-05): when the issue a PR closes carries the owner's dated decision
+  fixing the PR's intended shape — the shaping confirmation, a recorded
+  `Owner decision` comment, or the answer that lifted `needs-decision` — the
+  integrator does not park. It verifies the diff conforms to the decided shape
+  and that no finding expands it, applies `human-approved` itself with a
+  comment citing that decision, and merges as tier 2. It parks `needs-human`
+  only for a delta the decision did not cover, naming the delta. A tier-3
+  trigger that fired only in implementation — a persisted-data break, a CRDT
+  or concurrency change, a runtime dependency, auth semantics — is such a
+  delta unless the decision named it.
 - **Tier routes authority; it does not choose the design.** Never replace a
   simpler established primitive or dependency with bespoke correctness
   machinery merely to avoid tier 3. Make the intended shape visible early and

@@ -748,12 +748,40 @@ test("document actions stay reachable, close with the route, and archive into Re
   await page.getByRole("button", { name: "+ new doc" }).click();
   await page.locator(".ub-title").fill("Lifecycle notes");
   await page.setViewportSize({ width: 360, height: 720 });
+  await page.getByRole("button", { name: "Hide document list" }).click();
+  await expect(page.locator(".ub-list")).toHaveCount(0);
 
   const trigger = page.getByRole("button", { name: "Document actions" });
-  await expect(trigger).toBeVisible();
-  await expect(page.locator(".ub-doc-ids")).toBeVisible();
-  await expect(page.locator(".ub-copy-link")).toBeVisible();
-  await expect(page.locator(".ub-title")).toBeVisible();
+  const uuid = page.locator(".ub-doc-ids");
+  const copy = page.locator(".ub-copy-link");
+  const title = page.locator(".ub-title");
+  for (const [name, control] of [
+    ["title", title],
+    ["uuid", uuid],
+    ["copy", copy],
+    ["actions", trigger],
+  ] as const) {
+    await expect(control).toBeVisible();
+    const box = await control.boundingBox();
+    if (box === null) throw new Error("e2e: narrow document chrome has no box");
+    expect(box.x, name).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, name).toBeLessThanOrEqual(360);
+  }
+  await expect(uuid).toContainText(/^uuid [0-9a-f]{8}/);
+  expect(
+    await page.evaluate(() => {
+      const body = document.querySelector<HTMLElement>(".ub-body");
+      const pane = document.querySelector<HTMLElement>(".ub-pane");
+      if (body === null || pane === null) throw new Error("e2e: no document pane");
+      return {
+        body: [body.clientWidth, body.scrollWidth],
+        pane: [pane.clientWidth, pane.scrollWidth],
+      };
+    }),
+  ).toEqual({ body: [360, 360], pane: [360, 360] });
+
+  await copy.click();
+  await expect(page.locator(".ub-copied")).toHaveText("link copied");
 
   await trigger.click();
   await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
@@ -835,6 +863,7 @@ test("document actions stay reachable, close with the route, and archive into Re
     "contenteditable",
     "false",
   );
+  await page.getByRole("button", { name: "Show document list" }).click();
   await expect(page.getByRole("button", { name: /Lifecycle notes.*archived/ })).toBeVisible();
 });
 
@@ -887,8 +916,8 @@ test("the document collaborator cluster stays compact and jumps once without mov
   browser,
 }) => {
   const page = await openApp(browser, "light");
-  // The fixed 18rem sidebar leaves a roughly 400px document pane: narrow, but
-  // still inside the app's supported side-by-side shell.
+  // At this breakpoint the sidebar overlays the full-width document pane,
+  // exercising the compact cluster in the narrow shell.
   await page.setViewportSize({ width: 720, height: 640 });
   await page.getByRole("button", { name: "+ new doc" }).click();
   await page.locator(".ub-title").fill("Live collaborators");

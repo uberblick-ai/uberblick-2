@@ -10,9 +10,9 @@ risk-scoped final-head round. `integration.md` beside this file owns the
 gates' order and mechanics.
 
 How many challenges a diff owes, who owns each, and the candidate-head freeze
-are CLAUDE.md's gate and are not restated here. Read by role: an implementer or
-issue preparer needs only "Requesting the round" and "Challenge freshness"; the
-sections from "Finding continuity" on are the integrator's.
+are CLAUDE.md's gate. "Requesting the round" covers dispatch; "Findings and
+corrections" covers reviewer records and fix-ups; "Verification and completion"
+is the integrator's.
 
 ## Requesting the round
 
@@ -85,138 +85,61 @@ mutation probes, and hunt specifically for overtesting and overengineering per
 this repo's principles (KISS/YAGNI, least code wins, tests defend contracts and
 invariants rather than implementation trivia).
 
-## Challenge freshness
+## Findings and corrections
 
-The two challenges need not be repeated automatically after every correction.
-Their reasoning may carry across a later head only under the risk-scoped rule
-below, recorded separately for the two verdicts. If a fresh round is
-required, use the same runtime as the stale challenge it replaces unless the
-required runtime is unavailable; record an unavailable runtime as a failed
-dispatch, never as equivalent evidence.
+Reviewers record findings in their delegation verdict using stable IDs
+(`R<round>-F<number>`). Each finding names the affected code, supported-usage
+consequence, proposed severity, and reproducible evidence. Separate observations
+from assumptions. Record successful probes only when they resolve a finding or
+establish a material limitation.
 
-## Finding continuity
+The integrator maintains one finding ledger: ID, disposition, evidence link, and
+verification result. Evidence stays in the reviewer's verdict; later records
+link to it. Existing findings retain their IDs across heads. Reopen settled
+findings only when changed code or new evidence invalidates the disposition.
 
-The integrator maintains one compact finding-ledger comment per PR and edits it
-across heads. Each row has a stable id, the head where it was first established,
-its current disposition and one evidence link. Reviewers read it before filing
-findings. A settled observation is not a new finding merely because another
-runtime assigns a different severity: cite the existing id and add only
-material new evidence. Reopen that id only when the affected code changed or a
-reproducible supported-usage consequence makes the prior disposition no longer
-sound. The integrator updates the row; later rulings link it and discuss only
-rows that changed. New reviewer findings use the collision-free id
-`R<round>-F<sequence>`; the id does not change when severity or disposition
-does. Before dispatching the second reviewer of a required pair, the integrator
-initializes or updates the ledger from the first verdict so the second read can
-distinguish new evidence from rediscovery.
+Severity follows impact:
 
-```text
-<!-- uberblick-finding-ledger -->
-Finding ledger — PR #N
-| ID | First head | Status | Evidence / disposition |
-```
+- **P1:** data loss, secret exposure, violated invariant, or materially unusable
+  supported behavior.
+- **P2:** another concrete defect in supported usage.
+- **P3:** minor or theoretical impact.
 
-## Finding triage — before any fix-up brief
+The integrator chooses the disposition. Fix P1s and contained supported-usage
+P2s. A branch-caused failure of a required check must be fixed. A non-blocking P2
+may be deferred to a linked issue with its accepted consequence recorded; never
+defer data loss, security exposure, or violated invariants. Accept P3s without
+creating issues by default. Reject unsupported findings with a brief
+evidence-based reason.
 
-A finding is not automatically a work item; every finding is triaged explicitly
-against the supported usage model (single user, local-first, one hub, parallel
-loop-dispatched agents, dev-stage data). Record three independent decisions per
-finding — severity does not decide the other two:
+When two challenges are required, collect both on the same head before
+corrections, except for P1. Then issue one batched fix-up brief containing
+finding IDs, required outcomes, and verification. Include P3 corrections only
+when local and inexpensive; they must not drive a redesign or another external
+round.
 
-- **Severity.** P1: supported usage can lose data, expose secrets, violate a
-  CLAUDE.md invariant, or become materially unusable. P2: a real correctness,
-  reliability, accessibility, or maintainability defect within supported usage,
-  without P1 impact. P3: minor, local, or low-impact. Name the concrete
-  supported-usage consequence; fix size or reviewer confidence does not change
-  severity.
-- **A branch-caused red gate is fix-now.** When a required check is green at the
-  base and red at the reviewed head, the branch must restore it even when the
-  stale code is a test fixture rather than production. Severity still follows
-  impact; it is not inferred from the word `test`.
-- **Disposition.** *Fix now* — the default for P1 and for contained
-  supported-usage P2s. *Defer* — only for a non-blocking P2/P3 whose fix is
-  disproportionate right now: create a linked issue and record the concrete
-  accepted risk on the PR; never defer data loss, auth/security exposure, or a
-  violated invariant. Queue an implementable deferral with `needs-preparation`.
-  Create it through `.github/ISSUE_SPEC.md`'s **Request source** path.
-  If the finding already identifies a product or authority choice, create it at
-  `needs-decision` with the focused question, options and recommendation instead
-  of paying a preparation/adversary pass to rediscover the same boundary.
-  *Accept debt / wontfix* — for a P3, or a P2 whose claimed impact remains
-  theoretical because no current supported-usage failure is established,
-  record the consequence and why another delivery cycle is disproportionate,
-  without creating a linked issue. When an issue already exists, close it as
-  not planned with `wontfix`. A concrete bug observed later is new evidence and
-  may be filed or reopened then. Never use either route for data loss,
-  auth/security exposure, or a violated invariant.
-  *Document boundary* — reachable only outside the usage
-  model: the smallest useful code/doc statement naming the boundary; no behavior
-  changes, no mechanism tests for an unsupported scenario. *Reject* — not
-  reachable, factually wrong, or cost clearly exceeds stake: reply with evidence
-  on the thread. Never silent dismissal, and no category shortcuts ("human-run
-  commands can't race" is false here — parallel agents, retries and multiple
-  terminals make nominally human-run commands concurrent).
-- **Verification.** Who confirms the fix: the integrator (focused diff read,
-  the finding's test failing-then-passing, failure-path probe where stateful) or
-  an external re-review round per the scoping below. A subtle P2 fix may need
-  outside eyes; a tiny P1 correction with a focused proof may not.
+## Verification and completion
 
-## One batched fix-up wave per review head
+The integrator verifies corrections through focused diff inspection and
+relevant tests or failure-path probes. Tests defend the affected contract, not
+the implementation mechanism.
 
-Collect both challenges', any Copilot and integrator findings against the same
-frozen head and triage them all first; then one decision-complete brief, one
-implementer pickup, one re-gate at the new head — never a correction between
-the required pair and never a pickup per finding or per reviewer. The
-implementer's first-review evidence response may reject or clarify a finding,
-but for a dual challenge it does not move the head before the integrator's
-review. Standing
-brief constraints: smallest diff that closes the accepted findings; tests only
-for the contract or invariant a finding names, never for the mechanics of the
-fix. Fix-up diffs face the same Touches, scope-escape and overtesting checks as
-feature diffs. Late findings still get an explicit disposition, but reviewer
-timing must not manufacture extra waves.
-Once all required challenges have returned and no P1 or supported-usage P2
-remains, a later P3-only verdict does not justify another external round. The
-integrator dispositions it and verifies any accepted local correction directly.
+Repeat an external challenge only when a correction introduces a concrete
+unresolved risk or invalidates that challenge's earlier reasoning. Record the
+risk, affected verdict, and review scope before dispatch. A new head, severity
+disagreement, or P3-only verdict is insufficient. Replacement reviews examine
+the delta first and use the runtime of the verdict they replace.
 
-## Risk-scoped external re-review
+Merge requires CLAUDE.md's gates, no open P1, and an explicit disposition for
+every finding. Record carried-forward review evidence with a brief scope and
+rationale. The final ruling links to the ledger and gate results without
+repeating them.
 
-A further external round is required while a P1 remains open; and for a P2/P3 fix
-when it sits at a data-critical boundary (security/auth, persistence,
-concurrency, schema/CRDT semantics, cross-process lifecycle) **and** is
-non-local, introduces new state or synchronization, changes the design that
-answered the original finding, or lacks a focused test proving it — a one-line
-mechanical fix at such a boundary, proven by its test, is integrator territory;
-and whenever reviewer or integrator names a concrete risk rationale. Re-review
-briefs are delta-first: the fixes and the invariants they touch, expanding to
-the whole PR only when a fix materially changes the representation or
-invalidates earlier reasoning. Once the required pair has returned, another
-full-PR round needs a PR record naming that concrete reason; generic freshness,
-a new reviewer, or a severity disagreement is not one. Record every round in
-its mutable delegation comment as `Review round N (<runtime>, head <sha>):
-<verdict>` so round counts stay derivable without separate lifecycle comments.
+If a confirmation review finds a new P1, or a correction wave does not reduce the
+open P1 set, park for an owner decision. The integrator settles P2/P3
+disagreements after one implementer response; escalate only a specific
+unresolved decision.
 
-## Exit and convergence
-
-Review exits only when: no P1 remains; every supported-usage P2 is fixed or
-explicitly deferred (linked issue, accepted-risk rationale); every remark is
-fixed, deferred, accepted, documented or rejected explicitly; all gate evidence
-is fresh
-at the exact merge head; and any earlier external-review reasoning carried
-across a later local fix is recorded on the PR with scope and rationale. If a
-confirmation round surfaces a net-new triaged P1, or the open-P1 set fails to
-shrink after a directed correction wave, park the PR `needs-human` with the
-finding list instead of looping. Do not debate a P2/P3 label through fresh
-rounds: after one implementer evidence response or correction wave, the
-integrator rules from supported-usage impact; if it still cannot, park
-`needs-human` with the finding and one focused owner question. Never park for a
-false positive, an unrelated pre-existing issue, or a finding rejected with
-evidence.
-
-Count correction heads since the PR opened or since the owner's latest
-decision on it, whichever is later. The **third** parks the PR `needs-human`
-before it is built, with one question on the PR itself, never on a side issue:
-which mechanism keeps producing defects, whether deletion or an established
-primitive would replace it, and what the owner must decide for it to converge.
-"Continue" resets the count; a representation change restarts it. Merge tier is
-approval routing, never a reason to preserve bespoke correctness machinery.
+Before a third correction head since opening or the latest owner decision, park
+with one question identifying the mechanism preventing convergence. An owner
+instruction to continue resets the count.

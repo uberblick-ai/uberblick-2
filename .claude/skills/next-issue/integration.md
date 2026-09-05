@@ -188,10 +188,18 @@ label is merge-authorized: execute the merge as tier 2 (merge report first),
 every other gate unchanged — evidence fresh at the exact merge head, zero
 unaddressed remarks. The owner sets the label directly or explicitly directs a
 session to set it for named PRs; that session posts the direction as provenance.
-Never infer approval from `ready` or an unrelated owner comment. Approval covers
-the intended PR shape plus fix-ups and non-rewriting synchronization with
-`main`; if later commits materially expand the design or scope, replace it with
-`needs-human` and name the delta.
+**An owner decision on the closed issue is also that approval** (`CLAUDE.md`,
+owner decision 2026-09-05): when the issue carries the owner's dated decision
+fixing the PR's intended shape — the shaping confirmation, an `Owner decision`
+comment, or the answer that lifted `needs-decision` — verify the diff conforms
+to it and that no finding expands it, set `human-approved` yourself with a
+comment citing that decision, and merge as tier 2. Park `needs-human` only for
+a delta the decision did not cover, and name it; a tier-3 trigger that fired
+only in implementation is such a delta unless the decision named it. Never
+infer approval from `ready` alone or from an owner comment unrelated to the
+PR's shape. Approval covers the intended PR shape plus fix-ups and
+non-rewriting synchronization with `main`; if later commits materially expand
+the design or scope, replace it with `needs-human` and name the delta.
 Tier 1 and Tier 2 self-merge as specified there (Tier 2 requires the merge-report
 comment on the PR first). Every merge report ends with two machine-readable
 lines — `findings_p1_p2_p3: <n>/<n>/<n>` and `deferred_findings: <issue refs or

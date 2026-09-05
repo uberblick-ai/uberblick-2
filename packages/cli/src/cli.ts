@@ -14,6 +14,7 @@ import { doctorCommand } from "./doctor.js";
 import { envCommand } from "./env.js";
 import { initCommand } from "./init.js";
 import { installCommand } from "./install.js";
+import { isInstallPayload } from "./installation.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { launchCommand } from "./launch.js";
@@ -47,6 +48,12 @@ options:
   -v, --version     print the version
 `;
 
+function visibleHelp(): string {
+  return isInstallPayload()
+    ? HELP.replace("  launch <role>          keep one agent entry role running in this terminal\n", "")
+    : HELP;
+}
+
 /**
  * `ub mcp` is a group like `workspace` and `remote`, with one human child.
  *
@@ -70,7 +77,7 @@ export async function runCli(
   const [command, ...rest] = argv;
 
   if (command === undefined || command === "help" || command === "--help" || command === "-h") {
-    io.out(HELP);
+    io.out(visibleHelp());
     return 0;
   }
   if (command === "--version" || command === "-v") {
@@ -123,6 +130,6 @@ export async function runCli(
   }
 
   // The help goes to stderr here, so a pipe reading stdout sees nothing at all.
-  io.err(`ub: unknown command ${JSON.stringify(command)}\n\n${HELP}`);
+  io.err(`ub: unknown command ${JSON.stringify(command)}\n\n${visibleHelp()}`);
   return 2;
 }

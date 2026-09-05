@@ -80,6 +80,7 @@ import {
   writeUserConfig,
 } from "./config.js";
 import { takeHelp } from "./help.js";
+import { isInstallPayload } from "./installation.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock, seedLockPath } from "./init-lock.js";
 import { installCommand } from "./install.js";
@@ -569,7 +570,7 @@ export async function initCommand(
 
   // Whether this is a checkout, which decides only whether the report below
   // names the contributor tasks. Nothing is written into one.
-  const root = findCheckoutRoot(process.cwd());
+  const root = isInstallPayload() ? null : findCheckoutRoot(process.cwd());
 
   // --- everything that writes ---------------------------------------------
   //
@@ -865,10 +866,10 @@ export async function initCommand(
   }
 
   report += "\nnext steps\n";
-  if (root !== null) {
-    report +=
-      "  mise run dev          the hub and the web app on http://localhost:5173\n";
-  }
+  report +=
+    root === null
+      ? "  ub open               the web app and a hub in the foreground\n"
+      : "  mise run dev          the hub and the web app on http://localhost:5173\n";
   // Only when the question was left open: `--mcp` does it below instead, and
   // `--no-mcp` is somebody saying they do not want to be told about it.
   if (flags.mcp === undefined) {

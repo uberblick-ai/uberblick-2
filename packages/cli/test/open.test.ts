@@ -269,7 +269,7 @@ async function anotherRunBuilding(
   const hold = join(box.cwd, "still-building");
   writeFileSync(hold, "", "utf8");
   const run = ensureBundle(
-    { action: "serve", dir, ours: true },
+    { action: "serve", dir, ours: true, installed: false },
     {
       ...box.env,
       PATH: tool.path,
@@ -1536,7 +1536,7 @@ describe("ub open", () => {
     const io = stderrIo();
 
     const served = await ensureBundle(
-      { action: "serve", dir: bundle, ours: true },
+      { action: "serve", dir: bundle, ours: true, installed: false },
       {
         ...box.env,
         PATH: mise.path,
@@ -1574,7 +1574,7 @@ describe("ub open", () => {
 
     const io = stderrIo();
     const served = await ensureBundle(
-      { action: "serve", dir: bundle, ours: false },
+      { action: "serve", dir: bundle, ours: false, installed: false },
       {
         ...box.env,
         PATH: mise.path,
@@ -1595,7 +1595,7 @@ describe("ub open", () => {
     const bundle = fixtureBundle(box);
     stamp(bundle, null);
     const mise = fakeMise(box);
-    const plan = { action: "serve", dir: bundle, ours: true } as const;
+    const plan = { action: "serve", dir: bundle, ours: true, installed: false } as const;
     const noTools = join(box.cwd, "no-tools");
     mkdirSync(noTools, { recursive: true });
 
@@ -1656,7 +1656,12 @@ describe("ub open", () => {
     const io = stderrIo();
     const holder = await anotherRunBuilding(bundle, SYNC_PROTOCOL_VERSION);
 
-    const waiting = ensureBundle({ action: "serve", dir: bundle, ours: true }, env, io, calm());
+    const waiting = ensureBundle(
+      { action: "serve", dir: bundle, ours: true, installed: false },
+      env,
+      io,
+      calm(),
+    );
     await waitUntil("the waiter to announce itself", () => io.text().includes("waiting for it"));
     // Nothing was built behind the holder's back — which is the whole point:
     // `vite build` empties this directory before it writes it.
@@ -1683,7 +1688,12 @@ describe("ub open", () => {
     // current stamp can be there before `index.html` is.
     stamp(dir, SYNC_PROTOCOL_VERSION);
 
-    const waiting = ensureBundle({ action: "serve", dir, ours: true }, { ...box.env, PATH: mise.path }, io, calm());
+    const waiting = ensureBundle(
+      { action: "serve", dir, ours: true, installed: false },
+      { ...box.env, PATH: mise.path },
+      io,
+      calm(),
+    );
     // Waiting, not serving: announcing is what a run does when it finds the
     // lock held, and taking the stamp at its word would have returned already.
     await waitUntil("the waiter to announce itself", () => io.text().includes("waiting for it"));
@@ -1716,7 +1726,12 @@ describe("ub open", () => {
       FAKE_STAMP_DIR: dir,
       FAKE_STAMP_VERSION: String(SYNC_PROTOCOL_VERSION),
     };
-    const waiting = ensureBundle({ action: "serve", dir, ours: true }, env, io, calm());
+    const waiting = ensureBundle(
+      { action: "serve", dir, ours: true, installed: false },
+      env,
+      io,
+      calm(),
+    );
     await waitUntil("the waiter to announce itself", () => io.text().includes("waiting for it"));
     expect(mise.calls()).toEqual([]);
 
@@ -1742,7 +1757,7 @@ describe("ub open", () => {
     const io = stderrIo();
 
     const outcome = await ensureBundle(
-      { action: "build", dir, ours: true },
+      { action: "build", dir, ours: true, installed: false },
       { ...box.env, PATH: pnpm.path, FAKE_EXIT_CODE: "1" },
       io,
       calm(),
@@ -1767,7 +1782,12 @@ describe("ub open", () => {
     const io = stderrIo();
     const holder = await anotherRunBuilding(bundle);
 
-    const waiting = ensureBundle({ action: "build", dir: bundle, ours: true }, env, io, calm());
+    const waiting = ensureBundle(
+      { action: "build", dir: bundle, ours: true, installed: false },
+      env,
+      io,
+      calm(),
+    );
     await waitUntil("the waiter to announce itself", () => io.text().includes("waiting for it"));
     expect(pnpm.calls()).toEqual([]);
 
@@ -1782,7 +1802,7 @@ describe("ub open", () => {
     const bundle = fixtureBundle(box);
     stamp(bundle, SYNC_PROTOCOL_VERSION + 1);
     const mise = fakeMise(box);
-    const plan = { action: "serve", dir: bundle, ours: true } as const;
+    const plan = { action: "serve", dir: bundle, ours: true, installed: false } as const;
 
     // Waiting for somebody else's build: no build of its own, and no failure.
     const waitEnv = { ...box.env, PATH: mise.path };
@@ -1837,7 +1857,7 @@ describe("ub open", () => {
       FAKE_SLEEP: "0.3",
       FAKE_BUSY_DIR: join(one.cwd, "building"),
     };
-    const plan = { action: "serve", dir: bundle, ours: true } as const;
+    const plan = { action: "serve", dir: bundle, ours: true, installed: false } as const;
     const first = stderrIo();
     const second = stderrIo();
 
@@ -1864,7 +1884,7 @@ describe("ub open", () => {
     // No signal reached this process, so a dead build is a build that did not
     // work — exit 1 with a reason, not the quiet exit 0 of a Ctrl-C.
     const outcome = await ensureBundle(
-      { action: "serve", dir: bundle, ours: true },
+      { action: "serve", dir: bundle, ours: true, installed: false },
       { ...box.env, PATH: mise.path, FAKE_KILL_SELF: "1" },
       io,
       calm(),
@@ -1889,14 +1909,14 @@ describe("ub open", () => {
     };
 
     const rebuilt = await ensureBundle(
-      { action: "serve", dir: bundle, ours: true },
+      { action: "serve", dir: bundle, ours: true, installed: false },
       env,
       stderrIo(),
       calm(),
     );
     const first = join(box.cwd, "first-build");
     const built = await ensureBundle(
-      { action: "build", dir: first, ours: true },
+      { action: "build", dir: first, ours: true, installed: false },
       { ...env, FAKE_STAMP_DIR: first },
       stderrIo(),
       calm(),
