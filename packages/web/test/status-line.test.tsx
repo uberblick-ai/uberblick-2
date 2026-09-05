@@ -32,6 +32,7 @@ function stubConnection(
   const status: RoomStatus = {
     connected: false,
     synced: false,
+    hasReceivedServerState: true,
     writable: true,
     storeRefused: false,
     unsyncedChanges,

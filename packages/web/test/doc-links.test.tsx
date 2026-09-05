@@ -388,6 +388,7 @@ describe("what a reference says about its target", () => {
 const LIVE: RoomStatus = {
   connected: true,
   synced: true,
+  hasReceivedServerState: true,
   writable: true,
   storeRefused: false,
   unsyncedChanges: 0,

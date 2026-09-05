@@ -17,8 +17,8 @@
  *
  * Hand-rolled on purpose (#68). There are four routes — the workspace, one
  * document, the whole corpus listed (`/<workspace>/all`, #118), and workspace
- * settings (`/<workspace>/settings`); a router library would be a new runtime
- * dependency buying nothing but indirection.
+ * settings (`/<workspace>/settings`, with one Tags child); a router library
+ * would be a new runtime dependency buying nothing but indirection.
  *
  * The address bar is the selection. Nothing else stores "which document is
  * open": the sidebar navigates, Back navigates, a pasted link navigates, and
@@ -36,6 +36,9 @@ export interface Workspace {
   /** The first path segment, as typed — decorated or not. */
   segment: string;
 }
+
+/** The two destinations inside workspace settings. */
+export type SettingsPage = "general" | "tags";
 
 /**
  * What an address resolves to.
@@ -58,7 +61,7 @@ export type Route =
   | { kind: "no-workspace"; reason: "invalid"; configured: string }
   | { kind: "list"; workspace: Workspace }
   | { kind: "all"; workspace: Workspace }
-  | { kind: "settings"; workspace: Workspace }
+  | { kind: "settings"; workspace: Workspace; page: SettingsPage }
   | { kind: "doc"; workspace: Workspace; uuid: string }
   | { kind: "invalid"; reason: string; workspace: Workspace | null };
 
@@ -71,8 +74,11 @@ export type Route =
  */
 export const ALL_SEGMENT = "all";
 
-/** The workspace-settings mode. It has no page segment of its own. */
+/** The workspace-settings mode. General keeps the mode's root address. */
 export const SETTINGS_SEGMENT = "settings";
+
+/** The only child address inside workspace settings. */
+export const TAG_SETTINGS_SEGMENT = "tags";
 
 /**
  * Canonical UUID shape — lowercase, and a *shape* check only.
@@ -163,6 +169,19 @@ export function parseRoute(pathname: string, configured: string | null): Route {
 
   const second = segments[1];
   if (second === undefined) return { kind: "list", workspace };
+  const canonical = second.toLowerCase();
+  if (canonical === SETTINGS_SEGMENT) {
+    const page = segments[2]?.toLowerCase();
+    if (page === undefined) return { kind: "settings", workspace, page: "general" };
+    if (segments.length === 3 && page === TAG_SETTINGS_SEGMENT) {
+      return { kind: "settings", workspace, page: "tags" };
+    }
+    return {
+      kind: "invalid",
+      reason: "It has more path segments than an address.",
+      workspace,
+    };
+  }
   if (segments.length > 2) {
     return {
       kind: "invalid",
@@ -179,9 +198,7 @@ export function parseRoute(pathname: string, configured: string | null): Route {
   // that spelling in the address bar the way it does a trailing slash. The
   // rejection message keeps the spelling as typed: it is about the link on
   // screen.
-  const canonical = second.toLowerCase();
   if (canonical === ALL_SEGMENT) return { kind: "all", workspace };
-  if (canonical === SETTINGS_SEGMENT) return { kind: "settings", workspace };
   if (!UUID.test(canonical)) {
     return {
       kind: "invalid",
@@ -241,9 +258,13 @@ export function allPath(segment: string): string {
   return `/${segment}/${ALL_SEGMENT}`;
 }
 
-/** The path of the workspace's settings mode. */
-export function settingsPath(segment: string): string {
-  return `/${segment}/${SETTINGS_SEGMENT}`;
+/** The path of one workspace-settings destination. */
+export function settingsPath(
+  segment: string,
+  page: SettingsPage = "general",
+): string {
+  const root = `/${segment}/${SETTINGS_SEGMENT}`;
+  return page === "tags" ? `${root}/${TAG_SETTINGS_SEGMENT}` : root;
 }
 
 /**
@@ -261,7 +282,7 @@ export function canonicalPath(route: Route): string | null {
     case "all":
       return allPath(route.workspace.segment);
     case "settings":
-      return settingsPath(route.workspace.segment);
+      return settingsPath(route.workspace.segment, route.page);
     case "doc":
       return docPath(route.workspace.segment, route.uuid);
     default:

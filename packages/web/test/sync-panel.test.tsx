@@ -59,6 +59,7 @@ function fixture(status: Partial<RoomStatus> = {}): Fixture {
   const full: RoomStatus = {
     connected: true,
     synced: true,
+    hasReceivedServerState: true,
     writable: true,
     storeRefused: false,
     unsyncedChanges: 0,

@@ -257,12 +257,14 @@ it("keeps a room on a live socket read-only until its token is admitted", async 
   expect(second.history[0]).toMatchObject({
     connected: true,
     writable: false,
+    hasReceivedServerState: false,
     hasAnswered: false,
   });
   await waitFor("the second room's token to be admitted", () =>
     second.latest().writable,
   );
   await waitFor("the second room's server answer", () => second.latest().hasAnswered);
+  expect(second.latest().hasReceivedServerState).toBe(true);
 }, TEST_TIMEOUT_MS);
 
 /** Send the same room-local close reason the local browser bridge sends. */
@@ -312,6 +314,7 @@ it("resumes live sync after a hub restart, and never claims to be synced while i
     () => !(tab.latest().connected && tab.latest().synced),
   );
   expect(tab.latest().writable).toBe(false);
+  expect(tab.latest().hasReceivedServerState).toBe(true);
 
   // The hub comes back on the same address, with the same database. Nothing
   // rebinds or reloads on this side: same connection, same Y.Doc, same

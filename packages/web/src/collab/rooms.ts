@@ -358,6 +358,12 @@ export interface RoomStatus {
   connected: boolean;
   synced: boolean;
   /**
+   * True once this room has completed a sync with its server. Unlike `synced`,
+   * it stays true across a later disconnect; unlike `hasAnswered`, a refusal
+   * over an empty Y.Doc does not count as server state.
+   */
+  hasReceivedServerState: boolean;
+  /**
    * True once this room has completed a sync or its connection has failed or
    * been refused. Until then an empty Y.Doc is silence rather than evidence
    * that a deep-linked document is absent.
@@ -491,6 +497,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
       !storeRefused &&
       socket.status === WebSocketStatus.Connected,
     synced: protocolMismatch === null && !storeRefused && provider.isSynced,
+    hasReceivedServerState: provider.isSynced,
     hasAnswered:
       provider.isSynced || protocolMismatch !== null || storeRefused || tokenMissing,
     writable: false,
@@ -590,6 +597,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   });
 
   provider.on("synced", () => {
+    status.hasReceivedServerState = true;
     status.hasAnswered = true;
     refresh();
   });
