@@ -104,7 +104,7 @@ function worktreeScenario(t) {
 		HOUSEKEEPING_WORKTREE_MAX_AGE_H: "1",
 	});
 
-	return { base, bin, clean, current, dirty, env, locked, outside, young };
+	return { bin, clean, current, dirty, env, locked, outside, young };
 }
 
 function proveWorktreeCleanup({ clean, current, dirty, env, locked, outside, young }) {
