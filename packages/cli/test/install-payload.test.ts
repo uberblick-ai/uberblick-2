@@ -1,0 +1,280 @@
+/** The checkout-free archive, exercised through the binaries it ships. */
+
+import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  cpSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, relative } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  REPO_ROOT,
+  pointAt,
+  removeTempDirs,
+  sandbox,
+  waitUntil,
+} from "./helpers.js";
+
+const VERSION = "0.1.0";
+const WORKSPACE = "956f508d-40ec-43f7-974a-0e71dca68c35";
+const BUILD_SCRIPT = join(REPO_ROOT, "scripts", "build-install-payload.mjs");
+const scratch = mkdtempSync(join(tmpdir(), "uberblick-install-payload-test-"));
+const webFixture = join(scratch, "web");
+const output = join(scratch, "output");
+const extracted = join(scratch, "extracted");
+const nodeBin = join(scratch, "node-bin");
+const archive = join(output, `uberblick-${VERSION}.tar.gz`);
+const payload = join(extracted, `uberblick-${VERSION}`);
+
+afterAll(() => {
+  rmSync(scratch, { recursive: true, force: true });
+  removeTempDirs();
+});
+
+function build(version: string, outputDir = output) {
+  return spawnSync(process.execPath, [BUILD_SCRIPT, version], {
+    cwd: REPO_ROOT,
+    env: {
+      ...process.env,
+      UBERBLICK_PAYLOAD_OUTPUT_DIR: outputDir,
+      UBERBLICK_PAYLOAD_WEB_DIST: webFixture,
+    },
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+}
+
+function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined) result[key] = value;
+  }
+  return result;
+}
+
+function runtimeEnv(
+  box: ReturnType<typeof sandbox>,
+  root = payload,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...box.env,
+    PATH: `${join(root, "bin")}:${nodeBin}`,
+  };
+  delete env.FORCE_COLOR;
+  env.NO_COLOR = "1";
+  return env;
+}
+
+function runPayload(
+  box: ReturnType<typeof sandbox>,
+  args: string[],
+  options: { command?: "ub" | "uberblick"; cwd?: string; root?: string } = {},
+) {
+  return spawnSync(options.command ?? "ub", args, {
+    cwd: options.cwd ?? box.cwd,
+    env: runtimeEnv(box, options.root),
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+}
+
+function filesBelow(root: string): string[] {
+  const files: string[] = [];
+  const visit = (dir: string): void => {
+    for (const name of readdirSync(dir).sort()) {
+      const path = join(dir, name);
+      const stat = lstatSync(path);
+      if (stat.isDirectory()) visit(path);
+      else files.push(path);
+    }
+  };
+  visit(root);
+  return files;
+}
+
+function treeDigest(root: string): string {
+  const hash = createHash("sha256");
+  for (const path of filesBelow(root)) {
+    const stat = lstatSync(path);
+    hash.update(relative(root, path));
+    hash.update(String(stat.mode));
+    hash.update(stat.isSymbolicLink() ? readlinkSync(path) : readFileSync(path));
+  }
+  return hash.digest("hex");
+}
+
+async function freePort(): Promise<number> {
+  const { createServer } = await import("node:net");
+  const server = createServer();
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("could not reserve a port");
+  }
+  await new Promise<void>((done) => server.close(() => done()));
+  return address.port;
+}
+
+beforeAll(() => {
+  mkdirSync(webFixture, { recursive: true });
+  writeFileSync(
+    join(webFixture, "index.html"),
+    "<!doctype html><title>payload web</title><div id=root></div>\n",
+    "utf8",
+  );
+  writeFileSync(
+    join(webFixture, "uberblick-build.json"),
+    `${JSON.stringify({ syncProtocolVersion: SYNC_PROTOCOL_VERSION })}\n`,
+    "utf8",
+  );
+  mkdirSync(nodeBin, { recursive: true });
+  symlinkSync(process.execPath, join(nodeBin, "node"));
+
+  const built = build(VERSION);
+  expect(built.status, built.stderr).toBe(0);
+  mkdirSync(extracted, { recursive: true });
+  const unpacked = spawnSync("tar", ["-xzf", archive, "-C", extracted], {
+    encoding: "utf8",
+  });
+  expect(unpacked.status, unpacked.stderr).toBe(0);
+});
+
+describe("the versioned install payload", () => {
+  it("refuses the checkout placeholder as a release version", () => {
+    const invalidOutput = join(scratch, "invalid");
+    const invalid = build("0.0.0", invalidOutput);
+    expect(invalid.status).toBe(1);
+    expect(invalid.stderr).toContain("0.0.0 is not a release");
+  });
+
+  it("runs init, status, MCP and the packaged web app with only Node on PATH", async () => {
+    const box = sandbox();
+    const initialPayload = treeDigest(payload);
+
+    const version = runPayload(box, ["--version"]);
+    expect(version.status, version.stderr).toBe(0);
+    expect(version.stdout.trim()).toBe(VERSION);
+    expect(
+      runPayload(box, ["--version"], {
+        command: "uberblick",
+      }).stdout.trim(),
+    ).toBe(VERSION);
+    const help = runPayload(box, ["--help"]);
+    expect(help.status, help.stderr).toBe(0);
+    expect(help.stdout).not.toContain("launch <role>");
+    expect(filesBelow(payload).some((path) => path.endsWith(".map"))).toBe(false);
+
+    const initialized = runPayload(box, ["init", "--yes", "--no-mcp"], {
+      cwd: REPO_ROOT,
+    });
+    expect(initialized.status, initialized.stderr).toBe(0);
+    expect(initialized.stdout).toContain("ub open");
+    expect(initialized.stdout).not.toMatch(/mise run|pnpm/);
+
+    const status = runPayload(box, ["status", "--json"]);
+    expect(status.status, status.stderr).toBe(0);
+    expect(JSON.parse(status.stdout)).toMatchObject({
+      version: VERSION,
+      storage: {
+        layout: "xdg",
+        config: join(box.configHome, "uberblick", "config.json"),
+        data: join(box.dataHome, "uberblick"),
+      },
+    });
+
+    const transport = new StdioClientTransport({
+      command: "ub",
+      args: ["mcp", "serve"],
+      cwd: box.cwd,
+      env: stringEnv(runtimeEnv(box)),
+      stderr: "pipe",
+    });
+    const client = new Client({ name: "install-payload-test", version: VERSION });
+    try {
+      await client.connect(transport);
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("list_docs");
+    } finally {
+      await client.close();
+    }
+
+    const hubPort = await freePort();
+    const webPort = await freePort();
+    pointAt(box, `ws://127.0.0.1:${hubPort}`);
+    const opened = spawn("ub", ["open", "--no-browser", "--port", String(webPort)], {
+      cwd: box.cwd,
+      env: runtimeEnv(box),
+    });
+    let stdout = "";
+    let stderr = "";
+    opened.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+    });
+    opened.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (done) => opened.on("close", (code, signal) => done({ code, signal })),
+    );
+    let outcome: Awaited<typeof closed>;
+    try {
+      await waitUntil("the installed web app to start", () =>
+        stdout.includes("uberblick is at"),
+      );
+      expect(await (await fetch(`http://127.0.0.1:${webPort}/`)).text()).toContain(
+        "payload web",
+      );
+      expect(stderr).not.toMatch(/mise run|pnpm|building/);
+    } finally {
+      if (opened.exitCode === null && opened.signalCode === null) opened.kill("SIGINT");
+      outcome = await closed;
+    }
+    expect(outcome).toEqual({ code: 0, signal: null });
+
+    const home = dirname(box.cwd);
+    for (const file of filesBelow(home)) {
+      expect(
+        file.startsWith(box.configHome) || file.startsWith(box.dataHome),
+        `${file} is outside the XDG roots`,
+      ).toBe(true);
+    }
+    expect(treeDigest(payload)).toBe(initialPayload);
+  });
+
+  it.each([
+    ["missing", (root: string) => rmSync(join(root, "packages", "web", "dist", "index.html"))],
+    [
+      "incompatible",
+      (root: string) =>
+        writeFileSync(
+          join(root, "packages", "web", "dist", "uberblick-build.json"),
+          `${JSON.stringify({ syncProtocolVersion: SYNC_PROTOCOL_VERSION + 1 })}\n`,
+          "utf8",
+        ),
+    ],
+  ])("refuses %s packaged web assets without changing the payload", (_case, breakWeb) => {
+    const broken = join(scratch, `broken-${_case}`);
+    cpSync(payload, broken, { recursive: true });
+    breakWeb(broken);
+    const before = treeDigest(broken);
+    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+
+    const opened = runPayload(box, ["open", "--no-browser"], { root: broken });
+    expect(opened.status).toBe(1);
+    expect(opened.stderr).toContain("Reinstall Uberblick");
+    expect(opened.stderr).not.toMatch(/mise run|pnpm/);
+    expect(treeDigest(broken)).toBe(before);
+  });
+});

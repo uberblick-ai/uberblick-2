@@ -16,9 +16,11 @@
  * configured differently.
  */
 
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runChild } from "./child.js";
 import { resolveConfig } from "./config.js";
+import { isInstallPayload } from "./installation.js";
 
 /**
  * tsx's loader, so the child can run the server's TypeScript source — the same
@@ -36,6 +38,11 @@ function mcpServerMain(): string {
   );
 }
 
+/** The precompiled MCP entry shipped beside the installed CLI bundle. */
+function installedMcpServerMain(): string {
+  return fileURLToPath(new URL("./mcp.mjs", import.meta.url));
+}
+
 export async function serveCommand(
   argv: string[],
   err: (text: string) => void = (text) => process.stderr.write(text),
@@ -50,9 +57,14 @@ export async function serveCommand(
     err(`ub: warning: ${warning}\n`);
   }
 
-  return await runChild(
-    process.execPath,
-    ["--import", tsxLoader(), mcpServerMain()],
-    resolved.env,
-  );
+  if (isInstallPayload()) {
+    const main = installedMcpServerMain();
+    if (!existsSync(main)) {
+      err(`ub mcp serve: the installed MCP server is missing at ${main}; reinstall Uberblick\n`);
+      return 1;
+    }
+    return await runChild(process.execPath, [main], resolved.env);
+  }
+
+  return await runChild(process.execPath, ["--import", tsxLoader(), mcpServerMain()], resolved.env);
 }
