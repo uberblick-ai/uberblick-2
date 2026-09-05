@@ -526,7 +526,14 @@ export class Replicas {
     });
 
     this.replicas.set(room, replica);
-    this.poll(replica);
+    try {
+      this.poll(replica);
+    } catch (error) {
+      this.replicas.delete(room);
+      replica.awareness.destroy();
+      replica.doc.destroy();
+      throw error;
+    }
     this.sync.attach({ room, doc, awareness });
     return replica;
   }
