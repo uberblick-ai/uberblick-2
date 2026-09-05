@@ -117,6 +117,7 @@ export async function createMcpEngine(
       immediate = null;
     }
     unsubscribeAppend();
+    unsubscribeRoomQuiet();
   };
 
   const pass = (): void => {
@@ -177,6 +178,7 @@ export async function createMcpEngine(
   };
 
   const unsubscribeAppend = store.onAppend(schedule);
+  const unsubscribeRoomQuiet = replicas.sync.onRoomQuiet(schedule);
   const timer = setInterval(pass, refreshIntervalMs);
 
   return {

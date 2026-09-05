@@ -335,6 +335,8 @@ export class HubSync {
 
   private readonly onConnected: () => void;
 
+  private readonly roomQuietListeners = new Set<() => void>();
+
   private readonly socket: HocuspocusProviderWebsocket | null = null;
 
   private readonly providers = new Map<string, AdmittedHocuspocusProvider>();
@@ -846,6 +848,11 @@ export class HubSync {
           this.syncedRooms.add(room);
         }
       },
+      onUnsyncedChanges: ({ number }) => {
+        if (number === 0) {
+          for (const listener of this.roomQuietListeners) listener();
+        }
+      },
       onAuthenticationFailed: ({ reason }: { reason: string }) => {
         provider.blockUntilToken();
         // The one string the hub gets to say, read by strict match and never
@@ -1062,6 +1069,15 @@ export class HubSync {
     return provider.isSynced && !provider.hasUnsyncedChanges;
   }
 
+  /** Wake work that can advance once a provider has no outstanding messages. */
+  onRoomQuiet(listener: () => void): () => void {
+    if (this.destroyed) return () => {};
+    this.roomQuietListeners.add(listener);
+    return () => {
+      this.roomQuietListeners.delete(listener);
+    };
+  }
+
   /**
    * Provider sync messages awaiting acknowledgement, summed over every attached
    * room. Messages, not updates: a batch merges into one message, and a
@@ -1168,6 +1184,7 @@ export class HubSync {
       return;
     }
     this.destroyed = true;
+    this.roomQuietListeners.clear();
     if (this.rebuildTimer !== null) {
       clearTimeout(this.rebuildTimer);
       this.rebuildTimer = null;
