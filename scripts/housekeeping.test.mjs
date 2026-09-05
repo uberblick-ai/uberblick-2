@@ -64,7 +64,7 @@ function runGit(cwd, args) {
 	return result.stdout;
 }
 
-test("cleans the current and expired review images plus stale Docker artifacts", (t) => {
+test("cleans every named and expired review image plus stale Docker artifacts", (t) => {
 	const { base, bin, calls } = fixture(t);
 	fakeDocker(
 		bin,
@@ -73,11 +73,12 @@ test("cleans the current and expired review images plus stale Docker artifacts",
 			'  *"reference=uberblick-review"*"until=24h"*) printf "expired-b\\nexpired-a\\nexpired-a\\n" ;;\n' +
 			'  *"reference=uberblick-review"*) printf "expired-b\\nexpired-a\\nrecent-peer\\n" ;;\n' +
 			'  "image ls -q uberblick-review:test-sha") printf "current-image\\n" ;;\n' +
+			'  "image ls -q uberblick-review:merge-sha") printf "merged-image\\n" ;;\n' +
 			'esac\n' +
 			'exit 0',
 	);
 
-	const result = spawnSync("sh", [script, "test-sha"], {
+	const result = spawnSync("sh", [script, "test-sha", "merge-sha"], {
 		cwd: base,
 		encoding: "utf8",
 		env: environment(bin, calls),
@@ -87,7 +88,10 @@ test("cleans the current and expired review images plus stale Docker artifacts",
 	const commands = readFileSync(calls, "utf8");
 	assert.match(commands, /image rm -f expired-a expired-b/);
 	assert.doesNotMatch(commands, /image rm -f .*recent-peer/);
-	assert.match(commands, /image rm -f uberblick-review:test-sha/);
+	assert.match(
+		commands,
+		/image rm -f uberblick-review:test-sha uberblick-review:merge-sha/,
+	);
 	assert.match(commands, /container prune -f --filter until=168h/);
 	assert.match(commands, /image prune -f/);
 	assert.match(commands, /image prune -a -f --filter until=168h/);
@@ -95,20 +99,21 @@ test("cleans the current and expired review images plus stale Docker artifacts",
 	assert.match(commands, /builder prune -f --min-free-space 5GB/);
 });
 
-test("cleans expired review images when this run's image is already absent", (t) => {
+test("an absent named image does not suppress other named or expired images", (t) => {
 	const { base, bin, calls } = fixture(t);
 	fakeDocker(
 		bin,
 		'printf "%s\\n" "$*" >> "$HOUSEKEEPING_CALLS"\n' +
 			'case "$*" in\n' +
-			'  "image ls -q uberblick-review:test-sha") ;;\n' +
+			'  "image ls -q uberblick-review:absent-sha") ;;\n' +
+			'  "image ls -q uberblick-review:merge-sha") printf "merged-image\\n" ;;\n' +
 			'  *"reference=uberblick-review"*"until=24h"*) printf "expired-b\\nexpired-a\\n" ;;\n' +
 			'  *"reference=uberblick-review"*) printf "expired-b\\nexpired-a\\nrecent-peer\\n" ;;\n' +
 			'esac\n' +
 			'exit 0',
 	);
 
-	const result = spawnSync("sh", [script, "test-sha"], {
+	const result = spawnSync("sh", [script, "absent-sha", "merge-sha"], {
 		cwd: base,
 		encoding: "utf8",
 		env: environment(bin, calls),
@@ -118,7 +123,69 @@ test("cleans expired review images when this run's image is already absent", (t)
 	const commands = readFileSync(calls, "utf8");
 	assert.match(commands, /image rm -f expired-a expired-b/);
 	assert.doesNotMatch(commands, /image rm -f .*recent-peer/);
-	assert.doesNotMatch(commands, /image rm -f uberblick-review:test-sha/);
+	assert.match(commands, /image rm -f uberblick-review:merge-sha/);
+	assert.doesNotMatch(commands, /image rm -f .*uberblick-review:absent-sha/);
+});
+
+test("dry-run lists every selected image and removes none", (t) => {
+	const { base, bin, calls } = fixture(t);
+	fakeDocker(
+		bin,
+		'printf "%s\\n" "$*" >> "$HOUSEKEEPING_CALLS"\n' +
+			'case "$*" in\n' +
+			'  "image ls -q uberblick-review:test-sha") printf "current-image\\n" ;;\n' +
+			'  "image ls -q uberblick-review:merge-sha") printf "merged-image\\n" ;;\n' +
+			'  *"reference=uberblick-review"*"until=24h"*) printf "expired-image\\n" ;;\n' +
+			'  "info --format"*) printf "%s\\n" "$HOUSEKEEPING_DOCKER_ROOT" ;;\n' +
+			'esac\n' +
+			'exit 0',
+	);
+
+	const result = spawnSync(
+		"sh",
+		[script, "test-sha", "merge-sha", "--dry-run"],
+		{
+			cwd: base,
+			encoding: "utf8",
+			env: environment(bin, calls, { HOUSEKEEPING_DOCKER_ROOT: base }),
+		},
+	);
+
+	assert.equal(result.status, 0, result.stderr);
+	assert.match(result.stdout, /would: docker image rm -f expired-image/);
+	assert.match(
+		result.stdout,
+		/would: docker image rm -f uberblick-review:test-sha uberblick-review:merge-sha/,
+	);
+	assert.doesNotMatch(readFileSync(calls, "utf8"), /image rm/);
+});
+
+test("resolves every image selection before removing any", (t) => {
+	const { base, bin, calls } = fixture(t);
+	fakeDocker(
+		bin,
+		'printf "%s\\n" "$*" >> "$HOUSEKEEPING_CALLS"\n' +
+			'case "$*" in\n' +
+			'  "image ls -q uberblick-review:first-sha") printf "first-image\\n" ;;\n' +
+			'  "image ls -q uberblick-review:second-sha") exit 17 ;;\n' +
+			'  "info --format"*) printf "%s\\n" "$HOUSEKEEPING_DOCKER_ROOT" ;;\n' +
+			'  *) printf "Total reclaimed space: 0B\\n" ;;\n' +
+			'esac\n' +
+			'exit 0',
+	);
+
+	const result = spawnSync("sh", [script, "first-sha", "second-sha"], {
+		cwd: base,
+		encoding: "utf8",
+		env: environment(bin, calls, { HOUSEKEEPING_DOCKER_ROOT: base }),
+	});
+
+	assert.notEqual(result.status, 0);
+	assert.match(
+		result.stderr,
+		/housekeeping: failed \(17\): docker image ls uberblick-review:second-sha/,
+	);
+	assert.doesNotMatch(readFileSync(calls, "utf8"), /image rm/);
 });
 
 test("reports each prune's reclaimed space and honors the configured cache floor", (t) => {
@@ -316,18 +383,23 @@ test("dry-run and real cleanup agree on removable, dirty, locked, and current wo
 	assert.equal(existsSync(outside), true);
 });
 
-test("rejects --dry-run without a review sha before invoking Docker", (t) => {
+test("rejects no arguments and --dry-run alone before invoking Docker", (t) => {
 	const { base, bin, calls } = fixture(t);
 	fakeDocker(bin, 'printf "%s\\n" "$*" >> "$HOUSEKEEPING_CALLS"');
 
-	const result = spawnSync("sh", [script, "--dry-run"], {
-		cwd: base,
-		encoding: "utf8",
-		env: environment(bin, calls),
-	});
+	for (const args of [[], ["--dry-run"]]) {
+		const result = spawnSync("sh", [script, ...args], {
+			cwd: base,
+			encoding: "utf8",
+			env: environment(bin, calls),
+		});
 
-	assert.notEqual(result.status, 0);
-	assert.match(result.stderr, /usage: housekeeping\.sh <review sha> \[--dry-run\]/);
+		assert.equal(result.status, 2);
+		assert.match(
+			result.stderr,
+			/usage: housekeeping\.sh <review sha>\.\.\. \[--dry-run\]/,
+		);
+	}
 	assert.equal(existsSync(calls), false);
 });
 

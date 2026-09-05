@@ -225,10 +225,11 @@ processes.
 
 **Housekeeping, last** (owner direction, 2026-09-01). On every durable outcome —
 merge or parked ruling — once the probes on the retained review image are done,
-run `sh scripts/housekeeping.sh <headRefOid>` from the same freshly fetched
-`origin/main` checkout used for the container review, and record a concise
-summary on the PR.
-It removes this run's review image, other review images older than 24 hours,
+run `sh scripts/housekeeping.sh <review-sha>... [--dry-run]` from the same
+freshly fetched `origin/main` checkout used for the container review, passing
+every review SHA this run built — each exact head it gated and each merged-tree
+commit from an observed base advance — and record a concise summary on the PR.
+It removes this run's review images, other review images older than 24 hours,
 stopped containers and dangling layers, and every host-wide unused image older
 than a week while keeping newer images and build cache warm.
 `--dry-run` shows what it would do.
