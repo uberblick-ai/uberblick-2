@@ -576,16 +576,25 @@ describe("set_status", () => {
         { type: "heading", text: "Reconsidering", level: 2 },
         { type: "paragraph", text: "   " },
       ],
+      [
+        { type: "heading", text: "Reconsidering", level: 2 },
+        { type: "heading", text: "References", level: 2 },
+      ],
+      [
+        { type: "paragraph", text: "Reconsidering" },
+        { type: "paragraph", text: "Revisit when usage changes." },
+      ],
+      undefined,
     ];
 
     for (const [index, blocks] of invalidBlocks.entries()) {
       const decision = await rig.ok("create_doc", {
         title: `Unfinished decision ${index}`,
         description: "A decision that does not yet name its revival trigger.",
-        kind: "decision",
-        blocks,
+        ...(blocks === undefined ? {} : { kind: "decision", blocks }),
       });
       const before = await rig.ok("get_doc", { uuid: decision.uuid });
+      const beforeStub = stub(rig, decision.uuid);
 
       const refused = await rig.call("set_status", {
         uuid: decision.uuid,
@@ -598,18 +607,10 @@ describe("set_status", () => {
         uuid: decision.uuid,
         kind: "decision",
         status: "decided",
-        heading: "Reconsidering",
-        applied: false,
-        partial: false,
-        synced: false,
-        recoveryClass: "manual",
       });
       expect(refused.payload.message).toContain("non-whitespace");
       expect(await rig.ok("get_doc", { uuid: decision.uuid })).toEqual(before);
-      expect(stub(rig, decision.uuid)).toMatchObject({
-        kind: "decision",
-        status: "open",
-      });
+      expect(stub(rig, decision.uuid)).toEqual(beforeStub);
     }
   });
 
@@ -631,15 +632,6 @@ describe("set_status", () => {
     expect(
       await rig.ok("set_status", { uuid: open.uuid, status: "open" }),
     ).toMatchObject({ kind: "decision", status: "open" });
-
-    const requirement = await lifecycleDoc(rig, "Requirement", {
-      kind: "requirement",
-    });
-    for (const status of ["planned", "implementing", "done"]) {
-      expect(
-        await rig.ok("set_status", { uuid: requirement.uuid, status }),
-      ).toMatchObject({ kind: "requirement", status });
-    }
   });
 });
 

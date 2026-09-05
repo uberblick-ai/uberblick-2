@@ -134,7 +134,7 @@ const EXPECTED: Record<
   },
   revival_trigger_missing: {
     recoveryClass: "manual",
-    detail: ["uuid", "kind", "status", "heading"],
+    detail: ["uuid", "kind", "status"],
   },
   governs_not_requirement: {
     recoveryClass: "reread",

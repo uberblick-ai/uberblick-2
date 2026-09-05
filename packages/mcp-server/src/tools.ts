@@ -55,6 +55,7 @@ import {
   exportMarkdown,
   getBlock,
   getBlockRev,
+  getBlocks,
   getBlocksWithInline,
   getDirectoryEntry,
   getMeta,
@@ -1638,19 +1639,23 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const kind = stored.kind ?? kindForStatus(status);
 
       if (kind === "decision" && status === "decided") {
-        const blocks = getBlocksWithInline(replica.doc).map(({ block }) => block);
-        const hasRevivalTrigger = blocks.some(
-          (block, index) =>
+        const blocks = getBlocks(replica.doc);
+        const hasRevivalTrigger = blocks.some((block, index) => {
+          const next = blocks[index + 1];
+          return (
             block.type === "heading" &&
             block.text === "Reconsidering" &&
-            blocks.slice(index + 1).some((candidate) => candidate.text.trim().length > 0),
-        );
+            next !== undefined &&
+            next.type !== "heading" &&
+            next.text.trim().length > 0
+          );
+        });
         if (!hasRevivalTrigger) {
           throw new ToolError(
             "revival_trigger_missing",
             "A decision can be set to decided only when it has a heading whose text is exactly `Reconsidering`, " +
               "followed by at least one block with non-whitespace text.",
-            { uuid, kind, status, heading: "Reconsidering" },
+            { uuid, kind, status },
           );
         }
       }
