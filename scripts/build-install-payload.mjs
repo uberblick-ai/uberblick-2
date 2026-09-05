@@ -73,7 +73,9 @@ async function main() {
 	const payload = join(scratch, name);
 	const cli = join(payload, "packages", "cli");
 	const web = join(payload, "packages", "web", "dist");
-	const temporaryArchive = `${archive}.tmp`;
+	// Staged beside the archive so the rename is same-filesystem and atomic, and
+	// named per builder so two concurrent builds never share one staging file.
+	const temporaryArchive = `${archive}.${process.pid}.tmp`;
 
 	try {
 		let webDist = process.env.UBERBLICK_PAYLOAD_WEB_DIST;
