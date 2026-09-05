@@ -372,7 +372,8 @@ export function DocMetaLine({
             canWrite={() => connection.status.writable}
           />
           <span className="ub-doc-ids">
-            uuid {meta.uuid.slice(0, 8)} · rev {rev ?? "········"}
+            uuid {meta.uuid.slice(0, 8)}
+            <span className="ub-doc-rev"> · rev {rev ?? "········"}</span>
           </span>
           {/* Archived or not: a tombstoned document still has an address, and
               handing somebody the link to it is not a write. */}

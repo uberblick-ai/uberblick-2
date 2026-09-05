@@ -75,9 +75,35 @@ test("the sidebar and pane share the top edge, and collapse transfers focus", as
     return [sidebar.y, pane.y];
   };
 
+  const geometry = () =>
+    page.evaluate(() => {
+      const body = document.querySelector<HTMLElement>(".ub-body");
+      const sidebar = document.querySelector<HTMLElement>(".ub-list");
+      const pane = document.querySelector<HTMLElement>(".ub-pane");
+      if (body === null || sidebar === null || pane === null) {
+        throw new Error("e2e: shell is not laid out");
+      }
+      const bodyBox = body.getBoundingClientRect();
+      const sidebarBox = sidebar.getBoundingClientRect();
+      const paneBox = pane.getBoundingClientRect();
+      return {
+        position: getComputedStyle(sidebar).position,
+        body: { left: bodyBox.left, right: bodyBox.right, width: bodyBox.width },
+        sidebar: { left: sidebarBox.left, right: sidebarBox.right },
+        pane: { left: paneBox.left, right: paneBox.right, width: paneBox.width },
+      };
+    });
+
   expect(await origins()).toEqual([0, 0]);
   await page.setViewportSize({ width: 420, height: 720 });
   expect(await origins()).toEqual([0, 0]);
+  const narrow = await geometry();
+  expect(narrow.position).toBe("absolute");
+  expect(narrow.sidebar.left).toBeCloseTo(narrow.body.left, 1);
+  expect(narrow.sidebar.right).toBeLessThan(narrow.body.right);
+  expect(narrow.pane.left).toBeCloseTo(narrow.body.left, 1);
+  expect(narrow.pane.right).toBeCloseTo(narrow.body.right, 1);
+  expect(narrow.pane.width).toBeCloseTo(narrow.body.width, 1);
 
   await page.getByRole("button", { name: "Hide document list" }).click();
   await expect(page.locator(".ub-list")).toHaveCount(0);
@@ -93,6 +119,31 @@ test("the sidebar and pane share the top edge, and collapse transfers focus", as
   await expect(page.getByRole("button", { name: "You" })).toBeVisible();
   expect(await origins()).toEqual([0, 0]);
   expect(new URL(page.url()).pathname).toBe(path);
+
+  // The breakpoint changes presentation, not state: the open sidebar becomes a
+  // fixed column at 768px and the same open state becomes an overlay again when
+  // the window narrows, without a reload or a second gesture.
+  await page.setViewportSize({ width: 768, height: 720 });
+  const wide = await geometry();
+  expect(wide.position).toBe("relative");
+  expect(wide.pane.left).toBeCloseTo(wide.sidebar.right, 1);
+  await page.setViewportSize({ width: 420, height: 720 });
+  expect((await geometry()).position).toBe("absolute");
+
+  // Settings is the other mode of this same sidebar shell. It must overlay the
+  // settings pane too rather than quietly returning to a narrow fixed column.
+  await page
+    .getByRole("button", { name: "Workspace settings", exact: true })
+    .click();
+  await expect(page.locator('.ub-list[data-mode="settings"]')).toBeVisible();
+  await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
+  const settings = await geometry();
+  expect(settings.position).toBe("absolute");
+  expect(settings.pane.left).toBeCloseTo(settings.body.left, 1);
+  expect(settings.pane.width).toBeCloseTo(settings.body.width, 1);
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/${harness().workspace}$`));
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
 
   // A stored preference is not a collapse gesture. Loading into it leaves
   // focus where the browser put it instead of stealing it for the restore UI.

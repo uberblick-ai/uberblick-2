@@ -1666,6 +1666,41 @@ body {
   }
 }
 
+/* Below the iPad breakpoint the document list is a drawer, not a column. Its
+   open state still comes from the existing persisted sidebar preference; only
+   the way that state is laid out changes. Keeping the pane in normal flow
+   gives it the whole viewport behind the drawer, while the same hide/restore
+   controls make both states reachable across a resize. */
+@media (max-width: 767px) {
+  .ub-list {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 5;
+    width: min(var(--sidebar-width), 85vw);
+    box-shadow: 8px 0 24px rgb(0 0 0 / 0.18);
+  }
+
+  /* The wide layout spends inline room to clear the floating restore button.
+     A phone cannot afford that permanent gutter: clear it vertically instead,
+     for every pane the sidebar serves, and return the document to its compact
+     edge inset. */
+  .ub-sidebar-restore + .ub-pane {
+    padding-block-start: 3.5rem;
+  }
+
+  .ub-sidebar-restore ~ .ub-document-pane {
+    --pane-document-inset: 1rem;
+  }
+
+  /* The uuid is the actionable identity at this width; the revision is the one
+     optional fact in the row. Removing only that suffix keeps the identity,
+     copy and actions controls inside the viewport without shrinking their
+     touch targets. */
+  .ub-doc-rev {
+    display: none;
+  }
+}
+
 /* ---- the sync detail panel (#72, design surface 1e's right column) ---- */
 
 /* An overlay, not a fourth column: it is opened to answer a question and closed
@@ -2157,6 +2192,7 @@ body {
    placeholder needs no rule of its own; an input paints it in the field's own
    face. */
 .ub-title {
+  min-width: 0;
   font-size: 2.05rem;
   font-weight: 500;
   line-height: 1.18;
