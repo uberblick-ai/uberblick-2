@@ -87,7 +87,6 @@ test("the sidebar and pane share the top edge, and collapse transfers focus", as
       const sidebarBox = sidebar.getBoundingClientRect();
       const paneBox = pane.getBoundingClientRect();
       return {
-        position: getComputedStyle(sidebar).position,
         body: { left: bodyBox.left, right: bodyBox.right, width: bodyBox.width },
         sidebar: { left: sidebarBox.left, right: sidebarBox.right },
         pane: { left: paneBox.left, right: paneBox.right, width: paneBox.width },
@@ -98,7 +97,6 @@ test("the sidebar and pane share the top edge, and collapse transfers focus", as
   await page.setViewportSize({ width: 420, height: 720 });
   expect(await origins()).toEqual([0, 0]);
   const narrow = await geometry();
-  expect(narrow.position).toBe("absolute");
   expect(narrow.sidebar.left).toBeCloseTo(narrow.body.left, 1);
   expect(narrow.sidebar.right).toBeLessThan(narrow.body.right);
   expect(narrow.pane.left).toBeCloseTo(narrow.body.left, 1);
@@ -125,10 +123,11 @@ test("the sidebar and pane share the top edge, and collapse transfers focus", as
   // the window narrows, without a reload or a second gesture.
   await page.setViewportSize({ width: 768, height: 720 });
   const wide = await geometry();
-  expect(wide.position).toBe("relative");
   expect(wide.pane.left).toBeCloseTo(wide.sidebar.right, 1);
   await page.setViewportSize({ width: 420, height: 720 });
-  expect((await geometry()).position).toBe("absolute");
+  const narrowAgain = await geometry();
+  expect(narrowAgain.pane.left).toBeCloseTo(narrowAgain.body.left, 1);
+  expect(narrowAgain.pane.width).toBeCloseTo(narrowAgain.body.width, 1);
 
   // Settings is the other mode of this same sidebar shell. It must overlay the
   // settings pane too rather than quietly returning to a narrow fixed column.
@@ -138,7 +137,6 @@ test("the sidebar and pane share the top edge, and collapse transfers focus", as
   await expect(page.locator('.ub-list[data-mode="settings"]')).toBeVisible();
   await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
   const settings = await geometry();
-  expect(settings.position).toBe("absolute");
   expect(settings.pane.left).toBeCloseTo(settings.body.left, 1);
   expect(settings.pane.width).toBeCloseTo(settings.body.width, 1);
   await page.goBack();

@@ -916,8 +916,8 @@ test("the document collaborator cluster stays compact and jumps once without mov
   browser,
 }) => {
   const page = await openApp(browser, "light");
-  // The fixed 18rem sidebar leaves a roughly 400px document pane: narrow, but
-  // still inside the app's supported side-by-side shell.
+  // At this breakpoint the sidebar overlays the full-width document pane,
+  // exercising the compact cluster in the narrow shell.
   await page.setViewportSize({ width: 720, height: 640 });
   await page.getByRole("button", { name: "+ new doc" }).click();
   await page.locator(".ub-title").fill("Live collaborators");

@@ -1681,11 +1681,11 @@ body {
   }
 
   /* The wide layout spends inline room to clear the floating restore button.
-     A phone cannot afford that permanent gutter: clear it vertically instead,
-     for every pane the sidebar serves, and return the document to its compact
-     edge inset. */
-  .ub-sidebar-restore + .ub-pane {
-    padding-block-start: 3.5rem;
+     A phone cannot afford that permanent gutter: move the pane's content below
+     the button while its sticky edge controls keep their normal top position,
+     and return the document to its compact edge inset. */
+  .ub-sidebar-restore + .ub-pane > :not(.ub-pane-threads-toggle) {
+    margin-block-start: 2.75rem;
   }
 
   .ub-sidebar-restore ~ .ub-document-pane {
@@ -2192,7 +2192,6 @@ body {
    placeholder needs no rule of its own; an input paints it in the field's own
    face. */
 .ub-title {
-  min-width: 0;
   font-size: 2.05rem;
   font-weight: 500;
   line-height: 1.18;
