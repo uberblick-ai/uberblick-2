@@ -40,6 +40,7 @@ function environment(bin, calls, overrides = {}) {
 	return {
 		...process.env,
 		HOUSEKEEPING_CALLS: calls,
+		HOUSEKEEPING_DOCKER_OS: "Docker Engine",
 		PATH: `${bin}:${process.env.PATH}`,
 		...overrides,
 	};
@@ -50,7 +51,12 @@ function successfulDocker(bin) {
 		bin,
 		'printf "%s\\n" "$*" >> "$HOUSEKEEPING_CALLS"\n' +
 			'case "$1 $2" in\n' +
-			'  "info --format") printf "%s\\n" "$HOUSEKEEPING_DOCKER_ROOT" ;;\n' +
+			'  "info --format")\n' +
+			'    case "$3" in\n' +
+			'      "{{.DockerRootDir}}") printf "%s\\n" "$HOUSEKEEPING_DOCKER_ROOT" ;;\n' +
+			'      "{{.OperatingSystem}}") printf "%s\\n" "$HOUSEKEEPING_DOCKER_OS" ;;\n' +
+			'    esac\n' +
+			'    ;;\n' +
 			'  "image ls") ;;\n' +
 			'  *) printf "Total reclaimed space: 0B\\n" ;;\n' +
 			'esac\n' +
@@ -262,6 +268,56 @@ test("warns with Docker's filesystem when its free space is below the threshold"
 	);
 });
 
+test("measures the host volume containing Docker Desktop's data", (t) => {
+	const { base, bin, calls } = fixture(t);
+	const home = join(base, "home");
+	const desktopData = join(
+		home,
+		"Library",
+		"Containers",
+		"com.docker.docker",
+		"Data",
+		"vms",
+		"0",
+		"data",
+	);
+	mkdirSync(desktopData, { recursive: true });
+	const diskImage = join(desktopData, "Docker.raw");
+	writeFileSync(diskImage, "");
+	successfulDocker(bin);
+	const dfCalls = join(base, "df-calls");
+	fakeExecutable(
+		bin,
+		"df",
+		'printf "%s\\n" "$*" >> "$HOUSEKEEPING_DF_CALLS"\n' +
+			'printf "Filesystem 1024-blocks Used Available Capacity Mounted on\\n"\n' +
+			'printf "/dev/desktop 9999999 0 4194304 0%% %s\\n" "$2"',
+	);
+
+	const result = spawnSync("sh", [script, "test-sha"], {
+		cwd: base,
+		encoding: "utf8",
+		env: environment(bin, calls, {
+			HOME: home,
+			HOUSEKEEPING_DOCKER_OS: "Docker Desktop",
+			HOUSEKEEPING_DOCKER_ROOT: base,
+			HOUSEKEEPING_DF_CALLS: dfCalls,
+			HOUSEKEEPING_WARN_FREE_GB: "3",
+		}),
+	});
+
+	assert.equal(result.status, 0, result.stderr);
+	assert.match(
+		result.stdout,
+		/housekeeping: disk ok: \/dev\/desktop has 4GB free \(threshold 3GB\)/,
+	);
+	assert.doesNotMatch(result.stderr, /could not determine Docker root/);
+	assert.equal(readFileSync(dfCalls, "utf8"), `-Pk ${diskImage}\n`);
+	assert.ok(
+		readFileSync(calls, "utf8").includes("info --format {{.OperatingSystem}}"),
+	);
+});
+
 test("does not substitute another filesystem when Docker's root is unavailable", (t) => {
 	const { base, bin, calls } = fixture(t);
 	fakeDocker(
@@ -301,6 +357,45 @@ test("does not substitute another filesystem when Docker's root is unavailable",
 	assert.equal(invalidRoot.status, 0, invalidRoot.stderr);
 	assert.match(invalidRoot.stderr, /housekeeping: WARNING could not determine Docker root/);
 	assert.equal(existsSync(invalidDfCalls), false);
+
+	successfulDocker(bin);
+	const desktopCalls = join(base, "desktop-docker-calls");
+	const desktopDfCalls = join(base, "desktop-df-calls");
+	const emptyHome = join(base, "empty-home");
+	mkdirSync(
+		join(
+			emptyHome,
+			"Library",
+			"Containers",
+			"com.docker.docker",
+			"Data",
+			"vms",
+			"0",
+			"data",
+		),
+		{ recursive: true },
+	);
+	const missingDesktopData = spawnSync("sh", [script, "test-sha"], {
+		cwd: base,
+		encoding: "utf8",
+		env: environment(bin, desktopCalls, {
+			HOME: emptyHome,
+			HOUSEKEEPING_DOCKER_OS: "Docker Desktop",
+			HOUSEKEEPING_DOCKER_ROOT: base,
+			HOUSEKEEPING_DF_CALLS: desktopDfCalls,
+		}),
+	});
+
+	assert.equal(missingDesktopData.status, 0, missingDesktopData.stderr);
+	assert.match(
+		missingDesktopData.stderr,
+		/housekeeping: WARNING could not determine Docker Desktop data location/,
+	);
+	assert.equal(existsSync(desktopDfCalls), false);
+	assert.match(
+		readFileSync(desktopCalls, "utf8"),
+		/builder prune -f --min-free-space 5GB/,
+	);
 });
 
 test("dry-run and real cleanup agree on removable, dirty, locked, and current worktrees", (t) => {
