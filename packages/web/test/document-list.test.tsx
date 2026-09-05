@@ -200,7 +200,7 @@ function searchClient(
 ): DocumentSearchClient {
   return {
     search: vi.fn(find),
-    status: vi.fn(async () => ({ caughtUp: await caughtUp() })),
+    status: vi.fn(async () => ({ caughtUp: await caughtUp(), rooms: {} })),
   };
 }
 

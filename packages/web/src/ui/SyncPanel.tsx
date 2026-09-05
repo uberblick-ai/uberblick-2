@@ -3,10 +3,10 @@
  * what this client knows about its connection, and who else is in the room.
  *
  * Every line is a *reading* of state the client already holds — the resolved
- * hub endpoint, the room key, the provider's status, the awareness map. There
- * is no new persistence, no new RPC, and nothing here asks the hub a question:
- * a panel that had to call out to say whether it was connected would have
- * nothing to show in exactly the outage it exists for.
+ * hub endpoint, the room key, the provider's status, the awareness map. When
+ * `ub open` serves the page, the shell also supplies its latest local
+ * `/api/status` answer. The panel never asks the remote hub directly and the
+ * local durability reading never waits on that HTTP fact.
  *
  * That rule is also why the mockup's local-update count is missing rather than
  * filled in: the web client keeps no local update log, so the number has no
@@ -20,6 +20,7 @@ import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
+import { documentSyncFacts } from "./sync-facts.js";
 import type { RemotePresence } from "./doc-chrome.js";
 import { useRoomStatus } from "./hooks.js";
 import { PeerAvatar } from "./PeerAvatar.js";
@@ -47,18 +48,17 @@ function Fact({ label, value }: { label: string; value: string }): ReactElement 
  * once per session by an async read the shell already waits on (`hubUrl` throws
  * before it settles). Null is that in-between moment, and it says so.
  *
- * Its two rows are one answer to one question (#362): *which* hub is this
- * "synced" about. One machine legitimately runs several — the dev island and
- * the promoted remote — so a panel that named the state without naming the hub
- * let two tabs of one workspace both read "synced" while attached to different
- * worlds. The source is beside the address because falling back to compiled
- * values is exactly how a tab lands on the wrong one, and the address itself is
- * `config.ts`'s stripped label: an endpoint, never a credential.
+ * The hub rows answer which hub an upstream fact is about (#362). One machine
+ * legitimately runs several — the local serving process and the promoted
+ * remote — so a panel that named the state without naming the remote would
+ * overclaim during an outage. The address is `config.ts`'s stripped label: an
+ * endpoint, never a credential.
  */
 export function SyncPanel({
   connection,
   presence,
   endpoint,
+  hubAcked,
   onClose,
 }: {
   connection: RoomConnection | null;
@@ -66,6 +66,8 @@ export function SyncPanel({
   presence: readonly RemotePresence[];
   /** The endpoint the provider was constructed with, or null until resolved. */
   endpoint: HubEndpoint | null;
+  /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
+  hubAcked?: boolean | null | undefined;
   onClose: () => void;
 }): ReactElement {
   const status = useRoomStatus(connection);
@@ -75,8 +77,9 @@ export function SyncPanel({
   // cadence, never a quieter version of the truth (see calm.ts) — and two
   // different words in one corner of the screen would be worse than either.
   const reading = statusReading(status, state ?? raw);
-  const hasReading =
-    connection !== null && (state !== null || reading.detail !== null);
+  const facts = documentSyncFacts(status, state, reading, hubAcked);
+  const hasReading = connection !== null && facts.primary !== null;
+  const namedEndpoint = hubAcked !== undefined && !facts.twoFact ? null : endpoint;
 
   /**
    * Escape closes the panel, and the panel alone.
@@ -121,15 +124,25 @@ export function SyncPanel({
         </button>
       </div>
       <dl className="ub-sync-facts">
-        <Fact label="Hub" value={endpoint?.url ?? UNKNOWN} />
+        <Fact label="Hub" value={namedEndpoint?.url ?? UNKNOWN} />
         {/* Always drawn, "served config" included: a reader checking which hub
             they are on is asking in the same breath who decided it. */}
         <Fact
           label="Source"
-          value={endpoint === null ? UNKNOWN : endpointSourceLabel(endpoint.source)}
+          value={
+            namedEndpoint === null
+              ? UNKNOWN
+              : endpointSourceLabel(namedEndpoint.source)
+          }
         />
         <Fact label="Room" value={connection?.room ?? UNKNOWN} />
-        <Fact label="State" value={hasReading ? reading.word : UNKNOWN} />
+        <Fact
+          label="State"
+          value={hasReading ? (facts.primary ?? UNKNOWN) : UNKNOWN}
+        />
+        {facts.twoFact && (
+          <Fact label="Hub state" value={facts.hub ?? UNKNOWN} />
+        )}
         {/* Drawn only under a refusal (#448). This is the panel the pill opens,
             and the pill has room for the word alone — so the sentence saying
             what to do about it belongs here, and nowhere else. There is no such

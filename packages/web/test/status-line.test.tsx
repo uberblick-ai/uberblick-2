@@ -323,7 +323,7 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
   });
 });
 
-describe("the document's sole sync reading opens its details", () => {
+describe("a directly connected document's sync reading opens its details", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -367,5 +367,78 @@ describe("the document's sole sync reading opens its details", () => {
 
     act(() => root.unmount());
     host.remove();
+  });
+});
+
+describe("the locally served document's two sync facts", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function localLine(
+    hubAcked: boolean | null,
+    patch: Partial<RoomStatus> = {},
+  ): { words: string[]; label: string | null } {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+    vi.useFakeTimers();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() =>
+      root.render(
+        <StatusLine
+          connection={stubConnection(0, {
+            connected: true,
+            synced: true,
+            writable: true,
+            ...patch,
+          })}
+          presence={NOBODY}
+          endpoint={{ url: "wss://remote.example/ws", source: "document" }}
+          hubAcked={hubAcked}
+          onToggleSync={() => {}}
+        />,
+      ),
+    );
+    act(() => void vi.advanceTimersByTime(5_000));
+    const answer = {
+      words: [...host.querySelectorAll(".ub-status-word")].map(
+        (word) => word.textContent ?? "",
+      ),
+      label: host.querySelector(".ub-sync-toggle")?.getAttribute("aria-label") ?? null,
+    };
+    act(() => root.unmount());
+    host.remove();
+    return answer;
+  }
+
+  it("distinguishes local durability from upstream acknowledgement", () => {
+    expect(localLine(false).words).toEqual([
+      "saved here",
+      "not synced with hub",
+    ]);
+    expect(localLine(true).words).toEqual(["saved here", "synced with hub"]);
+    expect(localLine(null).words).toEqual(["saved here", ""]);
+  });
+
+  it("names the remote hub from the served configuration", () => {
+    expect(localLine(false).label).toBe(
+      "Sync details — saved here, not synced with hub; hub " +
+        "wss://remote.example/ws (served /uberblick-config.json)",
+    );
+  });
+
+  it("lets an unsaved or refused reading suppress the upstream fact", () => {
+    const unsaved = localLine(true, {
+      connected: false,
+      synced: false,
+      writable: false,
+    });
+    expect(unsaved.words).toEqual(["offline"]);
+    expect(unsaved.label).toBe("Sync details — offline");
+    const refused = localLine(true, { writable: false, tokenMissing: true });
+    expect(refused.words).toEqual(["no hub token"]);
+    expect(refused.label).toBe("Sync details — no hub token");
   });
 });

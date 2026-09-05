@@ -131,10 +131,12 @@ function publish(
 function Panel({
   fix,
   endpoint = ENDPOINT,
+  hubAcked,
   onClose = () => {},
 }: {
   fix: Fixture;
   endpoint?: HubEndpoint | null;
+  hubAcked?: boolean | null | undefined;
   onClose?: () => void;
 }): ReactElement {
   const presence = usePresence(fix.connection);
@@ -143,6 +145,7 @@ function Panel({
       connection={fix.connection}
       presence={presence}
       endpoint={endpoint}
+      hubAcked={hubAcked}
       onClose={onClose}
     />
   );
@@ -151,13 +154,18 @@ function Panel({
 function mount(
   fix: Fixture,
   endpoint: HubEndpoint | null = ENDPOINT,
+  hubAcked?: boolean | null | undefined,
 ): { host: HTMLElement; root: Root } {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  act(() => root.render(<Panel fix={fix} endpoint={endpoint} />));
+  act(() =>
+    root.render(
+      <Panel fix={fix} endpoint={endpoint} hubAcked={hubAcked} />,
+    ),
+  );
   // Past every settle window, so the state word is what a reader sees rather
   // than the "offline" every mount starts from.
   act(() => void vi.advanceTimersByTime(5_000));
@@ -276,6 +284,52 @@ describe("the sync panel renders the state this client holds", () => {
     try {
       expect(facts(host).State).toBe("offline");
       expect(facts(host).Backlog).toBe("1 sync message unacked");
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("shows the same two locally served facts as the status line", () => {
+    vi.useFakeTimers();
+    const remote: HubEndpoint = {
+      url: "wss://remote.example/ws",
+      source: "document",
+    };
+    for (const [hubAcked, expected] of [
+      [false, "not synced with hub"],
+      [true, "synced with hub"],
+      [null, "—"],
+    ] as const) {
+      const { host, root } = mount(fixture(), remote, hubAcked);
+      try {
+        expect(facts(host)).toMatchObject({
+          Hub: remote.url,
+          Source: "served /uberblick-config.json",
+          State: "saved here",
+          "Hub state": expected,
+        });
+      } finally {
+        act(() => root.unmount());
+        host.remove();
+      }
+    }
+  });
+
+  it("suppresses the upstream fact when the local room is not writable", () => {
+    vi.useFakeTimers();
+    const { host, root } = mount(
+      fixture({ connected: false, synced: false, writable: false }),
+      ENDPOINT,
+      true,
+    );
+    try {
+      expect(facts(host)).toMatchObject({
+        Hub: "—",
+        Source: "—",
+        State: "offline",
+      });
+      expect(facts(host)["Hub state"]).toBeUndefined();
     } finally {
       act(() => root.unmount());
       host.remove();

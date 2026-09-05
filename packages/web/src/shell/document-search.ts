@@ -11,6 +11,7 @@ export interface DocumentSearchResult {
 
 export interface DocumentSearchStatus {
   readonly caughtUp: boolean;
+  readonly rooms: Readonly<Record<string, { readonly hubAcked: boolean }>>;
 }
 
 export interface DocumentSearchClient {
@@ -49,10 +50,23 @@ function searchResult(body: Record<string, unknown>): DocumentSearchResult {
 }
 
 function searchStatus(body: Record<string, unknown>): DocumentSearchStatus {
-  if (typeof body.caughtUp !== "boolean") {
+  const rooms = object(body.rooms);
+  if (
+    typeof body.caughtUp !== "boolean" ||
+    rooms === null ||
+    Array.isArray(body.rooms)
+  ) {
     throw new Error("ub open returned a malformed status answer");
   }
-  return { caughtUp: body.caughtUp };
+  const parsed: Record<string, { hubAcked: boolean }> = {};
+  for (const [room, value] of Object.entries(rooms)) {
+    const status = object(value);
+    if (status === null || typeof status.hubAcked !== "boolean") {
+      throw new Error("ub open returned a malformed status answer");
+    }
+    parsed[room] = { hubAcked: status.hubAcked };
+  }
+  return { caughtUp: body.caughtUp, rooms: parsed };
 }
 
 /**

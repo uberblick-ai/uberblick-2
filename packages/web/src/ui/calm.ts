@@ -92,10 +92,12 @@ export function useCalmSyncState(raw: SyncState): SyncState;
 export function useCalmSyncState(
   raw: SyncState,
   source: object | null,
+  settleMs?: Readonly<Record<SyncState, number>>,
 ): SyncState | null;
 export function useCalmSyncState(
   raw: SyncState,
   source?: object | null,
+  settleMs: Readonly<Record<SyncState, number>> = SETTLE_MS,
 ): SyncState | null {
   const scoped = source !== undefined;
   const key = source ?? null;
@@ -117,36 +119,36 @@ export function useCalmSyncState(
     if (!scoped) return;
     setSettled({ source: key, state: null });
     if (key === null) return;
-    if (SETTLE_MS[firstRaw] === 0) {
+    if (settleMs[firstRaw] === 0) {
       setSettled({ source: key, state: firstRaw });
       return;
     }
     const timer = setTimeout(
       () => setSettled({ source: key, state: latestRaw.current }),
-      SETTLE_MS[firstRaw],
+      settleMs[firstRaw],
     );
     return () => clearTimeout(timer);
-  }, [firstRaw, key, scoped]);
+  }, [firstRaw, key, scoped, settleMs]);
 
   useEffect(() => {
     if (settled.source !== key) return;
     if (shown === null) {
       // Bad news keeps its zero-delay contract even inside the initial window.
-      if (scoped && key !== null && SETTLE_MS[raw] === 0) {
+      if (scoped && key !== null && settleMs[raw] === 0) {
         setSettled({ source: key, state: raw });
       }
       return;
     }
     if (raw === shown) return;
-    if (SETTLE_MS[raw] === 0) {
+    if (settleMs[raw] === 0) {
       setSettled({ source: key, state: raw });
       return;
     }
     const timer = setTimeout(
       () => setSettled({ source: key, state: raw }),
-      SETTLE_MS[raw],
+      settleMs[raw],
     );
     return () => clearTimeout(timer);
-  }, [key, raw, scoped, shown, settled.source]);
+  }, [key, raw, scoped, settleMs, shown, settled.source]);
   return shown;
 }

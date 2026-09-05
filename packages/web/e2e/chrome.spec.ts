@@ -448,7 +448,7 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   expect(await painted(page, ".ub-list", "background-color")).toBe(sidebar);
 });
 
-test("the open document owns the remaining chrome and its sole sync reading", async ({
+test("the open document owns the remaining chrome and its one sync-details handle", async ({
   browser,
 }) => {
   const page = await openApp(browser, "light");

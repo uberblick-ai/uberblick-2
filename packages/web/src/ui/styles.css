@@ -2089,7 +2089,7 @@ body {
   white-space: nowrap;
 }
 
-/* The document's one sync reading is also the details-panel handle. It stays
+/* The document's sync facts share one details-panel handle. It stays
    inside the status line, so making it operable adds no second status surface. */
 .ub-status-sync {
   display: inline-flex;
@@ -3183,9 +3183,9 @@ h3.ub-heading {
 
 /* ---- sync indicator (#76) ---- */
 
-/* Two fixed-width slots. Whatever the state, the mark is one square and the
-   word is one fixed column — sized on `.ub-status-word` below — so whatever
-   follows them never moves. */
+/* Fixed-width slots. Every fact's mark is one square and every word has a
+   reserved column, so local acknowledgement and upstream acknowledgement can
+   change independently without moving the freshness or presence readings. */
 .ub-status-mark {
   display: inline-flex;
   align-items: center;
@@ -3207,6 +3207,17 @@ h3.ub-heading {
   flex: none;
   line-height: 1.2;
   text-align: left;
+}
+
+/* Locally served pages split the old column into the two facts #746 names.
+   Each keeps the width of its longest reading, including while blank, so a
+   first `/api/status` answer changes ink and never geometry. */
+.ub-status-word--saved {
+  width: 12ch;
+}
+
+.ub-status-word--hub {
+  width: 19ch;
 }
 
 /* The dot's replacement, in the same slot: a ring with one lit quarter. Same
