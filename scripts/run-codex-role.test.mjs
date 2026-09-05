@@ -21,7 +21,7 @@ const skill = join(root, ".claude/skills/next-issue/SKILL.md");
 
 function fixture(
 	t,
-	{ claim = "found", claimUpdatedAt, codexExit = "0", deadlineMs, role = "implementer" } = {},
+	{ claim = "found", claimUpdatedAt, codexExit = "0", deadlineSeconds, role = "implementer" } = {},
 ) {
 	const base = mkdtempSync(join(tmpdir(), "codex-role-runner-"));
 	t.after(() => rmSync(base, { recursive: true, force: true }));
@@ -111,7 +111,9 @@ esac
 			CODEX_TEST_EXIT: codexExit,
 			CODEX_TEST_GIT: join(base, "git-calls"),
 			CODEX_TEST_RUN_ID: runId,
-			...(deadlineMs === undefined ? {} : { CODEX_RUNNER_DEADLINE_MS: String(deadlineMs) }),
+			...(deadlineSeconds === undefined
+				? {}
+				: { CODEX_RUNNER_DEADLINE_SECONDS: String(deadlineSeconds) }),
 			PATH: `${bin}:${process.env.PATH}`,
 		},
 	};
@@ -272,7 +274,7 @@ test("termination signals reap even a run group that ignores them", async (t) =>
 });
 
 test("the detached group enforces its deadline after the supervisor is killed", async (t) => {
-	const current = fixture(t, { deadlineMs: 300 });
+	const current = fixture(t, { deadlineSeconds: 1 });
 	const pgidFile = join(current.base, "run-pgid");
 	const child = spawn(
 		process.execPath,
@@ -303,7 +305,7 @@ test("the detached group enforces its deadline after the supervisor is killed", 
 });
 
 test("a live supervisor reports deadline expiry distinctly and preserves recovery state", async (t) => {
-	const current = fixture(t, { deadlineMs: 150 });
+	const current = fixture(t, { deadlineSeconds: 1 });
 	const pgidFile = join(current.base, "run-pgid");
 	const child = spawn(
 		process.execPath,

@@ -27,20 +27,19 @@ const log = join(scratch, `${runId}.log`);
 const last = join(scratch, `${runId}.last`);
 const statusFile = join(scratch, `${runId}.status`);
 const deadlineFile = join(scratch, `${runId}.deadline`);
-const watchdogReadyFile = join(scratch, `${runId}.watchdog-ready`);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const FORWARDED = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"];
-const RUN_DEADLINE_MS = 3 * 60 * 60 * 1000;
-const GROUP_TERMINATION_GRACE_MS = 200;
+const RUN_DEADLINE_SECONDS = 3 * 60 * 60;
+const GROUP_TERMINATION_GRACE_SECONDS = 1;
 const GROUP_REAP_WAIT_MS = 1_800;
 const CLAIM_LOOKBACK_MS = 30 * 60 * 1000;
 
 function configuredDeadline() {
-	const value = process.env.CODEX_RUNNER_DEADLINE_MS;
-	if (value === undefined) return RUN_DEADLINE_MS;
+	const value = process.env.CODEX_RUNNER_DEADLINE_SECONDS;
+	if (value === undefined) return RUN_DEADLINE_SECONDS;
 	const parsed = Number(value);
 	if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-		process.stderr.write("CODEX_RUNNER_DEADLINE_MS must be a positive integer.\n");
+		process.stderr.write("CODEX_RUNNER_DEADLINE_SECONDS must be a positive integer.\n");
 		process.exit(2);
 	}
 	return parsed;
@@ -70,9 +69,8 @@ if (codexCheck.error?.code === "ENOENT") {
 rmSync(statusFile, { force: true });
 rmSync(last, { force: true });
 rmSync(deadlineFile, { force: true });
-rmSync(watchdogReadyFile, { force: true });
 const startedAt = new Date();
-const runDeadlineMs = configuredDeadline();
+const runDeadlineSeconds = configuredDeadline();
 
 const codexArgs = ["exec", "-C", worktree];
 if (role === "implementer") {
@@ -87,33 +85,6 @@ if (role === "implementer") {
 }
 codexArgs.push("-o", last, "-");
 
-// This watchdog shares the detached run group but ignores its graceful
-// signals. It therefore survives long enough to escalate a deadline even when
-// the supervisor itself has disappeared; normal completion kills and reaps it.
-const watchdogSource = `
-const { writeFileSync } = require("node:fs");
-const [readyFile, deadlineFile, deadlineMs, graceMs, groupId] = process.argv.slice(1);
-for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"]) {
-	process.on(signal, () => {});
-}
-writeFileSync(readyFile, "ready\\n", { flag: "wx", mode: 0o600 });
-setTimeout(() => {
-	try {
-		writeFileSync(deadlineFile, "expired\\n", { flag: "wx", mode: 0o600 });
-	} catch {}
-	try {
-		process.kill(-Number(groupId), "SIGTERM");
-	} catch {}
-	setTimeout(() => {
-		try {
-			process.kill(-Number(groupId), "SIGKILL");
-		} catch {
-			process.exit(0);
-		}
-	}, Number(graceMs));
-}, Number(deadlineMs));
-`;
-
 // The shell, Codex and watchdog share one detached process group, while this
 // Node process remains its supervisor. The shell writes the sentinel only
 // after Codex returns and the watchdog is gone, so termination cannot
@@ -122,23 +93,38 @@ const command = `
 status_file=$1
 prompt=$2
 log=$3
-ready_file=$4
-deadline_file=$5
-watchdog_node=$6
-watchdog_source=$7
-deadline_ms=$8
-grace_ms=$9
-shift 9
-"$watchdog_node" -e "$watchdog_source" "$ready_file" "$deadline_file" "$deadline_ms" "$grace_ms" "$$" &
+deadline_file=$4
+deadline_seconds=$5
+grace_seconds=$6
+shift 6
+
+# Ignored dispositions survive the fork and exec of sleep. Install them in
+# the parent first so the watchdog is protected from the moment it exists,
+# then restore the run shell before starting Codex.
+trap '' INT TERM HUP QUIT
+(
+	sleeper=
+	stop_watchdog() {
+		[ -z "$sleeper" ] || kill -KILL "$sleeper" 2>/dev/null || :
+		[ -z "$sleeper" ] || wait "$sleeper" 2>/dev/null || :
+		exit 0
+	}
+	trap stop_watchdog USR1
+	sleep "$deadline_seconds" &
+	sleeper=$!
+	wait "$sleeper" || exit $?
+	trap - USR1
+	(umask 077 && printf 'expired\\n' > "$deadline_file") || exit 126
+	kill -TERM "-$$" 2>/dev/null || :
+	sleep "$grace_seconds"
+	kill -KILL "-$$" 2>/dev/null || :
+) &
 watchdog=$!
-while [ ! -f "$ready_file" ]; do
-	kill -0 "$watchdog" 2>/dev/null || exit 125
-done
+trap - INT TERM HUP QUIT
 "$@" < "$prompt" > "$log" 2>&1
 status=$?
-kill -KILL "$watchdog" 2>/dev/null || :
+kill -USR1 "$watchdog" 2>/dev/null || :
 wait "$watchdog" 2>/dev/null || :
-rm -f "$ready_file"
 (umask 077 && printf "%s\\n" "$status" > "$status_file") || exit 126
 exit "$status"
 `;
@@ -151,12 +137,9 @@ const run = spawn(
 		statusFile,
 		prompt,
 		log,
-		watchdogReadyFile,
 		deadlineFile,
-		process.execPath,
-		watchdogSource,
-		String(runDeadlineMs),
-		String(GROUP_TERMINATION_GRACE_MS),
+		String(runDeadlineSeconds),
+		String(GROUP_TERMINATION_GRACE_SECONDS),
 		"codex",
 		...codexArgs,
 	],
@@ -194,7 +177,7 @@ for (const signal of FORWARDED) {
 		if (stopPromise !== undefined) return;
 		stopPromise = (async () => {
 			signalGroup(signal);
-			await delay(GROUP_TERMINATION_GRACE_MS);
+			await delay(GROUP_TERMINATION_GRACE_SECONDS * 1000);
 			signalGroup("SIGKILL");
 			await waitForGroupExit();
 		})();
