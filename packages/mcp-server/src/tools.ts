@@ -55,6 +55,7 @@ import {
   exportMarkdown,
   getBlock,
   getBlockRev,
+  getBlocks,
   getBlocksWithInline,
   getDirectoryEntry,
   getMeta,
@@ -1620,7 +1621,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "Record a document's lifecycle status. On an ordinary document this also adopts the kind that owns the " +
         "status; the result names both, so adoption is never silent. A document that already has a kind accepts " +
         "only that kind's statuses. Its kind is fixed through MCP: if it was adopted in error, retrying with the " +
-        "other kind's status cannot change it.\n\n" +
+        "other kind's status cannot change it. Moving a decision to `decided` also requires a heading whose text " +
+        "is exactly `Reconsidering`, followed by at least one block with non-whitespace text; otherwise the call " +
+        "is refused and changes nothing.\n\n" +
         LIFECYCLE_RECORDS_STATE +
         "\n\n" +
         ARCHIVED_IS_READ_ONLY +
@@ -1634,6 +1637,28 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const replica = requireWritableDoc(uuid);
       const stored = getMeta(replica.doc);
       const kind = stored.kind ?? kindForStatus(status);
+
+      if (kind === "decision" && status === "decided") {
+        const blocks = getBlocks(replica.doc);
+        const hasRevivalTrigger = blocks.some((block, index) => {
+          const next = blocks[index + 1];
+          return (
+            block.type === "heading" &&
+            block.text === "Reconsidering" &&
+            next !== undefined &&
+            next.type !== "heading" &&
+            next.text.trim().length > 0
+          );
+        });
+        if (!hasRevivalTrigger) {
+          throw new ToolError(
+            "revival_trigger_missing",
+            "A decision can be set to decided only when it has a heading whose text is exactly `Reconsidering`, " +
+              "followed by at least one block with non-whitespace text.",
+            { uuid, kind, status },
+          );
+        }
+      }
 
       replica.doc.transact(() => {
         if (stored.kind === undefined) {

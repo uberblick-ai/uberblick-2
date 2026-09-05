@@ -132,6 +132,10 @@ const EXPECTED: Record<
     recoveryClass: "manual",
     detail: ["kind", "status"],
   },
+  revival_trigger_missing: {
+    recoveryClass: "manual",
+    detail: ["uuid", "kind", "status"],
+  },
   governs_not_requirement: {
     recoveryClass: "reread",
     detail: ["governs", "kind"],
@@ -297,6 +301,19 @@ describe("the failure contract", () => {
         await rig.call("set_status", {
           uuid: requirement.uuid,
           status: "open",
+        })
+      ).payload,
+    );
+    const unfinishedDecision = await rig.ok("create_doc", {
+      title: "Unfinished decision",
+      description: "A decision without a revival trigger.",
+      kind: "decision",
+    });
+    record(
+      (
+        await rig.call("set_status", {
+          uuid: unfinishedDecision.uuid,
+          status: "decided",
         })
       ).payload,
     );

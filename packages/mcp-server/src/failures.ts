@@ -244,6 +244,12 @@ const RECOVERIES: Record<string, Recovery> = {
       "The document's stored kind is fixed through MCP. Choose a status in that kind's lifecycle; if the kind " +
       "itself is wrong, retrying cannot change or clear it through this interface.",
   },
+  revival_trigger_missing: {
+    recoveryClass: "manual",
+    guidance:
+      "Add a heading whose text is exactly `Reconsidering`, followed by at least one block with non-whitespace " +
+      "text, then call set_status again.",
+  },
   governs_not_requirement: {
     recoveryClass: "reread",
     guidance:
