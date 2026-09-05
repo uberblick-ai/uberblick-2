@@ -25,7 +25,7 @@ jobs:
 
       - name: Install and prove the formula from a throwaway tap
         env:
-          GH_TOKEN: ${{ github.token }}
+          HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
           HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
           set -euo pipefail
@@ -33,9 +33,6 @@ jobs:
 
           export XDG_CONFIG_HOME="$RUNNER_TEMP/uberblick-formula-config"
           export XDG_DATA_HOME="$RUNNER_TEMP/uberblick-formula-data"
-          curlrc="$RUNNER_TEMP/uberblick-formula.curlrc"
-          printf 'header = "Accept: application/octet-stream"\nheader = "Authorization: Bearer %s"\n' "$GH_TOKEN" > "$curlrc"
-          export HOMEBREW_CURLRC="$curlrc"
 
           tap=uberblick-ai/formula-proof
           brew tap-new "$tap"
