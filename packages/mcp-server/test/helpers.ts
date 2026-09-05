@@ -243,12 +243,11 @@ export async function startServer(
     name: CLIENT_NAME,
     version: "0.0.0",
   },
-  nextDocumentUuid?: () => string,
 ): Promise<Rig> {
   const instance =
     store === undefined
-      ? createMcpServer(config, undefined, nextDocumentUuid)
-      : createMcpServer(config, store, nextDocumentUuid);
+      ? createMcpServer(config)
+      : createMcpServer(config, store);
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
 

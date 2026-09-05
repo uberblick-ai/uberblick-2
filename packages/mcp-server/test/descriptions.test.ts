@@ -827,40 +827,6 @@ describe("decision log tools", () => {
     expect(await rig.ok("get_doc", { uuid: ordinary.uuid })).toEqual(before);
   });
 
-  it("refuses a generated supersession self-reference without writing", async () => {
-    const uuid = randomUUID();
-    const rig = await startServer(
-      testConfig(),
-      undefined,
-      undefined,
-      () => uuid,
-    );
-    rigs.push(rig);
-    const earlier = await lifecycleDoc(rig, "Collision target", {
-      kind: "decision",
-    });
-    const beforeLog = rig.instance.replicas.store.logSize();
-    const before = await rig.ok("get_doc", { uuid: earlier.uuid });
-
-    const refused = await rig.call("create_doc", {
-      title: "Refused self-reference",
-      description: "Must not replace itself.",
-      kind: "decision",
-      supersedes: earlier.uuid,
-    });
-
-    expect(refused.payload).toMatchObject({
-      error: "supersedes_self_reference",
-      supersedes: earlier.uuid,
-      uuid: earlier.uuid,
-      applied: false,
-      partial: false,
-      synced: false,
-    });
-    expect(rig.instance.replicas.store.logSize()).toBe(beforeLog);
-    expect(await rig.ok("get_doc", { uuid: earlier.uuid })).toEqual(before);
-  });
-
   it("keeps archived and missing decision references visible in stored order", async () => {
     const rig = await localRig();
     const requirement = await lifecycleDoc(rig, "Requirement", {

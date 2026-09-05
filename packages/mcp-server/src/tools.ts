@@ -622,7 +622,6 @@ const ANNOTATE_SHAPES =
 export function registerTools(
   server: McpServer,
   replicas: Replicas,
-  nextDocumentUuid: () => string = randomUUID,
 ): void {
   /**
    * Resolve a document, or fail with a hub-aware message: a uuid in the
@@ -1015,7 +1014,7 @@ export function registerTools(
       const supersedesUuid =
         supersedes === undefined
           ? null
-          : (canonicalDocumentUuid(supersedes) ?? supersedes);
+          : canonicalDocumentUuid(supersedes);
       const superseded =
         supersedesUuid === null ? null : requireDoc(supersedesUuid);
       const supersededKind =
@@ -1041,14 +1040,7 @@ export function registerTools(
       // does not know refuses the whole call before there is a document.
       const inputs = (blocks ?? []).map(blockInputFor);
 
-      const uuid = nextDocumentUuid();
-      if (supersedesUuid === uuid) {
-        throw new ToolError(
-          "supersedes_self_reference",
-          `Decision ${uuid} cannot supersede itself`,
-          { supersedes: supersedesUuid, uuid },
-        );
-      }
+      const uuid = randomUUID();
       const replica = replicas.replica(uuid);
       // The one write that opens its room directly instead of through
       // `requireWritableDoc`, and it is working in the document like any other.

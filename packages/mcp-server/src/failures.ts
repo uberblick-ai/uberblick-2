@@ -262,12 +262,6 @@ const RECOVERIES: Record<string, Recovery> = {
       "Choose a decision UUID from list_docs with `kind: decision`, then call create_doc again. Nothing was " +
       "created by this refused call.",
   },
-  supersedes_self_reference: {
-    recoveryClass: "retry",
-    guidance:
-      "Nothing was created. Call create_doc again with the same earlier decision UUID; the new document receives " +
-      "a fresh UUID and cannot then refer to itself.",
-  },
 };
 
 /**
