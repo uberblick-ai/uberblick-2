@@ -31,7 +31,8 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const FORWARDED = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"];
 const RUN_DEADLINE_SECONDS = 3 * 60 * 60;
 const GROUP_TERMINATION_GRACE_SECONDS = 1;
-const GROUP_REAP_WAIT_MS = 1_800;
+// Outlast the watchdog's group-termination grace before giving up the liveness poll.
+const GROUP_REAP_WAIT_MS = GROUP_TERMINATION_GRACE_SECONDS * 1000 + 800;
 const CLAIM_LOOKBACK_MS = 30 * 60 * 1000;
 
 function configuredDeadline() {
@@ -114,7 +115,8 @@ trap '' INT TERM HUP QUIT
 	sleeper=$!
 	wait "$sleeper" || exit $?
 	trap - USR1
-	(umask 077 && printf 'expired\\n' > "$deadline_file") || exit 126
+	# Reporting is best-effort; a failed marker must not disable deadline enforcement.
+	(umask 077 && printf 'expired\\n' > "$deadline_file") || :
 	kill -TERM "-$$" 2>/dev/null || :
 	sleep "$grace_seconds"
 	kill -KILL "-$$" 2>/dev/null || :
@@ -156,7 +158,7 @@ function signalGroup(signal) {
 		process.kill(-run.pid, signal);
 		return true;
 	} catch (error) {
-		if (error?.code === "ESRCH") return false;
+		if (error?.code === "ESRCH" || error?.code === "EPERM") return false;
 		throw error;
 	}
 }

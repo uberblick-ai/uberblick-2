@@ -304,6 +304,38 @@ test("the detached group enforces its deadline after the supervisor is killed", 
 	assert.equal(existsSync(join(current.scratch, `${current.runId}.log`)), true);
 });
 
+test("a failed deadline marker does not disable detached group enforcement", async (t) => {
+	const current = fixture(t, { deadlineSeconds: 1 });
+	const pgidFile = join(current.base, "run-pgid");
+	const child = spawn(
+		process.execPath,
+		[script, "implementer", current.runId, current.worktree, current.scratch],
+		{
+			env: {
+				...current.env,
+				CODEX_TEST_IGNORE_SIGNALS: "1",
+				CODEX_TEST_PGID: pgidFile,
+			},
+			stdio: ["ignore", "pipe", "pipe"],
+		},
+	);
+	const pgid = await waitForPgid(pgidFile);
+	chmodSync(current.scratch, 0o500);
+	try {
+		child.kill("SIGKILL");
+		const [code, signal] = await new Promise((resolve) =>
+			child.once("close", (...args) => resolve(args)),
+		);
+		assert.equal(code, null);
+		assert.equal(signal, "SIGKILL");
+		await waitForGroupGone(pgid);
+		assert.equal(existsSync(join(current.scratch, `${current.runId}.deadline`)), false);
+	} finally {
+		chmodSync(current.scratch, 0o700);
+		if (groupExists(pgid)) process.kill(-pgid, "SIGKILL");
+	}
+});
+
 test("a live supervisor reports deadline expiry distinctly and preserves recovery state", async (t) => {
 	const current = fixture(t, { deadlineSeconds: 1 });
 	const pgidFile = join(current.base, "run-pgid");
