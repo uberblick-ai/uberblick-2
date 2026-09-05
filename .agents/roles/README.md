@@ -70,8 +70,8 @@ assignments; its `updated_at` is liveness; its final body is the handoff.
 Each run uses fresh private scratch outside the worktree, namespaced by its run
 id; never share it or treat it as durable state.
 
-The normal order is draft → one issue-preparer run (trivial self-check, otherwise
-one fresh adversary) → `ready` or an owner boundary → implementation. Bounded
+The normal order is draft → one issue-preparer run (route chosen by
+`.agents/protocols/issue-preparation.md`) → `ready` or an owner boundary → implementation. Bounded
 means one outcome and stopping condition, not one attempt: the preparer owns
 correctable findings through its final handoff rather than opening another role
 loop. A stopped process is never resumed: recovery starts a fresh assignment

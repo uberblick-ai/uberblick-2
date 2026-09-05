@@ -1,9 +1,4 @@
-/**
- * Drift guard for the one-pass preparation policy. The prose tables in
- * `issue-preparation.md` and the executable specification beside this file must route
- * the same cases: trivial gets no adversary, everything else gets exactly one,
- * correctable findings stay in the preparer pass, and owner boundaries park.
- */
+// Preparation route boundaries and ownership/finding lifecycle parity.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -53,25 +48,24 @@ describe("one-pass issue preparation", () => {
     assert.deepEqual(
       rows.map(([route, , adversaries]) => [route.match(/`([^`]+)`/)?.[1], Number(adversaries)]),
       [
-        ["trivial", 0],
+        ["self-check", 0],
         ["challenged", 1],
       ],
     );
   });
 
-  it("routes only the fully grounded mechanical case around the adversary", () => {
+  it("self-checks settled intent with a known approach and no material risk", () => {
+    assert.equal(classify({ intentSettled: true, approachKnown: true, materialRisk: false }), "self-check");
+  });
+
+  it("challenges unsettled intent, an uncertain approach, or consequential risk", () => {
     for (const axes of everyCombination()) {
-      const trivial =
-        axes.materiality === "mechanical" &&
-        axes.uncertainty === "low" &&
-        axes.blastRadius === "local" &&
-        axes.reversibility === "easy";
-      const expectedRoute = trivial ? "trivial" : "challenged";
-      const plan = preflight(axes);
-      assert.equal(classify(axes), expectedRoute, JSON.stringify(axes));
-      assert.equal(plan.route, expectedRoute, JSON.stringify(axes));
-      assert.equal(plan.adversaries, trivial ? 0 : 1, JSON.stringify(axes));
+      const expected = axes.intentSettled && axes.approachKnown && !axes.materialRisk
+        ? "self-check" : "challenged";
+      assert.equal(classify(axes), expected);
+      assert.equal(preflight(axes).adversaries, expected === "self-check" ? 0 : 1);
     }
+
   });
 
   it("routes every documented final outcome at every risk shape", () => {
@@ -98,10 +92,9 @@ describe("one-pass issue preparation", () => {
 
   it("keeps correctable findings in one challenged preparer pass", () => {
     const plan = preflight({
-      materiality: "behavioral",
-      uncertainty: "low",
-      blastRadius: "local",
-      reversibility: "easy",
+      intentSettled: true,
+      approachKnown: true,
+      materialRisk: true,
       findingState: "correctable-applied",
     });
     assert.equal(plan.route, "challenged");
@@ -112,10 +105,9 @@ describe("one-pass issue preparation", () => {
 
   it("parks an owner boundary without buying another adversary", () => {
     const plan = preflight({
-      materiality: "architectural",
-      uncertainty: "high",
-      blastRadius: "wide",
-      reversibility: "hard",
+      intentSettled: true,
+      approachKnown: true,
+      materialRisk: true,
       findingState: "owner-boundary",
     });
     assert.equal(plan.adversaries, 1);
@@ -128,10 +120,9 @@ describe("one-pass issue preparation", () => {
 
   it("turns an oversized request into a coordination parent without dispatching it", () => {
     const plan = preflight({
-      materiality: "behavioral",
-      uncertainty: "low",
-      blastRadius: "wide",
-      reversibility: "easy",
+      intentSettled: true,
+      approachKnown: true,
+      materialRisk: true,
       findingState: "split",
     });
     assert.equal(plan.adversaries, 1);
@@ -143,22 +134,23 @@ describe("one-pass issue preparation", () => {
   });
 
   it("does not route on package names, labels or keywords", () => {
-    const mechanical = {
-      materiality: "mechanical",
-      uncertainty: "low",
-      blastRadius: "local",
-      reversibility: "easy",
+    const grounded = {
+      intentSettled: true,
+      approachKnown: true,
+      materialRisk: false,
     };
-    assert.throws(() => classify({ ...mechanical, touches: ["schema"] }), /unknown signal/);
-    assert.equal(classify(mechanical), "trivial");
+    assert.throws(() => classify({ ...grounded, touches: ["schema"] }), /unknown signal/);
+    assert.throws(() => classify({ ...grounded, label: "spike" }), /unknown signal/);
+    assert.throws(() => classify({ ...grounded, intentSettled: "yes" }), /must be one of/);
+    assert.throws(() => classify({ intentSettled: true }), /missing signal/);
+    assert.equal(classify(grounded), "self-check");
   });
 
   it("lets a lost parent claim outrank every finding", () => {
     const plan = preflight({
-      materiality: "behavioral",
-      uncertainty: "low",
-      blastRadius: "local",
-      reversibility: "easy",
+      intentSettled: true,
+      approachKnown: true,
+      materialRisk: true,
       findingState: "owner-boundary",
       parentOwnsIssue: false,
     });

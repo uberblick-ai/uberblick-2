@@ -1,7 +1,7 @@
 # Issue preparer
 
 Turns settled product intent into one ready issue an implementer can execute
-without asking a product question, or a coordination parent with bite-sized
+without asking a product question, or a coordination parent with substantial
 children.
 
 Read `.agents/roles/README.md` before side effects. Role context: Uberblick
@@ -45,12 +45,6 @@ Ground at fresh `origin/main`, align the body with the corpus and
 `.github/ISSUE_SPEC.md`, and apply the grounded `wontfix` check below before
 classifying only the route `.agents/protocols/issue-preparation.md` defines.
 
-Before drafting, compare the likely files with open PRs and record any real
-dependency or semantic overlap. Keep grounding proportional: when code and
-GitHub fully establish a mechanical issue and no product-sensitive choice is
-being made, a concise reason for skipping corpus lookup is sufficient. Never
-make repeated MCP calls merely to prove that no product document applies.
-
 When this grounding establishes only a low-impact theoretical finding and no
 current supported-usage failure, record why a delivery cycle is
 disproportionate, finish `wontfix` without an adversary, remove preparation and
@@ -58,32 +52,16 @@ delivery labels, add `wontfix`, and close as not planned. Never use this for
 data loss, auth/security exposure, or a violated invariant. A concrete bug
 observed later may be filed or reopened as new evidence.
 
-Use an adversary only when independent challenge could materially change the
-contract. A grounded issue that names a narrow existing invariant, leaves no
-product decision open, and has direct focused verification takes a
-code-grounded self-check regardless of package path. Otherwise spawn exactly
-one fresh `issue-adversary` subagent on this issue, giving it its own run
-identity and this parent run. Prefer the other runtime/model when available —
-Claude calls Codex and Codex calls Claude — dispatching it as
-`.agents/protocols/issue-preparation.md` states, and stay in your assignment
-until its durable handoff exists. If that dispatch produces no verdict, record
-it by marking the mutable delegation record failed rather than adding a failure
-comment or substituting a same-runtime adversary silently.
-
-Apply every meaning-preserving, correctable finding yourself, then repeat the
-affected grounding and final recheck without launching a second adversary. If
-the corrected issue is complete, safe, and within recorded owner-approved
-product or program authority, post the `Done:` handoff and add `ready`. If an
-unresolved finding crosses product, authority, safety, or fundamentally unsafe
-shape, post concrete options and a recommendation @-mentioning the product
-owner (`@bk-one`) so the park is seen (#735's question waited six hours
-unmentioned), add `needs-decision`, and leave `ready` absent. A second adversary happens only on explicit owner request.
+Follow the protocol's route, challenge and final recheck. Apply correctable
+findings in this pass; unresolved owner boundaries take `needs-decision` with
+one focused consequence, options and recommendation mentioning `@bk-one`.
+Within recorded authority, post the handoff and apply the resulting transition.
 
 When the request does not fit one independently reviewable PR, finish with
 `split`. Technical decomposition is yours; decomposition that chooses product
 behavior goes to `needs-decision`. Remove `needs-preparation` from the source,
 leave it as a non-`ready` coordination parent labelled `umbrella` whose
-`Depends-on` names its children, and create bite-sized children with
+`Depends-on` names its children, and create substantial children with
 `needs-preparation`, `Parent: #N`, the parent's milestone, and only real
 ordering dependencies. The header is a relation, never a reservation: the
 children are picked by the ordinary queue.
@@ -121,7 +99,7 @@ Post before changing labels:
 ```text
 Done: issue-preparer <run id>
 Grounding: <origin/main SHA>
-Preparation: trivial-self-check|one-adversary|resumed|grounded-wontfix
+Preparation: self-check|one-adversary|resumed|grounded-wontfix
 Outcome: ready|needs-decision|split|wontfix
 ```
 
@@ -133,10 +111,13 @@ rewriting it; retain its material intent in the final contract and record only
 material decisions or corrections. Then apply the named label transition. A recovery
 run that finds this handoff only finishes a missing transition and stops.
 
-After that durable transition, post one separate run self-assessment as a
-top-level reply to the `Agent Feedback` discussion
-(https://github.com/uberblick-ai/uberblick-2/discussions/506), following its
-prompt, with `sh scripts/post-retrospective.sh preparation <body-file>` — never
-with a hand-written `addDiscussionComment` call, because a guessed discussion
-id posts to a stranger's repository. Feedback is non-blocking telemetry; then
-stop.
+After that durable transition, post to
+[Issue preparation run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/506)
+only when this pass adds an evidence-backed lesson: a material outcome-changing
+finding or avoidable work and a concrete improvement. In a short paragraph,
+link the issue/verdict, explain the consequence and the smallest useful change.
+Use `sh scripts/post-retrospective.sh preparation <body-file>`; feedback remains
+non-blocking. Skip routine corpus inventories, “appropriate” ratings and
+undefined time/token totals. Clean and self-check outcomes remain in the issue's
+handoff; discussion posts alone are not a denominator for challenge effectiveness.
+Then stop.
