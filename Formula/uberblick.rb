@@ -14,7 +14,7 @@ class Uberblick < Formula
 
   def install
     libexec.install Dir["*"]
-    inreplace libexec/"bin/ub", "#!/usr/bin/env node", "#!#{Formula["node"].opt_bin}/node"
+    inreplace libexec/"bin/ub", "#!/usr/bin/env node", "#!#{formula_opt_bin("node")}/node"
     bin.install_symlink libexec/"bin/ub"
     bin.install_symlink libexec/"bin/uberblick"
   end
