@@ -20,10 +20,12 @@ import {
   createMcpEngine,
   type UberblickMcpEngine,
 } from "../src/engine.js";
+import { collectServingSyncStatus } from "../src/status.js";
 import { MirrorStore } from "../src/store.js";
 import {
   FailingStore,
   hubUrl,
+  LIVE_HUB_SETTLE,
   peerClient,
   removeTempDirs,
   sleep,
@@ -186,6 +188,62 @@ describe("transport-free MCP engine", () => {
     expect(getBlocks(peer.doc).map((block) => block.text)).toEqual([
       "survives recovery",
     ]);
+  });
+
+  it("releases acknowledged browser writes without waiting for the periodic tick", async () => {
+    const running = await startHub();
+    hubs.push(running);
+    const databasePath = tempDatabasePath();
+    const source = new Y.Doc();
+    const uuid = randomUUID();
+    const room = roomForDoc(WORKSPACE, uuid);
+    initDoc(source, { uuid, title: "Acknowledged browser writes" });
+    appendBlock(source, { type: "paragraph", text: "initial" });
+    const store = new MirrorStore(databasePath, WORKSPACE);
+    store.appendUpdate(room, Y.encodeStateAsUpdate(source), "local");
+
+    const engine = await createMcpEngine(
+      testConfig({
+        databasePath,
+        authSecret: TEST_SECRET,
+        hubUrl: hubUrl(running.port),
+        ...LIVE_HUB_SETTLE,
+      }),
+      {
+        store,
+        // Any true reading in this test comes from an explicit wake, not time.
+        refreshIntervalMs: 30_000,
+      },
+    );
+    engines.push(engine);
+    const status = () => collectServingSyncStatus(engine, [room]);
+    await waitUntil("the seeded serving room to be acknowledged", () =>
+      status().rooms[room]?.hubAcked === true,
+    );
+
+    for (const text of ["one", "two", "three"]) {
+      let update: Uint8Array | null = null;
+      const capture = (next: Uint8Array): void => {
+        update = next;
+      };
+      source.on("update", capture);
+      appendBlock(source, { type: "paragraph", text });
+      source.off("update", capture);
+      if (update === null) throw new Error("the browser edit produced no update");
+
+      await tickAfter(engine, () => {
+        engine.store.appendUpdate(room, update as Uint8Array, "local");
+      });
+      expect(status()).toMatchObject({
+        caughtUp: false,
+        rooms: { [room]: { hubAcked: false } },
+      });
+      await waitUntil("the provider acknowledgement to release its marker", () =>
+        status().caughtUp,
+      );
+    }
+
+    source.destroy();
   });
 
   it("reports ready after the one-time sidebar seed and closes without later ticks", async () => {
