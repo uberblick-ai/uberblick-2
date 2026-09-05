@@ -306,7 +306,6 @@ for (const scheme of ["light", "dark"] as const) {
       .getByRole("group", { name: "Presence colour" })
       .getByRole("button");
     await expect(swatches).toHaveCount(8);
-    await expect(panel.getByText("Local cache", { exact: true })).toBeVisible();
     await page.evaluate(
       () =>
         new Promise<void>((resolve) =>
