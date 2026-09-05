@@ -42,7 +42,7 @@ async function localRig(): Promise<Rig> {
 async function lifecycleDoc(
   rig: Rig,
   title: string,
-  lifecycle: Record<string, string> = {},
+  lifecycle: Record<string, unknown> = {},
 ): Promise<any> {
   return rig.ok("create_doc", {
     title,
@@ -562,6 +562,84 @@ describe("set_status", () => {
       kind: "requirement",
       status: "implementing",
     });
+  });
+
+  it("refuses to decide without an exact, populated Reconsidering section", async () => {
+    const rig = await localRig();
+    const invalidBlocks = [
+      [{ type: "paragraph", text: "Revisit when usage changes." }],
+      [
+        { type: "heading", text: "reconsidering", level: 2 },
+        { type: "paragraph", text: "Revisit when usage changes." },
+      ],
+      [
+        { type: "heading", text: "Reconsidering", level: 2 },
+        { type: "paragraph", text: "   " },
+      ],
+    ];
+
+    for (const [index, blocks] of invalidBlocks.entries()) {
+      const decision = await rig.ok("create_doc", {
+        title: `Unfinished decision ${index}`,
+        description: "A decision that does not yet name its revival trigger.",
+        kind: "decision",
+        blocks,
+      });
+      const before = await rig.ok("get_doc", { uuid: decision.uuid });
+
+      const refused = await rig.call("set_status", {
+        uuid: decision.uuid,
+        status: "decided",
+      });
+
+      expect(refused.payload).toMatchObject({
+        error: "revival_trigger_missing",
+        message: expect.stringContaining("Reconsidering"),
+        uuid: decision.uuid,
+        kind: "decision",
+        status: "decided",
+        heading: "Reconsidering",
+        applied: false,
+        partial: false,
+        synced: false,
+        recoveryClass: "manual",
+      });
+      expect(refused.payload.message).toContain("non-whitespace");
+      expect(await rig.ok("get_doc", { uuid: decision.uuid })).toEqual(before);
+      expect(stub(rig, decision.uuid)).toMatchObject({
+        kind: "decision",
+        status: "open",
+      });
+    }
+  });
+
+  it("decides with a revival trigger while other lifecycle moves stay unchanged", async () => {
+    const rig = await localRig();
+    const decision = await lifecycleDoc(rig, "Complete decision", {
+      kind: "decision",
+      blocks: [
+        { type: "heading", text: "Reconsidering", level: 2 },
+        { type: "paragraph", text: "Revisit when usage changes." },
+      ],
+    });
+
+    expect(
+      await rig.ok("set_status", { uuid: decision.uuid, status: "decided" }),
+    ).toMatchObject({ kind: "decision", status: "decided" });
+
+    const open = await lifecycleDoc(rig, "Open decision", { kind: "decision" });
+    expect(
+      await rig.ok("set_status", { uuid: open.uuid, status: "open" }),
+    ).toMatchObject({ kind: "decision", status: "open" });
+
+    const requirement = await lifecycleDoc(rig, "Requirement", {
+      kind: "requirement",
+    });
+    for (const status of ["planned", "implementing", "done"]) {
+      expect(
+        await rig.ok("set_status", { uuid: requirement.uuid, status }),
+      ).toMatchObject({ kind: "requirement", status });
+    }
   });
 });
 
