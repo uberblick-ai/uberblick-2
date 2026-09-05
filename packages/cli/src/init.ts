@@ -80,6 +80,7 @@ import {
   writeUserConfig,
 } from "./config.js";
 import { takeHelp } from "./help.js";
+import { isInstallPayload } from "./installation.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock, seedLockPath } from "./init-lock.js";
 import { installCommand } from "./install.js";
@@ -569,7 +570,7 @@ export async function initCommand(
 
   // Whether this is a checkout, which decides only whether the report below
   // names the contributor tasks. Nothing is written into one.
-  const root = findCheckoutRoot(process.cwd());
+  const root = isInstallPayload() ? null : findCheckoutRoot(process.cwd());
 
   // --- everything that writes ---------------------------------------------
   //
