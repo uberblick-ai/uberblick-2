@@ -147,6 +147,23 @@ describe("the workspace tag catalog", () => {
       partial: false,
     });
     expect(refused.payload.recovery).toContain("has not reached this replica");
+
+    // A retirement this replica already holds is not waiting on the hub:
+    // hydration cannot make the value assignable, so the caller is told to
+    // correct the call rather than to repeat it.
+    retireTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.id);
+    const blocked = await rig.call("create_doc", {
+      title: "Must not exist either",
+      description: "A retirement this replica already knows about.",
+      tags: [AUTH.id],
+    });
+    expect(blocked.payload).toMatchObject({
+      error: "invalid_tag_assignment",
+      retired: [AUTH.id],
+      recoveryClass: "manual",
+    });
+    expect(blocked.payload.recovery).not.toContain("has not reached this replica");
+
     expect((await rig.ok("list_docs")).docs).toEqual([]);
   });
 

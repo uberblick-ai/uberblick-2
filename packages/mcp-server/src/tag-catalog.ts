@@ -79,6 +79,11 @@ export function tagCatalogComplete(replicas: Replicas): boolean {
  * room has not reached this replica, `list_tags` cannot name the value either
  * — it may be a real workspace tag — so the failure says that instead of
  * sending the caller round a loop that cannot help.
+ *
+ * A retired blocker is the exception: this replica already holds the value and
+ * already knows it is retired, and hydration cannot make it assignable again.
+ * The table's `manual` stands for any refusal carrying one, so an agent is
+ * never told to repeat a call only catalog curation can unblock.
  */
 function refuseTagValues(
   replicas: Replicas,
@@ -89,7 +94,7 @@ function refuseTagValues(
   throw new ToolError("invalid_tag_assignment", message, {
     unknown,
     retired,
-    ...(tagCatalogComplete(replicas)
+    ...(retired.length > 0 || tagCatalogComplete(replicas)
       ? {}
       : incompleteCatalogRecovery(replicas.sync.state().status)),
   });
