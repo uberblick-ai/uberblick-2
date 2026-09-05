@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const usage = "usage: run-codex-role.mjs <role> <run-id> <worktree> <scratch>";
-const roles = new Set(["issue-preparer", "implementer", "integrator"]);
+const roles = new Set(["issue-preparer", "implementer", "integrator", "implementation-reviewer"]);
 const [role, runId, worktree, scratch] = process.argv.slice(2);
 
 function failUsage() {
@@ -95,6 +95,7 @@ const completion = await new Promise((resolve) => {
 const duration = Math.max(0, Math.round((Date.now() - startedAt.getTime()) / 1000));
 
 function removeWorktree() {
+	if (role === "implementation-reviewer") return true;
 	const removed = spawnSync("git", ["-C", root, "worktree", "remove", "--force", worktree], {
 		encoding: "utf8",
 	});
@@ -143,8 +144,11 @@ function claimState() {
 
 	// These exact durable lines are owned by `.agents/roles/README.md` and
 	// `.github/ISSUE_SPEC.md`; keep this lookup aligned if their grammar moves.
-	const claimLine =
-		role === "implementer" ? `Implementer: codex ${runId}` : `Claim: ${role} ${runId}`;
+	const claimLine = role === "implementer"
+		? `Implementer: codex ${runId}`
+		: role === "implementation-reviewer"
+			? `Delegated: implementation-reviewer ${runId}`
+			: `Claim: ${role} ${runId}`;
 	return commentsResult.stdout.split(/\r?\n/).includes(claimLine) ? "found" : "not found";
 }
 
@@ -157,7 +161,11 @@ await new Promise((resolve) =>
 		resolve,
 	),
 );
-process.stdout.write(`Worktree preserved and registered at ${worktree} because the run was lost.\n`);
+process.stdout.write(
+	role === "implementation-reviewer"
+		? `Parent worktree remains at ${worktree}; this reviewer did not own it.\n`
+		: `Worktree preserved and registered at ${worktree} because the run was lost.\n`,
+);
 
 if (completion.error) {
 	process.stderr.write(`Codex run ${runId}: supervisor observed ${completion.error.message}.\n`);

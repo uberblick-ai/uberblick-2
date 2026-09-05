@@ -87,10 +87,17 @@ applies correctable findings in this same run and repeats the affected grounding
 and final recheck. It does not call a second adversary to review those edits.
 Another adversary is exceptional and requires an explicit owner request.
 
-**Dispatching the other runtime.** Use the two commands under "Requesting the
-round" in `.claude/skills/next-issue/review-protocol.md`, with `issue-adversary` in
-place of `implementation-reviewer`: from Claude, `codex exec`; from Codex,
-`claude -p --agent issue-adversary …`. `codex exec` selects no
+**Dispatching the other runtime.** Follow "Requesting the round" in
+`.claude/skills/next-issue/review-protocol.md` for the common transport mechanics.
+From Codex, use its Claude command with `issue-adversary` in place of
+`implementation-reviewer`. From Claude, start the Codex adversary directly — the
+repository runner is authorized only for implementation review:
+
+```sh
+( codex exec -C <parent-worktree> -s workspace-write -c 'sandbox_workspace_write.network_access=true' - < <prompt-file> > <scratch-log> 2>&1; echo $? > <scratch-log>.status )
+```
+
+`codex exec` selects no
 `.codex/agents/*.toml` adapter, so that prompt tells the child to read the
 `issue-adversary` role contract and supplies the exact issue, child run id and
 parent run id. Do not route this through the companion `codex-rescue`/task
