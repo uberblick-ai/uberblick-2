@@ -350,6 +350,33 @@ export class InvalidDecisionReferenceError extends Error {
   }
 }
 
+export type SupersedesReferenceErrorReason =
+  | "not-a-document"
+  | "self-reference"
+  | "immutable";
+
+/**
+ * Thrown when a decision's immutable supersession reference is not one valid,
+ * different document UUID, or when re-initialisation would replace it.
+ */
+export class InvalidSupersedesReferenceError extends Error {
+  readonly reason: SupersedesReferenceErrorReason;
+  readonly uuid: unknown;
+
+  constructor(reason: SupersedesReferenceErrorReason, uuid: unknown) {
+    super(
+      reason === "not-a-document"
+        ? `Not a document reference: ${renderUnknown(uuid)}. supersedes carries a document uuid.`
+        : reason === "self-reference"
+          ? `A decision cannot supersede itself (${renderUnknown(uuid)}).`
+          : `A decision's supersedes reference is immutable after creation.`,
+    );
+    this.name = "InvalidSupersedesReferenceError";
+    this.reason = reason;
+    this.uuid = uuid;
+  }
+}
+
 /** Render foreign Yjs values without letting error construction throw. */
 function renderUnknown(value: unknown): string {
   if (typeof value === "bigint") return `${value}n`;

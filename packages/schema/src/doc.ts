@@ -6,8 +6,8 @@
  *
  *   - `meta`        Y.Map     — uuid, title, description, TL;DR, changelog
  *                              suggestion, `tag-assigned:<identity>` presence
- *                              entries, links, kind, status and decision
- *                              remove/add levels
+ *                              entries, links, kind, status, supersedes and
+ *                              internal decision remove/add levels
  *   - `blocks`      Y.XmlFragment — one Y.XmlElement per block
  *   - `annotations` Y.Map     — threadId → that thread's own Y.Map
  *   - `decisions`   Y.Array   — decision-document uuids, in stored order
@@ -40,6 +40,7 @@ import { getDirectoryEntry } from "./directory.js";
 import {
   InvalidDecisionReferenceError,
   InvalidDocumentLifecycleError,
+  InvalidSupersedesReferenceError,
 } from "./errors.js";
 import { canonicalDocumentUuid } from "./rooms.js";
 import {
@@ -109,6 +110,8 @@ export interface InitDocOptions {
   uuid: string;
   title: string;
   tags?: string[];
+  /** Earlier decision this decision replaces; immutable once first written. */
+  supersedes?: string;
   /**
    * One or two sentences saying what the document is for. Optional here because
    * the web UI creates documents without one; MCP's `create_doc` requires it.
@@ -123,10 +126,35 @@ export interface InitDocOptions {
  * Idempotent for uuid/title/tags (they are overwritten with what is passed);
  * `links` is only seeded when absent, so re-initialising never drops links.
  * `description` is written only when one is given, so re-initialising a
- * document without one does not erase the description it since acquired.
+ * document without one does not erase the description it since acquired. A
+ * supplied `supersedes` is canonicalized and written once; re-initialisation
+ * may repeat it but cannot replace it.
  */
 export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
+  const supersedes =
+    options.supersedes === undefined
+      ? undefined
+      : canonicalDocumentUuid(options.supersedes);
+  if (options.supersedes !== undefined && supersedes === null) {
+    throw new InvalidSupersedesReferenceError(
+      "not-a-document",
+      options.supersedes,
+    );
+  }
+  if (
+    supersedes !== undefined &&
+    canonicalDocumentUuid(options.uuid) === supersedes
+  ) {
+    throw new InvalidSupersedesReferenceError("self-reference", supersedes);
+  }
+
   const meta = getMetaMap(ydoc);
+  if (supersedes !== undefined && meta.has("supersedes")) {
+    const stored = canonicalDocumentUuid(meta.get("supersedes"));
+    if (stored !== supersedes) {
+      throw new InvalidSupersedesReferenceError("immutable", supersedes);
+    }
+  }
   ydoc.transact(() => {
     meta.set("uuid", options.uuid);
     meta.set("title", options.title);
@@ -135,6 +163,9 @@ export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
       meta.set("description", options.description);
     }
     if (!meta.has("links")) meta.set("links", []);
+    if (supersedes !== undefined && !meta.has("supersedes")) {
+      meta.set("supersedes", supersedes);
+    }
     // Touch the other roots so they exist in the update stream from the start.
     getBlocksFragment(ydoc);
     getAnnotationsMap(ydoc);
@@ -222,6 +253,8 @@ export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
   const description = meta.get("description");
   const tldr = meta.get("tldr");
   const lifecycle = readDocumentLifecycle(meta.get("kind"), meta.get("status"));
+  const supersedes =
+    lifecycle.kind === "decision" ? readSupersedes(meta, uuid) : undefined;
   return {
     uuid: typeof uuid === "string" ? uuid : "",
     title: typeof title === "string" ? title : "",
@@ -231,8 +264,25 @@ export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
     tldr: typeof tldr === "string" && tldr !== "" ? tldr : null,
     ...readChangelogSuggestion(meta.get("changelogSuggestion")),
     ...lifecycle,
-    links: effectiveLinks(ydoc, readStringArray(meta.get("links"))),
+    ...(supersedes === undefined ? {} : { supersedes }),
+    links: effectiveLinks(
+      ydoc,
+      readStringArray(meta.get("links")),
+      supersedes,
+    ),
   };
+}
+
+/** A tolerant public read of the immutable new-decision → old-decision edge. */
+function readSupersedes(
+  meta: Y.Map<unknown>,
+  documentUuid: unknown,
+): string | undefined {
+  const supersedes = canonicalDocumentUuid(meta.get("supersedes"));
+  if (supersedes === null) return undefined;
+  return supersedes === canonicalDocumentUuid(documentUuid)
+    ? undefined
+    : supersedes;
 }
 
 /**
@@ -409,7 +459,8 @@ function storedDecisions(ydoc: Y.Doc): string[] {
 }
 
 /**
- * The public graph edges: curated replacements plus every active decision.
+ * The public graph edges: curated replacements, active decisions, and the
+ * earlier decision this decision supersedes.
  *
  * `setLinks` remains the sole writer of the curated array, so it keeps its
  * replacement and CRDT last-writer semantics. Decision edges derive from the
@@ -417,25 +468,35 @@ function storedDecisions(ydoc: Y.Doc): string[] {
  * curated spelling already names an active decision, keep its first position
  * but canonicalize and deduplicate it.
  */
-function effectiveLinks(ydoc: Y.Doc, curated: string[]): string[] {
-  const decisions = storedDecisions(ydoc);
-  if (decisions.length === 0) return curated;
+function effectiveLinks(
+  ydoc: Y.Doc,
+  curated: string[],
+  supersedes?: string,
+): string[] {
+  const derived = [
+    ...storedDecisions(ydoc),
+    ...(supersedes === undefined ? [] : [supersedes]),
+  ];
+  if (derived.length === 0) return curated;
 
-  const decisionSet = new Set(decisions);
-  const seenDecisions = new Set<string>();
+  const derivedSet = new Set(derived);
+  const seenDerived = new Set<string>();
   const out: string[] = [];
   for (const link of curated) {
     const canonical = canonicalDocumentUuid(link);
-    if (canonical === null || !decisionSet.has(canonical)) {
+    if (canonical === null || !derivedSet.has(canonical)) {
       out.push(link);
       continue;
     }
-    if (seenDecisions.has(canonical)) continue;
-    seenDecisions.add(canonical);
+    if (seenDerived.has(canonical)) continue;
+    seenDerived.add(canonical);
     out.push(canonical);
   }
-  for (const decision of decisions) {
-    if (!seenDecisions.has(decision)) out.push(decision);
+  for (const link of derived) {
+    if (!seenDerived.has(link)) {
+      seenDerived.add(link);
+      out.push(link);
+    }
   }
   return out;
 }

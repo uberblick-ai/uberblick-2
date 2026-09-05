@@ -327,12 +327,12 @@ const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
     title: "A requirement document (`kind: requirement`)",
     when: { field: "kind", is: "requirement" },
-    forbids: ["governs"],
+    forbids: ["governs", "supersedes"],
   },
   {
     title: "An ordinary document",
     when: { field: "kind", present: false },
-    forbids: ["status", "governs"],
+    forbids: ["status", "governs", "supersedes"],
   },
 ];
 
@@ -342,8 +342,10 @@ const LIFECYCLE_RECORDS_STATE =
 
 const DECISION_EDGES =
   "A document's `decisions` are an ordered log resolved from its decision slot. Their UUIDs are also derived " +
-  "outbound edges in `links`. `set_links` still replaces only the curated link array with exactly what it is " +
-  "given, so passing get_doc's effective `links` back to it stores any decision UUIDs there too; get_doc " +
+  "outbound edges in `links`. A decision's immutable `supersedes` reference is another derived edge, so " +
+  "backlinks on the earlier decision exposes its successors without editing it. `set_links` still replaces only " +
+  "the curated link array with exactly what it is given, so passing get_doc's effective `links` back to it stores " +
+  "any decision UUIDs there too; get_doc " +
   "deduplicates the resulting edge.";
 
 function firstStatus(kind: DocumentKind): DocumentStatus {
@@ -617,7 +619,10 @@ const ANNOTATE_SHAPES =
   "range half-stated, is refused at the input boundary before anything is written, rather than resolved by " +
   "ignoring whichever fields do not fit. `text` and `author` belong to both.";
 
-export function registerTools(server: McpServer, replicas: Replicas): void {
+export function registerTools(
+  server: McpServer,
+  replicas: Replicas,
+): void {
   /**
    * Resolve a document, or fail with a hub-aware message: a uuid in the
    * directory whose room has not reached this replica yet is a different
@@ -921,6 +926,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         " A decision may pass `governs`, the UUID of a live, hydrated requirement in this replica. The decision " +
         "is made durable before its UUID is appended to that requirement's ordered decision log; any other use " +
         "of `governs` is refused before a UUID is allocated or a room is written. " +
+        "A decision may also pass `supersedes`, the UUID of a readable, hydrated decision it replaces. The " +
+        "reference is immutable, is returned by get_doc, and is a derived link: backlinks on the earlier " +
+        "decision exposes every successor without editing that earlier document. A non-decision target or a " +
+        "self-reference is refused before any room is written. " +
         "\n\n" +
         CREATE_DOC_PLACEMENT +
         "\n\n" +
@@ -943,6 +952,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
             .describe(
               "Requirement UUID whose ordered decision log receives this new decision. Accepted only with `kind: decision`.",
             ),
+          supersedes: uuidArg
+            .optional()
+            .describe(
+              "Earlier decision UUID this new decision replaces. Immutable and accepted only with `kind: decision`.",
+            ),
           blocks: z
             .array(blockInputSchema)
             .optional()
@@ -959,6 +973,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       kind,
       status,
       governs,
+      supersedes,
       blocks,
       sidebar,
     }) => {
@@ -993,6 +1008,22 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           "governs_not_requirement",
           `Document ${governs} is not a requirement, so this decision cannot govern it`,
           { governs, kind: requirementKind },
+        );
+      }
+
+      const supersedesUuid =
+        supersedes === undefined
+          ? null
+          : canonicalDocumentUuid(supersedes);
+      const superseded =
+        supersedesUuid === null ? null : requireDoc(supersedesUuid);
+      const supersededKind =
+        superseded === null ? null : (getMeta(superseded.doc).kind ?? null);
+      if (superseded !== null && supersededKind !== "decision") {
+        throw new ToolError(
+          "supersedes_not_decision",
+          `Document ${supersedesUuid} is not a decision, so a new decision cannot supersede it`,
+          { supersedes: supersedesUuid, kind: supersededKind },
         );
       }
 
@@ -1125,6 +1156,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
             title,
             description,
             ...(tags === undefined ? {} : { tags }),
+            ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
           });
           if (lifecycle !== null) {
             setKind(replica.doc, lifecycle.kind);
@@ -1206,6 +1238,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         tags: tags ?? [],
         ...(lifecycle === null ? {} : lifecycle),
         ...(governs === undefined ? {} : { governs }),
+        ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
         blocks: blocksJson(replica),
         ...(placement === null ? {} : { sidebar: placement }),
         ...durabilityAcross(replica, completed),
