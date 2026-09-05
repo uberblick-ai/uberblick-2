@@ -988,6 +988,18 @@ test("the document collaborator cluster stays compact and jumps once without mov
     await page.locator(".ub-title").click();
     await expect(overflow).toHaveCount(0);
     await expect(page.locator(".ub-title")).toBeFocused();
+    // The title's native focus scroll can outlive the focus transfer. Let the
+    // pane settle before resetting it for the independent presence checks.
+    let previousScrollTop: number | null = null;
+    let stableScrollReads = 0;
+    await expect
+      .poll(async () => {
+        const scrollTop = await page.locator(".ub-pane").evaluate((pane) => pane.scrollTop);
+        stableScrollReads = scrollTop === previousScrollTop ? stableScrollReads + 1 : 0;
+        previousScrollTop = scrollTop;
+        return stableScrollReads;
+      }, { intervals: [100, 100, 100, 100, 100, 100], timeout: 2_000 })
+      .toBeGreaterThanOrEqual(5);
 
     await page.evaluate(() => {
       const first = document.querySelector(".ub-editor .ProseMirror > *")?.firstChild;
