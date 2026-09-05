@@ -1,49 +1,41 @@
-/**
- * Tag editing in the doc header (#122).
- *
- * One claim, told twice: **the chips are a human front door to the write an
- * agent already makes.** `set_tags` replaces the document's tag set through
- * per-tag writes; so does the identity line. Everything that follows a retag
- * today — the directory stub,
- * its group badge, `list_docs` on a second client — follows a chip for the same
- * reason and over the same path, with nothing in the UI told about any of it.
- *
- * Both tests mount the real app over shared Y.Docs (the `archived.test.tsx`
- * harness), because the interesting half of this feature is what the write
- * travels through: a chip that only proved a component re-renders its own state
- * would prove nothing about `meta.tags`, the stub, or the second client.
- *
- * `acquireRoom` is mocked: rooms here are plain shared Y.Docs, since the
- * transport is not what is under test.
- */
+/** The catalog-backed tag picker in the document identity line (#509). */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
+import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import type { ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import {
   appendBlock,
+  createTagCatalogEntry,
   directoryRoom,
   getDirectoryEntry,
   getMeta,
   initDoc,
+  retireTagCatalogEntry,
   roomForDoc,
+  settingsRoom,
   setTags,
+  tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const UUID = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
-/** Two other documents, so the workspace has tags to suggest. */
-const REF = "1f77c0d9-6b42-4a18-9e35-2c8d0f6a1b73";
-const PROTOCOL = "7c2e5a11-3f80-4d66-b1a9-8e4d2c6f0a55";
 
-const OFFLINE: RoomStatus = {
-  connected: false,
-  synced: false,
+const TAGS = {
+  auth: "10000000-0000-4000-8000-000000000001",
+  billing: "10000000-0000-4000-8000-000000000002",
+  legacy: "10000000-0000-4000-8000-000000000003",
+  mcp: "10000000-0000-4000-8000-000000000004",
+  sync: "10000000-0000-4000-8000-000000000005",
+} as const;
+
+const LIVE: RoomStatus = {
+  connected: true,
+  synced: true,
   hasReceivedServerState: true,
   writable: true,
   storeRefused: false,
@@ -63,9 +55,9 @@ function room(name: string): RoomConnection {
     room: name,
     ydoc: new Y.Doc(),
     provider: { awareness: null },
-    status: OFFLINE,
+    status: { ...LIVE },
     onStatusChange: (listener: (next: RoomStatus) => void) => {
-      listener(OFFLINE);
+      listener(connection.status);
       return () => {};
     },
   } as unknown as RoomConnection;
@@ -91,9 +83,16 @@ function peerOf(local: Y.Doc): Y.Doc {
 let mounted: { root: Root; host: HTMLElement } | null = null;
 
 beforeEach(() => {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response("", { status: 404 }),
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 404 }));
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    },
   );
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
 });
 
 afterEach(() => {
@@ -105,9 +104,9 @@ afterEach(() => {
   }
   rooms.clear();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
-/** Render, and let the hub endpoint settle before anything is asserted. */
 async function mount(node: ReactNode): Promise<HTMLElement> {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
@@ -115,32 +114,51 @@ async function mount(node: ReactNode): Promise<HTMLElement> {
   document.body.appendChild(host);
   const root = createRoot(host);
   mounted = { root, host };
-  await act(async () => {
-    root.render(node);
-  });
+  await act(async () => root.render(node));
   return host;
 }
 
-async function openApp(path: string): Promise<HTMLElement> {
-  window.history.replaceState(null, "", path);
+async function openApp(): Promise<HTMLElement> {
+  window.history.replaceState(null, "", `/${WORKSPACE}/${UUID}`);
   return await mount(<App />);
 }
 
-/**
- * Change an input the way a keystroke does, so React's `onChange` runs.
- *
- * Assigning `.value` is not enough: React installs its own setter on the
- * prototype to track the last value it saw, so a plain assignment updates that
- * record too and the event that follows is dismissed as "nothing changed".
- */
+function documentFixture(tags: readonly string[] = []): {
+  document: RoomConnection;
+  directory: RoomConnection;
+  catalog: RoomConnection;
+} {
+  const document = room(roomForDoc(WORKSPACE, UUID));
+  const directory = room(directoryRoom(WORKSPACE));
+  const catalog = room(settingsRoom(WORKSPACE));
+  initDoc(document.ydoc, { uuid: UUID, title: "Sync and offline", tags: [...tags] });
+  appendBlock(document.ydoc, { type: "paragraph", text: "how sync behaves" });
+  upsertDirectoryEntry(directory.ydoc, {
+    uuid: UUID,
+    title: "Sync and offline",
+    tags: [...tags],
+  });
+  return { document, directory, catalog };
+}
+
+function addCatalogTags(
+  catalog: Y.Doc,
+  names: ReadonlyArray<keyof typeof TAGS>,
+): void {
+  for (const name of names) createTagCatalogEntry(catalog, name, TAGS[name]);
+}
+
+function click(element: Element | null | undefined): void {
+  act(() => (element as HTMLElement | null | undefined)?.click());
+}
+
 function typeInto(input: HTMLInputElement | null, value: string): void {
-  if (input === null) return;
   const native = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
     "value",
   )?.set;
   native?.call(input, value);
-  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input?.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 function press(
@@ -151,147 +169,150 @@ function press(
   element?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...init }));
 }
 
-function field(host: HTMLElement): HTMLInputElement | null {
-  return host.querySelector<HTMLInputElement>(".ub-tag-add");
+function picker(host: HTMLElement): HTMLButtonElement | null {
+  return host.querySelector<HTMLButtonElement>('button[aria-label="Edit tags"]');
 }
 
-/** The tag words on screen, in the order the chips are drawn. */
-function chips(host: HTMLElement): string[] {
-  return [...host.querySelectorAll(".ub-tag-name")].map(
-    (node) => node.textContent ?? "",
-  );
+function search(): HTMLInputElement | null {
+  return document.querySelector<HTMLInputElement>('input[aria-label="Search tags"]');
 }
 
-/** What the add field offers, straight out of the directory. */
-function suggestions(host: HTMLElement): string[] {
-  return [...host.querySelectorAll<HTMLOptionElement>("datalist option")].map(
-    (option) => option.value,
-  );
+function options(): HTMLButtonElement[] {
+  return [...document.querySelectorAll<HTMLButtonElement>(".ub-tag-option")];
 }
 
-/** The identity line's group badge — where the document lives right now. */
-function badge(host: HTMLElement): string {
-  return host.querySelector(".ub-badge")?.textContent ?? "";
+function option(name: string): HTMLButtonElement | undefined {
+  return options().find((candidate) => candidate.textContent?.includes(name));
 }
 
-/** Type a word into the add field and commit it with Enter. */
-function addTag(host: HTMLElement, word: string): void {
-  act(() => typeInto(field(host), word));
-  act(() => press(field(host), "Enter"));
-}
+describe("the document tag picker", () => {
+  it("renders one searchable control from the catalog, without tag-derived navigation", async () => {
+    const fix = documentFixture([TAGS.sync]);
+    addCatalogTags(fix.catalog.ydoc, ["sync", "billing", "mcp"]);
+    const host = await openApp();
 
-describe("tags are editable in the document identity line", () => {
-  it("writes the document tag set, and the stub and the sidebar follow", async () => {
-    const directory = room(directoryRoom(WORKSPACE)).ydoc;
-    const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
-    initDoc(ydoc, { uuid: UUID, title: "Sync and offline" });
-    appendBlock(ydoc, { type: "paragraph", text: "how sync behaves" });
-    upsertDirectoryEntry(directory, { uuid: UUID, title: "Sync and offline" });
-    // Two documents nobody opens: the suggestions come from their *stubs*, which
-    // is the whole point of asking the directory rather than the corpus.
-    upsertDirectoryEntry(directory, {
-      uuid: REF,
-      title: "Schema API",
-      tags: ["reference"],
-    });
-    upsertDirectoryEntry(directory, {
-      uuid: PROTOCOL,
-      title: "Sync protocol",
-      tags: ["verify", "Reference"],
-    });
+    expect(picker(host)?.textContent).toContain("sync");
+    expect(host.querySelector(".ub-tag-x")).toBeNull();
+    expect(host.querySelector(".ub-lifecycle-badge")).toBeNull();
+    expect(host.querySelector(".ub-badge")).toBeNull();
 
-    const peer = peerOf(directory);
-    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    click(picker(host));
+    expect(options().map((entry) => entry.textContent?.trim())).toEqual([
+      "billing",
+      "mcp",
+      "✓sync",
+    ]);
+    expect(option("sync")?.getAttribute("aria-selected")).toBe("true");
 
-    // ---- suggestions are the workspace's tags, deduped and no doc opened ----
-    // "Reference" and "reference" are one tag, offered in the spelling the
-    // workspace used first.
-    expect(suggestions(host)).toEqual(["reference", "verify"]);
-    expect(chips(host)).toEqual([]);
-    // No canonical tag, so the document is not filed under an invented group.
-    expect(badge(host)).toBe("");
+    act(() => typeInto(search(), "MC"));
+    expect(options().map((entry) => entry.textContent?.trim())).toEqual(["mcp"]);
+    expect(document.body.textContent).not.toContain("Create MC");
 
-    // ---- adding a tag is the write set_tags makes ----
-    act(() => typeInto(field(host), "Feature"));
-    // An Enter that ends an IME composition belongs to the input method, not to
-    // this field: nothing is committed, and the word is still being typed.
-    act(() => press(field(host), "Enter", { isComposing: true }));
-    expect(getMeta(ydoc).tags).toEqual([]);
-    // The same word, committed for real — and stored in the spelling the
-    // workspace already knows, because a "Feature" that never joined the
-    // Features group would be a tag this editor and the sidebar disagree about.
-    act(() => press(field(host), "Enter"));
-    expect(chips(host)).toEqual(["feature"]);
-    expect(getMeta(ydoc).tags).toEqual(["feature"]);
-    // The stub is repaired from meta, so the second client sees it without
-    // anyone telling it: this is what `list_docs` reads.
-    expect(getDirectoryEntry(peer, UUID)?.tags).toEqual(["feature"]);
-    // And the document has moved groups live.
-    expect(badge(host)).toBe("Features");
-    // A tag already on the document is not offered again.
-    expect(suggestions(host)).toEqual(["reference", "verify"]);
-
-    // ---- duplicates and blanks are rejected, quietly ----
-    addTag(host, "Feature");
-    expect(getMeta(ydoc).tags).toEqual(["feature"]);
-    expect(field(host)?.value).toBe("");
-    addTag(host, "   ");
-    expect(getMeta(ydoc).tags).toEqual(["feature"]);
-    expect(field(host)?.value).toBe("");
-    // Nothing was said about either: rejection is silence, not an error.
-    expect(chips(host)).toEqual(["feature"]);
-
-    // ---- and the keyboard-only way back out ----
-    const remove = host.querySelector<HTMLButtonElement>(".ub-tag-x");
-    expect(remove?.getAttribute("aria-label")).toBe("Remove tag feature");
-    act(() => remove?.focus());
-    expect(document.activeElement).toBe(remove);
-    act(() => press(remove, "Backspace"));
-    // Focus went somewhere a keyboard reader can stand — the add field, since
-    // that chip was the only one. Left on the unmounted button it would have
-    // fallen to `<body>`, returning them to the top of the page mid-gesture.
-    expect(document.activeElement).toBe(field(host));
-    expect(chips(host)).toEqual([]);
-    expect(getMeta(ydoc).tags).toEqual([]);
-    expect(getDirectoryEntry(peer, UUID)?.tags).toEqual([]);
-    // Removing the last canonical tag takes the group label away with it.
-    expect(badge(host)).toBe("");
+    act(() => typeInto(search(), "missing"));
+    expect(options()).toEqual([]);
+    expect(document.querySelector(".ub-tag-empty")?.textContent).toBe(
+      "No matching tags.",
+    );
   });
 
-  /**
-   * A header open while an agent retags the same document must take the remote
-   * state before its next local toggle. The chips are rendered from a snapshot;
-   * writing that stale snapshot back would undo the agent's write.
-   */
-  it("takes an agent's set_tags, and adds on top of the result", async () => {
-    const directory = room(directoryRoom(WORKSPACE)).ydoc;
-    const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
-    initDoc(ydoc, { uuid: UUID, title: "Sync and offline", tags: ["feature"] });
-    appendBlock(ydoc, { type: "paragraph", text: "how sync behaves" });
-    upsertDirectoryEntry(directory, {
-      uuid: UUID,
-      title: "Sync and offline",
-      tags: ["feature"],
+  it("distinguishes a hydrated empty catalog from a catalog that has not arrived", async () => {
+    documentFixture();
+    const host = await openApp();
+    expect(picker(host)?.textContent).toContain("Add tags");
+    click(picker(host));
+    expect(document.querySelector(".ub-tag-empty")?.textContent).toBe(
+      "No tags available.",
+    );
+
+    act(() => mounted?.root.unmount());
+    mounted?.host.remove();
+    mounted = null;
+    rooms.clear();
+
+    const waiting = documentFixture();
+    waiting.catalog.status.hasReceivedServerState = false;
+    const waitingHost = await openApp();
+    expect(waitingHost.querySelector(".ub-tags")?.textContent).toContain(
+      "Loading tags…",
+    );
+    expect(picker(waitingHost)).toBeNull();
+  });
+
+  it("toggles identities on live state, preserves concurrent tags, and removes retired tags", async () => {
+    const fix = documentFixture([TAGS.sync, TAGS.legacy]);
+    addCatalogTags(fix.catalog.ydoc, ["auth", "billing", "legacy", "sync"]);
+    retireTagCatalogEntry(fix.catalog.ydoc, TAGS.legacy);
+    const documentPeer = peerOf(fix.document.ydoc);
+    const directoryPeer = peerOf(fix.directory.ydoc);
+    const host = await openApp();
+
+    expect(picker(host)?.textContent).toContain("legacy (retired)");
+    click(picker(host));
+    expect(option("legacy")?.getAttribute("aria-selected")).toBe("true");
+    expect(option("legacy")?.textContent).toContain("retired");
+
+    // One act keeps the render stale while the Y.Doc is already current.
+    const auth = option("auth");
+    act(() => {
+      setTags(documentPeer, [TAGS.billing, TAGS.legacy, TAGS.sync]);
+      auth?.click();
     });
+    expect(getMeta(fix.document.ydoc).tags).toEqual(
+      [TAGS.auth, TAGS.billing, TAGS.legacy, TAGS.sync].sort(),
+    );
+    expect(getMeta(documentPeer).tags).toEqual(getMeta(fix.document.ydoc).tags);
+    expect(getDirectoryEntry(directoryPeer, UUID)?.tags).toEqual(
+      getMeta(fix.document.ydoc).tags,
+    );
 
-    const agent = peerOf(ydoc);
-    const host = await openApp(`/${WORKSPACE}/${UUID}`);
-    expect(chips(host)).toEqual(["feature"]);
+    click(option("legacy"));
+    expect(getMeta(fix.document.ydoc).tags).not.toContain(TAGS.legacy);
+    expect(option("legacy")).toBeUndefined();
 
-    // The agent replaces its local set, from its own replica.
-    act(() => setTags(agent, ["reference", "verify"]));
-    expect(chips(host)).toEqual(["reference", "verify"]);
-    expect(getMeta(ydoc).tags).toEqual(["reference", "verify"]);
-    expect(badge(host)).toBe("Verify");
-    expect(getDirectoryEntry(directory, UUID)?.tags).toEqual([
-      "reference",
-      "verify",
-    ]);
+    // The button can be stale too; the write boundary reads live writability.
+    const before = getMeta(fix.document.ydoc).tags;
+    fix.document.status.writable = false;
+    click(option("auth"));
+    expect(getMeta(fix.document.ydoc).tags).toEqual(before);
+  });
 
-    // And the next chip is folded onto what the agent left, not onto what the
-    // header was rendered from.
-    addTag(host, "needs-love");
-    expect(getMeta(ydoc).tags).toEqual(["needs-love", "reference", "verify"]);
-    expect(getMeta(agent).tags).toEqual(["needs-love", "reference", "verify"]);
+  it("supports search and option movement from the keyboard, and ignores IME Enter", async () => {
+    const fix = documentFixture();
+    addCatalogTags(fix.catalog.ydoc, ["auth", "billing", "mcp"]);
+    const host = await openApp();
+    const trigger = picker(host);
+    click(trigger);
+    expect(document.activeElement).toBe(search());
+
+    act(() => typeInto(search(), "mcp"));
+    act(() => press(search(), "Enter", { isComposing: true }));
+    expect(getMeta(fix.document.ydoc).tags).toEqual([]);
+    act(() => press(search(), "Enter"));
+    expect(getMeta(fix.document.ydoc).tags).toEqual([TAGS.mcp]);
+
+    act(() => typeInto(search(), ""));
+    act(() => press(search(), "ArrowDown"));
+    expect(document.activeElement?.textContent).toContain("auth");
+    act(() => press(document.activeElement, "ArrowDown"));
+    expect(document.activeElement?.textContent).toContain("billing");
+    click(document.activeElement);
+    expect(getMeta(fix.document.ydoc).tags).toContain(TAGS.billing);
+
+    await act(async () => press(document.activeElement, "Escape"));
+    expect(document.querySelector(".ub-tag-picker-panel")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("shows archived assignments read-only, including retired names", async () => {
+    const fix = documentFixture([TAGS.legacy, TAGS.sync]);
+    addCatalogTags(fix.catalog.ydoc, ["legacy", "sync"]);
+    retireTagCatalogEntry(fix.catalog.ydoc, TAGS.legacy);
+    tombstoneDirectoryEntry(fix.directory.ydoc, UUID);
+    const host = await openApp();
+
+    expect(host.querySelector(".ub-tags")?.textContent).toContain("legacy (retired)");
+    expect(host.querySelector(".ub-tags")?.textContent).toContain("sync");
+    expect(picker(host)).toBeNull();
+    expect(document.querySelector(".ub-tag-option")).toBeNull();
   });
 });

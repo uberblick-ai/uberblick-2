@@ -51,7 +51,6 @@ import { OutlinePane } from "./OutlinePane.js";
 import { SyncPanel } from "./SyncPanel.js";
 import { ThreadsPane } from "./ThreadsPane.js";
 import { WorkspaceSettings } from "./WorkspaceSettings.js";
-import { workspaceTags } from "./tags.js";
 import { focusThread } from "./threads.js";
 import type { SelectThread, ThreadFocus, ThreadView } from "./threads.js";
 import { useServingRoomStatus } from "./serving-status.js";
@@ -130,7 +129,7 @@ export function RoutePane({
   hubAcked,
   meta,
   author,
-  knownTags,
+  catalogConnection = null,
   archived,
   updatedAt,
   docLinks,
@@ -182,8 +181,8 @@ export function RoutePane({
    */
   meta: DocMeta | null;
   author: string;
-  /** The workspace's tags, for the identity line's add field (#122). */
-  knownTags: readonly string[];
+  /** The workspace settings room that owns the curated tag catalog. */
+  catalogConnection?: RoomConnection | null;
   /** Whether the directory tombstones this document — see `useArchived`. */
   archived: boolean;
   /** The selected directory stub's edit-freshness hint, when it has one. */
@@ -301,7 +300,7 @@ export function RoutePane({
       endpoint={endpoint}
       hubAcked={hubAcked}
       author={author}
-      knownTags={knownTags}
+      catalogConnection={catalogConnection}
       archived={archived}
       updatedAt={updatedAt}
       docLinks={docLinks}
@@ -500,8 +499,10 @@ export function App(): ReactElement {
     identity,
   );
   const catalog = useRoom(
-    hubReady && route.kind === "settings" && route.page === "tags"
-      ? settingsRoom(route.workspace.uuid)
+    hubReady &&
+      workspace !== null &&
+      (selected !== null || (route.kind === "settings" && route.page === "tags"))
+      ? settingsRoom(workspace.uuid)
       : null,
     identity,
   );
@@ -518,13 +519,6 @@ export function App(): ReactElement {
   /** Whether the open document is pinned — what its actions menu shows. */
   const pinned =
     selected !== null && sidebarGroups.some((group) => group.docs.includes(selected));
-  /**
-   * The workspace's tags, from the directory stubs alone — the suggestions the
-   * open document's tag strip offers. Derived here because the listing is
-   * already here, and reading it a second time would be a second observer over
-   * the same map.
-   */
-  const knownTags = useMemo(() => workspaceTags(entries), [entries]);
   const meta = useDocMeta(doc);
   const archived = useArchived(directory, selected);
   const restoreFocusRoom = useRef<string | null>(null);
@@ -951,7 +945,7 @@ export function App(): ReactElement {
             hubAcked={serving === null ? undefined : hubAcked}
             meta={meta}
             author={identity.name}
-            knownTags={knownTags}
+            catalogConnection={catalog}
             archived={archived}
             updatedAt={selectedDirectoryEntry?.updatedAt}
             docLinks={docLinks}

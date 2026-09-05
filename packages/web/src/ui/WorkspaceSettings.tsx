@@ -22,6 +22,7 @@ import { rawSyncState, useCalmSyncState } from "./calm.js";
 import { useRoomStatus } from "./hooks.js";
 import type { SettingsPage, Workspace } from "./route.js";
 import { statusReading } from "./status-reading.js";
+import { useTagCatalog } from "./tags.js";
 
 /** What a SyncPanel-style fact reads as before this client knows it. */
 const UNKNOWN = "—";
@@ -85,38 +86,6 @@ function GeneralSettings({
       </div>
     </section>
   );
-}
-
-interface CatalogReading {
-  connection: RoomConnection;
-  entries: TagCatalogEntry[];
-  seeded: boolean;
-}
-
-/** Read the catalog from its Y.Doc, with local and remote updates on one path. */
-function useTagCatalog(connection: RoomConnection | null): CatalogReading | null {
-  const [reading, setReading] = useState<CatalogReading | null>(null);
-  useEffect(() => {
-    if (connection === null) return;
-    const read = (): void => {
-      setReading({
-        connection,
-        entries: listTagCatalog(connection.ydoc),
-        seeded: isTagCatalogSeeded(connection.ydoc),
-      });
-    };
-    read();
-    connection.ydoc.on("update", read);
-    return () => connection.ydoc.off("update", read);
-  }, [connection]);
-  if (connection === null) return null;
-  return reading?.connection === connection
-    ? reading
-    : {
-        connection,
-        entries: listTagCatalog(connection.ydoc),
-        seeded: isTagCatalogSeeded(connection.ydoc),
-      };
 }
 
 type Feedback = { kind: "error" | "success"; text: string };
