@@ -25,5 +25,6 @@ case "$role" in
       '[.[] | select(.isDraft | not) | select(.labels | map(.name) | index("needs-human") | not)] | length') || exit 2 ;;
   *) echo "usage: probe-work.sh issue-preparer|implementer|integrator" >&2; exit 2 ;;
 esac
-echo "probe-work: $role: $n candidate(s)"
+if [ "$n" -eq 1 ]; then noun=candidate; else noun=candidates; fi
+echo "probe-work: $role: $n $noun"
 [ "$n" -gt 0 ]
