@@ -1,8 +1,8 @@
 /**
  * The MCP server's replica engine without an MCP transport.
  *
- * `ub open` needs the same local store, replicas, hub sync and one-time sidebar
- * seed as an MCP process, but it has no MCP tool call to drive `settle`. This
+ * `ub open` needs the same local store, replicas, hub sync and tag-catalog seed
+ * as an MCP process, but it has no MCP tool call to drive `settle`. This
  * entry replaces those calls with hub-free refresh ticks. Same-process appends
  * wake it directly; commits from another process are found through SQLite's
  * `data_version` on the short periodic poll.
@@ -11,12 +11,12 @@
 import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
 import { Replicas } from "./replica.js";
-import { seedSidebarOnce } from "./sidebar-tools.js";
 import {
   acquireServingReplicaRole,
   type ServingReplicaRole,
 } from "./serving-role.js";
 import { MirrorStore } from "./store.js";
+import { seedTagCatalogOnce } from "./tag-catalog.js";
 
 const DEFAULT_REFRESH_INTERVAL_MS = 25;
 
@@ -63,7 +63,7 @@ function engineHealth(replicas: Replicas): EngineHealth {
 /**
  * Boot the full local replica engine and its refresh loop without attaching an
  * MCP transport. Resolves at the same readiness point as `createMcpServer`'s
- * `connect`: after the bounded initial settle and the one-time sidebar seed.
+ * `connect`: after the bounded initial settle and the tag-catalog seed.
  */
 export async function createMcpEngine(
   config: McpConfig,
@@ -91,7 +91,7 @@ export async function createMcpEngine(
     replicas = new Replicas(config, store, {
       publishOwnPresence: options.serving !== true,
     });
-    await seedSidebarOnce(replicas);
+    await seedTagCatalogOnce(replicas);
   } catch (error) {
     replicas?.destroy();
     servingRole?.close();

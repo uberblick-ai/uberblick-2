@@ -137,7 +137,7 @@ describe("directory timestamps", () => {
     const doc = await rig.ok("create_doc", { title: "Retagged", description: "A test document." });
 
     vi.setSystemTime(T0 + 1_000);
-    await rig.ok("set_tags", { uuid: doc.uuid, tags: ["reference"] });
+    await rig.ok("set_tags", { uuid: doc.uuid, tags: ["mcp"] });
     expect(stub(rig, doc.uuid).updatedAt).toBe(T0 + 1_000);
   });
 
@@ -243,11 +243,13 @@ describe("directory timestamps", () => {
     // repairs the cached fields without inventing a stamp at the restore time.
     // The honest answer remains the greatest stamp an author actually wrote.
     vi.setSystemTime(T0 + 3 * WINDOW);
-    setTags(rig.instance.replicas.replica(doc.uuid).doc, ["retired"]);
+    setTags(rig.instance.replicas.replica(doc.uuid).doc, [
+      "00000000-0000-4000-8000-000000000002",
+    ]);
     await rig.ok("restore_doc", { uuid: doc.uuid });
 
     expect(stub(rig, doc.uuid)).toMatchObject({
-      tags: ["retired"],
+      tags: ["00000000-0000-4000-8000-000000000002"],
       updatedAt: T0,
     });
   });

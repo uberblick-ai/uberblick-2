@@ -11,7 +11,8 @@ import {
   appendBlock,
   getBlocks,
   initDoc,
-  isSidebarSeeded,
+  isTagCatalogSeeded,
+  listTagCatalog,
   readSidebar,
   roomForDoc,
 } from "@uberblick/schema";
@@ -188,14 +189,14 @@ describe("transport-free MCP engine", () => {
     ]);
   });
 
-  it("reports ready after the one-time sidebar seed and closes without later ticks", async () => {
+  it("reports ready after the catalog seed without deriving sidebar curation", async () => {
     const databasePath = tempDatabasePath();
     const author = await startServer(testConfig({ databasePath }));
     rigs.push(author);
     await author.ok("create_doc", {
-      title: "Legacy start page",
-      description: "A document for the boot seed.",
-      tags: ["start-here"],
+      title: "Tagged page",
+      description: "A tagged document that does not imply navigation.",
+      tags: ["auth"],
     });
     await author.close();
     rigs.splice(rigs.indexOf(author), 1);
@@ -204,8 +205,10 @@ describe("transport-free MCP engine", () => {
       refreshIntervalMs: 10,
     });
     engines.push(engine);
-    expect(isSidebarSeeded(engine.replicas.sidebar().doc)).toBe(true);
-    expect(readSidebar(engine.replicas.sidebar().doc)).toHaveLength(1);
+    expect(isTagCatalogSeeded(engine.replicas.settings().doc)).toBe(true);
+    expect(listTagCatalog(engine.replicas.settings().doc).map((tag) => tag.name))
+      .toEqual(["auth", "billing", "mcp", "permissions", "sync"]);
+    expect(readSidebar(engine.replicas.sidebar().doc)).toHaveLength(0);
 
     let ticks = 0;
     engine.onRefresh(() => {

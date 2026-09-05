@@ -57,6 +57,7 @@ import {
   BlockNotFoundError,
   ConflictingLinkMarksError,
   InvalidDocumentLifecycleError,
+  InvalidTagAssignmentError,
   InlineLinkRangeError,
   OldTextMismatchError,
   StaleBlockError,
@@ -132,6 +133,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
  * does not claim.
  */
 export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "list_tags",
   "get_doc",
   "list_docs",
   "search",
@@ -255,6 +257,12 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Choose a live requirement UUID from list_docs with `kind: requirement`, then call create_doc again. " +
       "Nothing was created by this refused call.",
+  },
+  invalid_tag_assignment: {
+    recoveryClass: "manual",
+    guidance:
+      "Call list_tags for the complete active catalog, then call again with active ids or exact active names. " +
+      "An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
   },
 };
 
@@ -502,6 +510,14 @@ export function toFailure(tool: string, error: unknown): CallToolResult {
       message: error.message,
       kind: error.kind,
       status: error.status,
+    });
+  }
+  if (error instanceof InvalidTagAssignmentError) {
+    return stamped(tool, {
+      error: "invalid_tag_assignment",
+      message: error.message,
+      unknown: error.unknown,
+      retired: error.retired,
     });
   }
   if (error instanceof ToolError) {

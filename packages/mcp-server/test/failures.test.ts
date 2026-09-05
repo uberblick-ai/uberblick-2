@@ -140,6 +140,10 @@ const EXPECTED: Record<
     recoveryClass: "reread",
     detail: ["governs", "kind"],
   },
+  invalid_tag_assignment: {
+    recoveryClass: "manual",
+    detail: ["unknown", "retired"],
+  },
   // The unclassified fallback: a handler that threw something nobody mapped
   // cannot say what happened to a write, so it promises the floor and no more.
   internal_error: { recoveryClass: null, detail: [] },
@@ -332,6 +336,14 @@ describe("the failure contract", () => {
     record(
       (await rig.call("set_title", { uuid: archived.uuid, title: "Nope" }))
         .payload,
+    );
+    record(
+      (
+        await rig.call("set_tags", {
+          uuid: doc.uuid,
+          tags: ["not-in-catalog"],
+        })
+      ).payload,
     );
 
     // A handler that threw something nobody mapped, and a refused log write:

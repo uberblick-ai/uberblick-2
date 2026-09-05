@@ -101,6 +101,7 @@ export interface StoredSnapshot {
 export interface IndexedDoc {
   uuid: string;
   title: string;
+  /** Canonical catalog identities, never display names. */
   tags: string[];
   /** The document's description, or the empty string when it has none. */
   description: string;
@@ -164,8 +165,8 @@ export interface StoreSyncSnapshot {
 }
 
 /**
- * Read a search row's packed tags. `json_group_array` gives back a JSON array,
- * which survives tags containing anything at all — separators, quotes, nothing.
+ * Read a search row's packed catalog identities. `json_group_array` preserves
+ * the UUID strings without an in-band separator.
  */
 function parseTags(packed: string | null): string[] {
   if (packed === null) {
@@ -231,7 +232,8 @@ CREATE TABLE IF NOT EXISTS doc_index (
 );
 CREATE TABLE IF NOT EXISTS doc_index_seq (
   uuid                TEXT PRIMARY KEY,
-  indexed_through_seq INTEGER NOT NULL
+  indexed_through_seq INTEGER NOT NULL,
+  catalog_through_seq INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS doc_tags (
   uuid TEXT NOT NULL,
@@ -361,7 +363,7 @@ export class MirrorStore {
     markPending: Prepared<[string, number]>;
     clearPending: Prepared<[string, number]>;
     listPending: Prepared<[]>;
-    advanceIndex: Prepared<[string, number]>;
+    advanceIndex: Prepared<[string, number, number]>;
     putDoc: Prepared<[string, string, string]>;
     hasDoc: Prepared<[string]>;
     dropDoc: Prepared<[string]>;
@@ -372,7 +374,7 @@ export class MirrorStore {
     putLink: Prepared<[string, string]>;
     dropFts: Prepared<[string]>;
     putFts: Prepared<[string, string, string]>;
-    search: Prepared<[string, number]>;
+    search: Prepared<[string, string | null, string | null, number]>;
     backlinks: Prepared<[string]>;
   };
 
@@ -394,7 +396,11 @@ export class MirrorStore {
     positions: readonly RoomLogPosition[],
   ) => StoreSyncSnapshot;
 
-  private readonly indexTx: (doc: IndexedDoc, throughSeq: number) => void;
+  private readonly indexTx: (
+    doc: IndexedDoc,
+    throughSeq: number,
+    catalogThroughSeq: number,
+  ) => void;
 
   private readonly unindexTx: (uuid: string) => void;
 
@@ -438,6 +444,7 @@ export class MirrorStore {
     // After the schema, so the backfill can read `updates` and `snapshots`.
     this.migratePendingRooms();
     this.migrateDocDescription();
+    this.migrateCatalogIndexSequence();
 
     const prepare = <P extends SQLInputValue[]>(sql: string): Prepared<P> =>
       this.db.prepare(sql) as Prepared<P>;
@@ -489,10 +496,14 @@ export class MirrorStore {
       ),
       listPending: prepare("SELECT room, seq FROM pending_rooms ORDER BY room"),
       advanceIndex: prepare(
-        "INSERT INTO doc_index_seq (uuid, indexed_through_seq) VALUES (?, ?) " +
+        "INSERT INTO doc_index_seq (uuid, indexed_through_seq, catalog_through_seq) VALUES (?, ?, ?) " +
           "ON CONFLICT (uuid) DO UPDATE SET " +
-          "indexed_through_seq = excluded.indexed_through_seq " +
-          "WHERE doc_index_seq.indexed_through_seq < excluded.indexed_through_seq",
+          "indexed_through_seq = excluded.indexed_through_seq, " +
+          "catalog_through_seq = excluded.catalog_through_seq " +
+          "WHERE doc_index_seq.indexed_through_seq <= excluded.indexed_through_seq " +
+          "AND doc_index_seq.catalog_through_seq <= excluded.catalog_through_seq " +
+          "AND (doc_index_seq.indexed_through_seq < excluded.indexed_through_seq " +
+          "OR doc_index_seq.catalog_through_seq < excluded.catalog_through_seq)",
       ),
       putDoc: prepare(
         "INSERT INTO doc_index (uuid, title, description) VALUES (?, ?, ?) " +
@@ -516,16 +527,17 @@ export class MirrorStore {
       ),
       // Tags come back packed into the row rather than one query per hit: a
       // search over a growing corpus should cost one query, not 1 + limit.
-      // The packing is a JSON array, not a joined string — tags are arbitrary
-      // text, so any in-band separator would split a tag that contains it and
-      // swallow an empty one.
+      // The packing is a JSON array, not a joined string, so the representation
+      // stays unambiguous and independently parseable.
       search: prepare(
         "SELECT f.uuid AS uuid, d.title AS title, d.description AS description, " +
           "snippet(docs_fts, 2, '', '', '…', 16) AS snippet, " +
           "(SELECT json_group_array(t.tag) FROM " +
           "(SELECT tag FROM doc_tags WHERE uuid = f.uuid ORDER BY tag) t) AS tags " +
           "FROM docs_fts f JOIN doc_index d ON d.uuid = f.uuid " +
-          "WHERE docs_fts MATCH ? ORDER BY bm25(docs_fts) LIMIT ?",
+          "WHERE docs_fts MATCH ? AND (? IS NULL OR EXISTS " +
+          "(SELECT 1 FROM doc_tags WHERE uuid = f.uuid AND tag = ?)) " +
+          "ORDER BY bm25(docs_fts) LIMIT ?",
       ),
       backlinks: prepare(
         "SELECT l.source AS uuid, COALESCE(d.title, '') AS title, " +
@@ -607,12 +619,20 @@ export class MirrorStore {
       },
     );
 
-    this.indexTx = transactional(this.db, (doc: IndexedDoc, throughSeq: number) => {
+    this.indexTx = transactional(this.db, (
+      doc: IndexedDoc,
+      throughSeq: number,
+      catalogThroughSeq: number,
+    ) => {
       // The guarded row is both the directory metadata and the generation
       // marker for every dependent row below. A stale derivation loses before
       // it can delete anything; the winner and all of its rows commit together.
       const written =
-        this.statements.advanceIndex.run(doc.uuid, throughSeq).changes > 0;
+        this.statements.advanceIndex.run(
+          doc.uuid,
+          throughSeq,
+          catalogThroughSeq,
+        ).changes > 0;
       if (!written) {
         return;
       }
@@ -795,13 +815,17 @@ export class MirrorStore {
   /**
    * Upsert one document's derived rows when they came from a newer log cut.
    *
-   * `throughSeq` is the highest room-log sequence the deriving Y.Doc has
-   * applied contiguously. The metadata row, that cut and every dependent row
-   * land in one transaction, so a slower older derivation cannot
-   * replace a newer one.
+   * `throughSeq` and `catalogThroughSeq` are the highest contiguous document
+   * and settings log cuts used for the derivation. The metadata row, both cuts
+   * and every dependent row land in one transaction, so a derivation stale on
+   * either input cannot replace one newer on both.
    */
-  indexDoc(doc: IndexedDoc, throughSeq: number): void {
-    this.indexTx(doc, throughSeq);
+  indexDoc(
+    doc: IndexedDoc,
+    throughSeq: number,
+    catalogThroughSeq = 0,
+  ): void {
+    this.indexTx(doc, throughSeq, catalogThroughSeq);
   }
 
   /**
@@ -839,12 +863,17 @@ export class MirrorStore {
     })();
   }
 
-  search(query: string, limit: number): SearchHit[] {
+  search(query: string, limit: number, tag?: string): SearchHit[] {
     const match = ftsQuery(query);
     if (match === null) {
       return [];
     }
-    const rows = this.statements.search.all(match, limit) as {
+    const rows = this.statements.search.all(
+      match,
+      tag ?? null,
+      tag ?? null,
+      limit,
+    ) as {
       uuid: string;
       title: string;
       description: string;
@@ -983,6 +1012,26 @@ export class MirrorStore {
     }
     this.db.exec(
       "ALTER TABLE doc_index ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+    );
+  }
+
+  /**
+   * Add the catalog half of the derived-index generation.
+   *
+   * Tag rows now depend on two replicas: the document that stores assignments
+   * and the settings document that resolves aliases to canonical identities.
+   * Existing rows were derived without that second cut, so zero is their exact
+   * starting value and the next catalog-aware pass replaces them.
+   */
+  private migrateCatalogIndexSequence(): void {
+    const columns = this.db
+      .prepare("SELECT name FROM pragma_table_info('doc_index_seq')")
+      .all() as { name: string }[];
+    if (columns.some((column) => column.name === "catalog_through_seq")) {
+      return;
+    }
+    this.db.exec(
+      "ALTER TABLE doc_index_seq ADD COLUMN catalog_through_seq INTEGER NOT NULL DEFAULT 0",
     );
   }
 

@@ -1,7 +1,7 @@
 /**
  * The v0 MCP tool set.
  *
- * Twenty-five tools and no more: create_doc, get_doc, list_docs, search,
+ * Twenty-six tools and no more: list_tags, create_doc, get_doc, list_docs, search,
  * backlinks, edit_block, insert_block, delete_block, set_tags, set_links,
  * set_title, set_description, set_tldr, set_status, set_changelog_suggestion,
  * archive_doc,
@@ -45,6 +45,7 @@ import {
   MAX_DESCRIPTION_LENGTH,
   MAX_TLDR_LENGTH,
   REQUIREMENT_STATUSES,
+  assignDocumentTags,
   addDecision,
   addComment,
   appendBlock,
@@ -65,7 +66,10 @@ import {
   isProseBlockType,
   listAnnotations,
   listDirectory,
+  readDirectoryTags,
   readDecisions,
+  readDocumentTags,
+  resolveTagAssignments,
   resolveAnnotationRange,
   restoreDirectoryEntry,
   setChangelogSuggestion,
@@ -75,7 +79,6 @@ import {
   setKind,
   setLinks,
   setStatus,
-  setTags,
   setTitle,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
@@ -109,6 +112,11 @@ import {
 } from "./sidebar-tools.js";
 import type { SidebarPlacement } from "./sidebar-tools.js";
 import { collectSyncStatus } from "./status.js";
+import {
+  activeTagCatalog,
+  resolveTagFilter,
+  resolveTagSelectors,
+} from "./tag-catalog.js";
 
 function json(payload: unknown): CallToolResult {
   return {
@@ -726,6 +734,13 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       ? getMeta(replicas.replica(uuid).doc).title
       : stub.title;
 
+  /** The settings doc is the one catalog authority every tag path resolves. */
+  const tagCatalog = () => replicas.settings().doc;
+
+  /** A document's assignments in the public id/name/state shape. */
+  const documentTags = (replica: Replica) =>
+    readDocumentTags(replica.doc, tagCatalog());
+
   /**
    * The title an inline reference to `docId` is written with, or a refusal.
    *
@@ -819,7 +834,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
    * the sidebar are not documents and have no description to miss.
    */
   const descriptionGap = (replica: Replica): Record<string, unknown> => {
-    if (replica.isDirectory || replica.isSidebar) {
+    if (replica.isDirectory || replica.isSidebar || replica.isSettings) {
       return {};
     }
     if (getMeta(replica.doc).description !== null) {
@@ -900,6 +915,28 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
   });
 
   server.registerTool(
+    "list_tags",
+    {
+      title: "List assignable tags",
+      description:
+        "The complete active workspace tag catalog, in deterministic name order. Each entry carries the stable " +
+        "canonical `id` documents store and its current display `name`. Retired entries are absent here but remain " +
+        "visible, marked retired, on documents that still carry them. MCP cannot curate this catalog." +
+        failureContract("list_tags"),
+      inputSchema: strictInput({}),
+    },
+    guarded("list_tags", async () => {
+      await replicas.settle();
+      return json({
+        workspace: replicas.config.workspaceId,
+        complete: true,
+        tags: activeTagCatalog(tagCatalog()).map(({ id, name }) => ({ id, name })),
+        hub: replicas.sync.state(),
+      });
+    }),
+  );
+
+  server.registerTool(
     "create_doc",
     {
       title: "Create a document",
@@ -910,6 +947,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "When the call seeds at least one block, its answer also carries the non-blocking TL;DR review reminder; " +
         "a metadata-only create carries no such reminder. " +
         "The write applies to the local replica and syncs in the background.\n\n" +
+        "`tags` is a complete assignment set of active catalog ids or exact active names. Names are selectors; " +
+        "the document stores canonical ids and the answer resolves each id beside its current name. An unknown or " +
+        "retired selection refuses the whole call before a document exists; list_tags is the active vocabulary.\n\n" +
         "A `title` and a `description` are both REQUIRED here and the call fails without either, creating nothing. " +
         "A title cannot be empty or whitespace: an untitled document cannot be picked out of a listing, and " +
         "set_title is the repair for the untitled ones the web UI creates. " +
@@ -995,6 +1035,10 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           { governs, kind: requirementKind },
         );
       }
+
+      // Before allocating a document uuid: an invalid tag selection is an
+      // all-or-nothing refusal, not the first stage of a partial create.
+      const tagIds = resolveTagSelectors(tagCatalog(), tags ?? []);
 
       // Resolved before a uuid exists, because this is the one part of the call
       // that can still be all-or-nothing: an unknown group must fail having
@@ -1124,8 +1168,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
             uuid,
             title,
             description,
-            ...(tags === undefined ? {} : { tags }),
           });
+          // The same schema-owned catalog boundary set_tags uses. Validation
+          // already ran before identity allocation; this writes the canonical
+          // assignment representation inside the document's one update.
+          assignDocumentTags(replica.doc, tagCatalog(), tagIds);
           if (lifecycle !== null) {
             setKind(replica.doc, lifecycle.kind);
             setStatus(replica.doc, lifecycle.status);
@@ -1146,7 +1193,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
           uuid,
           title,
           description,
-          ...(tags === undefined ? {} : { tags }),
+          ...(tags === undefined ? {} : { tags: tagIds }),
           ...(lifecycle === null ? {} : lifecycle),
           createdAt: now,
           updatedAt: now,
@@ -1203,7 +1250,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         room: replica.room,
         title,
         description,
-        tags: tags ?? [],
+        tags: documentTags(replica),
         ...(lifecycle === null ? {} : lifecycle),
         ...(governs === undefined ? {} : { governs }),
         blocks: blocksJson(replica),
@@ -1240,6 +1287,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       const meta = getMeta(replica.doc);
       return json({
         ...meta,
+        tags: documentTags(replica),
         room: replica.room,
         decisions: readDecisions(replica.doc, replicas.directory().doc),
         blocks: blocksJson(replica),
@@ -1276,7 +1324,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "as approximate, and expect either to be missing on a stub written before they existed.\n\n" +
         "Lifecycle documents include `kind` and their compatible `status`; ordinary documents omit both. " +
         "The optional `kind` and `status` filters are answered from those directory stubs without opening a " +
-        "document room, and combine with `tag`. " +
+        "document room, and combine with `tag`. A tag filter accepts a catalog id or exact current name. Each " +
+        "returned assignment carries its canonical id, current name (or null while unresolved), and active, retired " +
+        "or unresolved state. " +
         LIFECYCLE_RECORDS_STATE +
         failureContract("list_docs"),
       inputSchema: strictInput({
@@ -1289,14 +1339,22 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     guarded("list_docs", async ({ tag, kind, status, include_deleted }) => {
       await replicas.settle();
       const hasPredicate = tag !== undefined || kind !== undefined || status !== undefined;
+      const catalog = tagCatalog();
+      const tagId = tag === undefined ? null : resolveTagFilter(catalog, tag);
       const entries = listDirectory(replicas.directory().doc, {
         includeDeleted: include_deleted ?? false,
       }).filter(
-        (entry) =>
-          (hasPredicate || entry.kind !== "decision") &&
-          (tag === undefined || entry.tags.includes(tag)) &&
-          (kind === undefined || entry.kind === kind) &&
-          (status === undefined || entry.status === status),
+        (entry) => {
+          const assignments = readDirectoryTags(entry, catalog);
+          return (
+            (hasPredicate || entry.kind !== "decision") &&
+            (tag === undefined ||
+              (tagId !== null &&
+                assignments.some((assignment) => assignment.id === tagId))) &&
+            (kind === undefined || entry.kind === kind) &&
+            (status === undefined || entry.status === status)
+          );
+        },
       );
       // Derived, never stored: the sidebar doc is the one place a pin lives.
       const pinned = pinnedUuids(replicas);
@@ -1304,6 +1362,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         workspace: replicas.config.workspaceId,
         docs: entries.map((entry) => ({
           ...entry,
+          tags: readDirectoryTags(entry, catalog),
           // Always present, null when absent: an agent scanning this listing
           // should read one shape, not test for a missing key.
           description: entry.description ?? null,
@@ -1328,7 +1387,9 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
         "`withdrawing`. A trailing `*` loosens one term to a prefix match, which is how to reach an inflection: " +
         "`withdraw*` finds both `withdrawal` and `withdrawing`. No hits means no indexed document matched the whole query under those rules; it does not by itself mean the index is empty.\n\n" +
         "Every hit carries the document's `description` — null where nobody has written one — so relevance can be " +
-        "judged from the result list rather than by opening each document in turn." +
+        "judged from the result list rather than by opening each document in turn. Its tag assignments carry " +
+        "canonical ids, current names and retirement state. Pass `tag` as a catalog id or exact current name to " +
+        "restrict hits to that assignment." +
         failureContract("search"),
       inputSchema: strictInput({
         query: z
@@ -1338,13 +1399,24 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
             "Words to match; every term must occur in one document, `list_docs` matches both `list_docs` and `list docs` but not `a list of docs`, and a trailing * makes its term a prefix match.",
           ),
         limit: z.number().int().min(1).max(100).optional(),
+        tag: z.string().min(1).optional().describe("Only documents carrying this catalog tag id or exact name."),
       }),
     },
-    guarded("search", async ({ query, limit }) => {
+    guarded("search", async ({ query, limit, tag }) => {
       await replicas.settle();
+      const catalog = tagCatalog();
+      const tagId = tag === undefined ? undefined : resolveTagFilter(catalog, tag);
+      const hits =
+        tag !== undefined && tagId === null
+          ? []
+          : replicas.store.search(query, limit ?? 20, tagId ?? undefined);
       return json({
         query,
-        hits: replicas.store.search(query, limit ?? 20),
+        ...(tag === undefined ? {} : { tag }),
+        hits: hits.map((hit) => ({
+          ...hit,
+          tags: resolveTagAssignments(catalog, hit.tags),
+        })),
       });
     }),
   );
@@ -1493,7 +1565,11 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     {
       title: "Set a document's tags",
       description:
-        "Replace the document's tag set. The directory stub is updated to match, so list_docs and tag filters follow.\n\n" +
+        "Replace the document's complete tag assignment set with catalog ids or exact active names. Names resolve " +
+        "to canonical ids before storage. An existing retired or unresolved assignment may be preserved by passing " +
+        "the id returned by get_doc; it may be removed, but cannot be newly added. Any unknown or newly assigned " +
+        "retired value refuses the whole mutation before the document, directory stub or index changes and names " +
+        "every invalid value; call list_tags for the active vocabulary.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
@@ -1503,8 +1579,13 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
     guarded("set_tags", async ({ uuid, tags }) => {
       await replicas.settle();
       const replica = requireWritableDoc(uuid);
-      setTags(replica.doc, tags);
-      return json({ uuid, tags, ...durability(replica) });
+      const tagIds = resolveTagSelectors(
+        tagCatalog(),
+        tags,
+        documentTags(replica),
+      );
+      assignDocumentTags(replica.doc, tagCatalog(), tagIds);
+      return json({ uuid, tags: documentTags(replica), ...durability(replica) });
     }),
   );
 
@@ -2007,6 +2088,7 @@ export function registerTools(server: McpServer, replicas: Replicas): void {
       return json({
         uuid,
         markdown: exportMarkdown(replica.doc, {
+          tagCatalog: tagCatalog(),
           ...(frontmatter === undefined ? {} : { frontmatter }),
           ...(annotations === undefined ? {} : { annotations }),
         }),
