@@ -103,17 +103,34 @@ describe("an address names a document, a workspace mode, or neither", () => {
     expect(canonicalPath(route("/"))).toBe(`/${CONFIGURED}`);
   });
 
-  it("reserves settings as the whole workspace-settings address", () => {
-    expect(route(`/${WS}/settings`)).toEqual({ kind: "settings", workspace });
-    expect(route(`/${WS}/settings/`)).toEqual({ kind: "settings", workspace });
+  it("reserves General and Tags as the complete workspace-settings address set", () => {
+    expect(route(`/${WS}/settings`)).toEqual({
+      kind: "settings",
+      workspace,
+      page: "general",
+    });
+    expect(route(`/${WS}/settings/`)).toEqual({
+      kind: "settings",
+      workspace,
+      page: "general",
+    });
+    expect(route(`/${WS}/settings/tags`)).toEqual({
+      kind: "settings",
+      workspace,
+      page: "tags",
+    });
     expect(settingsPath(WS)).toBe(`/${WS}/settings`);
+    expect(settingsPath(WS, "tags")).toBe(`/${WS}/settings/tags`);
     expect(canonicalPath(route(`/${WS}/settings/`))).toBe(`/${WS}/settings`);
+    expect(canonicalPath(route(`/${WS}/settings/TAGS/`))).toBe(
+      `/${WS}/settings/tags`,
+    );
 
-    // Settings has no page segment: General is what the mode shows, not a
-    // third piece of address that would silently broaden the route grammar.
-    const nested = route(`/${WS}/settings/general`);
-    expect(nested.kind).toBe("invalid");
-    expect(nested.kind === "invalid" && nested.workspace).toEqual(workspace);
+    for (const invalid of ["general", "unknown", "tags/more"]) {
+      const nested = route(`/${WS}/settings/${invalid}`);
+      expect(nested.kind).toBe("invalid");
+      expect(nested.kind === "invalid" && nested.workspace).toEqual(workspace);
+    }
   });
 
   it("says so when nothing names a workspace, rather than guessing one", () => {
@@ -383,6 +400,7 @@ function openingConnection(room: string): {
   const status: RoomStatus = {
     connected: false,
     synced: false,
+    hasReceivedServerState: false,
     writable: true,
     storeRefused: false,
     unsyncedChanges: 0,
@@ -490,6 +508,7 @@ function stubConnection(room: string): RoomConnection {
   const status: RoomStatus = {
     connected: false,
     synced: false,
+    hasReceivedServerState: true,
     writable: true,
     storeRefused: false,
     unsyncedChanges: 0,

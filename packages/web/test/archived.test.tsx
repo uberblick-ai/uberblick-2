@@ -57,6 +57,7 @@ const OTHER = "1f77c0d9-6b42-4a18-9e35-2c8d0f6a1b73";
 const OFFLINE: RoomStatus = {
   connected: false,
   synced: false,
+  hasReceivedServerState: true,
   writable: true,
   storeRefused: false,
   unsyncedChanges: 0,

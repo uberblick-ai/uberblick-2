@@ -3,7 +3,14 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import * as Y from "yjs";
-import { upsertDirectoryEntry } from "@uberblick/schema";
+import {
+  EXAMPLE_TAGS,
+  createTagCatalogEntry,
+  listTagCatalog,
+  retireTagCatalogEntry,
+  settingsRoom,
+  upsertDirectoryEntry,
+} from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { HubEndpoint } from "../src/config.js";
 import { WorkspaceSettings } from "../src/ui/WorkspaceSettings.js";
@@ -22,6 +29,7 @@ const ENDPOINT: HubEndpoint = {
 const SYNCED: RoomStatus = {
   connected: true,
   synced: true,
+  hasReceivedServerState: true,
   writable: true,
   storeRefused: false,
   unsyncedChanges: 0,
@@ -31,14 +39,17 @@ const SYNCED: RoomStatus = {
   tokenMissing: false,
 };
 
-function statusRoom(initial: RoomStatus, workspace = WORKSPACE.uuid): {
+function statusRoom(
+  initial: RoomStatus,
+  room = `${WORKSPACE.uuid}/_directory`,
+): {
   connection: RoomConnection;
   update: (patch: Partial<RoomStatus>) => void;
 } {
   let status = initial;
   const listeners = new Set<(next: RoomStatus) => void>();
   const connection = {
-    room: `${workspace}/_directory`,
+    room,
     ydoc: new Y.Doc(),
     provider: { awareness: null },
     status,
@@ -104,6 +115,47 @@ async function mount(
   return host;
 }
 
+async function mountTags(connection: RoomConnection | null): Promise<HTMLElement> {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+    true;
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  mounted = { root, host };
+  await act(async () => {
+    root.render(
+      <WorkspaceSettings
+        page="tags"
+        workspace={WORKSPACE}
+        endpoint={ENDPOINT}
+        connection={null}
+        catalogConnection={connection}
+        agentSessions={2}
+      />,
+    );
+  });
+  return host;
+}
+
+/** Change a controlled input through the native setter, like a keystroke. */
+function typeInto(input: HTMLInputElement, value: string): void {
+  const native = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  native?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/** A second client whose Y.Doc converges in both directions. */
+function peerOf(local: Y.Doc): Y.Doc {
+  const peer = new Y.Doc();
+  Y.applyUpdate(peer, Y.encodeStateAsUpdate(local));
+  local.on("update", (update: Uint8Array) => Y.applyUpdate(peer, update));
+  peer.on("update", (update: Uint8Array) => Y.applyUpdate(local, update));
+  return peer;
+}
+
 function facts(host: HTMLElement): Map<string, string> {
   return new Map(
     [...host.querySelectorAll<HTMLElement>(".ub-settings-facts .ub-panel-fact")].map(
@@ -158,7 +210,7 @@ it("counts only the routed directory after its server has answered", async () =>
 
   const foreign = statusRoom(
     SYNCED,
-    "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+    "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/_directory",
   );
   seedDocuments(foreign.connection, 1);
   await act(async () => {
@@ -172,6 +224,124 @@ it("counts only the routed directory after its server has answered", async () =>
     );
   });
   expect(facts(host).get("Documents")).toBe("—");
+});
+
+it("waits for server state, seeds once, and keeps a retired-only reading offline", async () => {
+  const room = statusRoom(
+    {
+      ...SYNCED,
+      connected: false,
+      synced: false,
+      hasReceivedServerState: false,
+      hasAnswered: true,
+      writable: false,
+      storeRefused: true,
+    },
+    settingsRoom(WORKSPACE.uuid),
+  );
+  const host = await mountTags(room.connection);
+
+  expect(host.textContent).toContain("Waiting for the tag catalog");
+  expect(host.querySelector("input")).toBeNull();
+  expect(host.querySelector(".ub-settings-tag-list")).toBeNull();
+
+  room.update({
+    connected: true,
+    synced: true,
+    hasReceivedServerState: true,
+    writable: true,
+    storeRefused: false,
+  });
+  await act(async () => {});
+  expect(
+    [...host.querySelectorAll("#ub-active-tags + .ub-settings-tag-list > li")].map(
+      (row) => row.firstElementChild?.textContent,
+    ),
+  ).toEqual(EXAMPLE_TAGS.map((entry) => entry.name));
+
+  act(() => {
+    for (const entry of listTagCatalog(room.connection.ydoc)) {
+      retireTagCatalogEntry(room.connection.ydoc, entry.id);
+    }
+  });
+  expect(host.textContent).toContain("No active tags.");
+  expect(
+    host.querySelectorAll("#ub-retired-tags + .ub-settings-tag-list > li"),
+  ).toHaveLength(EXAMPLE_TAGS.length);
+
+  room.update({ connected: false, synced: false, writable: false });
+  expect(host.textContent).not.toContain("Waiting for the tag catalog");
+  expect(host.textContent).toContain("Tag changes are unavailable");
+  expect(
+    [...host.querySelectorAll<HTMLButtonElement>(".ub-settings-tags-card button")].every(
+      (button) => button.disabled,
+    ),
+  ).toBe(true);
+
+  room.update({ connected: true, synced: true, writable: true });
+  expect(
+    [...host.querySelectorAll<HTMLButtonElement>(".ub-settings-tag-list button")].every(
+      (button) => !button.disabled,
+    ),
+  ).toBe(true);
+  expect(listTagCatalog(room.connection.ydoc)).toHaveLength(EXAMPLE_TAGS.length);
+  expect(listTagCatalog(room.connection.ydoc).every((entry) => entry.state === "retired"))
+    .toBe(true);
+});
+
+it("validates unique names and converges create, retire, and restore with a peer", async () => {
+  const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  const peer = peerOf(room.connection.ydoc);
+  const host = await mountTags(room.connection);
+  const input = host.querySelector<HTMLInputElement>("#ub-new-tag");
+  const submit = host.querySelector<HTMLButtonElement>(
+    ".ub-settings-tag-create button[type=submit]",
+  );
+  if (input === null || submit === null) throw new Error("the create form is missing");
+
+  act(() => {
+    typeInto(input, "Needs spaces");
+    submit.click();
+  });
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+    "lowercase letters or numbers",
+  );
+
+  act(() => {
+    typeInto(input, "auth");
+    submit.click();
+  });
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+    "already an active tag",
+  );
+
+  act(() => {
+    typeInto(input, "product");
+    submit.click();
+  });
+  const created = listTagCatalog(peer).find((entry) => entry.name === "product");
+  expect(created).toMatchObject({ name: "product", state: "active" });
+
+  const productRow = [...host.querySelectorAll(".ub-settings-tag-list li")].find(
+    (row) => row.firstElementChild?.textContent === "product",
+  );
+  act(() => productRow?.querySelector<HTMLButtonElement>("button")?.click());
+  expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)?.state).toBe(
+    "retired",
+  );
+
+  const retiredProduct = [...host.querySelectorAll(".ub-settings-tag-list li")].find(
+    (row) => row.firstElementChild?.textContent === "product",
+  );
+  act(() => retiredProduct?.querySelector<HTMLButtonElement>("button")?.click());
+  expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)?.state).toBe(
+    "active",
+  );
+
+  act(() => {
+    createTagCatalogEntry(peer, "zeta");
+  });
+  expect(host.textContent).toContain("zeta");
 });
 
 it("takes offline and refusal readings live from the shared status derivation", async () => {

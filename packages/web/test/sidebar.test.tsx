@@ -32,6 +32,7 @@ import {
   readSidebar,
   restoreDirectoryEntry,
   roomForDoc,
+  settingsRoom,
   sidebarRoom,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
@@ -47,6 +48,7 @@ const THREE = "7c2e5a11-3f80-4d66-b1a9-8e4d2c6f0a55";
 const LIVE: RoomStatus = {
   connected: true,
   synced: true,
+  hasReceivedServerState: true,
   writable: true,
   storeRefused: false,
   unsyncedChanges: 0,
@@ -638,6 +640,17 @@ describe("workspace settings is a route-driven sidebar mode", () => {
       host.querySelector(".ub-sidebar-toggle")?.getAttribute("aria-label"),
     ).toBe("Hide sidebar");
 
+    const tags = [
+      ...settings.querySelectorAll<HTMLButtonElement>(".ub-settings-nav button"),
+    ].find((button) => button.textContent?.includes("Tags"));
+    act(() => tags?.click());
+    expect(window.location.pathname).toBe(`/${WORKSPACE}/settings/tags`);
+    expect(settings.querySelector('[aria-current="page"]')?.textContent).toContain(
+      "Tags",
+    );
+    expect(host.querySelector("#ub-settings-title")?.textContent).toBe("Tags");
+    expect(rooms.has(settingsRoom(WORKSPACE))).toBe(true);
+
     act(() => settings.querySelector<HTMLButtonElement>(".ub-settings-back")?.click());
     expect(window.location.pathname).toBe(`/${WORKSPACE}`);
     expectDead(settings);
@@ -655,6 +668,15 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     expect(host.querySelector(".ub-document-sidebar")?.hasAttribute("inert")).toBe(
       true,
     );
+  });
+
+  it("opens the pasted Tags settings address directly", async () => {
+    const host = await openApp(`/${WORKSPACE}/settings/tags`);
+    expect(host.querySelector("#ub-settings-title")?.textContent).toBe("Tags");
+    expect(
+      host.querySelector(".ub-settings-sidebar [aria-current=page]")?.textContent,
+    ).toContain("Tags");
+    expect(rooms.has(settingsRoom(WORKSPACE))).toBe(true);
   });
 
   it("offers no settings destination when the address names no workspace", async () => {

@@ -280,6 +280,7 @@ function roomFixture(room: string): {
   const status: RoomStatus = {
     connected: true,
     synced: true,
+    hasReceivedServerState: true,
     writable: true,
     storeRefused: false,
     unsyncedChanges: 0,

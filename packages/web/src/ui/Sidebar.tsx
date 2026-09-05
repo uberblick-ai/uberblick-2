@@ -52,7 +52,7 @@ import { rawSyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
 import { UserMenu } from "./UserMenu.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
-import type { Workspace } from "./route.js";
+import type { SettingsPage, Workspace } from "./route.js";
 
 /** The group a pin lands in when the sidebar has none yet. */
 const FIRST_GROUP_NAME = "Pinned";
@@ -144,6 +144,7 @@ export function Sidebar({
   onBackToWorkspace,
   allOpen,
   settingsOpen,
+  settingsPage,
 }: {
   /** The pane-boundary control that removes this sidebar. */
   collapseButtonRef?: Ref<HTMLButtonElement>;
@@ -177,13 +178,15 @@ export function Sidebar({
   /** Go to the "All docs" listing (#118) — the live row in Navigation. */
   onOpenAll: () => void;
   /** Enter workspace settings. Like every selection, this is navigation. */
-  onOpenSettings: () => void;
+  onOpenSettings: (page: SettingsPage) => void;
   /** Leave settings for the workspace's fixed list address. */
   onBackToWorkspace: () => void;
   /** Whether that listing is what the address currently names. */
   allOpen: boolean;
   /** Whether the address names workspace settings. */
   settingsOpen: boolean;
+  /** The selected settings destination, when settings is open. */
+  settingsPage: SettingsPage | null;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const sidebarStatus = useRoomStatus(sidebar);
@@ -330,7 +333,7 @@ export function Sidebar({
             current={workspace}
             docs={entries.length}
             onSwitch={onSwitchWorkspace}
-            onOpenSettings={onOpenSettings}
+            onOpenSettings={() => onOpenSettings("general")}
             active={!settingsOpen}
           />
           <div className="ub-list-head">
@@ -421,7 +424,7 @@ export function Sidebar({
                 type="button"
                 className="ub-settings-entry"
                 data-swap-focus
-                onClick={onOpenSettings}
+                onClick={() => onOpenSettings("general")}
               >
                 <GearIcon />
                 Workspace settings
@@ -437,6 +440,8 @@ export function Sidebar({
           identity={identity}
           agentSessions={agentSessions}
           active={settingsOpen}
+          page={settingsPage}
+          onSelect={onOpenSettings}
           onBack={onBackToWorkspace}
         />
       </div>
@@ -450,12 +455,16 @@ function SettingsNavigation({
   identity,
   agentSessions,
   active,
+  page,
+  onSelect,
   onBack,
 }: {
   workspace: Workspace | null;
   identity: AwarenessUser;
   agentSessions: number;
   active: boolean;
+  page: SettingsPage | null;
+  onSelect: (page: SettingsPage) => void;
   onBack: () => void;
 }): ReactElement {
   return (
@@ -482,9 +491,23 @@ function SettingsNavigation({
         <p className="ub-nav-label">Workspace settings</p>
         <ul>
           <li>
-            <button type="button" aria-current="page">
+            <button
+              type="button"
+              aria-current={page === "general" ? "page" : undefined}
+              onClick={() => onSelect("general")}
+            >
               <GearIcon />
               General
+            </button>
+          </li>
+          <li>
+            <button
+              type="button"
+              aria-current={page === "tags" ? "page" : undefined}
+              onClick={() => onSelect("tags")}
+            >
+              <TagIcon />
+              Tags
             </button>
           </li>
         </ul>
@@ -622,6 +645,21 @@ function GearIcon(): ReactElement {
         strokeLinejoin="round"
       />
       <circle cx="8" cy="8" r="1.7" fill="none" stroke="currentColor" />
+    </svg>
+  );
+}
+
+/** The catalog mark, drawn locally like the rest of the sidebar glyphs. */
+function TagIcon(): ReactElement {
+  return (
+    <svg className="ub-nav-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M6 2.5 4.8 13.5 M11.2 2.5 10 13.5 M2.8 6h10.7 M2.2 10h10.7"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

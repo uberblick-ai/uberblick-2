@@ -1,13 +1,26 @@
-/** The facts-only General page for workspace settings. */
+/** General facts and the workspace tag-catalog curation page. */
 
-import type { ReactElement, ReactNode } from "react";
-import { directoryRoom, listDirectory } from "@uberblick/schema";
+import { useEffect, useState } from "react";
+import type { FormEvent, ReactElement, ReactNode } from "react";
+import {
+  createTagCatalogEntry,
+  directoryRoom,
+  isTagCatalogSeeded,
+  isTagName,
+  listDirectory,
+  listTagCatalog,
+  restoreTagCatalogEntry,
+  retireTagCatalogEntry,
+  seedTagCatalog,
+  settingsRoom,
+} from "@uberblick/schema";
+import type { TagCatalogEntry } from "@uberblick/schema";
 import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
 import { useRoomStatus } from "./hooks.js";
-import type { Workspace } from "./route.js";
+import type { SettingsPage, Workspace } from "./route.js";
 import { statusReading } from "./status-reading.js";
 
 /** What a SyncPanel-style fact reads as before this client knows it. */
@@ -27,7 +40,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }): Reac
  * path. The directory room is the connection reading because it is the room
  * every workspace page has, including this one.
  */
-export function WorkspaceSettings({
+function GeneralSettings({
   workspace,
   endpoint,
   connection,
@@ -71,5 +84,237 @@ export function WorkspaceSettings({
         </div>
       </div>
     </section>
+  );
+}
+
+interface CatalogReading {
+  connection: RoomConnection;
+  entries: TagCatalogEntry[];
+  seeded: boolean;
+}
+
+/** Read the catalog from its Y.Doc, with local and remote updates on one path. */
+function useTagCatalog(connection: RoomConnection | null): CatalogReading | null {
+  const [reading, setReading] = useState<CatalogReading | null>(null);
+  useEffect(() => {
+    if (connection === null) return;
+    const read = (): void => {
+      setReading({
+        connection,
+        entries: listTagCatalog(connection.ydoc),
+        seeded: isTagCatalogSeeded(connection.ydoc),
+      });
+    };
+    read();
+    connection.ydoc.on("update", read);
+    return () => connection.ydoc.off("update", read);
+  }, [connection]);
+  if (connection === null) return null;
+  return reading?.connection === connection
+    ? reading
+    : {
+        connection,
+        entries: listTagCatalog(connection.ydoc),
+        seeded: isTagCatalogSeeded(connection.ydoc),
+      };
+}
+
+type Feedback = { kind: "error" | "success"; text: string };
+
+function TagSettings({
+  workspace,
+  connection,
+}: {
+  workspace: Workspace;
+  connection: RoomConnection | null;
+}): ReactElement {
+  const status = useRoomStatus(connection);
+  const catalog = useTagCatalog(connection);
+  const [draft, setDraft] = useState("");
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const arrived =
+    connection !== null &&
+    connection.room === settingsRoom(workspace.uuid) &&
+    status.hasReceivedServerState;
+  const seeded = arrived && catalog?.seeded === true;
+  const writable = seeded && status.writable;
+
+  // The examples are one schema-owned, merge-safe transition. Wait for the
+  // server's answer first: seeding an empty Y.Doc before that answer could
+  // recreate an example another client already retired.
+  useEffect(() => {
+    if (
+      connection === null ||
+      !arrived ||
+      !status.writable ||
+      isTagCatalogSeeded(connection.ydoc)
+    ) {
+      return;
+    }
+    seedTagCatalog(connection.ydoc);
+  }, [arrived, connection, status.writable]);
+
+  if (!seeded) {
+    return (
+      <section className="ub-pane ub-settings-page" aria-labelledby="ub-settings-title">
+        <div className="ub-settings-column">
+          <h1 id="ub-settings-title">Tags</h1>
+          <div className="ub-settings-card">
+            <p className="ub-settings-waiting" role="status">
+              Waiting for the tag catalog…
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const entries = catalog?.entries ?? [];
+  const active = entries.filter((entry) => entry.state === "active");
+  const retired = entries.filter((entry) => entry.state === "retired");
+
+  const create = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (connection === null || !connection.status.writable) {
+      setFeedback({
+        kind: "error",
+        text: "Reconnect before changing the tag catalog.",
+      });
+      return;
+    }
+    if (!isTagName(draft)) {
+      setFeedback({
+        kind: "error",
+        text: "Use 1–30 lowercase letters or numbers, separated by single hyphens.",
+      });
+      return;
+    }
+    const existing = listTagCatalog(connection.ydoc).find(
+      (entry) => entry.name === draft,
+    );
+    if (existing !== undefined) {
+      setFeedback({
+        kind: "error",
+        text:
+          existing.state === "retired"
+            ? `“${draft}” is retired. Restore it from the retired list.`
+            : `“${draft}” is already an active tag.`,
+      });
+      return;
+    }
+    createTagCatalogEntry(connection.ydoc, draft);
+    setFeedback({ kind: "success", text: `Created “${draft}”.` });
+    setDraft("");
+  };
+
+  const changeState = (entry: TagCatalogEntry): void => {
+    if (connection === null || !connection.status.writable) return;
+    if (entry.state === "active") retireTagCatalogEntry(connection.ydoc, entry.id);
+    else restoreTagCatalogEntry(connection.ydoc, entry.id);
+    setFeedback({
+      kind: "success",
+      text: `${entry.state === "active" ? "Retired" : "Restored"} “${entry.name}”.`,
+    });
+  };
+
+  const list = (state: "active" | "retired", items: TagCatalogEntry[]) => (
+    <section className="ub-settings-tag-section" aria-labelledby={`ub-${state}-tags`}>
+      <h2 id={`ub-${state}-tags`}>{state === "active" ? "Active" : "Retired"}</h2>
+      {items.length === 0 ? (
+        <p className="ub-muted">No {state} tags.</p>
+      ) : (
+        <ul className="ub-settings-tag-list">
+          {items.map((entry) => (
+            <li key={entry.id}>
+              <span>{entry.name}</span>
+              <button
+                type="button"
+                disabled={!writable}
+                onClick={() => changeState(entry)}
+              >
+                {entry.state === "active" ? "Retire" : "Restore"}
+                <span className="ub-sr-only"> {entry.name}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+
+  return (
+    <section className="ub-pane ub-settings-page" aria-labelledby="ub-settings-title">
+      <div className="ub-settings-column">
+        <h1 id="ub-settings-title">Tags</h1>
+        <div className="ub-settings-card ub-settings-tags-card">
+          <form className="ub-settings-tag-create" onSubmit={create}>
+            <label htmlFor="ub-new-tag">Create a tag</label>
+            <div>
+              <input
+                id="ub-new-tag"
+                value={draft}
+                disabled={!writable}
+                aria-describedby="ub-tag-name-help"
+                onChange={(event) => {
+                  setDraft(event.currentTarget.value);
+                  setFeedback(null);
+                }}
+              />
+              <button type="submit" disabled={!writable}>
+                Create
+              </button>
+            </div>
+            <p id="ub-tag-name-help" className="ub-muted">
+              Lowercase letters and numbers, separated by hyphens; 30 characters
+              maximum.
+            </p>
+          </form>
+          {!writable && (
+            <p className="ub-settings-read-only" role="status">
+              Tag changes are unavailable while this page is disconnected.
+            </p>
+          )}
+          {feedback !== null && (
+            <p
+              className={`ub-settings-feedback ub-settings-feedback-${feedback.kind}`}
+              role={feedback.kind === "error" ? "alert" : "status"}
+            >
+              {feedback.text}
+            </p>
+          )}
+          <div className="ub-settings-tag-groups">
+            {list("active", active)}
+            {list("retired", retired)}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function WorkspaceSettings({
+  page = "general",
+  workspace,
+  endpoint,
+  connection,
+  catalogConnection = null,
+  agentSessions,
+}: {
+  page?: SettingsPage;
+  workspace: Workspace;
+  endpoint: HubEndpoint | null;
+  connection: RoomConnection | null;
+  catalogConnection?: RoomConnection | null;
+  agentSessions: number;
+}): ReactElement {
+  return page === "tags" ? (
+    <TagSettings workspace={workspace} connection={catalogConnection} />
+  ) : (
+    <GeneralSettings
+      workspace={workspace}
+      endpoint={endpoint}
+      connection={connection}
+      agentSessions={agentSessions}
+    />
   );
 }

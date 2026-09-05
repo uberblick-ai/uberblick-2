@@ -24,6 +24,7 @@ import {
   initDoc,
   restoreDirectoryEntry,
   roomForDoc,
+  settingsRoom,
   sidebarRoom,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
@@ -498,6 +499,12 @@ export function App(): ReactElement {
     hubReady && workspace !== null ? sidebarRoom(workspace.uuid) : null,
     identity,
   );
+  const catalog = useRoom(
+    hubReady && route.kind === "settings" && route.page === "tags"
+      ? settingsRoom(route.workspace.uuid)
+      : null,
+    identity,
+  );
   const directoryStatus = useRoomStatus(directory);
   const docStatus = useRoomStatus(doc);
   const sidebarStatus = useRoomStatus(sidebar);
@@ -713,8 +720,8 @@ export function App(): ReactElement {
   }, [navigate, segment]);
 
   /** Enter settings, or leave it for the workspace's fixed list address. */
-  const onOpenSettings = useCallback(() => {
-    if (segment !== null) navigate(settingsPath(segment));
+  const onOpenSettings = useCallback((page: "general" | "tags") => {
+    if (segment !== null) navigate(settingsPath(segment, page));
   }, [navigate, segment]);
   const onBackToWorkspace = useCallback(() => {
     if (segment !== null) navigate(`/${segment}`);
@@ -897,6 +904,7 @@ export function App(): ReactElement {
             onBackToWorkspace={onBackToWorkspace}
             allOpen={listing}
             settingsOpen={settings}
+            settingsPage={route.kind === "settings" ? route.page : null}
           />
         )}
         {/* Workspace modes own the content pane directly. The corpus journey
@@ -909,9 +917,11 @@ export function App(): ReactElement {
             resolves to. */}
         {settings ? (
           <WorkspaceSettings
+            page={route.page}
             workspace={route.workspace}
             endpoint={endpoint}
             connection={directory}
+            catalogConnection={catalog}
             agentSessions={agentSessions}
           />
         ) : listing ? (
