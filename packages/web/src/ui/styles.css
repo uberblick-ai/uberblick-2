@@ -2217,6 +2217,17 @@ body {
   /* Optional text readings share this line box; the mono face's normal leading
      would otherwise resize the row when one appears (#793). */
   line-height: 1.2;
+  /* The collaborator cluster's 28px circle is the tallest thing this row ever
+     holds, and the row states that height so the *peerless* row reserves it —
+     the same rule `.ub-doc-meta` follows for its copy control (#592). Without
+     the floor the first `.ub-peer-control` to render stretches this ~15.4px
+     line box and drops the prose ~12.7px the moment a collaborator joins
+     (#832). Further peers only widen a non-wrapping row of identical circles,
+     so the one circle is the whole contract.
+
+     The `*` reset above makes this a border-box floor, so it names the circle
+     plus the two lines below it — this row's own padding and its rule. */
+  min-height: calc(28px + 0.7rem + 1px);
   color: var(--muted-foreground);
   padding: 0.35rem 0;
   border-bottom: 1px solid var(--border);

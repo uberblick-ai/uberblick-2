@@ -272,6 +272,39 @@ test("a peer's cursor renders in the other context with its name and colour", as
   await expect(label).toHaveCSS("background-color", chosen);
 });
 
+test("a peer joining leaves the status row's height and the prose where they were", async ({
+  browser,
+}) => {
+  // The cluster is the row's tallest child, and a peer arriving is the most
+  // ordinary event in a collaborative document: if the row grows to fit the
+  // first circle, every block below it drops by that much (#832). #793's
+  // proof covers the row's optional *text*; only a real second client puts a
+  // 28px control in it.
+  const title = docTitle("row-height");
+  const [a, b] = await Promise.all([openApp(browser), openApp(browser)]);
+  await createDoc(a, title);
+  await placeCaret(a);
+  await type(a, "still");
+
+  const status = a.locator(".ub-status");
+  const firstBlock = editor(a).locator(":scope > *").first();
+  const peers = a.locator(".ub-peers > .ub-peer-control");
+  // Both sync facts settled, so the reading beside the cluster is not still
+  // resolving while the two geometries are read.
+  await expect(a.locator(".ub-status-word--saved")).toHaveText("saved here");
+  await expect(a.locator(".ub-status-word--hub")).toHaveText("synced with hub");
+  const geometry = async () => ({
+    row: (await status.boundingBox())?.height,
+    prose: (await firstBlock.boundingBox())?.y,
+  });
+  await expect(peers).toHaveCount(0);
+  const alone = await geometry();
+
+  await openDoc(b, title);
+  await expect(peers).toHaveCount(1);
+  expect(await geometry()).toEqual(alone);
+});
+
 test("the open document's last-updated reading follows its stub through status and archive changes", async ({
   browser,
 }) => {

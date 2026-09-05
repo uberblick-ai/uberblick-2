@@ -926,6 +926,8 @@ test("the document collaborator cluster stays compact and jumps once without mov
   await page.keyboard.type("start");
   const titleBefore = await page.locator(".ub-title").boundingBox();
   const editorBefore = await page.locator(".ub-editor").boundingBox();
+  const status = page.locator(".ub-status");
+  const rowBefore = (await status.boundingBox())?.height;
 
   const uuid = new URL(page.url()).pathname.split("/").filter(Boolean).at(-1);
   if (uuid === undefined) throw new Error("e2e: the document route has no uuid");
@@ -1029,6 +1031,11 @@ test("the document collaborator cluster stays compact and jumps once without mov
     expect(titleAfter?.width).toBe(titleBefore?.width);
     expect(editorAfter?.x).toBe(editorBefore?.x);
     expect(editorAfter?.width).toBe(editorBefore?.width);
+    // The row reserves its circle's height while it is empty, so the cap and
+    // the overflow control beside it leave it exactly as tall (#832). The
+    // prose position that follows from it is proven at the transition that
+    // would move it, in `collab.spec.ts`.
+    expect((await status.boundingBox())?.height).toBe(rowBefore);
 
     const circles = await visible.evaluateAll((controls) =>
       controls.map((control) => {
