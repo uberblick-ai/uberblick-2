@@ -2082,11 +2082,13 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
       const note = document.querySelector(".ub-copied");
       if (control === null || note === null) throw new Error("e2e: no control");
       const box = control.getBoundingClientRect();
-      const shown = note.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(note);
+      const shown = range.getBoundingClientRect();
       return shown.left >= box.left - 0.5 && shown.right <= box.right + 0.5;
     });
   };
-  expect(await confirmationIsContained(page)).toBe(true);
+  expect.soft(await confirmationIsContained(page)).toBe(true);
 
   // And on the waiting screen, where the control inherits a larger font and the
   // same words are wider — the reason its width floor is in `em`.
@@ -2096,5 +2098,5 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
     `/${harness().workspace}/${randomUUID()}`,
   );
   await expect(waiting.locator(".ub-notice")).toContainText("Waiting for sync");
-  expect(await confirmationIsContained(waiting)).toBe(true);
+  expect.soft(await confirmationIsContained(waiting)).toBe(true);
 });
