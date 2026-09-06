@@ -18,6 +18,7 @@ The first lines of the issue body, before any heading:
 Depends-on: #2, #3
 Touches: mcp-server, schema
 Parent: #486
+Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
 ```
 
 - **`Depends-on`** — mandatory, even when empty. `none` or a comma-separated
@@ -48,6 +49,36 @@ Parent: #486
   next candidate; never guess which parent was meant. (A delegated subagent's
   `Parent: <role> <run id>` claim comment is a different record in a different
   place, and is not this header.)
+- **`Implements`** — optional, and the only header line that may repeat: one
+  line per requirement document, the repeated lines contiguous, after `Parent`
+  — or directly after `Touches` where there is no `Parent` line. Grammar:
+  `^Implements: <uuid>( \[<block-id>(, <block-id>)*\])?$`, the requirement
+  document's uuid and optionally the ids of the outcome blocks this issue
+  covers. Both are read from the live workspace; the repository holds no uuid
+  table. It is what makes retrieval work — "which issues did this requirement
+  become" is an `Implements:` search rather than a full-text guess — and it is
+  the only line that arms the gate below. A misplaced, malformed or
+  non-contiguous line fails the lint below rather than being interpreted; never
+  guess which requirement was meant.
+
+  A requirement cited only under **Pointers** stays background reading, with no
+  lifecycle and no approval effect: citing a uuid there declares nothing and
+  gates nothing.
+
+  **`Implements:` narrows who may hold `ready`.** An issue carrying it holds
+  `ready` only while its body also carries the product owner's own dated
+  decision covering the outcomes it names, on a line of its own reading
+  `Owner decision, <YYYY-MM-DD>: <what was decided>`. Markdown emphasis around
+  that line is permitted — `**Owner decision, 2026-08-26: …**`, the form #272
+  uses, is the shape. The lowercase parenthetical `(owner decision, <date>)`
+  that runs through `CLAUDE.md` and the role contracts is a citation of a
+  decision recorded elsewhere, not this line. The decision line may name the
+  umbrella thread it came from, but it stands in the implementing issue's own
+  body: approval lives in GitHub, never in a document field any client can
+  write, so a requirement's `status` authorizes nothing. The lint can check
+  only that the line is present and well formed — never who wrote it, nor
+  whether the decision it quotes really covers the outcomes named. That
+  judgment stays with whoever grants `ready`.
 
 ### Scheduling semantics
 
@@ -344,6 +375,10 @@ An issue labeled `ready` must pass all of:
    Out of scope, Pointers.
 5. At least one `- [ ]` checkbox under Acceptance criteria.
 6. Out of scope and Pointers are non-empty (explicit `None.` is acceptable).
+7. `Implements`, where present, occupies one contiguous run of lines after
+   `Parent` — or directly after `Touches` where there is no `Parent` line —
+   each matching the grammar above.
+8. A body carrying `Implements` also carries the owner decision line above.
 
 Sizing and decision-completeness are judgment calls, not lintable — the
 issue-preparer applies them when granting `ready`, and any role that finds a
