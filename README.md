@@ -69,10 +69,11 @@ Homebrew, exactly as below. A checkout **on `main`** is fast-forwarded to
 `origin/main` and its dependencies and web app are refreshed to match, so it is
 runnable at the new head with nothing left to run by hand; a checkout on any
 other branch is not updated. Nothing is ever stashed, discarded, rebased or
-switched: git decides whether the fast-forward is safe — local commits,
-divergence, or uncommitted changes an incoming commit would overwrite are its
-refusal to make — and when it refuses you get git's own reason and an unchanged
-checkout.
+switched: git decides whether the fast-forward is safe — divergence, or
+uncommitted changes an incoming commit would overwrite, are its refusal to
+make — and when it refuses you get git's own reason and an unchanged checkout.
+Unpushed commits on `main` are not a refusal: that checkout already contains
+`origin/main`, so it goes straight to the refresh and keeps them.
 
 The Homebrew commands are these two, and running them directly is the same
 thing — the first refreshes the tap, the second replaces the installed copy

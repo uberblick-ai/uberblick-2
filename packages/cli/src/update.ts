@@ -19,11 +19,14 @@
  *
  * **Git decides whether the fast-forward is safe, and this command does not
  * second-guess it** (owner decision, 2026-09-05, on #846). There is no
- * cleanliness pre-check: local commits, divergence and uncommitted changes an
- * incoming commit would overwrite all surface as git's own refusal, reported
- * as-is, with the checkout untouched. Uncommitted changes git does not have to
- * touch survive, and untracked files are never even looked at. Nothing here
- * stashes, discards, rebases or switches.
+ * cleanliness pre-check: divergence, and uncommitted changes an incoming commit
+ * would overwrite, surface as git's own refusal, reported as-is, with the
+ * checkout untouched. A `main` carrying unpushed commits already contains
+ * `origin/main`, so it fast-forwards trivially and goes on to the refresh —
+ * refusing it would need exactly the classifier the decision rejected.
+ * Uncommitted changes git does not have to touch survive, untracked files are
+ * never even looked at, and nothing here stashes, discards, rebases or
+ * switches.
  *
  * **The refresh always runs, and records nothing.** A checkout already at
  * `origin/main` still installs and rebuilds before this reports success, which
@@ -53,6 +56,9 @@ const FORMULA = "uberblick-ai/tap/uberblick";
 
 /** Long enough to outlast a real Vite build, the same bound `ub open` waits. */
 const BUILD_WAIT_MS = 10 * 60_000;
+
+/** The two a terminal or a supervisor sends; see {@link processHost}'s `run`. */
+const SIGNALS: readonly NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
 
 export const UPDATE_HELP = `usage: ub update
 
@@ -132,9 +138,30 @@ export function processHost(): UpdateHost {
         // Both streams to stderr: stdout carries this command's own result, and
         // a reader of it must not have to sift a build log out first.
         const child = spawn(command, args, { cwd, stdio: ["ignore", 2, 2] });
-        child.on("error", (error) => done(`${label} could not be run (${message(error)})`));
+
+        // **A signal is passed on, never obeyed by leaving.** Node's default
+        // action for SIGINT is to exit at once, and Ctrl-C during the web build
+        // would then strand the lock this run holds — every later `ub update`
+        // waiting ten minutes on a dead holder. A listener suppresses that
+        // exit; the child is told to stop and this waits for it, so the
+        // `finally` around the lock still runs. A child that survives the
+        // signal keeps the lock, which is the point: releasing it while
+        // something can still write `dist` is the hazard the lock exists for.
+        const forward = SIGNALS.map((signal) => {
+          const stop = (): void => {
+            child.kill(signal);
+          };
+          process.on(signal, stop);
+          return { signal, stop };
+        });
+        const finish = (result: string | null): void => {
+          for (const { signal, stop } of forward) process.off(signal, stop);
+          done(result);
+        };
+
+        child.on("error", (error) => finish(`${label} could not be run (${message(error)})`));
         child.on("close", (status, signal) =>
-          done(
+          finish(
             status === 0
               ? null
               : signal !== null
@@ -242,9 +269,19 @@ async function updateCheckout(root: string, io: Io, host: UpdateHost): Promise<n
 
   // No cleanliness pre-check: git is the authority on whether this is safe, and
   // its refusal is the message. `--ff-only` never rewrites and never merges.
+  //
+  // `--no-autostash` because `merge.autostash = true` is a configuration a
+  // person may already have, and under it `--ff-only` stops refusing: it
+  // stashes the tracked changes the incoming commits overwrite, advances HEAD,
+  // and applies the stash back — leaving conflict markers in those files and
+  // still exiting 0, so this command would go on to build and report success.
+  // The owner's decision is that git decides *whether the fast-forward
+  // happens*, not that it may rewrite somebody's uncommitted work to make one
+  // happen; turning the setting off here is what keeps the refusal a refusal
+  // without adding the cleanliness classifier the decision rejected.
   for (const args of [
     ["-C", root, "fetch", "origin", "main"],
-    ["-C", root, "merge", "--ff-only", "origin/main"],
+    ["-C", root, "merge", "--ff-only", "--no-autostash", "origin/main"],
   ]) {
     const failure = await host.run("git", args);
     if (failure !== null) {
@@ -261,7 +298,13 @@ async function updateCheckout(root: string, io: Io, host: UpdateHost): Promise<n
     );
     return 1;
   }
-  io.out(`The checkout at ${root} is at origin/main, with its dependencies and web app refreshed.\n`);
+  // "includes", not "is at": a `main` carrying unpushed commits already
+  // contains `origin/main`, fast-forwards trivially and refreshes, and saying
+  // it now equals `origin/main` would be a claim this command did not make true.
+  io.out(
+    `The checkout at ${root} now includes origin/main, with its dependencies ` +
+      "and web app refreshed.\n",
+  );
   return 0;
 }
 

@@ -14,13 +14,19 @@
  * a failed step is named and left to be retried.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildLockPath } from "../src/build-lock.js";
 import type { Io } from "../src/io.js";
-import { type CaptureResult, type UpdateHost, updateCommand } from "../src/update.js";
+import {
+  type CaptureResult,
+  type UpdateHost,
+  processHost,
+  updateCommand,
+} from "../src/update.js";
 
 const roots: string[] = [];
 
@@ -117,7 +123,7 @@ describe("ub update on a checkout", () => {
     expect(labels()).toEqual([
       `git -C ${root} branch --show-current`,
       `git -C ${root} fetch origin main`,
-      `git -C ${root} merge --ff-only origin/main`,
+      `git -C ${root} merge --ff-only --no-autostash origin/main`,
       "mise run install",
       "mise run build-web",
     ]);
@@ -148,7 +154,7 @@ describe("ub update on a checkout", () => {
   });
 
   it("lets git refuse the fast-forward, and stops there", async () => {
-    for (const step of ["fetch origin main", "merge --ff-only origin/main"]) {
+    for (const step of ["fetch origin main", "merge --ff-only --no-autostash origin/main"]) {
       const { root, cliDir } = checkout();
       const refused = `git -C ${root} ${step}`;
       const { host, labels } = fake(cliDir, {
@@ -187,5 +193,111 @@ describe("ub update on a checkout", () => {
     expect(io.stdout).toBe("");
     expect(io.stderr).toMatch(/^ub update: expected no arguments/);
     expect(labels()).toEqual([]);
+  });
+});
+
+/**
+ * The same command line, against real git.
+ *
+ * The cases above pin which commands run; these pin what git does with them.
+ * `merge.autostash` is why they exist: with that setting `--ff-only` stops
+ * refusing and starts rewriting tracked files instead, exiting 0 even when
+ * applying the stash back conflicts (R1-F1). Only real git can show that, and
+ * only the git half is real here — the refresh stays stubbed, because running
+ * `mise run install` in a fixture is not what is being tested.
+ */
+describe("ub update against real git", () => {
+  function git(root: string, ...args: string[]): string {
+    const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    if (result.status !== 0) {
+      throw new Error(`git ${args.join(" ")} failed: ${result.stderr || result.error?.message}`);
+    }
+    return result.stdout;
+  }
+
+  /** A checkout on `main` one commit behind its own `origin/main`. */
+  function behindOrigin(): { root: string; cliDir: string; file: string } {
+    const { root, cliDir } = checkout();
+    const remote = mkdtempSync(join(tmpdir(), "uberblick-update-origin-"));
+    roots.push(remote);
+    spawnSync("git", ["init", "--bare", "-b", "main", remote]);
+
+    const file = join(root, "file.txt");
+    git(root, "init", "-b", "main");
+    git(root, "config", "user.email", "fixture@example.invalid");
+    git(root, "config", "user.name", "Fixture");
+    git(root, "config", "commit.gpgsign", "false");
+    writeFileSync(file, "base\n", "utf8");
+    git(root, "add", "-A");
+    git(root, "commit", "-m", "base");
+    git(root, "remote", "add", "origin", remote);
+    git(root, "push", "origin", "main");
+    writeFileSync(file, "incoming\n", "utf8");
+    git(root, "commit", "-am", "incoming");
+    git(root, "push", "origin", "main");
+    git(root, "reset", "--hard", "HEAD~1");
+    return { root, cliDir, file };
+  }
+
+  /** Real git, stubbed refresh. */
+  function gitOnly(cliDir: string): { host: UpdateHost; refreshed: string[] } {
+    const real = processHost();
+    const refreshed: string[] = [];
+    const host: UpdateHost = {
+      cliDir,
+      installPayload: false,
+      capture: (command, args) => real.capture(command, args),
+      run: (command, args, cwd) => {
+        if (command === "git") return real.run(command, args, cwd);
+        refreshed.push([command, ...args].join(" "));
+        return Promise.resolve(null);
+      },
+    };
+    return { host, refreshed };
+  }
+
+  it("fast-forwards, and the refresh follows", async () => {
+    const { cliDir, file } = behindOrigin();
+    const { host, refreshed } = gitOnly(cliDir);
+    const io = recorder();
+
+    expect(await updateCommand([], io, host)).toBe(0);
+
+    expect(readFileSync(file, "utf8")).toBe("incoming\n");
+    expect(refreshed).toEqual(["mise run install", "mise run build-web"]);
+  });
+
+  it("still refuses under merge.autostash, rather than rewriting local work", async () => {
+    const { root, cliDir, file } = behindOrigin();
+    git(root, "config", "merge.autostash", "true");
+    writeFileSync(file, "local uncommitted work\n", "utf8");
+    const head = git(root, "rev-parse", "HEAD");
+    const { host, refreshed } = gitOnly(cliDir);
+    const io = recorder();
+
+    expect(await updateCommand([], io, host)).toBe(1);
+
+    expect(readFileSync(file, "utf8")).toBe("local uncommitted work\n");
+    expect(git(root, "rev-parse", "HEAD")).toBe(head);
+    expect(git(root, "stash", "list")).toBe("");
+    expect(refreshed).toEqual([]);
+    expect(io.stderr).toContain("the checkout is unchanged");
+  });
+});
+
+describe("the commands ub update spawns", () => {
+  it("passes a signal on to the child it is waiting for", async () => {
+    const host = processHost();
+    // Outlives the signal window, so a run that forwards nothing gives a
+    // different answer instead of hanging until the suite's timeout.
+    const running = host.run(process.execPath, ["-e", "setTimeout(() => {}, 3000)"]);
+    await new Promise((done) => setTimeout(done, 300));
+    process.emit("SIGINT", "SIGINT");
+
+    // `process.emit` runs the listeners without the OS default action, so what
+    // this observes is the forwarding. Registering that listener is also what
+    // suppresses Node's default exit — the exit that used to strand the build
+    // lock on Ctrl-C (R1-F2) — and the two are the same registration.
+    expect(await running).toMatch(/was killed by SIGINT/);
   });
 });
