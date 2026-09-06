@@ -548,10 +548,11 @@ function remoteConfig(bridge: Bridge): McpConfig {
  * Read the remote, asking for a credential once if the first attempt says one
  * would help. Read-only: nothing on either side is written by this.
  *
- * Always with documents. An absent archived room is allowed through this
- * read-only preflight because this machine may hold the content that repairs
- * it during reconciliation. The acting and verification readings remain
- * strict, so a room neither side can produce never becomes a successful join.
+ * The preflight reads only the directory. Document content is deliberately
+ * left to reconciliation: this machine may hold a room the hub lacks, and
+ * attaching its local mirror is what can repair that partial join. The acting
+ * and verification readings remain strict, so a room neither side can produce
+ * never becomes a successful join.
  *
  * The first read is `silent`: it happens before the prompt, and both readings
  * that reach the prompt log themselves otherwise — a machine that ran `ub init`
@@ -563,7 +564,6 @@ function remoteConfig(bridge: Bridge): McpConfig {
  */
 async function openRemote(bridge: Bridge, secretFileGiven: boolean): Promise<Corpus> {
   const first = await inspectRemote(remoteConfig(bridge), {
-    documents: "preflight",
     silent: true,
   });
   if (!credentialCouldFix(first.hub) || secretFileGiven) {
@@ -574,7 +574,7 @@ async function openRemote(bridge: Bridge, secretFileGiven: boolean): Promise<Cor
     return first;
   }
   bridge.credential = { secret: typed, persist: true };
-  return await inspectRemote(remoteConfig(bridge), { documents: "preflight" });
+  return await inspectRemote(remoteConfig(bridge));
 }
 
 function listDocs(docs: readonly { uuid: string; title: string }[], limit = 10): string {
@@ -908,9 +908,9 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
 
   // Read as a fresh client, which writes nothing on either side — so every
   // refusal below leaves both this machine and the remote exactly as they were.
-  // An archived room may be absent here: this machine's replica can still hold
-  // and upload it. The strict reading after reconciliation decides whether
-  // either side could actually produce the content.
+  // Document rooms are not opened here: this machine's replica may hold and
+  // upload content the remote lacks. The strict reading after reconciliation
+  // decides whether either side could actually produce every room.
   const remote = await openRemote(bridge, flags.secretFile !== undefined);
   const remoteProblem = corpusProblem(bridge.target, remote);
   if (remoteProblem !== null) {

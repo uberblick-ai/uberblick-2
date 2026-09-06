@@ -349,10 +349,7 @@ function directoryOnly(entry: {
  * @param options.documents `true` opens every document the directory names and
  * fingerprints it. `"sample"` opens every archived document plus one live
  * document, which keeps large-corpus join verification bounded without ever
- * claiming an archived room moved from its tombstone alone. `"preflight"`
- * opens every room but keeps an absent archived room as directory-only: the
- * acting replica may hold the content needed to repair it, and the later
- * strict reading still refuses if neither side can produce it. Off where the
+ * claiming an archived room moved from its tombstone alone. Off where the
  * caller needs only the directory entries.
  *
  * @param options.silent Keep this probe's hub reading off stderr, for a caller
@@ -363,7 +360,7 @@ function directoryOnly(entry: {
  */
 export async function inspectRemote(
   config: McpConfig,
-  options: { documents?: boolean | "sample" | "preflight"; silent?: boolean } = {},
+  options: { documents?: boolean | "sample"; silent?: boolean } = {},
 ): Promise<Corpus> {
   const sync = new HubSync(config, () => {}, { silent: options.silent === true });
   const opened = new Map<string, { doc: Y.Doc; awareness: Awareness }>();
@@ -408,11 +405,7 @@ export async function inspectRemote(
     const live = all.filter((entry) => entry.deleted !== true);
     const dead = all.filter((entry) => entry.deleted === true);
 
-    if (
-      options.documents !== true &&
-      options.documents !== "sample" &&
-      options.documents !== "preflight"
-    ) {
+    if (options.documents !== true && options.documents !== "sample") {
       return {
         hub: sync.state(),
         entries: all.map(directoryOnly),
@@ -453,11 +446,7 @@ export async function inspectRemote(
       // An empty `meta.uuid` is the one reliable "this document has not
       // arrived": the room is named after the uuid, so its name proves nothing.
       if (held === undefined || getMeta(held.doc).uuid === "") {
-        if (options.documents === "preflight" && entry.deleted === true) {
-          entries.push(directoryOnly(entry));
-        } else {
-          missing.push({ uuid: entry.uuid, title: entry.title });
-        }
+        missing.push({ uuid: entry.uuid, title: entry.title });
         continue;
       }
       entries.push({
