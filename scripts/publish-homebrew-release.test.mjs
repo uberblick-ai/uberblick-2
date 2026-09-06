@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,10 @@ const TAG = "v1.2.3";
 const VERSION = "1.2.3";
 const ASSET_URL =
   "https://github.com/uberblick-ai/uberblick-2/releases/download/v1.2.3/uberblick-1.2.3.tar.gz";
+const WORKFLOW_ROOT = join(ROOT, ".github", "workflows");
+const workflowSkip = existsSync(WORKFLOW_ROOT)
+  ? undefined
+  : ".github/workflows is absent from this checkout, so workflow isolation cannot be checked here";
 
 function input(overrides = {}) {
   return {
@@ -239,6 +243,65 @@ test("a partial publication can add an absent formula from the verified asset", 
   ]);
 });
 
+test("a partial publication advances an older formula from the verified asset", async () => {
+  const fake = services({
+    getRelease: async () => {
+      fake.calls.push("get release");
+      return release();
+    },
+    getTapFormula: async () => {
+      fake.calls.push("get formula");
+      return {
+        sha: "old-formula-sha",
+        content: formulaFor("v1.2.2", "1.2.2", "b".repeat(64)),
+      };
+    },
+  });
+
+  const result = await publishHomebrewRelease(input(), fake);
+
+  assert.equal(result.outcome, "recovered-formula");
+  assert.deepEqual(fake.calls, [
+    "get source",
+    "get release",
+    "get formula",
+    "download",
+    "published version",
+    "public asset",
+    "put formula old-formula-sha",
+  ]);
+});
+
+test("a malformed tap version is refused with the publisher's own diagnostic", async () => {
+  const malformed = formulaFor("v1.2.3", "1.2.3", DIGEST).replace(
+    'version "1.2.3"',
+    'version "1.2"',
+  );
+  const fake = services({
+    getRelease: async () => {
+      fake.calls.push("get release");
+      return release();
+    },
+    getTapFormula: async () => {
+      fake.calls.push("get formula");
+      return { sha: "formula-sha", content: malformed };
+    },
+  });
+
+  await assert.rejects(
+    () => publishHomebrewRelease(input(), fake),
+    /publish-homebrew-release: the tap formula has invalid version "1\.2"/,
+  );
+  assert.deepEqual(fake.calls, [
+    "get source",
+    "get release",
+    "get formula",
+    "download",
+    "published version",
+    "public asset",
+  ]);
+});
+
 test("a dry run builds the payload but reaches no repository API", async () => {
   const output = [];
   const fake = services({
@@ -307,13 +370,12 @@ test("an anonymously unreachable uploaded asset never reaches the public tap", a
   ]);
 });
 
-test("only the tag-triggered publishing job can declare the tap environment", () => {
-  const workflowRoot = join(ROOT, ".github", "workflows");
-  const workflows = readdirSync(workflowRoot)
+test("only the tag-triggered publishing job can declare the tap environment", { skip: workflowSkip }, () => {
+  const workflows = readdirSync(WORKFLOW_ROOT)
     .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
-    .map((name) => [name, readFileSync(join(workflowRoot, name), "utf8")]);
+    .map((name) => [name, readFileSync(join(WORKFLOW_ROOT, name), "utf8")]);
   const declarations = workflows.flatMap(([name, body]) =>
-    [...body.matchAll(/^\s*environment:\s*homebrew-tap\s*$/gm)].map(() => name),
+    [...body.matchAll(/homebrew-tap/g)].map(() => name),
   );
   assert.deepEqual(declarations, ["release-homebrew.yml"]);
 

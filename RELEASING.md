@@ -28,3 +28,7 @@ mise run publish-homebrew-release -- v0.1.0 --dry-run
 A published tag is immutable. Re-running a matching tag verifies and reuses
 its published payload; it changes nothing when the tap formula matches and
 refuses when the tag, payload, or formula disagree.
+
+If GitHub leaves the expected asset incompletely uploaded, delete that
+incomplete asset before re-running the workflow. The publisher reports this
+recovery and never deletes a release asset automatically.

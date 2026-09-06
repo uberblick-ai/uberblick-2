@@ -69,8 +69,13 @@ function formulaVersion(formula) {
 }
 
 function compareVersions(left, right) {
-	const a = left.split(".");
-	const b = right.split(".");
+	const leftMatch = RELEASE_TAG.exec(`v${left}`);
+	const rightMatch = RELEASE_TAG.exec(`v${right}`);
+	if (leftMatch === null || rightMatch === null) {
+		fail(`the tap formula has invalid version ${JSON.stringify(left)}`);
+	}
+	const a = leftMatch.slice(1);
+	const b = rightMatch.slice(1);
 	for (let index = 0; index < 3; index += 1) {
 		if (a[index].length !== b[index].length) return a[index].length - b[index].length;
 		const compared = a[index].localeCompare(b[index]);
@@ -131,7 +136,9 @@ export async function publishHomebrewRelease(input, services) {
 	let published = false;
 	if (existingAsset !== null) {
 		if (existingAsset.state !== "uploaded") {
-			fail(`release ${input.tag}'s ${name} asset is not completely uploaded`);
+			fail(
+				`release ${input.tag}'s ${name} asset is not completely uploaded; delete the incomplete asset before re-running`,
+			);
 		}
 		if (existingAsset.browser_download_url !== assetUrl(input.tag, version)) {
 			fail(`release ${input.tag}'s asset URL disagrees with the public formula URL`);
@@ -170,8 +177,13 @@ export async function publishHomebrewRelease(input, services) {
 	}
 
 	if (published) {
-		if (existingFormula === null) {
-			await services.putTapFormula(formula, null, version);
+		const currentVersion =
+			existingFormula === null ? null : formulaVersion(existingFormula.content);
+		if (
+			existingFormula === null ||
+			(currentVersion !== null && compareVersions(currentVersion, version) < 0)
+		) {
+			await services.putTapFormula(formula, existingFormula?.sha ?? null, version);
 			return { outcome: "recovered-formula", formula };
 		}
 		if (existingFormula.content !== formula) {
