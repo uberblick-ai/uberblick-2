@@ -8,7 +8,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { Io } from "./io.js";
 
@@ -22,7 +22,7 @@ interface RoleData {
   contract: string;
   defaultRuntime: "claude" | "codex";
   runtimes: {
-    claude: { adapter: string; permissionMode: "auto" };
+    claude: { adapter: string; permissionMode: "auto"; allowedTools: string[] };
     codex: { adapter: string; sandbox: "workspace-write" };
   };
 }
@@ -93,22 +93,29 @@ export async function agentsPrototypeCommand(argv: string[], io: Io): Promise<nu
   const prompt =
     `Read ${entry.contract} in the project control tree completely, then follow it exactly. ` +
     `The candidate to inspect is ${candidate}. This is a bounded, read-only spike probe.`;
-  const environment = { ...process.env, PROBE_CANDIDATE: candidate };
+  const environment = {
+    ...process.env,
+    PROBE_CANDIDATE: candidate,
+    XDG_CONFIG_HOME: join(project, ".runtime/config"),
+    XDG_DATA_HOME: join(project, ".runtime/data"),
+  };
   const launched = runtime === "claude"
     ? spawnSync(
         "claude",
         [
           "-p",
+          prompt,
           "--agent",
           role,
           "--permission-mode",
           entry.runtimes.claude.permissionMode,
+          "--allowedTools",
+          ...entry.runtimes.claude.allowedTools,
           "--setting-sources",
           "project",
           "--no-session-persistence",
           "--add-dir",
           candidate,
-          prompt,
         ],
         { cwd: project, env: environment, stdio: "inherit" },
       )
