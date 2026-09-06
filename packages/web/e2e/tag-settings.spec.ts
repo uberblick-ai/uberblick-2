@@ -60,10 +60,15 @@ test("Tags settings is address-selected and its catalog changes converge", async
   await first.getByRole("button", { name: "Create", exact: true }).click();
   await expect(second.getByRole("button", { name: "Retire product" })).toBeVisible();
 
-  await first.getByRole("button", { name: "Retire product" }).click();
+  // Curated from the keyboard, so focus has to survive the entry moving lists:
+  // the control that took its place, and its own new control once the list it
+  // left is empty.
+  await first.getByRole("button", { name: "Retire product" }).press("Enter");
   await expect(second.getByRole("button", { name: "Restore product" })).toBeVisible();
-  await first.getByRole("button", { name: "Restore product" }).click();
+  await expect(first.getByRole("button", { name: "Retire sync" })).toBeFocused();
+  await first.getByRole("button", { name: "Restore product" }).press("Enter");
   await expect(second.getByRole("button", { name: "Retire product" })).toBeVisible();
+  await expect(first.getByRole("button", { name: "Retire product" })).toBeFocused();
 
   await first
     .getByRole("navigation", { name: "Workspace settings" })

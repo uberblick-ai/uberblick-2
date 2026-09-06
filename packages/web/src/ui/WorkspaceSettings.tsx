@@ -1,6 +1,6 @@
 /** General facts and the workspace tag-catalog curation page. */
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent, ReactElement, ReactNode } from "react";
 import {
   createTagCatalogEntry,
@@ -101,6 +101,23 @@ function TagSettings({
   const catalog = useTagCatalog(connection);
   const [draft, setDraft] = useState("");
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const groups = useRef<HTMLDivElement | null>(null);
+  /**
+   * The lifecycle action this client just activated, and where its entry stood.
+   *
+   * Retiring or restoring moves the entry to the other list, so the button that
+   * had focus unmounts, and focus on a detached element is focus on `<body>` —
+   * the keyboard reader is silently returned to the top of the page, mid-
+   * curation. The target cannot be picked here, because it does not exist until
+   * the write has re-rendered both lists, so the *position* is remembered and
+   * resolved in the layout effect below. Only a local action sets it: a peer's
+   * catalog change re-renders through the same path and must not move focus.
+   */
+  const [refocus, setRefocus] = useState<{
+    from: "active" | "retired";
+    at: number;
+    moved: string;
+  } | null>(null);
   const arrived =
     connection !== null &&
     connection.room === settingsRoom(workspace.uuid) &&
@@ -122,6 +139,24 @@ function TagSettings({
     }
     seedTagCatalog(connection.ydoc);
   }, [arrived, connection, status.writable]);
+
+  useLayoutEffect(() => {
+    if (refocus === null) return;
+    setRefocus(null);
+    const card = groups.current;
+    if (card === null) return;
+    const left = [
+      ...card.querySelectorAll<HTMLButtonElement>(
+        `[aria-labelledby="ub-${refocus.from}-tags"] .ub-settings-tag-list button`,
+      ),
+    ];
+    // The control that took the moved entry's place, the last one when it was
+    // last, and the entry's own new control when the list it left is now empty.
+    const target =
+      left[Math.min(refocus.at, left.length - 1)] ??
+      card.querySelector<HTMLButtonElement>(`[data-tag-entry="${refocus.moved}"]`);
+    target?.focus();
+  }, [refocus]);
 
   if (!seeded) {
     return (
@@ -176,10 +211,11 @@ function TagSettings({
     setDraft("");
   };
 
-  const changeState = (entry: TagCatalogEntry): void => {
+  const changeState = (entry: TagCatalogEntry, at: number): void => {
     if (connection === null || !connection.status.writable) return;
     if (entry.state === "active") retireTagCatalogEntry(connection.ydoc, entry.id);
     else restoreTagCatalogEntry(connection.ydoc, entry.id);
+    setRefocus({ from: entry.state, at, moved: entry.id });
     setFeedback({
       kind: "success",
       text: `${entry.state === "active" ? "Retired" : "Restored"} “${entry.name}”.`,
@@ -193,13 +229,14 @@ function TagSettings({
         <p className="ub-muted">No {state} tags.</p>
       ) : (
         <ul className="ub-settings-tag-list">
-          {items.map((entry) => (
+          {items.map((entry, at) => (
             <li key={entry.id}>
               <span>{entry.name}</span>
               <button
                 type="button"
+                data-tag-entry={entry.id}
                 disabled={!writable}
-                onClick={() => changeState(entry)}
+                onClick={() => changeState(entry, at)}
               >
                 {entry.state === "active" ? "Retire" : "Restore"}
                 <span className="ub-sr-only"> {entry.name}</span>
@@ -251,7 +288,7 @@ function TagSettings({
               {feedback.text}
             </p>
           )}
-          <div className="ub-settings-tag-groups">
+          <div className="ub-settings-tag-groups" ref={groups}>
             {list("active", active)}
             {list("retired", retired)}
           </div>
