@@ -131,7 +131,6 @@ export async function agentsPrototypeCommand(argv: string[], io: Io): Promise<nu
           entry.runtimes.codex.sandbox,
           "-c",
           "sandbox_workspace_write.network_access=true",
-          "--ignore-user-config",
           "--ephemeral",
           prompt,
         ],
