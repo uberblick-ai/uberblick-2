@@ -4,13 +4,21 @@
 
 Keep the project/control split, but do not ship the tested command yet.
 
-An installed `ub` payload can select a project's workflow, start a real Claude
-or Codex parent there, and let that parent start the other runtime while both
-inspect an older candidate tree. A four-session run selected projects A and B
-concurrently from a directory outside both. Every session reported its
-project's control marker and MCP workspace pin; project B's stale candidate
-marker never appeared, neither candidate changed, and the installed payload's
-tree digest remained unchanged.
+An installed `ub` payload selected projects A and B concurrently from a
+directory outside both and started one real Claude or Codex parent in each. The
+historical run recorded parent lines consistent with each parent starting the
+other runtime against an older candidate tree. The original fixture, however,
+searched the combined logs for success-shaped substrings and did not retain the
+child runners' results separately. Those lines therefore prove neither that the
+children completed nor that any session actually called `sync_status`. The
+fixture's independent checks still found both candidates clean and the installed
+payload's tree digest unchanged.
+
+The raw session logs and result JSON from that run are no longer retained.
+Except for the fixture's structure and its offline validation self-test,
+runtime-output statements below are therefore historical observations rather
+than independently corroborated evidence; re-establishing one requires the full
+fixture run.
 
 The experiment also found two blockers rather than proving the full contract:
 
@@ -29,8 +37,8 @@ The experiment also found two blockers rather than proving the full contract:
 The smallest next implementation therefore needs explicit runtime trust and
 configuration contracts plus a Codex project-MCP bootstrap that survives a
 source-hidden installed environment. The control/candidate transport shape is
-promising; checkout-free, user-config-neutral unattended launch is not yet
-proved.
+promising, but the historical run does not prove its completed child paths;
+checkout-free, user-config-neutral unattended launch is not yet proved.
 
 ## Reproduction artifacts
 
@@ -39,6 +47,14 @@ The disposable CLI prototype is retained, unmerged, at
 on `spike/909-project-local-launch-prototype`. It adds only the probe form of
 `ub agents launch`; no production branch carries it. This PR carries the
 fixture at `docs/spikes/909-project-local-launch-fixture.mjs`.
+
+The fixture's offline validation self-test requires neither an installed
+payload nor live agent runs. It checks one valid structured result and rejects
+the two known false-positive classes:
+
+```sh
+node docs/spikes/909-project-local-launch-fixture.mjs --self-test
+```
 
 From a checkout of this PR, the following recreates the payload and the two
 projects. Use a real workspace UUID known to the local `ub`; the fixture calls
@@ -64,12 +80,13 @@ node "$report_root/docs/spikes/909-project-local-launch-fixture.mjs" \
 ```
 
 The expected result on the recorded runtime versions is JSON with
-`verdict: "bounded-failure"`, four successful marker/workspace readings,
-clean candidates, an unchanged installed tree, and both user config paths
-under `changedUserRuntimeConfig`. It exits non-zero because a configuration
-write that was required not to happen is evidence, not success. Each runtime
-process has a 20-minute deadline and its own process group; the fixture waits
-for both groups and escalates only those exact groups if needed.
+`verdict: "bounded-failure"`, exact validated parent and independently captured
+child readings for both projects, clean candidates, an unchanged installed
+tree, and both user config paths under `changedUserRuntimeConfig`. It exits
+non-zero because a configuration write that was required not to happen is
+evidence, not success. Each runtime process has a 20-minute deadline and its own
+process group; the fixture waits for both groups and escalates only those exact
+groups if needed.
 
 The stricter Linux source-hidden control copied only the fixture into the
 namespace, masked both checkout parents, and mounted the unpacked payload
@@ -122,12 +139,16 @@ The final recorded functional run on 2026-09-06 used:
   before and after the sessions. Its archive contained no `.agents`, `.claude`,
   `.codex`, or `scripts` directory.
 
-The two final parent readings were:
+The report recorded these two parent readings:
 
 ```text
 PARENT marker=PROJECT_A_CONTROL workspace=bd526fa1-4cb6-4590-bda6-ccb7262e30a2 child="CHILD marker=PROJECT_A_CONTROL workspace=bd526fa1-4cb6-4590-bda6-ccb7262e30a2 candidate=a-candidate-content"
 PARENT marker=PROJECT_B_CONTROL workspace=bd526fa1-4cb6-4590-bda6-ccb7262e30a2 child="CHILD marker=PROJECT_B_CONTROL workspace=bd526fa1-4cb6-4590-bda6-ccb7262e30a2 candidate=b-candidate-content"
 ```
+
+They are historical output, not independently corroborated child results: the
+original fixture did not preserve either child's own final line. No paid runtime
+was re-run for this correction.
 
 ## Demonstrated behaviour
 
@@ -137,8 +158,10 @@ The prototype resolved `.agents/launch.json`, the role contract, and both
 runtime adapters from the explicit `--project` directory. It never derived an
 Uberblick checkout root from its own module path. Both top-level commands were
 spawned concurrently with the fixture root as their working directory,
-outside projects A and B; each runtime child then ran with its selected project
-as the control working directory.
+outside projects A and B; each child command names its selected project as the
+control working directory. The command construction establishes that separation;
+the historical output strings alone do not establish that both children
+completed.
 
 The payload was built and unpacked outside the report checkout. The session
 environment put only that payload's `bin` first on `PATH`. The fixture compares
@@ -169,16 +192,18 @@ installed bundle, not through `mise x` or a source-tree runner.
 
 The candidate was passed as an additional accessible directory; it never
 became the runtime's project directory. The Claude parent discovered its agent
-under project A's `.claude/agents`. Its Codex child ran with `-C` set to A's
-control tree and `--add-dir` set to A's candidate, while its initial prompt
-named the control role contract because Codex does not select the TOML adapter.
+under project A's `.claude/agents`. Its Codex child command set `-C` to A's
+control tree and `--add-dir` to A's candidate, while its initial prompt named
+the control role contract because Codex does not select the TOML adapter.
 
-The Codex parent similarly stayed rooted in B's control tree. It launched its
-Claude child in the foreground and waited for it; that subprocess's working
-directory was B's control tree, so `--agent probe-reviewer` discovered the
-control adapter even though the added candidate held an adapter with the wrong
-marker. Both candidate `git status --porcelain` readings were empty after the
-children exited. Agent files entered neither candidate diff.
+The Codex parent similarly stayed rooted in B's control tree. Its runner starts
+the Claude child in the foreground and waits for it; that subprocess's working
+directory is B's control tree, so `--agent probe-reviewer` resolves there rather
+than in the added candidate. Both candidate `git status --porcelain` readings
+were empty after the launch processes exited. Agent files entered neither
+candidate diff. The recorded marker and candidate strings are consistent with
+the intended isolation, but the old substring checks do not prove completed
+child reads.
 
 This is the portable part of the repository's existing reviewer transport
 boundary: the control tree supplies instructions and the runner; the candidate
@@ -197,11 +222,12 @@ ub mcp install codex --project --workspace <workspace-uuid>
 ```
 
 The commands wrote project-local entries for `ub mcp serve` with only
-`WORKSPACE_ID` pinned. All four sessions in the functional run called
-`sync_status` and returned that UUID. Runtime databases and Uberblick
-configuration were redirected into each project's ignored `.runtime/`
-directory, so the calls neither contended with nor wrote to the user's
-Uberblick replica.
+`WORKSPACE_ID` pinned. The two recorded parent lines contain that UUID in their
+parent and quoted-child segments, but the old fixture did not retain child
+results or tool-call evidence, so it does not establish that all four sessions
+called `sync_status`. Runtime databases and Uberblick configuration were
+redirected into each project's ignored `.runtime/` directory for any calls the
+sessions made.
 
 Codex needed normal configuration discovery for project MCP. Passing
 `--ignore-user-config` removed the configured server. The project-owned launch

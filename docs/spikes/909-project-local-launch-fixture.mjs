@@ -33,13 +33,21 @@ const { values } = parseArgs({
   options: {
     ub: { type: "string" },
     root: { type: "string" },
+    "self-test": { type: "boolean" },
     workspace: { type: "string" },
   },
   strict: true,
 });
 
+if (values["self-test"] === true) {
+  runValidationSelfTest();
+  process.exit(0);
+}
+
 if (values.ub === undefined || values.workspace === undefined) {
-  throw new Error("usage: 909-project-local-launch-fixture.mjs --ub <installed-ub> --workspace <uuid> [--root <dir>]");
+  throw new Error(
+    "usage: 909-project-local-launch-fixture.mjs --ub <installed-ub> --workspace <uuid> [--root <dir>] | --self-test",
+  );
 }
 
 const ub = resolve(values.ub);
@@ -95,6 +103,88 @@ function treeDigest(path) {
   return hash.digest("hex");
 }
 
+function finalLine(output) {
+  return output.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? "";
+}
+
+function parseChildReading(line, source) {
+  const match = /^CHILD marker=(\S+) workspace=(\S+) candidate=(\S+)$/.exec(line);
+  if (match === null) throw new Error(`${source} has no completed CHILD result`);
+  return { marker: match[1], workspace: match[2], candidate: match[3] };
+}
+
+function validateReadings(spec, result, expectedWorkspace, childOutput) {
+  const parentLine = finalLine(result.output);
+  const parentMatch = /^PARENT marker=(\S+) workspace=(\S+) child="([^"\r\n]+)"$/.exec(parentLine);
+  if (parentMatch === null) {
+    throw new Error(`${spec.name} has no completed final PARENT result; see ${result.log}`);
+  }
+
+  const embeddedChildLine = parentMatch[3];
+  const childLine = finalLine(childOutput);
+  const parent = {
+    marker: parentMatch[1],
+    workspace: parentMatch[2],
+    child: parseChildReading(embeddedChildLine, `${spec.name} parent result`),
+  };
+  const child = parseChildReading(childLine, `${spec.name} child runner result`);
+  const expectedCandidate = `${spec.name.toLowerCase()}-candidate-content`;
+  const expected = { marker: spec.marker, workspace: expectedWorkspace, candidate: expectedCandidate };
+  for (const [source, reading] of [["parent", parent], ["embedded child", parent.child], ["child runner", child]]) {
+    for (const field of ["marker", "workspace"]) {
+      if (reading[field] !== expected[field]) {
+        throw new Error(`${spec.name} ${source} reported wrong ${field}; see ${result.log}`);
+      }
+    }
+  }
+  for (const [source, reading] of [["embedded child", parent.child], ["child runner", child]]) {
+    if (reading.candidate !== expected.candidate) {
+      throw new Error(`${spec.name} ${source} reported wrong candidate; see ${result.log}`);
+    }
+  }
+  if (embeddedChildLine !== childLine) {
+    throw new Error(`${spec.name} parent claim does not match the child runner result; see ${result.log}`);
+  }
+  return { parent, child };
+}
+
+function runValidationSelfTest() {
+  const spec = { name: "A", marker: "PROJECT_A_CONTROL" };
+  const workspace = "11111111-1111-4111-8111-111111111111";
+  const child = `CHILD marker=${spec.marker} workspace=${workspace} candidate=a-candidate-content`;
+  const valid = `PARENT marker=${spec.marker} workspace=${workspace} child="${child}"`;
+  const validatedReadings = validateReadings(
+    spec,
+    { output: valid, log: "synthetic.log" },
+    workspace,
+    child,
+  );
+
+  const counterexamples = {
+    wrong_child_result: {
+      output: `PARENT marker=${spec.marker} workspace=${workspace} child="CHILD marker=${spec.marker} workspace=22222222-2222-4222-8222-222222222222 candidate=WRONG"`,
+      childOutput: child,
+    },
+    instruction_echo_only: {
+      output: `Tool output: PARENT marker=${spec.marker} workspace=<workspace-uuid> child="CHILD marker=${spec.marker}"\nworkspace=${workspace}\nFinal: child did not run.`,
+      childOutput: "",
+    },
+  };
+  const rejected = [];
+  for (const [name, example] of Object.entries(counterexamples)) {
+    try {
+      validateReadings(spec, { output: example.output, log: "synthetic.log" }, workspace, example.childOutput);
+    } catch {
+      rejected.push(name);
+    }
+  }
+  if (rejected.length !== Object.keys(counterexamples).length) {
+    const accepted = Object.keys(counterexamples).filter((name) => !rejected.includes(name));
+    throw new Error(`validator accepted a counterexample: ${accepted.join(", ")}`);
+  }
+  process.stdout.write(`${JSON.stringify({ verdict: "pass", validatedReadings, rejected }, null, 2)}\n`);
+}
+
 function launcherData(childRuntime) {
   return `${JSON.stringify({
     version: 1,
@@ -148,7 +238,7 @@ function reviewerRole(marker) {
 
 const codexRunner = `#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -169,7 +259,11 @@ try {
     process.stderr.write(child.stderr ?? "");
     process.exitCode = child.status ?? 1;
   } else {
-    process.stdout.write(readFileSync(last, "utf8").trim() + "\\n");
+    const line = readFileSync(last, "utf8").trim();
+    const resultDir = join(process.cwd(), ".runtime");
+    mkdirSync(resultDir, { recursive: true });
+    writeFileSync(join(resultDir, "probe-child-result.txt"), line + "\\n", "utf8");
+    process.stdout.write(line + "\\n");
   }
 } finally {
   rmSync(scratch, { recursive: true, force: true });
@@ -178,6 +272,8 @@ try {
 
 const claudeRunner = `#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const candidate = process.env.PROBE_CANDIDATE;
 if (candidate === undefined) throw new Error("PROBE_CANDIDATE is missing");
@@ -191,6 +287,9 @@ if (child.status !== 0) {
   process.exitCode = child.status ?? 1;
 } else {
   const line = child.stdout.trim().split(/\\r?\\n/).filter(Boolean).at(-1) ?? "";
+  const resultDir = join(process.cwd(), ".runtime");
+  mkdirSync(resultDir, { recursive: true });
+  writeFileSync(join(resultDir, "probe-child-result.txt"), line + "\\n", "utf8");
   process.stdout.write(line + "\\n");
 }
 `;
@@ -297,20 +396,12 @@ const startedAt = new Date().toISOString();
 const [aResult, bResult] = await Promise.all([launch(a, "claude"), launch(b, "codex")]);
 const endedAt = new Date().toISOString();
 
+const validatedReadings = new Map();
 for (const [spec, result] of [[a, aResult], [b, bResult]]) {
   if (result.code !== 0) throw new Error(`${spec.name} launch failed; see ${result.log}`);
-  if (!result.output.includes(`PARENT marker=${spec.marker}`)) {
-    throw new Error(`${spec.name} parent did not report its control marker; see ${result.log}`);
-  }
-  if (!result.output.includes(`CHILD marker=${spec.marker}`)) {
-    throw new Error(`${spec.name} child did not report its control marker; see ${result.log}`);
-  }
-  if (!result.output.includes(`workspace=${workspace}`)) {
-    throw new Error(`${spec.name} did not report the project-pinned workspace; see ${result.log}`);
-  }
-  if (result.output.includes("CANDIDATE_WRONG")) {
-    throw new Error(`${spec.name} loaded the candidate's conflicting adapter; see ${result.log}`);
-  }
+  const childResult = join(spec.control, ".runtime/probe-child-result.txt");
+  const childOutput = existsSync(childResult) ? readFileSync(childResult, "utf8") : "";
+  validatedReadings.set(spec.name, validateReadings(spec, result, workspace, childOutput));
   const candidateStatus = run("git", ["status", "--porcelain"], spec.candidate).stdout;
   if (candidateStatus !== "") throw new Error(`${spec.name} candidate was modified: ${candidateStatus}`);
 }
@@ -345,6 +436,7 @@ process.stdout.write(`${JSON.stringify({
       claude: !spec.beforeRegistration.claude,
       codex: !spec.beforeRegistration.codex,
     },
+    validatedReadings: validatedReadings.get(spec.name),
     candidateClean: true,
     log: join(root, `${spec.name.toLowerCase()}-${spec.name === "A" ? "claude" : "codex"}.log`),
   })),
