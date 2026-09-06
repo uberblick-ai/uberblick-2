@@ -3582,8 +3582,11 @@ h3.ub-heading {
 }
 
 .ub-tldr-error {
+  margin: 0;
   color: var(--destructive);
   font-size: 0.75rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .ub-tldr-actions {
