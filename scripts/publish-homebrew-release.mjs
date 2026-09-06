@@ -35,7 +35,21 @@ function assetName(version) {
 }
 
 function assetUrl(tag, version) {
-	return `https://github.com/${SOURCE_REPOSITORY}/releases/download/${tag}/${assetName(version)}`;
+	return `https://github.com/${TAP_REPOSITORY}/releases/download/${tag}/${assetName(version)}`;
+}
+
+/**
+ * The published release's body. The source repository stays private and the
+ * artifact lives on the public tap, whose release targets a tap commit — so the
+ * commit this version was published from is recorded here, and is what a later
+ * run of the same tag is checked against.
+ */
+export function releaseBody(version, sourceCommit) {
+	return `Uberblick ${version}\n\nSource-commit: ${sourceCommit}\n`;
+}
+
+function sourceCommitOf(release) {
+	return /^Source-commit: ([0-9a-f]{40})$/m.exec(release.body ?? "")?.[1] ?? null;
 }
 
 /**
@@ -97,13 +111,14 @@ function sha256(bytes) {
 }
 
 function assertRelease(release, tag, expectedAssetName, headSha) {
-	if (
-		release.tag_name !== tag ||
-		release.target_commitish !== headSha ||
-		release.draft === true ||
-		release.prerelease === true
-	) {
+	if (release.tag_name !== tag || release.draft === true || release.prerelease === true) {
 		fail(`release ${tag} disagrees with the immutable stable-tag contract`);
+	}
+	const publishedFrom = sourceCommitOf(release);
+	if (publishedFrom !== headSha) {
+		fail(
+			`release ${tag} was published from source commit ${publishedFrom ?? "(none recorded)"}, not ${headSha}`,
+		);
 	}
 	const assets = release.assets.filter((asset) => asset.name === expectedAssetName);
 	if (assets.length > 1) fail(`release ${tag} has more than one ${expectedAssetName} asset`);
@@ -129,9 +144,14 @@ export async function publishHomebrewRelease(input, services) {
 	const name = assetName(version);
 	assertTagContext(input);
 	if (!input.dryRun) {
-		const source = await services.getSourceRepository();
-		if (source.visibility !== "public") {
-			fail(`${SOURCE_REPOSITORY} must be public before publishing a Homebrew release`);
+		const destination = await services.getTapRepository();
+		if (destination.visibility !== "public") {
+			fail(`${TAP_REPOSITORY} must be public before publishing a Homebrew release`);
+		}
+		if (!destination.initialized) {
+			fail(
+				`${TAP_REPOSITORY} has no commits; seed it with one commit on its default branch before the first release`,
+			);
 		}
 	}
 
@@ -202,7 +222,7 @@ export async function publishHomebrewRelease(input, services) {
 	}
 
 	const targetRelease =
-		release ?? (await services.createRelease(input.tag, input.headSha));
+		release ?? (await services.createRelease(input.tag, releaseBody(version, input.headSha)));
 	await services.uploadAsset(targetRelease.upload_url, name, bytes);
 	await services.assertPublicAsset(assetUrl(input.tag, version));
 	await services.putTapFormula(formula, existingFormula?.sha ?? null, version);
@@ -281,17 +301,23 @@ async function githubRequest(path, token, options = {}) {
 }
 
 function productionServices() {
-	const sourceToken = process.env.GITHUB_TOKEN;
 	const tapToken = process.env.HOMEBREW_TAP_TOKEN;
-	if (sourceToken === undefined || sourceToken === "" || tapToken === undefined || tapToken === "") {
-		fail("GITHUB_TOKEN and HOMEBREW_TAP_TOKEN are required outside --dry-run");
+	if (tapToken === undefined || tapToken === "") {
+		fail("HOMEBREW_TAP_TOKEN is required outside --dry-run");
 	}
 	return {
 		...localServices,
-		getSourceRepository: () =>
-			githubRequest(`/repos/${SOURCE_REPOSITORY}`, sourceToken),
+		getTapRepository: async () => {
+			const tap = await githubRequest(`/repos/${TAP_REPOSITORY}`, tapToken);
+			const branch = await githubRequest(
+				`/repos/${TAP_REPOSITORY}/branches/${tap.default_branch}`,
+				tapToken,
+				{ notFound: true },
+			);
+			return { visibility: tap.visibility, initialized: branch !== null };
+		},
 		getRelease: (tag) =>
-			githubRequest(`/repos/${SOURCE_REPOSITORY}/releases/tags/${tag}`, sourceToken, {
+			githubRequest(`/repos/${TAP_REPOSITORY}/releases/tags/${tag}`, tapToken, {
 				notFound: true,
 			}),
 		getTapFormula: async () => {
@@ -306,7 +332,7 @@ function productionServices() {
 		},
 		downloadAsset: async (url) => {
 			const response = await fetch(url, {
-				headers: { authorization: `Bearer ${sourceToken}` },
+				headers: { authorization: `Bearer ${tapToken}` },
 			});
 			if (!response.ok) fail(`published asset download returned ${response.status}`);
 			return Buffer.from(await response.arrayBuffer());
@@ -317,21 +343,20 @@ function productionServices() {
 				fail(`published asset is not anonymously downloadable: ${url} returned ${response.status}`);
 			}
 		},
-		createRelease: (tag, headSha) =>
-			githubRequest(`/repos/${SOURCE_REPOSITORY}/releases`, sourceToken, {
+		createRelease: (tag, body) =>
+			githubRequest(`/repos/${TAP_REPOSITORY}/releases`, tapToken, {
 				method: "POST",
 				body: {
 					tag_name: tag,
-					target_commitish: headSha,
 					name: tag,
-					body: `Uberblick ${tag.slice(1)}`,
+					body,
 					draft: false,
 					prerelease: false,
 				},
 			}),
 		uploadAsset: (uploadUrl, name, bytes) => {
 			const url = `${uploadUrl.replace("{?name,label}", "")}?name=${encodeURIComponent(name)}`;
-			return githubRequest(url, sourceToken, {
+			return githubRequest(url, tapToken, {
 				method: "POST",
 				accept: "application/vnd.github+json",
 				contentType: "application/gzip",
@@ -384,7 +409,7 @@ async function main() {
 function productionServicesForDryRun() {
 	return {
 		...localServices,
-		getSourceRepository: async () => fail("dry-run cannot read the source repository"),
+		getTapRepository: async () => fail("dry-run cannot read the tap repository"),
 		getRelease: async () => null,
 		getTapFormula: async () => null,
 		downloadAsset: async () => fail("dry-run cannot download an existing asset"),
