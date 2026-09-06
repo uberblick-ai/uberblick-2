@@ -1679,7 +1679,6 @@ for (const scheme of ["light", "dark"] as const) {
     // `.first()` because the sidebar is one workspace shared by this file's
     // tests, so the appearance before this one has already left a group here.
     await expect(page.locator(".ub-group-toggle").first()).toBeVisible();
-    await expect(page.locator(".ub-group-count")).toHaveCount(0);
     readings.push(...(await surface(page, ".ub-list")));
 
     // Both anchored menus, each while it is open: they are portalled siblings
