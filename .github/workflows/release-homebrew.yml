@@ -1,8 +1,9 @@
 name: Publish Homebrew release
 
 # Release step: push an exact vMAJOR.MINOR.PATCH tag. The tag-only environment
-# policy is the authority that admits this job to HOMEBREW_TAP_TOKEN; the script
-# then verifies the tag again before it publishes either repository.
+# policy is the authority that admits this job to HOMEBREW_TAP_TOKEN, which is
+# the only credential the publisher needs: the asset and the formula both land
+# on the public tap. The script verifies the tag again before it publishes.
 on:
   push:
     tags:
@@ -13,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   publish:
@@ -40,5 +41,4 @@ jobs:
       - name: Publish the immutable release and generated formula
         run: mise run publish-homebrew-release -- "$GITHUB_REF_NAME"
         env:
-          GITHUB_TOKEN: ${{ github.token }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

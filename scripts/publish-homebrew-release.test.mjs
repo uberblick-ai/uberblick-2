@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   formulaFor,
   publishHomebrewRelease,
+  releaseBody,
   versionForTag,
 } from "./publish-homebrew-release.mjs";
 
@@ -16,8 +17,9 @@ const BYTES = Buffer.from("versioned payload");
 const DIGEST = createHash("sha256").update(BYTES).digest("hex");
 const TAG = "v1.2.3";
 const VERSION = "1.2.3";
+const HEAD_SHA = "a".repeat(40);
 const ASSET_URL =
-  "https://github.com/uberblick-ai/uberblick-2/releases/download/v1.2.3/uberblick-1.2.3.tar.gz";
+  "https://github.com/uberblick-ai/homebrew-tap/releases/download/v1.2.3/uberblick-1.2.3.tar.gz";
 const WORKFLOW_ROOT = join(ROOT, ".github", "workflows");
 const workflowSkip = existsSync(WORKFLOW_ROOT)
   ? undefined
@@ -30,9 +32,9 @@ function input(overrides = {}) {
     repository: "uberblick-ai/uberblick-2",
     refType: "tag",
     refName: TAG,
-    headSha: "a".repeat(40),
-    tagSha: "a".repeat(40),
-    workflowSha: "a".repeat(40),
+    headSha: HEAD_SHA,
+    tagSha: HEAD_SHA,
+    workflowSha: HEAD_SHA,
     ...overrides,
   };
 }
@@ -41,9 +43,9 @@ function services(overrides = {}) {
   const calls = [];
   const service = {
     calls,
-    getSourceRepository: async () => {
-      calls.push("get source");
-      return { visibility: "public" };
+    getTapRepository: async () => {
+      calls.push("get tap");
+      return { visibility: "public", initialized: true };
     },
     getRelease: async () => {
       calls.push("get release");
@@ -95,7 +97,7 @@ function services(overrides = {}) {
 function release() {
   return {
     tag_name: TAG,
-    target_commitish: "a".repeat(40),
+    body: releaseBody(VERSION, HEAD_SHA),
     draft: false,
     prerelease: false,
     upload_url: "https://uploads.github.test/assets{?name,label}",
@@ -118,10 +120,16 @@ test("release tags are exact vMAJOR.MINOR.PATCH values", () => {
 
 test("a new tag builds, verifies, publishes, then commits the generated formula", async () => {
   const oldFormula = formulaFor("v1.2.2", "1.2.2", "b".repeat(64));
+  let createdBody = null;
   const fake = services({
     getTapFormula: async () => {
       fake.calls.push("get formula");
       return { sha: "old-sha", content: oldFormula };
+    },
+    createRelease: async (_tag, body) => {
+      fake.calls.push("create release");
+      createdBody = body;
+      return { upload_url: "https://uploads.github.test/assets{?name,label}" };
     },
   });
 
@@ -129,7 +137,7 @@ test("a new tag builds, verifies, publishes, then commits the generated formula"
 
   assert.equal(result.outcome, "published");
   assert.deepEqual(fake.calls, [
-    "get source",
+    "get tap",
     "get release",
     "get formula",
     "build",
@@ -141,7 +149,15 @@ test("a new tag builds, verifies, publishes, then commits the generated formula"
     "put formula old-sha",
   ]);
   assert.equal(result.formula, formulaFor(TAG, VERSION, DIGEST));
-  assert.doesNotMatch(result.formula, /headers:|HOMEBREW_GITHUB_API_TOKEN/);
+  assert.match(createdBody, new RegExp(`^Source-commit: ${HEAD_SHA}$`, "m"));
+});
+
+test("the formula downloads the asset anonymously from the public tap", () => {
+  const formula = formulaFor(TAG, VERSION, DIGEST);
+
+  assert.match(formula, new RegExp(`^  url "${ASSET_URL}"$`, "m"));
+  assert.doesNotMatch(formula, /uberblick-2\/releases/);
+  assert.doesNotMatch(formula, /headers:|Authorization|Bearer|TOKEN/i);
 });
 
 test("a matching published tag verifies the asset and changes nothing", async () => {
@@ -161,7 +177,7 @@ test("a matching published tag verifies the asset and changes nothing", async ()
 
   assert.equal(result.outcome, "no-op");
   assert.deepEqual(fake.calls, [
-    "get source",
+    "get tap",
     "get release",
     "get formula",
     "download",
@@ -184,7 +200,7 @@ test("a published payload refuses a disagreeing formula without mutating either 
 
   await assert.rejects(() => publishHomebrewRelease(input(), fake), /asset .* and the tap formula disagree/);
   assert.deepEqual(fake.calls, [
-    "get source",
+    "get tap",
     "get release",
     "get formula",
     "download",
@@ -202,23 +218,27 @@ test("a payload version mismatch publishes nothing", async () => {
   });
 
   await assert.rejects(() => publishHomebrewRelease(input(), fake), /payload reports "1\.2\.4"/);
-  assert.deepEqual(fake.calls, ["get source", "get release", "get formula", "build", "version"]);
+  assert.deepEqual(fake.calls, ["get tap", "get release", "get formula", "build", "version"]);
 });
 
-test("moving a tag after publication is refused before the asset is downloaded", async () => {
-  const movedRelease = { ...release(), target_commitish: "b".repeat(40) };
-  const fake = services({
-    getRelease: async () => {
-      fake.calls.push("get release");
-      return movedRelease;
-    },
-  });
+test("a published release stays bound to the source commit it was published from", async () => {
+  // The tap release targets a tap commit, so the source commit is carried in the
+  // release body. Both a moved tag and a release that records no source commit
+  // are refused before the formula is even read, so nothing is mutated.
+  for (const [body, expected] of [
+    [releaseBody(VERSION, "b".repeat(40)), /published from source commit b{40}, not a{40}/],
+    ["Uberblick 1.2.3", /published from source commit \(none recorded\), not a{40}/],
+  ]) {
+    const fake = services({
+      getRelease: async () => {
+        fake.calls.push("get release");
+        return { ...release(), body };
+      },
+    });
 
-  await assert.rejects(
-    () => publishHomebrewRelease(input(), fake),
-    /immutable stable-tag contract/,
-  );
-  assert.deepEqual(fake.calls, ["get source", "get release"]);
+    await assert.rejects(() => publishHomebrewRelease(input(), fake), expected);
+    assert.deepEqual(fake.calls, ["get tap", "get release"]);
+  }
 });
 
 test("a partial publication can add an absent formula from the verified asset", async () => {
@@ -233,7 +253,7 @@ test("a partial publication can add an absent formula from the verified asset", 
 
   assert.equal(result.outcome, "recovered-formula");
   assert.deepEqual(fake.calls, [
-    "get source",
+    "get tap",
     "get release",
     "get formula",
     "download",
@@ -262,7 +282,7 @@ test("a partial publication advances an older formula from the verified asset", 
 
   assert.equal(result.outcome, "recovered-formula");
   assert.deepEqual(fake.calls, [
-    "get source",
+    "get tap",
     "get release",
     "get formula",
     "download",
@@ -293,7 +313,7 @@ test("a malformed tap version is refused with the publisher's own diagnostic", a
     /publish-homebrew-release: the tap formula has invalid version "1\.2"/,
   );
   assert.deepEqual(fake.calls, [
-    "get source",
+    "get tap",
     "get release",
     "get formula",
     "download",
@@ -330,19 +350,34 @@ test("a mismatched tag ref refuses before any external read or write", async () 
   assert.deepEqual(fake.calls, []);
 });
 
-test("a private source repository refuses before any release or tap mutation", async () => {
+test("a private artifact destination refuses before any release or tap mutation", async () => {
   const fake = services({
-    getSourceRepository: async () => {
-      fake.calls.push("get source");
-      return { visibility: "private" };
+    getTapRepository: async () => {
+      fake.calls.push("get tap");
+      return { visibility: "private", initialized: true };
     },
   });
 
   await assert.rejects(
     () => publishHomebrewRelease(input(), fake),
-    /must be public before publishing/,
+    /homebrew-tap must be public before publishing/,
   );
-  assert.deepEqual(fake.calls, ["get source"]);
+  assert.deepEqual(fake.calls, ["get tap"]);
+});
+
+test("an artifact destination without commits refuses and names the seed step", async () => {
+  const fake = services({
+    getTapRepository: async () => {
+      fake.calls.push("get tap");
+      return { visibility: "public", initialized: false };
+    },
+  });
+
+  await assert.rejects(
+    () => publishHomebrewRelease(input(), fake),
+    /has no commits; seed it with one commit on its default branch/,
+  );
+  assert.deepEqual(fake.calls, ["get tap"]);
 });
 
 test("an anonymously unreachable uploaded asset never reaches the public tap", async () => {
@@ -358,7 +393,7 @@ test("an anonymously unreachable uploaded asset never reaches the public tap", a
     /anonymous asset probe returned 404/,
   );
   assert.deepEqual(fake.calls, [
-    "get source",
+    "get tap",
     "get release",
     "get formula",
     "build",
