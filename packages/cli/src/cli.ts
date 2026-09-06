@@ -11,6 +11,7 @@
  */
 
 import { doctorCommand } from "./doctor.js";
+import { agentsPrototypeCommand } from "./agents-prototype.js";
 import { envCommand } from "./env.js";
 import { initCommand } from "./init.js";
 import { installCommand } from "./install.js";
@@ -31,6 +32,7 @@ export const HELP = `uberblick — local-first, CRDT-backed collaborative docume
 usage: ub <command> [options]
 
 commands:
+  agents launch <role>   #909 prototype: launch a project-owned role
   init [hub-url]         identity, workspace and a signing secret — with a hub
                          given, the new workspace is created on that hub
   update                 update the copy of uberblick you are running — a
@@ -95,6 +97,9 @@ export async function runCli(
   }
   if (command === "launch") {
     return await launchCommand(rest, io);
+  }
+  if (command === "agents") {
+    return await agentsPrototypeCommand(rest, io);
   }
   if (command === "open") {
     return await openCommand(rest, io);
